@@ -99,7 +99,21 @@ def fetch_text(url: str, **kwargs: Any) -> str:
 
 
 def fetch_json(url: str, **kwargs: Any) -> Any:
-    return json.loads(fetch_text(url, **kwargs))
+    """Parse a JSON response, requiring a dict or list at the top level.
+
+    WAFs and error pages sometimes return valid-but-useless JSON scalars
+    (e.g. a bare "Access Denied" string). Every connector immediately calls
+    `.get(...)`/iterates on the result, so a scalar here previously escaped
+    the connector's own try/except as an AttributeError and aborted the whole
+    multi-board run. Raising ValueError instead keeps the failure inside the
+    per-board `ok=False` path.
+    """
+    data = json.loads(fetch_text(url, **kwargs))
+    if not isinstance(data, (dict, list)):
+        raise ValueError(
+            f"expected JSON object/array, got {type(data).__name__}: {str(data)[:80]!r}"
+        )
+    return data
 
 
 def post_json(url: str, payload: dict, *, headers: dict[str, str] | None = None, **kwargs: Any) -> Any:

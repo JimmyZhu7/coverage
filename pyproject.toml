@@ -40,6 +40,8 @@ members = [
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "coverage_web.settings.local"
 python_files = ["test_*.py", "*_test.py", "tests.py"]
-testpaths = ["coverage_web"]
+# All three packages: web (Django), domain (warmth ratchet/cadence — its
+# regression tests pin load-bearing behavior), connectors (ATS parsing).
+testpaths = ["coverage_web", "coverage_domain", "coverage_connectors"]
 pythonpath = ["coverage_web"]
 addopts = "-ra"

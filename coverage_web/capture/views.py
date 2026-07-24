@@ -35,7 +35,11 @@ def _authenticate(request) -> bool:
     provided = request.headers.get("X-Capture-Token") or request.GET.get("token", "")
     if not provided or not expected:
         return False
-    return hmac.compare_digest(str(provided), str(expected))
+    # Compare as bytes: str compare_digest raises TypeError on non-ASCII
+    # input, turning a garbage token into an unauthenticated 500.
+    return hmac.compare_digest(
+        str(provided).encode("utf-8"), str(expected).encode("utf-8")
+    )
 
 
 @csrf_exempt

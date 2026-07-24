@@ -364,22 +364,13 @@ def _sentenceize(reason: str) -> str:
 
 
 def _dashboard_context(user) -> dict:
-    """The Today dashboard: ledger stat cards + a 7-day Week Ahead strip
-    (modeled on the founder's radar). Stats read the SHARED zone (campus
-    openings, deadlines, day-precision cycle events) plus the user's own
-    application funnel; the strip only ever shows dated evidence — an empty
-    day renders as an em-dash, never a guess."""
+    """The Today dashboard's ledger stat cards. Stats read the SHARED zone
+    (campus openings, deadlines) plus the user's own application funnel."""
     today = timezone.localdate()
-    week_end = today + timedelta(days=6)
 
     campus = Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
     all_open = Opportunity.objects.filter(status="open")
     open_now = campus.count()
-    applied_week = (
-        UserOpportunity.objects.for_user(user)
-        .filter(applied_at__gte=timezone.now() - timedelta(days=7))
-        .count()
-    )
     closing_10 = campus.filter(deadline__range=(today, today + timedelta(days=9))).count()
     # HK/US split shares the all-open denominator with tracked_live below, so
     # neither regional figure can exceed the headline (they were computed over
@@ -394,49 +385,15 @@ def _dashboard_context(user) -> dict:
         "offer": uo.filter(applied_status__iexact="offer").count(),
     }
 
-    items_by_day: dict = {today + timedelta(days=i): [] for i in range(7)}
-    deadlines = (
-        campus.exclude(deadline=None)
-        .filter(deadline__range=(today, week_end))
-        .select_related("firm")
-        .order_by("deadline", "firm__name")
-    )
-    for opp in deadlines:
-        items_by_day[opp.deadline].append(
-            {"firm": opp.firm.name, "title": opp.title, "kind": "Closes", "url": opp.url}
-        )
-    events = (
-        FirmDate.objects.filter(precision="day", date__range=(today, week_end))
-        .select_related("firm")
-        .order_by("date")
-    )
-    from directory.timeline import EVENT_LABELS  # single label vocabulary
-
-    for fd in events:
-        items_by_day[fd.date].append(
-            {
-                "firm": fd.firm.name,
-                "title": EVENT_LABELS.get(fd.event_kind, fd.event_kind),
-                "kind": "Event",
-                "slug": fd.firm.slug,
-            }
-        )
-
-    week_ahead = [
-        {"date": d, "is_today": d == today, "items": items}
-        for d, items in items_by_day.items()
-    ]
     return {
         "dash": {
             "open_now": open_now,
-            "applied_week": applied_week,
             "closing_10": closing_10,
             "tracked_live": all_open.count(),
             "hk": hk,
             "us": us,
             "funnel": funnel,
         },
-        "week_ahead": week_ahead,
     }
 
 

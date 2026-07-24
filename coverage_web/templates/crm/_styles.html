@@ -16,37 +16,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   a.dash-card { color: inherit; text-decoration: none; }
   a.dash-card:hover { text-decoration: none; }
 
-  /* The Week Ahead: a slim ribbon of 7 day pills; a busy day carries a count
-     badge and reveals its detail in a popover on hover/focus. */
-  .week-ribbon { margin-bottom: var(--s6); }
-  .ribbon { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s2); }
-  .ribbon-day { position: relative; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 2px;
-    min-height: 62px; padding: var(--s2) var(--s1); border-radius: 12px;
-    border: 1px solid var(--line); background: var(--surface); }
-  .ribbon-day.has-items { border-color: var(--accent-line); }
-  .ribbon-day.is-today { border: 2px solid var(--accent); box-shadow: var(--shadow-1); }
-  .ribbon-dow { font-size: var(--fs-micro); color: var(--ink-3);
-    text-transform: uppercase; letter-spacing: 0.05em;
-    display: inline-flex; align-items: center; gap: 4px; }
-  .is-today .ribbon-dow { color: var(--accent-ink); font-weight: var(--w-bold); }
-  .ribbon-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-size: var(--fs-l); color: var(--ink); }
-  .ribbon-badge { position: absolute; top: 6px; right: 6px;
-    min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px;
-    background: var(--accent); color: #fff; font-size: 10px; font-weight: var(--w-bold);
-    display: inline-flex; align-items: center; justify-content: center; }
-  .ribbon-pop { position: absolute; top: calc(100% + 6px); left: 50%;
-    transform: translate(-50%, 6px); min-width: 190px; max-width: 280px;
-    background: var(--ink); color: var(--paper); border-radius: 10px;
-    padding: var(--s2) var(--s3); font-size: var(--fs-xs); line-height: 1.5;
-    display: flex; flex-direction: column; gap: 4px; text-align: left;
-    box-shadow: var(--shadow-2); opacity: 0; pointer-events: none; z-index: 30;
-    transition: opacity var(--t-med), transform var(--t-med); }
-  .ribbon-day.has-items:hover .ribbon-pop,
-  .ribbon-day.has-items:focus-within .ribbon-pop { opacity: 1; transform: translate(-50%, 0); }
-  .ribbon-item b { font-weight: var(--w-bold); }
-
   /* ---- The Today cockpit: cadence queue + a sticky pace/activity rail ---- */
   .cockpit { display: grid; grid-template-columns: minmax(0, 1fr) 320px;
     gap: var(--s5); align-items: start; transition: opacity var(--t-fast); }

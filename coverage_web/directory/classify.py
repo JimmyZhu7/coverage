@@ -64,8 +64,14 @@ def _rx(*patterns: str) -> re.Pattern[str]:
 # "New York, New York, United States"; "北京市 / 上海市"), so this maps the raw
 # string to a canonical code the Region filter and the network scopes share.
 # ---------------------------------------------------------------------------
-REGION_LABELS = {"hk": "Hong Kong", "us": "United States", "sg": "Singapore", "eu": "Europe"}
-REGION_ORDER = ("hk", "us", "sg", "eu")
+REGION_LABELS = {
+    "hk": "Hong Kong", "us": "United States", "sg": "Singapore", "eu": "Europe",
+    # Secondary markets that real boards carry (CICC's mainland internships,
+    # Point72 Tokyo). Mapped so the roles are filterable instead of sitting
+    # region-less and invisible to the Region filter.
+    "cn": "Mainland China", "jp": "Japan",
+}
+REGION_ORDER = ("hk", "us", "sg", "eu", "cn", "jp")
 
 # Checked in order; the first matching market wins. Keys are lowercase
 # substrings (city / country / region tokens).
@@ -79,8 +85,10 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "zurich", "geneva", "switzerland", "milan", "italy", "madrid", "spain",
         "dublin", "ireland", "luxembourg", "brussels", "belgium",
         "stockholm", "sweden", "copenhagen", "denmark", "oslo", "norway",
-        "warsaw", "poland", "sofia", "bulgaria", "lisbon", "portugal",
-        "vienna", "austria", "europe", "emea",
+        "warsaw", "wroclaw", "krakow", "poland", "sofia", "bulgaria",
+        "lisbon", "portugal", "vienna", "austria", "budapest", "hungary",
+        "prague", "czech", "bucharest", "romania", "athens", "greece",
+        "helsinki", "finland", "europe", "emea",
     )),
     ("us", (
         "united states", "u.s.", "usa", "new york", ", ny", "jersey city",
@@ -89,6 +97,13 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "atlanta", ", ga", "charlotte", ", nc", "washington, d", "miami", ", fl",
         "nashville", ", tn", "malvern", "philadelphia", ", pa", "denver", ", co",
     )),
+    # After hk so "香港" never falls through to the mainland bucket.
+    ("cn", (
+        "beijing", "shanghai", "shenzhen", "guangzhou", "hangzhou", "chengdu",
+        "北京", "上海", "深圳", "广东", "广州", "杭州", "成都", "中国",
+        "mainland china", ", china",
+    )),
+    ("jp", ("tokyo", "japan", "日本", "東京")),
 )
 
 
