@@ -292,7 +292,9 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
                 with transaction.atomic():
                     _apply_opportunity(firm, opp, now, stats, campus_hint=campus)
             except Exception as exc:  # noqa: BLE001 — isolate, record, continue
-                seen_by_pair[pair].discard(opp.url)
+                # Keep the url in `seen`: the fetch returned it live, so a
+                # transient upsert error must NOT make closed-detection flip
+                # an existing open row to closed. It just isn't updated this run.
                 stats["errors"].append({
                     "firm": board.firm, "provider": source,
                     "error": f"row failed ({opp.url[:120]}): {exc}",

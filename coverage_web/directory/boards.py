@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from coverage_connectors import (
     AvatureBoard, BeisenBoard, BoardConfig, EightfoldBoard, GoldmanSachsBoard,
-    GreenhouseBoard, LeverBoard, McKinseyBoard, OracleBoard, PhenomBoard,
+    GreenhouseBoard, McKinseyBoard, OracleBoard, PhenomBoard,
     SitemapBoard, TalentGatewayBoard, TalnetBoard, WorkdayBoard,
 )
 

@@ -71,3 +71,19 @@ def test_track_is_per_user(client):
     resp = client.get(reverse("my_applications"))
     assert resp.status_code == 200
     assert b"Nothing tracked yet" in resp.content
+
+
+@pytest.mark.django_db
+def test_track_ignores_external_next_redirect(client):
+    """A non-HX POST with an attacker-controlled `next` must not open-redirect
+    off-site; it falls back to My Applications."""
+    user = _user()
+    o = _opp()
+    client.force_login(user)
+    resp = client.post(
+        reverse("track_opportunity", args=[o.id]),
+        {"status": "saved", "next": "https://evil.example/phish"},
+    )
+    assert resp.status_code == 302
+    assert "evil.example" not in resp["Location"]
+    assert resp["Location"].endswith(reverse("my_applications"))

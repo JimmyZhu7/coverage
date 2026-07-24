@@ -238,3 +238,30 @@ def test_unseeded_firm_is_autocreated(monkeypatch):
     run = ingest.ingest_boards([BOARD], label="greenhouse")
     assert Firm.objects.filter(name="William Blair").exists()
     assert run.stats["created_firms"] == ["william-blair"]
+
+
+@pytest.mark.django_db
+def test_per_row_error_does_not_close_an_existing_open_row(monkeypatch):
+    """A transient upsert error on a row the fetch DID return live must not
+    make closed-detection flip that existing open row to closed — the url
+    stays in `seen` (regression for the inverted-discard bug)."""
+    _patch(monkeypatch, [_result([_opp(U1), _opp(U2)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    assert Opportunity.objects.filter(status="open").count() == 2
+
+    # Next run returns both again, but U2's upsert raises mid-apply.
+    real_apply = ingest._apply_opportunity
+
+    def flaky_apply(firm, opp, now, stats, **kw):
+        if opp.url == U2:
+            raise RuntimeError("transient")
+        return real_apply(firm, opp, now, stats, **kw)
+
+    monkeypatch.setattr(ingest, "_apply_opportunity", flaky_apply)
+    _patch(monkeypatch, [_result([_opp(U1), _opp(U2)])])
+    run = ingest.ingest_boards([BOARD], label="greenhouse")
+
+    # U2 errored but was returned live → must remain open, not closed.
+    assert Opportunity.objects.get(url=U2).status == "open"
+    assert run.stats["closed"] == 0
+    assert any("row failed" in e["error"] for e in run.stats["errors"])
