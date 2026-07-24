@@ -1,0 +1,21 @@
+{% load textstyle %}
+{% comment %}
+The firm checkbox list. Rendered inside the onboarding step-2 form and
+re-rendered on its own as the htmx swap target for live search. Each firm
+carries data-region/data-track so the picker reads honestly; the checked
+state is preserved from the user's existing target firms.
+{% endcomment %}
+<div class="firm-list" id="firm-list">
+  {% for firm in firms %}
+    <label>
+      <input type="checkbox" name="firms" value="{{ firm.id }}"
+             {% if firm.id in selected_firm_ids %}checked{% endif %}>
+      <span>{{ firm.name|smart_title }}</span>
+      <span class="firm-meta">
+        {{ firm.regions|join:", " }}{% if firm.tracks %} · {{ firm.tracks|join:", " }}{% endif %}
+      </span>
+    </label>
+  {% empty %}
+    <p class="muted">No firms match that search.</p>
+  {% endfor %}
+</div>

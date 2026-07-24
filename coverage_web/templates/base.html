@@ -1,0 +1,205 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Coverage{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/coverage.css' %}">
+  {# Vendored static asset, not a CDN or Node build — see coverage_web/static/vendor/. #}
+  <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {% comment %}
+    Shared shell. Plain hrefs, not reverse-url tags, so the shell renders
+    before any app route is defined. Sub-navs live inside each app's pages.
+  {% endcomment %}
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="wordmark" href="/">{% include "_logo.html" %}Coverage</a>
+      <nav class="site-nav" aria-label="Primary">
+        {% comment %}
+          Site IA: Today, Opportunities, Network, Email capture, Settings.
+          /app/ hosts both Today (the hub) and Network (contacts) — the
+          contacts prefix must win before the bare /app/ match.
+        {% endcomment %}
+        <a href="/app/"{% if request.path|slice:":4" == "/app" and request.path|slice:":13" != "/app/contacts" %} class="active"{% endif %}>Today</a>
+        <a href="/opportunities/"{% if request.path|slice:":14" == "/opportunities" %} class="active"{% endif %}>Opportunities</a>
+        <a href="/app/contacts/"{% if request.path|slice:":13" == "/app/contacts" %} class="active"{% endif %}>Network</a>
+        <a href="/capture/health/"{% if request.path|slice:":8" == "/capture" %} class="active"{% endif %}>Email Capture</a>
+        <a href="/welcome/"{% if request.path|slice:":8" == "/welcome" %} class="active"{% endif %}>Settings</a>
+      </nav>
+      <div class="site-auth">
+        {% if user.is_authenticated %}
+          <span class="site-user">{{ user.email }}</span>
+          <a href="/accounts/logout/">Sign Out</a>
+        {% else %}
+          <a href="/accounts/login/">Sign In</a>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <a class="footer-logo" href="/" aria-label="Coverage home">
+        {% include "_logo.html" %}<span>Coverage</span>
+      </a>
+      <span>Recruiting deadlines and a networking CRM.</span>
+      <nav>
+        <a href="/pricing/">Pricing</a>
+        <a href="/welcome/privacy/">Privacy</a>
+        <a href="/welcome/terms/">Terms</a>
+      </nav>
+    </div>
+  </footer>
+
+  {% comment %}
+    Site-wide kinetic ledger numbers: any `.dash-num` counts up from 0 on
+    first paint. Purely presentational, skipped under reduced-motion, and
+    tolerant of non-numeric values ("—" passes straight through).
+  {% endcomment %}
+  <script>
+    (function () {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      document.querySelectorAll(".dash-num").forEach(function (el) {
+        var target = parseInt(el.textContent.trim(), 10);
+        if (isNaN(target) || target === 0) return;
+        var t0 = null;
+        function tick(ts) {
+          if (!t0) t0 = ts;
+          var p = Math.min((ts - t0) / 700, 1);
+          el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3)));
+          if (p < 1) requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      });
+    })();
+  </script>
+
+  {% comment %}
+    On-brand dropdowns: a native <select>'s open menu is OS-rendered and
+    unstyleable, so we enhance every single-value <select> into a styled,
+    keyboard-accessible listbox. The real <select> stays in the DOM (hidden)
+    as the submittable source of truth and fires `change` on pick, so htmx
+    filters keep working; with JS off, the styled native control is the
+    fallback. New selects arriving via htmx swaps are re-enhanced.
+  {% endcomment %}
+  <script>
+    (function () {
+      var uid = 0;
+      function enhance(sel) {
+        if (sel.dataset.cselDone || sel.multiple) return;
+        sel.dataset.cselDone = "1";
+        var wrap = document.createElement("div");
+        wrap.className = "csel";
+        sel.parentNode.insertBefore(wrap, sel);
+        wrap.appendChild(sel);
+        sel.classList.add("csel-native");
+        sel.tabIndex = -1;
+
+        var listId = "csel-" + (++uid);
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "csel-btn";
+        btn.setAttribute("aria-haspopup", "listbox");
+        btn.setAttribute("aria-expanded", "false");
+        btn.setAttribute("aria-controls", listId);
+        if (sel.getAttribute("aria-label")) btn.setAttribute("aria-label", sel.getAttribute("aria-label"));
+        var val = document.createElement("span");
+        val.className = "csel-value";
+        btn.appendChild(val);
+        btn.insertAdjacentHTML("beforeend",
+          '<svg class="csel-caret" viewBox="0 0 16 16" aria-hidden="true">' +
+          '<path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+          'stroke-linecap="round" stroke-linejoin="round"/></svg>');
+        wrap.appendChild(btn);
+
+        var menu = document.createElement("ul");
+        menu.className = "csel-menu";
+        menu.id = listId;
+        menu.setAttribute("role", "listbox");
+        menu.hidden = true;
+        wrap.appendChild(menu);
+
+        var opts = [], active = -1;
+        function syncLabel() {
+          var o = sel.options[sel.selectedIndex];
+          val.textContent = o ? o.textContent : "";
+        }
+        function build() {
+          menu.innerHTML = "";
+          opts = [];
+          Array.prototype.forEach.call(sel.options, function (o, i) {
+            var li = document.createElement("li");
+            li.className = "csel-opt";
+            li.id = listId + "-o" + i;
+            li.setAttribute("role", "option");
+            li.setAttribute("aria-selected", o.selected ? "true" : "false");
+            li.textContent = o.textContent;
+            li.addEventListener("click", function () { choose(i); });
+            menu.appendChild(li);
+            opts.push(li);
+          });
+        }
+        function highlight() {
+          opts.forEach(function (li, i) { li.classList.toggle("is-active", i === active); });
+          if (opts[active]) {
+            btn.setAttribute("aria-activedescendant", opts[active].id);
+            opts[active].scrollIntoView({ block: "nearest" });
+          }
+        }
+        function open() {
+          build();
+          menu.hidden = false;
+          wrap.dataset.open = "true";
+          btn.setAttribute("aria-expanded", "true");
+          active = sel.selectedIndex < 0 ? 0 : sel.selectedIndex;
+          highlight();
+          document.addEventListener("click", onDoc, true);
+        }
+        function close() {
+          menu.hidden = true;
+          wrap.dataset.open = "false";
+          btn.setAttribute("aria-expanded", "false");
+          btn.removeAttribute("aria-activedescendant");
+          document.removeEventListener("click", onDoc, true);
+        }
+        function onDoc(e) { if (!wrap.contains(e.target)) close(); }
+        function choose(i) {
+          if (sel.selectedIndex !== i) {
+            sel.selectedIndex = i;
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          syncLabel();
+          close();
+          btn.focus();
+        }
+        btn.addEventListener("click", function () { menu.hidden ? open() : close(); });
+        wrap.addEventListener("keydown", function (e) {
+          if (menu.hidden) {
+            if (["ArrowDown", "ArrowUp", "Enter", " "].indexOf(e.key) > -1) { e.preventDefault(); open(); }
+            return;
+          }
+          if (e.key === "Escape") { e.preventDefault(); close(); btn.focus(); }
+          else if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(opts.length - 1, active + 1); highlight(); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(0, active - 1); highlight(); }
+          else if (e.key === "Home") { e.preventDefault(); active = 0; highlight(); }
+          else if (e.key === "End") { e.preventDefault(); active = opts.length - 1; highlight(); }
+          else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (active > -1) choose(active); }
+        });
+        sel.addEventListener("change", syncLabel);
+        syncLabel();
+      }
+      function enhanceAll(root) {
+        (root || document).querySelectorAll("select:not([multiple]):not(.csel-native)").forEach(enhance);
+      }
+      if (document.readyState !== "loading") enhanceAll();
+      else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });
+      document.body.addEventListener("htmx:afterSettle", function (e) { enhanceAll(e.target); });
+    })();
+  </script>
+</body>
+</html>

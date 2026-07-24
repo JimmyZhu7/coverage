@@ -1,0 +1,144 @@
+{% load textstyle %}
+{% comment %}
+  The live panel: warmth meter + (on a log-a-touch POST) the visible movement
+  flag + fit score + touch history + the log-a-touch form. Rendered inline by
+  contact_detail.html AND returned on its own by the log_touch view for an
+  htmx `outerHTML` swap — so the id stays stable and both paths look identical.
+  The warmth-meter and moved-flag CSS animations replay on every insert, which
+  is exactly the same-session capture reward (§5).
+{% endcomment %}
+<section id="contact-live">
+
+  <h2>Warmth</h2>
+  <div class="row">
+    <span class="chip warmth-{{ contact.warmth }}">{{ contact.warmth }}</span>
+    <span class="chip">{{ contact.thread_state }}</span>
+  </div>
+  <div class="meter">
+    <div class="meter-track">
+      <div class="meter-fill" style="--from: {{ warmth_from_pct }}%; --to: {{ warmth_to_pct }}%"></div>
+    </div>
+    <div class="meter-scale">
+      {% for w in warmth_order %}
+        <span class="{% if w == contact.warmth %}on{% endif %}">{{ w }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if moved %}
+    {% if moved.error %}
+      <p class="moved-flag error">{{ moved.error }}</p>
+    {% elif moved.changed %}
+      <p class="moved-flag">
+        Logged {{ moved.kind_label }}.
+        Warmth {{ moved.from_warmth }} <span class="arrow">→</span> {{ contact.warmth }}{% if moved.from_state != contact.thread_state %},
+        thread {{ moved.from_state }} <span class="arrow">→</span> {{ contact.thread_state }}{% endif %}.
+      </p>
+    {% else %}
+      <p class="moved-flag nochange">Logged {{ moved.kind_label }}. No state change.</p>
+    {% endif %}
+  {% endif %}
+
+  {# --- Log a touch (htmx) --- #}
+  <form class="logform"
+        hx-post="{% url 'crm:log_touch' contact.id %}"
+        hx-target="#contact-live"
+        hx-swap="outerHTML">
+    {% csrf_token %}
+    <select name="kind" aria-label="Interaction">
+      {% for value, label in touch_kinds %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <select name="channel" aria-label="Channel">
+      {% for value, label in channels %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <input type="text" name="note" placeholder="Note (optional)">
+    <button class="btn btn-primary" type="submit">Log Touch</button>
+  </form>
+
+  {# --- Contact fit score (§6): band + axes + reasoning --- #}
+  <h2>Fit Score
+    <span class="band band-{{ contact_score.band }}">
+      <span class="num">{{ contact_score.composite }}</span> {{ contact_score.band }}
+    </span>
+  </h2>
+  {% if contact_score.reasoning %}<p class="reasoning">{{ contact_score.reasoning }}</p>{% endif %}
+  <div class="axes">
+    <div class="axis">
+      <span class="name">Depth</span>
+      <span class="bar"><i style="width: {{ contact_score.axes.depth.score }}%"></i></span>
+      <span class="val">{{ contact_score.axes.depth.score }}</span>
+      <span class="meta">{{ contact_score.axes.depth.chats }} chat{{ contact_score.axes.depth.chats|pluralize }} evidenced (level {{ contact_score.axes.depth.level }}/3)</span>
+    </div>
+    <div class="axis">
+      <span class="name">Responsiveness</span>
+      <span class="bar"><i style="width: {{ contact_score.axes.responsiveness.score }}%"></i></span>
+      <span class="val">{{ contact_score.axes.responsiveness.score }}</span>
+      <span class="meta">
+        {{ contact_score.axes.responsiveness.replies }} repl{{ contact_score.axes.responsiveness.replies|pluralize:"y,ies" }}
+        to {{ contact_score.axes.responsiveness.sends }} note{{ contact_score.axes.responsiveness.sends|pluralize }}{% if contact_score.axes.responsiveness.median_latency_days != None %}, ~{{ contact_score.axes.responsiveness.median_latency_days }}d median{% endif %}
+      </span>
+    </div>
+    <div class="axis">
+      <span class="name">Recency</span>
+      <span class="bar"><i style="width: {{ contact_score.axes.recency.score }}%"></i></span>
+      <span class="val">{{ contact_score.axes.recency.score }}</span>
+      <span class="meta">{% if contact_score.axes.recency.days_since_meaningful != None %}{{ contact_score.axes.recency.days_since_meaningful }}d since a meaningful reply/chat{% else %}no meaningful interaction yet{% endif %}</span>
+    </div>
+    <div class="axis">
+      <span class="name">Leverage</span>
+      <span class="bar"><i style="width: {{ contact_score.axes.leverage.score }}%"></i></span>
+      <span class="val">{{ contact_score.axes.leverage.score }}</span>
+      <span class="meta">{% if contact_score.axes.leverage.seniority != None %}role tier {{ contact_score.axes.leverage.seniority }}{% else %}role unknown{% endif %}{% if contact_score.axes.leverage.school_affiliation %} · alum{% endif %}</span>
+    </div>
+  </div>
+
+  {% if firm_score %}
+    <h2>Firm Fit: {{ firm.name|smart_title }}
+      <span class="band band-{{ firm_score.band }}">
+        <span class="num">{{ firm_score.composite }}</span> {{ firm_score.band }}
+      </span>
+    </h2>
+    {% if firm_score.reasoning %}<p class="reasoning">{{ firm_score.reasoning }}</p>{% endif %}
+    <div class="axes">
+      <div class="axis">
+        <span class="name">Network</span>
+        <span class="bar"><i style="width: {{ firm_score.axes.network.score }}%"></i></span>
+        <span class="val">{{ firm_score.axes.network.score }}</span>
+        <span class="meta">{{ firm_score.axes.network.contacts }} contact{{ firm_score.axes.network.contacts|pluralize }}, {{ firm_score.axes.network.advocates }} advocate{{ firm_score.axes.network.advocates|pluralize }}</span>
+      </div>
+      <div class="axis">
+        <span class="name">Momentum</span>
+        <span class="bar"><i style="width: {{ firm_score.axes.momentum.score }}%"></i></span>
+        <span class="val">{{ firm_score.axes.momentum.score }}</span>
+        <span class="meta">{{ firm_score.axes.momentum.recent_count }} in last 14d vs {{ firm_score.axes.momentum.base_count }} in 45d</span>
+      </div>
+      <div class="axis">
+        <span class="name">Timeline</span>
+        <span class="bar"><i style="width: {{ firm_score.axes.timeline.score }}%"></i></span>
+        <span class="val">{{ firm_score.axes.timeline.score }}</span>
+        <span class="meta">{% if firm_score.axes.timeline.next_event %}{{ firm_score.axes.timeline.next_event }} in {{ firm_score.axes.timeline.days_until }}d, {{ firm_score.axes.timeline.warm_contacts }} warm{% else %}no confirmed date{% endif %}</span>
+      </div>
+      <div class="axis">
+        <span class="name">Structural</span>
+        <span class="bar"><i style="width: {{ firm_score.axes.structural.score }}%"></i></span>
+        <span class="val">{{ firm_score.axes.structural.score }}</span>
+        <span class="meta">rules v1: region {{ firm_score.axes.structural.region_overlap|yesno:"match,no,?" }}, track {{ firm_score.axes.structural.track_overlap|yesno:"match,no,?" }}</span>
+      </div>
+    </div>
+  {% endif %}
+
+  {# --- Touch history (append-only log) --- #}
+  <h2>Touch History</h2>
+  {% if touches %}
+    <ul class="touches">
+      {% for t in touches %}
+        <li>
+          <span class="when">{{ t.ts|date:"M j, Y" }}</span>
+          <span><span class="kind">{{ t.kind }}</span>{% if t.channel %} · {{ t.channel }}{% endif %}{% if t.note %} · <span class="muted">{{ t.note }}</span>{% endif %}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted small">No touches logged yet.</p>
+  {% endif %}
+</section>

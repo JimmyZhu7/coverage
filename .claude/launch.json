@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "coverage-web",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "coverage_web/manage.py", "runserver", "8000"],
+      "port": 8000
+    }
+  ]
+}

@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}Settings · Coverage{% endblock %}
+
+{% block head %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* Full-width settings, like every other page: a sticky section rail beside
+     a column of section cards. */
+  .settings-wrap { display: grid; grid-template-columns: 240px minmax(0, 1fr);
+    gap: var(--s7); align-items: start; max-width: 1160px; margin: 0 auto; }
+  .settings-nav { position: sticky; top: 88px; display: flex; flex-direction: column; gap: 2px; }
+  .settings-nav-title { font-size: var(--fs-micro); text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--ink-3); font-weight: var(--w-med);
+    margin: 0 0 var(--s2); padding-left: var(--s4); }
+  .settings-nav a { padding: 9px 15px; border-radius: var(--r-ctl); color: var(--ink-2);
+    font-size: var(--fs-s); font-weight: var(--w-med); border-left: 2px solid transparent;
+    transition: background-color var(--t-fast), color var(--t-fast), border-color var(--t-fast); }
+  .settings-nav a:hover { background: var(--accent-soft); color: var(--accent-ink);
+    text-decoration: none; }
+  .settings-nav a.is-active { background: var(--accent-soft); color: var(--accent-ink);
+    border-left-color: var(--accent); }
+
+  .settings-main { min-width: 0; display: flex; flex-direction: column; gap: var(--s5); }
+  .settings-msgs { max-width: 1160px; margin: 0 auto var(--s4); }
+
+  .set-card { background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-1); scroll-margin-top: 92px; }
+  .set-head { padding: var(--s5) var(--s5) 0; }
+  .set-head h2 { margin: 0 0 var(--s1); font-size: var(--fs-l); }
+  .set-head p { margin: 0; color: var(--ink-2); font-size: var(--fs-s); max-width: 60ch; }
+  .set-body { padding: var(--s4) var(--s5) var(--s5); }
+  .set-card.is-danger { border-color: var(--danger-line); }
+  .set-card.is-danger .set-head h2 { color: var(--danger); }
+
+  /* Setting row: label + description on the left, control/value on the right. */
+  .set-row { display: flex; justify-content: space-between; align-items: center;
+    gap: var(--s5); padding: var(--s4) 0; border-top: 1px solid var(--line); }
+  .set-row:first-child { border-top: 0; }
+  .set-row-main { min-width: 0; }
+  .set-row-label { font-weight: var(--w-med); font-size: var(--fs-m); }
+  .set-row-desc { color: var(--ink-3); font-size: var(--fs-s); margin-top: 2px; }
+  .set-row-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: 24px; font-weight: var(--w-med); color: var(--accent-ink); flex: none; }
+  .set-row-control { flex: none; display: flex; gap: var(--s2); }
+
+  /* Capture address with an inline copy control. */
+  .set-copy { display: flex; gap: var(--s2); align-items: stretch; }
+  .set-copy .capture-addr { margin: 0; flex: 1; display: flex; align-items: center; }
+  .set-copy .btn { flex: none; }
+
+  /* Profile form: two-up where it reads better (school + class year). */
+  .set-form .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4); }
+
+  @media (max-width: 820px) {
+    .settings-wrap { grid-template-columns: 1fr; gap: var(--s4); }
+    .settings-nav { position: static; flex-direction: row; flex-wrap: wrap;
+      gap: var(--s1); padding-bottom: var(--s2); }
+    .settings-nav-title { display: none; }
+    .settings-nav a { border-left: 0; }
+  }
+  @media (max-width: 560px) { .set-form .grid-2 { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="settings" %}</span>
+    <p class="kin-hero-eyebrow">Your account</p>
+    <h1 class="kin-hero-title">Settings</h1>
+  </header>
+
+  {% if messages %}
+    <div class="settings-msgs">
+      {% for m in messages %}<p class="msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</p>{% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="settings-wrap">
+    <aside class="settings-nav">
+      <p class="settings-nav-title">On This Page</p>
+      <a href="#profile" class="is-active">Profile</a>
+      <a href="#capture">Email Capture</a>
+      <a href="#language">Language</a>
+      <a href="#data">Your Data</a>
+      <a href="#legal">Legal</a>
+      <a href="#danger">Danger Zone</a>
+    </aside>
+
+    <div class="settings-main">
+      {# ---- Profile ---- #}
+      <section class="set-card kin-reveal" id="profile" style="--i:0">
+        <div class="set-head">
+          <h2>Profile</h2>
+          <p>Your School, Class Year, and Recruiting Targets</p>
+        </div>
+        <div class="set-body">
+          <form class="set-form" method="post" action="{% url 'accounts:settings' %}"
+                hx-post="{% url 'accounts:settings' %}" hx-target="#profile-fields" hx-swap="innerHTML">
+            {% csrf_token %}
+            <div id="profile-fields">{% include "accounts/_profile_form.html" %}</div>
+            <div class="actions"><button type="submit" class="btn btn-primary">Save Profile</button></div>
+          </form>
+        </div>
+      </section>
+
+      {# ---- Email Capture ---- #}
+      <section class="set-card kin-reveal" id="capture" style="--i:1">
+        <div class="set-head">
+          <h2>Email Capture</h2>
+          <p>Your Private BCC Capture Address</p>
+        </div>
+        <div class="set-body">
+          <div class="set-copy">
+            <code class="capture-addr" id="capture-addr">{{ capture_address }}</code>
+            <button type="button" class="btn" id="copy-addr" data-copy="{{ capture_address }}">Copy</button>
+          </div>
+        </div>
+      </section>
+
+      {# ---- Language ---- #}
+      <section class="set-card kin-reveal" id="language" style="--i:2">
+        <div class="set-head">
+          <h2>Language</h2>
+          <p>Your Preferred Interface Language</p>
+        </div>
+        <div class="set-body">
+          <form method="post" action="{% url 'accounts:settings' %}" class="set-row" style="border-top:0; padding-top:0;">
+            {% csrf_token %}
+            <div class="set-row-main">
+              <div class="set-row-label">Interface Language</div>
+            </div>
+            <div class="set-row-control">
+              <select name="language" aria-label="Interface language">
+                {% for code, label in languages %}
+                  <option value="{{ code }}"{% if code == current_language %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      {# ---- Your Data ---- #}
+      <section class="set-card kin-reveal" id="data" style="--i:3">
+        <div class="set-head">
+          <h2>Your Data</h2>
+          <p>Import, Export, and Your Totals</p>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-label">Contacts</div>
+              <div class="set-row-desc">People in your private CRM.</div>
+            </div>
+            <div class="set-row-value">{{ contact_count }}</div>
+          </div>
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-label">Target Firms</div>
+              <div class="set-row-desc">Firms you've tiered on your Network board.</div>
+            </div>
+            <div class="set-row-value">{{ target_firm_count }}</div>
+          </div>
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-label">Import &amp; Export</div>
+              <div class="set-row-desc">Bring contacts in from a CSV, or download all your data.</div>
+            </div>
+            <div class="set-row-control">
+              <a class="btn" href="{% url 'accounts:import' %}">Import</a>
+              <a class="btn" href="{% url 'accounts:export' %}">Export</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {# ---- Legal ---- #}
+      <section class="set-card kin-reveal" id="legal" style="--i:3">
+        <div class="set-head">
+          <h2>Legal</h2>
+          <p>Privacy and Terms</p>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-label">Privacy Policy</div>
+              <div class="set-row-desc">What we collect and why.</div>
+            </div>
+            <div class="set-row-control"><a class="btn" href="{% url 'accounts:privacy' %}">Read</a></div>
+          </div>
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-label">Terms of Service</div>
+              
+            </div>
+            <div class="set-row-control"><a class="btn" href="{% url 'accounts:terms' %}">Read</a></div>
+          </div>
+        </div>
+      </section>
+
+      {# ---- Danger Zone ---- #}
+      <section class="set-card is-danger kin-reveal" id="danger" style="--i:4">
+        <div class="set-head">
+          <h2>Danger Zone</h2>
+          <p>Irreversible Account Actions</p>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-label">Delete Account</div>
+              <div class="set-row-desc">Permanently delete your account and everything in it.
+                This can't be undone.</div>
+            </div>
+            <div class="set-row-control"><a class="btn btn-danger" href="{% url 'accounts:delete' %}">Delete Account</a></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    // Copy the capture address, with a quick "Copied" confirmation.
+    var btn = document.getElementById("copy-addr");
+    if (btn && navigator.clipboard) {
+      btn.addEventListener("click", function () {
+        navigator.clipboard.writeText(btn.dataset.copy).then(function () {
+          var label = btn.textContent;
+          btn.textContent = "Copied";
+          setTimeout(function () { btn.textContent = label; }, 1400);
+        });
+      });
+    }
+    // Scroll-spy: light up the rail item whose section is in view.
+    var links = Array.prototype.slice.call(document.querySelectorAll(".settings-nav a"));
+    var sections = Array.prototype.slice.call(document.querySelectorAll(".set-card"));
+    function setActive(id) {
+      links.forEach(function (a) {
+        a.classList.toggle("is-active", a.getAttribute("href").slice(1) === id);
+      });
+    }
+    if ("IntersectionObserver" in window && sections.length) {
+      var obs = new IntersectionObserver(function (entries) {
+        // At the bottom of the page the last (often short) section can never
+        // reach the observer's middle band, so the bottom fallback below owns
+        // that case. Ignore observer updates while pinned to the bottom.
+        if (atBottom()) return;
+        entries.forEach(function (e) {
+          if (e.isIntersecting) setActive(e.target.id);
+        });
+      }, { rootMargin: "-35% 0px -55% 0px" });
+      sections.forEach(function (c) { obs.observe(c); });
+
+      // Bottom-of-page fallback: the last section can't cross the middle band,
+      // so force it active once the viewport is pinned to the page bottom.
+      function atBottom() {
+        return window.innerHeight + window.scrollY >=
+          document.documentElement.scrollHeight - 2;
+      }
+      window.addEventListener("scroll", function () {
+        if (atBottom()) setActive(sections[sections.length - 1].id);
+      }, { passive: true });
+    }
+  })();
+</script>
+{% endblock %}

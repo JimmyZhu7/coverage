@@ -1,0 +1,18 @@
+{% comment %}
+Accounts-only extras. All base styling (forms, buttons, msgs, steps, cards,
+capture address, summary tables) lives in static/css/coverage.css. This
+partial must never style body/nav/main — the shared shell owns those.
+{% endcomment %}
+<style>
+  /* v3: step titles sit on the centerline like every other page head;
+     the forms below them stay left-aligned for scannability. */
+  .page--narrow > h1, .page--narrow section > h1 { text-align: center; }
+  .firm-list { max-height: 340px; overflow-y: auto; border: 1px solid var(--line);
+    border-radius: var(--r-panel); padding: var(--s2) var(--s3); background: var(--surface); }
+  .firm-list .firm-meta { color: var(--ink-3); font-size: var(--fs-xs); }
+  .checkgrid { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s5); }
+  .survey-row { border-top: 1px solid var(--line); padding: var(--s2) 0; }
+  .survey-row:first-of-type { border-top: 0; }
+  .survey-check { display: flex; gap: var(--s2); align-items: center;
+    font-weight: var(--w-reg); margin: var(--s2) 0; }
+</style>

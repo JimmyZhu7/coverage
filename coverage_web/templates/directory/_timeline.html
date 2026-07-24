@@ -1,0 +1,28 @@
+{% comment %}
+A firm's cycle dates from firm_dates, rendered as a timeline. `timeline` is a
+list of dicts from directory/views.py `_firm_date_row`. Confirmed dates are
+solid; rumored ones are dashed and wear their confidence openly.
+{% endcomment %}
+{% if timeline %}
+  <ul class="tl">
+    {% for row in timeline %}
+      <li class="tl-row {{ row.state }}">
+        <span class="tl-date">{{ row.date_text }}</span>
+        <span class="tl-event">
+          {{ row.event_label }}
+          <span class="tl-scope">{{ row.cycle }}{% if row.region %} · {{ row.region }}{% endif %}</span>
+        </span>
+        <span class="markers">
+          {% if row.state == "confirmed" %}
+            <span class="pill conf-high" title="High-confidence, dated.">confirmed</span>
+          {% else %}
+            <span class="pill conf-{{ row.confidence.level }}" title="Not yet confirmed; shown with its confidence.">rumored · confidence {{ row.confidence.label }}{% if row.confidence.value %} ({{ row.confidence.value }}){% endif %}</span>
+          {% endif %}
+          {% if row.source_url %}<a class="pill fresh" href="{{ row.source_url }}" rel="nofollow noopener" target="_blank">source</a>{% endif %}
+        </span>
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="count-line">No cycle dates on file for this firm yet.</p>
+{% endif %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}{{ firm.name|smart_title }} · Coverage{% endblock %}
+
+{% block head %}{% include "directory/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page">
+  <header class="page-head">
+    <p class="subnav"><a href="{% url 'opportunities' %}">← Opportunities</a></p>
+    <h1>{{ firm.name|smart_title }}</h1>
+    <p class="lede">
+      {% if firm.regions %}{{ firm.regions|join:", " }}{% endif %}
+      {% if firm.regions and firm.tracks %} · {% endif %}
+      {% if firm.tracks %}{{ firm.tracks|join:", " }}{% endif %}
+    </p>
+  </header>
+
+  <section class="section">
+    <h2>Cycle Dates</h2>
+    <p class="lede">Confirmed dates are solid; anything we haven't nailed down is marked rumored, with its confidence shown.</p>
+    {% include "directory/_timeline.html" %}
+  </section>
+
+  <section class="section">
+    <h2>Open Roles <span class="scrub-count">{{ total }}</span></h2>
+    {% if cards %}
+      <div class="cards">
+        {% for card in cards %}
+          {% include "directory/_card.html" %}
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty">
+        <h2>Nothing open right now.</h2>
+        <p>We'll list this firm's openings as soon as the next check finds any.</p>
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,20 @@
+[project]
+name = "coverage-domain"
+version = "0.1.0"
+description = "Coverage's ported pure-logic core: the warmth/thread-state machine (this package's first module), plus cadence, apply-layer, and scoring logic to follow. Pure Python — no Django import anywhere; every function takes a DB-API 2.0 connection/cursor and a user_id tenancy scope. See docs/build-plan.md §4's port table."
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "psycopg[binary]>=3.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

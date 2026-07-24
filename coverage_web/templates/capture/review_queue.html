@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Capture Review · Coverage{% endblock %}
+
+{% block content %}
+<div class="page page--narrow">
+  <header class="page-head">
+    <h1>Review Captured Email</h1>
+    <p class="lede">
+      These messages were captured but couldn't be classified with confidence
+      (an auto-reply, an unreadable sender, or a scheduling-shaped message we
+      won't guess at). Confirm what each one is. No email is dropped and nothing
+      is sent to a model.
+    </p>
+  </header>
+
+  {% if not events %}
+    <div class="empty">
+      <p>Nothing to review.</p>
+      <p><a href="{% url 'capture:health' %}">Back to capture health</a></p>
+    </div>
+  {% endif %}
+
+  {% for event in events %}
+    <article class="panel" aria-label="Captured event {{ event.id }}">
+      <p>
+        <strong>{{ event.counterparty_name|default:event.counterparty_email|default:"Unknown sender" }}</strong>
+        {% if event.counterparty_email %}<span class="muted small tabular">{{ event.counterparty_email }}</span>{% endif %}
+        · {{ event.direction|default:"unknown direction" }},
+        received {{ event.received_at }}
+      </p>
+      {% if event.signals.evidence_quote %}
+        <p class="small muted"><em>Why flagged:</em> {{ event.signals.evidence_quote }}</p>
+      {% endif %}
+
+      <div class="actions">
+        <form method="post" action="{% url 'capture:confirm' event.id %}">
+          {% csrf_token %}
+          <label>
+            Log as:
+            <select name="touch_kind">
+              {% for kind in kinds %}
+                <option value="{{ kind }}">{{ kind }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button type="submit" class="btn btn-primary">Confirm</button>
+        </form>
+
+        <form method="post" action="{% url 'capture:ignore' event.id %}">
+          {% csrf_token %}
+          <button type="submit" class="btn">Ignore</button>
+        </form>
+      </div>
+    </article>
+  {% endfor %}
+</div>
+{% endblock %}

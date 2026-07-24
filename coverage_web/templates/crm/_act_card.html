@@ -1,0 +1,36 @@
+{% load textstyle %}
+{% comment %}
+One Act Now card with inline quick actions. `a` is a cadence action dict
+(contact, label, reason, warmth_pct, mailto, touch_kind, priority). The
+buttons post to crm:today_act; hx-target/hx-swap/hx-headers are inherited
+from #today-cockpit, so a click re-renders the whole cockpit (queue + pace +
+activity stay in sync). `idx` drives the staggered entrance.
+{% endcomment %}
+<article class="act-card kin-reveal act-{{ a.priority }}" style="--i:{{ idx }}">
+  <div class="act-top">
+    <span class="opp-firm">{{ a.firm_name|smart_title }}</span>
+    <span class="chip warmth-{{ a.contact.warmth }}">{{ a.contact.warmth }}</span>
+  </div>
+  <h3 class="act-name"><a href="{% url 'crm:contact_detail' a.contact.id %}">{{ a.contact.name|smart_title }}</a></h3>
+  {% if a.contact.role %}<p class="act-role">{{ a.contact.role|smart_title }}</p>{% endif %}
+  <div class="act-badges"><span class="prio prio-{{ a.priority }}">{{ a.label }}</span></div>
+  <div class="act-quick">
+    <div class="act-primary">
+      <button type="button" class="btn btn-primary act-btn"
+              hx-post="{% url 'crm:today_act' a.contact.id 'sent' %}"
+              hx-vals='{"kind": "{{ a.touch_kind }}"}'>Sent</button>
+      <button type="button" class="btn act-btn"
+              hx-post="{% url 'crm:today_act' a.contact.id 'reply' %}">Reply</button>
+      {% if a.contact.email %}<a class="btn act-btn" href="{{ a.mailto }}">Compose</a>
+      {% else %}<a class="btn act-btn" href="{% url 'crm:contact_detail' a.contact.id %}">Email</a>{% endif %}
+    </div>
+    <div class="act-ghosts">
+      <button type="button" class="btn act-ghost"
+              hx-post="{% url 'crm:today_act' a.contact.id 'snooze' %}"
+              title="Snooze for 3 days">Snooze</button>
+      <button type="button" class="btn act-ghost"
+              hx-post="{% url 'crm:today_act' a.contact.id 'skip' %}"
+              title="Dismiss for today">Skip</button>
+    </div>
+  </div>
+</article>

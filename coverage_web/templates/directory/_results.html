@@ -1,0 +1,81 @@
+{% load textstyle %}
+{% comment %}
+The Opportunities body (htmx swap target). One firm per card; every open role
+listed inside its own scroll window as a standardized card that keeps its
+honest urgency signal — a depleting "fuse" countdown when the role has a real
+deadline, a live pulse + how-recently-seen when it's rolling review. Firms are
+personalized from the survey: the user's target firms and chosen tracks/regions
+float to the top.
+{% endcomment %}
+
+{% comment %}Slim inline stat strip — one line under the hero instead of four
+oversized cards, so the roles start a screen sooner. Zero-value stats are
+hidden rather than shown as a weak "0".{% endcomment %}
+<div class="stat-strip">
+  <span class="ss-item"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num" style="--i:0">{{ total }}</b> Open Roles</span>
+  <span class="ss-item"><b class="dash-num" style="--i:1">{{ clusters|length }}</b> Firms</span>
+  {% if dash.closing_week %}<span class="ss-item ss-warn"><b class="dash-num" style="--i:2">{{ dash.closing_week }}</b> Closing This Week</span>{% endif %}
+  {% if dash.fresh_count %}<span class="ss-item"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh This Week</span>{% endif %}
+</div>
+
+{% if personalized %}
+  <p class="honesty">★ <strong>Sorted for you.</strong></p>
+{% endif %}
+
+{% if clusters %}
+  <div class="firmcols">
+    {% for cl in clusters %}
+      <article class="firmcol{% if cl.is_mine %} is-mine{% endif %} kin-reveal" style="--i:{{ forloop.counter0 }}">
+        <header class="firmcol-head">
+          <span class="firmcol-logo" style="--hue: {{ cl.firm_slug|firm_hue }}">{{ cl.monogram }}</span>
+          <div class="firmcol-id">
+            <a class="firmcol-name" href="{% url 'directory:firm_detail' cl.firm_slug %}">{{ cl.firm_name|smart_title }}</a>
+            <span class="firmcol-meta">{% if cl.category %}{{ cl.category }} · {% endif %}{{ cl.open_count }} open</span>
+            <div class="firmcol-stats">
+              <span class="firmcol-tier{% if cl.is_mine %} is-mine{% endif %}">{% if cl.tier %}Tier {{ cl.tier }}{% else %}Untiered{% endif %}</span>
+              {% if cl.closing_count %}<span class="fc-stat fc-closing">{{ cl.closing_count }} closing</span>{% endif %}
+            </div>
+          </div>
+        </header>
+        <div class="firmcol-scroll">
+          {% for r in cl.roles %}
+            <div class="rolecard urg-{{ r.level }}">
+              <div class="rolecard-top">
+                <span class="role-mini role-{{ r.bucket }}">{{ r.bucket_label }}{% if r.cohort %} · {{ r.cohort }}{% endif %}</span>
+                {% if r.is_fresh and not r.dated %}<span class="fresh-badge">New</span>{% endif %}
+              </div>
+              <h4 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a></h4>
+              {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_title }}</span>{% endif %}
+              {% if r.dated %}
+                <div class="fuse fuse-{{ r.level }}">
+                  <span class="fuse-track"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>
+                  <span class="fuse-label">{{ r.countdown }}</span>
+                </div>
+              {% else %}
+                <div class="rolling-tag">
+                  <span class="rolling-dot"></span> Rolling
+                  {% if r.seen_days is not None %}<span class="rolling-seen">· {% if r.seen_days == 0 %}seen today{% elif r.seen_days == 1 %}seen 1d ago{% else %}seen {{ r.seen_days }}d ago{% endif %}</span>{% endif %}
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty">
+    {% if has_filters %}
+      <h2>Nothing open under those filters.</h2>
+      <p>Widen the filter, or <a href="{% url 'opportunities' %}">see everything open</a>.</p>
+    {% else %}
+      <h2>Nothing open right now.</h2>
+      <p>We'll list roles here as soon as the next check finds any.</p>
+    {% endif %}
+  </div>
+{% endif %}
+
+{% if hidden_other %}
+  <p class="count-line"><span class="hidden-note">{{ hidden_other }} non-campus role{{ hidden_other|pluralize }} hidden.
+    <a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a>.</span></p>
+{% endif %}

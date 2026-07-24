@@ -1,0 +1,30 @@
+{% load socialaccount %}
+{% comment %}
+Social sign-in buttons, driven by core.context_processors.social_providers.
+A provider without credentials renders disabled rather than as a live button
+that would dead-end at the OAuth redirect. `action` is "Sign In" / "Sign Up".
+{% endcomment %}
+<div class="auth-providers">
+  {% for p in social_providers %}
+    {% if p.configured %}
+      <form method="post" action="{% provider_login_url p.id %}">
+        {% csrf_token %}
+        {% if redirect_field_value %}
+          <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
+        {% endif %}
+        <button type="submit" class="auth-provider">
+          <span class="auth-provider-mark auth-mark-{{ p.id }}" aria-hidden="true"></span>
+          <span>Continue with {{ p.label }}</span>
+        </button>
+      </form>
+    {% else %}
+      <button type="button" class="auth-provider is-off" disabled
+              title="{{ p.label }} sign-in needs its OAuth credentials before it goes live.">
+        <span class="auth-provider-mark auth-mark-{{ p.id }}" aria-hidden="true"></span>
+        <span>Continue with {{ p.label }}</span>
+        <span class="auth-provider-soon">Setup Needed</span>
+      </button>
+    {% endif %}
+  {% endfor %}
+</div>
+<p class="auth-scope-note">Coverage never reads your inbox.</p>

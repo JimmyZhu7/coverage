@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Network · Coverage{% endblock %}
+
+{% block head %}{% include "crm/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page page--full">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="network" %}</span>
+    <p class="kin-hero-eyebrow">Your relationships</p>
+    <h1 class="kin-hero-title">Network</h1>
+    <p class="kin-hero-sub">Everyone you know at each firm, how warm they are, and who's next.</p>
+  </header>
+  <nav class="subnav scope-tabs standalone">
+    <a href="{% url 'crm:contact_list' %}"{% if not scope %} aria-current="page"{% endif %}>All</a>
+    <a href="?scope=hk"{% if scope == 'hk' %} aria-current="page"{% endif %}>Hong Kong</a>
+    <a href="?scope=us"{% if scope == 'us' %} aria-current="page"{% endif %}>United States</a>
+    <a href="?scope=sg"{% if scope == 'sg' %} aria-current="page"{% endif %}>Singapore</a>
+    <a href="?scope=eu"{% if scope == 'eu' %} aria-current="page"{% endif %}>Europe</a>
+    <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School</a>
+  </nav>
+
+  <div class="net-board">
+    {# ---- Left: Contacts Needing Action ---- #}
+    <section class="net-actions">
+      <h2 class="strip-title">Contacts Needing Action <span class="scrub-count">{{ action_total }}</span></h2>
+      <div class="net-panel">
+      {% for group in action_groups %}
+        <div class="net-group">
+          <div class="net-group-head">
+            <span>{{ group.label }}</span>
+            <span class="scrub-count">{{ group.items|length }}</span>
+          </div>
+          {% if group.items %}
+            <div class="net-minis">
+              {% for a in group.items %}
+                <a class="net-mini" href="{% url 'crm:contact_detail' a.contact.id %}">
+                  <span class="net-mini-name">{{ a.contact.name|smart_title }}</span>
+                  <span class="net-mini-firm">{{ a.firm_name|smart_title }}</span>
+                </a>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="net-none">Nothing right now.</p>
+          {% endif %}
+        </div>
+      {% endfor %}
+      </div>
+    </section>
+
+    {# ---- Right: Firm Coverage by tier (draggable) ---- #}
+    <section class="net-coverage">
+      <h2 class="strip-title">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
+      <div class="net-panel">
+      <div class="net-legend">
+        <span><i class="dot dot-cold"></i> Emailed, No Reply</span>
+        <span><i class="dot dot-replied"></i> Replied</span>
+        <span><i class="dot dot-chatted"></i> Chatted</span>
+        <span><i class="dot dot-advocate"></i> Advocate</span>
+      </div>
+      {% for section in tier_sections %}
+        <div class="tier-section" data-tier="{{ section.tier|default:'' }}">
+          <div class="tier-label">{{ section.label }}</div>
+          <div class="tier-grid">
+            {% for fc in section.cards %}
+              <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
+                   style="--i:{{ forloop.counter0 }}"
+                   title="Drag to another tier. Tier drives your action priorities.">
+                <div class="firm-card-name">{{ fc.firm.name|smart_title }}</div>
+                <div class="firm-card-badges">
+                  {% if fc.open %}<span class="pill fc-open">{{ fc.open }} Open</span>{% endif %}
+                  {% if fc.soon %}<span class="pill fc-soon">{{ fc.soon }} Soon</span>{% endif %}
+                  {% if fc.act_now %}<span class="pill fc-act">{{ fc.act_now }} Act Now</span>{% endif %}
+                  {% if fc.sponsors %}<span class="pill fc-spon">Sponsors</span>{% endif %}
+                </div>
+                <div class="firm-bar" title="{{ fc.contact_count }} contact{{ fc.contact_count|pluralize }}">
+                  {% for seg in fc.segments %}{% if seg.pct %}<i class="seg seg-{{ seg.warmth }}" style="width: {{ seg.pct }}%"></i>{% endif %}{% endfor %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+          {# Placeholder sits OUTSIDE the grid — a dropped card never shares a row with it; JS toggles it. #}
+          <p class="net-none tier-empty"{% if section.cards %} hidden{% endif %}>Drop a firm here.</p>
+        </div>
+      {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  {# ---- Full contact cards, by warmth ---- #}
+  <section class="net-contacts">
+    <h2 class="strip-title">Contacts <span class="scrub-count">{{ contact_total }}</span></h2>
+    {% for section in sections %}
+      {# Empty sections start collapsed so they don't take up the board. #}
+      <details class="warmth-section"{% if section.cards %} open{% endif %}>
+        <summary class="net-group-head">
+          <span>{% if section.key != "school" %}<i class="dot dot-{% if section.key == 'no_reply' %}cold{% else %}{{ section.key }}{% endif %}"></i> {% endif %}{{ section.label }}</span>
+          <span class="scrub-count">{{ section.cards|length }}</span>
+        </summary>
+        {% if section.cards %}
+          <div class="contact-grid">
+            {% for card in section.cards %}
+              <div class="contact-card kin-reveal" style="--i:{{ forloop.counter0 }}">
+                <div class="cc-head">
+                  <span class="cc-avatar">{{ card.initials }}</span>
+                  <div class="cc-id">
+                    <span class="cc-name">{{ card.c.name|smart_title }}
+                      {% if card.gender %}<span class="pill cc-pill">{{ card.gender }}</span>{% endif %}
+                      {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
+                    </span>
+                    <span class="cc-firm">
+                      {% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}
+                    </span>
+                    {% if card.school %}<span class="pill cc-school">{{ card.school }}</span>{% endif %}
+                  </div>
+                </div>
+                {% if card.bullets %}
+                  <ul class="cc-bullets">
+                    {% for b in card.bullets %}<li>{{ b }}.</li>{% endfor %}
+                  </ul>
+                {% endif %}
+                {% if card.c.email %}<a class="cc-email" href="mailto:{{ card.c.email }}">{{ card.c.email }}</a>{% endif %}
+                <div class="cc-foot">
+                  <span class="cc-since">
+                    {% if card.days_since is not None %}{{ card.days_since }}d since last touch{% else %}Never contacted{% endif %}
+                  </span>
+                  <span class="cc-btns">
+                    <a class="btn" href="{% url 'crm:contact_detail' card.c.id %}">Log Touch</a>
+                    <a class="btn" href="{% url 'crm:contact_detail' card.c.id %}">Update</a>
+                  </span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="net-none">No contacts.</p>
+        {% endif %}
+      </details>
+    {% endfor %}
+  </section>
+</div>
+
+<script>
+  (function () {
+    var dragged = null;
+    document.querySelectorAll(".firm-card").forEach(function (card) {
+      card.addEventListener("dragstart", function () { dragged = card; card.classList.add("dragging"); });
+      card.addEventListener("dragend", function () { card.classList.remove("dragging"); });
+    });
+    document.querySelectorAll(".tier-section").forEach(function (section) {
+      section.addEventListener("dragover", function (e) { e.preventDefault(); section.classList.add("drop-hot"); });
+      section.addEventListener("dragleave", function () { section.classList.remove("drop-hot"); });
+      section.addEventListener("drop", function (e) {
+        e.preventDefault();
+        section.classList.remove("drop-hot");
+        if (!dragged) return;
+        var firm = dragged.dataset.firm;
+        var tier = section.dataset.tier;
+        var body = new URLSearchParams({ firm: firm, tier: tier });
+        fetch("{% url 'crm:set_firm_tier' %}", {
+          method: "POST",
+          headers: { "X-CSRFToken": "{{ csrf_token }}",
+                     "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+        }).then(function (resp) {
+          if (!resp.ok) return;
+          section.querySelector(".tier-grid").appendChild(dragged);
+          // Re-sync every tier's empty-state placeholder.
+          document.querySelectorAll(".tier-section").forEach(function (s) {
+            var empty = s.querySelector(".tier-empty");
+            if (empty) empty.hidden = s.querySelector(".tier-grid").children.length > 0;
+          });
+        });
+      });
+    });
+  })();
+</script>
+{% endblock %}

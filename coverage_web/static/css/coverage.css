@@ -1,0 +1,897 @@
+/* ==========================================================================
+   Coverage design system — static/css/coverage.css  (v2)
+   "An instrument, not a movement." Ledger look: paper, ink, hairlines,
+   one navy accent, squared badges, mono tabular figures for numbers.
+   Light mode only (deliberate; see design spec §0 + v2 addendum).
+
+   v2 elevation (founder-directed, 2026-07-23): sticky translucent masthead,
+   one soft shadow token for lift-on-hover, a stat-strip component, larger
+   display type, and a wide page variant for the heat-mapped calendar. The
+   identity is unchanged — same paper, ink, navy, hairlines, system fonts.
+   ========================================================================== */
+
+/* ---- 0. Typefaces — the "research desk" set, self-hosted ------------------
+   Three voices, one identity ("initiating coverage" is an equity-research
+   term, and the type says so):
+     display  Fraunces          — editorial serif masthead; authority.
+     ui/body  Instrument Sans   — quiet modern grotesque; stays out of the way.
+     data     Spline Sans Mono  — every number, eyebrow, and label; the ledger.
+   All vendored woff2 variable fonts, no CDN (same posture as htmx). Fraunces
+   carries an optical-size axis: browsers auto-select display cuts at big
+   sizes (font-optical-sizing is on by default). */
+@font-face {
+  font-family: "Fraunces";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/fraunces-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Fraunces";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/fraunces-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../fonts/instrument-sans-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../fonts/instrument-sans-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("../fonts/spline-sans-mono-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("../fonts/spline-sans-mono-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---- 1. Tokens ---------------------------------------------------------- */
+:root {
+  /* Ground + ink */
+  --paper:        #f7f6f3;   /* page background */
+  --surface:      #fffefc;   /* panels, cards, inputs */
+  --ink:          #1a1915;   /* primary text */
+  --ink-2:        #52504a;   /* secondary text */
+  --ink-3:        #6e6a62;   /* faint text — 4.5:1+ on paper, small labels */
+  --line:         #dedad1;   /* hairline borders */
+  --line-strong:  #b8b3a8;   /* emphasized borders (inputs, table heads) */
+
+  /* Accent — one, navy */
+  --accent:       #1f4e79;
+  --accent-ink:   #163a5b;   /* hover/active */
+  --accent-soft:  #e9eef4;   /* tinted surfaces (honesty banner) */
+  --accent-line:  #cfdbe7;
+
+  /* Semantic: outcomes */
+  --ok:           #2f6a45;
+  --ok-soft:      #e6f0e9;
+  --ok-line:      #cbdfd2;
+  --danger:       #9d2b23;
+  --danger-soft:  #f7e8e6;
+  --danger-line:  #e9c8c4;
+
+  /* Warmth states (cold -> replied -> chatted -> advocate).
+     -t text, -s surface tint, -l border, -bar saturated ramp color. */
+  --w-cold-t:     #435d76;  --w-cold-s:     #e8edf2;  --w-cold-l:     #d3dce6;
+  --w-replied-t:  #7d5410;  --w-replied-s:  #f6ecd6;  --w-replied-l:  #e8d7ad;
+  --w-chatted-t:  #8f4319;  --w-chatted-s:  #f7e4d6;  --w-chatted-l:  #ecccb4;
+  --w-advocate-t: #8c222d;  --w-advocate-s: #f6dfe0;  --w-advocate-l: #eccace;
+  --w-cold-bar:     #7f97ab;
+  --w-replied-bar:  #c99b3f;
+  --w-chatted-bar:  #c1652f;
+  --w-advocate-bar: #a83240;
+
+  /* Score bands (hot/warm/cool/cold) — hot reuses advocate heat, cold is neutral */
+  --band-hot-t:  #8c222d;  --band-hot-s:  #f6dfe0;
+  --band-warm-t: #8f4319;  --band-warm-s: #f7e4d6;
+  --band-cool-t: #435d76;  --band-cool-s: #e8edf2;
+  --band-cold-t: #57544d;  --band-cold-s: #edebe5;
+
+  /* Confidence */
+  --conf-high-t:    #2f6a45;  --conf-high-s:    #e6f0e9;  --conf-high-l:    #cbdfd2;
+  --conf-medium-t:  #3f5d7d;  --conf-medium-s:  #e8edf2;  --conf-medium-l:  #d3dce6;
+  --conf-low-t:     #7d5410;  --conf-low-s:     #f6ecd6;  --conf-low-l:     #e8d7ad;
+  --conf-unrated-t: #57544d;  --conf-unrated-s: #edebe5;  --conf-unrated-l: #dedad1;
+
+  /* Staleness */
+  --stale-t: #7d5410;  --stale-s: #f9efdb;  --stale-l: #ead9b0;
+  --fresh-t: #57544d;  --fresh-s: #f1efe9;  --fresh-l: #e2ded4;
+
+  /* Sponsorship */
+  --spon-known-t:   #2f6a45;  --spon-known-s:   #e6f0e9;  --spon-known-l:   #cbdfd2;
+  --spon-none-t:    #8c3a31;  --spon-none-s:    #f5e6e3;  --spon-none-l:    #e7cdc8;
+  --spon-unknown-t: #57544d;  --spon-unknown-s: #edebe5;  --spon-unknown-l: #dedad1;
+
+  /* Type — the research-desk set (v4): editorial serif masthead, quiet
+     grotesque body, deliberate mono ledger. */
+  --font-ui:      "Instrument Sans", -apple-system, BlinkMacSystemFont,
+                  "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-mono:    "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo,
+                  Consolas, "Liberation Mono", monospace;
+  --fs-xs:  12px;   /* metadata, touch dates */
+  --fs-s:   13px;   /* pills-adjacent text, small */
+  --fs-m:   15px;   /* body */
+  --fs-l:   17px;   /* section headings (h2) */
+  --fs-xl:  22px;   /* page titles on subpages */
+  --fs-xxl: 29px;   /* page titles on top-level pages */
+  --fs-hero: 34px;  /* landing headline only */
+  --fs-micro: 11px; /* uppercase badge labels only */
+  --lh-body: 1.6;
+  --lh-tight: 1.25;
+  /* --w-black is only ever paired with --font-display; 720 is Fraunces's
+     editorial-bold sweet spot (true 800+ reads poster-fat in a serif). */
+  --w-reg: 400; --w-med: 600; --w-bold: 700; --w-black: 720;
+
+  /* Space (4px base) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+  --s6: 32px; --s7: 48px; --s8: 64px;
+
+  /* Shape — v3 "bubbly": full-round badges, soft controls, generous panels. */
+  --r-badge: 999px;
+  --r-ctl:   10px;  /* buttons, inputs */
+  --r-panel: 16px;
+
+  /* Motion */
+  --t-fast: 120ms ease;
+  --t-med:  180ms cubic-bezier(0.2, 0.6, 0.2, 1);
+
+  /* Depth — one soft, warm shadow pair; lift stays subtle (ledger, not app). */
+  --shadow-1: 0 1px 2px rgba(26, 25, 21, 0.05), 0 4px 14px rgba(26, 25, 21, 0.06);
+  --shadow-2: 0 2px 4px rgba(26, 25, 21, 0.06), 0 10px 28px rgba(26, 25, 21, 0.09);
+
+  /* Layout */
+  --page-w:        960px;
+  --page-w-narrow: 680px;
+  --page-w-wide:   1120px;  /* the heat-mapped calendar breathes wider */
+  --page-w-full:   1440px;  /* the opportunities directory uses the whole page */
+}
+
+/* ---- 2. Reset + base ----------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: var(--w-reg) var(--fs-m)/var(--lh-body) var(--font-ui);
+  border-top: 3px solid var(--accent);   /* the masthead rule */
+}
+img, svg { max-width: 100%; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-ink); text-decoration: underline; }
+h1, h2, h3 { line-height: var(--lh-tight); margin: 0 0 var(--s2); }
+h1 { font: var(--w-black) var(--fs-xxl)/var(--lh-tight) var(--font-display); letter-spacing: -0.01em; }
+h2 { font-size: var(--fs-l); font-weight: var(--w-bold); margin-top: var(--s6); letter-spacing: -0.01em; }
+h3 { font-size: var(--fs-m); font-weight: var(--w-med); }
+code { font-family: var(--font-mono); font-size: 0.9em; }
+ul, ol { padding-left: 1.25rem; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 1px; }
+
+.muted { color: var(--ink-2); }
+.small { font-size: var(--fs-s); }
+.num, .tabular { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---- 3. Shell: header / main / footer ------------------------------------ */
+/* v2: the masthead sticks and gains a faint translucency, so the instrument's
+   frame is always in reach without stealing attention from the ledger. */
+.site-header {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.site-header-inner {
+  max-width: var(--page-w-wide); margin: 0 auto; padding: var(--s3) var(--s5);
+  display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap;
+}
+.wordmark {
+  font: var(--w-black) 21px/1 var(--font-display);
+  color: var(--ink); letter-spacing: -0.03em;
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+.wordmark .logo-mark { width: 21px; height: 21px; color: var(--accent);
+  transition: transform var(--t-med); }
+.wordmark:hover .logo-mark { transform: translateY(-1px); }
+/* v3.1: the radar-style capsule bar — uppercase tabs inside one rounded
+   container; the active tab is a solid filled pill. */
+.site-nav {
+  display: flex; gap: var(--s1); flex-wrap: wrap;
+  margin: 0 auto; justify-content: center;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px;
+}
+.site-nav a {
+  color: var(--ink-2); padding: 7px 16px; border-radius: 999px;
+  font-size: var(--fs-micro); font-weight: var(--w-med);
+  text-transform: uppercase; letter-spacing: 0.07em;
+  transition: color var(--t-fast), background-color var(--t-fast);
+}
+.site-nav a:hover { color: var(--ink); text-decoration: none; background: var(--accent-soft); }
+.site-nav a.active { color: #fff; background: var(--accent); }
+.site-nav a.active:hover { color: #fff; background: var(--accent-ink); }
+.site-auth { display: flex; gap: var(--s3); align-items: center; font-size: var(--fs-s); }
+.site-user { color: var(--ink-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
+
+main { min-height: 60vh; }
+/* Full page width is the default across the whole site. Only forms, auth,
+   legal, and onboarding opt down to `--narrow`, where a full-bleed measure
+   would hurt readability. `--wide`/`--full` remain as explicit aliases so
+   existing templates keep working. */
+.page {
+  max-width: var(--page-w-full); margin: 0 auto;
+  padding: var(--s7) var(--s5) var(--s6);
+}
+.page--narrow { max-width: var(--page-w-narrow); }
+.page--wide   { max-width: var(--page-w-full); }
+.page--full   { max-width: var(--page-w-full); }
+
+.site-footer { border-top: 1px solid var(--line); margin-top: var(--s6); }
+.site-footer-inner {
+  max-width: var(--page-w); margin: 0 auto; padding: var(--s5) var(--s5) var(--s6);
+  display: flex; flex-direction: column; gap: var(--s2); align-items: center;
+  text-align: center; font-size: var(--fs-xs); color: var(--ink-3);
+}
+.site-footer-inner nav { display: flex; gap: var(--s4); }
+.site-footer-inner a { color: var(--ink-3); }
+.footer-logo {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: var(--w-black) var(--fs-m)/1 var(--font-display);
+  letter-spacing: -0.02em; color: var(--ink);
+}
+.footer-logo:hover { text-decoration: none; color: var(--ink); }
+.footer-logo .logo-mark { width: 18px; height: 18px; color: var(--accent);
+  transition: transform var(--t-med); }
+.footer-logo:hover .logo-mark { transform: translateY(-1px); }
+
+/* ---- 4. Page furniture ---------------------------------------------------- */
+/* v3: page heads are centered and breathe — the rule below them is gone,
+   whitespace does the separating now. */
+.page-head { text-align: center; padding-bottom: var(--s5); margin-bottom: var(--s5); }
+.page-head h1 { margin-bottom: var(--s2); }
+.lede { color: var(--ink-2); margin: 0 auto var(--s3); font-size: var(--fs-m); max-width: 56ch; }
+.page-head .subnav, .page-head .stats { justify-content: center; }
+
+/* v2: stat strip — ledger figures for a page's key counts (Today, home). */
+.stats { display: flex; gap: var(--s5); flex-wrap: wrap; margin: var(--s4) 0 0; }
+.stat { display: flex; flex-direction: column; gap: 2px; min-width: 72px; }
+.stat .num {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 24px; font-weight: var(--w-med); line-height: 1.1; color: var(--ink);
+}
+.stat .lbl {
+  font-size: var(--fs-micro); color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.stat .num a { color: inherit; }
+.dateline {
+  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 var(--s1);
+}
+.subnav { display: flex; gap: var(--s2); font-size: var(--fs-s); margin: var(--s3) 0 0; flex-wrap: wrap; }
+.subnav a { padding: 4px 12px; border-radius: 999px; transition: background-color var(--t-fast); }
+.subnav a:hover { background: var(--accent-soft); text-decoration: none; }
+.page > .subnav:first-child, .subnav.standalone {
+  margin: 0 0 var(--s5); justify-content: center;
+}
+.subnav a[aria-current="page"], .subnav strong {
+  color: var(--accent-ink); font-weight: var(--w-med); background: var(--accent-soft);
+  border-radius: 999px; padding: 4px 12px;
+}
+
+/* Scope tabs — the segmented capsule (same look as the pricing switcher):
+   one bordered pill container, solid navy on the active segment. Scrolls
+   sideways on narrow screens instead of wrapping. */
+.subnav.scope-tabs {
+  width: max-content; max-width: 100%; overflow-x: auto;
+  align-items: center; gap: 4px; padding: 4px; flex-wrap: nowrap;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); box-shadow: var(--shadow-1);
+  scrollbar-width: none;
+}
+.subnav.scope-tabs::-webkit-scrollbar { display: none; }
+.subnav.scope-tabs.standalone { margin-left: auto; margin-right: auto; }
+.subnav.scope-tabs a {
+  padding: 8px 20px; line-height: 1.2; white-space: nowrap;
+  font-weight: var(--w-med); color: var(--ink-2);
+}
+.subnav.scope-tabs a:hover { background: var(--accent-soft); color: var(--ink); }
+.subnav.scope-tabs a[aria-current="page"] { background: var(--accent); color: #fff; }
+.section { margin-top: var(--s6); }
+.section-firm {
+  display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
+  border-bottom: 1px solid var(--line); padding-bottom: var(--s2); margin-bottom: var(--s3);
+}
+.tier {
+  font-size: var(--fs-micro); color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono);
+}
+.row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
+.count-line { color: var(--ink-2); font-size: var(--fs-s); margin: var(--s1) 0 var(--s4); }
+.count-line, .count-line * { font-variant-numeric: tabular-nums; }
+
+/* ---- 5. Panels / empty / honesty / flash ---------------------------------- */
+.panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-panel); padding: var(--s5);
+  margin-bottom: var(--s4); box-shadow: var(--shadow-1);
+  transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med);
+}
+.panel:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); transform: translateY(-2px); }
+.empty {
+  border: 1px dashed var(--line-strong); border-radius: var(--r-panel);
+  padding: var(--s7) var(--s5); text-align: center; color: var(--ink-2);
+}
+.empty h2 { margin: 0 0 var(--s2); font-size: var(--fs-l); color: var(--ink); }
+.empty p { margin: 0 0 var(--s2); }
+
+.honesty {
+  background: var(--accent-soft); border: 1px solid var(--accent-line);
+  border-radius: var(--r-panel); padding: var(--s3) var(--s5);
+  font-size: var(--fs-s); color: var(--ink-2); margin: 0 auto var(--s5);
+  max-width: 64ch; text-align: center;
+}
+.honesty strong { color: var(--accent-ink); }
+
+.msg { padding: var(--s2) var(--s3); border-radius: var(--r-ctl);
+  margin: var(--s2) 0; font-size: var(--fs-s); border: 1px solid var(--line); }
+.msg.success { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }
+.msg.error   { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-line); }
+.msg.warning { background: var(--stale-s); color: var(--stale-t); border-color: var(--stale-l); }
+.msg.info    { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
+
+.note { font-size: var(--fs-xs); color: var(--ink-3); margin-top: var(--s2); }
+code.addr, .capture-addr {
+  font-family: var(--font-mono); background: var(--paper);
+  border: 1px solid var(--line); border-radius: var(--r-ctl);
+}
+code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
+.capture-addr {
+  display: block; padding: var(--s2) var(--s3); font-size: var(--fs-s);
+  word-break: break-all; margin: 0 0 var(--s3);
+}
+
+/* ---- 6. Buttons ----------------------------------------------------------- */
+.btn {
+  display: inline-block; cursor: pointer;
+  font: var(--w-med) var(--fs-s)/1.2 var(--font-ui);
+  padding: 10px 20px; border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface); color: var(--ink);
+  transition: border-color var(--t-fast), background-color var(--t-fast),
+    box-shadow var(--t-med), transform var(--t-med);
+}
+.btn:hover { border-color: var(--ink-3); color: var(--ink); text-decoration: none;
+  box-shadow: var(--shadow-1); transform: translateY(-1px); }
+.btn:active { transform: translateY(0); box-shadow: none; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: #fff; }
+.btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn-danger:hover { background: #841f18; border-color: #841f18; color: #fff; }
+.btn[aria-disabled="true"], .btn:disabled { opacity: 0.5; pointer-events: none; }
+.btn-link { border: 0; background: none; padding: 8px 4px; color: var(--accent); font: inherit; font-size: var(--fs-s); cursor: pointer; }
+.actions { margin-top: var(--s5); display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
+
+/* ---- 7. Forms ------------------------------------------------------------- */
+label { display: block; font-weight: var(--w-med); font-size: var(--fs-s); margin: var(--s4) 0 var(--s1); }
+input[type="text"], input[type="email"], input[type="password"], input[type="number"],
+input[type="search"], input[type="file"], select, textarea {
+  width: 100%; max-width: 100%;
+  font: var(--w-reg) var(--fs-m)/1.4 var(--font-ui);
+  color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
+  padding: 9px 14px;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+input:hover, select:hover, textarea:hover { border-color: var(--ink-3); box-shadow: var(--shadow-1); }
+
+/* Selects — v3: native menus, custom chrome. The default chevron widget is
+   replaced with an inline-SVG arrow so the closed control matches the pill
+   language everywhere a select appears. */
+select {
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%236e6a62' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center; background-size: 14px;
+  padding-right: 38px; cursor: pointer;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 0;
+}
+input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--accent); }
+::placeholder { color: var(--ink-3); }
+.errorlist { color: var(--danger); font-size: var(--fs-s); margin: var(--s1) 0; padding-left: 1rem; }
+form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
+form p label { margin-top: var(--s3); }
+.checkgrid label,
+ul.checkboxselectmultiple label,
+.firm-list label {
+  display: flex; align-items: center; gap: var(--s2);
+  font-weight: var(--w-reg); margin: var(--s1) 0; font-size: var(--fs-m);
+}
+ul.checkboxselectmultiple { list-style: none; padding: 0; margin: var(--s1) 0;
+  display: flex; flex-wrap: wrap; gap: 0 var(--s5); }
+
+/* ---- 8. Pills / chips / badges -------------------------------------------- */
+.pill, .chip, .prio {
+  display: inline-flex; align-items: center; gap: var(--s1);
+  font-size: var(--fs-micro); font-weight: var(--w-med);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 3px 11px; border-radius: var(--r-badge);
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  white-space: nowrap;
+}
+a.pill:hover { text-decoration: underline; }
+
+.pill.stale { background: var(--stale-s); color: var(--stale-t); border-color: var(--stale-l); }
+.pill.fresh { background: var(--fresh-s); color: var(--fresh-t); border-color: var(--fresh-l); }
+.pill.conf-high    { background: var(--conf-high-s);    color: var(--conf-high-t);    border-color: var(--conf-high-l); }
+.pill.conf-medium  { background: var(--conf-medium-s);  color: var(--conf-medium-t);  border-color: var(--conf-medium-l); }
+.pill.conf-low     { background: var(--conf-low-s);     color: var(--conf-low-t);     border-color: var(--conf-low-l); }
+.pill.conf-unrated { background: var(--conf-unrated-s); color: var(--conf-unrated-t); border-color: var(--conf-unrated-l); }
+.pill.spon-known   { background: var(--spon-known-s);   color: var(--spon-known-t);   border-color: var(--spon-known-l); }
+.pill.spon-none    { background: var(--spon-none-s);    color: var(--spon-none-t);    border-color: var(--spon-none-l); }
+.pill.spon-unknown { background: var(--spon-unknown-s); color: var(--spon-unknown-t); border-color: var(--spon-unknown-l); }
+/* Opportunity-card tags: firm category + class year. */
+.pill.tag-cat   { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
+.pill.tag-class { background: var(--surface); color: var(--ink-2); border-color: var(--line-strong); }
+
+.chip.warmth-cold     { background: var(--w-cold-s);     color: var(--w-cold-t);     border-color: var(--w-cold-l); }
+.chip.warmth-replied  { background: var(--w-replied-s);  color: var(--w-replied-t);  border-color: var(--w-replied-l); }
+.chip.warmth-chatted  { background: var(--w-chatted-s);  color: var(--w-chatted-t);  border-color: var(--w-chatted-l); }
+.chip.warmth-advocate { background: var(--w-advocate-s); color: var(--w-advocate-t); border-color: var(--w-advocate-l); }
+
+.prio { border: 0; }
+.prio.prio-0 { background: var(--w-advocate-s); color: var(--w-advocate-t); }
+.prio.prio-1 { background: var(--w-replied-s);  color: var(--w-replied-t); }
+.prio.prio-2, .prio.prio-3 { background: var(--band-cold-s); color: var(--band-cold-t); }
+
+/* ---- 9. Score bands + axis bars ------------------------------------------- */
+.band {
+  display: inline-flex; align-items: baseline; gap: var(--s2);
+  font-size: var(--fs-micro); font-weight: var(--w-bold);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 3px 9px; border-radius: var(--r-badge);
+  vertical-align: middle; margin-left: var(--s2);
+}
+.band .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 17px; }
+.band.band-hot  { background: var(--band-hot-s);  color: var(--band-hot-t); }
+.band.band-warm { background: var(--band-warm-s); color: var(--band-warm-t); }
+.band.band-cool { background: var(--band-cool-s); color: var(--band-cool-t); }
+.band.band-cold { background: var(--band-cold-s); color: var(--band-cold-t); }
+.reasoning { font-style: italic; color: var(--ink-2); margin: var(--s2) 0 0; font-size: var(--fs-s); }
+
+.axes { display: grid; grid-template-columns: 1fr; gap: var(--s2); margin-top: var(--s3); }
+.axis { display: grid; grid-template-columns: 110px 1fr auto; align-items: center;
+  gap: var(--s3); font-size: var(--fs-s); }
+.axis .name { color: var(--ink-2); }
+.axis .bar { height: 6px; border-radius: var(--r-badge); background: var(--band-cold-s);
+  overflow: hidden; border: 1px solid var(--line); }
+.axis .bar > i { display: block; height: 100%; background: var(--accent); }
+.axis .val { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: var(--w-med); }
+.axis .meta { grid-column: 2 / -1; color: var(--ink-3); font-size: var(--fs-xs); margin-top: -2px; }
+
+/* ---- 10. Warmth meter (animation contract: inline --from/--to) ------------ */
+.meter { margin: var(--s2) 0 var(--s1); }
+.meter-track {
+  position: relative; height: 10px; border-radius: var(--r-badge);
+  background: var(--band-cold-s); overflow: hidden; border: 1px solid var(--line);
+}
+.meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--w-cold-bar), var(--w-replied-bar) 45%,
+              var(--w-chatted-bar) 72%, var(--w-advocate-bar));
+  width: var(--to);
+  animation: warmthgrow 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes warmthgrow { from { width: var(--from); } to { width: var(--to); } }
+.meter-scale { display: flex; justify-content: space-between;
+  font-size: var(--fs-micro); color: var(--ink-3); margin-top: var(--s1);
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.meter-scale span.on { color: var(--ink); font-weight: var(--w-med); }
+
+.moved-flag {
+  margin: var(--s3) 0 0; padding: var(--s2) var(--s3); border-radius: var(--r-ctl);
+  background: var(--ok-soft); border: 1px solid var(--ok-line);
+  color: var(--ok); font-weight: var(--w-med); font-size: var(--fs-s);
+  animation: flash 1400ms ease-out both;
+}
+.moved-flag.nochange { background: var(--band-cold-s); border-color: var(--line); color: var(--ink-2); }
+.moved-flag.error { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+@keyframes flash {
+  0%   { transform: translateY(-4px); opacity: 0; }
+  18%  { transform: translateY(0); opacity: 1; box-shadow: 0 0 0 3px rgba(47, 106, 69, 0.18); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 106, 69, 0); opacity: 1; }
+}
+.arrow { color: var(--ok); font-weight: var(--w-bold); }
+
+/* ---- 11. Touch log / definition rows / data tables ------------------------ */
+.touches { list-style: none; margin: 0; padding: 0; }
+.touches li { display: flex; gap: var(--s3); padding: var(--s2) 0;
+  border-top: 1px solid var(--line); font-size: var(--fs-s); }
+.touches li:first-child { border-top: 0; }
+.touches .when { color: var(--ink-3); font-family: var(--font-mono);
+  font-size: var(--fs-xs); min-width: 96px; padding-top: 1px; }
+.touches .kind { font-weight: var(--w-med); }
+
+.deflist { margin: var(--s3) 0; }
+.deflist > div { display: flex; justify-content: space-between; gap: var(--s3);
+  padding: var(--s2) 0; border-top: 1px solid var(--line); font-size: var(--fs-s); }
+.deflist > div:first-child { border-top: 0; }
+.deflist .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+table.summary { border-collapse: collapse; width: 100%; margin: var(--s3) 0; font-size: var(--fs-s); }
+table.summary td { padding: var(--s2) var(--s2); border-bottom: 1px solid var(--line); }
+table.summary td:last-child { text-align: right; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; }
+
+/* ---- 12. Deadline + markers ----------------------------------------------- */
+.deadline { font-size: var(--fs-s); margin: 0 0 var(--s2); }
+.deadline .date { font-weight: var(--w-med); font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; font-size: var(--fs-s); }
+.deadline .count { color: var(--ink-2); }
+.deadline.past .count { color: var(--danger); }
+.deadline.none { color: var(--ink-3); font-style: italic; }
+.markers { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
+
+/* ---- 13. Onboarding steps -------------------------------------------------- */
+.steps { display: flex; gap: var(--s4); list-style: none; padding: 0;
+  margin: 0 0 var(--s5); font-size: var(--fs-xs); color: var(--ink-3);
+  flex-wrap: wrap; justify-content: center; }
+.steps li { display: flex; align-items: center; gap: var(--s2); }
+.steps li.done, .steps li.current { color: var(--ink); }
+.steps .dot {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-micro); font-family: var(--font-mono); flex: none;
+}
+.steps li.current .dot { border-color: var(--accent); color: var(--accent); font-weight: var(--w-bold); }
+.steps li.done .dot { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ---- 14. Legal prose ------------------------------------------------------- */
+.legal p, .legal li { max-width: 65ch; }
+.legal h2 { margin-top: var(--s6); }
+
+/* ---- 14b. Dashboard stat cards (Today + Opportunities) -------------------- */
+.dash-stats--three { grid-template-columns: repeat(3, 1fr) !important; }
+.dash-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s4);
+  margin-bottom: var(--s6); }
+.dash-card { background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-panel); padding: var(--s5); text-align: center;
+  display: flex; flex-direction: column; gap: var(--s1); align-items: center;
+  /* Center vertically too — the funnel card sets the row height, and the
+     simple number cards must sit on its midline, not hang from the top. */
+  justify-content: center;
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
+.dash-card:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2);
+  transform: translateY(-2px); }
+.dash-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 32px; font-weight: var(--w-med); line-height: 1.1; color: var(--accent-ink); }
+.dash-lbl { font-size: var(--fs-micro); color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: var(--w-med); }
+.dash-sub { font-size: var(--fs-s); color: var(--ink-2); }
+.dash-funnel .funnel-row { display: flex; gap: var(--s3); align-items: center;
+  justify-content: center; margin-top: var(--s2); }
+.funnel-step { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+.funnel-step .dash-num { font-size: 22px; }
+.funnel-sep { color: var(--ink-3); }
+
+
+/* ---- 15. htmx niceties ----------------------------------------------------- */
+#cov-results { transition: opacity var(--t-fast); }
+.filters.htmx-request ~ #cov-results { opacity: 0.55; }
+/* Fresh swap content settles in with a quiet rise — new nodes only, so it
+   fires exactly once per swap. */
+#cov-results > .cards {
+  animation: settle 220ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
+}
+@keyframes settle {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- 15b. Site-wide kinetic layer ----------------------------------------
+   One motion system across every page: content reveals on load, sections
+   stagger in, interactive things give tactile feedback. No layout changes —
+   only transform/opacity, so nothing reflows. All of it is switched off by
+   the reduced-motion block (§17). */
+
+/* Page-load reveal: the page head drops in, then each direct section of the
+   main content rises in a gentle downward stagger. `main > .page > *` covers
+   every page since they all wrap content in `.page`. */
+main > .page { animation: page-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.page-head { animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.page > .panel,
+.page > section,
+.home-grid > .panel,
+.dash-stats > .dash-card,
+.warmth-section,
+.net-actions, .net-coverage {
+  animation: rise-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Downward stagger for grid/stack children so they cascade, not pop. */
+.home-grid > .panel:nth-child(2) { animation-delay: 60ms; }
+.home-grid > .panel:nth-child(3) { animation-delay: 120ms; }
+.home-grid > .panel:nth-child(4) { animation-delay: 180ms; }
+.dash-stats > .dash-card:nth-child(2) { animation-delay: 55ms; }
+.dash-stats > .dash-card:nth-child(3) { animation-delay: 110ms; }
+.dash-stats > .dash-card:nth-child(4) { animation-delay: 165ms; }
+.net-coverage { animation-delay: 90ms; }
+@keyframes rise-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* Tactile press: everything clickable dips slightly when pressed, so the
+   whole UI feels responsive to touch, not just the hover-lift cards. */
+.btn:active, .pill:active, .site-nav a:active, .subnav a:active,
+.scope-tabs a:active, .open-chip:active, .net-mini:active,
+.dash-card:active, .cluster:active, .firm-card:active,
+.contact-card:active, .heat:active, .hbar:active, .scrub-step:active {
+  transform: scale(0.97);
+}
+.btn, .pill, .open-chip, .net-mini, .scrub-step {
+  transition: transform var(--t-med), background-color var(--t-fast),
+    border-color var(--t-fast), color var(--t-fast), box-shadow var(--t-med);
+}
+
+/* Links get a quick underline-grow instead of an instant underline. */
+a:not(.btn):not(.pill):not(.site-nav a):not(.subnav a) { transition: color var(--t-fast); }
+
+/* Filter selects/inputs lift focus with a soft ring rather than a hard jump. */
+select:focus-visible, input:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* Section headings glide their count chip in. */
+.strip-title .scrub-count, .scrub-count {
+  transition: color var(--t-fast); }
+
+/* ---- 15c. Signature kinetic components ------------------------------------
+   The look the Opportunities urgency feed established, promoted to shared
+   components so Today, Network, Email capture, Settings, and the landing page
+   speak one visual language: a navy gradient hero with a slow sheen sweep,
+   index-driven staggered reveals (style="--i:N"), and a live pulse dot.
+   transform/opacity/background-position only — §17 disables all of it under
+   reduced-motion. */
+
+/* Light marquee header. A near-white surface with a faint navy-tinted glow in
+   the corner and a whisper of a sheen sweep — airy, premium, and the display
+   type (not a heavy color block) does the work. Navy is reserved for accents. */
+.kin-hero {
+  position: relative; overflow: hidden; isolation: isolate;
+  background:
+    radial-gradient(120% 150% at 92% -30%, rgba(31, 78, 121, 0.10), transparent 55%),
+    linear-gradient(135deg, #ffffff 0%, #f1f4f8 100%);
+  color: var(--ink); border-radius: var(--r-panel);
+  border: 1px solid var(--line);
+  padding: var(--s6) var(--s6) var(--s5);
+  margin-bottom: var(--s6); box-shadow: var(--shadow-1);
+  animation: rise-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Slow diagonal sheen — a faint navy-tinted highlight that crosses and rests
+   off-screen. Kept subtle so it reads as sheen, not a smudge, on the light band. */
+.kin-hero::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(115deg, transparent 34%,
+    rgba(31, 78, 121, 0.05) 50%, transparent 66%);
+  background-size: 250% 100%; background-repeat: no-repeat;
+  animation: kin-sheen 7.5s ease-in-out infinite;
+}
+@keyframes kin-sheen {
+  0%, 14%  { background-position: 150% 0; }
+  62%, 100% { background-position: -50% 0; }
+}
+.kin-hero-eyebrow {
+  font-family: var(--font-mono); font-size: var(--fs-micro);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--accent); margin: 0 0 var(--s3);
+}
+.kin-hero h1, .kin-hero-title {
+  font: var(--w-black) clamp(30px, 4.4vw, 46px)/1.06 var(--font-display);
+  letter-spacing: -0.012em; margin: 0; color: var(--ink); max-width: 22ch;
+}
+.kin-hero-sub {
+  color: var(--ink-2); margin: var(--s3) 0 0;
+  max-width: 66ch; font-size: var(--fs-m);
+}
+/* A designed line-icon, unique per page — a soft accent in the hero's
+   top-right corner. Fixed 40px (also hard-set on the SVG so it can't grow if
+   this rule is stale-cached). */
+.kin-hero-icon {
+  position: absolute; top: var(--s5); right: var(--s5); z-index: 0;
+  width: 40px; height: 40px; color: rgba(31, 78, 121, 0.16);
+  pointer-events: none;
+}
+.kin-hero-icon svg { width: 40px; height: 40px; display: block; }
+@media (max-width: 640px) { .kin-hero-icon { display: none; } }
+.kin-hero-stats {
+  display: flex; gap: var(--s7); flex-wrap: wrap; margin-top: var(--s5);
+}
+.kin-hero-stat { display: flex; flex-direction: column; gap: 2px; }
+.kin-hero-stat .dash-num, .kin-hero-stat .num {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--ink); font-size: 30px; font-weight: var(--w-med); line-height: 1.1;
+}
+.kin-hero-stat .dash-lbl, .kin-hero-stat .lbl {
+  font-size: var(--fs-micro); color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: var(--w-med);
+}
+.kin-hero .actions { margin-top: var(--s5); }
+/* Buttons sit on the light band, so they use the site's default treatment:
+   one solid navy primary CTA, ghost/outline secondaries. */
+
+/* Index-driven staggered reveal: set style="--i:N" on each child to cascade. */
+.kin-reveal {
+  animation: rise-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+/* Live pulse dot — a "live now / fresh" marker with an expanding ring. */
+.live-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ok); position: relative; flex: none;
+}
+.live-dot::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  border: 1.5px solid var(--ok); animation: kin-pulse-ring 1800ms ease-out infinite;
+}
+@keyframes kin-pulse-ring {
+  0%   { transform: scale(0.55); opacity: 0.9; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+/* ---- 15d. Custom select — on-brand dropdown ------------------------------
+   A native <select>'s open option menu is OS-rendered and cannot be styled
+   with CSS. A small script (base.html) enhances every single-value <select>
+   into this listbox so the open menu matches the site. The real <select>
+   stays in the DOM, visually hidden, as the submittable source of truth —
+   with JS off it falls back to the styled native control. */
+.csel { position: relative; display: inline-flex; min-width: 0; }
+.csel-native { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); border: 0; opacity: 0; pointer-events: none; }
+.csel-btn { display: inline-flex; align-items: center; justify-content: space-between;
+  gap: var(--s2); width: 100%; min-width: 0;
+  font: var(--w-reg) var(--fs-m)/1.4 var(--font-ui); color: var(--ink);
+  text-transform: none; letter-spacing: normal;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl); padding: 9px 14px; cursor: pointer; text-align: left;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.csel-btn:hover { border-color: var(--ink-3); box-shadow: var(--shadow-1); }
+.csel-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.csel-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csel-caret { flex: none; width: 14px; height: 14px; color: var(--ink-3);
+  transition: transform var(--t-med); }
+.csel[data-open="true"] .csel-caret { transform: rotate(180deg); }
+/* On the filter bar, the button takes the pill shape the old selects had. */
+.filters .csel { display: flex; }
+.filters .csel-btn { border-radius: 999px; border-color: var(--line);
+  box-shadow: var(--shadow-1); padding: 10px 18px; font-size: var(--fs-s); min-width: 10rem; }
+.filters .csel-btn:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
+
+.csel-menu { position: absolute; top: calc(100% + 6px); left: 0; min-width: 100%;
+  max-height: 320px; overflow-y: auto; z-index: 60; margin: 0; list-style: none;
+  text-transform: none; letter-spacing: normal;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-panel); box-shadow: var(--shadow-2); padding: var(--s1);
+  transform-origin: top; animation: csel-open 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.csel-menu::-webkit-scrollbar { width: 8px; }
+.csel-menu::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+.csel-menu[hidden] { display: none; }
+@keyframes csel-open { from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; } }
+.csel-opt { display: flex; align-items: center; gap: var(--s2);
+  padding: 8px 12px; border-radius: var(--r-ctl); cursor: pointer;
+  font-size: var(--fs-s); color: var(--ink); white-space: nowrap;
+  transition: background-color var(--t-fast), color var(--t-fast); }
+.csel-opt::before { content: ""; width: 13px; flex: none; font-weight: var(--w-bold);
+  color: var(--accent); text-align: center; }
+.csel-opt[aria-selected="true"]::before { content: "\2713"; }
+.csel-opt[aria-selected="true"] { font-weight: var(--w-med); }
+.csel-opt:hover, .csel-opt.is-active { background: var(--accent-soft); color: var(--accent-ink); }
+@media (prefers-reduced-motion: reduce) {
+  .csel-menu { animation: none; }
+  .csel-caret { transition: none; }
+}
+
+/* Multi-select checkbox dropdown (Opportunities "Companies" filter). Shares
+   the custom-select look; a real <input type=checkbox name=firm> per row, so
+   it submits multiple firm values and needs no JS to filter — the script only
+   toggles the panel and updates the button label. */
+.cmulti { position: relative; display: flex; min-width: 0; }
+.cmulti-btn { display: inline-flex; align-items: center; justify-content: space-between;
+  gap: var(--s2); width: 100%; min-width: 11rem; text-transform: none; letter-spacing: normal;
+  font: var(--w-reg) var(--fs-s)/1.4 var(--font-ui); color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  box-shadow: var(--shadow-1); padding: 10px 18px; cursor: pointer; text-align: left;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.cmulti-btn:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
+.cmulti-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.cmulti[data-open="true"] .csel-caret { transform: rotate(180deg); }
+.cmulti-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Wide, multi-column panel: auto-fits 2–3 columns so many firms are visible
+   at once without a long single-column scroll. */
+.cmulti-menu { position: absolute; top: calc(100% + 6px); left: 0;
+  width: 520px; max-width: 92vw; max-height: 360px; overflow-y: auto;
+  z-index: 60; margin: 0; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel);
+  box-shadow: var(--shadow-2); padding: var(--s2);
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 2px; align-content: start;
+  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+  animation: csel-open 140ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cmulti-menu::-webkit-scrollbar { width: 8px; }
+.cmulti-menu::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+.cmulti-menu[hidden] { display: none; }
+/* Scoped under .cmulti-menu to beat `.filters label` (which sets
+   flex-direction:column + uppercase and would otherwise stack the checkbox
+   above the name and shout it). */
+.cmulti-menu .cmulti-opt { display: flex; flex-direction: row; align-items: center;
+  gap: var(--s2); margin: 0; padding: 7px 10px; border-radius: var(--r-ctl);
+  cursor: pointer; font-size: var(--fs-s); color: var(--ink);
+  font-weight: var(--w-reg); text-transform: none; letter-spacing: normal;
+  min-width: 0; }
+.cmulti-menu .cmulti-opt:hover { background: var(--accent-soft); color: var(--accent-ink); }
+.cmulti-menu .cmulti-opt input { width: auto; margin: 0; flex: none; accent-color: var(--accent); }
+.cmulti-menu .cmulti-opt span { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+
+/* ---- 16. Responsive -------------------------------------------------------- */
+@media (max-width: 640px) {
+  .kin-hero { padding: var(--s5) var(--s4) var(--s4); }
+  .kin-hero-stats { gap: var(--s5); }
+  .page { padding: var(--s4) var(--s3) var(--s6); }
+  .site-header-inner { gap: var(--s3); padding: var(--s2) var(--s3); }
+  .site-user { display: none; }
+  .axis { grid-template-columns: 88px 1fr auto; gap: var(--s2); }
+  .touches .when { min-width: 78px; }
+  h1 { font-size: var(--fs-xl); }
+}
+
+/* ---- 17. Reduced motion ---------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .meter-fill { animation: none; width: var(--to); }
+  .moved-flag { animation: none; }
+  *, *::before, *::after { animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
+  *:active { transform: none !important; }
+}

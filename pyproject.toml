@@ -1,0 +1,45 @@
+[project]
+# NOT "coverage": that name is shadowed by the `coverage` PyPI package
+# (coverage.py) which pytest-cov depends on — uv's workspace resolution
+# treats a workspace member's name as authoritative over PyPI, so naming this
+# project "coverage" makes pytest-cov's dependency on the real `coverage`
+# package unsatisfiable. Verified directly: `uv sync` fails with "the name is
+# shadowed by one of your workspace members" until this project is renamed.
+name = "coverage-monorepo"
+version = "0.1.0"
+description = "Coverage — a shared, centrally-scraped deadline calendar wrapped around a private per-student relationship CRM. Workspace root only; see coverage_web/, coverage_domain/, coverage_connectors/ for the actual packages."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "playwright>=1.61.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+    "pytest-cov>=6.0",
+]
+
+# This root project is a virtual workspace anchor, not an installable package.
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+# "coverage_domain" is owned by a parallel workstream and does not exist yet in
+# this checkout. Listing it by name here is deliberate and safe: uv workspace
+# members that don't exist on disk are simply skipped rather than erroring
+# (verified against uv 0.11.26), so `uv sync` succeeds today and will pick up
+# coverage_domain automatically the moment its pyproject.toml lands — no
+# further edits to this file required.
+members = [
+    "coverage_web",
+    "coverage_connectors",
+    "coverage_domain",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "coverage_web.settings.local"
+python_files = ["test_*.py", "*_test.py", "tests.py"]
+testpaths = ["coverage_web"]
+pythonpath = ["coverage_web"]
+addopts = "-ra"

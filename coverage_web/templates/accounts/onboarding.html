@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome to Coverage{% endblock %}
+{% block head %}{% include "accounts/_welcome_head.html" %}{% endblock %}
+
+{% block content %}
+<div class="page page--narrow">
+  <ol class="steps">
+    {% for s in steps %}
+      <li class="{% if forloop.counter == step_number %}current{% elif forloop.counter < step_number %}done{% endif %}">
+        <span class="dot">{% if forloop.counter < step_number %}✓{% else %}{{ forloop.counter }}{% endif %}</span>
+        <span>{{ s|capfirst }}</span>
+      </li>
+    {% endfor %}
+  </ol>
+
+  {% if step == "profile" %}
+    <h1>Tell Us About Your Search</h1>
+    <p class="lede">This tailors your firm directory and the weekly list. You can change all of it later in Settings.</p>
+    <form method="post" action="{% url 'accounts:onboarding' %}?step=profile">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="profile">
+      {% include "accounts/_profile_form.html" %}
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Continue</button>
+      </div>
+    </form>
+
+  {% elif step == "firms" %}
+    <h1>Pick Your Target Firms</h1>
+    <p class="lede">Choose the firms you're recruiting for. These become your directory overlay and drive your firm-fit view. Add or remove any time.</p>
+    <form method="post" action="{% url 'accounts:onboarding' %}?step=firms">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="firms">
+      <label for="firm-filter">Search firms</label>
+      <input type="text" id="firm-filter" placeholder="Type to filter…" autocomplete="off"
+             oninput="(function(q){document.querySelectorAll('#firm-list label').forEach(function(l){l.style.display=l.textContent.toLowerCase().indexOf(q)>-1?'':'none';});})(this.value.toLowerCase())">
+      {% include "accounts/_firm_list.html" %}
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Continue</button>
+        <a class="muted" href="{% url 'accounts:onboarding' %}?step=import">Skip for now</a>
+      </div>
+    </form>
+
+  {% elif step == "survey" %}
+    <h1>Set Up Your Preferences</h1>
+    <p class="lede">Rank your firms and choose how Coverage should work for you. Everything here can change later in Settings.</p>
+    <form method="post" action="{% url 'accounts:onboarding' %}?step=survey">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="survey">
+
+      <div class="panel">
+        <h2 style="margin-top:0">Rank Your Firms</h2>
+        <p class="muted small">Tier 1 firms get the most attention in your action queue. Drag them between tiers any time on the Network page.</p>
+        {% if ranked_firms %}
+          {% for uf in ranked_firms %}
+            <div class="row survey-row">
+              <span>{{ uf.firm.name }}</span>
+              <select name="tier-{{ uf.firm_id }}" style="width:auto">
+                <option value="1"{% if uf.tier == 1 %} selected{% endif %}>Tier 1</option>
+                <option value="2"{% if uf.tier == 2 or uf.tier is None %} selected{% endif %}>Tier 2</option>
+                <option value="3"{% if uf.tier == 3 %} selected{% endif %}>Tier 3</option>
+              </select>
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="muted small">No firms picked yet. Go back a step to choose some.</p>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-top:0">Notifications</h2>
+        <label class="survey-check"><input type="checkbox" name="pref_digest" checked> Send me a weekly Monday digest of my priorities.</label>
+        <label class="survey-check"><input type="checkbox" name="pref_reminders" checked> Remind me before application deadlines at my firms.</label>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-top:0">Connections</h2>
+        <p class="muted small">These make capture automatic. Coverage never reads anything you don't explicitly share.</p>
+        <div class="actions">
+          <a class="btn" aria-disabled="true">Connect Gmail · Coming Soon</a>
+          <a class="btn" aria-disabled="true">Connect Google Calendar · Coming Soon</a>
+          <a class="btn" aria-disabled="true">Connect LinkedIn · Coming Soon</a>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Continue</button>
+      </div>
+    </form>
+
+  {% elif step == "import" %}
+    <h1>Bring Your Contacts In</h1>
+    <p class="lede">If you've been tracking outreach in a spreadsheet, import it now so your CRM starts full, not empty. You can also do this later.</p>
+    <div class="panel">
+      <p>Upload a CSV of your contacts: names, emails, firms, roles, notes. We'll match firms to the directory where we can and skip anything you already have.</p>
+      <div class="actions">
+        <a class="btn" href="{% url 'accounts:import' %}?from=welcome">Import Contacts</a>
+        <a class="btn" href="{% url 'accounts:import_template' %}">Download Template</a>
+      </div>
+    </div>
+    <form method="post" action="{% url 'accounts:onboarding' %}?step=import">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="import">
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Continue</button>
+      </div>
+    </form>
+
+  {% elif step == "capture" %}
+    <h1>Your Capture Address</h1>
+    <p class="lede"></p>
+    <div class="panel">
+      <p class="capture-addr">{{ capture_address }}</p>
+      <p><strong>BCC this address on your outreach.</strong> Every email you send with it in the BCC line is logged against the right contact automatically. Forward replies to it too, and your warmth updates on their own.</p>
+      <p class="muted">Only mail you BCC or forward is ever seen.</p>
+    </div>
+    <form method="post" action="{% url 'accounts:onboarding' %}?step=capture">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="capture">
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Finish Setup</button>
+      </div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

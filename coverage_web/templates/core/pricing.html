@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}Pricing · Coverage{% endblock %}
+
+{% block head %}
+<style>
+  /* ---- Pricing-page-only styles ------------------------------------------- */
+
+  /* Audience switcher: CSS-only segmented control (hidden radios + labels).
+     The checked radio shows its panel via sibling selectors; no JS, and with
+     CSS off both panels simply render stacked. */
+  .aud { max-width: 980px; margin: 0 auto; }
+  .aud > input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg { display: flex; justify-content: center; align-items: center; gap: 4px;
+    width: max-content; margin: 0 auto var(--s6); padding: 4px;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--surface); box-shadow: var(--shadow-1); }
+  /* Beat the global form-label rule (display:block + top margin), which
+     otherwise inflates the capsule. */
+  .seg label { display: inline-flex; align-items: center; margin: 0;
+    border-radius: 999px; padding: 8px 22px; line-height: 1.2; cursor: pointer;
+    font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink-2);
+    transition: background var(--t-fast), color var(--t-fast); }
+  .seg label:hover { color: var(--ink); background: var(--accent-soft); }
+  #aud-ind:checked ~ .seg label[for="aud-ind"],
+  #aud-team:checked ~ .seg label[for="aud-team"] {
+    background: var(--accent); color: #fff; }
+  .aud-panel { display: none; }
+  #aud-ind:checked ~ .panel-ind { display: block; }
+  #aud-team:checked ~ .panel-team { display: block; }
+
+  .price-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5);
+    max-width: 860px; margin: 0 auto; align-items: stretch; }
+  .price-card { border: 1px solid var(--line); border-radius: var(--r-panel);
+    background: var(--surface); box-shadow: var(--shadow-1);
+    padding: var(--s6) var(--s5); display: flex; flex-direction: column;
+    position: relative; overflow: hidden; }
+  .price-card.featured { border-color: var(--accent-line);
+    box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-2); }
+  .price-card.featured::before { content: ""; position: absolute; inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 130% at 100% 0%, rgba(31, 78, 121, 0.06), transparent 60%); }
+  .plan-badge { position: absolute; top: var(--s4); right: var(--s4);
+    font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    border-radius: 999px; padding: 3px 12px;
+    background: var(--accent-soft); color: var(--accent-ink); }
+  .plan-badge.soon { background: var(--stale-s); color: var(--stale-t); }
+  .plan-name { font: var(--w-black) 22px/1.2 var(--font-display);
+    letter-spacing: -0.01em; margin: 0 0 var(--s1); }
+  .plan-tagline { color: var(--ink-2); font-size: var(--fs-s); margin: 0 0 var(--s4); }
+  .plan-price { display: flex; align-items: baseline; gap: var(--s2);
+    margin-bottom: var(--s4); }
+  .plan-price .amount { font-family: var(--font-mono); font-weight: var(--w-bold);
+    font-size: 42px; line-height: 1; color: var(--ink);
+    font-variant-numeric: tabular-nums; }
+  .plan-price .per { color: var(--ink-3); font-size: var(--fs-s); }
+  .plan-includes { font-size: var(--fs-xs); font-weight: var(--w-med);
+    color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 0 0 var(--s2); }
+  .plan-features { list-style: none; margin: 0 0 var(--s5); padding: 0;
+    display: flex; flex-direction: column; gap: var(--s2); flex: 1; }
+  .plan-features li { display: flex; gap: var(--s2); align-items: baseline;
+    font-size: var(--fs-s); color: var(--ink-2); }
+  .plan-features li::before { content: ""; flex: none; width: 14px; height: 14px;
+    border-radius: 50%; transform: translateY(2px);
+    background:
+      no-repeat center / 8px url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M1.5 5.5l2.2 2.2L8.5 2.5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'),
+      var(--accent); }
+  .price-card.preview .plan-features li::before { background:
+      no-repeat center / 8px url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M2 5h6" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>'),
+      var(--ink-3); }
+  .plan-cta { margin-top: auto; }
+  .plan-cta .btn { width: 100%; justify-content: center; display: inline-flex; }
+  .plan-note { font-size: var(--fs-xs); color: var(--ink-3);
+    margin: var(--s2) 0 0; text-align: center; }
+
+  .price-honesty { max-width: 640px; margin: var(--s7) auto 0; text-align: center;
+    color: var(--ink-2); font-size: var(--fs-s); }
+  .price-honesty h2 { font: var(--w-black) 22px/1.2 var(--font-display);
+    letter-spacing: -0.01em; margin: 0 0 var(--s2); color: var(--ink); }
+
+  .price-faq { max-width: 640px; margin: var(--s6) auto 0; }
+  .price-faq details { border: 1px solid var(--line); border-radius: 12px;
+    background: var(--surface); padding: var(--s3) var(--s4);
+    margin-bottom: var(--s2); }
+  .price-faq summary { cursor: pointer; font-weight: var(--w-med);
+    font-size: var(--fs-s); color: var(--ink); }
+  .price-faq p { color: var(--ink-2); font-size: var(--fs-s);
+    margin: var(--s2) 0 0; }
+
+  @media (max-width: 720px) { .price-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="home" %}</span>
+    <p class="kin-hero-eyebrow">Pricing</p>
+    <h1 class="kin-hero-title">Free while we earn the right to charge.</h1>
+    <p class="kin-hero-sub">Everything Coverage does today is included.</p>
+  </header>
+
+  <div class="aud">
+    <input type="radio" name="aud" id="aud-ind" checked>
+    <input type="radio" name="aud" id="aud-team">
+    <div class="seg" role="tablist" aria-label="Plan audience">
+      <label for="aud-ind">Individual</label>
+      <label for="aud-team">Team &amp; Enterprise</label>
+    </div>
+
+    <div class="aud-panel panel-ind">
+      <div class="price-grid">
+        <article class="price-card featured kin-reveal" style="--i:0">
+          <span class="plan-badge">Available now</span>
+          <h2 class="plan-name">Free</h2>
+          <p class="plan-tagline">The full product. No card, no trial clock.</p>
+          <p class="plan-price"><span class="amount">$0</span><span class="per">forever, for what's listed here</span></p>
+          <ul class="plan-features">
+            <li>{{ open_count }} live campus roles across {{ firm_count }} firms</li>
+            <li>Deadline fuses, rolling markers, confidence labels</li>
+            <li>Filters across four markets and six verticals</li>
+            <li>The Today queue with one-click logging</li>
+            <li>The Network board: warmth lanes and firm tiers</li>
+            <li>Email capture by BCC</li>
+            <li>CSV import, export, and instant deletion</li>
+          </ul>
+          <div class="plan-cta">
+            {% if user.is_authenticated %}
+              <a class="btn btn-primary" href="/app/">Open Today</a>
+            {% else %}
+              <a class="btn btn-primary" href="/accounts/signup/">Create Account</a>
+            {% endif %}
+              </div>
+        </article>
+
+        <article class="price-card preview kin-reveal" style="--i:1">
+          <span class="plan-badge soon">In the works</span>
+          <h2 class="plan-name">Pro</h2>
+          <p class="plan-tagline">For the heaviest recruiting seasons.</p>
+          <p class="plan-price"><span class="amount">TBD</span><span class="per">priced when it ships</span></p>
+          <p class="plan-includes">Everything in Free, plus</p>
+          <ul class="plan-features">
+            <li>Optional Gmail and Calendar sync, only if you connect it</li>
+            <li>LinkedIn contact import</li>
+            <li>Faster refresh on your Tier 1 firms</li>
+            <li>Multi-cycle archive of past seasons</li>
+          </ul>
+          <div class="plan-cta">
+            <a class="btn" aria-disabled="true">Coming Soon</a>
+            <p class="plan-note">Announced in the app first.</p>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <div class="aud-panel panel-team">
+      <div class="price-grid">
+        <article class="price-card kin-reveal" style="--i:0">
+          <span class="plan-badge soon">In the works</span>
+          <h2 class="plan-name">Team</h2>
+          <p class="plan-tagline">For finance societies and student clubs running recruiting together.</p>
+          <p class="plan-price"><span class="amount">TBD</span><span class="per">per seat, priced when it ships</span></p>
+          <p class="plan-includes">Everything in Pro, plus</p>
+          <ul class="plan-features">
+            <li>Shared firm tiers and a club-wide coverage board</li>
+            <li>See which firms your members already reach</li>
+            <li>Member seats managed by club officers</li>
+            <li>A shared calendar of every tracked deadline</li>
+          </ul>
+          <div class="plan-cta">
+            <a class="btn" aria-disabled="true">Coming Soon</a>
+          </div>
+        </article>
+
+        <article class="price-card kin-reveal" style="--i:1">
+          <span class="plan-badge soon">In the works</span>
+          <h2 class="plan-name">Enterprise</h2>
+          <p class="plan-tagline">For career centers and business schools supporting whole cohorts.</p>
+          <p class="plan-price"><span class="amount">Custom</span><span class="per">scoped to your campus</span></p>
+          <p class="plan-includes">Everything in Team, plus</p>
+          <ul class="plan-features">
+            <li>Campus-wide feed with your own tracked firms</li>
+            <li>Cohort analytics: coverage, pace, outcomes</li>
+            <li>SSO and roster provisioning</li>
+            <li>A named contact, not a ticket queue</li>
+          </ul>
+          <div class="plan-cta">
+            <a class="btn" aria-disabled="true">Contact Us · Coming Soon</a>
+            <p class="plan-note">Career center? We'll build the pilot with you.</p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </div>
+
+  <section class="price-honesty">
+    <h2>The deal, plainly.</h2>
+    <p>Everything in Free stays free. Paid tiers will exist because syncing inboxes and serving campuses costs real money to run. Export or delete everything, on any plan, at any time.</p>
+  </section>
+
+  <section class="price-faq">
+    <details>
+      <summary>Do I need an account to see opportunities?</summary>
+      <p>No. The feed is public. An account adds the CRM: the Today queue, the Network board, and email capture.</p>
+    </details>
+    <details>
+      <summary>Will the free plan shrink when paid tiers launch?</summary>
+      <p>No. Everything listed in Free today stays in Free. Paid tiers are new capabilities, not repackaged ones.</p>
+    </details>
+    <details>
+      <summary>What would a Team plan look like for my club?</summary>
+      <p>Shared tiers, shared coverage, and per-seat billing managed by officers. If you run a finance society, we want your input before it ships.</p>
+    </details>
+    <details>
+      <summary>What happens to my data if I stop using Coverage?</summary>
+      <p>Export it as CSV whenever you like, or delete your account yourself and everything goes with it, immediately.</p>
+    </details>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Opportunities · Coverage{% endblock %}
+
+{% block head %}{% include "directory/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page page--full">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="opportunities" %}</span>
+    <p class="kin-hero-eyebrow">Insight · internships · entry-level</p>
+    <h1 class="kin-hero-title">Opportunities</h1>
+    <p class="kin-hero-sub">Open roles ranked by deadline, sorted to your firms.</p>
+  </header>
+
+  <form class="filters"
+        hx-get="{% url 'opportunities' %}"
+        hx-target="#cov-results"
+        hx-swap="innerHTML"
+        hx-push-url="true"
+        hx-trigger="change, keyup changed delay:350ms, submit"
+        method="get"
+        action="{% url 'opportunities' %}">
+    <label>Role Type
+      <select name="role">
+        {% for r in role_facet %}
+          <option value="{{ r.value }}"{% if r.value == selected.role %} selected{% endif %}>{{ r.label }} ({{ r.count }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Region
+      <select name="region">
+        <option value="">Any Region</option>
+        {% for r in facets.regions %}
+          <option value="{{ r.value }}"{% if r.value == selected.region %} selected{% endif %}>{{ r.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Track
+      <select name="track">
+        <option value="">Any Track</option>
+        {% for t in facets.tracks %}
+          <option value="{{ t.value }}"{% if t.value == selected.track %} selected{% endif %}>{{ t.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Companies
+      <div class="cmulti" data-cmulti>
+        <button type="button" class="cmulti-btn" aria-haspopup="true" aria-expanded="false">
+          <span class="cmulti-label">All Companies</span>
+          <svg class="csel-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="cmulti-menu" hidden>
+          {% for f in all_firms %}
+            <label class="cmulti-opt"><input type="checkbox" name="firm" value="{{ f.slug }}"{% if f.slug in selected.firm %} checked{% endif %}><span>{{ f.name|smart_title }}</span></label>
+          {% endfor %}
+        </div>
+      </div>
+    </label>
+    <label>Search
+      <input type="search" name="q" value="{{ selected.q }}" placeholder="Firm, role, city" autocomplete="off">
+    </label>
+    <noscript><button type="submit">Apply</button></noscript>
+    {% if has_filters %}<a class="filters-clear" href="{% url 'opportunities' %}">Clear</a>{% endif %}
+  </form>
+
+  <div id="cov-results">
+    {% include "directory/_results.html" %}
+  </div>
+</div>
+
+<script>
+  // "Companies" multi-select: toggle the checkbox panel and keep the button
+  // label in sync. The checkboxes are real form inputs (name="firm"), so the
+  // filter itself is pure htmx — this only manages the panel's open/close.
+  (function () {
+    document.querySelectorAll("[data-cmulti]").forEach(function (wrap) {
+      var btn = wrap.querySelector(".cmulti-btn");
+      var menu = wrap.querySelector(".cmulti-menu");
+      var label = wrap.querySelector(".cmulti-label");
+      function sync() {
+        var n = wrap.querySelectorAll("input:checked").length;
+        label.textContent = n === 0 ? "All Companies" : n + " selected";
+      }
+      function onDoc(e) { if (!wrap.contains(e.target)) close(); }
+      function open() {
+        menu.hidden = false; wrap.dataset.open = "true";
+        btn.setAttribute("aria-expanded", "true");
+        document.addEventListener("click", onDoc, true);
+      }
+      function close() {
+        menu.hidden = true; wrap.dataset.open = "false";
+        btn.setAttribute("aria-expanded", "false");
+        document.removeEventListener("click", onDoc, true);
+      }
+      btn.addEventListener("click", function () { menu.hidden ? open() : close(); });
+      menu.addEventListener("change", sync);
+      sync();
+    });
+  })();
+</script>
+{% endblock %}

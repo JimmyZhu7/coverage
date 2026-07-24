@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Sign Out · Coverage{% endblock %}
+{% block content %}
+<div class="page page--narrow">
+  <header class="page-head"><h1>Sign Out</h1></header>
+  <div class="panel">
+    <p>Sign out of Coverage on this browser?</p>
+    <form method="post" action="{% url 'account_logout' %}">
+      {% csrf_token %}
+      {% if redirect_field_value %}
+        <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
+      {% endif %}
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Sign out</button>
+        <a class="btn" href="/">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

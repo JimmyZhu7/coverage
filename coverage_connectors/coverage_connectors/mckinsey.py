@@ -1,0 +1,128 @@
+"""McKinsey connector — the careers gateway's public JSON search.
+
+Discovered live (2026-07-23) by watching mckinsey.com/careers/search-jobs's
+own network traffic: the page calls
+`gateway.mckinsey.com/apigw-x0cceuow60/v1/api/jobs/search` — plain GET,
+no auth, no cookies (re-verified from a clean urllib client). Same public
+trust tier as the other providers' boards APIs; the `q=` keyword parameter
+matches the search box's behavior (verified: q=intern narrows 595 -> 44).
+
+Notes on fidelity:
+
+- `friendlyURL` is the candidate-facing posting URL; rows without one are
+  skipped (no stable identity).
+- Cities can list dozens of offices per role; location is reported as the
+  first city plus an honest "+N more", never a fabricated single office.
+- The API exposes no deadline anywhere (checked every field) — deadline is
+  always None, per the never-invent rule.
+"""
+
+from __future__ import annotations
+
+import re
+import urllib.parse
+
+from .http import fetch_json
+from .models import FetchResult, McKinseyBoard, Opportunity, VerificationResult
+
+name = "mckinsey"
+
+_SEARCH_URL = (
+    "https://gateway.mckinsey.com/apigw-x0cceuow60/v1/api/jobs/search"
+    "?pageSize={size}&start={start}&lang=en"
+)
+_PAGE_SIZE = 50
+_MAX_JOBS = 300  # bound a saturated query, same posture as workday's cap
+
+_URL_RE = re.compile(r"mckinsey\.com/careers/search-jobs/jobs/([^/?#]+)", re.IGNORECASE)
+
+
+def _page(keyword: str, start: int) -> dict:
+    url = _SEARCH_URL.format(size=_PAGE_SIZE, start=start)
+    if keyword:
+        url += "&q=" + urllib.parse.quote(keyword)
+    return fetch_json(url)
+
+
+def _location(doc: dict) -> str:
+    cities = doc.get("cities") or []
+    if not cities:
+        return ""
+    if len(cities) == 1:
+        return cities[0]
+    return f"{cities[0]} +{len(cities) - 1} more"
+
+
+def _job_url(doc: dict) -> str:
+    friendly = (doc.get("friendlyURL") or "").strip()
+    if not friendly:
+        return ""
+    if friendly.startswith("http"):
+        return friendly
+    return f"https://www.mckinsey.com/careers/search-jobs/jobs/{friendly.lstrip('/')}"
+
+
+def _normalize(doc: dict, board: McKinseyBoard) -> Opportunity:
+    return Opportunity(
+        firm=board.firm,
+        title=doc.get("title", ""),
+        location=_location(doc),
+        url=_job_url(doc),
+        source="mckinsey",
+        raw=doc,
+    )
+
+
+def fetch(board: McKinseyBoard) -> FetchResult:
+    """One search per configured keyword, deduped by jobID, paginated up to
+    the cap. A failed keyword fails the board (partial coverage would let
+    closed-detection close live rows)."""
+    seen: set[str] = set()
+    docs: list[dict] = []
+    for kw in board.keywords or ("",):
+        start = 1
+        while True:
+            try:
+                data = _page(kw, start)
+            except Exception as e:  # noqa: BLE001
+                return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
+            batch = data.get("docs", [])
+            for doc in batch:
+                jid = str(doc.get("jobID") or "")
+                if not jid or jid in seen:
+                    continue
+                seen.add(jid)
+                docs.append(doc)
+            total = int(data.get("numFound") or 0)
+            start += _PAGE_SIZE
+            if not batch or start > min(total, _MAX_JOBS):
+                break
+    opportunities = [o for o in (_normalize(d, board) for d in docs) if o.url]
+    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(docs))
+
+
+def classify_url(url: str) -> dict | None:
+    m = _URL_RE.search(url or "")
+    return {"slug": m.group(1)} if m else None
+
+
+def verify(url: str) -> VerificationResult:
+    """Search the API for the URL's slug tokens and require the friendlyURL
+    to round-trip. Found -> verified-open; a clean search with no match ->
+    closed; network trouble -> unreachable."""
+    info = classify_url(url)
+    if not info:
+        return VerificationResult("mckinsey", url, "needs-verification",
+                                   "URL is not a recognized McKinsey careers job URL", [])
+    slug = info["slug"]
+    keyword = slug.split("-", 1)[-1].replace("-", " ")[:80]
+    try:
+        data = _page(keyword, 1)
+    except Exception as e:  # noqa: BLE001
+        return VerificationResult("mckinsey", url, "unreachable", str(e)[:200], [])
+    for doc in data.get("docs", []):
+        if slug.lower() in (doc.get("friendlyURL") or "").lower():
+            return VerificationResult("mckinsey", url, "verified-open",
+                                       f'title="{doc.get("title", "")}" matched by friendlyURL', [])
+    return VerificationResult("mckinsey", url, "closed",
+                               f'slug {slug!r} not found via title search — likely closed', [])

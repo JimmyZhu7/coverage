@@ -1,0 +1,380 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Coverage{% endblock %}
+
+{% block head %}
+<style>
+  /* ---- Landing-page-only styles. Everything shared lives in coverage.css. -- */
+
+  /* Section scaffolding: generous vertical rhythm, one centered eyebrow per
+     section, display-family section titles. */
+  .land-section { margin: var(--s8) 0 0; }
+  .land-eyebrow { font-family: var(--font-mono); font-size: var(--fs-micro);
+    color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em;
+    margin: 0 0 var(--s2); text-align: center; }
+  .land-title { font: var(--w-black) clamp(24px, 3vw, 32px)/1.15 var(--font-display);
+    letter-spacing: -0.01em; text-align: center; margin: 0 auto var(--s2);
+    max-width: 28ch; }
+  .land-lede { color: var(--ink-2); text-align: center; margin: 0 auto;
+    max-width: 58ch; font-size: var(--fs-m); }
+
+  /* Firm marquee: tracked firms as tinted chips flowing across the band.
+     Two identical groups; the track slides one group-width and loops, so the
+     motion is seamless. Pauses on hover; falls back to a static wrapped row
+     under reduced-motion. */
+  .marquee { overflow: hidden; margin-top: var(--s5);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); }
+  .marquee-track { display: flex; width: max-content;
+    animation: marquee 36s linear infinite; }
+  .marquee:hover .marquee-track { animation-play-state: paused; }
+  .marquee-group { display: flex; gap: var(--s3); padding-right: var(--s3); }
+  @keyframes marquee { to { transform: translateX(-50%); } }
+  .strip-chip { display: inline-flex; align-items: center; gap: var(--s2);
+    border: 1px solid var(--line); border-radius: 999px; flex: none;
+    background: var(--surface); padding: 6px 14px 6px 6px;
+    font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink-2);
+    white-space: nowrap; }
+  .strip-chip .mono { width: 26px; height: 26px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: var(--w-bold);
+    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 31%); }
+  @media (prefers-reduced-motion: reduce) {
+    .marquee { -webkit-mask-image: none; mask-image: none; }
+    .marquee-track { animation: none; width: auto; }
+    .marquee-group { flex-wrap: wrap; justify-content: center; padding-right: 0; }
+    .marquee-group[aria-hidden] { display: none; }
+  }
+
+  /* Feature rows: copy on one side, a pure-CSS product vignette on the other,
+     alternating. */
+  .feature-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s7);
+    align-items: center; margin-top: var(--s7); }
+  .feature-row.flip .feature-copy { order: 2; }
+  .feature-kicker { font-family: var(--font-mono); font-size: var(--fs-micro);
+    color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em;
+    margin: 0 0 var(--s2); }
+  .feature-copy h3 { font: var(--w-black) 24px/1.2 var(--font-display);
+    letter-spacing: -0.01em; margin: 0 0 var(--s3); }
+  .feature-copy p { color: var(--ink-2); margin: 0 0 var(--s3); max-width: 44ch; }
+  .feature-points { list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: var(--s2); }
+  .feature-points li { display: flex; gap: var(--s2); align-items: baseline;
+    font-size: var(--fs-s); color: var(--ink-2); }
+  .feature-points li::before { content: ""; flex: none; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--accent); transform: translateY(-2px); }
+
+  /* Vignette shell: a framed mini-screen the CSS mockups sit inside. */
+  .vig { border: 1px solid var(--line); border-radius: var(--r-panel);
+    background: var(--surface); box-shadow: var(--shadow-2);
+    padding: var(--s5); overflow: hidden; position: relative; }
+  .vig::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 130% at 100% 0%, rgba(31, 78, 121, 0.05), transparent 60%); }
+  .vig-label { font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3);
+    margin: 0 0 var(--s3); }
+
+  /* Vignette 1: a role card with a live fuse countdown. */
+  .v-role { border: 1px solid var(--line); border-left: 3px solid var(--danger);
+    border-radius: 12px; background: var(--paper); padding: var(--s3) var(--s4);
+    margin-bottom: var(--s3); }
+  .v-role.rolling { border-left-color: var(--ok-line); }
+  .v-role-tag { display: inline-block; font-size: 11px; font-weight: var(--w-med);
+    border-radius: 999px; padding: 2px 10px; background: var(--accent-soft);
+    color: var(--accent-ink); margin-bottom: 6px; }
+  .v-role-title { font-weight: var(--w-bold); font-size: var(--fs-s); margin: 0 0 8px; }
+  .v-fuse { display: flex; align-items: center; gap: var(--s3); }
+  .v-fuse-track { flex: 1; height: 5px; border-radius: 999px; background: var(--line);
+    overflow: hidden; }
+  .v-fuse-fill { display: block; height: 100%; border-radius: 999px;
+    background: var(--danger); width: 30%; animation: v-fuse-in 1.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .v-role.rolling .v-fuse-fill { background: var(--ok); width: 78%; }
+  @keyframes v-fuse-in { from { width: 0; } }
+  .v-fuse-label { font-family: var(--font-mono); font-size: 11px; color: var(--ink-2);
+    white-space: nowrap; }
+  .v-live { display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--ink-2); }
+
+  /* Vignette 2: the Today queue with a pace ring. */
+  .v-today { display: flex; gap: var(--s4); align-items: flex-start; position: relative; }
+  .v-queue { flex: 1; display: flex; flex-direction: column; gap: var(--s2); }
+  .v-act { border: 1px solid var(--line); border-radius: 10px; background: var(--paper);
+    padding: var(--s2) var(--s3); font-size: var(--fs-s); display: flex;
+    justify-content: space-between; align-items: center; gap: var(--s2); }
+  .v-act b { font-size: var(--fs-s); }
+  .v-act .why { color: var(--ink-3); font-size: 11px; }
+  .v-act .go { flex: none; font-size: 11px; font-weight: var(--w-med);
+    border-radius: 999px; padding: 3px 10px; background: var(--accent);
+    color: #fff; }
+  .v-ring { flex: none; width: 92px; height: 92px; border-radius: 50%;
+    background: conic-gradient(var(--accent) 0deg 252deg, var(--line) 252deg 360deg);
+    display: flex; align-items: center; justify-content: center; }
+  .v-ring::before { content: "7/10"; width: 68px; height: 68px; border-radius: 50%;
+    background: var(--surface); display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-weight: var(--w-bold); font-size: var(--fs-s);
+    color: var(--ink); }
+
+  /* Vignette 3: the warmth board. */
+  .v-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3);
+    position: relative; }
+  .v-col { border: 1px dashed var(--line-strong); border-radius: 10px;
+    padding: var(--s2); display: flex; flex-direction: column; gap: var(--s2); }
+  .v-col-h { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--ink-3); padding: 0 2px; }
+  .v-card { border: 1px solid var(--line); border-radius: 8px; background: var(--paper);
+    padding: 6px 8px; font-size: 11px; font-weight: var(--w-med); color: var(--ink-2);
+    box-shadow: var(--shadow-1); }
+  .v-card.hot { border-color: var(--accent-line); color: var(--accent-ink); }
+  .v-card.lift { transform: rotate(-3deg) translateY(-2px); box-shadow: var(--shadow-2); }
+
+  /* Vignette 4: BCC capture. */
+  .v-mail { border: 1px solid var(--line); border-radius: 10px; background: var(--paper);
+    padding: var(--s3) var(--s4); font-size: var(--fs-s); margin-bottom: var(--s3); }
+  .v-mail .hd { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3);
+    display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--s2); }
+  .v-mail .hd b { color: var(--accent-ink); font-weight: var(--w-med); }
+  .v-mail .bd { color: var(--ink-2); font-size: 12px; }
+  .v-logline { display: flex; align-items: center; gap: var(--s2);
+    font-size: var(--fs-s); color: var(--ink-2); }
+  .v-logline .ok-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .v-logline b { color: var(--ink); }
+
+  /* Trust band: three flat claims, no cards-in-cards. */
+  .trust-band { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s5);
+    margin-top: var(--s6); }
+  .trust-item h4 { font: var(--w-bold) var(--fs-m)/1.3 var(--font-display);
+    margin: 0 0 var(--s2); }
+  .trust-item p { color: var(--ink-2); font-size: var(--fs-s); margin: 0; }
+
+  /* Stat band: the ledger, big. */
+  .stat-band { display: flex; justify-content: center; gap: var(--s8);
+    flex-wrap: wrap; margin-top: var(--s6); padding: var(--s6) 0;
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .stat-band .cell { text-align: center; }
+  .stat-band .dash-num { font-size: 44px; color: var(--ink); }
+  .stat-band .dash-lbl { display: block; margin-top: 4px; }
+
+  /* Final CTA band. */
+  .cta-band { text-align: center; margin: var(--s8) 0 var(--s5);
+    padding: var(--s7) var(--s5);
+    background:
+      radial-gradient(110% 160% at 50% -40%, rgba(31, 78, 121, 0.10), transparent 60%),
+      var(--surface);
+    border: 1px solid var(--line); border-radius: var(--r-panel);
+    box-shadow: var(--shadow-1); }
+  .cta-band h2 { font: var(--w-black) clamp(24px, 3vw, 34px)/1.1 var(--font-display);
+    letter-spacing: -0.01em; margin: 0 0 var(--s2); }
+  .cta-band p { color: var(--ink-2); margin: 0 auto var(--s5); max-width: 52ch; }
+  .cta-band .actions { display: flex; justify-content: center; gap: var(--s3);
+    flex-wrap: wrap; }
+
+  @media (max-width: 820px) {
+    .feature-row { grid-template-columns: 1fr; gap: var(--s5); }
+    .feature-row.flip .feature-copy { order: 0; }
+    .trust-band { grid-template-columns: 1fr; }
+    .stat-band { gap: var(--s6); }
+    .v-board { grid-template-columns: repeat(2, 1fr); }
+    .v-board .v-col:last-child { display: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="home" %}</span>
+    <p class="kin-hero-eyebrow">Campus recruiting · finance &amp; consulting</p>
+    <h1 class="kin-hero-title">Everyone tracks deadlines. Nobody tracks the relationship.</h1>
+    <p class="kin-hero-sub">Live roles across four markets, plus a private CRM for the people behind them.</p>
+    <div class="kin-hero-stats">
+      <div class="kin-hero-stat"><span class="dash-num">{{ open_count|default:"0" }}</span><span class="dash-lbl">Live Campus Roles</span></div>
+      <div class="kin-hero-stat"><span class="dash-num">{{ firm_count|default:"0" }}</span><span class="dash-lbl">Firms Tracked</span></div>
+      <div class="kin-hero-stat"><span class="dash-num">6</span><span class="dash-lbl">Verticals</span></div>
+    </div>
+    <div class="actions">
+      <a class="btn btn-primary" href="/opportunities/">Browse Openings</a>
+      {% if user.is_authenticated %}
+        <a class="btn" href="/app/">Open Today</a>
+      {% else %}
+        <a class="btn" href="/accounts/signup/">Create Account</a>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if strip_firms %}
+  <section class="land-section" style="margin-top: var(--s6);">
+    <p class="land-eyebrow">Checked directly at the source</p>
+    <div class="marquee">
+      <div class="marquee-track">
+        <div class="marquee-group">
+          {% for f in strip_firms %}
+            <span class="strip-chip">
+              <span class="mono" style="--hue: {{ f.slug|firm_hue }}">{{ f.slug|slice:":2"|upper }}</span>
+              {{ f.name|smart_title }}
+            </span>
+          {% endfor %}
+        </div>
+        <div class="marquee-group" aria-hidden="true">
+          {% for f in strip_firms %}
+            <span class="strip-chip">
+              <span class="mono" style="--hue: {{ f.slug|firm_hue }}">{{ f.slug|slice:":2"|upper }}</span>
+              {{ f.name|smart_title }}
+            </span>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="land-section">
+    <p class="land-eyebrow">The whole workflow</p>
+    <h2 class="land-title">The deadline and the person behind it. One place.</h2>
+
+    <div class="feature-row">
+      <div class="feature-copy">
+        <p class="feature-kicker">Opportunities</p>
+        <h3>Every role, straight from the source.</h3>
+        <p>Pulled from each firm's own careers site and ranked by what closes next.</p>
+        <ul class="feature-points">
+          <li>A burning fuse on every real deadline</li>
+          <li>Rolling roles show when we last saw them live</li>
+          <li>Hong Kong, US, Singapore, Europe</li>
+        </ul>
+      </div>
+      <div class="vig kin-reveal">
+        <p class="vig-label">Opportunities · live</p>
+        <div class="v-role">
+          <span class="v-role-tag">Insight Programme</span>
+          <p class="v-role-title">Women in Banking Networking Dinner</p>
+          <div class="v-fuse">
+            <span class="v-fuse-track"><span class="v-fuse-fill"></span></span>
+            <span class="v-fuse-label">Closes in 9 days</span>
+          </div>
+        </div>
+        <div class="v-role rolling">
+          <span class="v-role-tag">Internship · 2027</span>
+          <p class="v-role-title">Summer Analyst, Investment Banking</p>
+          <div class="v-fuse">
+            <span class="v-fuse-track"><span class="v-fuse-fill"></span></span>
+            <span class="v-live"><span class="live-dot"></span> Rolling · seen today</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature-row flip">
+      <div class="feature-copy">
+        <p class="feature-kicker">Today</p>
+        <h3>Wake up knowing exactly who to reach.</h3>
+        <p>Your cadence becomes one ranked queue: overdue first, then due, each with the angle.</p>
+        <ul class="feature-points">
+          <li>One-click Sent, Reply, Snooze, Skip</li>
+          <li>A pace ring that fills as you work</li>
+          <li>Sorted by the tiers you set</li>
+        </ul>
+      </div>
+      <div class="vig kin-reveal">
+        <p class="vig-label">Today · your queue</p>
+        <div class="v-today">
+          <div class="v-queue">
+            <div class="v-act"><span><b>Sarah Lin</b> <span class="why">· VP, coffee chat 12d ago</span></span><span class="go">Compose</span></div>
+            <div class="v-act"><span><b>Marcus Ito</b> <span class="why">· Analyst, replied Tue</span></span><span class="go">Reply</span></div>
+            <div class="v-act"><span><b>Priya Nair</b> <span class="why">· Associate, new intro</span></span><span class="go">Sent</span></div>
+          </div>
+          <div class="v-ring" aria-label="7 of 10 weekly touches"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature-row">
+      <div class="feature-copy">
+        <p class="feature-kicker">Network</p>
+        <h3>A board, not a spreadsheet.</h3>
+        <p>Drag a contact between warmth lanes and your queue re-ranks itself.</p>
+        <ul class="feature-points">
+          <li>Warmth lanes show every relationship's real state</li>
+          <li>Tier your firms; the queue works Tier 1 first</li>
+          <li>Import your spreadsheet in one CSV</li>
+        </ul>
+      </div>
+      <div class="vig kin-reveal">
+        <p class="vig-label">Network · warmth board</p>
+        <div class="v-board">
+          <div class="v-col">
+            <span class="v-col-h">Cold</span>
+            <div class="v-card">David Park · PE</div>
+            <div class="v-card">Ana Sousa · S&amp;T</div>
+          </div>
+          <div class="v-col">
+            <span class="v-col-h">In touch</span>
+            <div class="v-card lift">Marcus Ito · IBD</div>
+            <div class="v-card">Priya Nair · AM</div>
+          </div>
+          <div class="v-col">
+            <span class="v-col-h">Warm</span>
+            <div class="v-card hot">Sarah Lin · IBD</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature-row flip">
+      <div class="feature-copy">
+        <p class="feature-kicker">Email capture</p>
+        <h3>BCC one address. The CRM writes itself.</h3>
+        <p>Every BCC'd email logs itself against the right contact. We never touch your inbox.</p>
+        <ul class="feature-points">
+          <li>Zero copy-paste, zero manual logging</li>
+          <li>Forward a reply and warmth updates itself</li>
+          <li>Raw mail is discarded within 30 days</li>
+        </ul>
+      </div>
+      <div class="vig kin-reveal">
+        <p class="vig-label">Capture · automatic logging</p>
+        <div class="v-mail">
+          <div class="hd">
+            <span>To: sarah.lin@bank.com</span>
+            <span>BCC: <b>you@capture.coverage</b></span>
+          </div>
+          <p class="bd">Hi Sarah, thank you for taking the time on Tuesday…</p>
+        </div>
+        <p class="v-logline"><span class="ok-dot"></span> Logged outreach to <b>Sarah Lin</b> · warmth moved to Warm</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="land-section">
+    <p class="land-eyebrow">Built on honesty</p>
+    <h2 class="land-title">Your data behaves like it's yours.</h2>
+    <div class="trust-band">
+      <div class="trust-item kin-reveal" style="--i:0">
+        <h4>Honest Dates</h4>
+        <p>Every deadline carries its confidence and freshness. Rumored says rumored.</p>
+      </div>
+      <div class="trust-item kin-reveal" style="--i:1">
+        <h4>Private by Default</h4>
+        <p>The feed is shared. Your contacts, notes, and touches never are.</p>
+      </div>
+      <div class="trust-item kin-reveal" style="--i:2">
+        <h4>Leave Anytime</h4>
+        <p>Export everything as CSV, or delete it all yourself, immediately.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-band">
+    <h2>Start with the feed. Win with the follow-up.</h2>
+    <p>The queue, the board, and capture are one account away.</p>
+    <div class="actions">
+      {% if user.is_authenticated %}
+        <a class="btn btn-primary" href="/app/">Open Today</a>
+      {% else %}
+        <a class="btn btn-primary" href="/accounts/signup/">Create Account</a>
+      {% endif %}
+      <a class="btn" href="{% url 'core:pricing' %}">Explore Pricing</a>
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Email Capture · Coverage{% endblock %}
+
+{% block content %}
+<div class="page page--narrow">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="capture" %}</span>
+    <p class="kin-hero-eyebrow">Inbox → CRM</p>
+    <h1 class="kin-hero-title">Email Capture</h1>
+    <p class="kin-hero-sub">BCC your recruiting mail and Coverage updates the contact for you.</p>
+  </header>
+
+  <div class="panel kin-reveal" style="--i:0" aria-label="Your capture address">
+    <p>BCC or forward your recruiting mail to:</p>
+    <p class="capture-addr">{{ address }}</p>
+    <p class="muted small">
+      Outbound mail you BCC advances a contact automatically; forward a reply
+      you received and it logs as a reply.
+    </p>
+  </div>
+
+  <section class="kin-reveal" style="--i:1" aria-label="Capture status">
+    <h2>
+      {% if last_received %}<span class="live-dot"></span> {% endif %}Is It Working?
+    </h2>
+    {% if last_received %}
+      <p><strong>Last received:</strong> {{ last_received }} ({{ total }} total captured)</p>
+    {% else %}
+      <p><strong>No captured email yet.</strong> Send a test message to the address above.</p>
+    {% endif %}
+    <div class="deflist">
+      <div><span>Applied (logged a touch)</span><span class="v">{{ counts.applied }}</span></div>
+      <div><span>Needs review{% if counts.needs_review %} · <a href="{% url 'capture:review' %}">review now</a>{% endif %}</span><span class="v">{{ counts.needs_review }}</span></div>
+      <div><span>Pending</span><span class="v">{{ counts.pending }}</span></div>
+      <div><span>Ignored</span><span class="v">{{ counts.ignored }}</span></div>
+    </div>
+  </section>
+</div>
+{% endblock %}

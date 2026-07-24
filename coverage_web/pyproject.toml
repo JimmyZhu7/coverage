@@ -1,0 +1,30 @@
+[project]
+name = "coverage-web"
+version = "0.1.0"
+description = "Coverage's Django project: multi-tenant web app, auth, base templates, htmx-served views."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "django>=5.1,<6.0",
+    "psycopg[binary]>=3.2",
+    "django-allauth[socialaccount]>=65.0",
+    "django-environ>=0.11",
+    # Production WSGI server + static-file serving (with DEBUG=False Django
+    # will not serve static itself). See settings/production.py + Dockerfile.
+    "gunicorn>=23.0",
+    "whitenoise>=6.8",
+    # Runtime deps: crm/views imports the domain engines; directory/ingest
+    # imports the connectors. Declared so `uv sync --package coverage-web`
+    # (and the Docker build) install them, not just `uv sync --all-packages`.
+    "coverage-domain",
+    "coverage-connectors",
+]
+
+# Application, not a library anyone imports — don't build/install it as a
+# distribution into the shared venv, just resolve+install its dependencies.
+[tool.uv]
+package = false
+
+# The two runtime deps above resolve to the sibling workspace members, not PyPI.
+[tool.uv.sources]
+coverage-domain = { workspace = true }
+coverage-connectors = { workspace = true }

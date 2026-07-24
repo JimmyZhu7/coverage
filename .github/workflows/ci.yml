@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: coverage
+          POSTGRES_PASSWORD: coverage
+          POSTGRES_DB: coverage
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U coverage"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DJANGO_SETTINGS_MODULE: coverage_web.settings.local
+      DJANGO_SECRET_KEY: ci-only-secret-key-not-for-production
+      DATABASE_URL: postgres://coverage:coverage@localhost:5432/coverage
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+
+      - name: Install Python (from .python-version)
+        run: uv python install
+
+      - name: Install dependencies (whole workspace)
+        run: uv sync --all-packages --locked
+
+      - name: Django system check
+        working-directory: coverage_web
+        run: uv run python manage.py check
+
+      - name: Run migrations against the Postgres service container
+        working-directory: coverage_web
+        run: uv run python manage.py migrate --noinput
+
+      - name: Run pytest
+        run: uv run pytest

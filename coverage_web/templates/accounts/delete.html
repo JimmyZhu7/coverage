@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Delete Your Account · Coverage{% endblock %}
+
+{% block content %}
+<div class="page page--narrow">
+  <header class="page-head"><h1>Delete Your Account</h1></header>
+  <p class="lede">This permanently and immediately removes everything below. There is no undo, and no waiting period.</p>
+
+  <div class="panel" style="border-color: var(--danger-line);">
+    <p>Deleting your account hard-deletes:</p>
+    <ul>
+      <li>Your profile and account login</li>
+      <li>All of your contacts and their touch history</li>
+      <li>Your target firms and tracked opportunities</li>
+      <li>Your captured email events and any fit scores</li>
+      <li>Your tasks, imports, and your product-usage events</li>
+    </ul>
+    <p class="muted">Shared, aggregate-only directory data (firms, deadlines) is not yours and is unaffected. Consider <a href="{% url 'accounts:export' %}">exporting your data</a> first.</p>
+  </div>
+
+  {% if error %}<p class="msg error">{{ error }}</p>{% endif %}
+
+  <form method="post" action="{% url 'accounts:delete' %}">
+    {% csrf_token %}
+    <label for="confirm">To confirm, type your email address <strong>{{ user.email }}</strong></label>
+    <input type="text" name="confirm" id="confirm" autocomplete="off"
+           placeholder="{{ user.email }}" required>
+    <div class="actions">
+      <button type="submit" class="btn btn-danger">Permanently Delete My Account</button>
+      <a class="btn" href="{% url 'accounts:settings' %}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

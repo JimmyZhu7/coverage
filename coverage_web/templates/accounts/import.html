@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Import Contacts · Coverage{% endblock %}
+
+{% block content %}
+<div class="page page--narrow">
+  <header class="page-head">
+    <h1>Import Contacts</h1>
+    <p class="lede">Upload a CSV.</p>
+  </header>
+
+  {% if messages %}
+    {% for m in messages %}
+      <p class="msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</p>
+    {% endfor %}
+  {% endif %}
+
+  {% if result and not result.errors %}
+    <div class="panel">
+      <h2 style="margin-top:0">Import Summary</h2>
+      <table class="summary">
+        <tr><td>Rows in file</td><td>{{ result.total_rows }}</td></tr>
+        <tr><td>Contacts created</td><td>{{ result.created }}</td></tr>
+        <tr><td>Skipped as duplicates</td><td>{{ result.skipped_duplicate }}</td></tr>
+        <tr><td>Skipped as empty</td><td>{{ result.skipped_empty }}</td></tr>
+        <tr><td>Firms matched to the directory</td><td>{{ result.firm_matched }}</td></tr>
+      </table>
+      <p class="muted">Duplicates are matched by email, or by name + firm when there's no email. Re-importing the same file adds nothing new.</p>
+    </div>
+  {% endif %}
+
+  <form method="post" action="{% url 'accounts:import' %}" enctype="multipart/form-data">
+    {% csrf_token %}
+    <label for="file">CSV file</label>
+    <input type="file" name="file" id="file" accept=".csv,text/csv" required>
+    <div class="actions">
+      <button type="submit" class="btn btn-primary">Upload &amp; Import</button>
+      <a class="btn" href="{% url 'accounts:import_template' %}">Download Template</a>
+    </div>
+  </form>
+
+  <div class="actions">
+    {% if from_onboarding %}
+      <a href="{% url 'accounts:onboarding' %}?step=capture">Continue setup →</a>
+    {% else %}
+      <a href="{% url 'accounts:settings' %}">Back to settings</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

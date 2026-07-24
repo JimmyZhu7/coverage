@@ -1,0 +1,96 @@
+# Render Blueprint for Coverage. `render.com` → New → Blueprint → point at this
+# repo. Review plans/hostnames in the dashboard after the first apply; the
+# `sync: false` vars must be filled in there (they can't live in git).
+#
+# Migrations run as `preDeployCommand` on the web service (once per deploy,
+# before the new version takes traffic), NOT in the image CMD — so a failed
+# migration blocks the release instead of half-applying on every boot.
+
+databases:
+  - name: coverage-db
+    databaseName: coverage
+    user: coverage
+    plan: basic-256mb # adjust; Render's smallest paid Postgres. Free tier expires.
+
+services:
+  # ---- Web service -------------------------------------------------------
+  - type: web
+    name: coverage-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /healthz
+    preDeployCommand: "uv run --package coverage-web python coverage_web/manage.py migrate --noinput"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        generateValue: true # Render generates + stores it
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false # e.g. coverage-web.onrender.com (+ your custom domain)
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        sync: false # e.g. https://coverage-web.onrender.com
+      - key: CAPTURE_INBOUND_SECRET
+        generateValue: true
+      - key: CAPTURE_INBOUND_DOMAIN
+        sync: false # e.g. in.coverage.app (the domain whose MX points at Postmark)
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      # Optional sign-in providers. Leave blank and their buttons render as
+      # "Setup Needed"; fill in and they go live — no code change either way.
+      - key: APPLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: APPLE_OAUTH_KEY_ID
+        sync: false
+      - key: APPLE_OAUTH_TEAM_ID
+        sync: false
+      - key: APPLE_OAUTH_PRIVATE_KEY
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: LINKEDIN_OAUTH_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: SENTRY_DSN
+        sync: false # optional; leave blank to disable
+
+  # ---- Freshness pass every 6 hours (scrape + reclassify + reverify) -----
+  # Four passes a day keeps deadlines honest across US and Asia hours.
+  # The refresh command exits non-zero on stage failures OR when a pass
+  # leaves zero open roles, so Render's cron-failure notification doubles
+  # as the stale-data alarm.
+  - type: cron
+    name: coverage-scrape
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 */6 * * *" # 00:00 / 06:00 / 12:00 / 18:00 UTC
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py refresh"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      # Share the web service's generated secrets so settings import cleanly.
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: DJANGO_SECRET_KEY
+      - key: CAPTURE_INBOUND_SECRET
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: CAPTURE_INBOUND_SECRET
+      - key: DJANGO_ALLOWED_HOSTS
+        value: localhost # cron serves no HTTP; any value satisfies the settings import

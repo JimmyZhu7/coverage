@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Today · Coverage{% endblock %}
+
+{% block head %}{% include "crm/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page page--wide">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="today" %}</span>
+    <p class="kin-hero-eyebrow">{% now "l · N j, Y" %}</p>
+    <h1 class="kin-hero-title">Today</h1>
+    <p class="kin-hero-sub">Who to reach, what's closing, and what moved since you last looked.</p>
+  </header>
+
+  {# ---- Dashboard stat cards (clickable jumps) ---- #}
+  <div class="dash-stats">
+    <a class="dash-card" href="{% url 'opportunities' %}">
+      <span class="dash-num">{{ dash.open_now }}</span>
+      <span class="dash-lbl"><span class="live-dot"></span> Open Now</span>
+      <span class="dash-sub">Campus roles live</span>
+    </a>
+    <a class="dash-card" href="{% url 'opportunities' %}">
+      <span class="dash-num">{{ dash.closing_10 }}</span>
+      <span class="dash-lbl">Closing Soon</span>
+      <span class="dash-sub">Within 10 days</span>
+    </a>
+    <a class="dash-card" href="{% url 'crm:contact_list' %}">
+      <span class="dash-num">{{ dash.tracked_live }}</span>
+      <span class="dash-lbl">Tracked Live</span>
+      <span class="dash-sub">{{ dash.hk }} in HK · {{ dash.us }} in US</span>
+    </a>
+    <div class="dash-card dash-funnel">
+      <span class="dash-lbl">Application Funnel</span>
+      <div class="funnel-row">
+        <span class="funnel-step"><span class="dash-num">{{ dash.funnel.submitted }}</span><span class="dash-lbl">Submitted</span></span>
+        <span class="funnel-sep">›</span>
+        <span class="funnel-step"><span class="dash-num">{{ dash.funnel.interview }}</span><span class="dash-lbl">Interview</span></span>
+        <span class="funnel-sep">›</span>
+        <span class="funnel-step"><span class="dash-num">{{ dash.funnel.offer }}</span><span class="dash-lbl">Offer</span></span>
+      </div>
+    </div>
+  </div>
+
+  {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}
+  <div id="today-cockpit"
+       hx-target="#today-cockpit" hx-swap="innerHTML"
+       hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+    {% include "crm/_cockpit.html" %}
+  </div>
+</div>
+{% endblock %}

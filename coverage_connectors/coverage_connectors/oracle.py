@@ -1,0 +1,128 @@
+"""Oracle Recruiting Cloud connector — public, unauthenticated REST.
+
+Ported from the radar's `sources.py` (`_ORACLE_URL`, `_fetch_oracle`,
+`_ats_normalize`'s oracle branch) and `verify_rows.py` (`_verify_oracle`,
+the oracle arm of `_URL_RES`). Same public trust tier as the
+Greenhouse/Lever/Workday boards-api calls: GET with the keyword in the
+finder expression, no auth, no cookies.
+
+Fetch contract: one search per configured keyword (Oracle's finder has no
+OR-of-terms syntax that reliably widens results — the career site's own
+search box behaves the same way), deduplicated by requisition Id across
+searches. `PostingEndDate` is a GENUINE deadline when present — the only
+one of the ported providers besides Greenhouse that exposes one — and
+`PostedDate` is evidence-only.
+"""
+
+from __future__ import annotations
+
+import re
+import urllib.error
+import urllib.parse
+
+from .http import fetch_json
+from .models import FetchResult, Opportunity, OracleBoard, VerificationResult
+
+name = "oracle"
+
+_SEARCH_URL = (
+    "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+    "?onlyData=true&expand=requisitionList&finder=findReqs;siteNumber={site},limit=25,keyword={kw}"
+)
+_JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{rid}"
+
+# Same shape as the radar's oracle _URL_RES arm: candidate-facing job URLs.
+_URL_RE = re.compile(
+    r"([\w.-]+\.oraclecloud\.com)/hcmUI/CandidateExperience/en/sites/([^/?#]+)(?:/job/(\d+))?",
+    re.IGNORECASE,
+)
+
+
+def _search(host: str, site: str, keyword: str) -> list[dict]:
+    url = _SEARCH_URL.format(host=host, site=site, kw=urllib.parse.quote(keyword))
+    data = fetch_json(url)
+    items = data.get("items", [])
+    return items[0].get("requisitionList", []) if items else []
+
+
+def _normalize(req: dict, board: OracleBoard) -> Opportunity:
+    rid = str(req.get("Id") or "")
+    deadline = req.get("PostingEndDate") or None
+    posted = req.get("PostedDate") or None
+    return Opportunity(
+        firm=board.firm,
+        title=req.get("Title", ""),
+        location=req.get("PrimaryLocation", ""),
+        url=_JOB_URL.format(host=board.host, site=board.site_number, rid=rid) if rid else "",
+        source="oracle",
+        deadline=deadline[:10] if deadline else None,
+        posted_at=posted[:10] if posted else None,
+        raw=req,
+    )
+
+
+def fetch(board: OracleBoard) -> FetchResult:
+    """One keyword search per configured term, deduped by requisition Id.
+    A single failed keyword fails the whole board (partial keyword coverage
+    would silently shrink closed-detection's 'seen' set and close live
+    rows)."""
+    seen: set[str] = set()
+    reqs: list[dict] = []
+    for kw in board.keywords:
+        try:
+            found = _search(board.host, board.site_number, kw)
+        except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
+            return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
+        for req in found:
+            rid = str(req.get("Id") or "")
+            if not rid or rid in seen:
+                continue
+            seen.add(rid)
+            reqs.append(req)
+    opportunities = [o for o in (_normalize(r, board) for r in reqs) if o.url]
+    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(reqs))
+
+
+def classify_url(url: str) -> dict | None:
+    m = _URL_RE.search(url or "")
+    if not m:
+        return None
+    return {"host": m.group(1), "site": m.group(2), "job_id": m.group(3)}
+
+
+def verify(url: str) -> VerificationResult:
+    """Ported from `_verify_oracle`: keyword-search the site for the
+    requisition Id itself (Oracle's keyword search matches Ids). Found ->
+    verified-open with its real dates; an Id that the search can't find is
+    closed/filled; network trouble is unreachable, never closed."""
+    info = classify_url(url)
+    if not info:
+        return VerificationResult("oracle", url, "needs-verification",
+                                   "URL is not a recognized Oracle Recruiting Cloud job URL", [])
+    host, site, job_id = info["host"], info["site"], info["job_id"]
+    if not job_id:
+        return VerificationResult("oracle", url, "needs-verification",
+                                   f"oracle site {site!r} but no requisition Id in the URL", [])
+    try:
+        reqs = _search(host, site, job_id)
+    except urllib.error.HTTPError as e:
+        return VerificationResult("oracle", url, "unreachable",
+                                   f"HTTP {e.code} from Oracle Recruiting Cloud", [])
+    except Exception as e:  # noqa: BLE001
+        return VerificationResult("oracle", url, "unreachable", str(e)[:200], [])
+
+    match = next((r for r in reqs if str(r.get("Id")) == str(job_id)), None)
+    if match is None:
+        return VerificationResult("oracle", url, "closed",
+                                   f"requisition Id {job_id} not found via keyword search — likely closed or filled", [])
+    title = match.get("Title", "")
+    posted = (match.get("PostedDate") or "")[:10]
+    end = (match.get("PostingEndDate") or "")[:10]
+    # PostedDate is a POSTED date, never a deadline — evidence-only.
+    # PostingEndDate IS a genuine deadline and feeds deadline_dates.
+    return VerificationResult(
+        "oracle", url, "verified-open",
+        f'title="{title}" PostedDate={posted or "unstated"} PostingEndDate={end or "unstated"}',
+        [end] if end else [],
+        posted_date=posted or None,
+    )

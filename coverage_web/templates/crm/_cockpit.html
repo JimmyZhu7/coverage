@@ -1,0 +1,86 @@
+{% load textstyle %}
+{% comment %}
+The Today cockpit (htmx swap target). Left: the cadence queue split into
+Overdue / Due Now / Keep Warm lanes of act cards with inline quick actions.
+Right: a weekly pace ring and a recent-activity feed. Re-rendered whole on
+every quick action so all three stay in sync.
+{% endcomment %}
+<div class="cockpit">
+  <div class="cockpit-main">
+    {% if not queue_total %}
+      <div class="empty">
+        {% if contact_count %}
+          <h2>You're all caught up.</h2>
+          <p>Nothing's due right now. Add people or log a touch to keep the cadence moving.</p>
+        {% else %}
+          <h2>No contacts yet.</h2>
+          <p>Add the people you're networking with and Coverage will tell you who to reach, and when.</p>
+        {% endif %}
+        <a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>
+      </div>
+    {% endif %}
+
+    {% if lanes.overdue %}
+      <section class="lane lane-overdue">
+        <h2 class="lane-title"><span class="lane-dot"></span> Overdue <span class="lane-count">{{ lanes.overdue|length }}</span></h2>
+        <div class="act-grid">
+          {% for a in lanes.overdue %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if lanes.due %}
+      <section class="lane lane-due">
+        <h2 class="lane-title">Due Now <span class="lane-count">{{ lanes.due|length }}</span></h2>
+        <div class="act-grid">
+          {% for a in lanes.due %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if lanes.later %}
+      <section class="lane lane-later">
+        <h2 class="lane-title">Keep Warm <span class="lane-count">{{ lanes.later|length }}</span></h2>
+        <div class="act-grid">
+          {% for a in lanes.later %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+        </div>
+      </section>
+    {% endif %}
+  </div>
+
+  <aside class="cockpit-rail">
+    <div class="rail-card pace-card">
+      <h3 class="rail-title">This Week</h3>
+      <div class="pace">
+        <svg class="pace-ring" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="pace-track" cx="60" cy="60" r="52"></circle>
+          <circle class="pace-fill{% if pace.hit %} is-hit{% endif %}" cx="60" cy="60" r="52" style="--pct: {{ pace.pct }}"></circle>
+        </svg>
+        <div class="pace-center">
+          <span class="pace-done">{{ pace.done }}</span>
+          <span class="pace-goal">/ {{ pace.goal }}</span>
+        </div>
+      </div>
+      <p class="pace-note">
+        {% if pace.hit %}Weekly goal hit.{% else %}{{ pace.remaining }} more touch{{ pace.remaining|pluralize }} to hit your weekly goal.{% endif %}
+      </p>
+    </div>
+
+    <div class="rail-card activity-card">
+      <h3 class="rail-title">Recent Activity</h3>
+      {% if activity %}
+        <ul class="activity">
+          {% for e in activity %}
+            <li class="activity-row">
+              <span class="activity-dot{% if e.inbound %} in{% endif %}"></span>
+              <span class="activity-text"><a href="{% url 'crm:contact_detail' e.contact_id %}">{{ e.name|smart_title }}</a> <span class="activity-kind">{{ e.kind_label }}</span></span>
+              <span class="activity-when">{{ e.ts|timesince }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="rail-empty">No touches logged yet.</p>
+      {% endif %}
+    </div>
+  </aside>
+</div>

@@ -1,0 +1,154 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://www.williamblair.com/Careers/job-description?gh_jid=5181697007",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": true
+        }
+      ],
+      "education": "education_required",
+      "internal_job_id": 4653704007,
+      "location": {
+        "name": "Atlanta, Georgia; Boston, Massachusetts; Charlotte, North Carolina; Chicago, Illinois, United States; Los Angeles, California; San Francisco, California"
+      },
+      "metadata": [
+        {
+          "id": 5715851007,
+          "name": "Areas of Interest (For External Application)",
+          "value": [
+            "Investment Banking"
+          ],
+          "value_type": "multi_select"
+        },
+        {
+          "id": 6360630007,
+          "name": "Primary Location",
+          "value": "Chicago, Illinois",
+          "value_type": "single_select"
+        },
+        {
+          "id": 6360631007,
+          "name": "Additional Locations",
+          "value": [
+            "Atlanta, Georgia",
+            "Boston, Massachusetts",
+            "Charlotte, North Carolina",
+            "Los Angeles, California",
+            "San Francisco, California"
+          ],
+          "value_type": "multi_select"
+        }
+      ],
+      "id": 5181697007,
+      "updated_at": "2026-07-15T10:29:22-04:00",
+      "requisition_id": "JR101517",
+      "title": "2027 Investment Banking Full-Time MBA Associate",
+      "company_name": "William Blair",
+      "first_published": "2026-07-14T16:56:11-04:00",
+      "language": "en",
+      "application_deadline": null
+    },
+    {
+      "absolute_url": "https://www.williamblair.com/Careers/job-description?gh_jid=5175283007",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": true
+        }
+      ],
+      "education": "education_required",
+      "internal_job_id": 4650736007,
+      "location": {
+        "name": "Chicago, Illinois, United States"
+      },
+      "metadata": [
+        {
+          "id": 5715851007,
+          "name": "Areas of Interest (For External Application)",
+          "value": [
+            "Private Wealth Management"
+          ],
+          "value_type": "multi_select"
+        },
+        {
+          "id": 6360630007,
+          "name": "Primary Location",
+          "value": "Chicago, Illinois",
+          "value_type": "single_select"
+        },
+        {
+          "id": 6360631007,
+          "name": "Additional Locations",
+          "value": null,
+          "value_type": "multi_select"
+        }
+      ],
+      "id": 5175283007,
+      "updated_at": "2026-07-13T12:12:55-04:00",
+      "requisition_id": "JR101504",
+      "title": "Associate I, Client Relations",
+      "company_name": "William Blair",
+      "first_published": "2026-06-29T11:26:55-04:00",
+      "language": "en",
+      "application_deadline": null
+    },
+    {
+      "absolute_url": "https://www.williamblair.com/Careers/job-description?gh_jid=5102983007",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": true
+        }
+      ],
+      "education": "education_required",
+      "internal_job_id": 4615838007,
+      "location": {
+        "name": "Chicago, Illinois, United States"
+      },
+      "metadata": [
+        {
+          "id": 5715851007,
+          "name": "Areas of Interest (For External Application)",
+          "value": [
+            "Information Technology"
+          ],
+          "value_type": "multi_select"
+        },
+        {
+          "id": 6360630007,
+          "name": "Primary Location",
+          "value": "Chicago, Illinois",
+          "value_type": "single_select"
+        },
+        {
+          "id": 6360631007,
+          "name": "Additional Locations",
+          "value": null,
+          "value_type": "multi_select"
+        }
+      ],
+      "id": 5102983007,
+      "updated_at": "2026-06-04T08:34:42-04:00",
+      "requisition_id": "JR101357",
+      "title": "Data & AI Engineer \u2013 Equities Technology",
+      "company_name": "William Blair",
+      "first_published": "2026-04-09T10:11:04-04:00",
+      "language": "en",
+      "application_deadline": null
+    }
+  ]
+}

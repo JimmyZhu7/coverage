@@ -1,0 +1,28 @@
+[project]
+name = "coverage-connectors"
+version = "0.1.0"
+description = "Coverage's deterministic ATS fetch/verify engine — Greenhouse, Lever, and Workday connectors, pure Python, no state, no filesystem paths. Oracle Recruiting Cloud, tal.net, and company-specific fetchers remain future work; see docs/build-plan.md §4/§7."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # Browser tier (beisen.py) drives headless Chromium. The Python package is
+    # light; the Chromium binary is installed separately (`playwright install
+    # chromium`, done in the Dockerfile). The connector imports it lazily and
+    # degrades gracefully, so HTTP-only installs still work if it's absent.
+    "playwright>=1.61.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "live: hits real, live network endpoints. Skips unless RUN_LIVE=1 is set.",
+]

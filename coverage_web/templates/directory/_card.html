@@ -1,0 +1,33 @@
+{% load textstyle %}
+{% comment %}
+One opportunity card. Every honesty marker (deadline, staleness, confidence,
+sponsorship) is pre-computed in directory/views.py `_card`; this template only
+lays it out. Pass `mine=True` to flag it as one of the user's targeted firms.
+{% endcomment %}
+<article class="opp-card{% if mine %} is-mine{% endif %}">
+  <div class="opp-top">
+    <span class="opp-firm"><a href="{% url 'directory:firm_detail' card.firm_slug %}">{{ card.firm_name|smart_title }}</a></span>
+    <span class="pill role role-{{ card.role.value }}">{{ card.role.label }}{% if card.cohort %} · {{ card.cohort }}{% endif %}</span>
+  </div>
+  <h3><a href="{{ card.url }}" rel="nofollow noopener" target="_blank">{{ card.title|smart_title }}</a></h3>
+  <p class="opp-meta">
+    {% if card.location %}{{ card.location|smart_title }}{% else %}Location not listed{% endif %}
+  </p>
+
+  {% if card.deadline.posted %}
+    <p class="deadline{% if card.deadline.past %} past{% endif %}">
+      <span class="date">{{ card.deadline.label }}</span>
+      <span class="count">· {{ card.deadline.countdown }}</span>
+    </p>
+  {% else %}
+    <p class="deadline none">{{ card.deadline.label }}</p>
+  {% endif %}
+
+  {% if card.tags %}
+    <div class="markers">
+      {% for tag in card.tags %}
+        <span class="pill {{ tag.css }}">{{ tag.label }}</span>
+      {% endfor %}
+    </div>
+  {% endif %}
+</article>

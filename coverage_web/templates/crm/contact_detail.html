@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}{{ contact.name|smart_title }} · Coverage{% endblock %}
+
+{% block head %}{% include "crm/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page">
+  <nav class="subnav standalone">
+    <a href="{% url 'crm:week' %}">Today</a>
+    <a href="{% url 'crm:contact_list' %}">Network</a>
+    <span class="muted">/ {{ contact.name|smart_title }}</span>
+  </nav>
+
+  <div class="row">
+    <div>
+      <h1>{{ contact.name|smart_title }}</h1>
+      <p class="lede">
+        {% if firm %}{{ firm.name|smart_title }}{% elif contact.firm_text %}{{ contact.firm_text|smart_title }}{% endif %}{% if contact.role %} · {{ contact.role }}{% endif %}
+        {% if contact.school_affiliation %} · <span class="chip">alum</span>{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <div class="panel">
+    {% if contact.email %}
+      <a class="btn btn-primary" href="{{ mailto }}">Compose (BCC Capture)</a>
+      <span class="muted small">{{ contact.email }}</span>
+      <p class="note">BCC → <code class="addr">{{ capture_address }}</code> captures this outreach automatically.</p>
+    {% else %}
+      <p class="muted small">No email on file. Add one to compose with BCC capture.</p>
+    {% endif %}
+    {% if contact.angle %}<p class="small"><strong>Angle:</strong> {{ contact.angle }}</p>{% endif %}
+    {% if contact.notes %}<p class="small muted">{{ contact.notes }}</p>{% endif %}
+    {% if contact.linkedin %}<p class="small"><a href="{{ contact.linkedin }}">LinkedIn</a></p>{% endif %}
+  </div>
+
+  {% include "crm/_contact_live.html" %}
+</div>
+{% endblock %}

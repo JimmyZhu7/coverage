@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Export Your Data · Coverage{% endblock %}
+
+{% block content %}
+<div class="page page--narrow">
+  <header class="page-head"><h1>Export Your Data</h1></header>
+  <p class="lede">Download your contacts and outreach history as CSV, any time.</p>
+
+  <div class="panel">
+    <p><strong>Contacts:</strong> every person in your CRM, with firm, role, warmth, angle and notes. You have {{ contact_count }} contact{{ contact_count|pluralize }}.</p>
+    <a class="btn btn-primary" href="{% url 'accounts:export' %}?kind=contacts">Download Contacts.csv</a>
+  </div>
+
+  <div class="panel">
+    <p><strong>Touches:</strong> your logged interactions, every outreach, reply, and chat, with the contact and firm it belongs to.</p>
+    <a class="btn btn-primary" href="{% url 'accounts:export' %}?kind=touches">Download Touches.csv</a>
+  </div>
+
+  <p class="muted"><a href="{% url 'accounts:settings' %}">Back to settings</a></p>
+</div>
+{% endblock %}

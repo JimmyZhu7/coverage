@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Privacy · Coverage{% endblock %}
+
+{% block content %}
+<div class="page page--narrow legal">
+  <h1>Privacy</h1>
+  <p class="lede">Exactly what Coverage stores, what it does with it, and what it never does. Here is exactly what Coverage stores, what it does with it, and what it never does.</p>
+
+  <h2>What we capture</h2>
+  <p>Coverage keeps a private record of your recruiting outreach so you don't have to. That record comes from three places, all of which you control:</p>
+  <ul>
+    <li><strong>Mail you choose to send us.</strong> When you BCC your capture address on an email, or forward a reply to it, we read that message (its headers and its body) to log the interaction against the right contact. That is the only mail we ever see. We do not connect to your inbox, and we cannot read anything you don't BCC or forward.</li>
+    <li><strong>Contacts you add or import.</strong> Names, emails, firms, roles, and your own notes and angles.</li>
+    <li><strong>What you do in the app.</strong> Which pages and actions you use, so we can tell whether the product is actually working. No email contents go into this.</li>
+  </ul>
+
+  <h2>What we use it for</h2>
+  <p>One thing: running your own CRM for you, which means logging touches, moving a contact's warmth, and building your weekly list and fit scores. Your data works for you and no one else.</p>
+
+  <h2>What we never do</h2>
+  <ul>
+    <li>We do not sell your data, and we don't share it with advertisers.</li>
+    <li>No other user can see your contacts, your touches, or who you're talking to. Ever. Your private data is scoped to your account at the database level.</li>
+    <li>The only thing your activity contributes to anyone else is an aggregate, anonymous count: whether mail to a firm's domain tends to bounce. That's a number, never an address, and it can't be traced back to you.</li>
+    <li>We don't put email bodies in our logs.</li>
+  </ul>
+
+  <h2>Retention</h2>
+  <p>Raw captured email (the original message) is kept for at most 30 days, then discarded. The structured result (the contact and the logged touch, which is your CRM) stays until you delete it.</p>
+
+  <h2>Security</h2>
+  <p>Traffic is encrypted in transit (TLS) and data is encrypted at rest. Your capture address uses an unguessable random token, so it can't be discovered by trying variations of your name.</p>
+
+  <h2>Your data is portable, and deletion is yours to run</h2>
+  <p>You can <a href="{% url 'accounts:export' %}">export everything</a> as CSV at any time, and you can <a href="{% url 'accounts:delete' %}">delete your account and all of its data</a> yourself, immediately, with no email to support and no waiting period.</p>
+
+  <p class="muted"><a href="{% url 'accounts:terms' %}">Terms</a></p>
+</div>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% comment %}
+Inner fields of ProfileForm — no <form> wrapper, no submit button, so the
+parent (onboarding step 1 / settings page) supplies those. Reused as the
+htmx swap target on the settings page's in-place save.
+{% endcomment %}
+{% if saved %}<p class="msg success">Profile saved.</p>{% endif %}
+
+{% comment %}Two-up on the settings page (.set-form scopes the grid); a plain stack everywhere else, e.g. the narrow onboarding step.{% endcomment %}
+<div class="grid-2">
+  <div>
+    <label for="id_school">School</label>
+    {% comment %}Autocompletes from the bundled world-universities list — htmx fills the datalist as you type; no external API call.{% endcomment %}
+    <input type="text" name="school" id="id_school" list="uni-options"
+           value="{{ form.school.value|default:'' }}" autocomplete="off"
+           placeholder="Start typing your university…"
+           hx-get="{% url 'accounts:university_search' %}"
+           hx-trigger="keyup changed delay:200ms"
+           hx-target="#uni-options" hx-swap="innerHTML">
+    <datalist id="uni-options"></datalist>
+    {{ form.school.errors }}
+  </div>
+  <div>
+    <label for="id_class_year">Class Year</label>
+    {{ form.class_year }}
+    {{ form.class_year.errors }}
+  </div>
+</div>
+
+<label for="id_target_cycle">Target Recruiting Cycle</label>
+{{ form.target_cycle }}
+{{ form.target_cycle.errors }}
+
+<label>Regions of Interest</label>
+{{ form.regions }}
+{{ form.regions.errors }}
+
+<label>Tracks of Interest</label>
+{{ form.tracks }}
+{{ form.tracks.errors }}

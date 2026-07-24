@@ -1,0 +1,37 @@
+{% load textstyle %}
+{% comment %}
+One urgency-feed card. `i` is the item; `idx` (passed via include) drives
+the staggered entrance. Dated roles get a depleting "fuse" countdown bar;
+rolling roles get a live pulse + how-recently-seen. All state is
+precomputed in directory/views._urgency_item.
+{% endcomment %}
+<article class="urg-card urg-{{ i.level }}{% if i.is_mine %} is-mine{% endif %}" style="--i: {{ idx }}">
+  <div class="urg-card-top">
+    <span class="urg-logo">{{ i.monogram }}</span>
+    <div class="urg-id">
+      <a class="urg-firm" href="{% url 'directory:firm_detail' i.firm_slug %}">{{ i.firm_name|smart_title }}</a>
+      {% if i.category %}<span class="urg-cat">{{ i.category }}</span>{% endif %}
+    </div>
+    {% if i.is_mine %}<span class="pill mine-pill">★ Yours</span>
+    {% elif i.is_fresh and not i.dated %}<span class="fresh-badge">New</span>{% endif %}
+  </div>
+
+  <h3 class="urg-title"><a href="{{ i.url }}" target="_blank" rel="nofollow noopener">{{ i.title|smart_title }}</a></h3>
+
+  <div class="urg-meta">
+    <span class="role-mini role-{{ i.bucket }}">{{ i.bucket_label }}{% if i.cohort %} · {{ i.cohort }}{% endif %}</span>
+    {% if i.location %}<span class="urg-loc">{{ i.location|smart_title }}</span>{% endif %}
+  </div>
+
+  {% if i.dated %}
+    <div class="fuse fuse-{{ i.level }}">
+      <span class="fuse-track"><span class="fuse-fill" style="--fuse: {{ i.fuse_pct }}%"></span></span>
+      <span class="fuse-label">{{ i.countdown }}</span>
+    </div>
+  {% else %}
+    <div class="rolling-tag">
+      <span class="rolling-dot"></span> Rolling
+      {% if i.seen_days is not None %}<span class="rolling-seen">· {% if i.seen_days == 0 %}seen today{% elif i.seen_days == 1 %}seen 1d ago{% else %}seen {{ i.seen_days }}d ago{% endif %}</span>{% endif %}
+    </div>
+  {% endif %}
+</article>

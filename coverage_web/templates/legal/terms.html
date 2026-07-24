@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Terms · Coverage{% endblock %}
+
+{% block content %}
+<div class="page page--narrow legal">
+  <h1>Terms</h1>
+  <p class="lede">The short, honest version.</p>
+
+  <h2>What Coverage is</h2>
+  <p>Coverage is two things: a free, shared feed of recruiting opportunities and deadlines that we scrape and verify centrally, and a private CRM for tracking your own outreach. The feed is a convenience. We work to keep it accurate and we label how confident and how fresh each date is, but you're responsible for confirming a deadline before you rely on it.</p>
+
+  <h2>Your account</h2>
+  <p>You sign in with a social provider, or an email address and password. Keep your login to yourself; you're responsible for activity under your account. Don't upload data you don't have the right to hold, and don't use Coverage to harass anyone or to break the law.</p>
+
+  <h2>Your data belongs to you</h2>
+  <p>The contacts and touches you put into Coverage are yours. You can <a href="{% url 'accounts:export' %}">export them</a> whenever you like, and you can <a href="{% url 'accounts:delete' %}">delete your account and everything in it</a> yourself, immediately. We don't hold your data hostage.</p>
+
+  <h2>What we ask of you around capture</h2>
+  <p>The capture address logs the mail you BCC or forward to it. Only send us mail you're entitled to: your own outreach and the replies to it. See the <a href="{% url 'accounts:privacy' %}">Privacy page</a> for exactly what we do with it.</p>
+
+  <h2>No warranty, and limits</h2>
+  <p>Coverage is provided as-is, without warranties. Dates can be wrong; connectors can break. We do our best and we flag staleness honestly, but we're not liable for a missed deadline or an outreach decision you made using the app. Confirm anything that matters at the source.</p>
+
+  <h2>Changes</h2>
+  <p>We may update these terms as the product grows. If we change something that materially affects you, we'll say so rather than bury it.</p>
+
+  <p class="muted"><a href="{% url 'accounts:privacy' %}">Privacy</a></p>
+</div>
+{% endblock %}
