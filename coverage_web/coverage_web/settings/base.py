@@ -179,6 +179,8 @@ AUTHENTICATION_BACKENDS = [
 
 LOGIN_REDIRECT_URL = "/"
 ACCOUNT_LOGOUT_REDIRECT_URL = "/"
+# Brand-new accounts land in the onboarding wizard, not on the marketing page.
+ACCOUNT_SIGNUP_REDIRECT_URL = "/welcome/"
 
 # Google is the primary sign-in path (see docs/build-plan.md §3); email/
 # password signup via allauth's own forms is left at its defaults for now.
@@ -227,7 +229,9 @@ SOCIALACCOUNT_PROVIDERS = {
         },
     },
     "linkedin_oauth2": {
-        "SCOPE": ["r_liteprofile", "r_emailaddress"],
+        # LinkedIn retired r_liteprofile/r_emailaddress; OpenID Connect is the
+        # supported sign-in surface now.
+        "SCOPE": ["openid", "profile", "email"],
         "APP": {
             "client_id": env("LINKEDIN_OAUTH_CLIENT_ID", default=""),
             "secret": env("LINKEDIN_OAUTH_CLIENT_SECRET", default=""),

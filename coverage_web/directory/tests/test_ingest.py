@@ -161,15 +161,36 @@ def test_failed_board_never_closes_its_postings(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_empty_but_successful_board_closes_all(monkeypatch):
+def test_empty_but_successful_board_does_not_mass_close(monkeypatch):
+    """A 200-OK fetch that suddenly returns ZERO rows for a firm with live
+    postings is treated as a suspected shape change, not a mass closing:
+    nothing is auto-closed, and the anomaly is recorded in stats["errors"].
+    (`reverify` liveness-checks the URLs individually, so a genuine mass
+    closing still converges to closed without this wipe.)"""
     _patch(monkeypatch, [_result([_opp(U1), _opp(U2)])])
     ingest.ingest_boards([BOARD], label="greenhouse")
 
     _patch(monkeypatch, [_result([])])  # live board, lists nothing now
     run = ingest.ingest_boards([BOARD], label="greenhouse")
 
-    assert Opportunity.objects.filter(status="closed").count() == 2
-    assert run.stats["closed"] == 2
+    assert Opportunity.objects.filter(status="closed").count() == 0
+    assert run.stats["closed"] == 0
+    assert any("suspected shape change" in e["error"] for e in run.stats["errors"])
+
+
+@pytest.mark.django_db
+def test_partial_shrink_still_closes_the_missing_rows(monkeypatch):
+    """The wipe guard only triggers on a FULL zero-row fetch. A board that
+    still returns some rows closes the ones it no longer lists, as before."""
+    _patch(monkeypatch, [_result([_opp(U1), _opp(U2)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    _patch(monkeypatch, [_result([_opp(U1)])])  # U2 disappeared
+    run = ingest.ingest_boards([BOARD], label="greenhouse")
+
+    assert Opportunity.objects.get(url=U2).status == "closed"
+    assert Opportunity.objects.get(url=U1).status == "open"
+    assert run.stats["closed"] == 1
 
 
 @pytest.mark.django_db

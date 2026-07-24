@@ -276,8 +276,27 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
             if not opp.url:
                 stats["skipped_no_url"] += 1
                 continue
+            if len(opp.url) > 1024:
+                # url is the dedup key and the column is 1024 wide; clipping
+                # would corrupt the key, so an oversized url is skipped as a
+                # per-row error instead of DataError-ing the whole pass.
+                stats["errors"].append({
+                    "firm": board.firm, "provider": source,
+                    "error": f"url too long ({len(opp.url)} chars), row skipped",
+                })
+                continue
             seen_by_pair[pair].add(opp.url)
-            _apply_opportunity(firm, opp, now, stats, campus_hint=campus)
+            try:
+                # savepoint per row: one malformed posting must not roll back
+                # (or abort) every other firm's upserts in this transaction.
+                with transaction.atomic():
+                    _apply_opportunity(firm, opp, now, stats, campus_hint=campus)
+            except Exception as exc:  # noqa: BLE001 — isolate, record, continue
+                seen_by_pair[pair].discard(opp.url)
+                stats["errors"].append({
+                    "firm": board.firm, "provider": source,
+                    "error": f"row failed ({opp.url[:120]}): {exc}",
+                })
 
     if mark_closed:
         for pair, all_ok in pair_all_ok.items():
@@ -285,12 +304,23 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
                 continue  # a board for this (firm, source) failed -> never close on partial data
             firm_id, source = pair
             seen = seen_by_pair.get(pair, set())
-            closed = (
-                Opportunity.objects.filter(firm_id=firm_id, source=source)
-                .exclude(status="closed")
-                .exclude(url__in=seen)
-                .update(status="closed", last_checked=now)
+            open_qs = Opportunity.objects.filter(firm_id=firm_id, source=source).exclude(
+                status="closed"
             )
+            if not seen and open_qs.exists():
+                # Suspicious wipe guard: an HTTP-200 fetch that suddenly
+                # returns zero rows for a firm that HAD live postings is far
+                # more often a silently changed page shape than a real mass
+                # closing. Don't nuke the firm's board on that signal —
+                # `reverify` liveness-checks each URL and closes real deaths
+                # one by one, so accuracy self-heals without the false wipe.
+                stats["errors"].append({
+                    "firm": Firm.objects.get(pk=firm_id).name, "provider": source,
+                    "error": "fetch ok but 0 rows while postings are open; "
+                             "skipped auto-close (suspected shape change)",
+                })
+                continue
+            closed = open_qs.exclude(url__in=seen).update(status="closed", last_checked=now)
             stats["closed"] += closed
 
     stats["created_firms"] = resolver.created_firms

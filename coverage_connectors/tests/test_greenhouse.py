@@ -137,3 +137,16 @@ def test_verify_needs_verification_on_custom_domain_url():
     reliable way to recover from an arbitrary third-party domain."""
     result = greenhouse.verify("https://www.williamblair.com/Careers/job-description?gh_jid=5181697007")
     assert result.result == "needs-verification"
+
+
+def test_wafd_scalar_json_degrades_to_board_failure(monkeypatch):
+    """A WAF returning valid-but-scalar JSON (a bare string) must surface as
+    ok=False, not escape as an AttributeError that aborts the whole run.
+    Uses the real fetch_json guard against a mocked fetch_text."""
+    from coverage_connectors import http
+
+    monkeypatch.setattr(http, "fetch_text", lambda url, **kw: '"Access Denied"')
+    monkeypatch.setattr(greenhouse, "fetch_json", http.fetch_json)
+    result = greenhouse.fetch(GreenhouseBoard(firm="X", token="x"))
+    assert result.ok is False
+    assert "expected JSON object" in (result.error or "")

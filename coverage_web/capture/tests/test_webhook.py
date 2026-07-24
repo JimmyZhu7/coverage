@@ -44,6 +44,15 @@ def test_wrong_secret_is_401(client, user, make_payload, capture_addr):
     assert CaptureEvent.all_objects.count() == 0
 
 
+def test_non_ascii_secret_is_401_not_500(client, user, make_payload, capture_addr):
+    """A garbage token with non-ASCII bytes must fail closed as a 401 —
+    str-mode compare_digest raises TypeError, which surfaced as a 500."""
+    payload = make_payload(from_email="jane@bank.example", to=[(USER_EMAIL, "")], capture_addr=capture_addr)
+    resp = _post(client, payload, token="é-not-the-secret")
+    assert resp.status_code == 401
+    assert CaptureEvent.all_objects.count() == 0
+
+
 def test_valid_secret_via_query_param_is_accepted(client, user, known_contact, make_payload, capture_addr):
     payload = make_payload(
         from_email=known_contact.email, to=[(USER_EMAIL, "")], capture_addr=capture_addr,

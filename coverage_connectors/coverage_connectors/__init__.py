@@ -48,9 +48,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
-from . import beisen, eightfold, goldmansachs, greenhouse, lever, mckinsey, oracle, phenom, sitemap, talentgateway, talnet, workday
+from . import avature, beisen, eightfold, goldmansachs, greenhouse, lever, mckinsey, oracle, phenom, sitemap, talentgateway, talnet, workday
 from .models import (
     BoardConfig,
+    AvatureBoard,
     BeisenBoard,
     Connector,
     EightfoldBoard,
@@ -71,6 +72,7 @@ from .models import (
 
 __all__ = [
     "BoardConfig",
+    "AvatureBoard",
     "BeisenBoard",
     "Connector",
     "EightfoldBoard",
@@ -109,6 +111,7 @@ CONNECTORS: dict[str, Connector] = {
     talentgateway.name: talentgateway,
     eightfold.name: eightfold,
     beisen.name: beisen,
+    avature.name: avature,
 }
 
 

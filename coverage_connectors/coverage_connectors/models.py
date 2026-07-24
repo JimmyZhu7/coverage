@@ -203,10 +203,21 @@ class BeisenBoard:
     provider: str = field(default="beisen", init=False)
 
 
+@dataclass(frozen=True, slots=True)
+class AvatureBoard:
+    """An Avature-hosted career site's RSS feed (see avature.py). `feed_url`
+    is the full `.../SearchJobs/feed/` URL; the connector paginates it via a
+    `folderOffset` query param it appends itself."""
+
+    firm: str
+    feed_url: str
+    provider: str = field(default="avature", init=False)
+
+
 BoardConfig = (
     GreenhouseBoard | LeverBoard | WorkdayBoard | OracleBoard | TalnetBoard | SitemapBoard
     | McKinseyBoard | PhenomBoard | GoldmanSachsBoard | TalentGatewayBoard | EightfoldBoard
-    | BeisenBoard
+    | BeisenBoard | AvatureBoard
 )
 
 

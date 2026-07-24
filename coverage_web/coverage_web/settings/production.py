@@ -36,6 +36,13 @@ SECURE_HSTS_PRELOAD = True
 # origin(s), e.g. "https://coverage.onrender.com,https://app.coverage.app".
 CSRF_TRUSTED_ORIGINS = env.list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
 
+# Outbound email (password resets today; digests/alerts later). EMAIL_URL is a
+# standard django-environ URL, e.g. smtp+tls://user:pass@smtp.resend.com:587.
+# Default is the console backend so an unconfigured deploy logs the reset link
+# to Render's logs (recoverable) instead of 500ing on localhost SMTP.
+vars().update(env.email_url("EMAIL_URL", default="consolemail://"))
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="Coverage <no-reply@localhost>")
+
 # Serve compressed, hashed static files via WhiteNoise. Requires a
 # `collectstatic` at build time (the Dockerfile / render build step does this).
 STORAGES = {

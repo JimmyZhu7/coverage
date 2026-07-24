@@ -60,6 +60,13 @@ services:
         sync: false
       - key: LINKEDIN_OAUTH_CLIENT_SECRET
         sync: false
+      # Outbound email (password resets; later digests/alerts). e.g.
+      # smtp+tls://resend:API_KEY@smtp.resend.com:587 — blank logs mail to the
+      # service logs instead of sending (never 500s).
+      - key: EMAIL_URL
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false # e.g. Coverage <no-reply@yourdomain.app>
       - key: SENTRY_DSN
         sync: false # optional; leave blank to disable
 

@@ -39,9 +39,9 @@ not in the seed set (e.g. Palantir), `ingest` auto-creates the firm — the
 from __future__ import annotations
 
 from coverage_connectors import (
-    BeisenBoard, BoardConfig, EightfoldBoard, GoldmanSachsBoard, GreenhouseBoard,
-    LeverBoard, McKinseyBoard, OracleBoard, PhenomBoard, SitemapBoard,
-    TalentGatewayBoard, TalnetBoard, WorkdayBoard,
+    AvatureBoard, BeisenBoard, BoardConfig, EightfoldBoard, GoldmanSachsBoard,
+    GreenhouseBoard, LeverBoard, McKinseyBoard, OracleBoard, PhenomBoard,
+    SitemapBoard, TalentGatewayBoard, TalnetBoard, WorkdayBoard,
 )
 
 # (firm_slug, BoardConfig). board.firm carries the display name.
@@ -135,8 +135,28 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("nomura", TalnetBoard(firm="Nomura", kind="events",
                            board_url="https://nomuracampus.tal.net/vx/mobile-0/candidate/jobboard/vacancy/2/adv/")),
 
+    # Elite boutiques + KKR (agent-identified + live-verified 2026-07-24).
+    # KKR's Greenhouse token really is the placeholder-looking "stage".
+    ("kkr", GreenhouseBoard(firm="KKR", token="stage")),
+    # Lazard runs two Oracle sites; CX_2 is the campus/internship one.
+    ("lazard", OracleBoard(firm="Lazard", host="icbpjb.fa.ocs.oraclecloud.com",
+                           site_number="CX_1", keywords=("intern", "graduate", "analyst"))),
+    ("lazard", OracleBoard(firm="Lazard", host="icbpjb.fa.ocs.oraclecloud.com",
+                           site_number="CX_2", keywords=("intern", "graduate", "analyst"))),
+    ("evercore", TalnetBoard(firm="Evercore", kind="jobs",
+                             board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/2/adv/")),
+    ("evercore", TalnetBoard(firm="Evercore", kind="jobs",
+                             board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/3/adv/")),
+    ("jefferies", TalnetBoard(firm="Jefferies", kind="jobs",
+                              board_url="https://jefferies.tal.net/vx/lang-en-GB/mobile-0/appcentre-ext/brand-4/xf-016c915b0a67/candidate/jobboard/vacancy/2/adv/")),
+    # Solomon's students board is real but empty out of season; the
+    # professionals board carries the current IB associate roles.
+    ("solomonpartners", GreenhouseBoard(firm="Solomon Partners", token="solomonpartnersprofessionals")),
+    ("pwp", WorkdayBoard(firm="Perella Weinberg", tenant_host="pwp.wd1",
+                         site="PWP_Experienced_Opportunities", tenant="pwp", search_text="intern")),
+
     ("apollo", WorkdayBoard(firm="Apollo", tenant_host="athene.wd5", site="apollononpubliccareersite",
-                            search_text="summer analyst intern")),
+                            search_text="intern")),
     ("carlyle", WorkdayBoard(firm="Carlyle", tenant_host="carlyle.wd1", site="Carlyle", search_text="intern")),
     ("baincapital", WorkdayBoard(firm="Bain Capital", tenant_host="baincapital.wd1", site="External_Public", search_text="intern")),
     ("baincapital", WorkdayBoard(firm="Bain Capital", tenant_host="baincapital.wd1", site="External_Private", search_text="intern")),
@@ -148,20 +168,20 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("rothschild", WorkdayBoard(firm="Rothschild & Co", tenant_host="rothschildandco.wd3", site="RothschildAndCo_Lateral", search_text="intern")),
     ("baird", WorkdayBoard(firm="Baird", tenant_host="baird.wd1", site="Careers", search_text="intern")),
     ("raymondjames", WorkdayBoard(firm="Raymond James", tenant_host="raymondjames.wd1", site="raymondjamescareers",
-                                  search_text="summer analyst intern")),
+                                  search_text="intern")),
     ("pipersandler", WorkdayBoard(firm="Piper Sandler", tenant_host="pipersandler.wd501", site="Piper_Sandler_Careers", search_text="intern")),
     ("stanchart", WorkdayBoard(firm="Standard Chartered", tenant_host="peopleplus.wd3", site="SCB_Careers", search_text="intern")),
     ("mizuho", WorkdayBoard(firm="Mizuho", tenant_host="mizuho.wd1", site="MizuhoAmericas", search_text="intern")),
     ("citi", WorkdayBoard(firm="Citi", tenant_host="citi.wd5", site="2", search_text="summer analyst")),
     # CITIC CLSA — Workday, HQ Hong Kong (agent-identified + live-verified 2026-07-23).
     ("clsa", WorkdayBoard(firm="CLSA", tenant_host="citicclsa.wd3", site="External",
-                          search_text="summer analyst intern")),
+                          search_text="intern")),
     ("barclays", WorkdayBoard(firm="Barclays", tenant_host="barclays.wd3", site="External_Career_Site_Barclays",
-                              search_text="summer analyst intern")),
-    ("db", WorkdayBoard(firm="Deutsche Bank", tenant_host="db.wd3", site="DBWebsite", search_text="summer analyst intern")),
-    ("wf", WorkdayBoard(firm="Wells Fargo", tenant_host="wf.wd1", site="WellsFargoJobs", search_text="summer analyst intern")),
-    ("ms", WorkdayBoard(firm="Morgan Stanley", tenant_host="ms.wd5", site="External", search_text="summer analyst intern")),
-    ("blackrock", WorkdayBoard(firm="BlackRock", tenant_host="blackrock.wd1", site="BlackRock_Professional", search_text="summer analyst intern")),
+                              search_text="intern")),
+    ("db", WorkdayBoard(firm="Deutsche Bank", tenant_host="db.wd3", site="DBWebsite", search_text="intern")),
+    ("wf", WorkdayBoard(firm="Wells Fargo", tenant_host="wf.wd1", site="WellsFargoJobs", search_text="intern")),
+    ("ms", WorkdayBoard(firm="Morgan Stanley", tenant_host="ms.wd5", site="External", search_text="intern")),
+    ("blackrock", WorkdayBoard(firm="BlackRock", tenant_host="blackrock.wd1", site="BlackRock_Professional", search_text="intern")),
     ("invesco", WorkdayBoard(firm="Invesco", tenant_host="invesco.wd1", site="IVZ", search_text="intern")),
     ("fidelityintl", WorkdayBoard(firm="Fidelity International", tenant_host="fil.wd3", site="001", search_text="intern")),
 
@@ -176,6 +196,19 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("mangroup", WorkdayBoard(firm="Man Group", tenant_host="mangroupplc.wd3", site="Man_Group_Careers", search_text="intern")),
     ("neubergerberman", WorkdayBoard(firm="Neuberger Berman", tenant_host="nb.wd1", site="NBCareers", search_text="intern")),
     ("statestreet", PhenomBoard(firm="State Street", host="careers.statestreet.com", keywords="intern")),
+    # PIMCO + Schroders (agent-identified + live-verified 2026-07-24).
+    ("pimco", WorkdayBoard(firm="PIMCO", tenant_host="pimco.wd1", site="pimco-careers",
+                           tenant="pimco", search_text="intern")),
+    ("schroders", OracleBoard(firm="Schroders", host="ekbq.fa.em2.oraclecloud.com",
+                              site_number="CX_2", keywords=("intern", "graduate"))),
+    # Avature RSS feeds (agent-identified + live-verified 2026-07-24). The feed
+    # exposes only the ~20 most-recent roles per firm (folderOffset is ignored
+    # server-side) — real URLs, no location field — so coverage is recent-roles,
+    # not the full board.
+    ("bain", AvatureBoard(firm="Bain & Company",
+                          feed_url="https://careers.bain.com/jobs/SearchJobs/feed/")),
+    ("macquarie", AvatureBoard(firm="Macquarie",
+                               feed_url="https://recruitment.macquarie.com/en_US/careers/SearchJobs/feed/")),
 
     # Prop trading / market-makers + multi-strat funds (agent-identified +
     # live-verified 2026-07-24). Greenhouse dominates — note the non-obvious

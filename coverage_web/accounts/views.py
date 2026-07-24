@@ -72,18 +72,6 @@ def onboarding(request):
                 tier = int(raw) if raw in ("1", "2", "3") else None
                 if tier != uf.tier:
                     UserFirm.all_objects.filter(pk=uf.pk).update(tier=tier)
-            # Preferences + connection placeholders live in the flexible
-            # assets blob until the real integrations exist.
-            assets = dict(request.user.assets or {})
-            assets["prefs"] = {
-                "weekly_digest": bool(request.POST.get("pref_digest")),
-                "deadline_reminders": bool(request.POST.get("pref_reminders")),
-            }
-            assets.setdefault("connections", {
-                "gmail": False, "google_calendar": False, "linkedin": False,
-            })
-            request.user.assets = assets
-            request.user.save(update_fields=["assets"])
             record_event("survey_completed", user=request.user)
             return redirect(_step_url("import"))
         elif step == "import":
@@ -94,7 +82,8 @@ def onboarding(request):
                 request.user.save(update_fields=["onboarded_at"])
                 record_event("onboarded", user=request.user)
             messages.success(request, "You're all set. Welcome to Coverage.")
-            return redirect(reverse("accounts:settings"))
+            # Land on Today — the working surface — not back in Settings.
+            return redirect("/app/")
 
     if form is None:
         form = ProfileForm.from_user(request.user)
@@ -113,7 +102,6 @@ def onboarding(request):
         context["ranked_firms"] = list(
             UserFirm.objects.for_user(request.user).select_related("firm").order_by("firm__name")
         )
-        context["prefs"] = (request.user.assets or {}).get("prefs", {})
     if step == "capture":
         context["capture_address"] = services.capture_address(request.user)
     return render(request, "accounts/onboarding.html", context)
