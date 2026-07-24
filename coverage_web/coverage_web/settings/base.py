@@ -155,6 +155,10 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
+# A bare "linkedin.com/in/x" in the contact form gets https, not http (also
+# silences the Django 6 URLField default-scheme deprecation warning).
+FORMS_URLFIELD_ASSUME_HTTPS = True
+
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"

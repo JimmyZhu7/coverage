@@ -12,6 +12,7 @@
     <p class="kin-hero-eyebrow">Your relationships</p>
     <h1 class="kin-hero-title">Network</h1>
     <p class="kin-hero-sub">Everyone you know at each firm, how warm they are, and who's next.</p>
+    <div class="actions"><a class="btn btn-primary" href="{% url 'crm:contact_new' %}">＋ Add Contact</a></div>
   </header>
   <nav class="subnav scope-tabs standalone">
     <a href="{% url 'crm:contact_list' %}"{% if not scope %} aria-current="page"{% endif %}>All</a>
@@ -128,7 +129,7 @@
                   </span>
                   <span class="cc-btns">
                     <a class="btn" href="{% url 'crm:contact_detail' card.c.id %}">Log Touch</a>
-                    <a class="btn" href="{% url 'crm:contact_detail' card.c.id %}">Update</a>
+                    <a class="btn" href="{% url 'crm:contact_edit' card.c.id %}">Edit</a>
                   </span>
                 </div>
               </div>

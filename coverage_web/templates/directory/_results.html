@@ -23,7 +23,7 @@ hidden rather than shown as a weak "0".{% endcomment %}
 {% endif %}
 
 {% if clusters %}
-  <div class="firmcols">
+  <div class="firmcols"{% if request.user.is_authenticated %} hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'{% endif %}>
     {% for cl in clusters %}
       <article class="firmcol{% if cl.is_mine %} is-mine{% endif %} kin-reveal" style="--i:{{ forloop.counter0 }}">
         <header class="firmcol-head">
@@ -42,7 +42,10 @@ hidden rather than shown as a weak "0".{% endcomment %}
             <div class="rolecard urg-{{ r.level }}">
               <div class="rolecard-top">
                 <span class="role-mini role-{{ r.bucket }}">{{ r.bucket_label }}{% if r.cohort %} · {{ r.cohort }}{% endif %}</span>
-                {% if r.is_fresh and not r.dated %}<span class="fresh-badge">New</span>{% endif %}
+                <span class="rolecard-top-right">
+                  {% if r.is_fresh and not r.dated %}<span class="fresh-badge">New</span>{% endif %}
+                  {% if request.user.is_authenticated %}{% include "directory/_track_control.html" %}{% endif %}
+                </span>
               </div>
               <h4 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a></h4>
               {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_title }}</span>{% endif %}

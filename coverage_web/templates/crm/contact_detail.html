@@ -21,6 +21,7 @@
         {% if contact.school_affiliation %} · <span class="chip">alum</span>{% endif %}
       </p>
     </div>
+    <a class="btn" href="{% url 'crm:contact_edit' contact.pk %}">Edit</a>
   </div>
 
   <div class="panel">
