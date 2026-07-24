@@ -1,0 +1,29 @@
+{% comment %}
+One role card's track control, swapped in place via htmx. `r` needs `id` and
+`track_status` (None = untracked; "saved"; or a funnel stage). CSRF is
+inherited from the hx-headers on the .firmcols ancestor. The funnel stages are
+shown as a read-only chip here — they're advanced on the My Applications page,
+so a stray feed click can't un-apply someone.
+{% endcomment %}
+<span class="track" id="track-{{ r.id }}">
+  {% if r.track_status is None %}
+    <button type="button" class="track-btn"
+            hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "saved"}'
+            hx-target="#track-{{ r.id }}" hx-swap="outerHTML"
+            title="Save this role">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11.5l-3.5 2 .9-3.9L2.5 6.9l4-.35L8 3l1.5 3.55 4 .35-2.9 2.7.9 3.9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+      Save
+    </button>
+  {% elif r.track_status == "saved" %}
+    <button type="button" class="track-btn is-saved"
+            hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "clear"}'
+            hx-target="#track-{{ r.id }}" hx-swap="outerHTML"
+            title="Remove from saved">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11.5l-3.5 2 .9-3.9L2.5 6.9l4-.35L8 3l1.5 3.55 4 .35-2.9 2.7.9 3.9z" fill="currentColor"/></svg>
+      Saved
+    </button>
+  {% else %}
+    <a class="track-chip track-{{ r.track_status }}" href="{% url 'my_applications' %}"
+       title="Manage on My Applications">{% if r.track_status == "submitted" %}Applied{% elif r.track_status == "interview" %}Interviewing{% else %}Offer{% endif %}</a>
+  {% endif %}
+</span>

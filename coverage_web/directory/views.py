@@ -23,10 +23,14 @@ from __future__ import annotations
 
 from collections import Counter
 
+from django.contrib.auth.decorators import login_required
 from django.db.models import Case, F, IntegerField, Q, Value, When
+from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
+from analytics.events import record_event
 # Read-only, cross-app import (build-plan.md §2's private zone). directory
 # never writes crm rows; the opportunities feed only reads UserFirm via the
 # tenant-scoped manager. No import cycle: crm.models imports directory.models.
@@ -356,6 +360,7 @@ def _urgency_item(o, *, now, today, my_firm_ids):
     bucket = o.bucket or OTHER
     seen_days = (now - o.first_seen).days if o.first_seen else None
     item = {
+        "id": o.id,
         "firm_name": o.firm.name,
         "firm_slug": o.firm.slug,
         "monogram": "".join(p[0] for p in name_parts[:2]).upper() or "?",
@@ -574,6 +579,21 @@ def opportunities(request):
     total = sum(c["open_count"] for c in cluster_list)
     personalized = bool(tier_by_firm or user_regions or user_tracks)
 
+    # Annotate each role with the user's own track status (saved / applied /
+    # …) so the card's star renders in the right state. One query for the lot.
+    if request.user.is_authenticated:
+        from analytics.models import UserOpportunity
+
+        tracked = dict(
+            UserOpportunity.objects.for_user(request.user)
+            .filter(dismissed=False)
+            .values_list("opportunity_id", "applied_status")
+        )
+        for cl in cluster_list:
+            for r in cl["roles"]:
+                if r["id"] in tracked:
+                    r["track_status"] = tracked[r["id"]] or "saved"
+
     # Widget row: total open campus roles, roles at the user's own firms,
     # and their application funnel. Anonymous visitors see an em-dash for
     # the personal figures, not a zero pretending to be data.
@@ -635,6 +655,92 @@ def opportunities(request):
     if request.headers.get("HX-Request"):
         return render(request, "directory/_results.html", context)
     return render(request, "directory/opportunities.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Opportunity tracking — the writable side of UserOpportunity. `saved` is the
+# feed's one-click star; `submitted`/`interview`/`offer` are the funnel states
+# managed on My Applications. Every write is scoped through `.for_user`.
+# ---------------------------------------------------------------------------
+_TRACK_STATES = ("saved", "submitted", "interview", "offer")
+_FUNNEL_STATES = ("submitted", "interview", "offer")
+
+
+def _track_control(request, opp):
+    """Render just the one card's star + status, for an htmx outerHTML swap."""
+    from analytics.models import UserOpportunity
+
+    uo = UserOpportunity.objects.for_user(request.user).filter(
+        opportunity=opp, dismissed=False
+    ).first()
+    return render(request, "directory/_track_control.html", {
+        "r": {"id": opp.id, "track_status": (uo.applied_status or "saved") if uo else None},
+    })
+
+
+@login_required
+@require_POST
+def track_opportunity(request, pk):
+    """Set (or clear) the current user's track status for one opportunity.
+    `status=clear` removes the row; any of _TRACK_STATES upserts it. Returns
+    the re-rendered control for an htmx swap."""
+    from analytics.models import UserOpportunity
+
+    opp = get_object_or_404(Opportunity, pk=pk)
+    status = (request.POST.get("status") or "saved").strip().lower()
+
+    if status == "clear":
+        UserOpportunity.objects.for_user(request.user).filter(opportunity=opp).delete()
+        record_event("opportunity_untracked", user=request.user)
+    elif status not in _TRACK_STATES:
+        return HttpResponseBadRequest("unknown status")
+    else:
+        uo, _ = UserOpportunity.all_objects.get_or_create(
+            user=request.user, opportunity=opp
+        )
+        uo.applied_status = "" if status == "saved" else status
+        uo.dismissed = False
+        # Stamp applied_at the first time the role enters the funnel.
+        if status in _FUNNEL_STATES and uo.applied_at is None:
+            uo.applied_at = timezone.now()
+        uo.save(update_fields=["applied_status", "applied_at", "dismissed"])
+        record_event("opportunity_tracked", user=request.user, status=status)
+
+    # The feed swaps just the one card's control (htmx); the My Applications
+    # page posts a plain form and wants a redirect back to itself.
+    if request.headers.get("HX-Request"):
+        return _track_control(request, opp)
+    from django.shortcuts import redirect
+
+    return redirect(request.POST.get("next") or "my_applications")
+
+
+@login_required
+def my_applications(request):
+    """The user's saved and applied roles, grouped by pipeline stage."""
+    from analytics.models import UserOpportunity
+
+    rows = (
+        UserOpportunity.objects.for_user(request.user)
+        .filter(dismissed=False)
+        .select_related("opportunity", "opportunity__firm")
+        .order_by("opportunity__firm__name", "opportunity__title")
+    )
+    # Group into Saved + the three funnel stages, in pipeline order.
+    groups = {"saved": [], "submitted": [], "interview": [], "offer": []}
+    for uo in rows:
+        groups[(uo.applied_status or "saved")].append(uo)
+    stages = [
+        {"key": "saved", "label": "Saved", "items": groups["saved"]},
+        {"key": "submitted", "label": "Applied", "items": groups["submitted"]},
+        {"key": "interview", "label": "Interviewing", "items": groups["interview"]},
+        {"key": "offer", "label": "Offer", "items": groups["offer"]},
+    ]
+    return render(request, "directory/my_applications.html", {
+        "stages": stages,
+        "total": rows.count(),
+        "states": _TRACK_STATES,
+    })
 
 
 def firm_detail(request, slug):

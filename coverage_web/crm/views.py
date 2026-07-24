@@ -17,10 +17,11 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count as models_Count, Max as models_Max, Q
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -28,7 +29,9 @@ from analytics.events import record_event
 from analytics.models import UserOpportunity
 from coverage_domain import cadence, scoring
 from coverage_domain.pipeline import CHANNELS, TOUCH_TRANSITIONS
+from crm.forms import ContactForm
 from directory.classify import TARGET_BUCKETS
+from directory.models import Firm
 from directory.models import Firm, FirmDate, Opportunity
 
 from . import services
@@ -608,6 +611,46 @@ def set_firm_tier(request: HttpRequest) -> HttpResponse:
         return HttpResponse(status=404)
     record_event("firm_tier_set", user=request.user)
     return HttpResponse(status=204)
+
+
+@login_required
+def contact_new(request: HttpRequest) -> HttpResponse:
+    """Hand-add a contact — the coffee-chat path the CRM was missing. A
+    ?firm=<slug> query pre-selects a firm (used by the firm page's button)."""
+    if request.method == "POST":
+        form = ContactForm(request.POST)
+        if form.is_valid():
+            contact = form.save(commit=False)
+            contact.user = request.user
+            contact.source = "manual"
+            contact.save()
+            record_event("contact_added", user=request.user, source="manual")
+            messages.success(request, f"Added {contact.name}.")
+            return redirect("crm:contact_detail", pk=contact.pk)
+    else:
+        initial = {}
+        firm_slug = request.GET.get("firm")
+        if firm_slug:
+            initial["firm"] = Firm.objects.filter(slug=firm_slug).first()
+        form = ContactForm(initial=initial)
+    return render(request, "crm/contact_form.html", {"form": form, "mode": "new"})
+
+
+@login_required
+def contact_edit(request: HttpRequest, pk: int) -> HttpResponse:
+    """Edit an existing contact. Scoped through `.for_user`, so another
+    tenant's id 404s indistinguishably from a missing one."""
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    if request.method == "POST":
+        form = ContactForm(request.POST, instance=contact)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Contact updated.")
+            return redirect("crm:contact_detail", pk=contact.pk)
+    else:
+        form = ContactForm(instance=contact)
+    return render(request, "crm/contact_form.html",
+                  {"form": form, "mode": "edit", "contact": contact})
 
 
 @login_required

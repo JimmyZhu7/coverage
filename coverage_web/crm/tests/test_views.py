@@ -213,3 +213,51 @@ def test_week_requires_login(client):
     resp = client.get(reverse("crm:week"))
     # login_required redirects unauthenticated users away.
     assert resp.status_code in (301, 302)
+
+
+# ---------------------------------------------------------------------------
+# Add / edit contact — the hand-add path (was: no way to create a contact).
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_contact_new_creates_scoped_to_user(client):
+    user = _user()
+    client.force_login(user)
+    resp = client.post(
+        reverse("crm:contact_new"),
+        {"name": "Ada Lovelace", "firm_text": "A Boutique", "role": "Analyst",
+         "email": "ada@example.com", "linkedin": "", "school": "", "angle": "", "notes": ""},
+    )
+    assert resp.status_code == 302
+    c = Contact.all_objects.get(name="Ada Lovelace")
+    assert c.user_id == user.id
+    assert c.source == "manual"
+    assert c.warmth == "cold"  # ratchet default, never set by the form
+    assert ProductEvent.all_objects.filter(event="contact_added", user=user).exists()
+
+
+@pytest.mark.django_db
+def test_contact_new_requires_a_name(client):
+    client.force_login(_user())
+    resp = client.post(reverse("crm:contact_new"), {"name": "", "firm_text": "X"})
+    assert resp.status_code == 200  # re-renders the form
+    assert Contact.all_objects.filter(firm_text="X").count() == 0
+
+
+@pytest.mark.django_db
+def test_contact_edit_requires_login(client):
+    user = _user()
+    c = Contact.all_objects.create(user=user, name="Grace")
+    resp = client.get(reverse("crm:contact_edit", args=[c.pk]))
+    assert resp.status_code == 302 and "/accounts/login/" in resp["Location"]
+
+
+@pytest.mark.django_db
+def test_user_b_cannot_edit_user_a_contact(client):
+    a = _user("a@example.com")
+    b = _user("b@example.com")
+    c = Contact.all_objects.create(user=a, name="Alan")
+    client.force_login(b)
+    resp = client.post(reverse("crm:contact_edit", args=[c.pk]), {"name": "Hacked"})
+    assert resp.status_code == 404
+    c.refresh_from_db()
+    assert c.name == "Alan"

@@ -14,6 +14,9 @@ urlpatterns = [
     # entry-level) — the star page: an urgency feed ranked by deadline then
     # freshness, served by the directory app's list view.
     path("opportunities/", directory_views.opportunities, name="opportunities"),
+    # The user's saved / applied roles, and the track toggle behind each card.
+    path("opportunities/mine/", directory_views.my_applications, name="my_applications"),
+    path("opportunities/<int:pk>/track/", directory_views.track_opportunity, name="track_opportunity"),
     # Per-firm detail pages linked from the feed.
     path("firms/", include("directory.urls")),
     path("app/", include("crm.urls")),               # authed hub: today, network

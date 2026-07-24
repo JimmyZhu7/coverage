@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}{% if mode == "edit" %}Edit Contact{% else %}Add Contact{% endif %} · Coverage{% endblock %}
+
+{% block head %}
+<style>
+  .cf-wrap { max-width: 640px; margin: 0 auto; }
+  .cf-card { background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-1);
+    padding: var(--s6) var(--s6) var(--s5); }
+  .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4); }
+  .cf-full { grid-column: 1 / -1; }
+  .cf-card label { font-size: var(--fs-s); }
+  .cf-card input, .cf-card select, .cf-card textarea { width: 100%; }
+  .cf-actions { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s4); }
+  .cf-cancel { font-size: var(--fs-s); }
+  .cf-err { color: var(--danger); font-size: var(--fs-xs); margin: 2px 0 var(--s2); }
+  @media (max-width: 560px) { .cf-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page cf-wrap">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="network" %}</span>
+    <p class="kin-hero-eyebrow">{% if mode == "edit" %}Edit{% else %}New{% endif %} contact</p>
+    <h1 class="kin-hero-title">{% if mode == "edit" %}Edit Contact{% else %}Add a Contact{% endif %}</h1>
+    <p class="kin-hero-sub">{% if mode == "edit" %}Update {{ contact.name }}.{% else %}Someone you met: a coffee chat, a recruiter, an alum. Warmth and cadence take it from here.{% endif %}</p>
+  </header>
+
+  <div class="cf-card">
+    <form method="post">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<p class="cf-err">{{ form.non_field_errors|striptags }}</p>{% endif %}
+
+      <div class="cf-full">
+        <label for="{{ form.name.id_for_label }}">Name</label>
+        {{ form.name }}
+        {% if form.name.errors %}<p class="cf-err">{{ form.name.errors|striptags }}</p>{% endif %}
+      </div>
+
+      <div class="cf-grid">
+        <div>
+          <label for="{{ form.firm.id_for_label }}">Firm</label>
+          {{ form.firm }}
+        </div>
+        <div>
+          <label for="{{ form.firm_text.id_for_label }}">Firm (if not listed)</label>
+          {{ form.firm_text }}
+        </div>
+        <div>
+          <label for="{{ form.role.id_for_label }}">Role</label>
+          {{ form.role }}
+        </div>
+        <div>
+          <label for="{{ form.school.id_for_label }}">School</label>
+          {{ form.school }}
+        </div>
+        <div>
+          <label for="{{ form.email.id_for_label }}">Email</label>
+          {{ form.email }}
+          {% if form.email.errors %}<p class="cf-err">{{ form.email.errors|striptags }}</p>{% endif %}
+        </div>
+        <div>
+          <label for="{{ form.linkedin.id_for_label }}">LinkedIn URL</label>
+          {{ form.linkedin }}
+          {% if form.linkedin.errors %}<p class="cf-err">{{ form.linkedin.errors|striptags }}</p>{% endif %}
+        </div>
+      </div>
+
+      <div class="cf-full">
+        <label for="{{ form.angle.id_for_label }}">Angle</label>
+        {{ form.angle }}
+        <p class="note">Your reason to reach out. Seeds the first draft.</p>
+      </div>
+      <div class="cf-full">
+        <label for="{{ form.notes.id_for_label }}">Notes</label>
+        {{ form.notes }}
+      </div>
+
+      <div class="cf-actions">
+        <button type="submit" class="btn btn-primary">{% if mode == "edit" %}Save Changes{% else %}Add Contact{% endif %}</button>
+        <a class="cf-cancel" href="{% if mode == "edit" %}{% url 'crm:contact_detail' contact.pk %}{% else %}{% url 'crm:contact_list' %}{% endif %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

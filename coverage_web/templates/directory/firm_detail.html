@@ -15,6 +15,9 @@
       {% if firm.regions and firm.tracks %} · {% endif %}
       {% if firm.tracks %}{{ firm.tracks|join:", " }}{% endif %}
     </p>
+    {% if user.is_authenticated %}
+    <div class="actions"><a class="btn" href="{% url 'crm:contact_new' %}?firm={{ firm.slug }}">＋ Add a Contact Here</a></div>
+    {% endif %}
   </header>
 
   <section class="section">
