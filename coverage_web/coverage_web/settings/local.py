@@ -7,7 +7,6 @@ fallback (see base.py's Database section for why).
 """
 
 from .base import *  # noqa: F401,F403
-from .base import env
 
 DEBUG = True
 

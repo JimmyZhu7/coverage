@@ -38,14 +38,8 @@ from crm.models import UserFirm
 from directory.classify import (
     BUCKET_LABELS, INSIGHT, OTHER, REGION_LABELS, REGION_ORDER, TARGET_BUCKETS,
 )
-from directory.models import Firm, Opportunity, ScrapeRun
+from directory.models import Firm, Opportunity
 from directory.timeline import EVENT_LABELS
-
-# Past this many days without a re-verification, a listing wears a visible
-# "may be stale" flag. The staleness banner is a feature, not noise
-# (build-plan.md §7/§10, risk #6): we tell on ourselves rather than let a
-# quietly-rotting date pass for fresh.
-STALE_AFTER_DAYS = 14
 
 # Firm category labels — the insider taxonomy students actually sort firms
 # by ("who has coverage on this account" energy, per the brand voice). Keyed
@@ -126,25 +120,6 @@ def confidence_marker(value):
     return {"level": level, "label": level, "value": round(value, 2), "pct": round(value * 100)}
 
 
-def staleness_marker(last_verified, last_checked, *, now=None):
-    """Age of the most recent verification, plus a stale flag past
-    STALE_AFTER_DAYS. Falls back to last_checked when last_verified is
-    absent; if neither exists, the listing is honestly "not yet verified".
-    """
-    now = now or timezone.now()
-    verified = last_verified or last_checked
-    if verified is None:
-        return {"label": "not yet verified", "is_stale": True, "days": None, "verified": None}
-    days = (now - verified).days
-    if days <= 0:
-        label = "verified today"
-    elif days == 1:
-        label = "verified 1 day ago"
-    else:
-        label = f"verified {days} days ago"
-    return {"label": label, "is_stale": days > STALE_AFTER_DAYS, "days": days, "verified": verified}
-
-
 def deadline_marker(deadline, precision, *, today=None):
     """Format a deadline honestly, respecting its stated precision, and
     never fabricating one. A null deadline says so out loud.
@@ -170,18 +145,6 @@ def deadline_marker(deadline, precision, *, today=None):
     else:
         countdown = f"closes in {days} days"
     return {"posted": True, "label": label, "countdown": countdown, "past": days < 0, "precision": prec}
-
-
-def sponsorship_marker(sponsorship):
-    """Tri-state, labelled honestly. "unknown" is a legitimate answer this
-    early (see directory/models.py's note) — not silently rounded to "no".
-    """
-    s = (sponsorship or "unknown").lower()
-    return {
-        "yes": {"level": "known", "label": "sponsors visas"},
-        "no": {"level": "none", "label": "no visa sponsorship"},
-        "unknown": {"level": "unknown", "label": "sponsorship unknown"},
-    }.get(s, {"level": "unknown", "label": f"sponsorship: {s}"})
 
 
 def _class_of(bucket: str, cohort: str) -> str:
@@ -594,34 +557,16 @@ def opportunities(request):
                 if r["id"] in tracked:
                     r["track_status"] = tracked[r["id"]] or "saved"
 
-    # Widget row: total open campus roles, roles at the user's own firms,
-    # and their application funnel. Anonymous visitors see an em-dash for
-    # the personal figures, not a zero pretending to be data.
-    campus_all = open_qs.filter(bucket__in=TARGET_BUCKETS)
+    # The two figures the stat strip actually renders. (The old hero widget's
+    # total/for-you/funnel counts were dropped with it — they cost 5 queries a
+    # request and nothing displayed them.)
     dash = {
-        "total_open": campus_all.count(),
-        "for_you": None,
-        "funnel": None,
+        "closing_week": sum(
+            1 for i in feed["closing"]
+            if i["days_left"] is not None and i["days_left"] <= 7
+        ),
+        "fresh_count": feed["fresh_count"],
     }
-    if request.user.is_authenticated:
-        my_firm_ids = list(
-            UserFirm.objects.for_user(request.user).values_list("firm_id", flat=True)
-        )
-        dash["for_you"] = campus_all.filter(firm_id__in=my_firm_ids).count()
-        from analytics.models import UserOpportunity  # local: avoids app-load order games
-
-        uo = UserOpportunity.objects.for_user(request.user)
-        dash["funnel"] = {
-            "submitted": uo.filter(applied_status__iexact="submitted").count(),
-            "interview": uo.filter(applied_status__iexact="interview").count(),
-            "offer": uo.filter(applied_status__iexact="offer").count(),
-        }
-
-    # Urgency headline stats for the hero.
-    dash["closing_week"] = sum(1 for i in feed["closing"] if i["days_left"] is not None and i["days_left"] <= 7)
-    dash["closing_next"] = feed["closing"][0] if feed["closing"] else None
-    dash["rolling_total"] = feed["rolling_total"]
-    dash["fresh_count"] = feed["fresh_count"]
 
     # Every covered firm (with an open campus role), for the multi-select.
     all_firms = [
@@ -631,7 +576,6 @@ def opportunities(request):
     ]
 
     context = {
-        "feed": feed,
         "clusters": cluster_list,
         "total": total,
         "facets": facets,
@@ -648,8 +592,6 @@ def opportunities(request):
             "q": query,
         },
         "has_filters": any([role, region, track, provider, query]) or bool(firm_slugs),
-        "latest_run": ScrapeRun.objects.order_by("-started").first(),
-        "stale_after_days": STALE_AFTER_DAYS,
     }
 
     if request.headers.get("HX-Request"):
@@ -710,9 +652,16 @@ def track_opportunity(request, pk):
     # page posts a plain form and wants a redirect back to itself.
     if request.headers.get("HX-Request"):
         return _track_control(request, opp)
-    from django.shortcuts import redirect
+    from django.shortcuts import redirect, resolve_url
+    from django.utils.http import url_has_allowed_host_and_scheme
 
-    return redirect(request.POST.get("next") or "my_applications")
+    # Only allow a same-site `next`; never bounce to an attacker-supplied host.
+    nxt = request.POST.get("next") or ""
+    if nxt and url_has_allowed_host_and_scheme(
+        nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return redirect(nxt)
+    return redirect(resolve_url("my_applications"))
 
 
 @login_required
@@ -720,16 +669,17 @@ def my_applications(request):
     """The user's saved and applied roles, grouped by pipeline stage."""
     from analytics.models import UserOpportunity
 
-    rows = (
+    rows = list(
         UserOpportunity.objects.for_user(request.user)
         .filter(dismissed=False)
         .select_related("opportunity", "opportunity__firm")
         .order_by("opportunity__firm__name", "opportunity__title")
     )
-    # Group into Saved + the three funnel stages, in pipeline order.
+    # Group into Saved + the three funnel stages, in pipeline order. setdefault
+    # so any unexpected legacy status can't KeyError the page.
     groups = {"saved": [], "submitted": [], "interview": [], "offer": []}
     for uo in rows:
-        groups[(uo.applied_status or "saved")].append(uo)
+        groups.setdefault(uo.applied_status or "saved", []).append(uo)
     stages = [
         {"key": "saved", "label": "Saved", "items": groups["saved"]},
         {"key": "submitted", "label": "Applied", "items": groups["submitted"]},
@@ -738,8 +688,7 @@ def my_applications(request):
     ]
     return render(request, "directory/my_applications.html", {
         "stages": stages,
-        "total": rows.count(),
-        "states": _TRACK_STATES,
+        "total": len(rows),
     })
 
 
@@ -761,6 +710,5 @@ def firm_detail(request, slug):
         "cards": [_card(o, now=now, today=today) for o in opps],
         "timeline": _timeline(firm, today=today),
         "total": opps.count(),
-        "stale_after_days": STALE_AFTER_DAYS,
     }
     return render(request, "directory/firm_detail.html", context)

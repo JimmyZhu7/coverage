@@ -7,7 +7,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .logform { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; margin-top: var(--s2); }
   .logform select { width: auto; }
   .logform input[type="text"] { flex: 1 1 180px; min-width: 140px; width: auto; }
-  .reason-line { margin: var(--s2) 0 var(--s3); }
 
   .strip-title { font-size: var(--fs-micro); color: var(--ink-3); margin: 0 0 var(--s3);
     text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--w-med); }
@@ -30,7 +29,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     margin: 0 0 var(--s3); padding-top: 2px; }
   .lane-count { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: var(--fs-s); color: var(--ink-3); }
-  .lane-sub { color: var(--ink-3); font-size: var(--fs-s); margin: 0 0 var(--s3); }
   .lane-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger);
     flex: none; animation: kin-pulse-ring 1800ms ease-out infinite; }
   .lane-overdue .prio { background: var(--danger-soft); color: var(--danger); }
@@ -111,9 +109,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .act-role { margin: 0; color: var(--ink-2); font-size: var(--fs-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .act-badges { display: flex; gap: var(--s2); flex-wrap: wrap; }
-  /* Reason clamped to two lines so every card is the same height. */
-  .act-reason { margin: 0; color: var(--ink-2); font-size: var(--fs-s); flex: 1;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
   /* ---- Network board (radar layout, Coverage light theme) ---- */
   .scope-tabs { margin-top: var(--s3); }
@@ -291,10 +286,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   @media (max-width: 900px) {
     .dash-stats { grid-template-columns: repeat(2, 1fr); }
-    .week-strip { grid-template-columns: repeat(4, 1fr); }
     .net-board { grid-template-columns: 1fr; }
-  }
-  @media (max-width: 640px) {
-    .week-strip { grid-template-columns: repeat(2, 1fr); }
   }
 </style>
