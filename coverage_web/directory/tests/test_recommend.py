@@ -336,8 +336,10 @@ def live_board(db):
 
 # The page's CSS block mentions "Picked for you" in a comment, so the presence
 # of the heading is asserted on its markup, not on the bare phrase.
-_HEADING = "<h2 class=\"recbar-title\">Picked for you</h2>"
-_RAIL = "<div class=\"recbar-rail\">"
+_HEADING = "<h2 class=\"recbar-title\" id=\"recbar-h\">Picked for you</h2>"
+# The picks used to render as a horizontally scrolling rail. They are now a
+# wrapping grid of per-firm blocks — see _group_picks in directory/views.py.
+_RAIL = "<div class=\"recbar-grid\">"
 
 
 @pytest.mark.django_db

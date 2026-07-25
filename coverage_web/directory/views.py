@@ -235,6 +235,7 @@ def _pick_card(rec) -> dict:
     passed through verbatim — shortening them here would break the promise that
     what the card says is exactly what the scorer decided."""
     c = rec.candidate
+    bucket = c.bucket or OTHER
     return {
         "id": c.id,
         "firm_name": c.firm_name,
@@ -244,9 +245,91 @@ def _pick_card(rec) -> dict:
         "url": c.url,
         "location": c.location,
         "deadline": c.deadline,
+        # The role's own kind ("Internship", "Insight Programme", ...). Two
+        # roles at one firm can differ on this where they cannot differ on any
+        # of the firm-level scoring axes, so it is one of the few fields that
+        # earns its place on the row itself.
+        "bucket": bucket,
+        "bucket_label": BUCKET_LABELS.get(bucket, bucket),
         "score": rec.score,
-        "reasons": rec.reasons,
+        "reasons": list(rec.reasons),
     }
+
+
+def _reason_key(r):
+    """A reason's identity for de-duplication: the exact (kind, text, detail)
+    triple.
+
+    Matching on `text` alone would be wrong and dishonest. "Tier 1" carries a
+    different sentence for each firm ("<firm> is a Tier 1 firm on your target
+    list"), so collapsing two firms' Tier 1 chips into one would print one
+    firm's justification over another's role. Only a byte-identical
+    justification may be stated once."""
+    return (r.kind, r.text, r.detail)
+
+
+def _group_picks(cards):
+    """Regroup the flat, ranked pick list into firm blocks and lift every
+    reason that is common to a whole block out of the individual rows.
+
+    WHY. Three of the four scoring axes (tier, track, region) read FIRM
+    properties, so two roles at the same firm are structurally incapable of
+    differing on them. Printed once per card, that produced a row of cards
+    whose "why" strings were byte-identical — a bar labelled "picked for you"
+    in which every card says the same thing tells the student nothing, and
+    buries the one thing that does differ (the role, its deadline, where it
+    is) under four chips that don't.
+
+    This is a PRESENTATION regroup and nothing else. It does not rescore and
+    does not reorder: blocks appear in the order their best-ranked role
+    appeared, roles keep their order inside a block, and no reason is dropped
+    — every reason the scorer produced is still printed exactly once, at the
+    broadest level where it is true. Only WHERE it prints changes.
+
+    A reason rises to the highest level at which it is universal:
+      * bar level  — identical on every pick, whatever the firm
+      * firm level — identical on every role at that one firm
+      * role level — whatever is left, i.e. the genuinely distinguishing bits
+
+    Returns `(shared, blocks)`.
+    """
+    if not cards:
+        return [], []
+
+    blocks: dict[str, dict] = {}
+    order: list[dict] = []
+    for c in cards:
+        b = blocks.get(c["firm_slug"])
+        if b is None:
+            b = blocks[c["firm_slug"]] = {
+                "firm_name": c["firm_name"],
+                "firm_slug": c["firm_slug"],
+                "monogram": c["monogram"],
+                "roles": [],
+            }
+            order.append(b)
+        b["roles"].append(c)
+
+    def universal(rows):
+        """The reasons carried, identically, by every row in `rows`. Walks
+        row 0 to emit them in the scorer's fixed axis order (see _AXES)."""
+        common = set(_reason_key(r) for r in rows[0]["reasons"])
+        for row in rows[1:]:
+            common &= set(_reason_key(r) for r in row["reasons"])
+        return [r for r in rows[0]["reasons"] if _reason_key(r) in common]
+
+    shared = universal(cards)
+    shared_keys = {_reason_key(r) for r in shared}
+    for b in order:
+        b["reasons"] = [
+            r for r in universal(b["roles"]) if _reason_key(r) not in shared_keys
+        ]
+        printed = shared_keys | {_reason_key(r) for r in b["reasons"]}
+        for role in b["roles"]:
+            role["reasons"] = [
+                r for r in role["reasons"] if _reason_key(r) not in printed
+            ]
+    return shared, order
 
 
 def _firm_date_row(fd, *, today):
@@ -621,6 +704,7 @@ def opportunities(request):
                     ],
                 )
             ]
+    pick_shared, pick_blocks = _group_picks(picks)
 
     qs = qs.order_by("firm__name", F("deadline").asc(nulls_last=True), "title")
     clusters: dict[int, dict] = {}
@@ -725,6 +809,12 @@ def opportunities(request):
         # signed-out / empty-survey state. The template needs to tell those
         # two apart, so both flags travel.
         "picks": picks,
+        # The same picks, regrouped for display: `pick_shared` are the reasons
+        # true of every pick (printed once, in the bar head), `pick_blocks` the
+        # per-firm blocks. `picks` stays as the flat, authoritative list — it is
+        # what the count in the head is drawn from and what tests read.
+        "pick_shared": pick_shared,
+        "pick_blocks": pick_blocks,
         "has_profile": bool(profile and not profile.is_empty),
         "facets": facets,
         "role_facet": role_facet,
@@ -844,6 +934,22 @@ def track_opportunity(request, pk):
     return redirect(resolve_url("my_applications"))
 
 
+def _urgency_band(days_left):
+    """Bucket a countdown into the three bands My Applications styles.
+
+    Returned as a (key, label) pair so the row can carry a WORD as well as a
+    colour: "now" rows are red *and* say "act now", which is what keeps the
+    urgency legible to a student who cannot separate the red from the amber
+    (ux: color-not-only, severity High)."""
+    if days_left is None:
+        return {"key": "none", "label": ""}
+    if days_left <= 2:
+        return {"key": "now", "label": "act now"}
+    if days_left <= 7:
+        return {"key": "soon", "label": "this week"}
+    return {"key": "later", "label": ""}
+
+
 def _lens_item(uo, *, today):
     """One row as it appears in a deadline lens (Closing Soon / Rolling).
 
@@ -851,6 +957,7 @@ def _lens_item(uo, *, today):
     reading as a separate pile of roles."""
     o = uo.opportunity
     stage = uo.applied_status or "saved"
+    days_left = (o.deadline - today).days if o.deadline else None
     return {
         "id": o.id,
         "firm_name": o.firm.name,
@@ -860,7 +967,8 @@ def _lens_item(uo, *, today):
         "stage": stage,
         "stage_label": _STAGE_LABELS.get(stage, stage.title()),
         "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
-        "days_left": (o.deadline - today).days if o.deadline else None,
+        "days_left": days_left,
+        "urgency": _urgency_band(days_left),
     }
 
 
@@ -899,8 +1007,22 @@ def my_applications(request):
     groups: dict[str, list] = {key: [] for key, _ in _STAGES}
     for uo in rows:
         groups.setdefault(uo.applied_status or "saved", []).append(uo)
+    # Every stage travels, including the empty ones. The funnel rail at the top
+    # of the page draws all five so the shape of the pipeline is readable at a
+    # glance — a stage holding three roles gets a bar three times the one
+    # holding one, and a stage holding none says "0" rather than vanishing and
+    # leaving the student to wonder whether it exists. `pct` is that bar, as a
+    # share of the busiest stage; it is presentation arithmetic the template
+    # cannot do, which is why it is computed here.
+    biggest = max((len(groups[key]) for key, _ in _STAGES), default=0)
     stages = [
-        {"key": key, "label": label, "items": groups[key]}
+        {
+            "key": key,
+            "label": label,
+            "items": groups[key],
+            "count": len(groups[key]),
+            "pct": round(100 * len(groups[key]) / biggest) if biggest else 0,
+        }
         for key, label in _STAGES
     ]
 

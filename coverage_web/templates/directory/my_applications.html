@@ -5,16 +5,159 @@
 
 {% block head %}
 <style>
-  .apps-stage { margin-top: var(--s6); }
+  /* ======================================================================
+     MY APPLICATIONS — data-dense dashboard.
+
+     The page answers one question: what do I need to do next. So the order of
+     the page is the order of that answer — a thin funnel rail for orientation,
+     then the deadline lenses (the urgent thing), then the stage detail. What
+     is urgent is the loudest thing on the screen; what is merely true is
+     quiet.
+     ====================================================================== */
+
+  /* ---- Funnel rail ------------------------------------------------------
+     All five stages, always, including the empty ones. Two jobs: it is the
+     shape of the pipeline (a stage holding three gets a bar three times the
+     one holding one — hierarchy by size, not by colour), and it is the jump
+     nav down to each section. A stage with nothing in it prints "0" and says
+     so rather than disappearing, because a silently absent stage is
+     indistinguishable from a stage that does not exist.
+     ---------------------------------------------------------------------- */
+  .apps-funnel { display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: var(--s2); margin-top: var(--s5); }
+  .apps-fseg { display: flex; flex-direction: column; gap: 5px;
+    padding: var(--s2) var(--s3) var(--s3); border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface); min-width: 0;
+    text-decoration: none; transition: border-color var(--t-med),
+      box-shadow var(--t-med), background-color var(--t-med); }
+  a.apps-fseg { cursor: pointer; }
+  a.apps-fseg:hover { border-color: var(--accent-line); background: var(--accent-soft);
+    box-shadow: var(--shadow-1); text-decoration: none; }
+  a.apps-fseg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .apps-fseg.is-empty { background: var(--paper); border-style: dashed; }
+  .apps-fseg-n { font-family: var(--font-mono); font-size: var(--fs-l);
+    font-variant-numeric: tabular-nums; font-weight: var(--w-med);
+    line-height: 1; color: var(--ink); }
+  .apps-fseg.is-empty .apps-fseg-n { color: var(--ink-3); font-weight: var(--w-reg); }
+  .apps-fseg-l { font-size: var(--fs-micro); text-transform: uppercase;
+    letter-spacing: 0.05em; font-weight: var(--w-med); color: var(--ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .apps-fseg-bar { height: 3px; border-radius: 999px; background: var(--line);
+    overflow: hidden; }
+  .apps-fseg-bar > i { display: block; height: 100%; background: var(--accent);
+    border-radius: 999px; }
+  .apps-fseg.is-empty .apps-fseg-bar { background: transparent; }
+  @media (max-width: 640px) {
+    .apps-funnel { grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); }
+  }
+
+  /* ---- Deadline lenses --------------------------------------------------
+     Closing Soon / Rolling. Styled deliberately UNLIKE the funnel cards below
+     — flatter, tighter, no controls — because they are the same roles seen a
+     second way, not a second set of roles. A student who can see at a glance
+     that these are a different KIND of block is a student who won't
+     double-count them.
+
+     Three things carry that "same roles, seen again" relationship, and none of
+     them is prose alone: the band wears a cross-section eyebrow, every row's
+     stage pill is a LIVE LINK down to the section the row is actually counted
+     in (clicking it proves the claim), and each lens count is written as a
+     fraction of the live total rather than as a bare number.
+     ---------------------------------------------------------------------- */
+  .apps-lenses { margin-top: var(--s5); border: 1px solid var(--line);
+    border-radius: var(--r-panel); background: var(--surface);
+    box-shadow: var(--shadow-1); padding: var(--s4) var(--s5) var(--s5); }
+  .apps-lenses-eyebrow { display: flex; align-items: center; gap: 6px;
+    font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.07em;
+    font-weight: var(--w-med); color: var(--ink-2); margin: 0 0 var(--s2); }
+  .apps-lenses-h { font-size: var(--fs-l); margin: 0 0 var(--s2); }
+  .apps-lenses-intro { margin: 0 0 var(--s4); font-size: var(--fs-s); color: var(--ink-2);
+    line-height: 1.5; max-width: 74ch; }
+  .apps-lens + .apps-lens { margin-top: var(--s4); padding-top: var(--s4);
+    border-top: 1px solid var(--line); }
+  .apps-lens h3 { margin: 0 0 var(--s1); font-size: var(--fs-m);
+    display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+  /* "3 of 12" — the fraction, not a bare count, is what keeps the section from
+     reading as three MORE roles on top of the twelve. */
+  .apps-lens-frac { font-family: var(--font-mono); font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums; color: var(--ink-3); font-weight: var(--w-reg); }
+  .apps-lens-note { margin: 0 0 var(--s3); font-size: var(--fs-xs); color: var(--ink-3); }
+  .apps-lens-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+  .apps-lens-row { display: flex; align-items: center; gap: var(--s3);
+    flex-wrap: wrap; padding: var(--s2) var(--s3); border-radius: 10px;
+    background: var(--paper); border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong);
+    transition: border-color var(--t-med), background-color var(--t-med); }
+  /* Row highlighting on hover is a named effect of the Data-Dense Dashboard
+     pattern, so it runs at --t-med (180ms) — inside the skill's 150-300ms
+     micro-interaction window. --t-fast (120ms) stays for plain text-colour
+     link hovers, which is the rhythm every other link in the product uses. */
+  .apps-lens-row:hover { background: var(--surface); border-color: var(--line-strong); }
+  .apps-lens-row .lens-when { display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--font-mono); font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--w-med); white-space: nowrap; flex: none; min-width: 8.5rem;
+    color: var(--ink-2); }
+  .lens-gl { flex: none; }
+  /* Urgency is carried by THREE channels at once — colour, a distinct glyph,
+     and a word ("act now" / "this week") — so it survives a reader who cannot
+     tell the red from the amber (ux: color-not-only, severity High). */
+  .apps-lens-row.u-now { border-left-color: var(--danger); background: var(--danger-soft); }
+  .apps-lens-row.u-now .lens-when { color: var(--danger); }
+  .apps-lens-row.u-soon { border-left-color: var(--stale-t); }
+  .apps-lens-row.u-soon .lens-when { color: var(--stale-t); }
+  .apps-lens-row .lens-when.lens-rolling { color: var(--ok); }
+  .lens-flag { flex: none; font-size: 10px; font-weight: var(--w-bold);
+    text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px;
+    border-radius: 999px; white-space: nowrap; }
+  /* --danger #9d2b23 on --danger-soft #f7e8e6 = 6.7:1 */
+  .u-now .lens-flag { background: var(--danger-soft); color: var(--danger);
+    border: 1px solid var(--danger-line); }
+  /* --stale-t #7d5410 on --stale-s #f9efdb = 6.0:1 */
+  .u-soon .lens-flag { background: var(--stale-s); color: var(--stale-t);
+    border: 1px solid var(--stale-l); }
+  .lens-role { flex: 1 1 14rem; min-width: 0; font-size: var(--fs-s); }
+  .lens-role a { color: var(--ink); }
+  .lens-role a:hover { color: var(--accent-ink); }
+  .lens-firm { color: var(--ink-3); font-size: var(--fs-xs);
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  /* The stage pill, and the load-bearing bit of the whole overlap story: it is
+     an anchor down to the one section this row is actually counted in. Prose
+     can claim the row appears twice; a link that jumps you there settles it. */
+  .lens-stage { flex: none; display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; font-weight: var(--w-med);
+    text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 9px;
+    border-radius: 999px; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink-2); white-space: nowrap;
+    cursor: pointer; text-decoration: none;
+    transition: border-color var(--t-med), color var(--t-med),
+      background-color var(--t-med); }
+  .lens-stage:hover { border-color: var(--accent-line); background: var(--accent-soft);
+    color: var(--accent-ink); text-decoration: none; }
+  .lens-stage:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lens-stage svg { opacity: 0.75; }
+
+  /* Empty lens: a sentence AND a way out, never a bare region
+     (ux: empty-states). */
+  .apps-lens-empty { margin: 0; font-size: var(--fs-s); color: var(--ink-2);
+    padding: var(--s3); border: 1px dashed var(--line-strong); border-radius: 10px;
+    background: var(--paper); display: flex; align-items: center; gap: var(--s2);
+    flex-wrap: wrap; }
+  .apps-lens-empty svg { flex: none; color: var(--ink-3); }
+
+  /* ---- Stage sections --------------------------------------------------- */
+  .apps-stage { margin-top: var(--s6); scroll-margin-top: var(--s5); }
   .apps-stage > h2 { font-size: var(--fs-l); margin: 0 0 var(--s3);
     display: flex; align-items: baseline; gap: var(--s2); }
   .apps-stage > h2 .scrub-count { font-family: var(--font-mono); font-size: var(--fs-s);
-    color: var(--ink-3); }
-  .apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    font-variant-numeric: tabular-nums; color: var(--ink-3); }
+  .apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
     gap: var(--s3); }
   .apps-card { border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
     box-shadow: var(--shadow-1); padding: var(--s4); display: flex; flex-direction: column;
-    gap: var(--s2); }
+    gap: var(--s2); min-width: 0;
+    transition: border-color var(--t-med), box-shadow var(--t-med); }
+  .apps-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); }
   .apps-firm { font-size: var(--fs-xs); color: var(--ink-2); font-weight: var(--w-med);
     text-transform: uppercase; letter-spacing: 0.04em; }
   .apps-title { font-size: var(--fs-m); font-weight: var(--w-med); line-height: 1.3; margin: 0; }
@@ -24,56 +167,20 @@
     padding-top: var(--s2); flex-wrap: wrap; }
   .apps-foot form { margin: 0; display: inline-flex; gap: var(--s2); align-items: center; }
   .apps-foot select { width: auto; min-width: 8.5rem; font-size: var(--fs-s);
-    padding: 6px 30px 6px 12px; border-radius: 999px; }
+    padding: 6px 30px 6px 12px; border-radius: 999px; cursor: pointer; }
   .apps-remove { background: transparent; border-color: transparent; color: var(--ink-3);
-    padding: 4px 8px; font-size: var(--fs-xs); }
+    padding: 4px 8px; font-size: var(--fs-xs); cursor: pointer;
+    transition: color var(--t-med), border-color var(--t-med),
+      background-color var(--t-med); }
   .apps-remove:hover { color: var(--danger); border-color: var(--danger-line);
     background: var(--danger-soft); }
-
-  /* ----------------------------------------------------------------------
-     Deadline lenses (Closing Soon / Rolling). Styled deliberately UNLIKE the
-     funnel cards below — flatter, tighter, no controls — because they are the
-     same roles seen a second way, not a second set of roles. A student who
-     can see at a glance that these are a different KIND of block is a student
-     who won't double-count them.
-     ---------------------------------------------------------------------- */
-  .apps-lenses { margin-top: var(--s5); border: 1px solid var(--line);
-    border-radius: var(--r-panel); background: var(--surface);
-    box-shadow: var(--shadow-1); padding: var(--s4) var(--s5) var(--s5); }
-  .apps-lenses-intro { margin: 0 0 var(--s4); font-size: var(--fs-s); color: var(--ink-2);
-    line-height: 1.5; }
-  .apps-lens + .apps-lens { margin-top: var(--s4); padding-top: var(--s4);
-    border-top: 1px solid var(--line); }
-  .apps-lens h3 { margin: 0 0 var(--s1); font-size: var(--fs-m);
-    display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
-  /* "3 of 12" — the fraction, not a bare count, is what keeps the section from
-     reading as three MORE roles on top of the twelve. */
-  .apps-lens-frac { font-family: var(--font-mono); font-size: var(--fs-xs);
-    color: var(--ink-3); font-weight: var(--w-reg); }
-  .apps-lens-note { margin: 0 0 var(--s3); font-size: var(--fs-xs); color: var(--ink-3); }
-  .apps-lens-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
-  .apps-lens-row { display: flex; align-items: baseline; gap: var(--s3);
-    flex-wrap: wrap; padding: var(--s2) var(--s3); border-radius: 10px;
-    background: var(--paper); border: 1px solid var(--line); }
-  .apps-lens-row .lens-when { font-family: var(--font-mono); font-size: var(--fs-xs);
-    font-weight: var(--w-med); white-space: nowrap; flex: none; min-width: 7.5rem; }
-  .apps-lens-row.is-urgent .lens-when { color: var(--danger); }
-  .apps-lens-row .lens-when.lens-rolling { color: var(--ok); }
-  .lens-role { flex: 1 1 14rem; min-width: 0; font-size: var(--fs-s); }
-  .lens-role a { color: var(--ink); }
-  .lens-role a:hover { color: var(--accent-ink); }
-  .lens-firm { color: var(--ink-3); font-size: var(--fs-xs);
-    text-transform: uppercase; letter-spacing: 0.04em; }
-  /* The stage pill: the visible link back to the one section this row is
-     actually counted in. */
-  .lens-stage { flex: none; font-size: 10px; font-weight: var(--w-med);
-    text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 9px;
-    border-radius: 999px; border: 1px solid var(--line-strong);
-    background: var(--surface); color: var(--ink-2); white-space: nowrap; }
-  .apps-lens-empty { margin: 0; font-size: var(--fs-s); color: var(--ink-3); }
-  /* Done is terminal, so its cards recede rather than compete with live ones. */
-  .apps-stage.stage-closed .apps-card { background: var(--paper); }
+  /* Done is terminal, so its cards recede rather than compete with live ones —
+     but the recession is a dashed border and a stated word as well as a flatter
+     background, so "finished" never rests on the tint alone. */
+  .apps-stage.stage-closed .apps-card { background: var(--paper); border-style: dashed; }
   .apps-stage.stage-closed .apps-title a { color: var(--ink-2); }
+  .apps-done-mark { font-size: var(--fs-micro); text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: var(--w-med); color: var(--ink-3); }
 </style>
 {% endblock %}
 
@@ -93,18 +200,48 @@
 
   {% if total %}
     {% comment %}
-    The lens band. It renders the SAME rows as the funnel below, cut by
-    deadline instead of by stage, and it says so in one sentence rather than
-    leaving the student to work out why a role appears twice. Each lens count
-    is written as a fraction of the live total, and every row wears the funnel
-    stage it is actually counted in. The only authoritative total on the page
-    is the funnel's, in the line under the tabs.
+    The funnel rail: all five stages, sized by how many roles each holds, each
+    one a jump link to its section. Empty stages stay on the rail showing 0 —
+    hiding them made a five-stage pipeline look like a three-stage one.
     {% endcomment %}
-    <section class="apps-lenses" aria-label="Your roles by deadline">
+    <nav class="apps-funnel" aria-label="Pipeline stages">
+      {% for stage in stages %}
+        {% if stage.count %}
+          <a class="apps-fseg" href="#stage-{{ stage.key }}">
+            <span class="apps-fseg-n">{{ stage.count }}</span>
+            <span class="apps-fseg-l">{{ stage.label }}</span>
+            <span class="apps-fseg-bar"><i style="width: {{ stage.pct }}%"></i></span>
+          </a>
+        {% else %}
+          <span class="apps-fseg is-empty" title="Nothing at this stage yet.">
+            <span class="apps-fseg-n">0</span>
+            <span class="apps-fseg-l">{{ stage.label }}</span>
+            <span class="apps-fseg-bar"></span>
+          </span>
+        {% endif %}
+      {% endfor %}
+    </nav>
+
+    {% comment %}
+    The lens band. It renders the SAME rows as the funnel below, cut by
+    deadline instead of by stage, and it says so three ways rather than leaving
+    the student to work out why a role appears twice: the eyebrow calls it a
+    cross-section, each lens count is written as a fraction of the live total,
+    and every row's stage pill is a link down to the section that row is
+    actually counted in. The only authoritative total on the page is the
+    funnel's.
+    {% endcomment %}
+    <section class="apps-lenses" aria-labelledby="lenses-h">
+      <p class="apps-lenses-eyebrow">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="6.2" cy="8" r="4.3"/><circle cx="9.8" cy="8" r="4.3"/></svg>
+        Cross-section — not extra roles
+      </p>
+      <h2 class="apps-lenses-h" id="lenses-h">By deadline</h2>
       <p class="apps-lenses-intro">
         <strong>{{ total }} role{{ total|pluralize }} tracked</strong>, all of them in one
         stage below. These two lists are the same roles seen by deadline, not extra
-        ones — a saved role closing this week appears in both places.
+        ones — a saved role closing this week appears in both places. Every row below
+        links back to the stage it is counted in.
       </p>
       {% for lens in lenses %}
         <div class="apps-lens">
@@ -115,19 +252,43 @@
           {% if lens.items %}
             <ul class="apps-lens-list">
               {% for r in lens.items %}
-                <li class="apps-lens-row{% if r.days_left is not None and r.days_left <= 2 %} is-urgent{% endif %}">
-                  <span class="lens-when{% if not r.deadline.posted %} lens-rolling{% endif %}">{% if r.deadline.posted %}{{ r.deadline.countdown|capfirst }}{% else %}No deadline{% endif %}</span>
+                <li class="apps-lens-row u-{{ r.urgency.key }}">
+                  <span class="lens-when{% if not r.deadline.posted %} lens-rolling{% endif %}">
+                    {% if r.deadline.posted %}
+                      {% if r.urgency.key == 'now' %}
+                        <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 2.2 15 14H1L8 2.2Z" stroke-linejoin="round"/><path d="M8 6.6v3.1" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".85" fill="currentColor" stroke="none"/></svg>
+                      {% else %}
+                        <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.4 1.4" stroke-linecap="round"/></svg>
+                      {% endif %}
+                      {{ r.deadline.countdown|capfirst }}
+                    {% else %}
+                      <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2.6 10.4a3.1 3.1 0 1 1 3.1-3.1 3.1 3.1 0 1 0 3.1 3.1 3.1 3.1 0 1 1 3.1-3.1" stroke-linecap="round"/></svg>
+                      No deadline
+                    {% endif %}
+                  </span>
+                  {% if r.urgency.label %}<span class="lens-flag">{{ r.urgency.label }}</span>{% endif %}
                   <span class="lens-role">
                     <a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a>
                     <span class="lens-firm">{{ r.firm_name|smart_title }}</span>
                   </span>
-                  <span class="lens-stage">{{ r.stage_label }}</span>
+                  <a class="lens-stage" href="#stage-{{ r.stage }}"
+                     title="Counted once, under {{ r.stage_label }} below. This row is that same role.">
+                    <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M8 3v10M4.2 9.2 8 13l3.8-3.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {{ r.stage_label }}
+                  </a>
                 </li>
               {% endfor %}
             </ul>
           {% else %}
             <p class="apps-lens-empty">
-              {% if lens.key == 'closing' %}Nothing you're tracking closes in the next {{ closing_soon_days }} days.{% else %}Every role you're tracking has a posted deadline.{% endif %}
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.9v3.6" stroke-linecap="round"/><circle cx="8" cy="11.1" r=".85" fill="currentColor" stroke="none"/></svg>
+              {% if lens.key == 'closing' %}
+                <span>Nothing you're tracking closes in the next {{ closing_soon_days }} days.
+                  <a href="{% url 'opportunities' %}">Find roles that do</a>.</span>
+              {% else %}
+                <span>Every role you're tracking has a posted deadline, so none of them are rolling.
+                  <a href="{% url 'opportunities' %}">Browse openings</a>.</span>
+              {% endif %}
             </p>
           {% endif %}
         </div>
@@ -136,13 +297,14 @@
 
     {% for stage in stages %}
       {% if stage.items %}
-        <section class="apps-stage stage-{{ stage.key }}">
-          <h2>{{ stage.label }} <span class="scrub-count">{{ stage.items|length }}</span></h2>
+        <section class="apps-stage stage-{{ stage.key }}" id="stage-{{ stage.key }}">
+          <h2>{{ stage.label }} <span class="scrub-count">{{ stage.count }}</span></h2>
           <div class="apps-grid">
             {% for uo in stage.items %}
               <article class="apps-card">
                 <span class="apps-firm">{{ uo.opportunity.firm.name|smart_title }}</span>
                 <h3 class="apps-title"><a href="{{ uo.opportunity.url }}" target="_blank" rel="nofollow noopener">{{ uo.opportunity.title|smart_title }}</a></h3>
+                {% if stage.key == 'closed' %}<span class="apps-done-mark">Done — no longer live</span>{% endif %}
                 <div class="apps-foot">
                   <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}">
                     {% csrf_token %}

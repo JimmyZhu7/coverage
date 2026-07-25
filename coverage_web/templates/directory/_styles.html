@@ -39,76 +39,149 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .hidden-note { color: var(--ink-3); }
 
   /* ======================================================================
-     "Picked for you" bar — one horizontal rail of scored roles between the
-     hero and the stat strip. See templates/directory/_recommend_bar.html for
-     the three states and directory/recommend.py for the scoring.
+     "Picked for you" bar — scored roles grouped by firm, between the hero and
+     the stat strip. See templates/directory/_recommend_bar.html for the three
+     states and the reason-hoisting rationale, and directory/recommend.py for
+     the scoring.
+
+     WRAPPING GRID, NOT A SCROLLING RAIL. The previous rail pinned the bar to
+     exactly one row and paid for it with 369px of content parked outside its
+     own box (1392 of room, 1761 of content) and no affordance saying so. The
+     fix is structural rather than cosmetic: grouping six role cards into three
+     firm blocks cuts the unit count, and a grid that wraps has no hidden
+     content left to signpost. Vertical growth is free on this page; a hidden
+     third of a recommendation row is not.
 
      Sizing rule, deliberately different from the .rolecard family below: these
-     cards are min-height with NO overflow clipping. The firm-column cards are
+     blocks are min-height with NO overflow clipping. The firm-column cards are
      pinned to 122px because they live in a scroll window where a ragged edge
-     would read as broken; these live in a single row where flex stretch
-     already equalizes them, so a fixed height would buy nothing and cost the
-     exact clipping bug this page has hit twice (a 97px chip in a 77px slot;
-     116px of content in a 90px box). A card that needs more room takes it.
+     would read as broken; these live in a wrapping grid where a taller block
+     simply makes its row taller, so a fixed height would buy nothing and cost
+     the exact clipping bug this page has hit twice (a 97px chip in a 77px
+     slot; 116px of content in a 90px box). A block that needs room takes it.
      ====================================================================== */
   .recbar { margin: 0 0 var(--s5); }
   .recbar-head { display: flex; align-items: baseline; gap: var(--s3);
-    flex-wrap: wrap; margin-bottom: var(--s3); }
+    flex-wrap: wrap; margin-bottom: var(--s2); }
   .recbar-title { font-size: var(--fs-l); margin: 0; letter-spacing: -0.01em; }
+  /* Tabular figures: the count sits beside a heading and must not jiggle the
+     baseline as it changes. */
+  .recbar-count { font-family: var(--font-mono); font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: var(--w-med); }
   .recbar-sub { font-size: var(--fs-xs); color: var(--ink-3); }
   .recbar-note { max-width: 62ch; margin: 0; font-size: var(--fs-s);
     color: var(--ink-2); line-height: 1.5; }
 
-  /* The rail: scrolls horizontally rather than wrapping, so the bar is always
-     exactly one row tall no matter how many picks there are. */
-  .recbar-rail { display: flex; gap: var(--s3); align-items: stretch;
-    overflow-x: auto; padding-bottom: var(--s2);
-    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-  .recbar-rail::-webkit-scrollbar { height: 8px; }
-  .recbar-rail::-webkit-scrollbar-thumb { background: var(--line-strong);
-    border-radius: 999px; border: 2px solid var(--paper); background-clip: padding-box; }
+  /* The reasons true of every pick. Stated once, here, instead of repeated on
+     each row — that repetition was the whole defect. */
+  .recbar-shared { display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+    margin: 0 0 var(--s3); }
+  .recbar-shared-label { font-size: var(--fs-micro); text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: var(--w-med); color: var(--ink-3);
+    margin-right: 3px; }
 
-  .reccard { flex: 1 0 258px; max-width: 320px; min-height: 156px;
-    display: flex; flex-direction: column; gap: 6px;
+  .recbar-grid { display: grid; gap: var(--s3);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+
+  .recblock { display: flex; flex-direction: column; gap: var(--s2);
     background: var(--surface); border: 1px solid var(--line);
     border-left: 3px solid var(--accent); border-radius: 12px;
-    padding: var(--s3) var(--s4); box-shadow: var(--shadow-1);
-    transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med); }
-  .reccard:hover { box-shadow: var(--shadow-2); transform: translateY(-2px); }
-  .reccard-firm { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
-  .reccard-logo { width: 24px; height: 24px; flex: none; border-radius: 7px;
-    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 31%);
+    padding: var(--s3) var(--s4); box-shadow: var(--shadow-1); min-width: 0;
+    transition: border-color var(--t-med), box-shadow var(--t-med); }
+  .recblock:hover { box-shadow: var(--shadow-2); }
+  .recblock-head { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+  .recblock-logo { width: 24px; height: 24px; flex: none; border-radius: 7px;
+    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 27%);
     font-size: 10px; font-weight: var(--w-bold);
     display: inline-flex; align-items: center; justify-content: center; }
-  .reccard-firmname { font-size: var(--fs-xs); color: var(--ink-2);
+  .recblock-firmname { font-size: var(--fs-xs); color: var(--ink-2);
     font-weight: var(--w-med); text-transform: uppercase; letter-spacing: 0.04em;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .reccard-firmname:hover { color: var(--accent-ink); }
-  .reccard-title { margin: 0; font-size: var(--fs-m); line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    transition: color var(--t-fast); }
+  .recblock-firmname:hover { color: var(--accent-ink); }
+  /* How many roles this block holds — the number that stops a two-role block
+     reading as one card that happens to be tall. */
+  .recblock-n { margin-left: auto; flex: none; font-family: var(--font-mono);
+    font-size: 10px; font-variant-numeric: tabular-nums; font-weight: var(--w-med);
+    color: var(--ink-2); background: var(--paper); border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 7px; }
+
+  /* Roles inside a block. The hairline between them is what says "two roles",
+     and the indent gives the firm head something to be the head OF. */
+  .recblock-roles { list-style: none; margin: 0; padding: 0; }
+  .recrole { padding: var(--s2) 0 0; }
+  .recrole + .recrole { margin-top: var(--s2); border-top: 1px solid var(--line); }
+  .recrole-title { margin: 0; font-size: var(--fs-m); line-height: 1.3;
     font-weight: var(--w-med); }
-  .reccard-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical; overflow: hidden; }
-  .reccard-title a:hover { color: var(--accent-ink); }
+  .recrole-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; transition: color var(--t-fast); }
+  .recrole-title a:hover { color: var(--accent-ink); }
 
   /* The "why". Wraps freely — the whole point is that every reason the scorer
      used is visible, so nothing here may truncate the list. */
-  .reccard-why { list-style: none; margin: 2px 0 0; padding: 0;
+  .reccard-why { list-style: none; margin: 4px 0 0; padding: 0;
     display: flex; flex-wrap: wrap; gap: 4px; }
-  .why-chip { font-size: 10px; font-weight: var(--w-med); letter-spacing: 0.03em;
+  .recblock-why { margin-top: 0; }
+  /* 11px, not 10px: these carry the scoring rationale and were the smallest
+     type on the page. --ink-2 on --paper measures 8.0:1; the tier and track
+     variants are checked against their own tinted backgrounds below. */
+  .why-chip { font-size: var(--fs-micro); font-weight: var(--w-med); letter-spacing: 0.03em;
     padding: 2px 8px; border-radius: 999px; white-space: nowrap;
     border: 1px solid var(--line-strong); background: var(--paper); color: var(--ink-2);
     cursor: help; }
+  /* --accent-ink #163a5b on --accent-soft #e9eef4 = 9.7:1 */
   .why-chip.why-tier { border-color: var(--accent-line); background: var(--accent-soft);
     color: var(--accent-ink); }
+  /* --ok #2f6a45 on --ok-soft #e6f0e9 = 5.6:1 */
   .why-chip.why-track { border-color: var(--ok-line); background: var(--ok-soft);
     color: var(--ok); }
-  .reccard-foot { display: flex; align-items: baseline; gap: 6px; margin: auto 0 0;
-    padding-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; }
-  .reccard-when { font-family: var(--font-mono); font-weight: var(--w-med);
+
+  .recrole-foot { display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+    margin: 6px 0 0; font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; }
+  .recrole-when { display: inline-flex; align-items: center; gap: 4px;
+    font-family: var(--font-mono); font-weight: var(--w-med);
+    font-variant-numeric: tabular-nums;
     color: var(--ink-2); white-space: nowrap; flex: none; }
-  .reccard-rolling { color: var(--ok); }
-  .reccard-loc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  @media (max-width: 640px) { .reccard { flex: 0 0 240px; } }
+  .recrole-gl { flex: none; }
+  /* Rolling is green AND wears a different glyph AND says the word — never
+     colour alone (ux: color-not-only, High). */
+  .recrole-rolling { color: var(--ok); cursor: help; }
+  .recrole-kind { flex: none; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.05em; font-weight: var(--w-med); color: var(--ink-2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; }
+  .recrole-loc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0; flex: 1 1 6rem; }
+
+  /* Every chip tooltip, in real text and in the tab order. `title` is
+     mouse-only, and the class-year sentence — the one that admits a year was
+     inferred from a programme year rather than stated — must not be reachable
+     by hover alone (ux: tooltip-keyboard). */
+  .recbar-why-all { margin-top: var(--s3); font-size: var(--fs-s); }
+  /* `display: inline-flex` on a <summary> silently drops the disclosure
+     triangle in Chrome, so the caret is drawn explicitly and rotated on open.
+     A disclosure with no visible affordance is a disclosure nobody opens. */
+  .recbar-why-all > summary { cursor: pointer; display: inline-flex; align-items: center;
+    gap: 5px; color: var(--ink-2); font-size: var(--fs-xs); width: fit-content;
+    padding: 3px 6px 3px 2px; border-radius: 6px; transition: color var(--t-fast); }
+  .recbar-why-all > summary::-webkit-details-marker { display: none; }
+  .recbar-why-all > summary::before { content: ""; width: 7px; height: 7px; flex: none;
+    border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor;
+    transform: rotate(-45deg); margin-left: 2px; margin-top: -2px;
+    transition: transform var(--t-med); }
+  .recbar-why-all[open] > summary::before { transform: rotate(45deg); margin-top: -4px; }
+  .recbar-why-all > summary:hover { color: var(--accent-ink); }
+  .recbar-why-all[open] > summary { margin-bottom: var(--s2); }
+  .recbar-why-all dl { display: grid; grid-template-columns: auto 1fr;
+    gap: 6px var(--s3); align-items: baseline; margin: 0;
+    padding: var(--s3) var(--s4); border: 1px solid var(--line);
+    border-radius: 12px; background: var(--surface); }
+  .recbar-why-all dt { cursor: default; justify-self: start; }
+  .recbar-why-all dd { margin: 0; color: var(--ink-2); line-height: 1.5;
+    font-size: var(--fs-s); }
+  @media (max-width: 560px) {
+    .recbar-why-all dl { grid-template-columns: 1fr; gap: 2px var(--s3); }
+    .recbar-why-all dd { margin-bottom: var(--s2); }
+  }
 
   /* Slim inline stat strip — replaces the four oversized stat cards. One line,
      numbers in the display family, a hairline divider between items. */

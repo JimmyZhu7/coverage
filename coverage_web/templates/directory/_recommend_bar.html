@@ -10,24 +10,41 @@ whole point of the component:
   2. A profile, but nothing clears the score threshold — say so plainly. The
      bar is allowed to be empty; padding it with the least-bad six would make
      a full bar meaningless on the days it is genuinely full.
-  3. Picks — up to six cards, each carrying the reasons that put it there.
+  3. Picks — grouped by firm, each group carrying the reasons that put it
+     there.
 
-Every card's "why" chips come straight from the scorer (directory/recommend.py)
-and each chip's title attribute holds the long-form justification, including
-an explicit admission when a class-year match was inferred from a programme
-year rather than stated by the posting.
+WHY GROUPED, AND WHY THE REASONS SIT WHERE THEY DO. Three of the scorer's four
+axes (tier, track, region) read FIRM properties, so two roles at one firm
+cannot differ on them. One flat card per role therefore printed the same "why"
+string six times over three firms — the eye landed on four chips that were
+constant and slid past the role title, deadline and location, which were the
+only things that actually varied. `_group_picks` in directory/views.py now
+lifts each reason to the broadest level at which it is literally true:
 
-Layout note: the cards are `min-height`, never a fixed height, and nothing
-here sets `overflow: hidden`. Two previous card bugs on this page were content
-clipped by a box smaller than its contents (a 97px chip in a 77px slot; 116px
-of content in a 90px box), so this component is built so that class of bug is
-not expressible — a card that needs more room grows, and the flex row keeps
-the whole set the same height as the tallest.
+  bar head  -> reasons identical on every pick
+  firm head -> reasons identical on every role at that firm
+  role row  -> whatever is left
+
+Nothing is dropped and nothing is reworded — a reason prints exactly once, at
+its own level, with the scorer's own sentence. The ranking is untouched.
+
+Every reason's long form is BOTH the chip's `title` and the text inside the
+"What these mean" disclosure, because a `title` tooltip is mouse-only and the
+class-year admission — that a year was inferred from a programme year rather
+than stated by the posting — is the one sentence on this page that must never
+be reachable by hover alone.
+
+Layout note: this is a wrapping grid, not a scrolling rail. The rail it
+replaced overflowed its own box (1392px of room, 1761px of content) with no
+affordance saying so; a grid that wraps has no hidden content to signpost.
+Blocks are min-height, never fixed, and nothing here sets `overflow: hidden` —
+two previous bugs on this page were content clipped by a box smaller than its
+contents, so a block that needs more room grows instead.
 {% endcomment %}
-<section class="recbar" aria-label="Recommended roles">
+<section class="recbar" aria-labelledby="recbar-h">
   {% if not has_profile %}
     <div class="recbar-head">
-      <h2 class="recbar-title">Roles for you</h2>
+      <h2 class="recbar-title" id="recbar-h">Roles for you</h2>
     </div>
     <p class="recbar-note">
       {% if user.is_authenticated %}
@@ -40,36 +57,96 @@ the whole set the same height as the tallest.
         class year, university, tracks, and target firms.
       {% endif %}
     </p>
-  {% elif picks %}
+  {% elif pick_blocks %}
     <div class="recbar-head">
-      <h2 class="recbar-title">Picked for you</h2>
-      <span class="recbar-sub">Scored on your class year, university, tracks, and firm tiers. Every card says why.</span>
+      <h2 class="recbar-title" id="recbar-h">Picked for you</h2>
+      <span class="recbar-count">{{ picks|length }} role{{ picks|pluralize }} · {{ pick_blocks|length }} firm{{ pick_blocks|pluralize }}</span>
+      <span class="recbar-sub">Scored on your class year, university, tracks, and firm tiers.</span>
     </div>
-    <div class="recbar-rail">
-      {% for p in picks %}
-        <article class="reccard">
-          <header class="reccard-firm">
-            <span class="reccard-logo" style="--hue: {{ p.firm_slug|firm_hue }}">{{ p.monogram }}</span>
-            <a class="reccard-firmname" href="{% url 'directory:firm_detail' p.firm_slug %}">{{ p.firm_name|smart_title }}</a>
+
+    {% if pick_shared %}
+      {% comment %}True of every pick, so it is stated once here instead of
+      repeated on each row. When this line is long it is because the picks
+      really are that alike — which is itself worth seeing.{% endcomment %}
+      <p class="recbar-shared">
+        <span class="recbar-shared-label">Every pick</span>
+        {% for r in pick_shared %}<span class="why-chip why-{{ r.kind }}" title="{{ r.detail }}">{{ r.text }}</span>{% endfor %}
+      </p>
+    {% endif %}
+
+    <div class="recbar-grid">
+      {% for b in pick_blocks %}
+        <article class="recblock">
+          <header class="recblock-head">
+            <span class="recblock-logo" style="--hue: {{ b.firm_slug|firm_hue }}" aria-hidden="true">{{ b.monogram }}</span>
+            <a class="recblock-firmname" href="{% url 'directory:firm_detail' b.firm_slug %}">{{ b.firm_name|smart_title }}</a>
+            <span class="recblock-n">{{ b.roles|length }}</span>
           </header>
-          <h3 class="reccard-title">
-            <a href="{{ p.url }}" target="_blank" rel="nofollow noopener">{{ p.title|smart_title }}</a>
-          </h3>
-          <ul class="reccard-why">
-            {% for r in p.reasons %}
-              <li class="why-chip why-{{ r.kind }}" title="{{ r.detail }}">{{ r.text }}</li>
+          {% if b.reasons %}
+            <ul class="reccard-why recblock-why">
+              {% for r in b.reasons %}
+                <li class="why-chip why-{{ r.kind }}" title="{{ r.detail }}">{{ r.text }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          <ul class="recblock-roles">
+            {% for p in b.roles %}
+              <li class="recrole">
+                <h3 class="recrole-title">
+                  <a href="{{ p.url }}" target="_blank" rel="nofollow noopener">{{ p.title|smart_title }}</a>
+                </h3>
+                {% if p.reasons %}
+                  <ul class="reccard-why recrole-why">
+                    {% for r in p.reasons %}
+                      <li class="why-chip why-{{ r.kind }}" title="{{ r.detail }}">{{ r.text }}</li>
+                    {% endfor %}
+                  </ul>
+                {% endif %}
+                <p class="recrole-foot">
+                  {% comment %}The deadline word is never carried by colour
+                  alone — each state has its own glyph and its own word.{% endcomment %}
+                  {% if p.deadline %}
+                    <span class="recrole-when">
+                      <svg class="recrole-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.4 1.4" stroke-linecap="round"/></svg>
+                      Closes {{ p.deadline|date:"M j" }}</span>
+                  {% else %}
+                    <span class="recrole-when recrole-rolling" title="No deadline posted. Reviewed as they arrive.">
+                      <svg class="recrole-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2.6 10.4a3.1 3.1 0 1 1 3.1-3.1 3.1 3.1 0 1 0 3.1 3.1 3.1 3.1 0 1 1 3.1-3.1" stroke-linecap="round"/></svg>
+                      Rolling</span>
+                  {% endif %}
+                  {% if p.bucket_label %}<span class="recrole-kind">{{ p.bucket_label }}</span>{% endif %}
+                  {% if p.location %}<span class="recrole-loc" title="{{ p.location|smart_title }}">{{ p.location|smart_title }}</span>{% endif %}
+                </p>
+              </li>
             {% endfor %}
           </ul>
-          <p class="reccard-foot">
-            {% if p.deadline %}<span class="reccard-when">Closes {{ p.deadline|date:"M j" }}</span>{% else %}<span class="reccard-when reccard-rolling">Rolling</span>{% endif %}
-            {% if p.location %}<span class="reccard-loc">{{ p.location|smart_title }}</span>{% endif %}
-          </p>
         </article>
       {% endfor %}
     </div>
+
+    {% comment %}The keyboard-reachable twin of every chip tooltip above. The
+    chips are terse because the blocks are narrow; the full sentence the scorer
+    wrote — including "this is inferred from the intake year, not something the
+    firm said" — lives here, in real text, in the tab order.{% endcomment %}
+    <details class="recbar-why-all">
+      <summary>What these labels mean</summary>
+      <dl>
+        {% for r in pick_shared %}
+          <dt class="why-chip why-{{ r.kind }}">{{ r.text }}</dt><dd>{{ r.detail }}</dd>
+        {% endfor %}
+        {% for b in pick_blocks %}
+          {% for r in b.reasons %}
+            <dt class="why-chip why-{{ r.kind }}">{{ r.text }}</dt><dd>{{ r.detail }}</dd>
+          {% endfor %}
+          {% for p in b.roles %}{% for r in p.reasons %}
+            <dt class="why-chip why-{{ r.kind }}">{{ r.text }}</dt><dd>{{ r.detail }}</dd>
+          {% endfor %}{% endfor %}
+        {% endfor %}
+      </dl>
+    </details>
   {% else %}
     <div class="recbar-head">
-      <h2 class="recbar-title">Picked for you</h2>
+      <h2 class="recbar-title" id="recbar-h">Picked for you</h2>
     </div>
     <p class="recbar-note">
       Nothing open right now scores high enough against your profile to be worth
