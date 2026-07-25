@@ -85,6 +85,26 @@ Note: raw-MIME 30-day retention (build-plan §10) is **not** wired yet — the
 webhook keeps only Postmark's message id, not the raw body. Add a retention blob
 store before scaling if you want the raw source kept.
 
+### 3b. The daily Gmail sync (founder only, no Google review needed)
+
+A second capture route, for a mailbox that is already being scanned outside
+Coverage. The existing daily job searches Gmail and emits *findings*; feed that
+same batch to Coverage and one nightly search serves both systems:
+
+```bash
+DAYS=$(manage.py capture_gmail --email you@example.com --window)   # size the search
+# ...the sync searches `newer_than:${DAYS}d` and writes findings.json...
+manage.py capture_gmail --email you@example.com --findings findings.json --dry-run
+manage.py capture_gmail --email you@example.com --findings findings.json
+```
+
+Always `--dry-run` first when wiring up a new findings source: it runs every
+match, ratchet and dedup decision and writes nothing, and a mis-shaped batch
+that silently archives contacts as bounced is tedious to unpick.
+
+Nothing in this path talks to Google, so §4's `openid`/`email`/`profile` rule is
+untouched and the restricted-scope decision stays deferred.
+
 ## 4. Google sign-in (login-only scopes)
 
 The `coverage-gmail-oauth-setup` skill in this repo walks the Cloud Console

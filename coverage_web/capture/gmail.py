@@ -224,12 +224,27 @@ def _touch_kind_for(finding: dict) -> str | None:
 # The entry point
 # --------------------------------------------------------------------------- #
 
-def apply_findings(user, findings: list[dict]) -> SyncResult:
+def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> SyncResult:
     """Apply a batch of Gmail findings for one user. Safe to run daily.
 
     Ordering follows the original exactly, because each step guards the next:
     bounce check first (an address that does not exist has nothing to log),
     then email backfill, then outreach, then at most one ladder touch.
+
+    ``dry_run`` reports what would happen and writes nothing. It is a flag on
+    THIS function rather than a caller-side `transaction.atomic()` rollback,
+    because a rollback cannot cover the writes: `crm.services.log_touch`
+    deliberately opens its own psycopg connection and commits there (see that
+    module's docstring), so it is invisible to Django's transaction management
+    and would survive the unwind. Every matching, ratchet and dedup decision
+    still runs on the one shared code path — only the three write sites are
+    guarded, so the report cannot drift from the real behaviour.
+
+    Note the resulting blind spot, which is inherent rather than an oversight:
+    a dry run does not persist its own touches, so two findings that climb the
+    same thread within one batch will both report as logging. A real run
+    ratchets the second one away. Batches are per-thread-per-day in practice,
+    so this stays theoretical.
     """
     result = SyncResult(findings=len(findings))
     provider = GmailFindingsProvider()
@@ -253,16 +268,18 @@ def apply_findings(user, findings: list[dict]) -> SyncResult:
         # archived contact is trivially recoverable.
         if finding.get("bounced"):
             if not contact.archived:
-                contact.archived = True
-                contact.save(update_fields=["archived"])
+                if not dry_run:
+                    contact.archived = True
+                    contact.save(update_fields=["archived"])
                 result.archived_bounced += 1
                 result.details.append(f"{name}: address bounced — archived")
             continue
 
         email = (finding.get("email") or "").strip()
         if email and email.lower() != (contact.email or "").lower():
-            contact.email = email[:254]
-            contact.save(update_fields=["email"])
+            if not dry_run:
+                contact.email = email[:254]
+                contact.save(update_fields=["email"])
             result.emails_backfilled += 1
 
         thread_id = (finding.get("thread_id") or "").strip()
@@ -279,12 +296,13 @@ def apply_findings(user, findings: list[dict]) -> SyncResult:
             if already:
                 result.skipped_already_logged += 1
             else:
-                event = provider.build_event(finding, user, "outreach")
-                crm_services.log_touch(
-                    user.id, contact.id, "outreach", TOUCH_CHANNEL,
-                    note=f"{marker}{evidence}".strip() or None,
-                )
-                _record(user, contact, event)
+                if not dry_run:
+                    event = provider.build_event(finding, user, "outreach")
+                    crm_services.log_touch(
+                        user.id, contact.id, "outreach", TOUCH_CHANNEL,
+                        note=f"{marker}{evidence}".strip() or None,
+                    )
+                    _record(user, contact, event)
                 result.outreach_logged += 1
                 result.details.append(f"{name}: outreach logged (a sent email was never recorded)")
 
@@ -312,12 +330,14 @@ def apply_findings(user, findings: list[dict]) -> SyncResult:
             )
             continue
 
-        event = provider.build_event(finding, user, kind)
-        updates = crm_services.log_touch(
-            user.id, contact.id, kind, TOUCH_CHANNEL,
-            note=f"{marker}{evidence}".strip() or None,
-        )
-        _record(user, contact, event, warmth_changed=bool(updates))
+        updates = {}
+        if not dry_run:
+            event = provider.build_event(finding, user, kind)
+            updates = crm_services.log_touch(
+                user.id, contact.id, kind, TOUCH_CHANNEL,
+                note=f"{marker}{evidence}".strip() or None,
+            )
+            _record(user, contact, event, warmth_changed=bool(updates))
         result.touches_logged += 1
         result.details.append(
             f"{name}: {kind} logged" + (f" -> {updates}" if updates else " (warmth already at/above this stage)")
