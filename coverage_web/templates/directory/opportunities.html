@@ -36,6 +36,22 @@
         {% endfor %}
       </select>
     </label>
+    {% comment %}
+    "Programme Year", NOT "Class". The value behind this select is the intake
+    year printed in the posting ("2027 Summer Internship"), which is a cycle,
+    not a graduation year — only a handful of postings state a class year, and
+    those are matched here too. The hint carries that distinction to the
+    student; drop it and the control starts telling ~4,000 roles' worth of
+    lies. "No Year Stated" is a real option because most roles say nothing.
+    {% endcomment %}
+    <label>Programme Year
+      <select name="year">
+        {% for y in year_facet %}
+          <option value="{{ y.value }}"{% if y.value == selected.year %} selected{% endif %}>{{ y.label }} ({{ y.count }})</option>
+        {% endfor %}
+      </select>
+      <small class="filter-hint">Intake year in the posting. Not a graduation year.</small>
+    </label>
     <label>Region
       <select name="region">
         <option value="">Any Region</option>

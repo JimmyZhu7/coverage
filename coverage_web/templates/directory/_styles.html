@@ -4,7 +4,11 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 {% endcomment %}
 <style>
   /* Filter bar — v3: a centered row of pill controls. */
-  .filters { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: flex-end;
+  /* align-items: flex-start, not flex-end: one control (Programme Year)
+     carries a sub-label underneath it, and bottom-alignment would float its
+     select above the rest of the row. Every label is [caption, control], so
+     aligning tops lines the controls up and lets the hint hang below. */
+  .filters { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: flex-start;
     margin-bottom: var(--s5); justify-content: center; }
   .filters label { display: flex; flex-direction: column; gap: var(--s2); margin: 0;
     font-size: var(--fs-micro); color: var(--ink-3); text-transform: uppercase;
@@ -20,6 +24,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .filters select:focus-visible, .filters input[type="search"]:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent-line); }
   .filters input[type="search"] { min-width: 12rem; }
+  /* Sub-label under a filter control, for the one case where the control's
+     name isn't self-explanatory: "Programme Year" has to say out loud that it
+     is not a graduation year. Lowercase (the label above it is uppercased) and
+     width-capped to the control so it can't stretch the flex row. */
+  .filter-hint { max-width: 13rem; font-size: var(--fs-micro); color: var(--ink-3);
+    text-transform: none; letter-spacing: 0; font-weight: var(--w-reg);
+    line-height: 1.35; }
+
   .filters-clear { font-size: var(--fs-s); align-self: center; padding: 6px 14px;
     border-radius: 999px; }
   .filters-clear:hover { background: var(--accent-soft); text-decoration: none; }
@@ -214,8 +226,20 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rolecard-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
     -webkit-box-orient: vertical; overflow: hidden; }
   .rolecard-title a:hover { color: var(--accent-ink); }
+  /* Class year (when stated) + location share one line, so adding the chip
+     costs no card height. */
+  .rolecard-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .rolecard-loc { font-size: var(--fs-xs); color: var(--ink-3);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  /* Stated class year. Rare by design (only postings that literally say
+     "Class of YYYY"), so it reads as a quiet fact chip rather than competing
+     with the role pill or the fuse. `flex: none` is load-bearing: the chip
+     keeps its full width and the location truncates instead, because a
+     half-rendered year ("Class of 20…") would be worse than no chip. */
+  .class-chip { flex: none; font-size: 10px; font-weight: var(--w-med);
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-2);
+    padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line-strong);
+    background: var(--surface); white-space: nowrap; }
 
   .role-mini { flex: none; font-size: 10px; font-weight: var(--w-med);
     text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3);

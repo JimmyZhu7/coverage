@@ -74,6 +74,34 @@ def test_ingest_stamps_bucket_and_cohort(monkeypatch):
     assert experienced.bucket == "other"
     assert experienced.cohort == ""
 
+    # …and neither row gets a class year, because neither title stated one.
+    # A 2027 programme is not a "Class of 2027" role.
+    assert campus_role.class_year == ""
+    assert experienced.class_year == ""
+
+
+@pytest.mark.django_db
+def test_ingest_stamps_class_year_only_when_stated(monkeypatch):
+    """`class_year` is the graduation year a posting names outright, and it is
+    a separate column from `cohort` for a reason: this real board title
+    carries a 2027 programme year AND a 2028 class year at once."""
+    _patch(
+        monkeypatch,
+        [_result([
+            _opp(U1, title="2027 Summer Intern, Markets (Class of 2028)"),
+            _opp(U2, title="2027 Summer Analyst Program"),
+        ])],
+    )
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    stated = Opportunity.objects.get(url=U1)
+    assert stated.cohort == "2027"       # programme/intake year
+    assert stated.class_year == "2028"   # stated graduation year — never derived
+
+    programme_only = Opportunity.objects.get(url=U2)
+    assert programme_only.cohort == "2027"
+    assert programme_only.class_year == ""
+
 
 @pytest.mark.django_db
 def test_campus_board_promotes_neutral_titles(monkeypatch):
@@ -97,15 +125,23 @@ def test_campus_board_promotes_neutral_titles(monkeypatch):
 def test_reclassify_backfills_existing_rows(monkeypatch):
     from django.core.management import call_command
 
-    _patch(monkeypatch, [_result([_opp(U1, title="Graduate Analyst Programme 2026")])])
+    _patch(monkeypatch, [_result([
+        _opp(U1, title="Graduate Analyst Programme 2026"),
+        _opp(U2, title="Analyst Programme 2026 (Class of 2027)"),
+    ])])
     ingest.ingest_boards([BOARD], label="greenhouse")
     # Simulate a pre-classifier row: blank out the derived fields.
-    Opportunity.objects.filter(url=U1).update(bucket="", cohort="")
+    Opportunity.objects.filter(url__in=[U1, U2]).update(bucket="", cohort="", class_year="")
 
     call_command("reclassify")
     o = Opportunity.objects.get(url=U1)
     assert o.bucket == "entry_level"
     assert o.cohort == "2026"
+    assert o.class_year == ""     # a programme year is not a class year
+    # `class_year` is re-derived too, so a row scraped before the column
+    # existed picks up a stated class year without waiting for the posting to
+    # change (which is what would otherwise re-trigger an ingest write).
+    assert Opportunity.objects.get(url=U2).class_year == "2027"
 
 
 @pytest.mark.django_db

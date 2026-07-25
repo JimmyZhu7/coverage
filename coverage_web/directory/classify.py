@@ -294,14 +294,65 @@ def classify_role(title: str, *, campus_hint: bool = False) -> str:
     return OTHER
 
 
-_COHORT_YEAR = re.compile(r"\b20(?:2[4-9]|3[0-5])\b")
+# ---------------------------------------------------------------------------
+# Two different years, and conflating them is the bug this section exists to
+# prevent:
+#
+#   cohort      the PROGRAMME / INTAKE year the posting runs in. "2027 Summer
+#               Internship - Account Analyst, Tokyo" is a 2027 programme. Say
+#               nothing about who is eligible to apply to it.
+#   class_year  the GRADUATION year the posting explicitly asks for, and only
+#               when the posting says so in those words ("Class of 2028").
+#
+# On the live open set (~4,000 roles) cohort is present on ~10% of rows and is
+# a programme year in essentially all of them; exactly three titles state a
+# class year out loud. So a year filter or a card chip labelled "Class" would
+# be factually wrong for ~99% of the feed. Hence two fields, two extractors,
+# and a hard rule: `extract_class_year` NEVER derives, infers, or offsets a
+# year from a programme year. If the posting didn't say it, the answer is "".
+# ---------------------------------------------------------------------------
+
+# The plausible-year window, shared by both extractors so "Founded in 1999" and
+# a 4-digit requisition code can never pose as a year.
+_YEAR = r"20(?:2[4-9]|3[0-5])"
+
+_COHORT_YEAR = re.compile(rf"\b{_YEAR}\b")
+
+# Explicit class-year statements only: "Class of 2028", "Class 2028",
+# "(Class of 2028)". The lookbehind rejects a hyphen or word character before
+# "class", which is what keeps "world-class 2027 programme" and the very real
+# "Investment Banking, Classic — Summer Analyst" family off this field. The
+# year must follow "class" directly (optionally via "of"), so a bare year
+# anywhere else in the title is ignored no matter how suggestive it looks.
+_CLASS_YEAR = re.compile(rf"(?<![\w-])class\s+(?:of\s+)?({_YEAR})\b", re.IGNORECASE)
 
 
 def extract_cohort(title: str) -> str:
     """First plausible cohort year (2024-2035) in the title, else "".
-    "2027 Summer Analyst Program" -> "2027". Never fabricates a year."""
+    "2027 Summer Analyst Program" -> "2027". Never fabricates a year.
+
+    This is a PROGRAMME year, not a graduation year — see the section comment
+    above before displaying or filtering on it."""
     m = _COHORT_YEAR.search(title or "")
     return m.group(0) if m else ""
+
+
+def extract_class_year(title: str) -> str:
+    """The graduation year a posting EXPLICITLY states, else "".
+
+    "Class of 2027 Investment Analyst"        -> "2027"
+    "Financial Analyst (Class of 2027)"       -> "2027"
+    "2027 Summer Intern ... (Class of 2028)"  -> "2028"   (cohort would be 2027)
+    "2027 Summer Analyst Program"             -> ""       (that is a cohort)
+
+    The last case is the whole point of this function. A 2027 summer programme
+    is typically read by recruiters as targeting 2028 graduates, but that
+    mapping varies by firm, region, and degree length, and the posting did not
+    say it. Deriving it here would put a confident graduation year on 89% of
+    the feed that no source ever stated. Blank means "not stated", which is a
+    true answer and the one the UI is built to show."""
+    m = _CLASS_YEAR.search(title or "")
+    return m.group(1) if m else ""
 
 
 def board_is_campus(board) -> bool:

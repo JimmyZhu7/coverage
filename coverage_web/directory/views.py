@@ -36,7 +36,7 @@ from analytics.events import record_event
 # tenant-scoped manager. No import cycle: crm.models imports directory.models.
 from crm.models import UserFirm
 from directory.classify import (
-    BUCKET_LABELS, INSIGHT, OTHER, REGION_LABELS, REGION_ORDER, TARGET_BUCKETS,
+    BUCKET_LABELS, OTHER, REGION_LABELS, REGION_ORDER, TARGET_BUCKETS,
 )
 from directory.models import Firm, Opportunity
 from directory.timeline import EVENT_LABELS
@@ -147,16 +147,23 @@ def deadline_marker(deadline, precision, *, today=None):
     return {"posted": True, "label": label, "countdown": countdown, "past": days < 0, "precision": prec}
 
 
-def _class_of(bucket: str, cohort: str) -> str:
-    """Display heuristic: a Summer 2027 internship (or insight cohort)
-    targets students graduating the following year; an entry-level start
-    year IS the graduation year. Empty cohort -> no tag, never a guess."""
-    if not (cohort or "").isdigit():
-        return ""
-    year = int(cohort)
-    if bucket in (INSIGHT, "internship"):
-        year += 1
-    return f"Class of {year}"
+def _class_tag(opp) -> dict | None:
+    """A "Class of YYYY" pill, but ONLY from `Opportunity.class_year` — i.e.
+    only when the posting itself said it.
+
+    This replaced a display heuristic that derived the tag from `cohort` by
+    adding a year for internships and insight programmes. It read confidently
+    and it was wrong: `cohort` is the programme/intake year ("2027 Summer
+    Internship - Account Analyst, Tokyo"), so the old rule stamped a
+    graduation year on every dated posting when only ~3 titles in the whole
+    open set state one. Firms differ on which class a given summer programme
+    targets, degrees run different lengths, and the offset flips by region.
+    Guessing that in a pill labelled "Class of" is exactly the silent lie the
+    honesty markers elsewhere in this file exist to avoid. No stated class
+    year -> no pill; the programme year still shows, labelled as such."""
+    if not (opp.class_year or "").strip():
+        return None
+    return {"label": f"Class of {opp.class_year}", "css": "tag-class"}
 
 
 def _sponsorship_tag(opp) -> dict | None:
@@ -178,7 +185,7 @@ def _sponsorship_tag(opp) -> dict | None:
 
 def _card(opp, *, now, today):
     """Bundle one opportunity into a template-ready card. Tags are the
-    student-facing trio: firm category, class year, sponsorship."""
+    student-facing trio: firm category, stated class year, sponsorship."""
     bucket = opp.bucket or OTHER
     category = FIRM_CATEGORIES.get(opp.firm.slug) or next(
         (TRACK_LABELS.get(t, "") for t in (opp.firm.tracks or [])), ""
@@ -186,9 +193,9 @@ def _card(opp, *, now, today):
     tags = []
     if category:
         tags.append({"label": category, "css": "tag-cat"})
-    class_of = _class_of(bucket, opp.cohort)
-    if class_of:
-        tags.append({"label": class_of, "css": "tag-class"})
+    class_tag = _class_tag(opp)
+    if class_tag:
+        tags.append(class_tag)
     spon = _sponsorship_tag(opp)
     if spon:
         tags.append(spon)
@@ -201,7 +208,10 @@ def _card(opp, *, now, today):
         "url": opp.url,
         "region": opp.region,
         "role": {"value": bucket, "label": BUCKET_LABELS.get(bucket, bucket)},
+        # Programme year (see classify.py); the template must not print it as
+        # a class year. `class_year` beside it is the stated graduation year.
         "cohort": opp.cohort,
+        "class_year": opp.class_year,
         "deadline": deadline_marker(opp.deadline, opp.deadline_precision, today=today),
         "tags": tags,
     }
@@ -304,6 +314,69 @@ def _apply_role_filter(qs, role):
 
 
 # ---------------------------------------------------------------------------
+# Year filter (?year=). The value being filtered is the PROGRAMME year — the
+# intake a posting runs in, "2027 Summer Internship — Account Analyst". It is
+# NOT a graduation year, and the UI label says so; see classify.py for why the
+# two are separate columns.
+#
+# A row matches year Y when EITHER its `cohort` (programme year) or its
+# `class_year` (the graduation year the posting stated outright) is Y. The
+# second half matters for a handful of rows only, but for those rows the
+# stated class year is the truthful answer to "which year is this for?", and a
+# student who picks 2027 should see "Class of 2027 Investment Analyst" whether
+# or not its title also happens to carry a programme year.
+#
+# `none` is a first-class option, not an afterthought: ~89% of the live open
+# set states no year at all. Silently excluding those the moment someone picks
+# a year would hide most of the feed behind a control that looks like it only
+# narrows a little. So "no year stated" is selectable, counted, and the
+# unfiltered default keeps showing everything.
+# ---------------------------------------------------------------------------
+YEAR_NONE = "none"
+YEAR_NONE_LABEL = "No Year Stated"
+
+
+def _apply_year_filter(qs, year):
+    """Narrow to one programme/intake year, or to the rows that state none.
+    Anything unrecognised (a hand-typed querystring) is a no-op rather than an
+    empty page — same posture as the role filter's fallthrough."""
+    if year == YEAR_NONE:
+        return qs.filter(cohort="", class_year="")
+    if year.isdigit():
+        return qs.filter(Q(cohort=year) | Q(class_year=year))
+    return qs
+
+
+def _year_facet(qs):
+    """Year options drawn from the live (otherwise-filtered) set, each with its
+    own count, so the select answers "under my current filters, how many?".
+
+    Counts are per-option and can sum to slightly more than the total: one row
+    can carry both a programme year and a different stated class year (a real
+    example on the live board is a 2027 summer intake whose title adds "(Class
+    of 2028)"), and it honestly belongs under both. Deduping it into one
+    bucket would mean picking one of the two years to lie about."""
+    counts: Counter[str] = Counter()
+    stated = 0
+    total = 0
+    for cohort, class_year in qs.values_list("cohort", "class_year"):
+        total += 1
+        years = {y for y in (cohort or "", class_year or "") if y}
+        for y in years:
+            counts[y] += 1
+        if years:
+            stated += 1
+    return [
+        {"value": "", "label": "Any Year", "count": total},
+        *[
+            {"value": y, "label": y, "count": counts[y]}
+            for y in sorted(counts, reverse=True)
+        ],
+        {"value": YEAR_NONE, "label": YEAR_NONE_LABEL, "count": total - stated},
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Views
 # ---------------------------------------------------------------------------
 
@@ -333,7 +406,11 @@ def _urgency_item(o, *, now, today, my_firm_ids):
         "location": o.location,
         "bucket": bucket,
         "bucket_label": BUCKET_LABELS.get(bucket, bucket),
+        # Programme/intake year — rendered next to the role type, never as a
+        # class year. `class_year` is the separate, stated-only graduation
+        # year and gets its own pill (see classify.py).
         "cohort": o.cohort,
+        "class_year": o.class_year,
         "is_mine": o.firm_id in my_firm_ids,
         "seen_days": seen_days,
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
@@ -405,6 +482,8 @@ def opportunities(request):
     facets = _facets(open_qs)
 
     role = request.GET.get("role", "").strip()
+    # Programme/intake year, or `none` for the rows that state no year at all.
+    year = request.GET.get("year", "").strip()
     region = request.GET.get("region", "").strip()
     track = request.GET.get("track", "").strip()
     provider = request.GET.get("provider", "").strip()
@@ -430,8 +509,16 @@ def opportunities(request):
             | Q(location__icontains=query)
         )
 
-    # Role counts reflect every OTHER active filter, so the select's numbers
-    # answer "under my current filters, how many of each?" honestly.
+    # Each facet's counts reflect every OTHER active filter, so its numbers
+    # answer "under my current filters, how many of each?" honestly. That
+    # means the two cross-cutting selects are counted against each other's
+    # applied filter, not against a shared pre-filter set: role counts see the
+    # year selection, year counts see the role selection. Two extra values()
+    # scans over an already-narrowed queryset, for numbers that don't lie when
+    # both selects are in use.
+    year_facet = _year_facet(_apply_role_filter(qs, role))
+    qs = _apply_year_filter(qs, year)
+
     bucket_counts = Counter(
         (b or OTHER) for b in qs.values_list("bucket", flat=True)
     )
@@ -580,18 +667,20 @@ def opportunities(request):
         "total": total,
         "facets": facets,
         "role_facet": role_facet,
+        "year_facet": year_facet,
         "hidden_other": hidden_other,
         "dash": dash,
         "all_firms": all_firms,
         "selected": {
             "role": role,
+            "year": year,
             "region": region,
             "track": track,
             "provider": provider,
             "firm": firm_slugs,
             "q": query,
         },
-        "has_filters": any([role, region, track, provider, query]) or bool(firm_slugs),
+        "has_filters": any([role, year, region, track, provider, query]) or bool(firm_slugs),
     }
 
     if request.headers.get("HX-Request"):

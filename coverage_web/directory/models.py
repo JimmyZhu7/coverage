@@ -45,7 +45,18 @@ class Opportunity(models.Model):
     bucket = models.CharField(max_length=64, blank=True, default="")
     region = models.CharField(max_length=64, blank=True, default="")
     location = models.CharField(max_length=255, blank=True, default="")
+    # The PROGRAMME/intake year the posting runs in ("2027 Summer Internship"
+    # -> "2027"), derived from the title by classify.extract_cohort. Says
+    # nothing about who is eligible — see `class_year` below.
     cohort = models.CharField(max_length=32, blank=True, default="")
+    # The GRADUATION year the posting states out loud ("Class of 2028"), and
+    # only that. Deliberately a separate column from `cohort` rather than a
+    # reinterpretation of it: on live data cohort is a programme year on
+    # essentially every row that has one, so treating it as a class year would
+    # mislabel ~99% of the set. Blank means "the posting didn't say", which is
+    # the common and honest case (~3 rows in 4,000 state one). Never derived —
+    # see classify.extract_class_year.
+    class_year = models.CharField(max_length=32, blank=True, default="")
     status = models.CharField(max_length=32, blank=True, default="")
     deadline = models.DateField(null=True, blank=True)
     deadline_precision = models.CharField(max_length=32, blank=True, default="")

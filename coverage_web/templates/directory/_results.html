@@ -41,14 +41,35 @@ hidden rather than shown as a weak "0".{% endcomment %}
           {% for r in cl.roles %}
             <div class="rolecard urg-{{ r.level }}">
               <div class="rolecard-top">
-                <span class="role-mini role-{{ r.bucket }}">{{ r.bucket_label }}{% if r.cohort %} · {{ r.cohort }}{% endif %}</span>
+                {% comment %}The year beside the role type is the PROGRAMME
+                year (a 2027 summer intake), not a class year — the title
+                attribute says so on hover, and the separate class-year pill
+                below is the only place a graduation year ever appears.
+                {% endcomment %}
+                  {% comment %}The year beside the role type is the PROGRAMME
+                year (a 2027 summer intake), not a class year — the title
+                attribute says so on hover, and the class-year chip below is
+                the only place a graduation year ever appears.{% endcomment %}
+                <span class="role-mini role-{{ r.bucket }}"{% if r.cohort %} title="{{ r.cohort }} programme year"{% endif %}>{{ r.bucket_label }}{% if r.cohort %} · {{ r.cohort }}{% endif %}</span>
                 <span class="rolecard-top-right">
                   {% if r.is_fresh and not r.dated %}<span class="fresh-badge">New</span>{% endif %}
                   {% if request.user.is_authenticated %}{% include "directory/_track_control.html" %}{% endif %}
                 </span>
               </div>
               <h4 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a></h4>
-              {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_title }}</span>{% endif %}
+              {% comment %}One sub-line: the stated class year (only when the
+              posting said it outright — never derived from the programme year
+              above) followed by the location. They share a row rather than
+              taking one each because the card is pinned to exactly 122px with
+              the fuse on the bottom edge. The chip holds its width and the
+              location ellipsises instead: a half-rendered year would be worse
+              than no chip at all.{% endcomment %}
+              {% if r.class_year or r.location %}
+                <div class="rolecard-sub">
+                  {% if r.class_year %}<span class="class-chip" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
+                  {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_title }}</span>{% endif %}
+                </div>
+              {% endif %}
               {% if r.dated %}
                 <div class="fuse fuse-{{ r.level }}">
                   <span class="fuse-track"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>

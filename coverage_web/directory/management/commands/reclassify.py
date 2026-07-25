@@ -1,4 +1,5 @@
-"""reclassify — re-derive `bucket` and `cohort` for every existing opportunity.
+"""reclassify — re-derive `bucket`, `cohort` and `class_year` for every
+existing opportunity.
 
     python manage.py reclassify            # apply
     python manage.py reclassify --dry-run  # report what would change
@@ -20,6 +21,12 @@ Cohort handling mirrors ingest: connector-supplied cohorts don't exist for
 these providers (always ""), so a cohort already present that doesn't look
 title-derived is left alone; blanks and stale title-derived values are
 re-extracted from the title.
+
+`class_year` (the graduation year a posting states outright, as opposed to
+`cohort`'s programme year) is re-derived unconditionally rather than with
+cohort's `existing or …` guard: nothing but the title has ever written it, so
+there is no external value to preserve, and an unconditional pass is what lets a
+tightened rule actually CLEAR a wrong value instead of only filling blanks.
 """
 
 from __future__ import annotations
@@ -29,7 +36,8 @@ from django.db import transaction
 
 from directory.boards import BOARDS
 from directory.classify import (
-    board_is_campus, classify_role, clean_title, extract_cohort, normalize_region,
+    board_is_campus, classify_role, clean_title, extract_class_year, extract_cohort,
+    normalize_region,
 )
 from directory.models import Opportunity
 
@@ -56,17 +64,22 @@ class Command(BaseCommand):
                 title = clean_title(opp.title)[:255]
                 bucket = classify_role(title, campus_hint=hint)
                 cohort = opp.cohort or extract_cohort(title)
+                class_year = extract_class_year(title)
                 region = normalize_region(opp.location)
                 counts[bucket] = counts.get(bucket, 0) + 1
                 if (bucket != opp.bucket or cohort != opp.cohort
+                        or class_year != opp.class_year
                         or region != opp.region or title != opp.title):
                     changed += 1
                     if not dry:
                         opp.title = title
                         opp.bucket = bucket
                         opp.cohort = cohort
+                        opp.class_year = class_year
                         opp.region = region
-                        opp.save(update_fields=["title", "bucket", "cohort", "region"])
+                        opp.save(update_fields=[
+                            "title", "bucket", "cohort", "class_year", "region",
+                        ])
             if dry:
                 transaction.set_rollback(True)
 

@@ -15,6 +15,7 @@ from directory.classify import (
     OTHER,
     board_is_campus,
     classify_role,
+    extract_class_year,
     extract_cohort,
 )
 
@@ -106,6 +107,59 @@ def test_campus_hint_promotes_neutral_junior_titles():
 )
 def test_extract_cohort(title, expected):
     assert extract_cohort(title) == expected
+
+
+# extract_class_year exists to stop a programme year masquerading as a
+# graduation year, so the negative cases below are the load-bearing half of
+# this table: if any of them ever returns a year, the Year filter and the card
+# chip start telling ~4,000 roles' worth of students the wrong eligibility.
+CLASS_YEAR_CASES = [
+    # ---- stated outright: the only thing that counts ----
+    ("Class of 2027 Investment Analyst", "2027"),                      # real row
+    ("Job Posting Title Financial Analyst (Class of 2027) - Financial "
+     "Restructuring - Minneapolis", "2027"),                           # real row
+    ("Class 2028 Analyst Programme", "2028"),                          # no "of"
+    ("Summer Analyst [Class of 2029]", "2029"),
+    ("CLASS OF 2026 - Global Markets", "2026"),                        # case-insensitive
+    # A programme year AND a stated class year, and they differ by one. This is
+    # a real board row and the single clearest proof the two fields can't be
+    # collapsed: cohort is 2027, class year is 2028.
+    ("JPN, 海外大, Autumn＆BCF選考, 2027 Summer Intern_Bachelor or Master "
+     "with NO full-time work experience (Class of 2028)", "2028"),
+    # ---- NOT a class year: a programme/intake year ----
+    ("2027 Summer Analyst Program", ""),                # the confusion this field prevents
+    ("2026 Off-Cycle Internship", ""),
+    ("2027 Summer Internship – Account Analyst, Tokyo", ""),           # real row
+    ("Graduate Analyst Programme 2026", ""),
+    ("Spring Insight Week 2027", ""),
+    # ---- "class" as a word with no year attached, or attached to the wrong
+    # thing. "Classic" is a real coverage group name on the live board. ----
+    ("Investment Banking, Classic — Summer Analyst", ""),              # real row
+    ("Corporate Advisory, Classic Group — Summer Analyst 2027", ""),   # real row + year
+    ("World-class 2027 Analyst Programme", ""),                        # hyphen guard
+    ("First-Class Honours 2026 Graduate Scheme", ""),
+    ("Asset Class Strategy 2027 Internship", ""),   # "Class" then a word, not a year
+    ("Class of 1999 Reunion Analyst", ""),          # outside the plausible window
+    ("", ""),
+    # Defensive: callers pass model fields that are declared non-null but the
+    # connectors' dataclass allows None.
+    (None, ""),
+]
+
+
+@pytest.mark.parametrize("title,expected", CLASS_YEAR_CASES)
+def test_extract_class_year(title, expected):
+    assert extract_class_year(title) == expected
+
+
+def test_class_year_and_cohort_are_independent():
+    """The two extractors must never be able to stand in for one another."""
+    title = "2027 Summer Intern (Class of 2028)"
+    assert extract_cohort(title) == "2027"       # programme year
+    assert extract_class_year(title) == "2028"   # stated graduation year
+    # And a plain programme title yields a cohort but no class year at all.
+    assert extract_cohort("2027 Summer Analyst Program") == "2027"
+    assert extract_class_year("2027 Summer Analyst Program") == ""
 
 
 class _FakeBoard:

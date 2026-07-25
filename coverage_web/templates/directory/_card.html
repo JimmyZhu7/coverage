@@ -7,7 +7,11 @@ lays it out. Pass `mine=True` to flag it as one of the user's targeted firms.
 <article class="opp-card{% if mine %} is-mine{% endif %}">
   <div class="opp-top">
     <span class="opp-firm"><a href="{% url 'directory:firm_detail' card.firm_slug %}">{{ card.firm_name|smart_title }}</a></span>
-    <span class="pill role role-{{ card.role.value }}">{{ card.role.label }}{% if card.cohort %} · {{ card.cohort }}{% endif %}</span>
+    {% comment %}The year on this pill is the PROGRAMME year (a 2027 summer
+    intake), not a graduation year. A "Class of YYYY" pill appears in the
+    markers row below ONLY when the posting stated one — see views._class_tag.
+    {% endcomment %}
+    <span class="pill role role-{{ card.role.value }}"{% if card.cohort %} title="{{ card.cohort }} programme year"{% endif %}>{{ card.role.label }}{% if card.cohort %} · {{ card.cohort }}{% endif %}</span>
   </div>
   <h3><a href="{{ card.url }}" rel="nofollow noopener" target="_blank">{{ card.title|smart_title }}</a></h3>
   <p class="opp-meta">

@@ -44,7 +44,10 @@ from django.utils.text import slugify
 
 from coverage_connectors import BoardConfig, FetchResult, Opportunity as ConnOpportunity, fetch_many
 
-from .classify import board_is_campus, classify_role, clean_title, extract_cohort, normalize_region
+from .classify import (
+    board_is_campus, classify_role, clean_title, extract_class_year, extract_cohort,
+    normalize_region,
+)
 from .models import Firm, Opportunity, ScrapeRun
 
 # Connector confidence-band string labels are absent for ATS postings (the
@@ -147,6 +150,9 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
                                                   NOT fabricated
       deadline (set)  -> deadline_precision="day" a real API date is day-precise; "" when null
       cohort          -> cohort (or "")           connector: always None -> ""
+      (computed)      -> class_year                only when the title states a
+                                                   "Class of YYYY" outright; no
+                                                   connector supplies it
       sponsorship     -> sponsorship (or default) connector: always None -> "unknown"
       (computed)      -> content_hash, first_seen, last_verified, last_checked
 
@@ -171,6 +177,11 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     h = content_hash_for(opp)
     bucket = classify_role(opp.title or "", campus_hint=campus_hint)
     cohort = opp.cohort or extract_cohort(opp.title or "")
+    # Two different years (see classify.py's section comment): `cohort` is the
+    # programme/intake year, `class_year` is a graduation year the posting
+    # states outright. No `opp.class_year or …` fallback because no connector
+    # has the field — the title is the only source, and it is usually silent.
+    class_year = extract_class_year(opp.title or "")
     # Clip to the storage columns' width (CharField(255)). A few boards carry
     # multi-city locations or very long titles that overrun the column and
     # would 500 the whole scrape (EQT posts roles listing 3+ office cities).
@@ -196,6 +207,7 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
             deadline=deadline,
             deadline_precision="day" if deadline else "",
             cohort=cohort,
+            class_year=class_year,
             sponsorship=opp.sponsorship or "unknown",
             content_hash=h,
             last_verified=now,
@@ -215,6 +227,7 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     existing.deadline = deadline
     existing.deadline_precision = "day" if deadline else ""
     existing.cohort = cohort
+    existing.class_year = class_year
     existing.sponsorship = opp.sponsorship or "unknown"
     existing.content_hash = h
     existing.status = "open"
