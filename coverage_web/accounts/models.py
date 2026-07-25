@@ -92,6 +92,12 @@ class User(AbstractUser):
         "Google subject ID", max_length=255, blank=True, default=""
     )
     name = models.CharField(max_length=255, blank=True, default="")
+    # Settings' "Profile picture". Local disk storage (MEDIA_ROOT) is fine at
+    # this project's current stage — local-only, pre-launch (see
+    # docs/product-brief.md) — but does NOT survive a Render redeploy (its
+    # filesystem is ephemeral): swap to S3-compatible storage before or at
+    # the point this ships to real users.
+    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     school = models.CharField(max_length=255, blank=True, default="")
     class_year = models.PositiveSmallIntegerField(null=True, blank=True)
     target_cycle = models.CharField(max_length=32, blank=True, default="")

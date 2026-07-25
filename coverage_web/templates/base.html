@@ -31,7 +31,14 @@
       </nav>
       <div class="site-auth">
         {% if user.is_authenticated %}
-          <span class="site-user">{{ user.email }}</span>
+          <a href="/welcome/#profile" class="site-user">
+            {% if user.avatar %}
+              <img class="site-user-avatar" src="{{ user.avatar.url }}" alt="">
+            {% else %}
+              <span class="site-user-avatar site-user-avatar-fallback">{{ user.name|default:user.email|first|upper }}</span>
+            {% endif %}
+            {{ user.name|default:user.email }}
+          </a>
           <a href="/accounts/logout/">Sign Out</a>
         {% else %}
           <a href="/accounts/login/">Sign In</a>

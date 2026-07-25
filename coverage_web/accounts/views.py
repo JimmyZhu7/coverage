@@ -56,7 +56,7 @@ def onboarding(request):
     form = None
     if request.method == "POST":
         if step == "profile":
-            form = ProfileForm(request.POST)
+            form = ProfileForm(request.POST, request.FILES)
             if form.is_valid():
                 form.apply_to(request.user)
                 return redirect(_step_url("firms"))
@@ -176,7 +176,7 @@ def settings_view(request):
             messages.success(request, "Language updated.")
         return redirect(reverse("accounts:settings"))
     if request.method == "POST":
-        form = ProfileForm(request.POST)
+        form = ProfileForm(request.POST, request.FILES)
         if form.is_valid():
             form.apply_to(request.user)
             saved = True

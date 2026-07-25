@@ -12,6 +12,7 @@ dependencies = [
     # will not serve static itself). See settings/production.py + Dockerfile.
     "gunicorn>=23.0",
     "whitenoise>=6.8",
+    "pillow>=11.0",  # required by ImageField (accounts.User.avatar)
     # Runtime deps: crm/views imports the domain engines; directory/ingest
     # imports the connectors. Declared so `uv sync --package coverage-web`
     # (and the Docker build) install them, not just `uv sync --all-packages`.

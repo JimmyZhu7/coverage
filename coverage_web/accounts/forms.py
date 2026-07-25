@@ -63,6 +63,19 @@ CYCLE_SUGGESTIONS: list[str] = [c for c, _ in CYCLE_CHOICES if c]
 class ProfileForm(forms.Form):
     """Step 1 of onboarding, and the editable core of /welcome/settings/."""
 
+    # Display name shown in the top nav and anywhere else a person's name
+    # reads better than their login — NOT the auth identifier, which stays
+    # the immutable email (USERNAME_FIELD, accounts/models.py). Optional:
+    # falls back to the email locally in templates when blank.
+    name = forms.CharField(max_length=255, required=False, strip=True)
+    avatar = forms.ImageField(required=False)
+    # Onboarding's step-1 render of this form has no existing avatar to
+    # clear, so this checkbox only really does anything on the settings
+    # page — Django's ClearableFileInput would add its own "Clear" checkbox
+    # automatically if the field were bound to an initial file, but this is
+    # a plain Form (not a ModelForm), so there is no such initial value for
+    # the widget to know about; this field does that job explicitly instead.
+    remove_avatar = forms.BooleanField(required=False)
     school = forms.CharField(max_length=255, required=False, strip=True)
     class_year = forms.TypedChoiceField(
         choices=CLASS_YEAR_CHOICES,
@@ -92,6 +105,7 @@ class ProfileForm(forms.Form):
         """Bind the form to a user's current values for a GET render."""
         return cls(
             initial={
+                "name": user.name,
                 "school": user.school,
                 "class_year": user.class_year,
                 "target_cycle": user.target_cycle,
@@ -104,17 +118,24 @@ class ProfileForm(forms.Form):
         """Persist validated values back onto the user row. Call only after
         `is_valid()`."""
         cd = self.cleaned_data
+        update_fields = ["name", "school", "class_year", "target_cycle", "regions", "tracks"]
+        user.name = cd["name"]
         user.school = cd["school"]
         user.class_year = cd["class_year"]
         user.target_cycle = cd["target_cycle"]
         user.regions = cd["regions"]
         user.tracks = cd["tracks"]
-        user.save(
-            update_fields=[
-                "school",
-                "class_year",
-                "target_cycle",
-                "regions",
-                "tracks",
-            ]
-        )
+        # remove_avatar wins over a simultaneous upload — the widget can't
+        # produce both in one real submission, but a wrong-order check here
+        # would silently discard whichever loses, so ties go to the more
+        # deliberate, explicitly-checked action rather than to whichever
+        # `if` happened to run second.
+        if cd["remove_avatar"]:
+            if user.avatar:
+                user.avatar.delete(save=False)
+            user.avatar = None
+            update_fields.append("avatar")
+        elif cd["avatar"]:
+            user.avatar = cd["avatar"]
+            update_fields.append("avatar")
+        user.save(update_fields=update_fields)

@@ -163,6 +163,16 @@ STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# User-uploaded avatars (accounts.User.avatar). Local disk storage: fine at
+# this project's local-only, pre-launch stage (docs/product-brief.md), but
+# Render's filesystem is ephemeral — swap MEDIA_ROOT for S3-compatible
+# storage (e.g. django-storages) before real users' avatars need to survive
+# a redeploy. Served by Django itself only in DEBUG (see urls.py); production
+# has no MEDIA serving wired up yet because there is no durable store to
+# serve it from.
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------------------------------------------------------------------------
@@ -183,6 +193,10 @@ AUTHENTICATION_BACKENDS = [
 
 LOGIN_REDIRECT_URL = "/"
 ACCOUNT_LOGOUT_REDIRECT_URL = "/"
+# Suppresses allauth's own "signed in as x" / "you have signed out" flashes
+# (pure noise on every session) while leaving its other messages (password
+# changed, etc.) intact. See accounts/adapter.py.
+ACCOUNT_ADAPTER = "accounts.adapter.CoverageAccountAdapter"
 # Brand-new accounts land in the onboarding wizard, not on the marketing page.
 ACCOUNT_SIGNUP_REDIRECT_URL = "/welcome/"
 

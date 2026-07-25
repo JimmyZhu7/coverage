@@ -5,6 +5,27 @@ htmx swap target on the settings page's in-place save.
 {% endcomment %}
 {% if saved %}<p class="msg success">Profile saved.</p>{% endif %}
 
+<div class="avatar-field">
+  {% if user.avatar %}
+    <img class="avatar-preview" src="{{ user.avatar.url }}" alt="">
+  {% else %}
+    <span class="avatar-preview avatar-preview-fallback">{{ user.name|default:user.email|first|upper }}</span>
+  {% endif %}
+  <div class="avatar-field-controls">
+    <label for="id_avatar" class="btn">Upload Photo</label>
+    {{ form.avatar }}
+    {% if user.avatar %}
+      <label class="avatar-remove">{{ form.remove_avatar }} Remove</label>
+    {% endif %}
+    {{ form.avatar.errors }}
+  </div>
+</div>
+
+<label for="id_name">Display Name</label>
+{{ form.name }}
+<p class="field-hint">Shown around Coverage in place of your email. Doesn't change how you sign in.</p>
+{{ form.name.errors }}
+
 {% comment %}Two-up on the settings page (.set-form scopes the grid); a plain stack everywhere else, e.g. the narrow onboarding step.{% endcomment %}
 <div class="grid-2">
   <div>

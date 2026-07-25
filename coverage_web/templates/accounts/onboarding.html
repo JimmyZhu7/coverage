@@ -17,7 +17,7 @@
   {% if step == "profile" %}
     <h1>Tell Us About Your Search</h1>
     <p class="lede">This tailors your firm directory and the weekly list. You can change all of it later in Settings.</p>
-    <form method="post" action="{% url 'accounts:onboarding' %}?step=profile">
+    <form method="post" action="{% url 'accounts:onboarding' %}?step=profile" enctype="multipart/form-data">
       {% csrf_token %}
       <input type="hidden" name="step" value="profile">
       {% include "accounts/_profile_form.html" %}

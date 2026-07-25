@@ -99,7 +99,9 @@
         </div>
         <div class="set-body">
           <form class="set-form" method="post" action="{% url 'accounts:settings' %}"
-                hx-post="{% url 'accounts:settings' %}" hx-target="#profile-fields" hx-swap="innerHTML">
+                enctype="multipart/form-data"
+                hx-post="{% url 'accounts:settings' %}" hx-encoding="multipart/form-data"
+                hx-target="#profile-fields" hx-swap="innerHTML">
             {% csrf_token %}
             <div id="profile-fields">{% include "accounts/_profile_form.html" %}</div>
             <div class="actions"><button type="submit" class="btn btn-primary">Save Profile</button></div>

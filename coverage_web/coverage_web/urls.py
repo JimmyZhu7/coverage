@@ -1,6 +1,8 @@
 """
 Root URL configuration for coverage_web.
 """
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
@@ -24,3 +26,8 @@ urlpatterns = [
     path("capture/", include("capture.urls")),       # inbound-email webhook + capture settings
     path("", include("core.urls")),
 ]
+
+# Avatars, DEBUG only — see MEDIA_ROOT's comment in settings/base.py for why
+# production has no equivalent yet.
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
