@@ -333,11 +333,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     border-radius: 999px; border: 2px solid var(--surface); background-clip: padding-box; }
   .firmcol-scroll::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
-  /* Standardized role card — every card is exactly 122px tall, with the fuse
-     or rolling tag pinned to the bottom edge. */
+  /* Standardized role card — 122px is the FLOOR, not a fixed height, so cards
+     line up when their content fits and grow when it doesn't.
+     It was `height: 122px` with the meta row pinned by `margin-top:auto`. That
+     silently assumed every title fits one line: a two-line title plus a
+     location line needs ~137px, so 792 of 805 cards on the live feed rendered
+     190px of content in a 120px box and spilled past the column edge. A fixed
+     height is only safe when the content is fixed, and a scraped job title
+     never is — so the box gives way, not the text. */
   .rolecard { background: var(--paper); border: 1px solid var(--line);
     border-left: 3px solid var(--line); border-radius: 12px;
-    padding: var(--s3) var(--s4); flex: none; height: 122px;
+    padding: var(--s3) var(--s4); flex: none; min-height: 122px;
     display: flex; flex-direction: column; gap: 5px;
     transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med); }
   .rolecard:hover { box-shadow: var(--shadow-1); transform: translateX(2px); }
