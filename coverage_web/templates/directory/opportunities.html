@@ -21,6 +21,15 @@
   </nav>
   {% endif %}
 
+  {% comment %}
+  The recommendation bar sits below the hero and above the stat line / firm
+  cards, and deliberately OUTSIDE #cov-results: it is scored over the whole
+  open campus set, not the filtered one, so leaving it inside the htmx swap
+  would re-render it on every filter change and make it look like it responds
+  to filters when it does not.
+  {% endcomment %}
+  {% include "directory/_recommend_bar.html" %}
+
   <form class="filters"
         hx-get="{% url 'opportunities' %}"
         hx-target="#cov-results"

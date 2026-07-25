@@ -38,6 +38,78 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 
   .hidden-note { color: var(--ink-3); }
 
+  /* ======================================================================
+     "Picked for you" bar — one horizontal rail of scored roles between the
+     hero and the stat strip. See templates/directory/_recommend_bar.html for
+     the three states and directory/recommend.py for the scoring.
+
+     Sizing rule, deliberately different from the .rolecard family below: these
+     cards are min-height with NO overflow clipping. The firm-column cards are
+     pinned to 122px because they live in a scroll window where a ragged edge
+     would read as broken; these live in a single row where flex stretch
+     already equalizes them, so a fixed height would buy nothing and cost the
+     exact clipping bug this page has hit twice (a 97px chip in a 77px slot;
+     116px of content in a 90px box). A card that needs more room takes it.
+     ====================================================================== */
+  .recbar { margin: 0 0 var(--s5); }
+  .recbar-head { display: flex; align-items: baseline; gap: var(--s3);
+    flex-wrap: wrap; margin-bottom: var(--s3); }
+  .recbar-title { font-size: var(--fs-l); margin: 0; letter-spacing: -0.01em; }
+  .recbar-sub { font-size: var(--fs-xs); color: var(--ink-3); }
+  .recbar-note { max-width: 62ch; margin: 0; font-size: var(--fs-s);
+    color: var(--ink-2); line-height: 1.5; }
+
+  /* The rail: scrolls horizontally rather than wrapping, so the bar is always
+     exactly one row tall no matter how many picks there are. */
+  .recbar-rail { display: flex; gap: var(--s3); align-items: stretch;
+    overflow-x: auto; padding-bottom: var(--s2);
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .recbar-rail::-webkit-scrollbar { height: 8px; }
+  .recbar-rail::-webkit-scrollbar-thumb { background: var(--line-strong);
+    border-radius: 999px; border: 2px solid var(--paper); background-clip: padding-box; }
+
+  .reccard { flex: 1 0 258px; max-width: 320px; min-height: 156px;
+    display: flex; flex-direction: column; gap: 6px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); border-radius: 12px;
+    padding: var(--s3) var(--s4); box-shadow: var(--shadow-1);
+    transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med); }
+  .reccard:hover { box-shadow: var(--shadow-2); transform: translateY(-2px); }
+  .reccard-firm { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+  .reccard-logo { width: 24px; height: 24px; flex: none; border-radius: 7px;
+    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 31%);
+    font-size: 10px; font-weight: var(--w-bold);
+    display: inline-flex; align-items: center; justify-content: center; }
+  .reccard-firmname { font-size: var(--fs-xs); color: var(--ink-2);
+    font-weight: var(--w-med); text-transform: uppercase; letter-spacing: 0.04em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .reccard-firmname:hover { color: var(--accent-ink); }
+  .reccard-title { margin: 0; font-size: var(--fs-m); line-height: 1.3;
+    font-weight: var(--w-med); }
+  .reccard-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; }
+  .reccard-title a:hover { color: var(--accent-ink); }
+
+  /* The "why". Wraps freely — the whole point is that every reason the scorer
+     used is visible, so nothing here may truncate the list. */
+  .reccard-why { list-style: none; margin: 2px 0 0; padding: 0;
+    display: flex; flex-wrap: wrap; gap: 4px; }
+  .why-chip { font-size: 10px; font-weight: var(--w-med); letter-spacing: 0.03em;
+    padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+    border: 1px solid var(--line-strong); background: var(--paper); color: var(--ink-2);
+    cursor: help; }
+  .why-chip.why-tier { border-color: var(--accent-line); background: var(--accent-soft);
+    color: var(--accent-ink); }
+  .why-chip.why-track { border-color: var(--ok-line); background: var(--ok-soft);
+    color: var(--ok); }
+  .reccard-foot { display: flex; align-items: baseline; gap: 6px; margin: auto 0 0;
+    padding-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; }
+  .reccard-when { font-family: var(--font-mono); font-weight: var(--w-med);
+    color: var(--ink-2); white-space: nowrap; flex: none; }
+  .reccard-rolling { color: var(--ok); }
+  .reccard-loc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  @media (max-width: 640px) { .reccard { flex: 0 0 240px; } }
+
   /* Slim inline stat strip — replaces the four oversized stat cards. One line,
      numbers in the display family, a hairline divider between items. */
   .stat-strip { display: flex; flex-wrap: wrap; align-items: center;
@@ -222,6 +294,9 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .track-chip:hover { text-decoration: none; box-shadow: var(--shadow-1); }
   .track-chip.track-offer { background: var(--ok-soft); color: var(--ok); }
   .track-chip.track-interview { background: var(--stale-s); color: var(--stale-t); }
+  /* Done is terminal — it recedes instead of competing with the live stages. */
+  .track-chip.track-closed { background: var(--paper); color: var(--ink-3);
+    border: 1px solid var(--line); }
   .rolecard-title { margin: 0; font-size: var(--fs-m); line-height: 1.3; font-weight: var(--w-med); }
   .rolecard-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
     -webkit-box-orient: vertical; overflow: hidden; }

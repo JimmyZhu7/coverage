@@ -29,6 +29,51 @@
     padding: 4px 8px; font-size: var(--fs-xs); }
   .apps-remove:hover { color: var(--danger); border-color: var(--danger-line);
     background: var(--danger-soft); }
+
+  /* ----------------------------------------------------------------------
+     Deadline lenses (Closing Soon / Rolling). Styled deliberately UNLIKE the
+     funnel cards below — flatter, tighter, no controls — because they are the
+     same roles seen a second way, not a second set of roles. A student who
+     can see at a glance that these are a different KIND of block is a student
+     who won't double-count them.
+     ---------------------------------------------------------------------- */
+  .apps-lenses { margin-top: var(--s5); border: 1px solid var(--line);
+    border-radius: var(--r-panel); background: var(--surface);
+    box-shadow: var(--shadow-1); padding: var(--s4) var(--s5) var(--s5); }
+  .apps-lenses-intro { margin: 0 0 var(--s4); font-size: var(--fs-s); color: var(--ink-2);
+    line-height: 1.5; }
+  .apps-lens + .apps-lens { margin-top: var(--s4); padding-top: var(--s4);
+    border-top: 1px solid var(--line); }
+  .apps-lens h3 { margin: 0 0 var(--s1); font-size: var(--fs-m);
+    display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
+  /* "3 of 12" — the fraction, not a bare count, is what keeps the section from
+     reading as three MORE roles on top of the twelve. */
+  .apps-lens-frac { font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--ink-3); font-weight: var(--w-reg); }
+  .apps-lens-note { margin: 0 0 var(--s3); font-size: var(--fs-xs); color: var(--ink-3); }
+  .apps-lens-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+  .apps-lens-row { display: flex; align-items: baseline; gap: var(--s3);
+    flex-wrap: wrap; padding: var(--s2) var(--s3); border-radius: 10px;
+    background: var(--paper); border: 1px solid var(--line); }
+  .apps-lens-row .lens-when { font-family: var(--font-mono); font-size: var(--fs-xs);
+    font-weight: var(--w-med); white-space: nowrap; flex: none; min-width: 7.5rem; }
+  .apps-lens-row.is-urgent .lens-when { color: var(--danger); }
+  .apps-lens-row .lens-when.lens-rolling { color: var(--ok); }
+  .lens-role { flex: 1 1 14rem; min-width: 0; font-size: var(--fs-s); }
+  .lens-role a { color: var(--ink); }
+  .lens-role a:hover { color: var(--accent-ink); }
+  .lens-firm { color: var(--ink-3); font-size: var(--fs-xs);
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  /* The stage pill: the visible link back to the one section this row is
+     actually counted in. */
+  .lens-stage { flex: none; font-size: 10px; font-weight: var(--w-med);
+    text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 9px;
+    border-radius: 999px; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink-2); white-space: nowrap; }
+  .apps-lens-empty { margin: 0; font-size: var(--fs-s); color: var(--ink-3); }
+  /* Done is terminal, so its cards recede rather than compete with live ones. */
+  .apps-stage.stage-closed .apps-card { background: var(--paper); }
+  .apps-stage.stage-closed .apps-title a { color: var(--ink-2); }
 </style>
 {% endblock %}
 
@@ -47,9 +92,51 @@
   </nav>
 
   {% if total %}
+    {% comment %}
+    The lens band. It renders the SAME rows as the funnel below, cut by
+    deadline instead of by stage, and it says so in one sentence rather than
+    leaving the student to work out why a role appears twice. Each lens count
+    is written as a fraction of the live total, and every row wears the funnel
+    stage it is actually counted in. The only authoritative total on the page
+    is the funnel's, in the line under the tabs.
+    {% endcomment %}
+    <section class="apps-lenses" aria-label="Your roles by deadline">
+      <p class="apps-lenses-intro">
+        <strong>{{ total }} role{{ total|pluralize }} tracked</strong>, all of them in one
+        stage below. These two lists are the same roles seen by deadline, not extra
+        ones — a saved role closing this week appears in both places.
+      </p>
+      {% for lens in lenses %}
+        <div class="apps-lens">
+          <h3>{{ lens.label }}
+            <span class="apps-lens-frac">{{ lens.items|length }} of {{ live_total }} live</span>
+          </h3>
+          <p class="apps-lens-note">{{ lens.note }}</p>
+          {% if lens.items %}
+            <ul class="apps-lens-list">
+              {% for r in lens.items %}
+                <li class="apps-lens-row{% if r.days_left is not None and r.days_left <= 2 %} is-urgent{% endif %}">
+                  <span class="lens-when{% if not r.deadline.posted %} lens-rolling{% endif %}">{% if r.deadline.posted %}{{ r.deadline.countdown|capfirst }}{% else %}No deadline{% endif %}</span>
+                  <span class="lens-role">
+                    <a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a>
+                    <span class="lens-firm">{{ r.firm_name|smart_title }}</span>
+                  </span>
+                  <span class="lens-stage">{{ r.stage_label }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="apps-lens-empty">
+              {% if lens.key == 'closing' %}Nothing you're tracking closes in the next {{ closing_soon_days }} days.{% else %}Every role you're tracking has a posted deadline.{% endif %}
+            </p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </section>
+
     {% for stage in stages %}
       {% if stage.items %}
-        <section class="apps-stage">
+        <section class="apps-stage stage-{{ stage.key }}">
           <h2>{{ stage.label }} <span class="scrub-count">{{ stage.items|length }}</span></h2>
           <div class="apps-grid">
             {% for uo in stage.items %}
@@ -65,6 +152,11 @@
                       <option value="submitted"{% if stage.key == 'submitted' %} selected{% endif %}>Applied</option>
                       <option value="interview"{% if stage.key == 'interview' %} selected{% endif %}>Interviewing</option>
                       <option value="offer"{% if stage.key == 'offer' %} selected{% endif %}>Offer</option>
+                      {% comment %}"Done" = the terminal state: withdrawn,
+                      rejected, accepted elsewhere, or the posting closed. It
+                      is not "Offer" — see _TRACK_STATES in directory/views.py
+                      for why the two can't be the same value.{% endcomment %}
+                      <option value="closed"{% if stage.key == 'closed' %} selected{% endif %}>Done</option>
                     </select>
                   </form>
                   <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}">

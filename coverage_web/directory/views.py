@@ -38,7 +38,11 @@ from crm.models import UserFirm
 from directory.classify import (
     BUCKET_LABELS, OTHER, REGION_LABELS, REGION_ORDER, TARGET_BUCKETS,
 )
+# The one definition of "closing soon" — see deadlines.py for why it isn't
+# spelled out at each call site (and for the crm/views.py follow-up).
+from directory.deadlines import CLOSING_SOON_DAYS, is_closing_soon
 from directory.models import Firm, Opportunity
+from directory.recommend import Candidate, Profile, recommend
 from directory.timeline import EVENT_LABELS
 
 # Firm category labels — the insider taxonomy students actually sort firms
@@ -214,6 +218,34 @@ def _card(opp, *, now, today):
         "class_year": opp.class_year,
         "deadline": deadline_marker(opp.deadline, opp.deadline_precision, today=today),
         "tags": tags,
+    }
+
+
+def _monogram(name: str) -> str:
+    """Two-letter firm initials for the logo tile — the always-works fallback
+    the firm columns already use, lifted out so the recommendation cards can
+    share it instead of re-deriving it."""
+    parts = [p for p in (name or "").split() if p[:1].isalnum()]
+    return "".join(p[0] for p in parts[:2]).upper() or "?"
+
+
+def _pick_card(rec) -> dict:
+    """One `recommend.Recommendation` as a template-ready dict, same posture as
+    `_card` above: the template renders, it doesn't compute. The reasons are
+    passed through verbatim — shortening them here would break the promise that
+    what the card says is exactly what the scorer decided."""
+    c = rec.candidate
+    return {
+        "id": c.id,
+        "firm_name": c.firm_name,
+        "firm_slug": c.firm_slug,
+        "monogram": _monogram(c.firm_name),
+        "title": c.title,
+        "url": c.url,
+        "location": c.location,
+        "deadline": c.deadline,
+        "score": rec.score,
+        "reasons": rec.reasons,
     }
 
 
@@ -567,6 +599,29 @@ def opportunities(request):
             UserFirm.objects.for_user(request.user).values_list("firm_id", "tier")
         )
 
+    # Picked-for-you bar. Deliberately scored over the WHOLE open campus set,
+    # not the filtered `qs`: it sits above the filter bar and answers "what
+    # should I look at", which a filter narrowing the page below shouldn't
+    # silently rewrite. Signed-out (and profile-less) users get no bar at all —
+    # `recommend()` returns [] for an empty profile, and the template renders
+    # an honest sign-in line instead of six generic cards pretending to be
+    # tailored. See recommend.py for the scoring itself.
+    picks: list = []
+    profile = None
+    if request.user.is_authenticated:
+        profile = Profile.from_user(request.user, tier_by_firm)
+        if not profile.is_empty:
+            picks = [
+                _pick_card(r)
+                for r in recommend(
+                    profile,
+                    [
+                        Candidate.from_opportunity(o)
+                        for o in open_qs.filter(bucket__in=TARGET_BUCKETS)
+                    ],
+                )
+            ]
+
     qs = qs.order_by("firm__name", F("deadline").asc(nulls_last=True), "title")
     clusters: dict[int, dict] = {}
     for o in qs:
@@ -665,6 +720,12 @@ def opportunities(request):
     context = {
         "clusters": cluster_list,
         "total": total,
+        # Recommendation bar. `picks` empty + `has_profile` true is the honest
+        # "nothing clears the bar" state; `has_profile` false is the
+        # signed-out / empty-survey state. The template needs to tell those
+        # two apart, so both flags travel.
+        "picks": picks,
+        "has_profile": bool(profile and not profile.is_empty),
         "facets": facets,
         "role_facet": role_facet,
         "year_facet": year_facet,
@@ -692,9 +753,39 @@ def opportunities(request):
 # Opportunity tracking — the writable side of UserOpportunity. `saved` is the
 # feed's one-click star; `submitted`/`interview`/`offer` are the funnel states
 # managed on My Applications. Every write is scoped through `.for_user`.
-# ---------------------------------------------------------------------------
-_TRACK_STATES = ("saved", "submitted", "interview", "offer")
+#
+# `closed` (shown as "Done") is the terminal state. Three candidates were on
+# the table and the other two are wrong:
+#
+#   - "Offer means done." It doesn't. An offer you are still deciding on is the
+#     most live row on the page, and the overwhelmingly common terminal
+#     outcome is a rejection, which never produces an offer at all. Folding
+#     both into one bucket would leave a student with no way to say "this one
+#     is over" about the 90% of applications that end without an offer.
+#   - "Reuse `UserOpportunity.dismissed`." That flag already means something
+#     else — "hide this from me", a pre-funnel not-interested signal — and
+#     every query on this page (and in the feed) filters `dismissed=False`, so
+#     a Done row would become invisible by construction. Nothing in the app
+#     currently sets it to True; that is an escape hatch to leave alone, not a
+#     free field to repurpose.
+#
+# So: a fifth `applied_status` value. It needs NO migration — `applied_status`
+# is a plain CharField(max_length=32) with no `choices` and no DB constraint,
+# so the vocabulary lives here, in the one place that writes it.
+TRACK_CLOSED = "closed"
+_TRACK_STATES = ("saved", "submitted", "interview", "offer", TRACK_CLOSED)
 _FUNNEL_STATES = ("submitted", "interview", "offer")
+
+# The pipeline, in display order. This list IS the partition: every tracked
+# row lands in exactly one of these, so the section counts sum to the total.
+_STAGES = (
+    ("saved", "Saved"),
+    ("submitted", "Applied"),
+    ("interview", "Interviewing"),
+    ("offer", "Offer"),
+    (TRACK_CLOSED, "Done"),
+)
+_STAGE_LABELS = dict(_STAGES)
 
 
 def _track_control(request, opp):
@@ -753,31 +844,102 @@ def track_opportunity(request, pk):
     return redirect(resolve_url("my_applications"))
 
 
+def _lens_item(uo, *, today):
+    """One row as it appears in a deadline lens (Closing Soon / Rolling).
+
+    Carries its funnel stage with it — that label is what stops the lens from
+    reading as a separate pile of roles."""
+    o = uo.opportunity
+    stage = uo.applied_status or "saved"
+    return {
+        "id": o.id,
+        "firm_name": o.firm.name,
+        "title": o.title,
+        "url": o.url,
+        "location": o.location,
+        "stage": stage,
+        "stage_label": _STAGE_LABELS.get(stage, stage.title()),
+        "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
+        "days_left": (o.deadline - today).days if o.deadline else None,
+    }
+
+
 @login_required
 def my_applications(request):
-    """The user's saved and applied roles, grouped by pipeline stage."""
+    """The user's tracked roles: one funnel partition, plus two deadline
+    lenses over the live rows.
+
+    OVERLAP, decided deliberately. The five funnel stages are the partition —
+    every tracked row is in exactly one of them, so `total` equals the sum of
+    the stage counts and the page can never imply the student is tracking more
+    roles than they are. Closing Soon and Rolling are *cross-sections* of those
+    same rows, not additional ones: a Saved role closing on Friday is genuinely
+    both, and hiding it from one of the two would break whichever section the
+    student happened to be reading.
+
+    So a role can render twice, and the page says so out loud rather than
+    hoping nobody notices: the lens band is introduced as "the same N roles,
+    seen by deadline", each lens count is written as "x of N", and every lens
+    card wears its funnel-stage pill. The one authoritative count — the number
+    a student would quote — is the funnel total in the header.
+
+    Done rows are excluded from both lenses. A finished application has no
+    deadline urgency left in it, and letting one back into Closing Soon would
+    put a dead role at the top of the page."""
     from analytics.models import UserOpportunity
 
+    today = timezone.localdate()
     rows = list(
         UserOpportunity.objects.for_user(request.user)
         .filter(dismissed=False)
         .select_related("opportunity", "opportunity__firm")
         .order_by("opportunity__firm__name", "opportunity__title")
     )
-    # Group into Saved + the three funnel stages, in pipeline order. setdefault
-    # so any unexpected legacy status can't KeyError the page.
-    groups = {"saved": [], "submitted": [], "interview": [], "offer": []}
+    # setdefault so any unexpected legacy status can't KeyError the page.
+    groups: dict[str, list] = {key: [] for key, _ in _STAGES}
     for uo in rows:
         groups.setdefault(uo.applied_status or "saved", []).append(uo)
     stages = [
-        {"key": "saved", "label": "Saved", "items": groups["saved"]},
-        {"key": "submitted", "label": "Applied", "items": groups["submitted"]},
-        {"key": "interview", "label": "Interviewing", "items": groups["interview"]},
-        {"key": "offer", "label": "Offer", "items": groups["offer"]},
+        {"key": key, "label": label, "items": groups[key]}
+        for key, label in _STAGES
+    ]
+
+    # The lenses read the LIVE rows only (everything that isn't Done).
+    live = [uo for uo in rows if (uo.applied_status or "saved") != TRACK_CLOSED]
+    closing = [
+        _lens_item(uo, today=today) for uo in live
+        if is_closing_soon(uo.opportunity.deadline, today=today)
+    ]
+    closing.sort(key=lambda i: (i["days_left"], i["firm_name"].lower()))
+    # Rolling is defined by the ABSENCE of a deadline, not by a far-off one: a
+    # role with a real deadline three months out is dated, just not urgent, and
+    # calling it rolling would be a small lie about the posting. Rolling roles
+    # carry no countdown and are never styled as overdue.
+    rolling = [
+        _lens_item(uo, today=today) for uo in live
+        if uo.opportunity.deadline is None
+    ]
+
+    lenses = [
+        {
+            "key": "closing",
+            "label": "Closing Soon",
+            "items": closing,
+            "note": f"Deadline inside the next {CLOSING_SOON_DAYS} days.",
+        },
+        {
+            "key": "rolling",
+            "label": "Rolling",
+            "items": rolling,
+            "note": "No posted deadline. Reviewed as they arrive, so apply early.",
+        },
     ]
     return render(request, "directory/my_applications.html", {
         "stages": stages,
+        "lenses": lenses,
         "total": len(rows),
+        "live_total": len(live),
+        "closing_soon_days": CLOSING_SOON_DAYS,
     })
 
 

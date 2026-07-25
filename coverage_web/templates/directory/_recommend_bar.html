@@ -1,0 +1,81 @@
+{% load textstyle %}
+{% comment %}
+The "Picked for you" bar. Three states, and the difference between them is the
+whole point of the component:
+
+  1. No profile (signed out, or signed in with an empty survey) — one honest
+     line and a way to fix it. Never cards. A bar labelled "picked for you"
+     shown to someone we know nothing about is a lie that costs exactly the
+     trust this page exists to earn.
+  2. A profile, but nothing clears the score threshold — say so plainly. The
+     bar is allowed to be empty; padding it with the least-bad six would make
+     a full bar meaningless on the days it is genuinely full.
+  3. Picks — up to six cards, each carrying the reasons that put it there.
+
+Every card's "why" chips come straight from the scorer (directory/recommend.py)
+and each chip's title attribute holds the long-form justification, including
+an explicit admission when a class-year match was inferred from a programme
+year rather than stated by the posting.
+
+Layout note: the cards are `min-height`, never a fixed height, and nothing
+here sets `overflow: hidden`. Two previous card bugs on this page were content
+clipped by a box smaller than its contents (a 97px chip in a 77px slot; 116px
+of content in a 90px box), so this component is built so that class of bug is
+not expressible — a card that needs more room grows, and the flex row keeps
+the whole set the same height as the tallest.
+{% endcomment %}
+<section class="recbar" aria-label="Recommended roles">
+  {% if not has_profile %}
+    <div class="recbar-head">
+      <h2 class="recbar-title">Roles for you</h2>
+    </div>
+    <p class="recbar-note">
+      {% if user.is_authenticated %}
+        We don't know your class year, region, or tracks yet, so there's nothing to
+        tailor. <a href="{% url 'accounts:settings' %}">Fill in your profile</a> and
+        this bar starts picking roles.
+      {% else %}
+        Nothing here is personalised — you're signed out.
+        <a href="{% url 'account_login' %}">Sign in</a> to get roles picked by your
+        class year, university, tracks, and target firms.
+      {% endif %}
+    </p>
+  {% elif picks %}
+    <div class="recbar-head">
+      <h2 class="recbar-title">Picked for you</h2>
+      <span class="recbar-sub">Scored on your class year, university, tracks, and firm tiers. Every card says why.</span>
+    </div>
+    <div class="recbar-rail">
+      {% for p in picks %}
+        <article class="reccard">
+          <header class="reccard-firm">
+            <span class="reccard-logo" style="--hue: {{ p.firm_slug|firm_hue }}">{{ p.monogram }}</span>
+            <a class="reccard-firmname" href="{% url 'directory:firm_detail' p.firm_slug %}">{{ p.firm_name|smart_title }}</a>
+          </header>
+          <h3 class="reccard-title">
+            <a href="{{ p.url }}" target="_blank" rel="nofollow noopener">{{ p.title|smart_title }}</a>
+          </h3>
+          <ul class="reccard-why">
+            {% for r in p.reasons %}
+              <li class="why-chip why-{{ r.kind }}" title="{{ r.detail }}">{{ r.text }}</li>
+            {% endfor %}
+          </ul>
+          <p class="reccard-foot">
+            {% if p.deadline %}<span class="reccard-when">Closes {{ p.deadline|date:"M j" }}</span>{% else %}<span class="reccard-when reccard-rolling">Rolling</span>{% endif %}
+            {% if p.location %}<span class="reccard-loc">{{ p.location|smart_title }}</span>{% endif %}
+          </p>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="recbar-head">
+      <h2 class="recbar-title">Picked for you</h2>
+    </div>
+    <p class="recbar-note">
+      Nothing open right now scores high enough against your profile to be worth
+      calling a match. Rather than pad this row with weak ones, it stays empty —
+      browse the full list below, or widen your regions and tracks in
+      <a href="{% url 'accounts:settings' %}">your profile</a>.
+    </p>
+  {% endif %}
+</section>

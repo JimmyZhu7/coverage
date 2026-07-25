@@ -24,6 +24,6 @@ so a stray feed click can't un-apply someone.
     </button>
   {% else %}
     <a class="track-chip track-{{ r.track_status }}" href="{% url 'my_applications' %}"
-       title="Manage on My Applications">{% if r.track_status == "submitted" %}Applied{% elif r.track_status == "interview" %}Interviewing{% else %}Offer{% endif %}</a>
+       title="Manage on My Applications">{% if r.track_status == "submitted" %}Applied{% elif r.track_status == "interview" %}Interviewing{% elif r.track_status == "offer" %}Offer{% else %}Done{% endif %}</a>
   {% endif %}
 </span>
