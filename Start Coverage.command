@@ -33,7 +33,7 @@ uv run --package coverage-web python coverage_web/manage.py migrate --noinput >/
 uv run --package coverage-web python coverage_web/manage.py shell < scripts/demo_seed.py 2>/dev/null | grep -i demo || true
 
 # 2b) If the listings haven't been refreshed in 12+ hours, refresh them in the
-#     background (scrape + classify + re-verify) so the calendar is never stale
+#     background (scrape + classify + re-verify) so the feed is never stale
 #     just because the daily job didn't get a chance to run.
 FRESHNESS=$(uv run --package coverage-web python coverage_web/manage.py shell -c "
 from django.utils import timezone
@@ -49,7 +49,7 @@ fi
 # 3) Open the browser once the site is ready (unless told not to, for testing).
 if [ "$COVERAGE_NO_OPEN" != "1" ]; then
   ( for _ in $(seq 1 40); do
-      curl -s http://127.0.0.1:8000/healthz >/dev/null 2>&1 && { open "http://127.0.0.1:8000/calendar/"; break; }
+      curl -s http://127.0.0.1:8000/healthz >/dev/null 2>&1 && { open "http://127.0.0.1:8000/opportunities/"; break; }
       sleep 0.5
     done ) &
 fi
@@ -57,10 +57,12 @@ fi
 echo ""
 echo "  ✓ Coverage is starting. A browser tab will open in a moment."
 echo ""
-echo "    Public calendar (no login):   http://127.0.0.1:8000/calendar/"
-echo "    Log in to see the CRM:        http://127.0.0.1:8000/accounts/login/"
-echo "        email:     demo@coverage.local"
-echo "        password:  demo1234"
+echo "    Opportunities feed (no login): http://127.0.0.1:8000/opportunities/"
+echo "    Log in to see the CRM:         http://127.0.0.1:8000/accounts/login/"
+echo "        email:     jimmy@coverage.local"
+echo "        password:  (the one you set)"
+echo ""
+echo "    Demo student (sample data):    demo@coverage.local / demo1234"
 echo ""
 echo "  KEEP THIS WINDOW OPEN while you use Coverage. Close it to stop."
 echo "──────────────────────────────────────────────"

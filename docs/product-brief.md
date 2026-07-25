@@ -1,6 +1,14 @@
 # Coverage — Product Brief
 
-*Captured 2026-07-23. Source: founder brief + competitive research.*
+*Captured 2026-07-23. Source: founder brief + competitive research.
+Competitive table and shipped-surface names refreshed 2026-07-25.*
+
+> **Naming note (2026-07-25):** this brief was written when the public surface
+> was a heat-mapped cycle **calendar**. That page has been retired; the public
+> surface is now the **Opportunities feed** at `/opportunities/` — the same free
+> data, ranked by deadline then freshness instead of laid out as a grid.
+> Per-firm cycle timelines survive on each firm's detail page. Read every
+> "calendar" below as "feed".
 
 ## Thesis
 
@@ -41,15 +49,16 @@ one-fetch-serves-all-users architecture is the scaling plan.
 *Legal note:* hiQ Labs v. LinkedIn establishes that scraping public data is
 CFAA-legal. ToS and tort risk still argue for staying reasonable on request volume.
 
-**The deadline calendar is free and never paywalled.** Trust with this audience
-depends on the tracker being real, not a lead magnet.
+**The public opportunities feed is free and never paywalled.** Trust with this
+audience depends on the tracker being real, not a lead magnet.
 
 ## Competitive landscape
 
 | Competitor | Model | Price | Notes |
 |---|---|---|---|
-| The Trackr | Free + Premium add-on | undisclosed | alerts/community, not personalization |
-| OffCycle | One-time unlock, explicitly "no subscription" | $9.99 / $20 | closest analog; wins goodwill by rejecting subscriptions |
+| The Trackr | Free + Premium add-on | **$40 one-time (US), £30 (UK)** | alerts/community, not personalization. Price confirmed 2026-07-25 — it lands within $1 of the Season Pass below, which is the strongest external validation the pricing has |
+| OffCycle | One-time unlock, explicitly "no subscription" | $9.99 unlocks | closest analog; wins goodwill by rejecting subscriptions. **Has since pivoted toward networking** — 434 firms refreshed hourly, plus verified HR contact emails and AI-assisted outreach for 10,000+ boutiques |
+| NextCoffee.ai | AI coffee-chat assistant | not established | **Nearest thing to Coverage's thesis found so far** (2026-07-25): prioritizes contacts by response signal, drafts notes, sends from Gmail, follows up. Attacks the *send* side; Coverage's claim is the *sustain* side. Needs a proper teardown before the capture UX is frozen |
 | Adventis | Free tracker as lead magnet | $295–495 course | one-time, 2yr access |
 | RecruitU | Marketplace | free to students | monetizes employers, not students |
 | WSO Academy | Off-menu sales call | ~$7,000 | one-time mentorship + tracker bundle |
@@ -62,7 +71,7 @@ deliberately rather than by default.
 
 ## Pricing
 
-- **Free forever** — full deadline calendar, CRM capped at 50 contacts, basic fit score.
+- **Free forever** — full opportunities feed, CRM capped at 50 contacts, basic fit score.
 - **Season Pass — $39 one-time per cycle** (hero offer, matches category norm) —
   unlimited contacts, full fit-score history, staleness automation, instant alerts.
   The "cycle" is a fixed 6-month window from activation, not a literal calendar

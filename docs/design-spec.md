@@ -6,6 +6,15 @@ page spec conflicts with an implementer's taste, the spec wins. The shared CSS
 (`static/css/coverage.css`) and `templates/base.html` have already been shipped
 verbatim from this spec — do not modify either.*
 
+> **One page in this spec no longer exists (noted 2026-07-25).** The
+> `directory/calendar.html` heat-mapped cycle grid at `/calendar/` was retired
+> after this spec was written; the Opportunities feed absorbed its job, and
+> per-firm cycle timelines moved onto `directory/firm_detail.html`. Its section
+> below, and the `/calendar/` links and "Deadline calendar" copy in the home and
+> pricing specs, describe a page that is not in the URL conf. Everything else in
+> this file remains the live contract. The retirement is deliberate, not drift:
+> a feed ranked by deadline states what is closing; a grid only displays it.
+
 ## 0. Design direction (committed)
 
 **The look: a well-set financial ledger.** Warm paper ground, near-black ink,

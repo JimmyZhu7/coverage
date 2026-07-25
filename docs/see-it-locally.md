@@ -11,7 +11,7 @@ so you can click around before deciding to put it online.
      — it's Coverage running. (If macOS says it can't open the file because it's
      from an unidentified developer: **right-click** the file → **Open** →
      **Open**. You only do this the first time.)
-   - After a few seconds, a **browser tab opens** to your deadline calendar.
+   - After a few seconds, a **browser tab opens** to your Opportunities feed.
 3. **Keep the black window open** while you use Coverage. To stop, just close it.
 
 The first start is the slowest (it wakes the database and sets up a demo
@@ -19,19 +19,23 @@ student). Later starts are quick.
 
 ## What you're looking at
 
-**The calendar** (opens first, no login) — the free, public deadline tracker.
-Real internship openings pulled from company career sites, with honest labels:
-"verified today", "may be stale", "no deadline posted". This is the part that's
-never paywalled.
+**The Opportunities feed** (opens first, no login) — the free, public listing.
+Real internship openings pulled from company career sites, ranked by deadline
+then freshness, with honest labels: "verified today", "may be stale", "no
+deadline posted". This is the part that's never paywalled. (There was once a
+separate heat-mapped cycle *calendar* page; it was retired in favour of this
+feed. Per-firm cycle timelines still live on each firm's detail page.)
 
 **The CRM** — the part that makes Coverage different. To see it, log in:
 
 - Go to **http://127.0.0.1:8000/accounts/login/** (or click "Sign in")
-- Email: **demo@coverage.local**
-- Password: **demo1234**
+- **Your own account:** `jimmy@coverage.local`, with your 69 target firms
+  already imported from `recruiting-radar/targets.yaml` and tiered by priority.
+- **The demo student** (sample contacts and touches, for showing other people):
+  `demo@coverage.local` / `demo1234`
 
-Then visit **http://127.0.0.1:8000/app/** — this is a demo student's account,
-pre-filled so you can see it working:
+Then visit **http://127.0.0.1:8000/app/**. On the demo account, which is
+pre-filled so you can see the loop working:
 
 - **This Week** — the priority list: who to contact, why, and a ready-to-send
   email with the tracking address already filled in. It's telling this student

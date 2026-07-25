@@ -251,6 +251,52 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("cicc", BeisenBoard(firm="CICC", host="cicc.zhiye.com")),
 ]
 
+# ---- Coverage gaps against the founder's target universe (probed 2026-07-25) ----
+#
+# Reconciling `recruiting-radar/targets.yaml` (69 targets) against BOARDS left
+# seven finance/consulting targets with no board. Each was probed directly; the
+# findings are recorded here so the next attempt starts from the result rather
+# than repeating the search. None are added as live entries: this file's
+# standing rule is that a board earns its place by returning real rows (see the
+# Jefferies note above, probed and held back on exactly this basis).
+#
+# 1. BNP Paribas — SOLVED except for rows. Runs tal.net, so the existing
+#    `talnet` connector covers it with no new code; the board is brand-2 and
+#    self-reports its canonical paths:
+#        https://bnpparibas.tal.net/vx/lang-en-GB/mobile-0/brand-2/xf-b9254cc52738/candidate/jobboard/vacancy/1/adv/   (Programmes)
+#        https://bnpparibas.tal.net/vx/lang-en-GB/mobile-0/brand-2/xf-b9254cc52738/candidate/jobboard/vacancy/2/adv/   (Events)
+#    Both return HTTP 200 and zero `opp_` rows on every vacancy id 1–6 as of
+#    2026-07-25 — empty out of season, the same state Solomon's students board
+#    shows above. Re-probe when BNP's campus cycle opens (historically Aug–Sep);
+#    if rows appear, add both as plain TalnetBoard entries. Note the `xf-` path
+#    segment may be session-scoped and could need rediscovering from
+#    https://bnpparibas.tal.net/candidate.
+#
+# 2. Société Générale — needs a connector this package does not have. SG runs
+#    Oracle **Taleo** (socgen.taleo.net), not Oracle Recruiting Cloud, so
+#    `oracle.py` does not apply. `/careersection/sgcareers/jobsearch.ftl` 302s
+#    to a session bootstrap and the `rest/jobboard/searchjobs` POST returns
+#    "An Error Occurred in TEE" without a valid portal id, which is only minted
+#    in a browser session. A `taleo` connector is the single highest-leverage
+#    one left to write — Taleo also backs BNP Paribas's non-campus boards and a
+#    long tail of banks — but it needs the browser tier (see beisen.py), not a
+#    plain fetch.
+#
+# 3–7. No public HTTP board at all; not a connector gap, an absence of data:
+#    Centerview (careers.aspx is a static page listing no roles, sitemap.xml
+#    403s — Centerview recruits through campus channels, not a board),
+#    Crédit Agricole CIB, CMB International, BOCI, and Guotai Junan Intl (all
+#    JS shells with no ATS host in the served markup). These belong on the
+#    firm-detail page as manually-maintained `firm_dates`, not in the feed.
+#
+# Deliberately absent, and not a gap: the 11 corp-strat / pipeline targets
+# (Google, Microsoft, Amazon, Meta, Apple, Nvidia, Tencent, Alibaba, ByteDance,
+# SEO Career, MLT). `scripts/import_targets.py` creates `firms` rows for them so
+# the founder can tier them and hang contacts off them, but adding boards here
+# would put tech back in the public feed and reverse the 2026-07-23 scope cut.
+# The scope decision lives in this catalog, which is why the firms table can
+# carry them harmlessly.
+
 
 # Vertical (Firm.tracks) for catalog firms that are NOT in the founder's
 # firms.yaml seed set, keyed by catalog slug. `scrape` pre-creates these Firm

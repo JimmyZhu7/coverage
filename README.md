@@ -1,13 +1,13 @@
 # Coverage
 
 Everyone tracks recruiting deadlines. Nobody tracks the relationship. Coverage
-is a shared, centrally-scraped deadline calendar for campus recruiting
-(consulting, finance, tech) — free, never paywalled — wrapped around a
-private, per-student networking CRM that scans a student's own outreach and
-scores contacts and firms by estimated chance of success, feeding that score
-back into a weekly, prioritized to-do list. The deadline calendar is a
-commodity given away for trust; the defensible value is the captured email
-activity a student feeds into their own relationship ledger. See
+is a shared, centrally-scraped opportunities feed for campus recruiting
+(consulting, finance) — free, never paywalled, ranked by deadline then
+freshness — wrapped around a private, per-student networking CRM that scans a
+student's own outreach and scores contacts and firms by estimated chance of
+success, feeding that score back into a weekly, prioritized to-do list. The
+feed is a commodity given away for trust; the defensible value is the captured
+email activity a student feeds into their own relationship ledger. See
 `docs/product-brief.md` for the full thesis and `docs/build-plan.md` for the
 technical build plan this repo follows.
 

@@ -302,6 +302,23 @@ explainable end to end.
 
 ## 7. Sequencing
 
+> **Status as of 2026-07-25 — read this before planning against the milestones below.**
+> M0–M4 are **built and running locally**, and most of M5 with them. The week numbers are
+> now history, not a plan, and several were overshot in scope: the catalog carries **89 boards
+> across 13 providers**, not M1's "Greenhouse + Lever + Workday only"; the fit score, weekly
+> list, capture pipeline, analytics events, and self-serve export/delete all exist. What has
+> *not* happened is M5's actual definition of done — **a non-founder completing the funnel
+> unassisted** — because the app has never been deployed and has no users but the founder.
+>
+> So the remaining critical path is not build work. It is: deploy (`docs/deploy.md`,
+> `render.yaml`), get 3–5 real students on it, and let §8's 40% gate return a verdict.
+> Two things below are genuinely still open and worth keeping: the **Gmail-OAuth decision
+> gate** in M6+ (now with a trigger — pull it forward if the gate fails on capture *mix*
+> rather than volume, i.e. students log manually but never BCC), and **clubs + billing**,
+> which stay gated on that verdict.
+>
+> The calendar page M1 describes was retired in favour of the `/opportunities/` feed.
+
 Target: second-student end-to-end moment at ~10 weeks of focused solo work. M1 is deliberately
 thin — seed data covers what connectors don't yet.
 
