@@ -44,7 +44,7 @@ TARGETS_PATH = os.environ.get(
     "COVERAGE_TARGETS_PATH",
     "/Users/zhujimmy/Claude/Projects/Recruitment Opportunities/recruiting-radar/targets.yaml",
 )
-OWNER_EMAIL = os.environ.get("COVERAGE_TARGETS_OWNER", "jimmy@coverage.local")
+OWNER_EMAIL = os.environ.get("COVERAGE_TARGETS_OWNER", "you@example.com")
 
 # targets.yaml is machine-parsed by its own dashboard with a line regex and the
 # file header mandates one target per line in strict flow style, so a regex is

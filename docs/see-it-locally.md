@@ -29,7 +29,7 @@ feed. Per-firm cycle timelines still live on each firm's detail page.)
 **The CRM** — the part that makes Coverage different. To see it, log in:
 
 - Go to **http://127.0.0.1:8000/accounts/login/** (or click "Sign in")
-- **Your own account:** `jimmy@coverage.local`, with your 69 target firms
+- **Your own account:** `you@example.com`, with your 69 target firms
   already imported from `recruiting-radar/targets.yaml` and tiered by priority.
 - **The demo student** (sample contacts and touches, for showing other people):
   `demo@coverage.local` / `demo1234`
