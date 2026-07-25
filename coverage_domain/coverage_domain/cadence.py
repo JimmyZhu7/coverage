@@ -8,7 +8,8 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
 
   - `due_actions()`'s fixed 7-branch decision tree, in the exact same
     order, returning at most one action per contact:
-      1. chat_done + no thank-you since the LATEST chat        -> thank_you
+      1. chat_done + no thank-you since the LATEST chat, and
+         that chat is within `thank_you_expires_after_days`    -> thank_you
       2. chat_scheduled stale > 4 business days                -> confirm_chat
       3. warm contact at a firm whose CONFIRMED app_close is
          within `pre_deadline_reping_days`, REGION-SCOPED       -> reping
@@ -22,6 +23,11 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
 
   - The second-chat thank-you fix and the "chat_done contacts re-enter the
     cadence once thanked" fix (both come free with the ported branch 1).
+
+  - DIVERGENCE from the original (deliberate, 2026-07-25): branch 1 now
+    EXPIRES. The original prompted for a thank-you indefinitely; here the
+    prompt stops after `thank_you_expires_after_days` and the contact falls
+    through to the rest of the cadence. See that parameter's comment for why.
 
   - Region scoping (branch 3): an HK app_close never re-pings a US contact
     at the same firm, and vice versa. A contact whose region can't be
@@ -72,6 +78,15 @@ CADENCE_DEFAULTS: dict[str, int] = {
     "park_after_business_days": 10,      # after max_cold_touches, no reply this long -> park
     "max_cold_touches": 2,               # initial note + 1 follow-up, then park
     "thank_you_within_hours": 24,        # after any chat
+    # ...but the prompt STOPS after this many days. A thank-you note is a
+    # courtesy with a shelf life: sent the next morning it lands well, sent
+    # three weeks later it reads as an afterthought and draws attention to the
+    # silence. Past this window the right move is a fresh reason to talk, not a
+    # belated thanks, so the contact falls through to the rest of the cadence
+    # instead of being nagged forever. Surfaced by the founder cutover, which
+    # replayed months of historical chats and produced a wall of stale
+    # thank-you prompts on day one.
+    "thank_you_expires_after_days": 7,
     "advocate_touch_min_weeks": 4,       # keep advocates warm every 4-6 weeks
     "advocate_touch_max_weeks": 6,
     "pre_deadline_reping_days": 14,      # re-ping warm contacts when a CONFIRMED app_close is this near
@@ -255,6 +270,7 @@ def due_actions(
     park_bd = int(p["park_after_business_days"])
     max_cold = int(p["max_cold_touches"])
     ty_hours = int(p["thank_you_within_hours"])
+    ty_expiry_days = int(p["thank_you_expires_after_days"])
     adv_min_days = int(p["advocate_touch_min_weeks"]) * 7
     reping_days = int(p["pre_deadline_reping_days"])
 
@@ -306,10 +322,14 @@ def due_actions(
                 if chat_dt is None or (t_dt is not None and t_dt >= chat_dt):
                     thanked = True
                     break
-            if not thanked:
-                hrs = None
-                if chat_dt is not None:
-                    hrs = (as_of - chat_dt).total_seconds() / 3600
+            hrs = None
+            if chat_dt is not None:
+                hrs = (as_of - chat_dt).total_seconds() / 3600
+            # The window has closed: too late for the note to read as a thanks.
+            # Deliberately checked BEFORE `thanked`, so an expired prompt and a
+            # sent one behave identically from here on — both fall through.
+            expired = hrs is not None and hrs > ty_expiry_days * 24
+            if not thanked and not expired:
                 overdue = hrs is not None and hrs > ty_hours
                 add(
                     "thank_you",
@@ -321,7 +341,8 @@ def due_actions(
                     hours=hrs, overdue=overdue, window_hours=ty_hours,
                 )
                 continue
-            # thanked for the latest chat — fall through.
+            # Thanked for the latest chat, or the window has closed — fall
+            # through to the reping / maintain cadence below either way.
 
         # 2. a scheduled-but-not-logged chat gone stale > 4 business days.
         if thread_state == "chat_scheduled":

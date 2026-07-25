@@ -214,8 +214,22 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     transition: box-shadow var(--t-med), transform var(--t-med), opacity var(--t-fast); }
   .firm-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
   .firm-card.dragging { opacity: 0.5; cursor: grabbing; }
-  .firm-card-name { font-weight: var(--w-bold); font-size: var(--fs-s); }
-  .firm-card-badges { display: flex; gap: var(--s1); flex-wrap: wrap; }
+  .firm-card-name { font-weight: var(--w-bold); font-size: var(--fs-s);
+    /* One line, ellipsised. A long firm name used to wrap to two lines and
+       push the badges past the fixed 92px card, which is what made the row
+       heights look ragged. */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Badges must fit the space the name leaves inside a 92px card. At the
+     default pill size two badges measured 156px against 156px of inner width
+     — wrapping to a second row on the exact tie, which overflowed the card
+     (116px of content in a 90px box), clipped the pills mid-shape against
+     `overflow:hidden`, and pushed the warmth bar out of view entirely. These
+     compact pills are firm-card-only: the global `.pill` keeps its size
+     everywhere else, so nothing outside this board shifts. */
+  .firm-card-badges { display: flex; gap: var(--s1); flex-wrap: wrap;
+    align-content: flex-start; min-height: 0; overflow: hidden; }
+  .firm-card-badges .pill { font-size: 10px; padding: 2px var(--s2);
+    line-height: 1.5; }
   .pill.fc-open { background: var(--conf-low-s); color: var(--conf-low-t); border-color: var(--conf-low-l); }
   .pill.fc-soon { background: var(--stale-s); color: var(--stale-t); border-color: var(--stale-l); }
   .pill.fc-act  { background: var(--w-advocate-s); color: var(--w-advocate-t); border-color: var(--w-advocate-l); }

@@ -84,6 +84,40 @@ def test_second_chat_prompts_new_thank_you():
     assert "thank_you" in kinds_for(actions, 1)
 
 
+def test_thank_you_prompt_expires_after_a_week():
+    """A chat older than `thank_you_expires_after_days` must NOT prompt a
+    thank-you: the note has missed its moment, and nagging produces a wall of
+    stale prompts the moment any historical data is imported. The contact falls
+    through to the rest of the cadence rather than dropping out."""
+    c = contact(1, warmth="advocate", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-06-01 10:00")]  # ~51 days before AS_OF
+    k = kinds_for(cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1)
+    assert "thank_you" not in k, f"chat is 51 days old — must not prompt, got {k}"
+    assert "maintain" in k, f"must fall through to the maintain cadence, got {k}"
+
+
+def test_thank_you_still_prompts_inside_the_window():
+    """The boundary the test above pins from the other side: a chat two days
+    old is overdue (>24h) but well inside the expiry, so it still prompts."""
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-07-20 09:00")]  # 2 days before AS_OF
+    assert "thank_you" in kinds_for(
+        cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1
+    )
+
+
+def test_thank_you_expiry_is_tunable():
+    """The window is a parameter, not a constant — a caller can restore the
+    original never-expires behaviour."""
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-06-01 10:00")]
+    actions = cadence.due_actions(
+        [c], touches, [], as_of=AS_OF, firms=FIRMS,
+        params={"thank_you_expires_after_days": 3650},
+    )
+    assert "thank_you" in kinds_for(actions, 1)
+
+
 def test_closing_soon_reping_is_region_filtered():
     """An HK app_close must not re-ping a US contact at the same firm."""
     close_date = TODAY + timedelta(days=5)
@@ -213,7 +247,10 @@ def test_actions_sorted_by_priority_then_tier():
     overdue = contact(1, warmth="chatted", thread_state="chat_done", firm_id="usfirm")
     followup = contact(2, warmth="cold", thread_state="no_reply", firm_id="hkfirm")
     touches = [
-        touch(1, "chat", "2026-07-01 10:00"),        # chat_done, never thanked -> overdue thank_you
+        # Overdue (>24h) but still inside the 7-day expiry window, so the
+        # prompt is live. Past that window branch 1 falls through entirely —
+        # see test_thank_you_prompt_expires_after_a_week.
+        touch(1, "chat", "2026-07-19 10:00"),        # chat_done, never thanked -> overdue thank_you
         touch(2, "outreach", "2026-07-10 10:00"),    # -> follow_up
     ]
     actions = cadence.due_actions([followup, overdue], touches, [], as_of=AS_OF, firms=FIRMS)
