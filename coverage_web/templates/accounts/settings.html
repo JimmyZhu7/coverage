@@ -53,6 +53,23 @@
   /* Profile form: two-up where it reads better (school + class year). */
   .set-form .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4); }
 
+  /* Section-level save button, right-aligned under a card's rows. */
+  .set-save { display: flex; justify-content: flex-end; padding-top: var(--s4);
+    border-top: 1px solid var(--line); margin-top: var(--s2); }
+  /* A .set-row's own error, sitting under the label rather than beside the
+     control so a long message doesn't squeeze the input. */
+  .set-row-err { color: var(--danger); font-size: var(--fs-s); margin-top: 4px; }
+  .set-row-err ul, .set-row-err p { margin: 0; padding: 0; list-style: none; }
+  /* Numeric override inputs: narrow, with the unit + default read as one line. */
+  .set-num { display: flex; align-items: center; gap: var(--s2); }
+  .set-num input { width: 88px; margin: 0; text-align: right;
+    font-variant-numeric: tabular-nums; }
+  .set-num .set-unit { color: var(--ink-3); font-size: var(--fs-s); white-space: nowrap; }
+  .set-default { color: var(--ink-3); font-size: var(--fs-xs); white-space: nowrap; }
+  /* Angles textarea: full width of the card body, monospace-free. */
+  .set-stack { padding: var(--s2) 0; }
+  .set-stack textarea { width: 100%; margin: 0; }
+
   @media (max-width: 820px) {
     .settings-wrap { grid-template-columns: 1fr; gap: var(--s4); }
     .settings-nav { position: static; flex-direction: row; flex-wrap: wrap;
@@ -83,6 +100,10 @@
     <aside class="settings-nav">
       <p class="settings-nav-title">On This Page</p>
       <a href="#profile" class="is-active">Profile</a>
+      <a href="#work-auth">Work Authorization</a>
+      <a href="#assets">Outreach Assets</a>
+      <a href="#cadence">Cadence</a>
+      <a href="#pace">Weekly Pace</a>
       <a href="#capture">Email Capture</a>
       <a href="#language">Language</a>
       <a href="#data">Your Data</a>
@@ -109,8 +130,114 @@
         </div>
       </section>
 
+      {# ---- Work Authorization ---- #}
+      <section class="set-card kin-reveal" id="work-auth" style="--i:1">
+        <div class="set-head">
+          <h2>Work Authorization</h2>
+          <p>Where You Can Work Without Sponsorship</p>
+        </div>
+        <div class="set-body">
+          <form method="post" action="{% url 'accounts:settings' %}">
+            {% csrf_token %}
+            <input type="hidden" name="section" value="work_auth">
+            {% for field in work_auth_form.rows %}
+              <div class="set-row">
+                <div class="set-row-main">
+                  <div class="set-row-label">{{ field.label }}</div>
+                  <div class="set-row-desc">Feeds the structural axis of your firm fit
+                    score. Leave it unspecified and that region stays honestly unknown
+                    — never guessed either way.</div>
+                  {% if field.errors %}<div class="set-row-err">{{ field.errors }}</div>{% endif %}
+                </div>
+                <div class="set-row-control">{{ field }}</div>
+              </div>
+            {% endfor %}
+            <div class="set-save"><button type="submit" class="btn btn-primary">Save Work Authorization</button></div>
+          </form>
+        </div>
+      </section>
+
+      {# ---- Outreach Assets ---- #}
+      <section class="set-card kin-reveal" id="assets" style="--i:2">
+        <div class="set-head">
+          <h2>Outreach Assets</h2>
+          <p>What You Lead With</p>
+        </div>
+        <div class="set-body">
+          <form method="post" action="{% url 'accounts:settings' %}">
+            {% csrf_token %}
+            <input type="hidden" name="section" value="assets">
+            <div class="set-stack">
+              <label for="{{ assets_form.angles.id_for_label }}">Your Angles</label>
+              <p class="field-hint">One per line, strongest first. These are the specifics
+                you open with — an internship, a shared team, a class, a city.</p>
+              {{ assets_form.angles }}
+              {% if assets_form.angles.errors %}<div class="set-row-err">{{ assets_form.angles.errors }}</div>{% endif %}
+            </div>
+            <div class="set-save"><button type="submit" class="btn btn-primary">Save Angles</button></div>
+          </form>
+        </div>
+      </section>
+
+      {# ---- Cadence ---- #}
+      <section class="set-card kin-reveal" id="cadence" style="--i:3">
+        <div class="set-head">
+          <h2>Cadence</h2>
+          <p>How Hard Coverage Chases</p>
+        </div>
+        <div class="set-body">
+          <form method="post" action="{% url 'accounts:settings' %}">
+            {% csrf_token %}
+            <input type="hidden" name="section" value="cadence">
+            {% for row in cadence_form.rows %}
+              <div class="set-row">
+                <div class="set-row-main">
+                  <div class="set-row-label">{{ row.field.label }}</div>
+                  <div class="set-row-desc">{{ row.description }}
+                    <span class="set-default">Default: {{ row.default }} {{ row.unit }}.</span></div>
+                  {% if row.field.errors %}<div class="set-row-err">{{ row.field.errors }}</div>{% endif %}
+                </div>
+                <div class="set-row-control set-num">
+                  {{ row.field }}<span class="set-unit">{{ row.unit }}</span>
+                </div>
+              </div>
+            {% endfor %}
+            <div class="set-save"><button type="submit" class="btn btn-primary">Save Cadence</button></div>
+          </form>
+        </div>
+      </section>
+
+      {# ---- Weekly Pace ---- #}
+      <section class="set-card kin-reveal" id="pace" style="--i:4">
+        <div class="set-head">
+          <h2>Weekly Pace</h2>
+          <p>Your Touches-Per-Week Target</p>
+        </div>
+        <div class="set-body">
+          <form method="post" action="{% url 'accounts:settings' %}">
+            {% csrf_token %}
+            <input type="hidden" name="section" value="pace">
+            <div class="set-row">
+              <div class="set-row-main">
+                <div class="set-row-label">Weekly Touch Goal</div>
+                <div class="set-row-desc">The target the pace ring on Today measures you
+                  against. <span class="set-default">Leave blank to use the default of
+                  {{ default_weekly_goal }}.</span></div>
+                {% if pace_form.weekly_touch_goal.errors %}
+                  <div class="set-row-err">{{ pace_form.weekly_touch_goal.errors }}</div>
+                {% endif %}
+              </div>
+              <div class="set-row-control set-num">
+                {{ pace_form.weekly_touch_goal }}<span class="set-unit">a week</span>
+              </div>
+            </div>
+            <div class="set-save"><button type="submit" class="btn btn-primary">Save Weekly Pace</button></div>
+          </form>
+        </div>
+      </section>
+
       {# ---- Email Capture ---- #}
-      <section class="set-card kin-reveal" id="capture" style="--i:1">
+      <section class="set-card kin-reveal" id="capture" style="--i:5">
         <div class="set-head">
           <h2>Email Capture</h2>
           <p>Your Private BCC Capture Address</p>
@@ -124,7 +251,7 @@
       </section>
 
       {# ---- Language ---- #}
-      <section class="set-card kin-reveal" id="language" style="--i:2">
+      <section class="set-card kin-reveal" id="language" style="--i:6">
         <div class="set-head">
           <h2>Language</h2>
           <p>Your Preferred Interface Language</p>
@@ -148,7 +275,7 @@
       </section>
 
       {# ---- Your Data ---- #}
-      <section class="set-card kin-reveal" id="data" style="--i:3">
+      <section class="set-card kin-reveal" id="data" style="--i:7">
         <div class="set-head">
           <h2>Your Data</h2>
           <p>Import, Export, and Your Totals</p>
@@ -182,7 +309,7 @@
       </section>
 
       {# ---- Legal ---- #}
-      <section class="set-card kin-reveal" id="legal" style="--i:3">
+      <section class="set-card kin-reveal" id="legal" style="--i:8">
         <div class="set-head">
           <h2>Legal</h2>
           <p>Privacy and Terms</p>
@@ -205,7 +332,7 @@
       </section>
 
       {# ---- Danger Zone ---- #}
-      <section class="set-card is-danger kin-reveal" id="danger" style="--i:4">
+      <section class="set-card is-danger kin-reveal" id="danger" style="--i:9">
         <div class="set-head">
           <h2>Danger Zone</h2>
           <p>Irreversible Account Actions</p>

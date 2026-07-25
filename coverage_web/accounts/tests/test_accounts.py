@@ -79,7 +79,9 @@ def test_onboarding_profile_step_saves_and_advances(client, user):
         },
     )
     assert resp.status_code == 302
-    assert "step=firms" in resp["Location"]
+    # Work authorization now sits between profile and firms — it's profile data,
+    # and the firm picker is the first place the score it feeds shows up.
+    assert "step=work_auth" in resp["Location"]
     user.refresh_from_db()
     assert user.school == "State U"
     assert user.class_year == 2028
@@ -155,7 +157,7 @@ def test_bare_welcome_shows_wizard_for_new_user(client, user):
 
 def test_onboarding_all_steps_render(client, user, firms):
     client.force_login(user)
-    for step in ["profile", "firms", "import", "capture"]:
+    for step in ["profile", "work_auth", "firms", "survey", "assets", "import", "capture"]:
         resp = client.get(reverse("accounts:onboarding") + f"?step={step}")
         assert resp.status_code == 200
 

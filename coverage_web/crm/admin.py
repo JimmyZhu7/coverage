@@ -11,7 +11,7 @@ CRUD surface with no extra wiring, while application code reaching for
 
 from django.contrib import admin
 
-from .models import CaptureEvent, Contact, Task, Touch, UserFirm
+from .models import CaptureEvent, ChatDebrief, Contact, Task, Touch, UserFirm
 
 
 @admin.register(UserFirm)
@@ -62,6 +62,21 @@ class CaptureEventAdmin(admin.ModelAdmin):
     )
     list_filter = ("provider", "direction", "status")
     search_fields = ("user__email", "provider_ref", "counterparty_email", "counterparty_name")
+
+
+@admin.register(ChatDebrief)
+class ChatDebriefAdmin(admin.ModelAdmin):
+    list_display = (
+        "contact", "user", "advocate_answer", "promoted", "dismissed",
+        "intro_contact", "tracked_date", "created",
+    )
+    list_filter = ("advocate_answer", "promoted", "dismissed")
+    search_fields = ("contact__name", "user__email", "learned", "intro_name")
+    # The derived side-effect rows: readable here for support, never
+    # editable — `crm.debrief.record` owns them and their idempotency
+    # markers. Editing one by hand would let a second referral contact or
+    # task be created on the next submit.
+    readonly_fields = ("intro_contact", "intro_task", "date_task", "created")
 
 
 @admin.register(Task)

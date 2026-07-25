@@ -110,6 +110,43 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .act-badges { display: flex; gap: var(--s2); flex-wrap: wrap; }
 
+  /* Debrief lane: a chat that already happened and hasn't been written
+     down. Toned as a capture prompt, not an alarm — it's a five-minute job,
+     and it disappears on its own after a week. */
+  .lane-debrief .prio-debrief { background: var(--accent-soft); color: var(--accent-ink);
+    border-color: var(--accent-line); }
+  .act-card.act-debrief { border-left-color: var(--accent-ink); }
+
+  /* ---- Coverage Gaps strip: where you are least covered, worst first ---- */
+  .gap-strip { margin-bottom: var(--s5); }
+  .gap-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: var(--s3); }
+  @media (max-width: 1180px) { .gap-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 700px) { .gap-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .gap-card { background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong); border-radius: 12px;
+    padding: var(--s3) var(--s4); display: flex; flex-direction: column;
+    gap: var(--s2); box-shadow: var(--shadow-1);
+    transition: box-shadow var(--t-med), transform var(--t-med); }
+  .gap-card:hover { box-shadow: var(--shadow-2); transform: translateY(-2px); }
+  /* Tier is the loudest term in the ranking, so it's the loudest signal on
+     the card too. */
+  .gap-t1 { border-left-color: var(--danger); }
+  .gap-t2 { border-left-color: var(--stale-t); }
+  .gap-t3 { border-left-color: var(--line-strong); }
+  .gap-head { display: flex; gap: var(--s1); flex-wrap: wrap; }
+  .gap-head .pill { font-size: 10px; padding: 2px var(--s2); line-height: 1.5; }
+  .pill.gap-tier { background: var(--paper); color: var(--ink-2); }
+  .pill.gap-due { background: var(--danger-soft); color: var(--danger);
+    border-color: var(--danger); }
+  .gap-name { font-weight: var(--w-bold); font-size: var(--fs-s); line-height: 1.25;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; }
+  .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
+  .gap-act { margin-top: auto; padding: 5px var(--s2); font-size: var(--fs-xs);
+    text-align: center; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; display: block; }
+
   /* ---- Network board (radar layout, Coverage light theme) ---- */
   .scope-tabs { margin-top: var(--s3); }
   /* Both columns stretch to the same height; each is a title over a panel
@@ -193,7 +230,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border-radius: 12px; transition: background-color var(--t-fast); }
   .tier-section.drop-hot { background: var(--accent-soft); outline: 2px dashed var(--accent-line); }
   .tier-label { font-size: var(--fs-micro); font-weight: var(--w-med); color: var(--ink-3);
-    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s3); }
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s3);
+    display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
+  /* The tier's cost, stated plainly next to its name. Lower-cased and
+     unemphasised: it's a fact to notice, not a warning to dismiss. */
+  .tier-cost { text-transform: none; letter-spacing: 0; font-size: var(--fs-xs);
+    color: var(--ink-3); font-weight: var(--w-reg); }
+  .tier-cost b { color: var(--ink-2); font-weight: var(--w-med); }
   .tier-empty { margin: var(--s2) 0; text-align: left; }
   /* Standardized geometry: every firm card is exactly one 92px grid row (the
      same height as a contact card), with the warmth bar pinned to the bottom
@@ -235,8 +278,29 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .pill.fc-act  { background: var(--w-advocate-s); color: var(--w-advocate-t); border-color: var(--w-advocate-l); }
   .pill.fc-spon { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line);
     align-self: flex-start; }
+  /* The card's bottom row: warmth bar + the advocate fraction, side by
+     side. Deliberately ONE row rather than a new line — the card is a fixed
+     92px grid cell with roughly 3px of slack, so a stacked line would push
+     the bar out of view (the exact failure the badge sizing above exists to
+     prevent). The row is as tall as the 11px fraction; the bar stays 6px and
+     centres in it, so total card content height moves by ~5px, absorbed by
+     the tightened gap below. */
+  .firm-card { gap: 6px; }
+  .firm-card-foot { display: flex; align-items: center; gap: var(--s2);
+    margin-top: auto; }
+  /* 10px/1 matches the compact firm-card pills and keeps the foot row a
+     flat 10px. Measured: card content 63.8px inside 66px of inner box, so
+     the card has MORE slack than it did before this row existed (1.2px) —
+     the 92px geometry is preserved with room to spare. */
+  .fc-adv { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: 10px; line-height: 1; color: var(--ink-3); white-space: nowrap;
+    flex: none; }
+  /* At/above target reads as done — a settled green, not another red count
+     asking to be fixed. */
+  .fc-adv.is-met { color: var(--ok); font-weight: var(--w-med); }
   .firm-bar { height: 6px; border-radius: 999px; background: var(--band-cold-s);
-    overflow: hidden; display: flex; margin-top: auto; transform-origin: left; }
+    overflow: hidden; display: flex; flex: 1; min-width: 0;
+    transform-origin: left; }
   /* The warmth bar grows in just after its card settles — the board fills
      with colour left-to-right. Disabled with everything else under §17. */
   .firm-card.kin-reveal .firm-bar {

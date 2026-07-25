@@ -224,6 +224,92 @@ class CaptureEvent(PrivateModel):
         return f"{self.provider}:{self.provider_ref}"
 
 
+class ChatDebrief(PrivateModel):
+    """What a coffee chat actually taught you, captured once per chat.
+
+    Before this, a `chat` touch recorded that a conversation happened and
+    nothing about what was in it: the intro that was offered, the deadline
+    that was mentioned, the read on whether this person would go to bat for
+    you. All of it evaporated. This row is the structured landing place —
+    deterministic fields, no model in the loop.
+
+    Idempotency is a schema guarantee, not a convention: `UniqueConstraint`
+    on (user, touch) means one debrief per chat touch, and the FK columns
+    below (`intro_contact`, `intro_task`, `date_task`) double as
+    already-done markers so a re-submitted form can never spawn a second
+    referral contact or a second task. See `crm.debrief.record` for the
+    first-write-wins rule each side effect follows.
+
+    `dismissed` is the escape hatch: a debrief nobody wants to write must be
+    dismissable, or the prompt becomes the wall of stale thank-yous the
+    cadence engine already had to grow an expiry to fix.
+    """
+
+    ADVOCATE_ANSWERS = [("yes", "Yes"), ("no", "No"), ("unsure", "Unsure")]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    contact = models.ForeignKey(
+        Contact, on_delete=models.CASCADE, related_name="debriefs"
+    )
+    # The specific `chat` touch being debriefed. CASCADE (not SET_NULL): a
+    # debrief without its chat has no subject, and touches are append-only
+    # anyway, so this only fires when the contact itself is deleted.
+    touch = models.ForeignKey(
+        Touch, on_delete=models.CASCADE, related_name="debriefs"
+    )
+    # Free text -> appended to Contact.notes under a dated header at save
+    # time. Kept here too so the append can be made exactly once (see
+    # crm.debrief.record) and so the raw answer survives note editing.
+    learned = models.TextField(blank=True, default="")
+
+    # "Did they offer an intro?" -> a new Contact plus a follow-up Task.
+    intro_name = models.CharField(max_length=255, blank=True, default="")
+    intro_email = models.EmailField(blank=True, default="")
+    # Non-null once the referral contact exists — the idempotency marker.
+    intro_contact = models.ForeignKey(
+        Contact,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="referred_by_debriefs",
+    )
+    intro_task = models.ForeignKey(
+        "Task", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    # "Did they mention a date worth tracking?" -> a Task on that date.
+    tracked_date = models.DateField(null=True, blank=True)
+    date_note = models.CharField(max_length=255, blank=True, default="")
+    date_task = models.ForeignKey(
+        "Task", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    # "Would they advocate for you?" — recorded as an answer, never acted on
+    # by itself. A "yes" OFFERS the promotion; `promoted` only turns true
+    # once the user takes it, and the warmth move itself goes through
+    # crm.services.set_contact_state so it lands in the touches audit trail
+    # like every other state change.
+    advocate_answer = models.CharField(
+        max_length=16, blank=True, default="", choices=ADVOCATE_ANSWERS
+    )
+    promoted = models.BooleanField(default=False)
+
+    dismissed = models.BooleanField(default=False)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "chat_debriefs"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "touch"], name="uniq_chat_debriefs_user_touch"
+            ),
+        ]
+        ordering = ["-created"]
+
+    def __str__(self) -> str:
+        return f"Debrief of {self.contact_id} @ {self.created:%Y-%m-%d}"
+
+
 class Task(PrivateModel):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField(max_length=255)

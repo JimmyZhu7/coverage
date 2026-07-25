@@ -29,13 +29,13 @@ from analytics.events import record_event
 from analytics.models import UserOpportunity
 from coverage_domain import cadence, scoring
 from coverage_domain.pipeline import CHANNELS, TOUCH_TRANSITIONS
-from crm.forms import ContactForm
+from crm.forms import ChatDebriefForm, ContactForm
 from directory.classify import TARGET_BUCKETS
 from directory.models import Firm
 from directory.models import Firm, FirmDate, Opportunity
 
-from . import services
-from .models import Contact, Touch, UserFirm
+from . import coverage, debrief as debrief_svc, services
+from .models import ChatDebrief, Contact, Touch, UserFirm
 
 # ---------------------------------------------------------------------------
 # Persistence -> domain adapter.
@@ -351,6 +351,11 @@ def _cockpit_context(user) -> dict:
     return {
         "lanes": lanes,
         "queue_total": len(actions),
+        # Chats from the last week that nobody has written down yet. Its own
+        # lane rather than a cadence action: the cadence engine is pure and
+        # knows nothing about ChatDebrief, and this prompt is about capturing
+        # what already happened rather than about the next outbound move.
+        "debriefs": debrief_svc.pending(user),
         "pace": pace,
         "activity": activity,
         "contact_count": len(contacts),
@@ -396,6 +401,98 @@ def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     else:
         return HttpResponse(status=400)
     return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+# ---------------------------------------------------------------------------
+# 1b. Post-chat debrief — the structured capture of what a chat taught you.
+# ---------------------------------------------------------------------------
+@login_required
+def debrief(request: HttpRequest, pk: int) -> HttpResponse:
+    """The debrief form for one `chat` touch (`pk`), and the saved view of
+    it afterwards. Scoped through `.for_user`, so another tenant's touch id
+    404s exactly like a missing one.
+
+    On save, `crm.debrief.record` does the bookkeeping (note append,
+    referral contact, tasks) idempotently, then this view OFFERS the
+    advocate promotion when the answer was "yes" — it never performs it.
+    A warmth change is a claim about a relationship, and the user gets to
+    make that claim on purpose (via `debrief_promote` below), not as a side
+    effect of ticking a radio button."""
+    touch = get_object_or_404(
+        Touch.objects.for_user(request.user).select_related("contact"), pk=pk, kind="chat"
+    )
+    existing = ChatDebrief.objects.for_user(request.user).filter(touch=touch).first()
+
+    if request.method == "POST":
+        form = ChatDebriefForm(request.POST, instance=existing)
+        if form.is_valid():
+            saved, made = debrief_svc.record(
+                request.user,
+                touch,
+                **{k: v for k, v in form.cleaned_data.items() if v not in (None, "")},
+            )
+            record_event("chat_debriefed", user=request.user)
+            notes = []
+            if made.get("intro_contact"):
+                notes.append(f"added {made['intro_contact'].name}")
+            if made.get("intro_task") or made.get("date_task"):
+                n = bool(made.get("intro_task")) + bool(made.get("date_task"))
+                notes.append(f"{n} task{'s' if n > 1 else ''} created")
+            messages.success(
+                request,
+                "Debrief saved" + (f" — {', '.join(notes)}." if notes else "."),
+            )
+            return redirect("crm:debrief", pk=touch.pk)
+    else:
+        form = ChatDebriefForm(instance=existing)
+
+    # The promotion is offered only while it would actually change
+    # something: answered yes, not taken yet, not already an advocate.
+    offer_promotion = bool(
+        existing
+        and existing.advocate_answer == "yes"
+        and not existing.promoted
+        and touch.contact.warmth != "advocate"
+    )
+    return render(
+        request,
+        "crm/debrief.html",
+        {
+            "touch": touch,
+            "contact": touch.contact,
+            "form": form,
+            "debrief": existing,
+            "offer_promotion": offer_promotion,
+        },
+    )
+
+
+@login_required
+@require_POST
+def debrief_dismiss(request: HttpRequest, pk: int) -> HttpResponse:
+    """Skip this debrief. Re-renders the cockpit so the card disappears in
+    place, like the other Today quick actions."""
+    touch = get_object_or_404(
+        Touch.objects.for_user(request.user).select_related("contact"), pk=pk, kind="chat"
+    )
+    debrief_svc.dismiss(request.user, touch)
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+@login_required
+@require_POST
+def debrief_promote(request: HttpRequest, pk: int) -> HttpResponse:
+    """Accept the offered advocate promotion. The state change itself goes
+    through `crm.services.set_contact_state`, which writes the audit touch
+    — see `crm.debrief.promote`."""
+    touch = get_object_or_404(Touch.objects.for_user(request.user), pk=pk, kind="chat")
+    row = get_object_or_404(
+        ChatDebrief.objects.for_user(request.user), touch=touch
+    )
+    debrief_svc.promote(row)
+    record_event("advocate_promoted", user=request.user, source="debrief")
+    messages.success(request, f"{row.contact.name} is now an advocate.")
+    return redirect("crm:contact_detail", pk=row.contact_id)
 
 
 import re as _re
@@ -576,6 +673,10 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         if c.firm_id:
             by_firm_contacts.setdefault(c.firm_id, []).append(c)
 
+    # The advocates-per-firm yardstick every card and every tier-cost line
+    # measures against (User.assets["advocate_target"], default 2).
+    adv_target = coverage.advocate_target(user)
+
     def firm_card(uf):
         cs = by_firm_contacts.get(uf.firm_id, [])
         total = len(cs) or 1
@@ -583,6 +684,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             {"warmth": w, "pct": round(sum(1 for c in cs if c.warmth == w) * 100 / total)}
             for w in ("cold", "replied", "chatted", "advocate")
         ]
+        advocates = sum(1 for c in cs if c.warmth == "advocate")
         return {
             "firm": uf.firm,
             "tier": uf.tier,
@@ -592,6 +694,13 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "sponsors": uf.firm.sponsors is True or uf.firm.sponsors == "true",
             "contact_count": len(cs),
             "segments": segments,
+            # "1/2 advocates" against the user's target. `met` is the whole
+            # point of showing a fraction rather than a count: a firm that
+            # has hit the target should read as finished, not as 2 more
+            # things you haven't done.
+            "advocates": advocates,
+            "adv_target": adv_target,
+            "adv_met": advocates >= adv_target,
         }
 
     tier_sections = []
@@ -601,7 +710,56 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             cards = [fc for fc in cards if scope in (fc["firm"].regions or [])]
         if cards or tier in (1, 2, 3):
             cards.sort(key=lambda fc: (-fc["act_now"], -fc["open"], fc["firm"].name))
-            tier_sections.append({"tier": tier, "label": label, "cards": cards})
+            tier_sections.append({
+                "tier": tier,
+                "label": label,
+                "cards": cards,
+                # What this tier is committing the user to, in advocates.
+                # Only for real tiers: "Unranked" is not a commitment.
+                "cost": coverage.tier_cost(cards, adv_target) if tier else None,
+            })
+
+    # --- Coverage Gaps strip (top of the page) ---------------------------
+    # Only CONFIRMED official close dates count toward urgency — the same
+    # bar cadence._closing_soon holds. Anything rumored or merely reported
+    # must not move a firm up the strip.
+    closes: dict[int, Any] = {}
+    for fd in FirmDate.objects.filter(
+        firm_id__in=firm_ids, event_kind="app_close", date__gte=today
+    ):
+        if _confidence_label(fd.confidence) != cadence.CONFIRMED:
+            continue
+        if fd.firm_id not in closes or fd.date < closes[fd.firm_id]:
+            closes[fd.firm_id] = fd.date
+
+    gaps = coverage.rank_gaps(
+        [
+            {
+                "firm_id": uf.firm_id,
+                "name": uf.firm.name,
+                "tier": uf.tier,
+                "warmths": [c.warmth for c in by_firm_contacts.get(uf.firm_id, [])],
+                "app_close": closes.get(uf.firm_id),
+            }
+            for uf in user_firms
+        ],
+        today=today,
+        target=adv_target,
+    )
+    # One click to act on each gap: somewhere to start when the firm is
+    # empty, and the warmest person who isn't an advocate yet when it
+    # isn't — that contact is the shortest path to closing the gap.
+    firms_by_id = {uf.firm_id: uf.firm for uf in user_firms}
+    lever_rank = {"chatted": 0, "replied": 1, "cold": 2}
+    for g in gaps:
+        firm = firms_by_id.get(g["firm_id"])
+        g["slug"] = firm.slug if firm else ""
+        candidates = [
+            c for c in by_firm_contacts.get(g["firm_id"], []) if c.warmth != "advocate"
+        ]
+        # Sort by warmth then id so the pick is stable across renders.
+        candidates.sort(key=lambda c: (lever_rank.get(c.warmth, 3), c.id))
+        g["lever"] = candidates[0] if candidates else None
 
     # --- Full contact cards ---------------------------------------------
     # Warmth sections normally; in School scope the sections ARE the
@@ -641,6 +799,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         "crm/contact_list.html",
         {
             "scope": scope,
+            "gaps": gaps,
+            "adv_target": adv_target,
             "action_groups": action_groups,
             "action_total": len(actions),
             "tier_sections": tier_sections,

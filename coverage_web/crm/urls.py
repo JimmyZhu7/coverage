@@ -10,6 +10,11 @@ urlpatterns = [
     path("", views.week, name="week"),
     # Today cockpit quick actions (htmx): sent / reply / snooze / skip.
     path("today/<int:pk>/<str:verb>/", views.today_act, name="today_act"),
+    # Post-chat debrief, keyed by the `chat` touch it belongs to (one
+    # debrief per chat — see crm.models.ChatDebrief).
+    path("debrief/<int:pk>/", views.debrief, name="debrief"),
+    path("debrief/<int:pk>/dismiss/", views.debrief_dismiss, name="debrief_dismiss"),
+    path("debrief/<int:pk>/promote/", views.debrief_promote, name="debrief_promote"),
     path("contacts/", views.contact_list, name="contact_list"),
     # Hand-add / edit a contact — the coffee-chat entry path.
     path("contacts/new/", views.contact_new, name="contact_new"),

@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Debrief · {{ contact.name }} · Coverage{% endblock %}
+
+{% block head %}
+{% include "crm/_styles.html" %}
+<style>
+  .db-wrap { max-width: 660px; margin: 0 auto; }
+  .db-card { background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-1);
+    padding: var(--s5) var(--s6) var(--s5); }
+  /* Each question is its own block with a rule above it, so the form reads
+     as four questions rather than one wall of fields. */
+  .db-q { border-top: 1px solid var(--line); padding: var(--s4) 0 var(--s3); }
+  .db-q:first-of-type { border-top: 0; padding-top: 0; }
+  .db-q > label, .db-qlabel { display: block; font-weight: var(--w-bold);
+    font-size: var(--fs-m); margin-bottom: var(--s2); }
+  .db-hint { color: var(--ink-3); font-size: var(--fs-s); margin: 0 0 var(--s3); }
+  .db-card input, .db-card select, .db-card textarea { width: 100%; }
+  .db-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+  .db-pair label { font-size: var(--fs-s); color: var(--ink-2); }
+  /* Django's RadioSelect renders a wrapper div with one div per option;
+     lay those out as a row of pill-shaped choices. */
+  .db-radios > div { display: flex; gap: var(--s3); flex-wrap: wrap; }
+  .db-radios > div > div { display: flex; }
+  .db-radios label { display: inline-flex; align-items: center; gap: var(--s2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 6px var(--s4);
+    font-size: var(--fs-s); cursor: pointer; background: var(--paper);
+    transition: border-color var(--t-fast), background-color var(--t-fast); }
+  .db-radios label:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+  .db-actions { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s5); }
+  .db-cancel { font-size: var(--fs-s); }
+  .db-err { color: var(--danger); font-size: var(--fs-xs); margin: 2px 0 var(--s2); }
+  /* The advocate offer: never auto-applied, always one deliberate click. */
+  .db-offer { border: 1px solid var(--ok-line); background: var(--ok-soft);
+    border-radius: var(--r-panel); padding: var(--s4) var(--s5);
+    margin-bottom: var(--s4); display: flex; gap: var(--s4);
+    align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .db-offer p { margin: 0; font-size: var(--fs-s); color: var(--ink); }
+  .db-made { margin: 0 0 var(--s4); padding: var(--s3) var(--s4);
+    border: 1px solid var(--line); border-radius: 10px; background: var(--paper);
+    font-size: var(--fs-s); color: var(--ink-2); }
+  .db-made a { font-weight: var(--w-med); }
+  @media (max-width: 560px) { .db-pair { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page db-wrap">
+  <header class="kin-hero">
+    <span class="kin-hero-icon">{% include "_icon.html" with name="network" %}</span>
+    <p class="kin-hero-eyebrow">Chat on {{ touch.ts|date:"N j, Y" }}</p>
+    <h1 class="kin-hero-title">Debrief</h1>
+    <p class="kin-hero-sub">
+      What did your chat with {{ contact.name|smart_title }} actually teach you?
+      Write it down now, while you still have it.
+    </p>
+  </header>
+
+  {% if offer_promotion %}
+    <div class="db-offer">
+      <p><strong>{{ contact.name|smart_title }} would advocate for you.</strong>
+         Move them to advocate?</p>
+      <form method="post" action="{% url 'crm:debrief_promote' touch.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary">Promote to advocate</button>
+      </form>
+    </div>
+  {% endif %}
+
+  {% if debrief %}
+    <p class="db-made">
+      Saved {{ debrief.created|date:"N j" }}.
+      {% if debrief.intro_contact %}
+        Referral: <a href="{% url 'crm:contact_detail' debrief.intro_contact.pk %}">{{ debrief.intro_contact.name|smart_title }}</a>.
+      {% endif %}
+      {% if debrief.tracked_date %}Tracking {{ debrief.tracked_date|date:"N j, Y" }}.{% endif %}
+      {% if debrief.promoted %}Promoted to advocate.{% endif %}
+    </p>
+  {% endif %}
+
+  <div class="db-card">
+    <form method="post">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<p class="db-err">{{ form.non_field_errors|striptags }}</p>{% endif %}
+
+      <div class="db-q">
+        <label for="{{ form.learned.id_for_label }}">What did you learn?</label>
+        <p class="db-hint">Goes onto {{ contact.name|smart_title }}'s notes under today's date.</p>
+        {{ form.learned }}
+      </div>
+
+      <div class="db-q">
+        <span class="db-qlabel">Did they offer an intro?</span>
+        <p class="db-hint">Leave blank if not. A name here becomes a new contact at
+          {% if contact.firm %}{{ contact.firm.name|smart_title }}{% else %}the same firm{% endif %},
+          plus a task to follow up.</p>
+        <div class="db-pair">
+          <div>
+            <label for="{{ form.intro_name.id_for_label }}">Who?</label>
+            {{ form.intro_name }}
+          </div>
+          <div>
+            <label for="{{ form.intro_email.id_for_label }}">Their email (optional)</label>
+            {{ form.intro_email }}
+            {% if form.intro_email.errors %}<p class="db-err">{{ form.intro_email.errors|striptags }}</p>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="db-q">
+        <span class="db-qlabel">Any date worth tracking?</span>
+        <p class="db-hint">A deadline, an info session, when their team starts reading apps. Becomes a task.</p>
+        <div class="db-pair">
+          <div>
+            <label for="{{ form.tracked_date.id_for_label }}">The date</label>
+            {{ form.tracked_date }}
+            {% if form.tracked_date.errors %}<p class="db-err">{{ form.tracked_date.errors|striptags }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.date_note.id_for_label }}">What happens then?</label>
+            {{ form.date_note }}
+          </div>
+        </div>
+      </div>
+
+      <div class="db-q db-radios">
+        <span class="db-qlabel">Would they advocate for you?</span>
+        <p class="db-hint">Your read, not a promise. A yes only offers the promotion — you take it or you don't.</p>
+        {{ form.advocate_answer }}
+      </div>
+
+      <div class="db-actions">
+        <button type="submit" class="btn btn-primary">Save Debrief</button>
+        <a class="db-cancel" href="{% url 'crm:contact_detail' contact.pk %}">Back to {{ contact.name|smart_title }}</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

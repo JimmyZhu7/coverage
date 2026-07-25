@@ -9,7 +9,7 @@
     {% for s in steps %}
       <li class="{% if forloop.counter == step_number %}current{% elif forloop.counter < step_number %}done{% endif %}">
         <span class="dot">{% if forloop.counter < step_number %}✓{% else %}{{ forloop.counter }}{% endif %}</span>
-        <span>{{ s|capfirst }}</span>
+        <span>{{ s.label }}</span>
       </li>
     {% endfor %}
   </ol>
@@ -26,6 +26,44 @@
       </div>
     </form>
 
+  {% elif step == "work_auth" %}
+    <h1>Where Can You Work?</h1>
+    <p class="lede">This is the one structural fact that moves your firm-fit score. Leave a region blank if you're not sure — unknown is a real answer here, and Coverage scores it neutral rather than guessing.</p>
+    <form method="post" action="{% url 'accounts:onboarding' %}?step=work_auth">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="work_auth">
+      <div class="panel">
+        {% for field in section_form.rows %}
+          <div class="row survey-row">
+            <span>{{ field.label }}</span>
+            {# width:auto so the select sizes to its longest option, matching the tier selects on the ranking step. #}
+            <span style="flex:none">{{ field }}</span>
+          </div>
+          {{ field.errors }}
+        {% endfor %}
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Continue</button>
+        <a class="muted" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
+      </div>
+    </form>
+
+  {% elif step == "assets" %}
+    <h1>What Do You Lead With?</h1>
+    <p class="lede">The specifics you open a cold email with — an internship, a shared desk, a class, a city. One per line, strongest first. Add them later in Settings if nothing comes to mind now.</p>
+    <form method="post" action="{% url 'accounts:onboarding' %}?step=assets">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="assets">
+      <label for="{{ section_form.angles.id_for_label }}">Your Angles</label>
+      {{ section_form.angles }}
+      {{ section_form.angles.errors }}
+      <p class="field-hint">Example: "London M&amp;A boutique internship (live deal exposure)".</p>
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Continue</button>
+        <a class="muted" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
+      </div>
+    </form>
+
   {% elif step == "firms" %}
     <h1>Pick Your Target Firms</h1>
     <p class="lede">Choose the firms you're recruiting for. These become your directory overlay and drive your firm-fit view. Add or remove any time.</p>
@@ -38,7 +76,8 @@
       {% include "accounts/_firm_list.html" %}
       <div class="actions">
         <button type="submit" class="btn btn-primary">Continue</button>
-        <a class="muted" href="{% url 'accounts:onboarding' %}?step=import">Skip for now</a>
+        {% comment %}Skipping the firm picker leaves the ranking step with nothing to rank, so this jumps past it to the next step that still has something to ask.{% endcomment %}
+        <a class="muted" href="{% url 'accounts:onboarding' %}?step=assets">Skip for now</a>
       </div>
     </form>
 

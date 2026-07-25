@@ -23,6 +23,36 @@
     <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School</a>
   </nav>
 
+  {% comment %}
+  Coverage Gaps: the worst-exposed tiered firms, worst first. The formula is
+  documented in crm/coverage.py — tier weight × gap points + a deadline
+  bonus for a CONFIRMED close — and each card shows its own arithmetic in
+  the tooltip so the rank is arguable, not asserted.
+  {% endcomment %}
+  {% if gaps %}
+  <section class="gap-strip">
+    <h2 class="strip-title">Coverage Gaps <span class="scrub-count">worst {{ gaps|length }}</span></h2>
+    <div class="gap-row">
+      {% for g in gaps %}
+        <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"
+             title="Tier {{ g.tier }} (×{{ g.tier_weight }}) × {{ g.label|lower }} ({{ g.gap_points }}){% if g.deadline_bonus %} + deadline in {{ g.days_out }}d ({{ g.deadline_bonus }}){% endif %} = exposure {{ g.exposure }}">
+          <div class="gap-head">
+            <span class="pill gap-tier">T{{ g.tier }}</span>
+            {% if g.deadline_bonus %}<span class="pill gap-due">{{ g.days_out }}d to close</span>{% endif %}
+          </div>
+          <div class="gap-name">{{ g.name|smart_title }}</div>
+          <div class="gap-state">{{ g.label }} · {{ g.advocates }}/{{ g.target }} advocates</div>
+          {% if g.lever %}
+            <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Work {{ g.lever.name|smart_title }}</a>
+          {% else %}
+            <a class="btn gap-act" href="{% url 'crm:contact_new' %}?firm={{ g.slug }}">＋ Add a contact</a>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   <div class="net-board">
     {# ---- Left: Contacts Needing Action ---- #}
     <section class="net-actions">
@@ -63,7 +93,24 @@
       </div>
       {% for section in tier_sections %}
         <div class="tier-section" data-tier="{{ section.tier|default:'' }}">
-          <div class="tier-label">{{ section.label }}</div>
+          <div class="tier-label">
+            <span>{{ section.label }}</span>
+            {% comment %}
+            The cost line: what this tier is actually promising. 14 firms at
+            a target of 2 is 28 advocates — visible so an over-tiered board
+            can be re-tiered on purpose instead of discovered one unanswered
+            email at a time.
+            {% endcomment %}
+            {% if section.cost and section.cost.firms %}
+              <span class="tier-cost">
+                {{ section.cost.firms }} firm{{ section.cost.firms|pluralize }} × {{ section.cost.target }}
+                = {{ section.cost.needed }} advocates ·
+                <b>{{ section.cost.have }}</b> in place ·
+                {% if section.cost.remaining %}{{ section.cost.remaining }} to go{% else %}tier covered{% endif %}
+                {% if section.cost.uncovered %}· {{ section.cost.uncovered }} with no contacts{% endif %}
+              </span>
+            {% endif %}
+          </div>
           <div class="tier-grid">
             {% for fc in section.cards %}
               <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
@@ -76,8 +123,18 @@
                   {% if fc.act_now %}<span class="pill fc-act">{{ fc.act_now }} Act Now</span>{% endif %}
                   {% if fc.sponsors %}<span class="pill fc-spon">Sponsors</span>{% endif %}
                 </div>
-                <div class="firm-bar" title="{{ fc.contact_count }} contact{{ fc.contact_count|pluralize }}">
-                  {% for seg in fc.segments %}{% if seg.pct %}<i class="seg seg-{{ seg.warmth }}" style="width: {{ seg.pct }}%"></i>{% endif %}{% endfor %}
+                {% comment %}
+                Bar + advocate fraction share one row so the card's fixed
+                92px geometry is unchanged (see _styles.html).
+                {% endcomment %}
+                <div class="firm-card-foot">
+                  <div class="firm-bar" title="{{ fc.contact_count }} contact{{ fc.contact_count|pluralize }}">
+                    {% for seg in fc.segments %}{% if seg.pct %}<i class="seg seg-{{ seg.warmth }}" style="width: {{ seg.pct }}%"></i>{% endif %}{% endfor %}
+                  </div>
+                  <span class="fc-adv{% if fc.adv_met %} is-met{% endif %}"
+                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm">
+                    {{ fc.advocates }}/{{ fc.adv_target }}{% if fc.adv_met %} ✓{% endif %}
+                  </span>
                 </div>
               </div>
             {% endfor %}

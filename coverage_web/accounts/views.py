@@ -23,14 +23,61 @@ from crm.models import Contact, UserFirm
 from directory.models import Firm
 
 from . import services
-from .forms import CYCLE_SUGGESTIONS, REGION_CHOICES, TRACK_CHOICES, ProfileForm
+from .forms import (
+    CYCLE_SUGGESTIONS,
+    REGION_CHOICES,
+    TRACK_CHOICES,
+    CadenceForm,
+    OutreachAssetsForm,
+    ProfileForm,
+    WeeklyPaceForm,
+    WorkAuthorizationForm,
+)
 from .models import LANGUAGES
 
-ONBOARDING_STEPS = ["profile", "firms", "survey", "import", "capture"]
+# The independently-saving sections of /welcome/settings/, keyed by the value
+# their hidden `section` input posts. See accounts/forms.SectionForm.
+SECTION_FORMS = {
+    form_cls.section: form_cls
+    for form_cls in (OutreachAssetsForm, WorkAuthorizationForm, CadenceForm, WeeklyPaceForm)
+}
+
+# Step order of the onboarding wizard.
+#
+# `work_auth` sits immediately after `profile` because it IS profile data —
+# a structural fact about the person, in the same breath as school and target
+# regions — and because the very next step (picking firms) is the first place
+# the fit score it feeds becomes visible. Asking for it after the firm board
+# is built would mean showing the user a set of scores computed without it.
+#
+# `assets` sits after the firm steps and before `import`/`capture`: angles are
+# outreach ammunition, so they only need to exist by the time the user starts
+# sending, but they read as a natural close to "who you are and what you're
+# going after" rather than as part of the mail plumbing at the end.
+ONBOARDING_STEPS = ["profile", "work_auth", "firms", "survey", "assets", "import", "capture"]
+
+# Rail labels — the raw step keys don't all title-case into English
+# ("work_auth"), and the rail is the user's map of how much is left.
+ONBOARDING_STEP_LABELS = {
+    "profile": "Profile",
+    "work_auth": "Work",
+    "firms": "Firms",
+    "survey": "Ranking",
+    "assets": "Angles",
+    "import": "Import",
+    "capture": "Capture",
+}
 
 
 def _step_url(step: str) -> str:
     return f"{reverse('accounts:onboarding')}?step={step}"
+
+
+def _next_step(step: str) -> str:
+    """The step after `step` — used by both Continue and Skip, so a step can
+    never be made non-skippable by a stale hardcoded target."""
+    idx = ONBOARDING_STEPS.index(step)
+    return ONBOARDING_STEPS[min(idx + 1, len(ONBOARDING_STEPS) - 1)]
 
 
 # ---------------------------------------------------------------------------
@@ -54,16 +101,28 @@ def onboarding(request):
         step = "profile"
 
     form = None
+    section_form = None
     if request.method == "POST":
         if step == "profile":
             form = ProfileForm(request.POST, request.FILES)
             if form.is_valid():
                 form.apply_to(request.user)
-                return redirect(_step_url("firms"))
+                return redirect(_step_url(_next_step(step)))
             # invalid → fall through and re-render this step with errors
+        elif step in ("work_auth", "assets"):
+            # Both reuse the settings-page section forms, so onboarding and
+            # Settings can never disagree about what's valid. Every field on
+            # them is optional, so an untouched form validates and writes
+            # nothing — "Continue" without answering is as skippable as the
+            # Skip link, and neither leaves a guessed default behind.
+            section_form = SECTION_FORMS[step](request.POST)
+            if section_form.is_valid():
+                section_form.apply_to(request.user)
+                return redirect(_step_url(_next_step(step)))
+            # invalid → re-render this step with errors
         elif step == "firms":
             services.set_target_firms(request.user, request.POST.getlist("firms"))
-            return redirect(_step_url("survey"))
+            return redirect(_step_url(_next_step(step)))
         elif step == "survey":
             # Tier ranking: tier-<firm_id> selects; only the user's own rows
             # are ever touched. Tier drives the cadence engine's priorities.
@@ -73,9 +132,9 @@ def onboarding(request):
                 if tier != uf.tier:
                     UserFirm.all_objects.filter(pk=uf.pk).update(tier=tier)
             record_event("survey_completed", user=request.user)
-            return redirect(_step_url("import"))
+            return redirect(_step_url(_next_step(step)))
         elif step == "import":
-            return redirect(_step_url("capture"))
+            return redirect(_step_url(_next_step(step)))
         elif step == "capture":
             if request.user.onboarded_at is None:
                 request.user.onboarded_at = timezone.now()
@@ -87,13 +146,19 @@ def onboarding(request):
 
     if form is None:
         form = ProfileForm.from_user(request.user)
+    if section_form is None and step in SECTION_FORMS:
+        section_form = SECTION_FORMS[step].from_user(request.user)
 
     context = {
         "step": step,
-        "steps": ONBOARDING_STEPS,
+        "steps": [
+            {"key": s, "label": ONBOARDING_STEP_LABELS[s]} for s in ONBOARDING_STEPS
+        ],
         "step_number": ONBOARDING_STEPS.index(step) + 1,
         "step_total": len(ONBOARDING_STEPS),
+        "next_step": _next_step(step),
         "form": form,
+        "section_form": section_form,
         "cycle_suggestions": CYCLE_SUGGESTIONS,
     }
     if step == "firms":
@@ -167,6 +232,15 @@ def import_template(request):
 @require_http_methods(["GET", "POST"])
 def settings_view(request):
     saved = False
+    form = None
+    # Every section starts as an unbound render of the user's current values;
+    # a failing POST replaces just its own with the bound, error-carrying one,
+    # so an invalid Cadence entry never blanks out the Work Authorization
+    # selects sitting above it.
+    section_forms = {
+        name: cls.from_user(request.user) for name, cls in SECTION_FORMS.items()
+    }
+
     # Language is a small standalone form (its own POST carries `language`).
     if request.method == "POST" and "language" in request.POST:
         lang = (request.POST.get("language") or "en").strip()
@@ -175,7 +249,19 @@ def settings_view(request):
             request.user.save(update_fields=["language"])
             messages.success(request, "Language updated.")
         return redirect(reverse("accounts:settings"))
-    if request.method == "POST":
+
+    section = request.POST.get("section") if request.method == "POST" else None
+    if section in SECTION_FORMS:
+        bound = SECTION_FORMS[section](request.POST)
+        if bound.is_valid():
+            bound.apply_to(request.user)
+            messages.success(request, bound.success_message)
+            # PRG, same as the profile and language saves: a refresh after
+            # saving must not re-POST.
+            return redirect(reverse("accounts:settings"))
+        # Invalid → fall through and re-render, this section showing errors.
+        section_forms[section] = bound
+    elif request.method == "POST":
         form = ProfileForm(request.POST, request.FILES)
         if form.is_valid():
             form.apply_to(request.user)
@@ -190,7 +276,7 @@ def settings_view(request):
                 )
             messages.success(request, "Profile saved.")
             return redirect(reverse("accounts:settings"))
-    else:
+    if form is None:
         form = ProfileForm.from_user(request.user)
 
     return render(
@@ -205,6 +291,11 @@ def settings_view(request):
             "contact_count": Contact.objects.for_user(request.user).count(),
             "languages": LANGUAGES,
             "current_language": request.user.language or "en",
+            "assets_form": section_forms["assets"],
+            "work_auth_form": section_forms["work_auth"],
+            "cadence_form": section_forms["cadence"],
+            "pace_form": section_forms["pace"],
+            "default_weekly_goal": WeeklyPaceForm.DEFAULT_GOAL,
         },
     )
 

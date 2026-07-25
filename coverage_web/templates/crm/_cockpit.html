@@ -7,7 +7,8 @@ every quick action so all three stay in sync.
 {% endcomment %}
 <div class="cockpit">
   <div class="cockpit-main">
-    {% if not queue_total %}
+    {# A pending debrief is work too — don't claim "all caught up" over one. #}
+    {% if not queue_total and not debriefs %}
       <div class="empty">
         {% if contact_count %}
           <h2>You're all caught up.</h2>
@@ -18,6 +19,41 @@ every quick action so all three stay in sync.
         {% endif %}
         <a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>
       </div>
+    {% endif %}
+
+    {% comment %}
+    Debrief lane. Sits above the cadence lanes because it is about a
+    conversation that ALREADY happened — what you remember from it is
+    decaying while the rest of the queue waits. Empties itself: a chat
+    older than crm.debrief.DEBRIEF_EXPIRES_AFTER_DAYS stops asking.
+    {% endcomment %}
+    {% if debriefs %}
+      <section class="lane lane-debrief">
+        <h2 class="lane-title">Debrief <span class="lane-count">{{ debriefs|length }}</span></h2>
+        <div class="act-grid">
+          {% for d in debriefs %}
+            <article class="act-card kin-reveal act-debrief" style="--i:{{ forloop.counter0 }}">
+              <div class="act-top">
+                <span class="opp-firm">{% if d.contact.firm %}{{ d.contact.firm.name|smart_title }}{% else %}{{ d.contact.firm_text|smart_title }}{% endif %}</span>
+                <span class="chip warmth-{{ d.contact.warmth }}">{{ d.contact.warmth }}</span>
+              </div>
+              <h3 class="act-name"><a href="{% url 'crm:contact_detail' d.contact.id %}">{{ d.contact.name|smart_title }}</a></h3>
+              <p class="act-role">Chatted {% if d.days_ago %}{{ d.days_ago }}d ago{% else %}today{% endif %}</p>
+              <div class="act-badges"><span class="prio prio-debrief">Write it down</span></div>
+              <div class="act-quick">
+                <div class="act-primary">
+                  <a class="btn btn-primary act-btn" href="{% url 'crm:debrief' d.touch.id %}">Debrief</a>
+                </div>
+                <div class="act-ghosts">
+                  <button type="button" class="btn act-ghost"
+                          hx-post="{% url 'crm:debrief_dismiss' d.touch.id %}"
+                          title="Don't ask about this chat">Skip</button>
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
     {% endif %}
 
     {% if lanes.overdue %}

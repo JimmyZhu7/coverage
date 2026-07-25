@@ -19,6 +19,18 @@ from datetime import date
 
 from django import forms
 
+from coverage_domain.cadence import CADENCE_DEFAULTS
+
+# The cadence whitelist + its valid ranges live at the point of use, in
+# crm.views — that module is what actually hands the overrides to
+# `cadence.due_actions`, so it owns the definition of "safe to honor". This
+# form imports it rather than restating the ranges: a copy here would be a
+# second source of truth that drifts silently, and the failure mode of drift
+# is a settings page that happily saves a value the engine then ignores.
+from crm.views import TUNABLE_CADENCE_PARAMS
+
+from .models import WORK_AUTH
+
 # Human labels for the raw region/track tokens stored on firms and users.
 REGION_CHOICES: list[tuple[str, str]] = [
     ("hk", "Hong Kong"),
@@ -139,3 +151,304 @@ class ProfileForm(forms.Form):
             user.avatar = cd["avatar"]
             update_fields.append("avatar")
         user.save(update_fields=update_fields)
+
+
+# ---------------------------------------------------------------------------
+# Independently-saving settings sections
+# ---------------------------------------------------------------------------
+# Each section of /welcome/settings/ POSTs on its own, following the pattern
+# the Language form established (its own <form>, distinguished server-side by
+# a field only it submits). Language sniffed for the *field name* itself;
+# with four more sections that heuristic stops scaling — two sections could
+# plausibly share a field name — so these carry an explicit `section=<name>`
+# hidden input instead. The view dispatches on it (accounts/views.py
+# SECTION_FORMS) and re-renders only the failing section with its errors.
+#
+# They share this base so the view can treat them uniformly: build with
+# `from_user`, validate, `apply_to`, flash `success_message`.
+class SectionForm(forms.Form):
+    """A settings section that saves on its own POST."""
+
+    # Value of the hidden `section` input, and the key in views.SECTION_FORMS.
+    section = ""
+    success_message = "Saved."
+
+    @classmethod
+    def from_user(cls, user) -> "SectionForm":
+        """Unbound form carrying the user's current values (GET render)."""
+        return cls(initial=cls.initial_for(user))
+
+    @classmethod
+    def initial_for(cls, user) -> dict:
+        raise NotImplementedError
+
+    def apply_to(self, user) -> None:
+        """Persist validated values. Call only after `is_valid()`."""
+        raise NotImplementedError
+
+
+class OutreachAssetsForm(SectionForm):
+    """`User.assets["angles"]` — the things the user leads with in outreach
+    ("London M&A boutique internship (live deal exposure)").
+
+    ONE TEXTAREA, ONE ANGLE PER LINE, deliberately — not a JS row manager.
+    Add/remove/reorder are all just text editing, which every user already
+    knows how to do; it degrades to a working form with JS off, it survives a
+    validation round-trip without rebuilding DOM state, and it has no
+    index-shuffling bugs. A row manager would buy drag handles and cost a few
+    hundred lines of JS plus a POST format that has to be reassembled
+    server-side. If ordering ever needs to be more than "the order you typed
+    them", revisit; today it doesn't.
+    """
+
+    section = "assets"
+    success_message = "Outreach assets saved."
+
+    # A generous ceiling, not a product opinion: `assets` is a JSON column on
+    # every row of `users`, so an accidental paste of a whole CV shouldn't be
+    # able to grow it without bound. Nobody leads with 50 different angles.
+    MAX_ANGLES = 50
+
+    angles = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 6, "placeholder": "One angle per line…"}),
+    )
+
+    @classmethod
+    def initial_for(cls, user) -> dict:
+        angles = (user.assets or {}).get("angles") or []
+        return {"angles": "\n".join(str(a) for a in angles)}
+
+    def clean_angles(self) -> list[str]:
+        """Text -> list of non-empty lines, order preserved."""
+        raw = self.cleaned_data.get("angles") or ""
+        lines = [line.strip() for line in raw.splitlines()]
+        angles = [line for line in lines if line]
+        if len(angles) > self.MAX_ANGLES:
+            raise forms.ValidationError(
+                f"That's more than {self.MAX_ANGLES} angles. Keep the ones you "
+                f"actually use."
+            )
+        return angles
+
+    def apply_to(self, user) -> None:
+        # Copy-then-set, never assign a fresh dict: `assets` also holds
+        # languages / current_status / advocate_target, and this form owns
+        # exactly one key of it.
+        assets = dict(user.assets or {})
+        angles = self.cleaned_data["angles"]
+        if angles:
+            assets["angles"] = angles
+        else:
+            # Blank means "no angles recorded", which is the absence of the
+            # key — not an empty list sitting there looking like an answer.
+            assets.pop("angles", None)
+        user.assets = assets
+        user.save(update_fields=["assets"])
+
+
+class WorkAuthorizationForm(SectionForm):
+    """`User.work_authorization` — one select per region in REGION_CHOICES.
+
+    Blank ("Not specified") stores NOTHING for that region. That is the whole
+    point: `scoring.needs_sponsorship` treats a missing entry as unknown and
+    scores it neutral, whereas any guessed default would move every firm's
+    structural score on a fact the user never gave us.
+    """
+
+    section = "work_auth"
+    success_message = "Work authorization saved."
+
+    # Field name prefix, so the per-region fields can't collide with anything
+    # else posted in this section.
+    FIELD_PREFIX = "work_auth_"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for code, label in REGION_CHOICES:
+            # required=False alone would let an unknown value through as ""
+            # — ChoiceField still validates membership, so a hand-crafted
+            # POST of e.g. "green-card" is rejected rather than stored.
+            self.fields[f"{self.FIELD_PREFIX}{code}"] = forms.ChoiceField(
+                label=label,
+                choices=[("", "Not specified")] + list(WORK_AUTH),
+                required=False,
+                widget=forms.Select,
+            )
+
+    @classmethod
+    def initial_for(cls, user) -> dict:
+        auth = user.work_authorization or {}
+        return {
+            f"{cls.FIELD_PREFIX}{code}": auth.get(code, "")
+            for code, _ in REGION_CHOICES
+        }
+
+    @property
+    def rows(self) -> list:
+        """Bound fields in REGION_CHOICES order, for the template."""
+        return [self[f"{self.FIELD_PREFIX}{code}"] for code, _ in REGION_CHOICES]
+
+    def apply_to(self, user) -> None:
+        # Keys for regions this form doesn't render (a region added to the
+        # firm directory later, or one set in the admin) are left alone —
+        # same reasoning as the assets dict: own your own keys only.
+        auth = dict(user.work_authorization or {})
+        for code, _ in REGION_CHOICES:
+            value = self.cleaned_data.get(f"{self.FIELD_PREFIX}{code}") or ""
+            if value:
+                auth[code] = value
+            else:
+                auth.pop(code, None)
+        user.work_authorization = auth
+        user.save(update_fields=["work_authorization"])
+
+
+# Presentation for the tunable cadence knobs: label, unit, and the one-line
+# "what does this actually change" description. Keyed by the same names as
+# crm.views.TUNABLE_CADENCE_PARAMS, which stays the authority on WHICH keys
+# exist and what range each accepts — this map only dresses them.
+CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
+    "followup_after_business_days": (
+        "Follow-Up Window",
+        "business days",
+        "How long a cold contact sits without a reply before Coverage asks you "
+        "to follow up.",
+    ),
+    "park_after_business_days": (
+        "Park After",
+        "business days",
+        "Silence after your last touch before the contact is parked and stops "
+        "surfacing.",
+    ),
+    "max_cold_touches": (
+        "Max Cold Touches",
+        "touches",
+        "How many times you'll reach out to someone who has never replied.",
+    ),
+    "advocate_touch_min_weeks": (
+        "Advocate Check-In",
+        "weeks",
+        "How often your advocates get a keep-warm touch.",
+    ),
+    "pre_deadline_reping_days": (
+        "Pre-Deadline Re-Ping",
+        "days",
+        "How far ahead of a confirmed deadline warm contacts get re-pinged.",
+    ),
+}
+
+
+class CadenceForm(SectionForm):
+    """`User.cadence_params` — per-key overrides of coverage_domain's
+    `CADENCE_DEFAULTS`, restricted to crm.views.TUNABLE_CADENCE_PARAMS.
+
+    Clearing an input REMOVES the override (falls back to the default) rather
+    than storing a zero: `_cadence_params` would drop a 0 as out-of-range
+    anyway, so storing one would leave the settings page showing a value the
+    engine silently ignores.
+    """
+
+    section = "cadence"
+    success_message = "Cadence updated."
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for key, (low, high) in TUNABLE_CADENCE_PARAMS.items():
+            label, unit, _desc = CADENCE_LABELS[key]
+            # min_value/max_value mirror the server-side whitelist exactly, so
+            # an out-of-range value is a form error the user sees, never a
+            # saved-then-ignored number.
+            self.fields[key] = forms.IntegerField(
+                label=label,
+                required=False,
+                min_value=low,
+                max_value=high,
+                widget=forms.NumberInput(
+                    attrs={"min": low, "max": high, "step": 1,
+                           "placeholder": CADENCE_DEFAULTS[key]}
+                ),
+                error_messages={
+                    "min_value": f"{label} must be between {low} and {high} {unit}.",
+                    "max_value": f"{label} must be between {low} and {high} {unit}.",
+                    "invalid": f"{label} must be a whole number of {unit}.",
+                },
+            )
+
+    @classmethod
+    def initial_for(cls, user) -> dict:
+        stored = user.cadence_params or {}
+        return {
+            key: stored.get(key)
+            for key in TUNABLE_CADENCE_PARAMS
+            if isinstance(stored.get(key), int)
+            and not isinstance(stored.get(key), bool)
+        }
+
+    @property
+    def rows(self) -> list[dict]:
+        """One row per tunable knob, carrying the default to show inline."""
+        rows = []
+        for key in TUNABLE_CADENCE_PARAMS:
+            _label, unit, desc = CADENCE_LABELS[key]
+            rows.append({
+                "field": self[key],
+                "unit": unit,
+                "description": desc,
+                "default": CADENCE_DEFAULTS[key],
+            })
+        return rows
+
+    def apply_to(self, user) -> None:
+        # Non-tunable keys (defaults an admin pinned by hand) survive: this
+        # form owns the whitelisted keys and nothing else.
+        params = dict(user.cadence_params or {})
+        for key in TUNABLE_CADENCE_PARAMS:
+            value = self.cleaned_data.get(key)
+            if value is None:
+                params.pop(key, None)
+            else:
+                params[key] = int(value)
+        user.cadence_params = params
+        user.save(update_fields=["cadence_params"])
+
+
+class WeeklyPaceForm(SectionForm):
+    """`User.weekly_touch_goal` — the Today pace ring's target."""
+
+    section = "pace"
+    success_message = "Weekly pace saved."
+
+    # crm.views.WEEKLY_TOUCH_GOAL, restated here as the placeholder/hint only.
+    # Imported rather than hardcoded would be tidier, but the number is a
+    # display string in two templates already; the view passes it in context.
+    DEFAULT_GOAL = 10
+    # Floor of 1, not 0: crm.views reads the goal with `or`, so a stored 0
+    # behaves exactly like NULL. Rejecting it with a message beats saving a
+    # number that quietly does nothing. Ceiling is a sanity bound well above
+    # any real week (the column itself would take 32767).
+    MAX_GOAL = 200
+
+    weekly_touch_goal = forms.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=MAX_GOAL,
+        widget=forms.NumberInput(
+            attrs={"min": 1, "max": MAX_GOAL, "step": 1, "placeholder": DEFAULT_GOAL}
+        ),
+        error_messages={
+            "min_value": f"Pick a goal between 1 and {MAX_GOAL} touches a week.",
+            "max_value": f"Pick a goal between 1 and {MAX_GOAL} touches a week.",
+            "invalid": "Your weekly goal must be a whole number of touches.",
+        },
+    )
+
+    @classmethod
+    def initial_for(cls, user) -> dict:
+        return {"weekly_touch_goal": user.weekly_touch_goal}
+
+    def apply_to(self, user) -> None:
+        # Blank -> NULL, which crm.views reads as "use the product default"
+        # rather than "no goal".
+        user.weekly_touch_goal = self.cleaned_data.get("weekly_touch_goal")
+        user.save(update_fields=["weekly_touch_goal"])
