@@ -36,6 +36,20 @@ LANGUAGES = [
 ]
 
 
+# Work-authorization status, per region (see `User.work_authorization`). Two
+# values only, because only one distinction actually changes the fit score:
+# does this student need the firm to sponsor a visa in that region, or not.
+# "citizen" covers every no-sponsorship-needed status (citizen, PR, existing
+# right to work); anything absent is UNKNOWN, which is a legitimate answer and
+# is scored as neutral rather than guessed either way.
+WORK_AUTH_CITIZEN = "citizen"
+WORK_AUTH_SPONSORSHIP = "sponsorship"
+WORK_AUTH = [
+    (WORK_AUTH_CITIZEN, "No sponsorship needed"),
+    (WORK_AUTH_SPONSORSHIP, "Needs sponsorship"),
+]
+
+
 class UserManager(BaseUserManager):
     """`AbstractUser`'s default manager assumes a `username` field. This
     is the same manager shape Django's own docs recommend when swapping
@@ -107,6 +121,22 @@ class User(AbstractUser):
     tracks = ArrayField(
         models.CharField(max_length=64), default=list, blank=True
     )
+    # Work authorization PER REGION, e.g. {"us": "citizen", "hk": "sponsorship"}
+    # — keyed by the same region codes as `regions`, valued by WORK_AUTH.
+    # Deliberately not one global boolean: a student can be free to work in one
+    # of their target regions and need a visa in the other, and collapsing that
+    # into a single flag is what forced the fit score to pass
+    # `needs_sponsorship=None` for everyone. A region with no entry stays
+    # UNKNOWN (the scorer treats unknown as neutral, never as a penalty).
+    work_authorization = models.JSONField(default=dict, blank=True)
+    # Per-user overrides for coverage_domain.cadence's rule parameters. Only
+    # the keys in crm.views.TUNABLE_CADENCE_PARAMS are honored, and only inside
+    # their documented ranges — this column is user-writable data, so the
+    # whitelist lives server-side at the point of use, not here.
+    cadence_params = models.JSONField(default=dict, blank=True)
+    # Touches-per-week target for the Today pace ring. NULL means "use the
+    # product default" (crm.views.WEEKLY_TOUCH_GOAL) rather than "no goal".
+    weekly_touch_goal = models.PositiveSmallIntegerField(null=True, blank=True)
     # Preferred interface language (code from accounts.LANGUAGES). Stored now;
     # actual UI translation is a later i18n pass.
     language = models.CharField(max_length=8, default="en", blank=True)

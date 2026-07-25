@@ -23,19 +23,30 @@ class ContactForm(forms.ModelForm):
         empty_label="Not in the directory",
     )
 
+    # Blank is a real choice, not a placeholder to be filled in: an unknown
+    # region keeps the cadence engine's both-regions fallback, which is safer
+    # than a wrong guess. `Contact.save()` fills this in from the firm when the
+    # firm names exactly one region.
+    region = forms.ChoiceField(
+        choices=[("", "Unknown / set from firm"), *Contact.REGION_CHOICES],
+        required=False,
+    )
+
     class Meta:
         model = Contact
         fields = [
             "name", "firm", "firm_text", "role", "email", "linkedin",
-            "school", "angle", "notes",
+            "school", "region", "angle", "opener", "notes",
         ]
         widgets = {
             "angle": forms.Textarea(attrs={"rows": 2}),
+            "opener": forms.Textarea(attrs={"rows": 3}),
             "notes": forms.Textarea(attrs={"rows": 3}),
         }
         labels = {
             "firm_text": "Firm (if not listed)",
-            "angle": "Angle",
+            "angle": "Angle (private)",
+            "opener": "Opener",
             "linkedin": "LinkedIn URL",
         }
 

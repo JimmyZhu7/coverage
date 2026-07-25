@@ -49,6 +49,14 @@ class UserFirm(PrivateModel):
 
 
 class Contact(PrivateModel):
+    # The recruiting regions the product models. Deliberately NOT the same
+    # vocabulary as `Firm.regions` (which also carries sg/eu): these two are
+    # the only regions the cadence engine's deadline scoping and the
+    # sponsorship rules actually reason about, so a contact only ever carries
+    # one of them or blank ("unknown", the honest default).
+    REGION_CHOICES = [("us", "United States"), ("hk", "Hong Kong")]
+    REGION_VALUES = frozenset(value for value, _ in REGION_CHOICES)
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
     # Nullable with a firm_text fallback (§2's "Deliberate calls"):
@@ -61,12 +69,31 @@ class Contact(PrivateModel):
     role = models.CharField(max_length=255, blank=True, default="")
     email = models.EmailField(blank=True, default="")
     linkedin = models.URLField(max_length=512, blank=True, default="")
+    # PROVENANCE ONLY — where this row came from ("manual", "import",
+    # "capture", or a free-text campaign label on ported rows). It is NOT a
+    # region field: `region` below is. See that field's comment.
     source = models.CharField(max_length=64, blank=True, default="")
+    # Which recruiting region this person is being worked for. Explicit,
+    # because the cadence engine scopes its pre-deadline re-ping by region and
+    # used to infer that by substring-matching "hk" inside `source` — which
+    # made every hand-added contact (source="manual") silently a US contact.
+    # Blank means "unknown", and unknown is a real answer: the engine falls
+    # back to matching either region rather than guessing.
+    region = models.CharField(
+        max_length=8, blank=True, default="", choices=REGION_CHOICES
+    )
     # Plain, unconstrained — see module docstring. Values are managed
     # entirely by coverage_domain.pipeline's ratchet, not Django.
     warmth = models.CharField(max_length=32, default="cold")
     thread_state = models.CharField(max_length=32, default="no_reply")
+    # PRIVATE — the user's own note ABOUT this person ("USC alum, super
+    # responsive", "warm intro from a classmate"). It is shown on the contact
+    # card and nowhere else. It must never be sent TO the contact: that is
+    # what `opener` below is for. See crm.views._mailto.
     angle = models.TextField(blank=True, default="")
+    # The draft body for an outbound email TO this person. Safe to put in a
+    # mailto: URL — that is its whole purpose.
+    opener = models.TextField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
     school_affiliation = models.BooleanField(default=False)
     # Display facts ported from the founder's campaign.db (both optional).
@@ -86,6 +113,36 @@ class Contact(PrivateModel):
 
     def __str__(self) -> str:
         return self.name
+
+    def default_region_from_firm(self) -> str:
+        """The region this contact's firm implies, or "" when it implies
+        nothing. Only an UNAMBIGUOUS firm answers: exactly one modeled region
+        (us/hk) on the firm. A firm that recruits in both, in neither, or only
+        in a region this product doesn't model yields "" — guessing there is
+        exactly the bug this field exists to kill, and a blank keeps the
+        cadence engine's conservative both-regions fallback."""
+        if self.firm_id is None:
+            return ""
+        known = {
+            (r or "").strip().lower()
+            for r in (self.firm.regions or [])
+        } & self.REGION_VALUES
+        return next(iter(known)) if len(known) == 1 else ""
+
+    def save(self, *args, **kwargs):
+        # Default region from the firm, but only when the user hasn't set one:
+        # an explicit region always wins, and a blank one stays blank unless
+        # the firm makes it unambiguous.
+        if not self.region:
+            inferred = self.default_region_from_firm()
+            if inferred:
+                self.region = inferred
+                # A partial save() must still persist the column we just
+                # filled in, or the value silently vanishes.
+                update_fields = kwargs.get("update_fields")
+                if update_fields is not None:
+                    kwargs["update_fields"] = {*update_fields, "region"}
+        super().save(*args, **kwargs)
 
 
 class Touch(PrivateModel):

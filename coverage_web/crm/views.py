@@ -119,7 +119,14 @@ def _mailto(to_email: str, bcc: str, *, subject: str = "", body: str = "") -> st
     """A `mailto:` URL with `to` + `bcc` (and optional subject/body) prefilled
     — the v1 capture surface (§5): composes start from Coverage so outreach is
     BCC'd to the capture address without any Gmail API access. `quote_via=quote`
-    keeps spaces as %20 and the `@` as %40, which every mail client accepts."""
+    keeps spaces as %20 and the `@` as %40, which every mail client accepts.
+
+    PRIVACY: `body` is addressed TO the contact, so only `Contact.opener` — the
+    field that exists to be a draft email — may be passed here. `Contact.angle`
+    must never be: it is the user's private note ABOUT the person ("USC alum,
+    super responsive"), and it used to seed this body, which meant clicking
+    Compose pre-filled an email to someone containing the user's assessment of
+    them. Pinned by test_angle_never_leaks_into_mailto."""
     params: list[tuple[str, str]] = []
     if bcc:
         params.append(("bcc", bcc))
@@ -148,6 +155,44 @@ def _touch_dicts(touches) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # 1. Weekly priority list — the authed hub at /app/.
 # ---------------------------------------------------------------------------
+# The ONLY cadence rule parameters a user may override, each with the range it
+# has to stay inside. Everything else in coverage_domain.cadence.CADENCE_DEFAULTS
+# stays a product constant.
+#
+# This is a whitelist, not a blocklist, and it is enforced here rather than at
+# write time because `User.cadence_params` is a JSONField: it can be populated
+# by a form, a fixture, a shell, or a future import path, and only the read
+# side is guaranteed to run for every request. An unknown key or an
+# out-of-range value is DROPPED, never passed through — the engine would
+# otherwise happily accept e.g. max_cold_touches: 10000 (a contact that is
+# never parked) or a negative window (a follow-up due forever).
+TUNABLE_CADENCE_PARAMS: dict[str, tuple[int, int]] = {
+    "followup_after_business_days": (1, 30),
+    "park_after_business_days": (1, 120),
+    "max_cold_touches": (1, 10),
+    "advocate_touch_min_weeks": (1, 52),
+    "pre_deadline_reping_days": (1, 90),
+}
+
+
+def _cadence_params(user) -> dict[str, int]:
+    """The user's validated cadence overrides — safe to hand to
+    `cadence.due_actions(params=...)`. Silently drops anything that isn't a
+    whitelisted key holding an in-range integer (`bool` is excluded on purpose:
+    it's an int subclass in Python, and `True` is not a sane window length)."""
+    raw = getattr(user, "cadence_params", None)
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, (low, high) in TUNABLE_CADENCE_PARAMS.items():
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            continue
+        if low <= value <= high:
+            out[key] = value
+    return out
+
+
 def _build_actions(user):
     """The cadence queue, shared by Today and Network: fetch the user's
     contacts/touches/tiers/firm-dates, run `cadence.due_actions`, and dress
@@ -191,6 +236,9 @@ def _build_actions(user):
 
     # cadence returns action["contact"] as the exact dict we pass in, so we
     # hand it dicts already carrying the display fields the template needs.
+    # `angle` is deliberately NOT in here: it is the user's private note about
+    # the person, the compose body now comes from `opener`, and nothing else in
+    # the queue reads it. Keeping it out means it can't leak into a draft again.
     contact_dicts = [
         {
             "id": c.id,
@@ -200,8 +248,9 @@ def _build_actions(user):
             "firm_text": c.firm_text,
             "warmth": c.warmth,
             "thread_state": c.thread_state,
+            "region": c.region,
             "source": c.source,
-            "angle": c.angle,
+            "opener": c.opener,
             "archived": c.archived,
         }
         for c in contacts
@@ -213,6 +262,7 @@ def _build_actions(user):
         firm_dates,
         as_of=timezone.now(),
         firms=firm_meta,
+        params=_cadence_params(user),
     )
 
     capture_addr = _capture_address(user)
@@ -221,12 +271,12 @@ def _build_actions(user):
         a["label"] = ACTION_LABELS.get(a["action"], a["action"])
         a["reason"] = _sentenceize(a.get("reason", ""))
         a["warmth_pct"] = _warmth_pct(c.get("warmth", "cold"))
-        # Compose surface: the angle seeds the draft body so the weekly list
+        # Compose surface: the opener seeds the draft body so the weekly list
         # doubles as the place outreach starts (§5).
         a["mailto"] = _mailto(
             c.get("email", ""),
             capture_addr,
-            body=(c.get("angle") or ""),
+            body=(c.get("opener") or ""),
         )
     return actions, contacts, capture_addr
 
@@ -243,7 +293,8 @@ _ACTION_TOUCH: dict[str, str] = {
     "park": "maintain",
 }
 
-# Weekly pace target — touches logged Monday-to-now.
+# Weekly pace target — touches logged Monday-to-now. The product default, used
+# when the user hasn't set their own `weekly_touch_goal`.
 WEEKLY_TOUCH_GOAL = 10
 
 
@@ -270,7 +321,10 @@ def _cockpit_context(user) -> dict:
     # Pace: touches logged since Monday against the weekly goal.
     week_start = today - timedelta(days=today.weekday())
     done = Touch.objects.for_user(user).filter(ts__date__gte=week_start).count()
-    goal = WEEKLY_TOUCH_GOAL
+    # `or` (not a None check) on purpose: a stored 0 is not a goal of zero —
+    # a zero-touch week target would make the ring meaningless and divide by
+    # zero below — so it falls back to the product default like NULL does.
+    goal = getattr(user, "weekly_touch_goal", None) or WEEKLY_TOUCH_GOAL
     pace = {
         "done": done,
         "goal": goal,
@@ -439,6 +493,9 @@ def _contact_card(c, *, tier, today):
         "gender": (c.gender or "")[:1].upper(),
         "tier": tier,
         "school": c.school,
+        # Blank when unknown — the chip simply doesn't render, rather than the
+        # card asserting a region nobody set.
+        "region": (c.region or "").upper(),
         "bullets": bullets[:3],
         "days_since": days_since,
     }
@@ -757,7 +814,16 @@ def _contact_live_context(
                 "id": user.id,
                 "regions": user.regions,
                 "tracks": user.tracks,
-                "needs_sponsorship": None,
+                # Derived per firm-region from the user's own work
+                # authorization, so the structural axis actually moves. This
+                # used to be a hardcoded None — "unknown" for every user
+                # forever, which neutralized the sponsorship component of the
+                # score permanently. `needs_sponsorship` still returns None
+                # when the user has no entry for the regions in play; unknown
+                # is a real answer, it just isn't the only one now.
+                "needs_sponsorship": scoring.needs_sponsorship(
+                    user.work_authorization, user.regions, firm.regions
+                ),
             },
             {
                 "id": firm.id,
@@ -797,7 +863,7 @@ def _contact_live_context(
         "touch_kinds": TOUCH_KIND_LABELS,
         "channels": CHANNEL_LABELS,
         "mailto": _mailto(
-            contact.email, _capture_address(user), body=(contact.angle or "")
+            contact.email, _capture_address(user), body=(contact.opener or "")
         ),
         "capture_address": _capture_address(user),
     }

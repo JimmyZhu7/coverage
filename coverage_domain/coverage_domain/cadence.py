@@ -30,11 +30,19 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
     through to the rest of the cadence. See that parameter's comment for why.
 
   - Region scoping (branch 3): an HK app_close never re-pings a US contact
-    at the same firm, and vice versa. A contact whose region can't be
-    inferred (empty `source`) keeps the both-regions fallback: it matches
-    on the soonest close date across any region for the firm. Region is
-    inferred from the contact's free-text `source` exactly as the original
-    `netdash.data.infer_region` did (see `infer_region` below).
+    at the same firm, and vice versa. A contact whose region is unknown keeps
+    the both-regions fallback: it matches on the soonest close date across any
+    region for the firm.
+
+  - DIVERGENCE from the original (deliberate, 2026-07-25): a contact's region
+    is now read from an EXPLICIT `region` key first, and only falls back to
+    `infer_region(source)` when that key is blank. The original had no region
+    column and inferred it by substring-matching "hk" inside the free-text
+    `source` — which is a provenance string, so every contact whose source
+    didn't happen to say "hk" (including every hand-added one, source
+    "manual") silently read as US: re-pinged against US deadlines, skipped
+    for HK ones. The fallback is kept rather than removed so rows written
+    before the explicit field existed keep the exact meaning they had.
 
   - `tasks_from_change()`: the backward planner. Fires ONLY on
     `confirmed_official` changes (rumor / reported never spawn a task).
@@ -118,10 +126,29 @@ def infer_region(source: str | None) -> str | None:
     same two-way call the original `netdash.data.infer_region` made. A
     missing/empty source returns None rather than guessing 'us', so branch 3
     can stay conservative (match either region) when region truly can't be
-    determined. Ported from campaign/src/campaign/region.py."""
+    determined. Ported from campaign/src/campaign/region.py.
+
+    LEGACY FALLBACK ONLY. `source` is a provenance string, not a region, so
+    this is a guess and a bad one for any source that simply doesn't mention
+    HK. New callers set `contact["region"]` explicitly; this stays only so
+    rows written before that field existed keep their previous meaning. See
+    `contact_region`."""
     if not source:
         return None
     return "hk" if "hk" in source.lower() else "us"
+
+
+def contact_region(contact: Mapping[str, Any]) -> str | None:
+    """The region a contact belongs to, or None when it genuinely isn't known.
+
+    The explicit `region` key wins. `infer_region(source)` is consulted ONLY
+    when `region` is absent or blank, so setting a region can never be
+    overridden by provenance text, and a legacy row with no region behaves
+    exactly as it did before the field existed."""
+    explicit = (contact.get("region") or "").strip().lower()
+    if explicit:
+        return explicit
+    return infer_region(contact.get("source"))
 
 
 def business_days_since(then: date, now: date) -> int:
@@ -243,8 +270,10 @@ def due_actions(
     Args:
         contacts: contact dicts. Keys used: `id`, `firm_id` (or `firm`),
             `firm_text` (display fallback when firm_id is None), `warmth`,
-            `thread_state`, `source` (for region inference), `archived`
-            (optional; truthy rows are skipped).
+            `thread_state`, `region` ("us" / "hk" / blank-or-absent for
+            unknown), `source` (legacy region fallback only, when `region` is
+            blank — see `contact_region`), `archived` (optional; truthy rows
+            are skipped).
         touches: touch dicts across those contacts. Keys used: `contact_id`,
             `ts`, `kind`.
         firm_dates: shared firm_date dicts. Keys used: `firm_id`,
@@ -361,11 +390,11 @@ def due_actions(
         by_region = closing_soon.get(firm_id)
         close: date | None = None
         if by_region:
-            contact_region = infer_region(c.get("source"))
-            if contact_region is None:
+            region = contact_region(c)
+            if region is None:
                 close = min(by_region.values())
-            elif contact_region in by_region:
-                close = by_region[contact_region]
+            elif region in by_region:
+                close = by_region[region]
         if close is not None and warmth in _WARM:
             window_start = close - timedelta(days=reping_days)
             already = any(

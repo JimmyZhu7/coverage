@@ -149,6 +149,73 @@ def test_closing_soon_reping_applies_both_regions_when_source_unknown():
     assert "reping" in kinds_for(actions, 1)
 
 
+# --------------------------------------------------------------------------
+# Explicit contact region (the `source`-substring bug).
+# --------------------------------------------------------------------------
+def _hk_close_firm_dates():
+    return [{
+        "firm_id": "dualfirm", "event_kind": "app_close", "region": "hk",
+        "date": TODAY + timedelta(days=5), "confidence": "confirmed_official",
+    }]
+
+
+def test_explicit_region_beats_source_inference():
+    """An explicit `region` wins over whatever `infer_region` would have made
+    of `source`. Here source says "direct search" (-> 'us' by inference), but
+    the contact is marked HK, so the HK close re-pings them."""
+    c = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="replied",
+                source="Apollo direct search", region="hk")
+    actions = cadence.due_actions([c], [touch(1, "chat", "2026-06-01 10:00")],
+                                  _hk_close_firm_dates(), as_of=AS_OF, firms=FIRMS)
+    assert "reping" in kinds_for(actions, 1)
+
+
+def test_explicit_region_excludes_other_regions_close():
+    """The other direction: source mentions HK (-> 'hk' by inference) but the
+    contact is explicitly US, so the HK close must not touch them."""
+    c = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="replied",
+                source="Apollo HK campaign", region="us")
+    actions = cadence.due_actions([c], [touch(1, "chat", "2026-06-01 10:00")],
+                                  _hk_close_firm_dates(), as_of=AS_OF, firms=FIRMS)
+    assert "reping" not in kinds_for(actions, 1)
+
+
+def test_hand_added_contact_is_not_guessed_us_from_source():
+    """The bug this field exists for: a hand-added contact is written with
+    source="manual", which `infer_region` reads as 'us' — so an HK contact was
+    skipped for HK deadlines forever. With the region set, the HK close fires;
+    without it, the legacy inference still (wrongly) says US."""
+    hk = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="replied",
+                 source="manual", region="hk")
+    legacy = contact(2, firm_id="dualfirm", warmth="chatted", thread_state="replied",
+                     source="manual", region="")
+    touches = [touch(1, "chat", "2026-06-01 10:00"), touch(2, "chat", "2026-06-01 10:00")]
+    actions = cadence.due_actions([hk, legacy], touches, _hk_close_firm_dates(),
+                                  as_of=AS_OF, firms=FIRMS)
+    assert "reping" in kinds_for(actions, 1)
+    assert "reping" not in kinds_for(actions, 2)
+
+
+def test_blank_region_still_falls_back_to_source():
+    """Legacy rows keep their exact previous meaning: a blank region falls
+    through to `infer_region(source)`, so a row whose source says HK still
+    behaves as it did before the column existed."""
+    c = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="replied",
+                source="Apollo HK campaign", region="")
+    actions = cadence.due_actions([c], [touch(1, "chat", "2026-06-01 10:00")],
+                                  _hk_close_firm_dates(), as_of=AS_OF, firms=FIRMS)
+    assert "reping" in kinds_for(actions, 1)
+
+
+def test_contact_region_helper_resolution_order():
+    assert cadence.contact_region({"region": "hk", "source": "manual"}) == "hk"
+    assert cadence.contact_region({"region": " HK ", "source": "manual"}) == "hk"
+    assert cadence.contact_region({"region": "", "source": "Apollo HK"}) == "hk"
+    assert cadence.contact_region({"region": "", "source": "manual"}) == "us"
+    assert cadence.contact_region({"region": "", "source": ""}) is None
+    assert cadence.contact_region({}) is None
+
+
 def test_zero_touch_contact_not_treated_as_stale():
     """A brand-new, never-touched contact is flagged for first outreach."""
     c = contact(1, warmth="cold", thread_state="no_reply")

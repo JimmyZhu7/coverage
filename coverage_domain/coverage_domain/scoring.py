@@ -15,6 +15,13 @@ Two scores come out of one engine, both PURE functions of
     band, reasoning, hash. Network strength reuses `score_contact` for each
     contact at the firm, so the two scores share one definition of warmth.
 
+One input helper comes with the engine:
+
+  - `needs_sponsorship()` collapses a user's PER-REGION work authorization
+    into the single tri-state `score_firm` takes, for one user × firm. The
+    collapse rule is a product decision, so it lives here with the scoring
+    contract rather than in whichever caller happens to need it.
+
 Design guarantees (all four are load-bearing, per the brief):
 
   1. ZERO LLM, ZERO randomness. Every number here is a closed-form function
@@ -642,6 +649,70 @@ def _overlap(a: Iterable[str] | None, b: Iterable[str] | None) -> bool | None:
     if not sa or not sb:
         return None
     return bool(sa & sb)
+
+
+# Work-authorization vocabulary (mirrors accounts.models.WORK_AUTH). Anything
+# else — including a missing entry — is UNKNOWN, never a guess.
+WORK_AUTH_CITIZEN = "citizen"
+WORK_AUTH_SPONSORSHIP = "sponsorship"
+
+
+def needs_sponsorship(
+    work_authorization: Mapping[str, Any] | None,
+    user_regions: Iterable[str] | None,
+    firm_regions: Iterable[str] | None,
+) -> bool | None:
+    """Derive `score_firm`'s `needs_sponsorship` input for ONE user × firm.
+
+    Work authorization is per-region (`{"us": "citizen", "hk": "sponsorship"}`)
+    because a student can be free to work in one target region and need a visa
+    in the other. A firm, though, gets a single structural-fit answer — so the
+    per-region facts have to collapse, and how they collapse is a real product
+    decision:
+
+      RULE: BEST CASE ACROSS THE REGIONS IN PLAY. If there is even one relevant
+      region where the student needs no sponsorship, the answer is False (no
+      sponsorship needed) — a student only has to be employable in ONE of a
+      firm's regions to work there, and a firm that can hire them in New York
+      is not a worse fit because they'd also need a visa in Hong Kong. Only
+      when EVERY relevant region needs sponsorship does this return True. If
+      no region says "citizen" and any relevant region has no entry at all,
+      the answer is None — unknown, which `_score_structural` scores as
+      neutral rather than penalizing.
+
+    "Relevant regions" are the overlap between the user's target regions and
+    the firm's — the regions where this pairing could actually happen. When
+    that overlap is empty (an unstated preference on either side, or a firm the
+    user is browsing outside their regions) it falls back to whichever side is
+    known, and to None when neither is.
+
+    Args:
+        work_authorization: {region: "citizen" | "sponsorship"}; unknown
+            regions may be absent. Unrecognized values count as unknown.
+        user_regions: the user's target regions.
+        firm_regions: the firm's regions.
+
+    Returns:
+        False (no sponsorship needed), True (needs it everywhere relevant), or
+        None (not enough information — scored neutral).
+    """
+    user_set = {(r or "").strip().lower() for r in (user_regions or [])} - {""}
+    firm_set = {(r or "").strip().lower() for r in (firm_regions or [])} - {""}
+    relevant = user_set & firm_set or firm_set or user_set
+    if not relevant:
+        return None
+
+    auth = {
+        (k or "").strip().lower(): (v or "").strip().lower()
+        for k, v in (work_authorization or {}).items()
+        if isinstance(v, str)
+    }
+    statuses = [auth.get(region) for region in sorted(relevant)]
+    if any(s == WORK_AUTH_CITIZEN for s in statuses):
+        return False
+    if statuses and all(s == WORK_AUTH_SPONSORSHIP for s in statuses):
+        return True
+    return None
 
 
 def _score_structural(

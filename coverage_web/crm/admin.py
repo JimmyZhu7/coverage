@@ -30,12 +30,13 @@ class ContactAdmin(admin.ModelAdmin):
         "firm",
         "firm_text",
         "role",
+        "region",
         "warmth",
         "thread_state",
         "archived",
         "created",
     )
-    list_filter = ("warmth", "thread_state", "archived")
+    list_filter = ("warmth", "thread_state", "region", "archived")
     search_fields = ("name", "email", "firm_text", "user__email", "firm__name")
     autocomplete_fields = ("firm",)
 

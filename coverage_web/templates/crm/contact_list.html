@@ -110,6 +110,7 @@
                     <span class="cc-name">{{ card.c.name|smart_title }}
                       {% if card.gender %}<span class="pill cc-pill">{{ card.gender }}</span>{% endif %}
                       {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
+                      {% if card.region %}<span class="pill cc-pill">{{ card.region }}</span>{% endif %}
                     </span>
                     <span class="cc-firm">
                       {% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}

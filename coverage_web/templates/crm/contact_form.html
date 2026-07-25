@@ -66,12 +66,22 @@
           {{ form.linkedin }}
           {% if form.linkedin.errors %}<p class="cf-err">{{ form.linkedin.errors|striptags }}</p>{% endif %}
         </div>
+        <div>
+          <label for="{{ form.region.id_for_label }}">Region</label>
+          {{ form.region }}
+          {% if form.region.errors %}<p class="cf-err">{{ form.region.errors|striptags }}</p>{% endif %}
+        </div>
       </div>
 
       <div class="cf-full">
         <label for="{{ form.angle.id_for_label }}">Angle</label>
         {{ form.angle }}
-        <p class="note">Your reason to reach out. Seeds the first draft.</p>
+        <p class="note">Your reason to reach out. Private to you, never sent.</p>
+      </div>
+      <div class="cf-full">
+        <label for="{{ form.opener.id_for_label }}">Opener</label>
+        {{ form.opener }}
+        <p class="note">The draft email itself. Seeds the compose body.</p>
       </div>
       <div class="cf-full">
         <label for="{{ form.notes.id_for_label }}">Notes</label>

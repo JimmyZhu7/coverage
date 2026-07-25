@@ -235,19 +235,23 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
         if matched_firm:
             result.firm_matched += 1
 
-        to_create.append(
-            Contact(
-                user=user,
-                name=name[:255],
-                firm=matched_firm,
-                firm_text="" if matched_firm else firm_raw[:255],
-                role=values.get("role", "")[:255],
-                email=email[:254],
-                notes=values.get("notes", ""),
-                angle=values.get("angle", ""),
-                source="import",
-            )
+        contact = Contact(
+            user=user,
+            name=name[:255],
+            firm=matched_firm,
+            firm_text="" if matched_firm else firm_raw[:255],
+            role=values.get("role", "")[:255],
+            email=email[:254],
+            notes=values.get("notes", ""),
+            angle=values.get("angle", ""),
+            source="import",
         )
+        # bulk_create (below) never calls save(), so the firm-derived region
+        # default has to be applied by hand here or imported contacts would be
+        # the one path that silently keeps an unknown region. `matched_firm` is
+        # already loaded, so this costs no extra query.
+        contact.region = contact.default_region_from_firm()
+        to_create.append(contact)
 
     if to_create:
         # bulk_create goes through the base manager; user is set on each row.
@@ -298,8 +302,8 @@ def import_template_csv() -> str:
 # CSV export (the user's own data, portable — §10 trust feature)
 # ---------------------------------------------------------------------------
 CONTACT_EXPORT_COLUMNS = [
-    "name", "email", "firm", "role", "warmth", "thread_state",
-    "angle", "notes", "source", "created",
+    "name", "email", "firm", "role", "region", "warmth", "thread_state",
+    "angle", "opener", "notes", "source", "created",
 ]
 TOUCH_EXPORT_COLUMNS = [
     "contact_name", "contact_email", "firm", "ts", "channel",
@@ -322,9 +326,11 @@ def contacts_csv(user) -> str:
                 c.email,
                 _firm_label(c),
                 c.role,
+                c.region,
                 c.warmth,
                 c.thread_state,
                 c.angle,
+                c.opener,
                 c.notes,
                 c.source,
                 c.created.isoformat() if c.created else "",

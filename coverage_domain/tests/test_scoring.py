@@ -332,6 +332,74 @@ def test_structural_sponsorship_conflict_penalized():
     assert "no sponsorship" in bad["reasoning"]
 
 
+# --------------------------------------------------------------------------
+# Per-region work authorization -> the single needs_sponsorship input.
+# --------------------------------------------------------------------------
+def test_needs_sponsorship_single_region_reads_that_region():
+    assert scoring.needs_sponsorship({"us": "citizen"}, ["us"], ["us"]) is False
+    assert scoring.needs_sponsorship({"us": "sponsorship"}, ["us"], ["us"]) is True
+
+
+def test_needs_sponsorship_ignores_regions_not_in_play():
+    """An HK visa requirement is irrelevant at a US-only firm."""
+    auth = {"us": "citizen", "hk": "sponsorship"}
+    assert scoring.needs_sponsorship(auth, ["us", "hk"], ["us"]) is False
+    assert scoring.needs_sponsorship(auth, ["us", "hk"], ["hk"]) is True
+
+
+def test_needs_sponsorship_multi_region_takes_the_best_case():
+    """The documented collapse rule: at a firm spanning both regions, one
+    region where no sponsorship is needed makes the whole firm conflict-free —
+    the student only has to be employable in one of them."""
+    auth = {"us": "citizen", "hk": "sponsorship"}
+    assert scoring.needs_sponsorship(auth, ["us", "hk"], ["us", "hk"]) is False
+    both = {"us": "sponsorship", "hk": "sponsorship"}
+    assert scoring.needs_sponsorship(both, ["us", "hk"], ["us", "hk"]) is True
+
+
+def test_needs_sponsorship_unknown_stays_unknown():
+    """No entry, an unrecognized value, or a partially-known multi-region firm
+    with no no-sponsorship region -> None (neutral), never a guess."""
+    assert scoring.needs_sponsorship({}, ["us"], ["us"]) is None
+    assert scoring.needs_sponsorship(None, ["us"], ["us"]) is None
+    assert scoring.needs_sponsorship({"us": "opt"}, ["us"], ["us"]) is None
+    assert scoring.needs_sponsorship({"us": "sponsorship"}, ["us", "hk"], ["us", "hk"]) is None
+
+
+def test_needs_sponsorship_falls_back_when_regions_do_not_overlap():
+    """No overlap (a firm outside the user's stated regions, or an unstated
+    preference) -> use whichever side is known rather than answering nothing."""
+    auth = {"us": "citizen", "hk": "sponsorship"}
+    assert scoring.needs_sponsorship(auth, ["us"], ["hk"]) is True    # firm's region wins
+    assert scoring.needs_sponsorship(auth, ["us"], []) is False       # user's region only
+    assert scoring.needs_sponsorship(auth, [], []) is None            # nothing to go on
+
+
+def test_needs_sponsorship_is_case_and_whitespace_tolerant():
+    assert scoring.needs_sponsorship({" US ": "Citizen"}, ["us"], ["US"]) is False
+
+
+def test_needs_sponsorship_feeds_the_structural_axis():
+    """End to end: the derived value is what moves the score. A student who
+    needs a visa at a non-sponsoring firm scores below one who doesn't."""
+    firm = _firm(regions=("us",), sponsors=False)
+    user_regions = ["us"]
+
+    def structural(auth):
+        user = {"id": 1, "regions": user_regions, "tracks": ["ib"],
+                "needs_sponsorship": scoring.needs_sponsorship(auth, user_regions, firm["regions"])}
+        return scoring.score_firm(user, firm, [], [], as_of=AS_OF)["axes"]["structural"]
+
+    assert structural({"us": "citizen"})["sponsorship_ok"] is True
+    assert structural({"us": "sponsorship"})["sponsorship_ok"] is False
+    assert structural({})["sponsorship_ok"] is None
+    assert (
+        structural({"us": "sponsorship"})["score"]
+        < structural({})["score"]
+        < structural({"us": "citizen"})["score"]
+    )
+
+
 def test_firm_determinism_snapshot():
     firm_dates = [{
         "firm_id": "acme", "event_kind": "app_close", "region": "us",

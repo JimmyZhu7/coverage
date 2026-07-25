@@ -47,6 +47,25 @@ class UserAdmin(DjangoUserAdmin):
                 )
             },
         ),
+        (
+            # These three feed the domain engines directly (fit-score
+            # sponsorship, cadence windows, the Today pace ring) and have no
+            # settings-page UI yet, so admin is the only place to set them.
+            "Recruiting preferences",
+            {
+                "fields": (
+                    "work_authorization",
+                    "cadence_params",
+                    "weekly_touch_goal",
+                ),
+                "description": (
+                    "work_authorization is keyed by region, e.g. "
+                    '{"us": "citizen", "hk": "sponsorship"}. cadence_params '
+                    "only honors the keys in crm.views.TUNABLE_CADENCE_PARAMS; "
+                    "anything else is ignored at read time."
+                ),
+            },
+        ),
         ("Capture", {"fields": ("capture_slug", "google_sub", "onboarded_at")}),
         (
             "Permissions",
