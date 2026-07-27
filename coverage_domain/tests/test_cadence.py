@@ -411,109 +411,53 @@ def test_params_override_changes_followup_window():
 
 
 # --------------------------------------------------------------------------
-# Staged follow-up windows (branch 6). AS_OF is Wed 2026-07-22, so:
-#   last touch Mon 2026-07-13 -> 7 business days ago
-#   last touch Fri 2026-07-10 -> 8 business days ago
-# 7 sits BETWEEN the two defaults (first 6, second 8), which is what makes it
-# the discriminating case: it is due under the first window and not yet due
-# under the second.
+# The follow-up cadence (branch 6). AS_OF is Wed 2026-07-22.
+#
+# HISTORY: this used to stage a longer window before a second follow-up
+# (2026-07-27), then dropped it the next day in favor of a stricter rule —
+# never send a second follow-up at all; one unanswered follow-up is enough
+# evidence to park. `max_cold_touches` is capped at 2 in
+# crm.views.TUNABLE_CADENCE_PARAMS specifically so that can't be configured
+# back open. These tests pin the current, simpler rule.
 # --------------------------------------------------------------------------
-# max_cold has to be raised for a SECOND follow-up to exist at all: branch 6
-# only offers a follow_up while `outbound < max_cold`, and the default of 2
-# means one outreach plus one follow-up, then park.
-_THREE_TOUCHES = {"max_cold_touches": 3}
 
 
-def test_first_and_second_followup_use_different_windows():
-    """The whole point of staging: at an identical 7-business-day silence, a
-    contact owed follow-up #1 is due and one owed #2 is not."""
-    c = contact(1, warmth="cold", thread_state="no_reply")
-
-    one_outbound = [touch(1, "outreach", "2026-07-13 10:00")]
-    two_outbound = [
-        touch(1, "outreach", "2026-06-25 10:00"),
-        touch(1, "follow_up", "2026-07-13 10:00"),
-    ]
-
-    first = cadence.due_actions([c], one_outbound, [], as_of=AS_OF, firms=FIRMS,
-                                params=_THREE_TOUCHES)
-    second = cadence.due_actions([c], two_outbound, [], as_of=AS_OF, firms=FIRMS,
-                                 params=_THREE_TOUCHES)
-
-    assert "follow_up" in kinds_for(first, 1)
-    assert "follow_up" not in kinds_for(second, 1)
-
-
-def test_second_followup_fires_once_its_own_window_elapses():
-    """One more business day of silence (8) and follow-up #2 comes due."""
+def test_only_one_followup_is_ever_sent():
+    """However long the silence after the one follow-up, no second one fires —
+    even well past what the old staged window would have required."""
     c = contact(1, warmth="cold", thread_state="no_reply")
     touches = [
-        touch(1, "outreach", "2026-06-25 10:00"),
-        touch(1, "follow_up", "2026-07-10 10:00"),   # 8 business days before AS_OF
+        touch(1, "outreach", "2026-05-01 10:00"),
+        touch(1, "follow_up", "2026-05-15 10:00"),   # long silent since; still no 2nd follow_up
     ]
-    actions = cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS,
-                                  params=_THREE_TOUCHES)
-    my = [a for a in actions if a["contact"]["id"] == 1]
-    assert [a["action"] for a in my] == ["follow_up"]
-    # The action reports WHICH window it was measured against, so the UI never
-    # has to guess which stage of the cadence a prompt came from.
-    assert my[0]["ctx"]["window_business_days"] == 8
-    assert my[0]["ctx"]["outbound"] == 2
-
-
-def test_second_window_is_tunable_independently_of_the_first():
-    """Widening only the second window parks the prompt without touching #1."""
-    c = contact(1, warmth="cold", thread_state="no_reply")
-    two_outbound = [
-        touch(1, "outreach", "2026-06-25 10:00"),
-        touch(1, "follow_up", "2026-07-10 10:00"),   # 8 business days ago
-    ]
-    one_outbound = [touch(1, "outreach", "2026-07-10 10:00")]
-
-    widened = {**_THREE_TOUCHES, "second_followup_after_business_days": 20}
-    assert "follow_up" not in kinds_for(
-        cadence.due_actions([c], two_outbound, [], as_of=AS_OF, firms=FIRMS, params=widened), 1
-    )
-    # ...while follow-up #1 at the same silence is untouched by that override.
-    assert "follow_up" in kinds_for(
-        cadence.due_actions([c], one_outbound, [], as_of=AS_OF, firms=FIRMS, params=widened), 1
-    )
-
-
-def test_third_and_later_followups_reuse_the_second_window():
-    """The second window governs #2 and everything after it — there is no
-    third knob, so a 3-outbound contact is measured against the same gap."""
-    c = contact(1, warmth="cold", thread_state="no_reply")
-    touches = [
-        touch(1, "outreach", "2026-06-01 10:00"),
-        touch(1, "follow_up", "2026-06-15 10:00"),
-        touch(1, "follow_up", "2026-07-10 10:00"),   # 8 business days ago
-    ]
-    actions = cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS,
-                                  params={"max_cold_touches": 4})
-    my = [a for a in actions if a["contact"]["id"] == 1]
-    assert [a["action"] for a in my] == ["follow_up"]
-    assert my[0]["ctx"]["window_business_days"] == 8
-
-
-def test_second_window_does_not_resurrect_a_maxed_out_contact():
-    """A contact already at max_cold_touches must stay silent when the second
-    window elapses. The follow_up branch is gated on `outbound < max_cold`, so
-    at 8 business days (second window met, park's 10 not yet) NOTHING is due —
-    staging must not smuggle an extra touch past the max."""
-    c = contact(1, warmth="cold", thread_state="no_reply")
-    touches = [
-        touch(1, "outreach", "2026-06-15 10:00"),
-        touch(1, "follow_up", "2026-07-10 10:00"),   # 8 bd: >= second window
-    ]
-    # Default max_cold_touches of 2 is already reached by these two touches.
     actions = cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS)
-    assert kinds_for(actions, 1) == set()
+    assert "follow_up" not in kinds_for(actions, 1)
+
+
+def test_a_raised_max_cold_touches_still_only_sends_one_followup():
+    """due_actions itself has no whitelist on `params` — it trusts whatever the
+    caller hands in, by design (the whitelist lives one layer up, in
+    crm.views.TUNABLE_CADENCE_PARAMS, tested there). So if a caller passed a
+    raised override anyway, this is what would happen: a SECOND follow-up
+    would in fact fire, because branch 6 has nothing else stopping it. That's
+    exactly why the range is capped at the web layer rather than left to this
+    module to enforce — pinned here so the two layers' responsibilities don't
+    blur, not as a claim that this module blocks it itself."""
+    c = contact(1, warmth="cold", thread_state="no_reply")
+    touches = [
+        touch(1, "outreach", "2026-06-25 10:00"),
+        touch(1, "follow_up", "2026-07-13 10:00"),   # 7 business days before AS_OF
+    ]
+    actions = cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS,
+                                  params={"max_cold_touches": 3})
+    assert "follow_up" in kinds_for(actions, 1), (
+        "confirms the cap must live in crm.views, not here"
+    )
 
 
 def test_park_still_fires_once_its_own_window_elapses():
-    """Park is unchanged by staging: at max_cold touches and 10 business days
-    of silence it still takes the contact, at priority 3."""
+    """At max_cold touches (the one follow-up already sent) and 10 business
+    days of silence, park still takes the contact, at priority 3."""
     c = contact(1, warmth="cold", thread_state="no_reply")
     touches = [
         touch(1, "outreach", "2026-06-15 10:00"),
@@ -525,17 +469,12 @@ def test_park_still_fires_once_its_own_window_elapses():
     assert my[0]["priority"] == 3
 
 
-def test_staged_defaults_both_clear_a_full_calendar_week():
-    """The defaults exist to put every follow-up BEYOND one week. 5 business
-    days is exactly 7 calendar days, so both windows must exceed 5 — this
-    pins the intent against a well-meaning future tweak back to 5."""
-    first = cadence.CADENCE_DEFAULTS["followup_after_business_days"]
-    second = cadence.CADENCE_DEFAULTS["second_followup_after_business_days"]
-    assert first > 5
-    assert second > 5
-    # Staged, not merely separate: the second gap is the longer of the two.
-    assert second > first
-    # And the arithmetic those defaults rest on, asserted rather than trusted:
+def test_followup_default_clears_a_full_calendar_week():
+    """The default exists to put the follow-up BEYOND one week. 5 business
+    days is exactly 7 calendar days, so the default must exceed 5 — this pins
+    the intent against a well-meaning future tweak back to 5."""
+    assert cadence.CADENCE_DEFAULTS["followup_after_business_days"] > 5
+    # And the arithmetic that default rests on, asserted rather than trusted:
     # a Monday touch + 6 business days is the following Tuesday, 8 days later.
     assert cadence.business_days_since(date(2026, 7, 13), date(2026, 7, 21)) == 6
     assert (date(2026, 7, 21) - date(2026, 7, 13)).days == 8

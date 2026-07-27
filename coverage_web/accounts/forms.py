@@ -366,12 +366,6 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
         "How long a cold contact sits without a reply before Coverage asks you "
         "to follow up the first time.",
     ),
-    "second_followup_after_business_days": (
-        "Second Follow-Up",
-        "business days",
-        "How long to wait after that follow-up before Coverage asks you to try "
-        "once more. Only applies if Max Cold Touches is 3 or higher.",
-    ),
     "park_after_business_days": (
         "Park After",
         "business days",
@@ -381,7 +375,9 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
     "max_cold_touches": (
         "Max Cold Touches",
         "touches",
-        "How many times you'll reach out to someone who has never replied.",
+        "How many times you'll reach out to someone who has never replied, "
+        "before Coverage parks them. Capped at 2: one note, one follow-up, "
+        "never a second follow-up.",
     ),
     "advocate_touch_min_weeks": (
         "Advocate Check-In",
@@ -435,12 +431,24 @@ class CadenceForm(SectionForm):
     @classmethod
     def initial_for(cls, user) -> dict:
         stored = user.cadence_params or {}
-        return {
-            key: stored.get(key)
-            for key in TUNABLE_CADENCE_PARAMS
-            if isinstance(stored.get(key), int)
-            and not isinstance(stored.get(key), bool)
-        }
+        initial = {}
+        for key, (low, high) in TUNABLE_CADENCE_PARAMS.items():
+            value = stored.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high:
+                initial[key] = value
+            # An out-of-range stored value (e.g. a max_cold_touches of 3 from
+            # before that range was tightened to (1, 2)) is dropped here for
+            # the same reason crm.views._cadence_params drops it on the read
+            # side: showing it pre-filled in a field whose own widget caps at
+            # `high` would render a number the input itself rejects. Since
+            # `apply_to` below treats every unposted field as "clear the
+            # override" (matching this form's own clearing-an-input
+            # contract), the next time the Cadence section ITSELF is saved,
+            # even untouched, also erases the stale value from the column:
+            # the same value the engine was already ignoring, now no longer
+            # left behind to confuse a human reading Settings or the raw
+            # column.
+        return initial
 
     @property
     def rows(self) -> list[dict]:

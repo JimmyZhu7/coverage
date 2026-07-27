@@ -168,14 +168,16 @@ def _touch_dicts(touches) -> list[dict[str, Any]]:
 # never parked) or a negative window (a follow-up due forever).
 TUNABLE_CADENCE_PARAMS: dict[str, tuple[int, int]] = {
     "followup_after_business_days": (1, 30),
-    # Allowed to run longer than the first window (30) because backing off
-    # further after a second unanswered note is the whole point of staging
-    # them. Capped at 45 business days — about nine calendar weeks — because
-    # past that a "follow-up" is really a fresh introduction, and the cadence
-    # should not pretend otherwise.
-    "second_followup_after_business_days": (1, 45),
     "park_after_business_days": (1, 120),
-    "max_cold_touches": (1, 10),
+    # Capped at 2, not left open — this is what enforces "never a second
+    # follow-up" as a structural fact rather than a default someone could
+    # raise. cadence.due_actions' branch 6 sends exactly one outreach note and
+    # one follow-up; `outbound >= max_cold_touches` is what routes a contact to
+    # `park` instead of a further follow-up. A cap of 3+ would let that branch
+    # fire a second follow-up on a longer wait — the staged-window behavior
+    # tried and reverted on 2026-07-28 (see cadence.py's DIVERGENCE note) — so
+    # the range itself, not just the default, has to stay at (1, 2).
+    "max_cold_touches": (1, 2),
     "advocate_touch_min_weeks": (1, 52),
     "pre_deadline_reping_days": (1, 90),
 }

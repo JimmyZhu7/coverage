@@ -442,26 +442,45 @@ def test_firm_cards_still_span_regions(client):
 # Cadence override whitelist.
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db
-def test_out_of_range_second_followup_override_is_dropped():
+def test_out_of_range_max_cold_touches_override_is_dropped():
     """`_cadence_params` is the read-side gate: an out-of-range value is
     DROPPED, never handed to the engine, so the queue falls back to the
-    default rather than honoring a nonsense window."""
+    default rather than honoring a nonsense value."""
     user = _user()
-    low, high = TUNABLE_CADENCE_PARAMS["second_followup_after_business_days"]
+    low, high = TUNABLE_CADENCE_PARAMS["max_cold_touches"]
 
-    user.cadence_params = {"second_followup_after_business_days": high + 1}
-    assert "second_followup_after_business_days" not in _cadence_params(user)
+    user.cadence_params = {"max_cold_touches": high + 1}
+    assert "max_cold_touches" not in _cadence_params(user)
 
-    user.cadence_params = {"second_followup_after_business_days": low - 1}
-    assert "second_followup_after_business_days" not in _cadence_params(user)
+    user.cadence_params = {"max_cold_touches": low - 1}
+    assert "max_cold_touches" not in _cadence_params(user)
 
     # Non-integers and bools are rejected too (bool is an int subclass).
-    user.cadence_params = {"second_followup_after_business_days": True}
-    assert "second_followup_after_business_days" not in _cadence_params(user)
+    user.cadence_params = {"max_cold_touches": True}
+    assert "max_cold_touches" not in _cadence_params(user)
 
     # An in-range value survives.
-    user.cadence_params = {"second_followup_after_business_days": 12}
-    assert _cadence_params(user)["second_followup_after_business_days"] == 12
+    user.cadence_params = {"max_cold_touches": 1}
+    assert _cadence_params(user)["max_cold_touches"] == 1
+
+
+@pytest.mark.django_db
+def test_max_cold_touches_cannot_be_raised_past_two():
+    """The range itself, not just the default, enforces "never a second
+    follow-up" — this is what stops a stray override of 3+ from reopening
+    the staged-follow-up behavior that was tried and reverted in cadence.py
+    (see its DIVERGENCE note). Capped at the web layer because
+    coverage_domain.cadence trusts whatever `params` it's handed by design;
+    see cadence's own test that pins that boundary."""
+    low, high = TUNABLE_CADENCE_PARAMS["max_cold_touches"]
+    assert (low, high) == (1, 2)
+
+    user = _user()
+    user.cadence_params = {"max_cold_touches": 3}
+    assert "max_cold_touches" not in _cadence_params(user), (
+        "an out-of-range override must fall back to the default (2), "
+        "never enable a second follow-up"
+    )
 
 
 @pytest.mark.django_db

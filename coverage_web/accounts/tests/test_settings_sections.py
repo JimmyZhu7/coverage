@@ -194,34 +194,43 @@ def _cadence_post(**overrides) -> dict:
 
 
 def test_cadence_saves_in_range_overrides(client, logged_in):
+    # max_cold_touches's only two legal values are 1 and 2 (the default) —
+    # capped there so a second follow-up can never be configured back on; see
+    # crm.views.TUNABLE_CADENCE_PARAMS. 1 is the differs-from-default value
+    # this test needs to prove a save round-trips.
     resp = _post(client, **_cadence_post(followup_after_business_days=7,
-                                         max_cold_touches=3))
+                                         max_cold_touches=1))
     assert resp.status_code == 302
     logged_in.refresh_from_db()
     assert logged_in.cadence_params == {
         "followup_after_business_days": 7,
-        "max_cold_touches": 3,
+        "max_cold_touches": 1,
     }
 
 
 def test_cadence_clearing_an_input_removes_the_override(client, logged_in):
     logged_in.cadence_params = {"followup_after_business_days": 7,
-                                "max_cold_touches": 3}
+                                "max_cold_touches": 1}
     logged_in.save(update_fields=["cadence_params"])
 
-    _post(client, **_cadence_post(max_cold_touches=3))
+    _post(client, **_cadence_post(max_cold_touches=1))
 
     logged_in.refresh_from_db()
     # Removed, not zeroed — `crm.views._cadence_params` would drop a 0 as
     # out-of-range anyway, leaving the page showing a value nothing honors.
-    assert logged_in.cadence_params == {"max_cold_touches": 3}
+    assert logged_in.cadence_params == {"max_cold_touches": 1}
 
 
 @pytest.mark.parametrize("key,bad", [
     ("followup_after_business_days", 0),
     ("followup_after_business_days", 31),
     ("park_after_business_days", 121),
-    ("max_cold_touches", 11),
+    # 3, not some larger number: the range is capped at 2 specifically so a
+    # second follow-up can never be configured back on (see cadence.py's
+    # DIVERGENCE note on the staged-window behaviour tried and reverted
+    # 2026-07-28) — 3 is the first value that would reopen it, so it's the
+    # boundary case worth pinning, not an arbitrary large one.
+    ("max_cold_touches", 3),
     ("advocate_touch_min_weeks", 53),
     ("pre_deadline_reping_days", 91),
 ])
@@ -261,11 +270,11 @@ def test_cadence_preserves_non_tunable_keys(client, logged_in):
     logged_in.cadence_params = {"thank_you_within_hours": 12}
     logged_in.save(update_fields=["cadence_params"])
 
-    _post(client, **_cadence_post(max_cold_touches=4))
+    _post(client, **_cadence_post(max_cold_touches=1))
 
     logged_in.refresh_from_db()
     assert logged_in.cadence_params == {"thank_you_within_hours": 12,
-                                        "max_cold_touches": 4}
+                                        "max_cold_touches": 1}
 
 
 def test_cadence_overrides_survive_the_engines_own_whitelist(logged_in):
@@ -291,6 +300,32 @@ def test_cadence_initial_ignores_junk_already_in_the_column(logged_in):
     # crm.views._cadence_params makes.
     assert "max_cold_touches" not in form.initial
     assert form.initial["advocate_touch_min_weeks"] == 5
+
+
+def test_cadence_initial_ignores_a_stale_out_of_range_value(logged_in):
+    """A value that was legal before max_cold_touches's range tightened to
+    (1, 2) — e.g. the 3 the staged-follow-up feature allowed before it was
+    reverted — must not render into a field whose own widget caps at 2. The
+    engine (crm.views._cadence_params) already ignores it; the form showing
+    it anyway would be a number the input itself rejects on the same page."""
+    logged_in.cadence_params = {"max_cold_touches": 3, "advocate_touch_min_weeks": 5}
+    form = CadenceForm.from_user(logged_in)
+    assert "max_cold_touches" not in form.initial
+    assert form.initial["advocate_touch_min_weeks"] == 5
+
+
+def test_saving_cadence_clears_a_stale_out_of_range_value_from_the_column(client, logged_in):
+    """Since the field renders blank (previous test) and `apply_to` treats an
+    unposted field as "clear the override", saving the Cadence section at
+    all — even leaving max_cold_touches untouched — scrubs the stale 3 out
+    of the stored column, not just out of what's displayed."""
+    logged_in.cadence_params = {"max_cold_touches": 3}
+    logged_in.save(update_fields=["cadence_params"])
+
+    _post(client, **_cadence_post(advocate_touch_min_weeks=6))
+
+    logged_in.refresh_from_db()
+    assert logged_in.cadence_params == {"advocate_touch_min_weeks": 6}
 
 
 # ---------------------------------------------------------------------------
@@ -336,13 +371,13 @@ def test_weekly_pace_feeds_the_today_pace_ring(client, logged_in):
 def test_each_section_saves_without_touching_the_others(client, logged_in):
     _post(client, section="work_auth", work_auth_us="citizen", work_auth_hk="")
     _post(client, section="assets", angles="An angle")
-    _post(client, **_cadence_post(max_cold_touches=5))
+    _post(client, **_cadence_post(max_cold_touches=1))
     _post(client, section="pace", weekly_touch_goal="12")
 
     logged_in.refresh_from_db()
     assert logged_in.work_authorization == {"us": "citizen"}
     assert logged_in.assets["angles"] == ["An angle"]
-    assert logged_in.cadence_params == {"max_cold_touches": 5}
+    assert logged_in.cadence_params == {"max_cold_touches": 1}
     assert logged_in.weekly_touch_goal == 12
 
 
@@ -401,7 +436,7 @@ def test_each_section_flashes_a_success_message(client, logged_in):
     for data in (
         {"section": "assets", "angles": "An angle"},
         {"section": "work_auth", "work_auth_us": "citizen", "work_auth_hk": ""},
-        _cadence_post(max_cold_touches=5),
+        _cadence_post(max_cold_touches=1),
         {"section": "pace", "weekly_touch_goal": "12"},
     ):
         resp = client.post(reverse(SETTINGS), data, follow=True)
