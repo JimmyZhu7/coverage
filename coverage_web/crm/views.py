@@ -1045,6 +1045,21 @@ def _contact_live_context(
             }
             for fd in FirmDate.objects.filter(firm=firm)
         ]
+        # The Network axis measures against `advocate_target` full-strength
+        # advocates as its 100-point yardstick (scoring._score_network). Left
+        # at `params=None` this silently falls back to
+        # `scoring.DEFAULT_PARAMS["advocate_target"] = 2` — but
+        # `coverage.advocate_target(user)` reads the user's own tunable
+        # `User.assets["advocate_target"]`, which is what every OTHER
+        # coverage number on this page (firm cards, "N/target advocates")
+        # is measured against. Without building the params bundle here, a
+        # firm would read as "covered" on the contact-detail fit score and
+        # not-covered on the firm-coverage list the instant a user changed
+        # their target — same firm, two different answers. `version` is
+        # tagged with the target so a changed setting is a visible,
+        # rehashable event rather than the same `inputs_hash` silently
+        # meaning two different things.
+        adv_target = coverage.advocate_target(user)
         firm_score = scoring.score_firm(
             {
                 "id": user.id,
@@ -1078,6 +1093,11 @@ def _contact_live_context(
             firm_touches,
             firm_dates,
             as_of=now,
+            params={
+                **scoring.DEFAULT_PARAMS,
+                "advocate_target": adv_target,
+                "version": f"scoring-v1+at{adv_target}",
+            },
         )
 
     # Warmth-meter animation endpoints. On a plain GET both are the current

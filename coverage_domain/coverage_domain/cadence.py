@@ -206,7 +206,17 @@ def _as_dt(value: Any) -> datetime | None:
     strings; Postgres hands back real datetimes — both are tolerated here so
     fixtures and real rows behave identically). Returns None if unparseable,
     mirroring the original's defensive `_touch_date`/`_hours_since` (which
-    returned None on a bad parse rather than raising)."""
+    returned None on a bad parse rather than raising).
+
+    Tries `fromisoformat` FIRST, before the `strptime` fallback formats.
+    `fromisoformat` understands a trailing UTC offset ("+08:00"); the
+    `strptime` formats below do not, and — because `text[: len(fmt) + 2]`
+    truncates the string to roughly the format's own length before parsing
+    — silently chop the offset off rather than raising, so a
+    "2026-07-27 09:00:00+08:00" timestamp used to parse as 09:00 UTC: an
+    unflagged 8-hour shift. Trying `fromisoformat` first parses the offset
+    correctly whenever it's present; the `strptime` loop remains only as a
+    fallback for stricter/older textual variants `fromisoformat` rejects."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -214,17 +224,19 @@ def _as_dt(value: Any) -> datetime | None:
     if isinstance(value, date):
         return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
     if isinstance(value, str):
-        text = value.strip().replace("T", " ")
+        text = value.strip()
+        try:
+            dt = datetime.fromisoformat(text)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+        text = text.replace("T", " ")
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
             try:
                 return datetime.strptime(text[: len(fmt) + 2], fmt).replace(tzinfo=timezone.utc)
             except ValueError:
                 continue
-        try:
-            dt = datetime.fromisoformat(value)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
+        return None
     return None
 
 
@@ -245,7 +257,15 @@ def _firm_meta(firms: Mapping | Iterable[Mapping] | None) -> dict[Any, dict]:
     `user_firms` join in the multi-tenant schema, so the caller is expected
     to fold it in before handing firms here; a missing tier defaults to 3
     and a missing name to the id, exactly as the original
-    `config.firms()`-backed lookups defaulted."""
+    `config.firms()`-backed lookups defaulted.
+
+    `crm.UserFirm.tier` is a nullable column, and `crm.views.set_firm_tier`
+    deliberately writes `tier=None` when a firm is dragged to the
+    "Unranked" lane — a real, on-the-record value, not an absent key. So the
+    None-coercion below is required in addition to `dict.get`'s default:
+    `f.get("tier", 3)` only substitutes 3 when the key is MISSING, and would
+    otherwise hand back a bare `None` that later breaks a `sort()` comparing
+    tiers to ints (see `due_actions`)."""
     out: dict[Any, dict] = {}
     if firms is None:
         return out
@@ -254,7 +274,8 @@ def _firm_meta(firms: Mapping | Iterable[Mapping] | None) -> dict[Any, dict]:
     else:
         items = ((f.get("id", f.get("firm_id")), f) for f in firms)
     for fid, f in items:
-        out[fid] = {"name": f.get("name", fid), "tier": f.get("tier", 3)}
+        tier = f.get("tier")
+        out[fid] = {"name": f.get("name", fid), "tier": 3 if tier is None else tier}
     return out
 
 
@@ -267,7 +288,14 @@ def _closing_soon(
     app_close dates within `reping_days` qualify (the original relied on
     `kb.confirmed_deadlines()` already filtering to confirmed; here the
     confidence check is explicit on each firm_date row). Keyed by region so
-    branch 3 can scope the re-ping to the contact's own region."""
+    branch 3 can scope the re-ping to the contact's own region.
+
+    A date already in the past is dropped, not just one too far in the
+    future: without this, a stale `confirmed_official` app_close that has
+    already come and gone would still occupy the per-region `min()` bucket
+    below and could beat out (and hide) a genuinely upcoming close for the
+    same firm/region, on top of firing a priority-0 re-ping for a deadline
+    that's already over."""
     out: dict[Any, dict[str | None, date]] = {}
     for e in firm_dates:
         if e.get("event_kind") != "app_close":
@@ -275,10 +303,14 @@ def _closing_soon(
         if e.get("confidence") != CONFIRMED:
             continue
         d = _as_date(e.get("date"))
-        if d is None or (d - today).days > reping_days:
+        if d is None or d < today or (d - today).days > reping_days:
             continue
         fid = e.get("firm_id")
+        # Case-normalized only — NOT collapsed with the blank/None fallback,
+        # which is a separate, deliberate behavior (see contact_region) that
+        # needs a product decision before it changes.
         region = e.get("region")
+        region = region.lower() if isinstance(region, str) else region
         bucket = out.setdefault(fid, {})
         if region not in bucket or d < bucket[region]:
             bucket[region] = d
@@ -335,7 +367,9 @@ def due_actions(
     max_cold = int(p["max_cold_touches"])
     ty_hours = int(p["thank_you_within_hours"])
     ty_expiry_days = int(p["thank_you_expires_after_days"])
-    adv_min_days = int(p["advocate_touch_min_weeks"]) * 7
+    adv_min_weeks = int(p["advocate_touch_min_weeks"])
+    adv_min_days = adv_min_weeks * 7
+    adv_max_weeks = int(p["advocate_touch_max_weeks"])
     reping_days = int(p["pre_deadline_reping_days"])
 
     today = as_of.date()
@@ -357,7 +391,12 @@ def due_actions(
         ctouches = by_contact.get(cid, [])
         firm_id = c.get("firm_id", c.get("firm"))
         firm_name = meta.get(firm_id, {}).get("name") or c.get("firm_text") or firm_id or "?"
-        tier = meta.get(firm_id, {}).get("tier", 3)
+        # Same None-coercion as _firm_meta (a `.get(..., 3)` default alone
+        # would not catch an explicit `tier=None` from an "Unranked" drag —
+        # that used to raise a TypeError comparing None to int in the
+        # `actions.sort()` below).
+        _tier = meta.get(firm_id, {}).get("tier")
+        tier = 3 if _tier is None else _tier
 
         last = ctouches[-1] if ctouches else None
         lt_date = _as_date(last.get("ts")) if last else None
@@ -392,7 +431,14 @@ def due_actions(
             # The window has closed: too late for the note to read as a thanks.
             # Deliberately checked BEFORE `thanked`, so an expired prompt and a
             # sent one behave identically from here on — both fall through.
-            expired = hrs is not None and hrs > ty_expiry_days * 24
+            #
+            # An undatable chat (chat_dt is None — reachable via the
+            # import/reconciliation path, which can write a `chat` touch
+            # without a parseable `ts`) counts as expired too: if you can't
+            # date the chat, you can't claim the thank-you is still timely,
+            # and treating it as "not yet expired" made `hrs is None` stay
+            # False forever, pinning an immortal daily thank-you prompt.
+            expired = chat_dt is None or (hrs is not None and hrs > ty_expiry_days * 24)
             if not thanked and not expired:
                 overdue = hrs is not None and hrs > ty_hours
                 add(
@@ -410,14 +456,20 @@ def due_actions(
 
         # 2. a scheduled-but-not-logged chat gone stale > 4 business days.
         if thread_state == "chat_scheduled":
-            bd = business_days_since(lt_date, today) if lt_date else 999
-            if bd > 4:
-                add(
-                    "confirm_chat",
+            # `bd is None` (no dateable touch on record) is treated the same
+            # as "definitely stale" — the branch still needs to surface
+            # SOMETHING, but the reason text below says so honestly instead
+            # of rendering a 999-day sentinel as if it were a real count.
+            bd = business_days_since(lt_date, today) if lt_date else None
+            if bd is None or bd > 4:
+                reason = (
+                    "chat was scheduled but no touches are on record — did it "
+                    "happen? log the chat or reschedule"
+                    if bd is None else
                     f"chat was scheduled {bd} business days ago — did it happen? "
-                    "log the chat or reschedule",
-                    1, business_days=bd,
+                    "log the chat or reschedule"
                 )
+                add("confirm_chat", reason, 1, business_days=bd)
             continue
 
         # 3. pre-deadline re-ping for warm contacts at closing firms, scoped
@@ -452,13 +504,21 @@ def due_actions(
 
         # 5. advocate idle >= advocate_touch_min_weeks -> maintain.
         if warmth == "advocate":
-            days = (today - lt_date).days if lt_date else 9999
-            if days >= adv_min_days:
-                add(
-                    "maintain",
-                    f"advocate — last touch {days}d ago (target every 4–6 weeks)",
-                    2, days_since=days, target_min_weeks=adv_min_days // 7,
+            days = (today - lt_date).days if lt_date else None
+            if days is None or days >= adv_min_days:
+                # The range in the copy is rendered from the params, not
+                # hardcoded — only `advocate_touch_min_weeks` gates this
+                # branch and it IS user-tunable from Settings; a hardcoded
+                # "4–6" used to keep printing even after the min was tuned
+                # away from the default, e.g. to 8.
+                reason = (
+                    "advocate — no dateable touch on record "
+                    f"(target every {adv_min_weeks}–{adv_max_weeks} weeks)"
+                    if days is None else
+                    f"advocate — last touch {days}d ago (target every "
+                    f"{adv_min_weeks}–{adv_max_weeks} weeks)"
                 )
+                add("maintain", reason, 2, days_since=days, target_min_weeks=adv_min_weeks)
             continue
 
         # 6. cold / no_reply cadence.
@@ -467,36 +527,46 @@ def due_actions(
             if outbound == 0:
                 add("first_outreach", "added but never contacted — send the first note", 1)
                 continue
-            bd = business_days_since(lt_date, today) if lt_date else 999
+            # `bd is None` means outbound touches exist but none carry a
+            # dateable ts — treated as "definitely stale enough" for both
+            # thresholds below, same reasoning as branch 2, so the branch
+            # still fires but never prints the old 999-day sentinel as a
+            # real number.
+            bd = business_days_since(lt_date, today) if lt_date else None
             # Which staged window applies is a function of how many outbound
             # touches are already on the record, NOT of how long it has been:
             # 1 prior outbound means the next note is follow-up #1, 2 or more
             # means #2 or later. Park is checked first and is unchanged.
             followup_window = followup_bd if outbound <= 1 else second_followup_bd
-            if outbound >= max_cold and bd >= park_bd:
-                add(
-                    "park",
-                    f"{outbound} touches, no reply, {bd} business days silent — park it",
-                    3, outbound=outbound, business_days=bd,
+            if outbound >= max_cold and (bd is None or bd >= park_bd):
+                reason = (
+                    f"{outbound} touches, no reply, no dateable touch on record — park it"
+                    if bd is None else
+                    f"{outbound} touches, no reply, {bd} business days silent — park it"
                 )
-            elif outbound < max_cold and bd >= followup_window:
+                add("park", reason, 3, outbound=outbound, business_days=bd)
+            elif outbound < max_cold and (bd is None or bd >= followup_window):
+                reason = (
+                    f"no reply after touch {outbound}, no dateable touch on record — follow up"
+                    if bd is None else
+                    f"no reply {bd} business days after touch {outbound} — follow up"
+                )
                 add(
-                    "follow_up",
-                    f"no reply {bd} business days after touch {outbound} — follow up",
-                    1, outbound=outbound, business_days=bd,
+                    "follow_up", reason, 1, outbound=outbound, business_days=bd,
                     window_business_days=followup_window,
                 )
             continue
 
         # 7. replied and idle >= 3 business days -> advance (propose a chat).
         if thread_state == "replied" and warmth in ("replied", "cold"):
-            bd = business_days_since(lt_date, today) if lt_date else 999
-            if bd >= 3:
-                add(
-                    "advance",
-                    f"they replied — propose a 15-min chat (idle {bd} business days)",
-                    1, business_days=bd,
+            bd = business_days_since(lt_date, today) if lt_date else None
+            if bd is None or bd >= 3:
+                reason = (
+                    "they replied — propose a 15-min chat (no dateable touch on record)"
+                    if bd is None else
+                    f"they replied — propose a 15-min chat (idle {bd} business days)"
                 )
+                add("advance", reason, 1, business_days=bd)
 
     actions.sort(key=lambda a: (a["priority"], a["tier"], str(a["firm_name"])))
     return actions

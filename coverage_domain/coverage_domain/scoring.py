@@ -42,10 +42,16 @@ Design guarantees (all four are load-bearing, per the brief):
      firm score, reintroduces decay.
 
   4. DEPTH READS THE LOG, NOT THE STORED WARMTH COLUMN. The Depth axis is
-     the highest stage *evidenced in the touch log* (a reply < a chat <
-     an advocate-marking), independent of `contacts.warmth`. This is the
-     concrete meaning of "compute warmth on read" coexisting with "the
-     stored ratchet never decays".
+     evidenced *in the touch log* (a reply < a chat < an advocate-marking),
+     independent of `contacts.warmth`. This is the concrete meaning of
+     "compute warmth on read" coexisting with "the stored ratchet never
+     decays". Chat/reply evidence only ever raises the level, but a
+     manual_override audit touch (`pipeline.set_state` — the one path that
+     can move warmth DOWN) is read as an explicit SET rather than folded
+     into a running max: the most recent `warmth=` override by timestamp
+     wins, so a documented demotion (e.g. an advocate walked back to
+     'cold') is honored by the scorer instead of being permanently
+     outranked by an earlier promotion.
 
 The web layer fetches rows (scoped to one user_id) and passes them in; this
 module issues no query, reads no wall clock beyond the caller-supplied
@@ -56,6 +62,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timezone
 from typing import Any
@@ -142,8 +149,23 @@ DEFAULT_PARAMS: dict[str, Any] = {
 _REPLY_KINDS = ("reply_received", "chat_scheduled")   # evidence they engaged, pre-chat
 _CHAT_KINDS = ("chat",)
 _MEANINGFUL_KINDS = ("reply_received", "chat_scheduled", "chat")  # their engagement -> recency
-_OUTBOUND_KINDS = ("outreach", "follow_up", "reping", "maintain", "thank_you")
+# NOTE: this is a narrower set than it looks like it should be, and that's
+# deliberate — `thank_you` and `maintain` are courtesy touches nobody is
+# expected to answer, so counting them as "sends" a reply is owed against
+# would drop a contact's responsiveness score every time the user does
+# exactly what the cadence engine told them to do. `cadence._OUTBOUND_KINDS`
+# is the narrower `("outreach", "follow_up")` for the same reason; the two
+# modules disagree on whether `reping` belongs here (kept for now — that one
+# needs a product decision, not a bugfix), but must not disagree on
+# `thank_you`/`maintain`.
+_OUTBOUND_KINDS = ("outreach", "follow_up", "reping")
 _MANUAL_OVERRIDE_KIND = "manual_override"  # pipeline.set_state's audit touch
+
+# Depth level implied by each `pipeline.WARMTH` value, for reading a
+# manual_override audit touch's "warmth=<value>" clause back into a level.
+# Matches `DEFAULT_PARAMS["depth_level_scores"]`'s 0/1/2/3 tiers exactly.
+_WARMTH_DEPTH: dict[str, int] = {"cold": 0, "replied": 1, "chatted": 2, "advocate": 3}
+_WARMTH_OVERRIDE_RE = re.compile(r"warmth=(\w+)")
 
 
 # Role-seniority keyword tiers, checked in order; first hit wins. Multiword
@@ -194,7 +216,17 @@ def _round1(x: float) -> float:
 
 def _as_dt(value: Any) -> datetime | None:
     """Coerce a timestamp to a tz-aware UTC datetime (naive assumed UTC).
-    Accepts datetime / date / ISO-8601 string. None on unparseable input."""
+    Accepts datetime / date / ISO-8601 string. None on unparseable input.
+
+    Tries `fromisoformat` FIRST, before the `strptime` fallback formats (kept
+    identical to `cadence._as_dt` — both modules had the same bug and both
+    need the same fix). `fromisoformat` understands a trailing UTC offset
+    ("+08:00"); the `strptime` formats do not, and — because
+    `text[: len(fmt) + 2]` truncates to roughly the format's own length
+    before parsing — silently drop the offset rather than raising, so
+    "2026-07-27 09:00:00+08:00" used to parse as 09:00 UTC: an unflagged
+    8-hour shift. Trying `fromisoformat` first parses the offset correctly
+    whenever it's present."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -202,17 +234,19 @@ def _as_dt(value: Any) -> datetime | None:
     if isinstance(value, date):
         return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
     if isinstance(value, str):
-        text = value.strip().replace("T", " ")
+        text = value.strip()
+        try:
+            dt = datetime.fromisoformat(text)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+        text = text.replace("T", " ")
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
             try:
                 return datetime.strptime(text[: len(fmt) + 2], fmt).replace(tzinfo=timezone.utc)
             except ValueError:
                 continue
-        try:
-            dt = datetime.fromisoformat(value)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
+        return None
     return None
 
 
@@ -264,23 +298,37 @@ def _band(composite: float, params: Mapping[str, Any]) -> str:
 # Contact Warmth Score.
 # ---------------------------------------------------------------------------
 def _depth_level(touches: list[Mapping[str, Any]]) -> int:
-    """Highest stage EVIDENCED IN THE LOG (not the stored warmth column):
+    """Highest stage EVIDENCED IN THE LOG (not the stored warmth column),
+    replayed in chronological order:
       3 advocate  — a manual_override audit touch that set warmth=advocate
       2 chatted   — a 'chat' touch (the conversation happened)
       1 replied   — a 'reply_received' or 'chat_scheduled' touch
       0 none      — only outreach/follow-up, or nothing
-    Advocate is read from pipeline.set_state's audit touch, whose note is
-    exactly 'manual override: warmth=advocate...' — the one place advocacy is
-    recorded in the append-only log."""
+    Advocate-marking is read from pipeline.set_state's audit touch, whose
+    note is 'manual override: warmth=<value>, ...' — the one place warmth is
+    explicitly set (rather than merely evidenced) in the append-only log.
+
+    A manual_override SETS the level (to whatever `warmth=` value it names)
+    rather than folding into the running max, and the LATEST such touch —
+    by timestamp, not log order — wins. `pipeline.set_state` is the
+    documented demotion path: it can move warmth down (e.g. an audit touch
+    reading 'manual override: warmth=cold, ...'), and set_state's whole
+    purpose is defeated if a later demotion is silently outranked by an
+    earlier promotion. Chat/reply touches AFTER an override still raise the
+    level normally — an override sets where the log stands at that moment,
+    not a ceiling or floor for everything after it."""
+    ordered = sorted(touches, key=lambda t: (_as_dt(t.get("ts")) or datetime.min.replace(tzinfo=timezone.utc)))
     level = 0
-    for t in touches:
+    for t in ordered:
         kind = t.get("kind")
         if kind in _CHAT_KINDS:
             level = max(level, 2)
         elif kind in _REPLY_KINDS:
             level = max(level, 1)
-        elif kind == _MANUAL_OVERRIDE_KIND and "warmth=advocate" in (t.get("note") or ""):
-            level = max(level, 3)
+        elif kind == _MANUAL_OVERRIDE_KIND:
+            match = _WARMTH_OVERRIDE_RE.search(t.get("note") or "")
+            if match is not None and match.group(1) in _WARMTH_DEPTH:
+                level = _WARMTH_DEPTH[match.group(1)]
     return level
 
 

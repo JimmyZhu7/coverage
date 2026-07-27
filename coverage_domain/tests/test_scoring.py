@@ -400,6 +400,103 @@ def test_needs_sponsorship_feeds_the_structural_axis():
     )
 
 
+# --------------------------------------------------------------------------
+# Audit fix 4: the LATEST manual_override "warmth=" touch wins, so a
+# documented demotion (pipeline.set_state moving warmth back down) is
+# actually honored instead of being permanently outranked by an earlier
+# promotion.
+# --------------------------------------------------------------------------
+def test_demotion_after_promotion_yields_the_demoted_level():
+    """A contact promoted to advocate and later demoted back to cold must
+    score as cold — the demotion is the most recent explicit override, and
+    set_state's documented purpose (the ONLY path that can move warmth down)
+    is defeated if the scorer ignores it."""
+    c = {"id": 1, "role": None}
+    touches = [
+        touch(1, "chat", 20),
+        touch(1, "manual_override", 15, note="manual override: warmth=advocate"),
+        touch(1, "manual_override", 5, note="manual override: warmth=cold, thread_state=quiet"),
+    ]
+    r = scoring.score_contact(c, touches, as_of=AS_OF)
+    assert r["axes"]["depth"]["level"] == 0
+    assert r["axes"]["depth"]["score"] == 0.0
+    assert "advocate" not in r["reasoning"]
+
+
+def test_promotion_after_demotion_still_reads_as_promoted():
+    """The other direction, so the fix isn't just "demotion always wins":
+    a later promotion after an earlier demotion reads as advocate."""
+    c = {"id": 1, "role": None}
+    touches = [
+        touch(1, "manual_override", 15, note="manual override: warmth=cold"),
+        touch(1, "manual_override", 5, note="manual override: warmth=advocate"),
+    ]
+    r = scoring.score_contact(c, touches, as_of=AS_OF)
+    assert r["axes"]["depth"]["level"] == 3
+
+
+def test_touch_evidence_after_an_override_still_raises_the_level():
+    """An override sets where the log stands at that moment, not a ceiling
+    for everything after it — a chat AFTER a cold demotion still evidences
+    engagement and raises the level normally."""
+    c = {"id": 1, "role": None}
+    touches = [
+        touch(1, "manual_override", 15, note="manual override: warmth=cold"),
+        touch(1, "chat", 5),
+    ]
+    r = scoring.score_contact(c, touches, as_of=AS_OF)
+    assert r["axes"]["depth"]["level"] == 2
+
+
+# --------------------------------------------------------------------------
+# Audit fix 5: thank_you/maintain are courtesy touches nobody owes a reply
+# to — they must not count in the responsiveness denominator.
+# --------------------------------------------------------------------------
+def test_logging_thank_you_does_not_lower_composite_score():
+    c = {"id": 1, "role": "Analyst"}
+    before = [touch(1, "outreach", 10), touch(1, "reply_received", 9)]
+    after = before + [touch(1, "thank_you", 1)]
+    score_before = scoring.score_contact(c, before, as_of=AS_OF)
+    score_after = scoring.score_contact(c, after, as_of=AS_OF)
+    assert score_after["composite"] == score_before["composite"]
+    assert score_after["axes"]["responsiveness"]["score"] == score_before["axes"]["responsiveness"]["score"]
+
+
+def test_logging_maintain_does_not_lower_responsiveness_either():
+    c = {"id": 1, "role": None}
+    before = [touch(1, "outreach", 10), touch(1, "reply_received", 9)]
+    after = before + [touch(1, "maintain", 1)]
+    rb = scoring.score_contact(c, before, as_of=AS_OF)["axes"]["responsiveness"]["score"]
+    ra = scoring.score_contact(c, after, as_of=AS_OF)["axes"]["responsiveness"]["score"]
+    assert ra == rb
+
+
+def test_reasoning_no_reply_count_excludes_courtesy_touches():
+    """The 'no reply to N notes' clause must count only real outbound asks,
+    not the thank-you/maintain notes the narrowed _OUTBOUND_KINDS excludes."""
+    c = {"id": 1, "role": None}
+    touches = [touch(1, "outreach", 5), touch(1, "thank_you", 1)]
+    r = scoring.score_contact(c, touches, as_of=AS_OF)
+    assert "no reply to 1 note" in r["reasoning"]
+    assert r["axes"]["responsiveness"]["sends"] == 1
+
+
+# --------------------------------------------------------------------------
+# Audit fix 8: an ISO timestamp with a UTC offset must keep that offset.
+# --------------------------------------------------------------------------
+def test_as_dt_keeps_utc_offset():
+    dt = scoring._as_dt("2026-07-27 09:00:00+08:00")
+    assert dt is not None
+    assert dt.utcoffset() == timedelta(hours=8)
+    assert dt.astimezone(timezone.utc).hour == 1
+
+
+def test_as_dt_still_parses_plain_strings_without_offset():
+    assert scoring._as_dt("2026-07-27 09:00:00") == datetime(2026, 7, 27, 9, 0, tzinfo=timezone.utc)
+    assert scoring._as_dt("2026-07-27") == datetime(2026, 7, 27, 0, 0, tzinfo=timezone.utc)
+    assert scoring._as_dt("not-a-date") is None
+
+
 def test_firm_determinism_snapshot():
     firm_dates = [{
         "firm_id": "acme", "event_kind": "app_close", "region": "us",

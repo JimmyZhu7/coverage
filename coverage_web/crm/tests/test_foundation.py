@@ -177,6 +177,61 @@ def test_firm_fit_sponsorship_is_scoped_to_the_firms_region(client):
 
 
 # ---------------------------------------------------------------------------
+# Audit fix 7: score_firm's `advocate_target` must come from the user's own
+# setting (crm.coverage.advocate_target), not the hardcoded
+# scoring.DEFAULT_PARAMS value — the same setting every other coverage number
+# on the page (firm cards, "N/target advocates") already reads.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_firm_fit_network_axis_uses_the_users_advocate_target(client):
+    """Same firm, same single advocate contact — only the user's
+    advocate_target differs. Before this fix, score_firm was always called
+    with params=None, so it silently used DEFAULT_PARAMS['advocate_target']
+    (2) no matter what the user had set, and the same firm could read as
+    covered on the firm-coverage list and not-covered on this page."""
+    firm = Firm.objects.create(
+        slug="onetarget", name="One Target Capital", regions=["us"], tracks=["ib"], sponsors=True,
+    )
+
+    default_target_user = _user("default@example.com", regions=["us"], tracks=["ib"])
+    tuned_target_user = _user(
+        "tuned@example.com", regions=["us"], tracks=["ib"], assets={"advocate_target": 1},
+    )
+
+    axes = {}
+    for u in (default_target_user, tuned_target_user):
+        c = Contact.all_objects.create(user=u, name="Pat Advocate", firm=firm, role="Analyst")
+        Touch.all_objects.create(
+            user=u, contact=c, ts=timezone.now(), kind="manual_override",
+            note="manual override: warmth=advocate, thread_state=advocate",
+        )
+        client.force_login(u)
+        resp = client.get(reverse("crm:contact_detail", args=[c.id]))
+        assert resp.status_code == 200
+        axes[u.email] = resp.context["firm_score"]["axes"]["network"]
+
+    # advocate_target=1 means ONE advocate already hits the yardstick — a
+    # materially higher network score than the same single advocate scored
+    # against the product default of 2.
+    assert axes["tuned@example.com"]["score"] > axes["default@example.com"]["score"]
+    assert axes["tuned@example.com"]["advocates"] == 1
+    assert axes["default@example.com"]["advocates"] == 1
+
+
+@pytest.mark.django_db
+def test_firm_fit_params_version_reflects_the_tuned_target(client):
+    """The version string must change with the target so `inputs_hash` stays
+    honest — an identical hash for two different advocate_target settings
+    would silently mean two different things."""
+    user = _user(assets={"advocate_target": 5})
+    firm = Firm.objects.create(slug="verfirm", name="Version Firm", regions=["us"], tracks=["ib"])
+    contact = Contact.all_objects.create(user=user, name="Pat", firm=firm)
+    client.force_login(user)
+    resp = client.get(reverse("crm:contact_detail", args=[contact.id]))
+    assert resp.context["firm_score"]["params_version"] == "scoring-v1+at5"
+
+
+# ---------------------------------------------------------------------------
 # 3. Explicit contact region.
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db
