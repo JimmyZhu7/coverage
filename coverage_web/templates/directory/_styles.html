@@ -345,9 +345,32 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .fc-closing { color: var(--stale-t); font-weight: var(--w-med); }
 
   /* The scroll window: standardized role cards, a permanent thin scrollbar. */
+  /* Scrolling shadows, so a half-visible card reads as "more below" instead of
+     as a broken box.
+
+     This window shows ~374px of a list that is routinely 9000px tall (65 roles
+     at Bank of America), so at any moment exactly one card straddles the bottom
+     edge and gets sliced mid-title. With no affordance that looks like a layout
+     bug rather than a scroll position — it was reported as one.
+
+     Four background layers, the Lea Verou technique, chosen over a `::after`
+     overlay or `mask-image` because it is self-regulating: the two `local`
+     layers scroll WITH the content and sit on top, so they cover the two
+     `scroll` shadow layers exactly when the list is at that end. A firm with
+     two roles therefore gets no fade at all, and neither edge shows a shadow it
+     hasn't earned. No JS, no overflow measurement, nothing to keep in sync.
+
+     `--surface` must match .firmcol's background or the cover layers will show
+     as bands. */
   .firmcol-scroll { flex: 1; min-height: 0; overflow-y: auto;
     padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: var(--s3);
-    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+    background:
+      linear-gradient(var(--surface) 30%, transparent) top / 100% 28px no-repeat local,
+      linear-gradient(transparent, var(--surface) 70%) bottom / 100% 28px no-repeat local,
+      linear-gradient(rgba(23, 23, 23, 0.10), transparent) top / 100% 14px no-repeat scroll,
+      linear-gradient(transparent, rgba(23, 23, 23, 0.10)) bottom / 100% 14px no-repeat scroll;
+    background-color: var(--surface); }
   .firmcol-scroll::-webkit-scrollbar { width: 8px; }
   .firmcol-scroll::-webkit-scrollbar-thumb { background: var(--line-strong);
     border-radius: 999px; border: 2px solid var(--surface); background-clip: padding-box; }
