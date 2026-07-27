@@ -231,10 +231,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      firm-column cards below.
      ====================================================================== */
 
-  {# Text is now "First seen Nd ago" rather than bare "NEW" (see views.py's
+  /* Text is now "First seen Nd ago" rather than bare "NEW" (see views.py's
      `_fresh_label` — the badge must say what it measures), so uppercase +
      wide letter-spacing (tuned for a 3-letter word) would both shout and
-     wrap; sentence case + nowrap keeps it a single-line pill. #}
+     wrap; sentence case + nowrap keeps it a single-line pill. */
   .fresh-badge { flex: none; font-size: 10px; font-weight: var(--w-bold);
     white-space: nowrap; color: #fff;
     background: var(--ok); border-radius: 999px; padding: 2px 9px;
@@ -251,10 +251,20 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .fuse-today .fuse-fill { background: var(--danger); }
   .fuse-soon  .fuse-fill { background: #c1652f; }
   .fuse-upcoming .fuse-fill { background: var(--accent); }
-  {# A passed deadline (fuse_pct=0, see views.py's _urgency_item) has no
+  /* A passed deadline (fuse_pct=0, see views.py's _urgency_item) has no
      colour rule of its own otherwise: .fuse-fill has no default background,
      so the bar would render fully burnt AND invisible. Muted, not red — a
-     dead deadline is not an active alarm. #}
+     dead deadline is not an active alarm.
+
+     NOTE FOR ANYONE EDITING THIS FILE: every comment inside this style block
+     MUST be a CSS comment. Django's brace-hash comment syntax is SINGLE-LINE
+     only, so a multi-line one is not stripped — it renders literally into the
+     stylesheet, the CSS parser hits the stray brace, gives up, and DISCARDS
+     EVERY RULE AFTER IT. That happened here and silently killed 103 of 185
+     rules, including .rolecard and .firmcols: the whole feed unwrapped into
+     unstyled blocks while the nav still looked fine, because the nav's styles
+     live in coverage.css and had already parsed. A template test now guards
+     this (directory/tests/test_styles_block.py). */
   .fuse-passed .fuse-fill { background: var(--ink-3); }
   .fuse-label { font-size: var(--fs-xs); font-weight: var(--w-med); white-space: nowrap;
     font-family: var(--font-mono); }
