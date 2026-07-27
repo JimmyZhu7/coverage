@@ -64,3 +64,117 @@ def test_classify_url():
 def test_verify_is_board_level():
     assert beisen.verify("https://cicc.zhiye.com/x").result == "needs-verification"
     assert beisen.verify("https://other.com/x").result == "needs-verification"
+
+
+# ---------------------------------------------------------------------------
+# _capture — C10: a page can fire GetJobAdPageList more than once, and the
+# old `holder["data"] = resp.json()` unconditionally overwrote whatever was
+# captured before it, so a narrower follow-up silently discarded a broader
+# response. These use a tiny fake response object (`.url`, `.json()`) rather
+# than a real Playwright Response — `_capture` only ever touches those two
+# attributes.
+# ---------------------------------------------------------------------------
+
+class _FakeResp:
+    def __init__(self, url, payload=None, raises=False):
+        self.url = url
+        self._payload = payload
+        self._raises = raises
+
+    def json(self):
+        if self._raises:
+            raise ValueError("not json")
+        return self._payload
+
+
+def test_capture_ignores_responses_that_are_not_the_job_list():
+    holder: dict = {}
+    beisen._capture(_FakeResp("https://cicc.zhiye.com/api/Other"), holder)
+    assert holder == {}
+
+
+def test_capture_keeps_the_larger_list_regardless_of_arrival_order():
+    """PINS C10's fix: a narrower follow-up capture must NOT discard an
+    already-captured broader one."""
+    broad = {"Data": {"PageList": [JOB, JOB, JOB]}}
+    narrow = {"Data": {"PageList": [JOB]}}
+    holder: dict = {}
+    beisen._capture(_FakeResp("https://x/api/GetJobAdPageList", broad), holder)
+    beisen._capture(_FakeResp("https://x/api/GetJobAdPageList", narrow), holder)
+    assert len(holder["jobs"]) == 3          # broad capture wins, not "last write"
+    assert holder["captured"] is True
+
+    # And the reverse order: narrow first, then broad — broad still wins.
+    holder2: dict = {}
+    beisen._capture(_FakeResp("https://x/api/GetJobAdPageList", narrow), holder2)
+    beisen._capture(_FakeResp("https://x/api/GetJobAdPageList", broad), holder2)
+    assert len(holder2["jobs"]) == 3
+
+
+def test_capture_records_a_non_json_body_instead_of_swallowing_it():
+    """PINS C10's fix: `except: pass` gave zero visibility into a malformed
+    capture. It must at least be recorded, not silently discarded."""
+    holder: dict = {}
+    beisen._capture(_FakeResp("https://x/api/GetJobAdPageList", raises=True), holder)
+    assert holder.get("jobs") is None
+    assert holder.get("captured") is None    # a parse failure is not a successful capture
+    assert len(holder.get("parse_errors") or []) == 1
+
+
+# ---------------------------------------------------------------------------
+# fetch() — the third C10 fix: a run where the browser never once captures a
+# GetJobAdPageList response must be ok=False, not a silent "0 jobs, ok=True"
+# (which a caller cannot distinguish from a genuinely empty board). A
+# minimal fake stands in for Playwright's sync API — just enough surface
+# (`chromium.launch`, `.new_page`, `.on`, `.goto`, `.wait_for_timeout`,
+# `.close`) for `fetch()` to run its real control flow with no real browser
+# and no network.
+# ---------------------------------------------------------------------------
+
+class _FakePage:
+    def on(self, event, handler):
+        pass  # no responses ever fire -> nothing is ever captured
+
+    def goto(self, *a, **kw):
+        pass
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def close(self):
+        pass
+
+
+class _FakeBrowser:
+    def new_page(self):
+        return _FakePage()
+
+    def close(self):
+        pass
+
+
+class _FakeChromium:
+    def launch(self, headless=True):
+        return _FakeBrowser()
+
+
+class _FakeSyncPlaywright:
+    chromium = _FakeChromium()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_fetch_reports_failure_when_nothing_is_ever_captured(monkeypatch):
+    """PINS C10's fix directly: before it, this exact scenario (a browser
+    session that runs cleanly but never sees a GetJobAdPageList response —
+    e.g. the site renamed the endpoint) returned `FetchResult(ok=True,
+    opportunities=[], raw_count=0)`, indistinguishable from a genuinely
+    empty board."""
+    monkeypatch.setattr("playwright.sync_api.sync_playwright", lambda: _FakeSyncPlaywright())
+    result = beisen.fetch(BOARD)
+    assert result.ok is False
+    assert "no GetJobAdPageList response captured" in result.error

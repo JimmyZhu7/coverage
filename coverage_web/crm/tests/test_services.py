@@ -61,6 +61,31 @@ def test_log_touch_reply_received_moves_warmth_cold_to_replied(user, contact):
     assert touch.source == "manual"
 
 
+def test_log_touch_threads_source_and_now(user, contact):
+    """log_touch didn't expose apply_touch's `source`/`now` params at all —
+    every touch was hardcoded 'manual' and stamped at call time regardless
+    of who logged it or when the interaction actually happened. Both are
+    now plain pass-through keyword args."""
+    import datetime as dt
+
+    from django.utils import timezone
+
+    happened_at = timezone.now() - dt.timedelta(days=5)
+
+    updates = services.log_touch(
+        user.id, contact.id, "reply_received", "email",
+        now=happened_at, source="capture",
+    )
+    # Backward-compatible return shape: still compares equal to a plain
+    # dict of the changed columns (see pipeline.TouchResult's docstring).
+    assert updates == {"warmth": "replied", "thread_state": "replied"}
+    assert updates.touch_id is not None
+
+    touch = Touch.all_objects.get(user=user, contact=contact)
+    assert touch.source == "capture"
+    assert abs((touch.ts - happened_at).total_seconds()) < 1
+
+
 def test_log_touch_is_scoped_to_the_given_tenant(user, contact):
     """A contact_id that exists but belongs to a different user_id must be
     indistinguishable from one that doesn't exist (pipeline.py's

@@ -120,7 +120,13 @@ def fetch(board: GoldmanSachsBoard) -> FetchResult:
         page += 1
         if not batch or page * _PAGE_SIZE >= min(total, _MAX_ROLES):
             break
-    opportunities = [o for o in (_normalize(i, board) for i in items) if o.url]
+    try:
+        # Its own try, separate from the per-page network try above — see
+        # greenhouse.py's fetch() for why a normalization failure must not
+        # propagate uncaught out of `fetch()`.
+        opportunities = [o for o in (_normalize(i, board) for i in items) if o.url]
+    except Exception as e:  # noqa: BLE001
+        return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(items))
 
 
@@ -131,7 +137,15 @@ def classify_url(url: str) -> dict | None:
 
 def verify(url: str) -> VerificationResult:
     """Re-run the campus search and look for the URL's roleId. Present ->
-    verified-open; a clean search without it -> closed."""
+    verified-open; network trouble -> unreachable.
+
+    A clean search without it -> `needs-verification`, NOT closed: `_post`
+    returns `{}` whenever `data.roleSearch` comes back null-but-error-free
+    (a GraphQL response can do this without ever raising), and `{}.get(
+    "totalCount") or 0` reads as `total=0` — which ends the loop after page 0
+    having found nothing, for every single role in one sweep. That is not a
+    "this role is gone" signal, it's "the API gave us an empty envelope",
+    and `reverify.py` acts on "closed" with zero corroboration."""
     info = classify_url(url)
     if not info:
         return VerificationResult("goldmansachs", url, "needs-verification",
@@ -153,5 +167,9 @@ def verify(url: str) -> VerificationResult:
         return VerificationResult("goldmansachs", url, "unreachable", f"HTTP {e.code}", [])
     except Exception as e:  # noqa: BLE001
         return VerificationResult("goldmansachs", url, "unreachable", str(e)[:200], [])
-    return VerificationResult("goldmansachs", url, "closed",
-                               f"roleId {target} not in campus search — likely closed", [])
+    return VerificationResult(
+        "goldmansachs", url, "needs-verification",
+        f"roleId {target} not in campus search — not a confirmed closure "
+        f"(an empty roleSearch envelope reads identically to a genuine "
+        f"zero-result search)", [],
+    )

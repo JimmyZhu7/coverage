@@ -121,16 +121,27 @@ def test_thank_you_expiry_is_tunable():
 
 
 def test_closing_soon_reping_is_region_filtered():
-    """An HK app_close must not re-ping a US contact at the same firm."""
+    """An HK app_close must not re-ping a US contact at the same firm.
+
+    Regions are stated explicitly. This test used to express them through
+    `source` strings ("Apollo direct search" -> us, "Apollo HK campaign" ->
+    hk) because it predates the `region` column and `infer_region` was the
+    only answer available. That inference is retired from the read path
+    (cadence.contact_region), so the strings no longer decide anything —
+    which is the point of the change, not a gap in this test: what it
+    asserts, that a close in one region leaves the other region's contacts
+    alone, is unchanged and now keys off the field that actually means
+    region.
+    """
     close_date = TODAY + timedelta(days=5)
     firm_dates = [{
         "firm_id": "dualfirm", "event_kind": "app_close", "region": "hk",
         "date": close_date, "confidence": "confirmed_official",
     }]
     us = contact(1, name="US Contact", firm_id="dualfirm", warmth="chatted",
-                 thread_state="replied", source="Apollo direct search")
+                 thread_state="replied", region="us")
     hk = contact(2, name="HK Contact", firm_id="dualfirm", warmth="chatted",
-                 thread_state="replied", source="Apollo HK campaign")
+                 thread_state="replied", region="hk")
     touches = [touch(1, "chat", "2026-06-01 10:00"), touch(2, "chat", "2026-06-01 10:00")]
     actions = cadence.due_actions([us, hk], touches, firm_dates, as_of=AS_OF, firms=FIRMS)
     assert "reping" not in kinds_for(actions, 1), "US contact must not re-ping off an HK close"
@@ -184,38 +195,87 @@ def test_explicit_region_excludes_other_regions_close():
 
 def test_hand_added_contact_is_not_guessed_us_from_source():
     """The bug this field exists for: a hand-added contact is written with
-    source="manual", which `infer_region` reads as 'us' — so an HK contact was
-    skipped for HK deadlines forever. With the region set, the HK close fires;
-    without it, the legacy inference still (wrongly) says US."""
+    source="manual", which `infer_region` read as 'us' — so an HK contact was
+    skipped for HK deadlines forever.
+
+    Both contacts now re-ping, for two different reasons, and the second one
+    is the fix that lands here. The first has region="hk" and matches the HK
+    close directly. The second has NO region: with the source inference
+    retired it resolves to None, which takes the both-regions fallback — the
+    engine matches the soonest close at the firm in any region rather than
+    withholding the highest-value nudge it makes on the strength of a guess
+    about a provenance string. Under-scoping shows a re-ping the user can
+    ignore; over-scoping hid it entirely.
+    """
     hk = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="replied",
                  source="manual", region="hk")
-    legacy = contact(2, firm_id="dualfirm", warmth="chatted", thread_state="replied",
-                     source="manual", region="")
+    unknown = contact(2, firm_id="dualfirm", warmth="chatted", thread_state="replied",
+                      source="manual", region="")
     touches = [touch(1, "chat", "2026-06-01 10:00"), touch(2, "chat", "2026-06-01 10:00")]
-    actions = cadence.due_actions([hk, legacy], touches, _hk_close_firm_dates(),
+    actions = cadence.due_actions([hk, unknown], touches, _hk_close_firm_dates(),
                                   as_of=AS_OF, firms=FIRMS)
     assert "reping" in kinds_for(actions, 1)
-    assert "reping" not in kinds_for(actions, 2)
+    assert "reping" in kinds_for(actions, 2)
 
 
-def test_blank_region_still_falls_back_to_source():
-    """Legacy rows keep their exact previous meaning: a blank region falls
-    through to `infer_region(source)`, so a row whose source says HK still
-    behaves as it did before the column existed."""
+def test_blank_region_is_unknown_not_inferred_from_source():
+    """A blank region means UNKNOWN, whatever the provenance text says.
+
+    This replaces `test_blank_region_still_falls_back_to_source`, which
+    pinned the opposite. `infer_region` answers for ANY non-empty string, so
+    while it backed the read path a blank region was never once unknown — it
+    was 'hk' for the few sources containing those two letters and 'us' for
+    everything else, including "Gmail USC discovery". Here the contact
+    re-pings via the both-regions fallback, and would do so identically if
+    the source read "manual" or "Apollo direct search": the string no longer
+    votes.
+    """
     c = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="replied",
                 source="Apollo HK campaign", region="")
     actions = cadence.due_actions([c], [touch(1, "chat", "2026-06-01 10:00")],
                                   _hk_close_firm_dates(), as_of=AS_OF, firms=FIRMS)
     assert "reping" in kinds_for(actions, 1)
+    assert cadence.contact_region(c) is None
 
 
-def test_contact_region_helper_resolution_order():
+def test_us_source_string_no_longer_hides_an_hk_close():
+    """The live-data case that forced the retirement, in miniature.
+
+    19 of the founder's 51 blank-region contacts resolved to 'us' purely
+    because their source read "Gmail USC discovery" — the substring "us" is
+    not even what `infer_region` keys on; it simply returns 'us' for
+    everything that doesn't say "hk". Each of those rows was then skipped for
+    every HK close at their firm. The re-ping is the highest-value nudge the
+    cadence makes, and it was being withheld on the basis of a provenance
+    label nobody wrote as a region.
+    """
+    c = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="replied",
+                source="Gmail USC discovery", region="")
+    actions = cadence.due_actions([c], [touch(1, "chat", "2026-06-01 10:00")],
+                                  _hk_close_firm_dates(), as_of=AS_OF, firms=FIRMS)
+    assert "reping" in kinds_for(actions, 1)
+
+
+def test_contact_region_helper_reads_only_the_explicit_field():
     assert cadence.contact_region({"region": "hk", "source": "manual"}) == "hk"
     assert cadence.contact_region({"region": " HK ", "source": "manual"}) == "hk"
-    assert cadence.contact_region({"region": "", "source": "Apollo HK"}) == "hk"
-    assert cadence.contact_region({"region": "", "source": "manual"}) == "us"
+    # Blank is UNKNOWN regardless of provenance text — these three lines used
+    # to assert "hk" / "us" / None respectively.
+    assert cadence.contact_region({"region": "", "source": "Apollo HK"}) is None
+    assert cadence.contact_region({"region": "", "source": "manual"}) is None
     assert cadence.contact_region({"region": "", "source": ""}) is None
     assert cadence.contact_region({}) is None
+
+
+def test_infer_region_is_kept_but_unused_by_the_read_path():
+    """`infer_region` stays in the module for a one-time backfill and as the
+    record of the old rule — so it must keep working — but `contact_region`
+    must not consult it. The second assertion is the one that matters: if the
+    fallback is ever reinstated, these two lines disagree."""
+    assert cadence.infer_region("Apollo HK campaign") == "hk"
+    assert cadence.infer_region("manual") == "us"
+    assert cadence.infer_region("") is None
+    assert cadence.contact_region({"region": "", "source": "Apollo HK campaign"}) is None
 
 
 def test_zero_touch_contact_not_treated_as_stale():

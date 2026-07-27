@@ -45,7 +45,12 @@ def _page(keyword: str, start: int) -> dict:
 
 
 def _location(doc: dict) -> str:
-    cities = doc.get("cities") or []
+    # Sorted before formatting: the API gives no ordering guarantee on
+    # `cities`, and `location` feeds `directory.ingest`'s `content_hash` —
+    # an unsorted array that comes back in a different order on a later
+    # fetch (same set of cities, same posting) would flip `changed`/
+    # `content_hash` for a role nothing actually changed about.
+    cities = sorted(doc.get("cities") or [])
     if not cities:
         return ""
     if len(cities) == 1:
@@ -97,7 +102,13 @@ def fetch(board: McKinseyBoard) -> FetchResult:
             start += _PAGE_SIZE
             if not batch or start > min(total, _MAX_JOBS):
                 break
-    opportunities = [o for o in (_normalize(d, board) for d in docs) if o.url]
+    try:
+        # Its own try, separate from the per-page network try above — see
+        # greenhouse.py's fetch() for why a normalization failure must not
+        # propagate uncaught out of `fetch()`.
+        opportunities = [o for o in (_normalize(d, board) for d in docs) if o.url]
+    except Exception as e:  # noqa: BLE001
+        return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(docs))
 
 
@@ -108,8 +119,17 @@ def classify_url(url: str) -> dict | None:
 
 def verify(url: str) -> VerificationResult:
     """Search the API for the URL's slug tokens and require the friendlyURL
-    to round-trip. Found -> verified-open; a clean search with no match ->
-    closed; network trouble -> unreachable."""
+    to round-trip. Found -> verified-open; network trouble -> unreachable.
+
+    A clean search with no match -> `needs-verification`, NOT closed: this
+    only checks ONE 50-row page (`_page(keyword, 1)`, no pagination loop like
+    `fetch`'s), and `keyword` is derived by lopping the slug's FIRST token off
+    (`slug.split("-", 1)[-1]`) — a crude derivation that can easily miss the
+    words that actually rank the real posting, especially past page 1 of a
+    saturated query. `data.get("docs", [])` also silently returns `[]` for a
+    missing/renamed envelope key, indistinguishable from a genuine zero
+    matches. None of that is a positive "this posting is gone" signal, and
+    `reverify.py` acts on "closed" with zero corroboration."""
     info = classify_url(url)
     if not info:
         return VerificationResult("mckinsey", url, "needs-verification",
@@ -124,5 +144,8 @@ def verify(url: str) -> VerificationResult:
         if slug.lower() in (doc.get("friendlyURL") or "").lower():
             return VerificationResult("mckinsey", url, "verified-open",
                                        f'title="{doc.get("title", "")}" matched by friendlyURL', [])
-    return VerificationResult("mckinsey", url, "closed",
-                               f'slug {slug!r} not found via title search — likely closed', [])
+    return VerificationResult(
+        "mckinsey", url, "needs-verification",
+        f'slug {slug!r} not found on page 1 of a single-keyword search — '
+        f'not a confirmed closure', [],
+    )

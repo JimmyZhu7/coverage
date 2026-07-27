@@ -92,17 +92,19 @@ def fetch(board: TalentGatewayBoard) -> FetchResult:
     url = _HOME.format(pid=board.partner_id, sid=board.site_id)
     try:
         html_text = fetch_text(url)
+        jobs = _parse_page(html_text)
+        seen: set[str] = set()
+        unique = []
+        for j in jobs:
+            rid = _fields(j).get("reqid") or ""
+            if rid and rid not in seen:
+                seen.add(rid)
+                unique.append(j)
+        # Normalization stays inside this try — see greenhouse.py's fetch()
+        # for why a malformed row must not raise past this function.
+        opportunities = [o for o in (_normalize(j, board) for j in unique) if o.url and o.title]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    jobs = _parse_page(html_text)
-    seen: set[str] = set()
-    unique = []
-    for j in jobs:
-        rid = _fields(j).get("reqid") or ""
-        if rid and rid not in seen:
-            seen.add(rid)
-            unique.append(j)
-    opportunities = [o for o in (_normalize(j, board) for j in unique) if o.url and o.title]
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(unique))
 
 
@@ -112,8 +114,17 @@ def classify_url(url: str) -> dict | None:
 
 
 def verify(url: str) -> VerificationResult:
-    """Re-fetch the board and look for the URL's reqid across its pages.
-    Present -> verified-open; absent from a clean read -> closed."""
+    """Re-fetch the board and look for the URL's reqid. Present ->
+    verified-open. Absent -> `needs-verification`, NEVER `closed`: per the
+    module docstring's SCOPE note, this server ignores pagination params
+    entirely and always returns the same ~10-job featured slice (89 rows on
+    the live UBS grad board at time of writing) — looping `&page=N` here
+    re-fetches that identical featured block up to `_MAX_PAGES` times
+    without ever seeing the other ~79. A reqid outside the featured slice is
+    indistinguishable from a reqid that's still open but simply not
+    "hot" — absence here is a coverage gap in this connector's own
+    fetch, not evidence the posting closed, and `reverify.py` treats
+    "closed" as a one-shot deletion from the feed with no corroboration."""
     info = classify_url(url)
     if not info:
         return VerificationResult("talentgateway", url, "needs-verification",
@@ -132,5 +143,9 @@ def verify(url: str) -> VerificationResult:
                                            f"reqid {target} present on the board", [])
     except Exception as e:  # noqa: BLE001
         return VerificationResult("talentgateway", url, "unreachable", str(e)[:200], [])
-    return VerificationResult("talentgateway", url, "closed",
-                               f"reqid {target} not found on the board — likely closed", [])
+    return VerificationResult(
+        "talentgateway", url, "needs-verification",
+        f"reqid {target} not found in the featured slice this connector can "
+        f"see — the board ignores pagination, so this is not a confirmed "
+        f"removal", [],
+    )

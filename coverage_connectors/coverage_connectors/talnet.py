@@ -138,10 +138,13 @@ def _normalize(row: dict, board: TalnetBoard) -> Opportunity:
 def fetch(board: TalnetBoard) -> FetchResult:
     try:
         html = fetch_text(board.board_url)
+        rows = _parse(html)
+        # Kept inside this try — see greenhouse.py's fetch() for why a
+        # normalization failure must not propagate uncaught out of
+        # `fetch()`.
+        opportunities = [o for o in (_normalize(r, board) for r in rows) if o.url]
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    rows = _parse(html)
-    opportunities = [o for o in (_normalize(r, board) for r in rows) if o.url]
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(rows))
 
 

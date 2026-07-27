@@ -284,3 +284,129 @@ def test_another_users_debrief_is_invisible(client, user, contact):
     assert ChatDebrief.objects.for_user(intruder).count() == 0
     assert debrief_svc.pending(intruder) == []
     assert ChatDebrief.objects.for_user(user).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# 5. An EDITED debrief persists.
+#
+# `record()` used to gate the note append on `learned` being EMPTY on the row
+# (`if learned and not debrief.learned`), which is right for the referral
+# contact and the tasks — those are objects, and a second one is a duplicate —
+# and wrong for text. The view renders the form bound to the existing
+# instance, so the box is editable; on resubmit the branch was skipped,
+# nothing was written, and the view flashed "Debrief saved." anyway. The user
+# was told their correction landed when it had been discarded.
+# ---------------------------------------------------------------------------
+def test_an_edited_debrief_persists_and_appends_a_second_block(user, contact):
+    touch = _chat(user, contact)
+
+    debrief_svc.record(user, touch, learned="Runs the HK coverage team.")
+    row, made = debrief_svc.record(
+        user, touch,
+        learned="Runs the HK coverage team. Also said to apply by September.",
+    )
+
+    # The row holds the LATEST text, so the form round-trips what you typed.
+    assert row.learned.endswith("apply by September.")
+    assert made.get("note") is True
+
+    contact.refresh_from_db()
+    # A NEW dated block, not a rewrite: `Contact.notes` is an append-only
+    # journal everywhere else in this codebase, and both versions are things
+    # the user actually wrote.
+    assert contact.notes.count("Chat debrief") == 2
+    assert "Runs the HK coverage team." in contact.notes
+    assert "apply by September." in contact.notes
+
+
+def test_an_unchanged_resubmit_writes_nothing(user, contact):
+    """The other half: idempotence must survive the fix. Identical text is a
+    resubmit, not a correction, and must not append a second block."""
+    touch = _chat(user, contact)
+    debrief_svc.record(user, touch, learned="They mentor two analysts.")
+    contact.refresh_from_db()
+    before = contact.notes
+
+    _, made = debrief_svc.record(user, touch, learned="They mentor two analysts.")
+
+    contact.refresh_from_db()
+    assert contact.notes == before
+    assert contact.notes.count("Chat debrief") == 1
+    assert made == {}
+
+
+def _last_flashed(response) -> str:
+    """The message this request queued.
+
+    Read off the messages framework rather than the rendered page on purpose:
+    `base.html` has no messages block, so nothing the CRM flashes is displayed
+    anywhere today. That is a separate gap in a shared template; what this
+    module can pin is that the view stops CLAIMING a save it didn't make, so
+    the claim is already true whenever the banner does get rendered. (For the
+    same reason the queue is never drained across these POSTs — nothing
+    renders it — so take the newest entry rather than the whole backlog.)
+    """
+    from django.contrib.messages import get_messages
+
+    queued = [str(m) for m in get_messages(response.wsgi_request)]
+    assert queued, "the view flashed nothing at all"
+    return queued[-1]
+
+
+def test_the_view_only_claims_a_save_when_something_was_written(
+    client, user, contact
+):
+    """"Debrief saved." was printed unconditionally, including on the exact
+    resubmit whose text it had just discarded. The message now reports what
+    happened."""
+    touch = _chat(user, contact)
+    client.force_login(user)
+    url = reverse("crm:debrief", args=[touch.id])
+
+    first = client.post(url, {"learned": "First version."})
+    assert "Debrief saved" in _last_flashed(first)
+
+    edited = client.post(url, {"learned": "Second, corrected version."})
+    assert "Debrief saved" in _last_flashed(edited)
+    contact.refresh_from_db()
+    assert "Second, corrected version." in contact.notes
+
+    same = client.post(url, {"learned": "Second, corrected version."})
+    latest = _last_flashed(same)
+    assert "No changes to save" in latest
+    assert "Debrief saved" not in latest
+
+
+def test_an_edit_through_the_view_reaches_the_contact_notes(client, user, contact):
+    """End to end, because the bug was only visible end to end: the service
+    silently no-opped and the view silently congratulated it."""
+    touch = _chat(user, contact)
+    client.force_login(user)
+    url = reverse("crm:debrief", args=[touch.id])
+
+    client.post(url, {"learned": "Thought it went fine."})
+    client.post(url, {"learned": "On reflection: they want a follow-up in August."})
+
+    contact.refresh_from_db()
+    assert "want a follow-up in August" in contact.notes
+    row = ChatDebrief.objects.for_user(user).get(touch=touch)
+    assert row.learned == "On reflection: they want a follow-up in August."
+
+
+def test_editing_the_text_does_not_duplicate_the_other_side_effects(user, contact):
+    """The gate changed for `learned` ONLY. The referral contact and the tasks
+    keep first-write-wins, because a second one of those is a duplicate rather
+    than a correction."""
+    touch = _chat(user, contact)
+    payload = dict(
+        learned="First.",
+        intro_name="Sam Referral",
+        tracked_date=timezone.localdate() + timedelta(days=10),
+    )
+    debrief_svc.record(user, touch, **payload)
+    debrief_svc.record(user, touch, **{**payload, "learned": "Second."})
+
+    assert Contact.objects.for_user(user).filter(name="Sam Referral").count() == 1
+    assert Task.objects.for_user(user).count() == 2
+    contact.refresh_from_db()
+    assert contact.notes.count("Chat debrief") == 2, "but the text edit landed"

@@ -212,9 +212,10 @@ _GRAD_WINDOW: Mapping[str, tuple[int, int]] = {
     INSIGHT: (2, 3),
 }
 
-#: Target-cycle prefixes -> the bucket that cycle is actually made of. Students
-#: write their cycle the way the industry says it: "SA 2028" is the Summer
-#: Analyst class of summer 2028, i.e. an internship with cohort 2028.
+#: Target-cycle prefixes -> the bucket that cycle is actually made of. Kept
+#: for any stored value already in this shape ("SA 2028" — kind, then year).
+#: Students who typed it this way, or a legacy row from before the dropdown
+#: below existed, must keep parsing.
 _CYCLE_BUCKETS: Mapping[str, str] = {
     "sa": INTERNSHIP, "summer analyst": INTERNSHIP, "sum": INTERNSHIP,
     "ft": ENTRY_LEVEL, "full time": ENTRY_LEVEL, "full-time": ENTRY_LEVEL,
@@ -222,13 +223,81 @@ _CYCLE_BUCKETS: Mapping[str, str] = {
 }
 _CYCLE_RX = re.compile(r"^\s*([A-Za-z][A-Za-z\s-]*?)\s*(20\d\d)\s*$")
 
+# ---------------------------------------------------------------------------
+# The OTHER cycle shape: year, then a label ("2028 Summer Internship") — what
+# `accounts.forms.ProfileForm`'s `target_cycle` dropdown actually stores. The
+# bug this section fixes: the dropdown has always produced this year-first
+# shape and `parse_target_cycle` only ever recognised the kind-first "SA
+# 2028" shape above, so all eight of the dropdown's own choices scored zero
+# on the 15-point cycle axis for every single user.
+#
+# `CYCLE_LABELS` is now the one place these label strings live.
+# `accounts.forms.cycle_choices()` builds its dropdown text from it instead
+# of restating the words, so the producer (the settings page) and this
+# consumer (the scorer) cannot drift apart the way they did before.
+# ---------------------------------------------------------------------------
+CYCLE_LABELS: Mapping[str, str] = {
+    INTERNSHIP: "Summer Internship",
+    ENTRY_LEVEL: "Full-Time / Graduate",
+    INSIGHT: "Spring Week / Insight",
+}
+#: How many years past `base_year` the dropdown offers a choice for, per
+#: bucket. Also read by `accounts.forms.cycle_choices` so the two stay in
+#: lockstep; order here is display order.
+CYCLE_YEAR_SPAN: Mapping[str, tuple[int, ...]] = {
+    INTERNSHIP: (0, 1, 2),
+    ENTRY_LEVEL: (0, 1),
+    INSIGHT: (0, 1),
+}
+#: The one choice with no attached year: off-cycle recruiting has no fixed
+#: intake. Rather than leaving it unparseable (the same silent-zero bug as
+#: above, just for a ninth value), it scores against "as soon as possible" —
+#: the current year, read at PARSE time so this never goes stale.
+OFF_CYCLE_LABEL = "Off-Cycle / Immediate"
+OFF_CYCLE_BUCKET = ENTRY_LEVEL
+
+_CYCLE_LABEL_TO_BUCKET: Mapping[str, str] = {v: k for k, v in CYCLE_LABELS.items()}
+_YEAR_FIRST_CYCLE_RX = re.compile(r"^\s*(20\d\d)\s+(.+?)\s*$")
+
+
+def cycle_choices(*, base_year: int | None = None) -> list[tuple[str, str]]:
+    """The full `target_cycle` dropdown vocabulary, anchored to `base_year`
+    (today's year by default) — the single source `accounts.forms.
+    ProfileForm` builds its Select choices from, so this parser's vocabulary
+    and the form's can never restate the same strings twice and drift.
+
+    Deliberately a function, not a module-level constant computed once: a
+    module-level `_YEAR = date.today().year` goes stale in a long-lived
+    worker process (a Django dev/prod server started in December still
+    serving last year's choices in July). Call this at the point you need
+    the choices, not at import time."""
+    base_year = base_year or date.today().year
+    choices: list[tuple[str, str]] = [("", "Select a cycle")]
+    for bucket, offsets in CYCLE_YEAR_SPAN.items():
+        label = CYCLE_LABELS[bucket]
+        for offset in offsets:
+            value = f"{base_year + offset} {label}"
+            choices.append((value, value))
+    choices.append((OFF_CYCLE_LABEL, OFF_CYCLE_LABEL))
+    return choices
+
 
 def parse_target_cycle(target_cycle: str) -> tuple[str, int] | None:
-    """"SA 2028" -> ("internship", 2028). Unrecognised text -> None.
+    """"2028 Summer Internship" -> ("internship", 2028); the legacy "SA 2028"
+    shape still parses too. Unrecognised text -> None.
 
     Returning None rather than a partial guess matters: an unparsed cycle must
     cost the student nothing, not silently match every 2028 posting."""
-    m = _CYCLE_RX.match(target_cycle or "")
+    text = (target_cycle or "").strip()
+    if not text:
+        return None
+    if text == OFF_CYCLE_LABEL:
+        return OFF_CYCLE_BUCKET, date.today().year
+    m = _YEAR_FIRST_CYCLE_RX.match(text)
+    if m:
+        bucket = _CYCLE_LABEL_TO_BUCKET.get(m.group(2).strip())
+        return (bucket, int(m.group(1))) if bucket is not None else None
+    m = _CYCLE_RX.match(text)
     if not m:
         return None
     kind = " ".join(m.group(1).lower().split())
@@ -375,8 +444,13 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
             # The posting named a different class. This is a veto, not a
             # subtraction: no other class/cycle evidence gets to argue with the
             # firm's own words, so nothing below runs.
+            # The chip text must not be byte-identical to the MATCH branch six
+            # lines below: `Recommendation.why` joins on `.text` alone, and a
+            # mismatch chip reading "Class of {stated}" typeset a reason
+            # AGAINST the role as if it were a reason FOR it. Only the
+            # tooltip differed before this fix.
             return W_CLASS_STATED_MISMATCH, [Reason(
-                f"Class of {stated}",
+                f"Not Class of {stated}",
                 f"The posting states Class of {stated}, not your {profile.class_year}.",
                 "class",
             )]

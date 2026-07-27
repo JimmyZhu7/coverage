@@ -37,15 +37,34 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
     the both-regions fallback: it matches on the soonest close date across any
     region for the firm.
 
-  - DIVERGENCE from the original (deliberate, 2026-07-25): a contact's region
-    is now read from an EXPLICIT `region` key first, and only falls back to
-    `infer_region(source)` when that key is blank. The original had no region
-    column and inferred it by substring-matching "hk" inside the free-text
-    `source` — which is a provenance string, so every contact whose source
-    didn't happen to say "hk" (including every hand-added one, source
-    "manual") silently read as US: re-pinged against US deadlines, skipped
-    for HK ones. The fallback is kept rather than removed so rows written
-    before the explicit field existed keep the exact meaning they had.
+  - DIVERGENCE from the original (deliberate, 2026-07-25, tightened
+    2026-07-27): a contact's region is read from an EXPLICIT `region` key and
+    from nothing else. The original had no region column and inferred it by
+    substring-matching "hk" inside the free-text `source` — which is a
+    provenance string, so every contact whose source didn't happen to say
+    "hk" (including every hand-added one, source "manual") silently read as
+    US: re-pinged against US deadlines, skipped for HK ones.
+
+    The 07-25 change kept that inference as a fallback for blank rows, on the
+    theory that legacy rows should keep the meaning they had. That was wrong,
+    and the live data is what showed it. `infer_region` returns a region for
+    ANY non-empty string, so the fallback answered confidently for all 51
+    blank-region contacts — 19 of them "us" purely because their provenance
+    text read "Gmail USC discovery". The documented "unknown" path, which
+    three other artifacts are built around (`crm.models.Contact.region`'s
+    comment, migration `crm/0005_backfill_contact_region`, and
+    `crm.views._in_scope`'s firm fallback), was therefore unreachable: a
+    blank region never once produced None. Worse, the wrong-but-confident
+    answer SUPPRESSES branch 3 — a contact read as "us" is skipped for an HK
+    close — costing the pre-deadline re-ping, the highest-value nudge in the
+    engine, on exactly the rows that carry the least information.
+
+    So the fallback is now retired from the read path. Blank means unknown,
+    unknown takes the both-regions fallback, and a contact whose region
+    matters gets it set explicitly. `infer_region` itself stays in the module
+    (see its docstring) as the record of the old rule and as the tool for a
+    one-time backfill, should the founder want those guesses written into the
+    column where they can be seen and corrected.
 
   - DIVERGENCE from the original (deliberate, 2026-07-27): branch 6's
     follow-up gap is now STAGED. The original reused one
@@ -162,11 +181,15 @@ def infer_region(source: str | None) -> str | None:
     can stay conservative (match either region) when region truly can't be
     determined. Ported from campaign/src/campaign/region.py.
 
-    LEGACY FALLBACK ONLY. `source` is a provenance string, not a region, so
-    this is a guess and a bad one for any source that simply doesn't mention
-    HK. New callers set `contact["region"]` explicitly; this stays only so
-    rows written before that field existed keep their previous meaning. See
-    `contact_region`."""
+    RETIRED FROM THE READ PATH (2026-07-27) — `contact_region` no longer calls
+    this, and nothing else in the engine does either. It is kept because it is
+    the only written record of how region used to be decided, and because a
+    ONE-TIME data migration is the right place to use it if the founder ever
+    wants the old inference materialised into the `region` column, where a
+    human can see it and correct it. Running it on every read is what made it
+    harmful: `source` is a provenance string, not a region, so this returns a
+    confident answer for any non-empty input and the "unknown" case it
+    documents was unreachable in practice. See `contact_region`."""
     if not source:
         return None
     return "hk" if "hk" in source.lower() else "us"
@@ -175,14 +198,15 @@ def infer_region(source: str | None) -> str | None:
 def contact_region(contact: Mapping[str, Any]) -> str | None:
     """The region a contact belongs to, or None when it genuinely isn't known.
 
-    The explicit `region` key wins. `infer_region(source)` is consulted ONLY
-    when `region` is absent or blank, so setting a region can never be
-    overridden by provenance text, and a legacy row with no region behaves
-    exactly as it did before the field existed."""
-    explicit = (contact.get("region") or "").strip().lower()
-    if explicit:
-        return explicit
-    return infer_region(contact.get("source"))
+    Only the explicit `region` key answers. Blank means UNKNOWN, and unknown
+    is a real answer here — branch 3 handles it by matching the soonest close
+    across any region for the firm, which is the conservative behaviour the
+    whole design documents.
+
+    `infer_region(source)` is deliberately NOT consulted (see that function).
+    While it was, this returned a confident region 100% of the time and the
+    unknown path below could never be taken."""
+    return (contact.get("region") or "").strip().lower() or None
 
 
 def business_days_since(then: date, now: date) -> int:
@@ -337,9 +361,9 @@ def due_actions(
         contacts: contact dicts. Keys used: `id`, `firm_id` (or `firm`),
             `firm_text` (display fallback when firm_id is None), `warmth`,
             `thread_state`, `region` ("us" / "hk" / blank-or-absent for
-            unknown), `source` (legacy region fallback only, when `region` is
-            blank — see `contact_region`), `archived` (optional; truthy rows
-            are skipped).
+            unknown — the ONLY key consulted for region; see
+            `contact_region`), `archived` (optional; truthy rows are
+            skipped).
         touches: touch dicts across those contacts. Keys used: `contact_id`,
             `ts`, `kind`.
         firm_dates: shared firm_date dicts. Keys used: `firm_id`,

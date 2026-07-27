@@ -20,6 +20,8 @@ from datetime import date
 from django import forms
 
 from coverage_domain.cadence import CADENCE_DEFAULTS
+from directory.classify import REGION_LABELS, REGION_ORDER
+from directory.recommend import cycle_choices
 
 # The cadence whitelist + its valid ranges live at the point of use, in
 # crm.views — that module is what actually hands the overrides to
@@ -31,10 +33,17 @@ from crm.views import TUNABLE_CADENCE_PARAMS
 
 from .models import WORK_AUTH
 
-# Human labels for the raw region/track tokens stored on firms and users.
+# Human labels for the region tokens a student can state a preference for.
+# Sourced from `classify.REGION_ORDER`/`REGION_LABELS` — the SAME six-market
+# vocabulary the Opportunities feed's own Region filter uses — rather than a
+# second, narrower hk/us-only list. That narrower list used to be sourced
+# from `Firm.regions`, which really is hk/us-only in the seed data, but
+# `Opportunity.region` (what a role's own location resolves to) is six wide:
+# eu (204 open campus roles), sg (74), cn (30), jp (16) were all markets a
+# student could not state a preference — or a work-authorization answer,
+# since `WorkAuthorizationForm` below also iterates this list — for.
 REGION_CHOICES: list[tuple[str, str]] = [
-    ("hk", "Hong Kong"),
-    ("us", "United States"),
+    (code, REGION_LABELS[code]) for code in REGION_ORDER
 ]
 
 TRACK_CHOICES: list[tuple[str, str]] = [
@@ -54,22 +63,40 @@ CLASS_YEAR_CHOICES: list[tuple[str, str]] = [("", "Select graduation year")] + [
     (str(y), str(y)) for y in range(_YEAR - 1, _YEAR + 7)
 ]
 
-# Recruiting-cycle options, anchored to the current year. Values double as
-# labels (the model column is a short CharField), so every entry stays under
-# 32 characters.
-CYCLE_CHOICES: list[tuple[str, str]] = (
-    [("", "Select a cycle")]
-    + [(f"{y} Summer Internship", f"{y} Summer Internship")
-       for y in (_YEAR, _YEAR + 1, _YEAR + 2)]
-    + [(f"{y} Full-Time / Graduate", f"{y} Full-Time / Graduate")
-       for y in (_YEAR, _YEAR + 1)]
-    + [(f"{y} Spring Week / Insight", f"{y} Spring Week / Insight")
-       for y in (_YEAR, _YEAR + 1)]
-    + [("Off-Cycle / Immediate", "Off-Cycle / Immediate")]
-)
+# Recruiting-cycle options. `cycle_choices()` (directory.recommend) is the
+# one place this vocabulary is built — this module-level binding is kept only
+# for the couple of call sites that still import CYCLE_CHOICES/
+# CYCLE_SUGGESTIONS directly (accounts.views' onboarding context, currently
+# unused by any template). `ProfileForm.target_cycle` itself does NOT read
+# this binding: see `ProfileForm.__init__`, which recomputes choices per
+# instance so a long-lived worker process never serves a stale year — the
+# same staleness this module-level constant is still subject to.
+CYCLE_CHOICES: list[tuple[str, str]] = cycle_choices()
 
 # Kept for backwards compatibility with any view still passing suggestions.
 CYCLE_SUGGESTIONS: list[str] = [c for c, _ in CYCLE_CHOICES if c]
+
+
+class _StaleValueSelect(forms.Select):
+    """A <select> where exactly one option — the student's own stored value,
+    once it rolls off the current `cycle_choices()` window — renders
+    `disabled`.
+
+    Plain `choices` tuples have no way to mark a single option disabled, and
+    the alternative (a stored-but-unlisted value just renders as nothing
+    selected) is the silent-clear bug this widget exists to avoid: the
+    student would see a blank "Select a cycle" with no sign their answer was
+    ever recorded, and the next save would erase it for good."""
+
+    def __init__(self, *args, disabled_value: str = "", **kwargs):
+        self._disabled_value = disabled_value
+        super().__init__(*args, **kwargs)
+
+    def create_option(self, name, value, *args, **kwargs):
+        option = super().create_option(name, value, *args, **kwargs)
+        if self._disabled_value and str(value) == self._disabled_value:
+            option["attrs"]["disabled"] = True
+        return option
 
 
 class ProfileForm(forms.Form):
@@ -111,6 +138,30 @@ class ProfileForm(forms.Form):
         required=False,
         widget=forms.CheckboxSelectMultiple,
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # `target_cycle`'s choices are recomputed HERE, per instance, rather
+        # than left at the class-level `CYCLE_CHOICES` binding above: that
+        # binding is a module-level constant frozen at import (`_YEAR =
+        # date.today().year`, evaluated once), so a long-lived worker process
+        # would keep serving whatever year it started in.
+        choices = cycle_choices()
+        # A stored value the current choices no longer list — e.g. a past
+        # year that rolled off the window, or the live `demo@coverage.local`
+        # row's `target_cycle='sa2028_ib'`, which matches nothing this
+        # dropdown has ever offered — must not vanish without a trace.
+        # Django's Select renders an unlisted value as nothing selected, so
+        # the student would see a blank "Select a cycle" and the next save
+        # would silently clear the field for good. Appending the value back
+        # in, disabled, keeps the loss visible instead.
+        current = (self.initial.get("target_cycle") or "").strip()
+        known_values = {value for value, _ in choices}
+        stale = current if current and current not in known_values else ""
+        if stale:
+            choices = choices + [(stale, f"{stale} (no longer offered)")]
+            self.fields["target_cycle"].widget = _StaleValueSelect(disabled_value=stale)
+        self.fields["target_cycle"].choices = choices
 
     @classmethod
     def from_user(cls, user) -> "ProfileForm":

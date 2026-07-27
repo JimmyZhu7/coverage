@@ -62,21 +62,24 @@ def fetch(board: AvatureBoard) -> FetchResult:
     seen: set[str] = set()
     opps: list[Opportunity] = []
     offset = 0
-    while offset < _MAX_ITEMS:
-        try:
+    try:
+        while offset < _MAX_ITEMS:
             xml = fetch_text(_feed_url(board.feed_url, offset))
-        except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to a multi-board run
-            return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-        items = _parse_items(xml)
-        fresh = [(t, u) for t, u in items if u not in seen]
-        if not fresh:
-            break  # empty page or all-duplicates (feed looped) -> done
-        for title, url in fresh:
-            seen.add(url)
-            opps.append(_normalize(title, url, board))
-        if len(items) < _PAGE_SIZE:
-            break
-        offset += _PAGE_SIZE
+            items = _parse_items(xml)
+            fresh = [(t, u) for t, u in items if u not in seen]
+            if not fresh:
+                break  # empty page or all-duplicates (feed looped) -> done
+            # Normalization stays inside this try — see greenhouse.py's
+            # fetch() for why a malformed row must not raise past this
+            # function and cost `fetch_many` every OTHER board's results.
+            for title, url in fresh:
+                seen.add(url)
+                opps.append(_normalize(title, url, board))
+            if len(items) < _PAGE_SIZE:
+                break
+            offset += _PAGE_SIZE
+    except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to a multi-board run
+        return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opps, raw_count=len(opps))
 
 

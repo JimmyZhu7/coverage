@@ -261,7 +261,11 @@ def settings_view(request):
             return redirect(reverse("accounts:settings"))
         # Invalid → fall through and re-render, this section showing errors.
         section_forms[section] = bound
-    elif request.method == "POST":
+    elif request.method == "POST" and section == "profile":
+        # Requires the explicit marker, like every other section — see the
+        # `elif request.method == "POST":` branch just below for why. The
+        # profile <form> in settings.html now carries
+        # `<input type="hidden" name="section" value="profile">` to match.
         form = ProfileForm(request.POST, request.FILES)
         if form.is_valid():
             form.apply_to(request.user)
@@ -276,6 +280,17 @@ def settings_view(request):
                 )
             messages.success(request, "Profile saved.")
             return redirect(reverse("accounts:settings"))
+    elif request.method == "POST":
+        # A POST that names neither a recognised `section` nor "profile" —
+        # a stale form cached before a section was added/renamed, or a
+        # hand-crafted request. This used to fall straight through to
+        # `ProfileForm(request.POST, ...)` unconditionally: every ProfileForm
+        # field is `required=False`, so an EMPTY POST validated, and its
+        # `apply_to` blanked all six profile fields (name/school/class_year/
+        # target_cycle/regions/tracks) with no error and no confirmation.
+        # Requiring the explicit marker turns an unrecognised POST into a
+        # no-op re-render instead of a silent profile wipe.
+        pass
     if form is None:
         form = ProfileForm.from_user(request.user)
 

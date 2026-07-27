@@ -172,14 +172,28 @@ def _class_tag(opp) -> dict | None:
 
 def _sponsorship_tag(opp) -> dict | None:
     """Sponsorship pill: the posting's own field wins; when it's unknown,
-    fall back to the firm-level fact from the seed (sponsors: true/false).
-    Still unknown -> no pill rather than a hedge."""
+    fall back to the firm-level fact from the seed. Still unknown -> no pill
+    rather than a hedge.
+
+    `Firm.sponsors` is a per-REGION JSON dict (`{"us": True, "hk": "unknown"}`
+    — see `seed_directory._sponsors_blob`), never a bare bool, so it must be
+    looked up by `opp.region`, not tested as a truthy/falsy scalar. The
+    scalar test was unreachable on every one of the ~4,000 open rows even
+    though 58 firms hold real per-region data.
+
+    A blank `opp.region` (~1,223 open rows — mostly unparsed board
+    locations) has no region to key the lookup on, so this returns None
+    rather than falling back to *some* region of the firm's: a firm that
+    sponsors in HK but not the US must never stamp "Sponsorship" on a role
+    whose own market is unknown."""
     s = (opp.sponsorship or "unknown").lower()
     if s == "yes":
         return {"label": "Sponsorship", "css": "spon-known"}
     if s == "no":
         return {"label": "No Sponsorship", "css": "spon-none"}
-    firm_fact = opp.firm.sponsors
+    if not opp.region:
+        return None
+    firm_fact = (opp.firm.sponsors or {}).get(opp.region)
     if firm_fact is True or firm_fact == "true":
         return {"label": "Sponsorship", "css": "spon-known"}
     if firm_fact is False or firm_fact == "false":
@@ -504,9 +518,25 @@ _FRESH_DAYS = 10
 _ROLLING_FEED_CAP = 30
 
 
+def _fresh_label(seen_days: int | None) -> str:
+    """What the "New" badge actually measures, spelled out: `first_seen` is
+    when the row entered OUR db, not when the firm posted it — so the badge
+    must say "first seen", never bare "New". (Bug: after a bulk import, 794
+    of 805 open roles wore "New" because every backfilled row's `first_seen`
+    was the import timestamp, days after the firm actually listed it.)"""
+    if seen_days is None:
+        return ""
+    if seen_days == 0:
+        return "First seen today"
+    if seen_days == 1:
+        return "First seen 1d ago"
+    return f"First seen {seen_days}d ago"
+
+
 def _urgency_item(o, *, now, today, my_firm_ids):
     """One feed card: firm identity + the honest urgency signal for this
-    role (a real countdown when dated, freshness when rolling)."""
+    role (a real countdown when dated, freshness when rolling, or an
+    explicit "deadline passed" state — see the three-way split below)."""
     name_parts = [p for p in o.firm.name.split() if p[:1].isalnum()]
     bucket = o.bucket or OTHER
     seen_days = (now - o.first_seen).days if o.first_seen else None
@@ -529,8 +559,22 @@ def _urgency_item(o, *, now, today, my_firm_ids):
         "is_mine": o.firm_id in my_firm_ids,
         "seen_days": seen_days,
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
+        "fresh_label": _fresh_label(seen_days),
     }
-    if o.deadline and o.deadline >= today:
+    # Three states, not two. "Rolling" must mean "no posted deadline" (it is
+    # tested that way at my_applications, views.py's `rolling` lens above) —
+    # so a dated role whose deadline has already PASSED cannot fall into the
+    # rolling branch just because `deadline >= today` failed. The old
+    # two-branch `if o.deadline and o.deadline >= today: ... else: rolling`
+    # did exactly that: a role dated last week rendered "Rolling · New" with
+    # "apply early" copy, while /firms/<slug>/ correctly said "deadline
+    # passed" for the same row — two Coverage surfaces disagreeing about the
+    # same fact. A passed deadline is dated (so the freshness badge, gated on
+    # `not dated` in the template, never shows on it) but neither "closing"
+    # nor "rolling"; `_urgency_feed` below sorts it to the very end.
+    if o.deadline is None:
+        item.update({"dated": False, "days_left": None, "level": "rolling"})
+    elif o.deadline >= today:
         days = (o.deadline - today).days
         item.update({
             "dated": True,
@@ -543,7 +587,13 @@ def _urgency_item(o, *, now, today, my_firm_ids):
             "fuse_pct": max(4, round((1 - min(days, _FUSE_HORIZON) / _FUSE_HORIZON) * 100)),
         })
     else:
-        item.update({"dated": False, "days_left": None, "level": "rolling"})
+        item.update({
+            "dated": True,
+            "days_left": (o.deadline - today).days,  # negative: days overdue
+            "countdown": "Deadline passed",
+            "level": "passed",
+            "fuse_pct": 0,
+        })
     return item
 
 
@@ -556,7 +606,11 @@ def _urgency_feed(qs, *, now, today, my_firm_ids):
         item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids)
         (closing if item["dated"] else rolling).append(item)
 
-    closing.sort(key=lambda i: (not i["is_mine"], i["days_left"]))
+    # Passed-deadline rows are "dated" (see `_urgency_item`) but are neither
+    # urgent nor rolling — sort them after every live-deadline row regardless
+    # of `is_mine`/`days_left`, which would otherwise put the most-overdue
+    # role first (most negative `days_left` sorts smallest).
+    closing.sort(key=lambda i: (i["level"] == "passed", not i["is_mine"], i["days_left"]))
 
     def rolling_key(i):
         # your-firm first, then fresher first, then earlier cohort (this
@@ -594,7 +648,6 @@ def opportunities(request):
     today = timezone.localdate()
 
     open_qs = Opportunity.objects.filter(status="open").select_related("firm")
-    facets = _facets(open_qs)
 
     role = request.GET.get("role", "").strip()
     # Programme/intake year, or `none` for the rows that state no year at all.
@@ -605,6 +658,16 @@ def opportunities(request):
     # Multi-select firm filter: any number of ?firm=<slug> params.
     firm_slugs = [s.strip() for s in request.GET.getlist("firm") if s.strip()]
     query = request.GET.get("q", "").strip()
+
+    # Facet options (region/track/provider) are drawn from the same
+    # role-bucket scope the view actually renders, not the whole open table.
+    # The default view hides the ~3,214 experienced/"other" rows, so faceting
+    # over all 4,019 open roles offered filter values that would return
+    # nothing under the very filters showing them — and cost a full-queryset
+    # scan on a public page for options nobody could use. Computed against
+    # `role` only (not region/track/provider/query themselves), same posture
+    # as `year_facet` below: a facet must not be crossed with its own filter.
+    facets = _facets(_apply_role_filter(open_qs, role))
 
     qs = open_qs
     if region:
@@ -652,6 +715,16 @@ def opportunities(request):
         for value, label in ROLE_CHOICES
     ]
     hidden_other = bucket_counts.get(OTHER, 0) if role == "" else 0
+
+    # The "Show everything" escape hatch for `hidden_other`: role forced to
+    # "all", every other active filter preserved. Built from the live
+    # querystring, not hardcoded — the bug this replaced rendered a bare `?`
+    # (no `show_all_qs` in context at all), which is `/opportunities/?`: the
+    # default view, i.e. the exact page that hides the roles it promised to
+    # reveal.
+    show_all_params = request.GET.copy()
+    show_all_params["role"] = "all"
+    show_all_qs = show_all_params.urlencode()
 
     qs = _apply_role_filter(qs, role)
 
@@ -734,17 +807,26 @@ def opportunities(request):
             }
         item = _urgency_item(o, now=now, today=today, my_firm_ids=set(tier_by_firm))
         cl["roles"].append(item)
-        if item["dated"]:
+        # A passed deadline is `dated` (see `_urgency_item`) but must not
+        # inflate the firm's "N closing" pill or drag `next_days` negative —
+        # both would misrepresent a dead posting as live urgency, and a
+        # negative `next_days` would rank the firm as closing SOONEST in
+        # `_cluster_key` below.
+        if item["dated"] and item["level"] != "passed":
             cl["closing_count"] += 1
             cl["next_days"] = (
                 item["days_left"] if cl["next_days"] is None
                 else min(cl["next_days"], item["days_left"])
             )
 
-    # Roles inside a firm: dated soonest-first, then fresh rolling, then the rest.
+    # Roles inside a firm: dated soonest-first, then passed, then fresh
+    # rolling, then the rest. (`i["level"] == "passed"` as the second key
+    # keeps passed-deadline rows out of the days-left ordering, which would
+    # otherwise put the most-overdue role first.)
     for cl in clusters.values():
         cl["roles"].sort(key=lambda i: (
             not i["dated"],
+            i["level"] == "passed",
             i["days_left"] if i["days_left"] is not None else 9999,
             not i["is_fresh"],
             i["seen_days"] if i["seen_days"] is not None else 9999,
@@ -787,11 +869,20 @@ def opportunities(request):
     # total/for-you/funnel counts were dropped with it — they cost 5 queries a
     # request and nothing displayed them.)
     dash = {
+        # `0 <=`, not just `<= 7`: a passed-deadline row is also in `closing`
+        # (see `_urgency_item`'s three-way split) with a NEGATIVE `days_left`,
+        # which would otherwise satisfy `<= 7` and count an already-dead
+        # posting as "closing this week".
         "closing_week": sum(
             1 for i in feed["closing"]
-            if i["days_left"] is not None and i["days_left"] <= 7
+            if i["days_left"] is not None and 0 <= i["days_left"] <= 7
         ),
         "fresh_count": feed["fresh_count"],
+        # Drives the stat-strip's "Fresh" label so it can never again say a
+        # window other than the one `_FRESH_DAYS` actually computes — the
+        # bug this replaced hardcoded "This Week" text next to a 10-day
+        # window.
+        "fresh_days": _FRESH_DAYS,
     }
 
     # Every covered firm (with an open campus role), for the multi-select.
@@ -816,10 +907,16 @@ def opportunities(request):
         "pick_shared": pick_shared,
         "pick_blocks": pick_blocks,
         "has_profile": bool(profile and not profile.is_empty),
+        # Whether the firm order was actually shaped by anything the student
+        # told Coverage (target firms, survey regions/tracks). Computed above
+        # alongside `_cluster_key`; it was never wired into this dict, so the
+        # "Sorted for you" honesty line at _results.html:22 could never render.
+        "personalized": personalized,
         "facets": facets,
         "role_facet": role_facet,
         "year_facet": year_facet,
         "hidden_other": hidden_other,
+        "show_all_qs": show_all_qs,
         "dash": dash,
         "all_firms": all_firms,
         "selected": {

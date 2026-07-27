@@ -25,7 +25,7 @@ So the caller asks for the window, then searches `newer_than:Nd`.
 
 --dry-run runs every match, ratchet, and dedup decision and prints what WOULD
 happen without writing. Use it the first time a new findings source is wired
-up: a mis-shaped batch that silently archives contacts as bounced is the one
+up: a mis-shaped batch that clears the wrong addresses as bounced is the one
 failure here that is tedious to unpick.
 """
 
@@ -130,7 +130,8 @@ class Command(BaseCommand):
             f"{prefix}{result.findings} findings: "
             f"{result.touches_logged} touches, {result.outreach_logged} outreach, "
             f"{result.emails_backfilled} emails backfilled, "
-            f"{result.archived_bounced} archived (bounced)"
+            f"{result.alternate_emails_noted} alternate emails noted, "
+            f"{result.bounced_cleared} bounced addresses cleared"
         )
         self.stdout.write(
             f"{prefix}skipped: {result.skipped_already_logged} already logged, "

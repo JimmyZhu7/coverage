@@ -8,12 +8,22 @@ happens *somewhere else*; a typed finding arrives; a deterministic apply layer
 A :class:`CaptureProvider` is an adapter for one source. It turns a raw payload
 into a typed :class:`InteractionEvent` that the pipeline
 (``capture.services``) consumes **uniformly**, regardless of source. v1 ships
-the ``bcc`` / ``forward`` provider (:class:`InboundEmailProvider`, one adapter
-that parses a Postmark-style inbound-email JSON payload and tags the event
-``bcc`` for outbound BCCs, ``forward`` for forwarded replies). ``manual`` and
-``import`` are documented seams (:class:`CaptureProvider` subclasses) that the
-accounts/CRM quick-log and CSV importer plug into later — the pipeline needs no
-change to accept them.
+:class:`InboundEmailProvider`, one adapter that parses a Postmark-style
+inbound-email JSON payload and tags the event ``bcc`` when the classifier read
+the message as outbound and ``forward`` when it read it as inbound.
+
+Read that second label as "inbound", NOT as "the student forwarded this":
+``provider`` is set straight off ``direction`` and no header parsing stands
+behind it. A message that really IS a forward is detected by
+``extractors.detect_forward`` and routed to ``needs_review`` before any of
+this matters, because a forward's envelope describes the student rather than
+the correspondent (see that function). The name is kept because it is written
+into stored rows; unpicking a forward into the exchange it carries is a
+separate feature, not a relabelling.
+
+``manual`` and ``import`` are documented seams (:class:`CaptureProvider`
+subclasses) that the accounts/CRM quick-log and CSV importer plug into later —
+the pipeline needs no change to accept them.
 
 Deliberately no DB or Django-ORM access in this module beyond reading
 ``User.email``/``capture_slug`` off a passed-in user: providers parse; the
@@ -47,7 +57,10 @@ class InteractionEvent:
     """
 
     user_id: int
-    provider: str  # "bcc" | "forward" | "manual" | "import"
+    # "bcc" (outbound) | "forward" (inbound) | "manual" | "import". See the
+    # module docstring: "forward" is a direction label, not a claim that the
+    # message was forwarded.
+    provider: str
     provider_ref: str  # stable dedup key: Message-ID / thread key / row hash
     direction: str  # "outbound" | "inbound"
     counterparty_email: str = ""
@@ -136,9 +149,11 @@ def _as_datetime(value: Any) -> Optional[datetime]:
 
 
 class InboundEmailProvider(CaptureProvider):
-    """The v1 ``bcc``/``forward`` provider. Parses a Postmark-style inbound
-    JSON payload (``To``/``Cc``/``Bcc`` + their ``*Full`` arrays, ``From``,
-    ``Subject``, ``Headers`` incl. Message-ID, ``TextBody``, ``Attachments``).
+    """The v1 inbound-email provider. Parses a Postmark-style inbound JSON
+    payload (``To``/``Cc``/``Bcc`` + their ``*Full`` arrays, ``From``,
+    ``Subject``, ``Headers`` incl. Message-ID, ``TextBody``, ``Attachments``)
+    and tags the event ``bcc`` or ``forward`` purely by direction — see the
+    module docstring for what those two labels do and do not assert.
     """
 
     name = "inbound_email"
@@ -209,10 +224,20 @@ class InboundEmailProvider(CaptureProvider):
         classification = extractors.classify(parsed, user.email)
         direction = classification.direction
 
-        counterparty_email, counterparty_name = self._counterparty(parsed, user, direction)
+        if classification.signals.get("bounced"):
+            # The counterparty for a bounce is the address that FAILED to
+            # deliver, not mailer-daemon (the technical sender). `_counterparty`
+            # would otherwise happily return mailer-daemon here, since it isn't
+            # the user or the capture address — see extractors.bounced_recipient
+            # for the recovery order (X-Failed-Recipients, else the DSN's
+            # Final-Recipient, else the attached original's To:).
+            counterparty_email = classification.signals.get("failed_recipient", "")
+            counterparty_name = ""
+        else:
+            counterparty_email, counterparty_name = self._counterparty(parsed, user, direction)
 
         provider = "bcc" if direction == "outbound" else "forward"
-        provider_ref = parsed.message_id or self._synthetic_ref(parsed, user)
+        provider_ref = parsed.message_id or self._synthetic_ref(parsed, user, counterparty_email)
 
         return InteractionEvent(
             user_id=user.pk,
@@ -281,22 +306,38 @@ class InboundEmailProvider(CaptureProvider):
         if direction == "inbound":
             if parsed.from_email and not is_self_or_capture(parsed.from_email):
                 return parsed.from_email, parsed.from_name
-            # Forwarded mail can put the original sender in the body; v1 falls
-            # back to the first non-self recipient rather than parsing bodies.
+            # Fall through to the recipients rather than parsing a body for an
+            # embedded sender. Genuine forwards (where the real correspondent
+            # only exists inside the body) are caught upstream by
+            # `extractors.detect_forward` and never reach the apply path.
         for name, addr in parsed.recipients:
             if addr and not is_self_or_capture(addr):
                 return addr, name
-        # Nothing usable — leave blank; the resolver/needs_review path copes.
+        # Nothing usable — leave blank. `services.resolve_contact` REFUSES to
+        # invent a contact from a blank pair (UnidentifiableContactError) and
+        # the event lands in needs_review; this must never be read as licence
+        # to create a placeholder.
         return "", ""
 
     @staticmethod
-    def _synthetic_ref(parsed: ParsedInbound, user) -> str:
+    def _synthetic_ref(parsed: ParsedInbound, user, counterparty_email: str) -> str:
         """Stable fallback dedup key when an email has no Message-ID: a hash of
-        (user, sender, subject, date). Deterministic, so a redelivery of the
-        same header-less message still de-dupes."""
+        (user, sender, counterparty, subject, date). Deterministic, so a
+        redelivery of the same header-less message still de-dupes.
+
+        `counterparty_email` is load-bearing: without it, a batch of
+        templated cold emails sent to different people in the same second
+        (same sender, same subject, same date, no Message-ID) all hashed to
+        the SAME key — the first one landed, and the rest silently returned
+        "duplicate" with no contact resolved and no touch logged. Keying on
+        the resolved counterparty (the one address each of those emails
+        actually differs on) is enough to tell them apart; the caller may
+        pass "" when no counterparty could be resolved at all, in which case
+        this degrades to exactly the old behavior for that one message."""
         basis = "|".join([
             str(user.pk),
             extractors.normalize_email(parsed.from_email),
+            extractors.normalize_email(counterparty_email),
             (parsed.subject or "").strip(),
             parsed.occurred_at.isoformat() if parsed.occurred_at else "",
         ])

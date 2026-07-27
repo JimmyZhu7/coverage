@@ -231,8 +231,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      firm-column cards below.
      ====================================================================== */
 
+  {# Text is now "First seen Nd ago" rather than bare "NEW" (see views.py's
+     `_fresh_label` — the badge must say what it measures), so uppercase +
+     wide letter-spacing (tuned for a 3-letter word) would both shout and
+     wrap; sentence case + nowrap keeps it a single-line pill. #}
   .fresh-badge { flex: none; font-size: 10px; font-weight: var(--w-bold);
-    text-transform: uppercase; letter-spacing: 0.06em; color: #fff;
+    white-space: nowrap; color: #fff;
     background: var(--ok); border-radius: 999px; padding: 2px 9px;
     animation: pop-in 500ms cubic-bezier(0.22, 1.4, 0.4, 1) both; }
   @keyframes pop-in { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: scale(1); } }
@@ -247,11 +251,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .fuse-today .fuse-fill { background: var(--danger); }
   .fuse-soon  .fuse-fill { background: #c1652f; }
   .fuse-upcoming .fuse-fill { background: var(--accent); }
+  {# A passed deadline (fuse_pct=0, see views.py's _urgency_item) has no
+     colour rule of its own otherwise: .fuse-fill has no default background,
+     so the bar would render fully burnt AND invisible. Muted, not red — a
+     dead deadline is not an active alarm. #}
+  .fuse-passed .fuse-fill { background: var(--ink-3); }
   .fuse-label { font-size: var(--fs-xs); font-weight: var(--w-med); white-space: nowrap;
     font-family: var(--font-mono); }
   .fuse-today .fuse-label { color: var(--danger); }
   .fuse-soon .fuse-label  { color: #a8501f; }
   .fuse-upcoming .fuse-label { color: var(--accent-ink); }
+  .fuse-passed .fuse-label { color: var(--ink-3); }
   .urg-today .fuse-fill { animation: fuse-burn 900ms both, pulse-red 1.6s ease-in-out 1s infinite; }
   @keyframes pulse-red { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 

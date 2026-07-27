@@ -86,8 +86,20 @@ def confirm(request, event_id: int):
     kind = request.POST.get("touch_kind", "reply_received")
     try:
         services.confirm_event(request.user, event_id, kind)
-    except (CaptureEvent.DoesNotExist, ValueError):
-        pass  # stale/foreign id or bad kind — fall through to a fresh queue
+    except (
+        CaptureEvent.DoesNotExist,
+        ValueError,
+        services.AmbiguousContactError,
+        services.UnidentifiableContactError,
+    ):
+        # Stale/foreign id, bad kind, (still) an ambiguous name match, or an
+        # event that names nobody to log against (a forward, typically) —
+        # the event stays needs_review either way. Fall through to a fresh
+        # queue rather than surface an error for what the review queue
+        # itself exists to handle. Confirming a forward is the one case the
+        # queue can't yet resolve on its own: the user has to add or pick the
+        # contact first, then log the touch from the contact page.
+        pass
     return redirect(reverse("capture:review"))
 
 

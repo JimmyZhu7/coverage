@@ -26,7 +26,7 @@ from analytics.events import record_event
 from capture import extractors
 from capture.providers import InboundEmailProvider, InteractionEvent, ParsedInbound
 from crm import services as crm_services
-from crm.models import CaptureEvent, Contact
+from crm.models import CaptureEvent, Contact, Touch
 
 User = get_user_model()
 
@@ -94,12 +94,60 @@ def resolve_user(parsed: ParsedInbound):
 # Resolver: counterparty -> contact (email, else name, else create pending)
 # --------------------------------------------------------------------------- #
 
+class AmbiguousContactError(Exception):
+    """More than one of the user's contacts share this normalized name (see
+    resolve_contact). Silently picking the first one found (previous
+    behavior — whichever row the queryset happened to yield first) would
+    land the touch on the wrong person as often as the right one, e.g. two
+    "Michael Chen"s at different firms. The caller must route this to
+    needs_review instead of guessing; a single unambiguous name match is
+    unaffected and keeps resolving exactly as before."""
+
+    def __init__(self, name: str, count: int):
+        super().__init__(f"{count} contacts match name {name!r} — ambiguous")
+        self.name = name
+        self.count = count
+
+
+class UnidentifiableContactError(Exception):
+    """The event names nobody: neither a counterparty email nor a name.
+
+    THE GUARD THAT STOPS JUNK CONTACTS. A contact row with no name and no
+    address is not a lead the user can act on — it is a row that says "an
+    email happened". The auto-create below used to reach its `or "Unknown
+    contact"` fallback and make one anyway, complete with an `outreach`
+    touch, so N unparseable messages produced N identical placeholder people
+    cluttering the Network board with a warmth ratchet each.
+
+    Every path that can produce a nameless, address-less counterparty is
+    ambiguous by definition (a forward whose envelope describes the student,
+    a message with no readable From and no usable recipient), so the honest
+    destination is the review queue — where the user says who it was — not a
+    fabricated row asserting that somebody exists.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("no counterparty name or email — refusing to create a contact")
+
+
 def resolve_contact(user, email: str, name: str) -> tuple[Contact, bool]:
     """Match the counterparty to one of the user's contacts by email, else by
     normalized name; unknown -> auto-create a ``pending`` contact for one-click
-    confirm. Returns (contact, created)."""
+    confirm. Returns (contact, created).
+
+    Raises:
+        AmbiguousContactError: more than one contact shares the normalized
+            name and there's no email to disambiguate with.
+        UnidentifiableContactError: neither a name nor an email was supplied,
+            so there is nobody to match and nobody to create.
+    """
     email = (email or "").strip()
     name = (name or "").strip()
+
+    # Checked before any query: with both blank there is nothing to match on
+    # either, so every branch below would fall through to the create anyway.
+    if not email and not name:
+        raise UnidentifiableContactError()
 
     scoped = Contact.objects.for_user(user).filter(archived=False)
 
@@ -112,15 +160,22 @@ def resolve_contact(user, email: str, name: str) -> tuple[Contact, bool]:
         norm = extractors.normalize_name(name)
         # Small per-user contact counts make an in-Python normalized compare
         # cheap and robust to spacing/case differences a DB iexact would miss.
-        for contact in scoped:
-            if contact.name and extractors.normalize_name(contact.name) == norm:
-                return contact, False
+        matches = [
+            contact for contact in scoped
+            if contact.name and extractors.normalize_name(contact.name) == norm
+        ]
+        if len(matches) > 1:
+            raise AmbiguousContactError(name, len(matches))
+        if matches:
+            return matches[0], False
 
     # Unknown -> create a pending contact (all_objects + explicit user, per the
     # tenancy contract: all_objects for creation, .for_user for scoped reads).
+    # `name or email` cannot be empty here — the guard at the top of this
+    # function already refused that case.
     contact = Contact.all_objects.create(
         user=user,
-        name=name or email or "Unknown contact",
+        name=name or email,
         email=email,
         source=PENDING_SOURCE,
     )
@@ -131,10 +186,35 @@ def resolve_contact(user, email: str, name: str) -> tuple[Contact, bool]:
 # Apply: signals -> touch kind -> ported ratchet
 # --------------------------------------------------------------------------- #
 
+def _clamped_occurred_at(occurred_at):
+    """`event.occurred_at` is parsed from the email's Date header — a student
+    forwarding/syncing last week's reply must still ratchet with THAT touch
+    timestamped when it happened, not when it was ingested, or the cadence's
+    business-day math, the fit score's recency/latency axes, and the
+    thank-you window all read the wrong age for it. But a forged or
+    misparsed Date header must never produce a touch in the future (which
+    would sort ahead of "now" everywhere that reads Touch.ts), so this
+    clamps to the wall clock at call time rather than trusting the header
+    past "now". Returns None unchanged — `apply_touch` already defaults a
+    None `now` to the current time itself."""
+    if occurred_at is None:
+        return None
+    now = timezone.now()
+    return occurred_at if occurred_at <= now else now
+
+
 def _apply_touch_for_event(user, capture_event: CaptureEvent, event: InteractionEvent) -> dict:
     """Resolve the contact and advance the warmth ratchet for a classified,
     actionable event. Sets ``status='applied'`` and records instrumentation.
-    Returns the dict of changed contact columns (warmth/thread_state)."""
+    Returns the dict of changed contact columns (warmth/thread_state).
+
+    Raises:
+        AmbiguousContactError: propagated from resolve_contact — the caller
+            (ingest_inbound_email / confirm_event) is responsible for
+            routing this to needs_review instead of guessing which contact.
+        UnidentifiableContactError: likewise propagated — the event names
+            nobody, so there is no contact to ratchet.
+    """
     contact, _created = resolve_contact(
         user, event.counterparty_email, event.counterparty_name
     )
@@ -144,8 +224,21 @@ def _apply_touch_for_event(user, capture_event: CaptureEvent, event: Interaction
     note = f"[capture:{capture_event.id}] {event.direction} via {event.provider}"
 
     updates = crm_services.log_touch(
-        user.id, contact.id, event.touch_kind, "email", note=note
+        user.id, contact.id, event.touch_kind, "email", note=note,
+        now=_clamped_occurred_at(event.occurred_at),
+        source="capture",
     )
+
+    # Touch.capture_event is a declared FK that nothing ever populated — see
+    # pipeline.TouchResult's docstring for why `apply_touch` can hand back
+    # the inserted row's id without changing its return contract for every
+    # other caller. Scoped through .for_user even though we just created
+    # this exact row moments ago, matching the tenancy convention that a
+    # write always goes through an explicit user scope, not an unscoped pk.
+    if updates.touch_id is not None:
+        Touch.objects.for_user(user).filter(pk=updates.touch_id).update(
+            capture_event=capture_event
+        )
 
     capture_event.status = "applied"
     capture_event.save(update_fields=["status"])
@@ -257,7 +350,33 @@ def ingest_inbound_email(payload: dict) -> IngestResult:
             },
         )
 
-    updates = _apply_touch_for_event(user, capture_event, event)
+    try:
+        updates = _apply_touch_for_event(user, capture_event, event)
+    except AmbiguousContactError:
+        # Two+ contacts share this normalized name and there's no email to
+        # tell them apart — logging the touch on whichever one the query
+        # happened to return first would be a guess dressed up as certainty.
+        # Park it for a human instead of silently picking one.
+        capture_event.status = "needs_review"
+        capture_event.save(update_fields=["status"])
+        return IngestResult(
+            status="needs_review",
+            http_status=200,
+            detail={"event_id": capture_event.id, "reason": "ambiguous_contact_name"},
+        )
+    except UnidentifiableContactError:
+        # The classifier was confident enough to pick a touch kind, but the
+        # message names nobody to hang it on. Same destination as the
+        # ambiguous case and for the same reason: the user knows who this
+        # was, and one click is cheaper than a placeholder contact that
+        # nobody can ever reconcile.
+        capture_event.status = "needs_review"
+        capture_event.save(update_fields=["status"])
+        return IngestResult(
+            status="needs_review",
+            http_status=200,
+            detail={"event_id": capture_event.id, "reason": "unidentifiable_contact"},
+        )
     return IngestResult(
         status="applied",
         http_status=200,
@@ -296,6 +415,12 @@ def confirm_event(user, event_id: int, touch_kind: str) -> dict:
         direction=capture_event.direction or "inbound",
         counterparty_email=capture_event.counterparty_email,
         counterparty_name=capture_event.counterparty_name,
+        # The event this confirmation applies to already recorded when the
+        # underlying email happened — carry it through so a confirmed
+        # needs_review item ratchets at that time too, not at confirm-click
+        # time (same reasoning as the auto-applied path; see
+        # _clamped_occurred_at).
+        occurred_at=capture_event.occurred_at,
         touch_kind=touch_kind,
     )
     return _apply_touch_for_event(user, capture_event, event)

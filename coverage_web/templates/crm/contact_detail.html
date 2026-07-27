@@ -21,8 +21,31 @@
         {% if contact.school_affiliation %} · <span class="chip">alum</span>{% endif %}
       </p>
     </div>
-    <a class="btn" href="{% url 'crm:contact_edit' contact.pk %}">Edit</a>
+    <div class="actions">
+      <a class="btn" href="{% url 'crm:contact_edit' contact.pk %}">Edit</a>
+      {% comment %}
+      Archive is a POST, not a link: it changes state, and a GET that hides a
+      contact would fire on any crawl or prefetch of this page.
+      {% endcomment %}
+      {% if not contact.archived %}
+        <form method="post" action="{% url 'crm:contact_archive' contact.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn">Archive</button>
+        </form>
+      {% endif %}
+    </div>
   </div>
+
+  {% if contact.archived %}
+    <div class="panel">
+      <p><strong>Archived.</strong> They're off the board and out of the
+      cadence queue. Their history is intact.</p>
+      <form method="post" action="{% url 'crm:contact_unarchive' contact.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary">Unarchive</button>
+      </form>
+    </div>
+  {% endif %}
 
   <div class="panel">
     {% if contact.email %}

@@ -20,6 +20,7 @@ Honesty limits of this source, stated up front:
 
 from __future__ import annotations
 
+import html
 import re
 import urllib.parse
 
@@ -30,10 +31,6 @@ name = "sitemap"
 
 _LOC_RE = re.compile(r"<loc>([^<]+)</loc>")
 _SLUG_RE = re.compile(r"/job/([^/]+)/\d+/?$")
-# HSBC slugs truncate "…-Hong-Kong" to "…-Hong"; a bare "Hong" token still
-# reliably identifies a Hong Kong posting in that feed (verified: no
-# Singapore/UK row carries it), hence token- rather than phrase-matching.
-_HK_TOKEN_RE = re.compile(r"\bhong\b", re.IGNORECASE)
 
 # Known sitemap URLs per host, for verify()'s re-read. Registered by the
 # board catalog at import time via `register_sitemap`, so verify(url) can
@@ -58,9 +55,22 @@ def _rows(xml: str, path_filter: str) -> list[dict]:
         rows.append({
             "url": loc,
             "title": title,
-            "location": "Hong Kong" if _HK_TOKEN_RE.search(slug) else "",
+            # NEVER inferred from the slug (a "Hong" token used to stamp
+            # "Hong Kong" here) — `models.py`'s `Opportunity.location` is
+            # documented as "nothing here is inferred, guessed, or filled
+            # in"; a sitemap carries no location field, so the honest answer
+            # is blank, same as every other field this source doesn't have.
+            "location": "",
         })
     return rows
+
+
+def _sitemap_urls(xml: str) -> set[str]:
+    """Every `<loc>` value in `xml`, HTML-entity-unescaped, as an exact set
+    for MEMBERSHIP testing — not a raw substring scan (see `verify` below
+    for the two bugs that produced).
+    """
+    return {html.unescape(loc) for loc in _LOC_RE.findall(xml)}
 
 
 def fetch(board: SitemapBoard) -> FetchResult:
@@ -69,14 +79,17 @@ def fetch(board: SitemapBoard) -> FetchResult:
         register_sitemap(host, board.sitemap_url)
     try:
         xml = fetch_text(board.sitemap_url)
+        rows = _rows(xml, board.path_filter)
+        # Kept inside this try — see greenhouse.py's fetch() for why a
+        # normalization failure must not propagate uncaught out of
+        # `fetch()`.
+        opportunities = [
+            Opportunity(firm=board.firm, title=r["title"], location=r["location"],
+                        url=r["url"], source="sitemap", raw=r)
+            for r in rows
+        ]
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    rows = _rows(xml, board.path_filter)
-    opportunities = [
-        Opportunity(firm=board.firm, title=r["title"], location=r["location"],
-                    url=r["url"], source="sitemap", raw=r)
-        for r in rows
-    ]
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(rows))
 
 
@@ -90,7 +103,15 @@ def classify_url(url: str) -> dict | None:
 def verify(url: str) -> VerificationResult:
     """Re-read the source sitemap: still listed -> verified-open; missing
     from its own sitemap -> closed. (The posting page itself is a JS shell
-    that 200s regardless, so a page fetch proves nothing.)"""
+    that 200s regardless, so a page fetch proves nothing.)
+
+    Exact `<loc>` membership (`_sitemap_urls`), not a raw `url in xml`
+    substring test — that used to fail two ways: `.../job/X/123` is itself a
+    string-prefix of `.../job/X/1234`, so a REMOVED posting could read as
+    still-open just because a longer id happens to share its prefix; and
+    sitemaps escape `&` as `&amp;`, so any URL with a query string (a `&`)
+    could never match the raw, unescaped `url` and would read as closed even
+    while genuinely still listed."""
     info = classify_url(url)
     if not info:
         return VerificationResult("sitemap", url, "needs-verification",
@@ -100,7 +121,7 @@ def verify(url: str) -> VerificationResult:
         xml = fetch_text(sitemap_url)
     except Exception as e:  # noqa: BLE001
         return VerificationResult("sitemap", url, "unreachable", str(e)[:200], [])
-    if url in xml:
+    if url in _sitemap_urls(xml):
         return VerificationResult("sitemap", url, "verified-open",
                                    "URL is still listed in the site's own sitemap", [])
     return VerificationResult("sitemap", url, "closed",

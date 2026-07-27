@@ -66,10 +66,16 @@ def fetch(board: LeverBoard) -> FetchResult:
     url = _POSTINGS_URL.format(org=board.org)
     try:
         data = fetch_json(url)
+        jobs = data if isinstance(data, list) else []
+        # Normalization stays inside this try — see greenhouse.py's fetch()
+        # for why: `_normalize` does `(job.get("categories") or {}).get(
+        # "location", "")`, which raises if `categories` ever arrives as
+        # something other than a dict, and an uncaught exception here would
+        # make `fetch_many` discard every OTHER board's results, not just
+        # this one's.
+        opportunities = [_normalize(j, board) for j in jobs]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    jobs = data if isinstance(data, list) else []
-    opportunities = [_normalize(j, board) for j in jobs]
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(jobs))
 
 

@@ -288,6 +288,14 @@ def _build_actions(user):
 
 
 # Quick-action "Sent" → the touch kind it logs, per cadence action.
+# "park" is deliberately ABSENT: it has no "Sent" quick-action at all (see
+# today_act's dedicated 'park' verb below) — it doesn't route through
+# log_touch, so it needs no touch kind here. It used to map to "maintain",
+# which meant clicking "Park it" logged a fabricated "Kept warm" touch and
+# left thread_state untouched, so a parked contact kept reappearing in the
+# queue with the same nag forever. Parking is a state change (thread_state
+# -> 'parked'), not an interaction, and now goes through
+# services.set_contact_state instead.
 _ACTION_TOUCH: dict[str, str] = {
     "first_outreach": "outreach",
     "follow_up": "follow_up",
@@ -296,7 +304,6 @@ _ACTION_TOUCH: dict[str, str] = {
     "maintain": "maintain",
     "advance": "outreach",
     "confirm_chat": "chat",
-    "park": "maintain",
 }
 
 # Weekly pace target — touches logged Monday-to-now. The product default, used
@@ -384,8 +391,9 @@ def week(request: HttpRequest) -> HttpResponse:
 @require_POST
 def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     """A Today-card quick action: log a Sent/Reply touch (advancing the
-    cadence) or Snooze/Skip the contact out of the queue. Re-renders the
-    whole cockpit so the queue, pace, and activity feed stay in sync."""
+    cadence), Park a contact out of the cadence entirely, or Snooze/Skip it
+    out of today's queue. Re-renders the whole cockpit so the queue, pace,
+    and activity feed stay in sync."""
     contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
     now = timezone.now()
     if verb == "sent":
@@ -396,6 +404,16 @@ def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     elif verb == "reply":
         services.log_touch(request.user.id, contact.id, "reply_received", "email", None)
         record_event("touch_logged", user=request.user, source="today")
+    elif verb == "park":
+        # A deliberate exit from the cadence, not an interaction: goes
+        # through the manual-override path (audited touch, no fabricated
+        # "Kept warm" entry) and actually changes thread_state so the
+        # contact stops reappearing in the queue. See _ACTION_TOUCH's
+        # comment for why this can't just be another "sent" kind.
+        services.set_contact_state(
+            request.user.id, contact.id,
+            thread_state="parked", note="Parked from the Today queue",
+        )
     elif verb == "snooze":
         Contact.objects.for_user(request.user).filter(pk=pk).update(
             snoozed_until=now + timedelta(days=3)
@@ -444,10 +462,20 @@ def debrief(request: HttpRequest, pk: int) -> HttpResponse:
             if made.get("intro_task") or made.get("date_task"):
                 n = bool(made.get("intro_task")) + bool(made.get("date_task"))
                 notes.append(f"{n} task{'s' if n > 1 else ''} created")
-            messages.success(
-                request,
-                "Debrief saved" + (f" — {', '.join(notes)}." if notes else "."),
-            )
+            # `made` is empty exactly when `record` wrote nothing — an
+            # unchanged resubmit. Saying "Debrief saved." there is a lie the
+            # user can't check, and it was covering a real bug: the note
+            # append used to be gated on `learned` being EMPTY, so every edit
+            # to the text was silently discarded under this same green
+            # banner. The gate is fixed (see crm.debrief.record); the message
+            # now also only claims what happened.
+            if made:
+                messages.success(
+                    request,
+                    "Debrief saved" + (f" — {', '.join(notes)}." if notes else "."),
+                )
+            else:
+                messages.info(request, "No changes to save.")
             return redirect("crm:debrief", pk=touch.pk)
     else:
         form = ChatDebriefForm(instance=existing)
@@ -585,8 +613,13 @@ def contact_region(c) -> str | None:
     decides this question (branch 3 scopes its pre-deadline re-ping by region),
     and if the Network page answered it differently the product would show a
     person under "Hong Kong" while re-pinging them against US deadlines. One
-    function, one answer: explicit `Contact.region` wins, and the legacy
-    `source` inference is consulted only when that column is blank.
+    function, one answer: the explicit `Contact.region` column, or None.
+
+    `source` is still passed for shape compatibility with the engine's input
+    dicts, but nothing reads it — the legacy provenance-text inference was
+    retired from the read path (see `cadence.contact_region`). That retirement
+    is what finally lets `_in_scope`'s firm fallback below actually run: it
+    was written for a None that the old inference never returned.
     """
     return cadence.contact_region({"region": c.region, "source": c.source})
 
@@ -597,11 +630,11 @@ def _in_scope(c, scope: str) -> bool:
     Precedence, mirroring `cadence.contact_region` exactly so the two can never
     disagree about a person:
 
-      1. Resolved region (explicit `Contact.region`, else the legacy `source`
-         inference) matches the scope -> in, and ONLY in, that one tab.
-      2. Resolved region is None — the contact has no region set and no source
-         to guess from, i.e. genuinely unknown — fall back to the firm's
-         regions, which can put the contact in more than one tab.
+      1. Resolved region (the explicit `Contact.region` column) matches the
+         scope -> in, and ONLY in, that one tab.
+      2. Resolved region is None — the contact has no region set, i.e.
+         genuinely unknown — fall back to the firm's regions, which can put
+         the contact in more than one tab.
 
     Step 2 is deliberately the LAST resort rather than the first, which is the
     whole fix. A firm's `regions` describes the FIRM, not the person: most
@@ -628,7 +661,7 @@ def _in_scope(c, scope: str) -> bool:
     return bool(c.firm and scope in (c.firm.regions or []))
 
 
-def _contact_card(c, *, tier, today):
+def _contact_card(c, *, tier, today, capture_addr):
     """One full contact card (radar style): initials, pills, firm · role,
     note bullets in plain grammar, and days since the last touch."""
     parts = [p for p in (c.name or "").split() if p]
@@ -652,6 +685,13 @@ def _contact_card(c, *, tier, today):
         "region": (c.region or "").upper(),
         "bullets": bullets[:3],
         "days_since": days_since,
+        # Compose surface: same rule as every other mailto: on the site (§5)
+        # — BCC'd to the capture address, body from `opener` ONLY, never
+        # `angle` (that's the user's private note ABOUT the person, not a
+        # draft addressed TO them). Before this, the Network board's email
+        # link was a bare `mailto:` with no BCC, so a send started here was
+        # invisible to Coverage's capture pipeline.
+        "mailto": _mailto(c.email or "", capture_addr, body=(c.opener or "")),
     }
 
 
@@ -664,7 +704,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     warmth."""
     user = request.user
     today = timezone.localdate()
-    actions, _, _ = _build_actions(user)
+    actions, _, capture_addr = _build_actions(user)
 
     contacts = list(
         Contact.objects.for_user(user)
@@ -850,7 +890,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 "key": "school",
                 "label": name,
                 "cards": [
-                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today)
+                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today, capture_addr=capture_addr)
                     for c in by_school[name]
                 ],
             })
@@ -864,7 +904,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 "key": key,
                 "label": label,
                 "cards": [
-                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today)
+                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today, capture_addr=capture_addr)
                     for c in members
                 ],
             })
@@ -946,10 +986,85 @@ def contact_edit(request: HttpRequest, pk: int) -> HttpResponse:
                   {"form": form, "mode": "edit", "contact": contact})
 
 
+# ---------------------------------------------------------------------------
+# 2b. Archive / unarchive — the contact lifecycle's exit AND its way back.
+# ---------------------------------------------------------------------------
+# `Contact.archived` has existed since the first migration and every query in
+# the app filters on it, but nothing could ever SET it from the UI and no page
+# ever listed the rows it hid. That made it a one-way trapdoor operated only by
+# automated paths: 25 of the founder's 137 contacts sat archived and invisible,
+# and because both capture resolvers filter `archived=False`, a later genuine
+# reply from one of them FORKED a new contact rather than resurrecting the old
+# one — the history split in two and neither half was complete.
+#
+# The three views below are the missing half. Archiving is now something a
+# person does on purpose and can undo; correspondingly, no automated path
+# archives at all any more (see capture/gmail.py's bounce block).
+def _set_archived(request: HttpRequest, pk: int, *, archived: bool) -> Contact:
+    """Flip `archived` on one of the user's contacts. A plain ORM write on
+    purpose: `archived` is a UI/lifecycle flag, not part of the
+    warmth/thread_state ratchet that must go through `crm.services`. It
+    changes nothing about the relationship's history — every touch stays on
+    the row and comes back with it."""
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    if contact.archived != archived:
+        contact.archived = archived
+        contact.save(update_fields=["archived"])
+    return contact
+
+
+@login_required
+@require_POST
+def contact_archive(request: HttpRequest, pk: int) -> HttpResponse:
+    """Archive a contact: off the Network board, out of the cadence queue,
+    out of coverage counts — but not deleted, and one click from coming
+    back."""
+    contact = _set_archived(request, pk, archived=True)
+    record_event("contact_archived", user=request.user)
+    messages.success(
+        request,
+        f"Archived {contact.name}. They're in Archived Contacts if you want "
+        "them back.",
+    )
+    return redirect("crm:contact_list")
+
+
+@login_required
+@require_POST
+def contact_unarchive(request: HttpRequest, pk: int) -> HttpResponse:
+    """Bring a contact back, with their whole touch history intact."""
+    contact = _set_archived(request, pk, archived=False)
+    record_event("contact_unarchived", user=request.user)
+    messages.success(request, f"{contact.name} is back on your board.")
+    return redirect("crm:contact_detail", pk=contact.pk)
+
+
+@login_required
+def contact_archived(request: HttpRequest) -> HttpResponse:
+    """The archived list — the view that makes archiving reversible in
+    practice rather than only in principle. Deliberately plain: this is a
+    recovery surface, not a second Network board."""
+    contacts = list(
+        Contact.objects.for_user(request.user)
+        .filter(archived=True)
+        .select_related("firm")
+        .annotate(last_touch_ts=models_Max("touches__ts"))
+        .order_by("name")
+    )
+    return render(
+        request,
+        "crm/contact_archived.html",
+        {"contacts": contacts, "contact_total": len(contacts)},
+    )
+
+
 @login_required
 def contact_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # for_user() 404s cleanly for another tenant's id (indistinguishable from
-    # a non-existent id — the tenancy guarantee, §2).
+    # a non-existent id — the tenancy guarantee, §2). Not filtered on
+    # `archived`: an archived contact's page must stay reachable, or the
+    # Archived list would have nowhere to link and unarchiving would have no
+    # home.
     contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
     context = _contact_live_context(request, contact)
     # §6: the fit score is computed on the fly and shown here — record the view.

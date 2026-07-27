@@ -73,16 +73,38 @@ def test_oracle_fetch_dedupes_across_keywords(monkeypatch):
     assert result.opportunities[1].deadline is None
 
 
-def test_oracle_verify_id_found_and_missing(monkeypatch):
+def test_oracle_verify_id_found(monkeypatch):
     monkeypatch.setattr(oracle_mod, "fetch_json", lambda url, **kw: _ORACLE_PAYLOAD)
     url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210658163"
     v = verify(url)
     assert v.provider == "oracle" and v.result == "verified-open"
     assert v.deadline_dates == ["2026-09-15"]
 
+
+def test_oracle_verify_does_not_close_when_id_is_missing(monkeypatch):
+    """PINS A FIXED BUG (C3): this test used to be named
+    `test_oracle_verify_id_found_and_missing` and asserted the "missing" half
+    resolved to `result == "closed"`. `_search` returns `[]` both for a
+    genuine empty result AND for a missing/renamed envelope key
+    (`data.get("items", [])` / `items[0].get("requisitionList", [])`) — those
+    two cases are indistinguishable at the call site, so treating "not
+    found" as "closed" risked a one-shot feed deletion on nothing more than
+    an API shape Oracle changed. Not found must be `needs-verification`."""
+    monkeypatch.setattr(oracle_mod, "fetch_json", lambda url, **kw: _ORACLE_PAYLOAD)
+    url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210658163"
     gone = url.replace("210658163", "999999999")
     v = verify(gone)
-    assert v.result == "closed"
+    assert v.result == "needs-verification"
+
+
+def test_oracle_verify_does_not_close_on_a_malformed_envelope(monkeypatch):
+    """The concrete failure mode C3 describes: Oracle renames/omits a key
+    (here, `items` itself is missing) and `_search` swallows it into `[]`,
+    exactly as it would for a genuinely empty result. Must not close."""
+    monkeypatch.setattr(oracle_mod, "fetch_json", lambda url, **kw: {"unexpectedKey": []})
+    url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210658163"
+    v = verify(url)
+    assert v.result == "needs-verification"
 
 
 # --------------------------------------------------------------------- talnet
@@ -143,13 +165,19 @@ _SITEMAP_XML = """<?xml version="1.0"?>
 
 
 def test_sitemap_fetch_filters_path_and_derives_titles(monkeypatch):
+    """PINS A FIXED BUG (C7): this test used to assert `hk.location ==
+    "Hong Kong"`, inferred from a bare "Hong" token surviving HSBC's slug
+    truncation ("…-Hong-Kong" -> "…-Hong"). That directly violated
+    `models.py`'s "nothing here is inferred, guessed, or filled in" — a
+    sitemap carries no location field at all, so every row's location must
+    be blank, the same honest answer as any other field this source lacks."""
     monkeypatch.setattr(sitemap_mod, "fetch_text", lambda url, **kw: _SITEMAP_XML)
     result = fetch(HSBC)
     assert result.ok
     assert len(result.opportunities) == 2        # the /careers/ row is filtered out
     hk = result.opportunities[0]
     assert hk.title == "Global Banking Internship Hong"
-    assert hk.location == "Hong Kong"            # truncated-slug "Hong" token rule
+    assert hk.location == ""                     # never inferred from the slug
     assert result.opportunities[1].location == ""
 
 
@@ -162,6 +190,33 @@ def test_sitemap_verify_rereads_the_sitemap(monkeypatch):
     assert verify(gone).result == "closed"
 
 
+def test_sitemap_verify_does_not_false_open_on_a_shared_id_prefix(monkeypatch):
+    """PINS C6's fix: a raw `url in xml` substring test false-matches a
+    REMOVED posting whose id is a string-prefix of a still-listed one —
+    ".../job/X/123" is literally a substring of ".../job/X/1234". Exact
+    `<loc>` membership must tell these apart."""
+    xml = ('<urlset><url><loc>https://apply.careers.hsbc.com/emergingtalent/'
+           'job/Global-Banking-Internship-Hong/1234</loc></url></urlset>')
+    monkeypatch.setattr(sitemap_mod, "fetch_text", lambda url, **kw: xml)
+    fetch(SitemapBoard(firm="HSBC", sitemap_url="https://apply.careers.hsbc.com/sitemap.xml",
+                        path_filter="/emergingtalent/job/"))
+    removed = "https://apply.careers.hsbc.com/emergingtalent/job/Global-Banking-Internship-Hong/123"
+    assert verify(removed).result == "closed"
+
+
+def test_sitemap_verify_does_not_false_close_on_an_escaped_ampersand(monkeypatch):
+    """PINS C6's fix: sitemaps escape `&` as `&amp;` in `<loc>`, so a stored
+    URL with a real `&` (a query string) never matches raw against the
+    escaped text — a false "closed" on a posting that is genuinely still
+    listed. Unescaping before the exact-membership test fixes it."""
+    listed_url = "https://apply.careers.hsbc.com/emergingtalent/job/Role-Hong/555?a=1&b=2"
+    xml = f'<urlset><url><loc>{listed_url.replace("&", "&amp;")}</loc></url></urlset>'
+    monkeypatch.setattr(sitemap_mod, "fetch_text", lambda url, **kw: xml)
+    fetch(SitemapBoard(firm="HSBC", sitemap_url="https://apply.careers.hsbc.com/sitemap.xml",
+                        path_filter="/emergingtalent/job/"))
+    assert verify(listed_url).result == "verified-open"
+
+
 # ---------------------------------------------------- mckinsey / phenom / gs
 
 from coverage_connectors import GoldmanSachsBoard, McKinseyBoard, PhenomBoard
@@ -172,6 +227,10 @@ from coverage_connectors import phenom as phenom_mod
 
 def test_mckinsey_paginates_and_dedupes(monkeypatch):
     payload = {"numFound": 2, "docs": [
+        # Cities deliberately NOT in alphabetical order in the source payload
+        # — `_location` must sort before formatting (C9) so a reordered-but-
+        # unchanged `cities` array on a later fetch can never flip which city
+        # is reported "first" and, with it, `content_hash`.
         {"jobID": "1", "title": "Business Analyst Intern", "cities": ["New York", "Boston"],
          "friendlyURL": "business-analyst-intern"},
         {"jobID": "2", "title": "Campus Recruiter", "cities": ["Chicago"],
@@ -181,8 +240,55 @@ def test_mckinsey_paginates_and_dedupes(monkeypatch):
     result = fetch(McKinseyBoard(firm="McKinsey & Company", keywords=("intern",)))
     assert result.ok and len(result.opportunities) == 2
     ba = result.opportunities[0]
-    assert ba.location == "New York +1 more"       # multi-city honesty
+    assert ba.location == "Boston +1 more"       # multi-city honesty, sorted
     assert ba.url.endswith("/business-analyst-intern")
+
+
+def test_mckinsey_verify_open_when_slug_matches(monkeypatch):
+    payload = {"numFound": 1, "docs": [
+        {"jobID": "1", "title": "Business Analyst Intern", "cities": ["Boston"],
+         "friendlyURL": "business-analyst-intern"},
+    ]}
+    monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: payload)
+    v = verify("https://www.mckinsey.com/careers/search-jobs/jobs/business-analyst-intern")
+    assert v.result == "verified-open"
+
+
+def test_mckinsey_verify_does_not_close_when_slug_is_absent(monkeypatch):
+    """PINS C4's fix: `verify` only checks ONE 50-row page with a keyword
+    derived by lopping the slug's first token off — nowhere near the full
+    board `fetch` walks. A slug not on that single page is not a confirmed
+    closure, just a coverage gap in this connector's own re-check."""
+    monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: {"numFound": 0, "docs": []})
+    v = verify("https://www.mckinsey.com/careers/search-jobs/jobs/business-analyst-intern")
+    assert v.result == "needs-verification"
+
+
+def test_mckinsey_verify_does_not_close_on_a_malformed_envelope(monkeypatch):
+    """The concrete C4 failure mode: `docs` renamed/missing silently becomes
+    `[]` via `.get("docs", [])`, indistinguishable from a genuine zero
+    matches. Must not close."""
+    monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: {"unexpectedKey": []})
+    v = verify("https://www.mckinsey.com/careers/search-jobs/jobs/business-analyst-intern")
+    assert v.result == "needs-verification"
+
+
+def test_mckinsey_location_is_stable_regardless_of_city_order(monkeypatch):
+    """PINS C9's fix directly: the same two cities in the opposite order must
+    format identically, or a later fetch that gets them back in a different
+    order (same posting, same cities) would flip `content_hash` for a role
+    nothing actually changed about."""
+    forward = {"numFound": 1, "docs": [
+        {"jobID": "1", "title": "Role", "cities": ["Zurich", "Amsterdam"], "friendlyURL": "role"},
+    ]}
+    backward = {"numFound": 1, "docs": [
+        {"jobID": "1", "title": "Role", "cities": ["Amsterdam", "Zurich"], "friendlyURL": "role"},
+    ]}
+    monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: forward)
+    a = fetch(McKinseyBoard(firm="McKinsey & Company")).opportunities[0]
+    monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: backward)
+    b = fetch(McKinseyBoard(firm="McKinsey & Company")).opportunities[0]
+    assert a.location == b.location == "Amsterdam +1 more"
 
 
 def test_phenom_reads_refinesearch(monkeypatch):
@@ -217,6 +323,34 @@ def test_goldman_campus_query(monkeypatch):
     assert o.url == "https://higher.gs.com/roles/180086_GS_CAMPUS"
 
 
+def test_goldman_verify_open_when_role_present(monkeypatch):
+    rs = {"data": {"roleSearch": {"totalCount": 1, "items": [
+        {"roleId": "180086_GS_CAMPUS", "jobTitle": "x", "locations": []},
+    ]}}}
+    monkeypatch.setattr(gs_mod, "fetch_json", lambda url, **kw: rs)
+    v = verify("https://higher.gs.com/roles/180086_GS_CAMPUS")
+    assert v.result == "verified-open"
+
+
+def test_goldman_verify_does_not_close_on_an_empty_role_search_envelope(monkeypatch):
+    """PINS C5's fix directly: `data.roleSearch` null-but-error-free makes
+    `_post` return `{}`, and `{}.get("totalCount") or 0` reads as `total=0` —
+    which ends the loop after page 0 having found nothing, for EVERY role in
+    one sweep. This must never read as a confirmed closure."""
+    monkeypatch.setattr(gs_mod, "fetch_json", lambda url, **kw: {"data": {"roleSearch": None}})
+    v = verify("https://higher.gs.com/roles/180086_GS_CAMPUS")
+    assert v.result == "needs-verification"
+
+
+def test_goldman_verify_does_not_close_when_role_is_genuinely_absent(monkeypatch):
+    rs = {"data": {"roleSearch": {"totalCount": 1, "items": [
+        {"roleId": "OTHER_ROLE", "jobTitle": "x", "locations": []},
+    ]}}}
+    monkeypatch.setattr(gs_mod, "fetch_json", lambda url, **kw: rs)
+    v = verify("https://higher.gs.com/roles/180086_GS_CAMPUS")
+    assert v.result == "needs-verification"
+
+
 def test_talentgateway_parses_embedded_results(monkeypatch):
     from coverage_connectors import TalentGatewayBoard
     from coverage_connectors import talentgateway as tg
@@ -239,3 +373,50 @@ def test_talentgateway_parses_embedded_results(monkeypatch):
     assert o.title == "2026 Off-cycle Internship \u2013 IB Marketing & Events"   # entity decoded, en-dash intact
     assert o.location == "Switzerland - Z\u00fcrich"
     assert "jobid=349091" in o.url
+
+
+def _tg_page(reqid: str) -> str:
+    import html as _h
+    import json as _j
+    payload = {"HotJobs": {"Job": [{
+        "Link": f"https://jobs.ubs.com/TGnewUI/Search/home/HomeWithPreLoad?jobid={reqid}",
+        "Questions": [{"QuestionName": "reqid", "Value": reqid},
+                      {"QuestionName": "jobtitle", "Value": "Some Role"},
+                      {"QuestionName": "formtext23", "Value": "Zurich"}],
+    }]}}
+    return '<html><body><input id="searchResults" value="' + \
+        _h.escape(_j.dumps(payload), quote=True) + '"></body></html>'
+
+
+def test_talentgateway_verify_open_when_reqid_present(monkeypatch):
+    from coverage_connectors import talentgateway as tg
+    monkeypatch.setattr(tg, "fetch_text", lambda url, **kw: _tg_page("349091"))
+    result = verify("https://jobs.ubs.com/TGnewUI/Search/home?jobid=349091")
+    assert result.result == "verified-open"
+
+
+def test_talentgateway_verify_does_not_close_on_absence(monkeypatch):
+    """PINS C2's fix: this board's own docstring says pagination is IGNORED
+    server-side, so every `&page=N` request in `verify()` re-fetches the same
+    ~10-job featured slice \u2014 a reqid among the other ~79 rows the fetch never
+    sees is indistinguishable from one that's still open. Absence here must
+    be `needs-verification`, never `closed` \u2014 the previous behaviour turned
+    "not one of the 10 featured jobs today" into a one-shot feed deletion."""
+    from coverage_connectors import talentgateway as tg
+    # Every page (including the different `&page=N` variants) returns the
+    # SAME featured job \u2014 reqid 111, never the target 999999 \u2014 matching the
+    # documented "pagination is ignored" behaviour exactly.
+    monkeypatch.setattr(tg, "fetch_text", lambda url, **kw: _tg_page("111"))
+    result = verify("https://jobs.ubs.com/TGnewUI/Search/home?jobid=999999")
+    assert result.result == "needs-verification"
+
+
+def test_talentgateway_verify_unreachable_on_error(monkeypatch):
+    from coverage_connectors import talentgateway as tg
+
+    def boom(url, **kw):
+        raise ConnectionError("timed out")
+
+    monkeypatch.setattr(tg, "fetch_text", boom)
+    result = verify("https://jobs.ubs.com/TGnewUI/Search/home?jobid=349091")
+    assert result.result == "unreachable"

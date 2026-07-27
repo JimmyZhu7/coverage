@@ -359,26 +359,42 @@ def test_a_section_post_does_not_wipe_the_profile(client, logged_in):
 
 
 def test_profile_save_still_works_alongside_the_new_sections(client, logged_in):
-    """The profile form posts no `section`, so it must still hit the profile
-    branch rather than being swallowed by the section dispatch."""
+    """The profile form posts its own explicit `section="profile"` marker
+    (see settings.html), so it must still hit the profile branch rather than
+    being swallowed by the section dispatch.
+
+    PINS A FIXED BUG: this test used to POST with no `section` at all and
+    still expect a save — that was exactly the hole B2 closed. Every
+    ProfileForm field is `required=False`, so a POST naming no section (or an
+    unrecognised one) used to fall straight through to
+    `ProfileForm(request.POST, ...)` and an empty/garbled POST validated as a
+    legitimate blank save, silently erasing the profile. The marker is now
+    required, like every other section."""
     resp = client.post(
         reverse(SETTINGS),
-        {"school": "Still Works U", "class_year": "2029", "target_cycle": "",
-         "regions": ["us"], "tracks": ["ib"]},
+        {"section": "profile", "school": "Still Works U", "class_year": "2029",
+         "target_cycle": "", "regions": ["us"], "tracks": ["ib"]},
     )
     assert resp.status_code == 302
     logged_in.refresh_from_db()
     assert logged_in.school == "Still Works U"
 
 
-def test_unknown_section_value_falls_through_to_the_profile_branch(client, logged_in):
-    """A bogus `section` must not 500 — it's just an unrecognized POST."""
+def test_unknown_section_value_is_a_noop_not_a_profile_fallthrough(client, logged_in):
+    """PINS A FIXED BUG: a bogus `section` must not 500 — but it must ALSO no
+    longer silently fall through to a profile save (the old behaviour this
+    test used to pin under a different name). It is simply an unrecognised
+    POST: a 200 re-render, and the profile untouched."""
+    logged_in.school = "Original School"
+    logged_in.save(update_fields=["school"])
     resp = client.post(
         reverse(SETTINGS),
         {"section": "not-a-section", "school": "Fallthrough U",
          "class_year": "", "target_cycle": "", "regions": [], "tracks": []},
     )
-    assert resp.status_code in (200, 302)
+    assert resp.status_code == 200
+    logged_in.refresh_from_db()
+    assert logged_in.school == "Original School"
 
 
 def test_each_section_flashes_a_success_message(client, logged_in):

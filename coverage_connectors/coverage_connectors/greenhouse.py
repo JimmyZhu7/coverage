@@ -70,10 +70,19 @@ def fetch(board: GreenhouseBoard) -> FetchResult:
     url = _BOARD_URL.format(token=board.token)
     try:
         data = fetch_json(url)
+        jobs = data.get("jobs", data if isinstance(data, list) else [])
+        # Normalization lives INSIDE this try, not after it: `_normalize`
+        # does `(job.get("location") or {}).get("name", "")`, which raises
+        # AttributeError the moment a single job's `location` ever arrives
+        # as a string instead of a dict. Outside the try, that exception
+        # would propagate uncaught out of `fetch()`, and `fetch_many`'s
+        # `list(pool.map(fetch, boards))` re-raises the first exception it
+        # sees — discarding every OTHER board's already-fetched results too,
+        # not just this one's. One malformed row must cost this board a
+        # clean `ok=False`, never the whole run.
+        opportunities = [_normalize(j, board) for j in jobs]
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to a multi-board run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    jobs = data.get("jobs", data if isinstance(data, list) else [])
-    opportunities = [_normalize(j, board) for j in jobs]
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(jobs))
 
 

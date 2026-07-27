@@ -37,6 +37,7 @@ config.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Iterator
 
 import psycopg
@@ -70,17 +71,38 @@ def log_touch(
     kind: str,
     channel: str,
     note: str | None = None,
-) -> dict[str, str]:
+    *,
+    now: datetime | None = None,
+    source: str = "manual",
+) -> pipeline.TouchResult:
     """Log one interaction against `contact_id` and let the ported
     ratchet advance warmth/thread_state per `TOUCH_TRANSITIONS`. Returns
-    the dict of changed `contacts` columns (empty if nothing moved).
+    the dict of changed `contacts` columns (empty if nothing moved) — see
+    `pipeline.TouchResult` for the additive `.touch_id` attribute riding
+    along on the same object.
 
     Thin wrapper over `coverage_domain.pipeline.apply_touch` — see that
     function's docstring for the full behavior contract (ratchet,
     terminal-advocate guard, TOCTOU-safe atomic update).
+
+    `now`: when the interaction actually happened, if known (e.g. a
+    captured email's Date header) — defaults to "right now" exactly like
+    before when omitted, so every existing caller is unaffected. Without
+    this, a captured touch was always stamped at INGEST time rather than
+    when the interaction happened, which corrupts the cadence's
+    business-day math, the fit score's recency axis, and the thank-you
+    window for anything forwarded/synced later than same-day. Callers are
+    responsible for clamping a forwarded/synced timestamp to not exceed
+    "now" — this function does not second-guess what it's given.
+
+    `source`: one of `Touch.SOURCE_CHOICES` ("manual" default, "capture" for
+    a touch the capture pipeline logged on the student's behalf, "import"
+    for a bulk import) — threaded straight through to `apply_touch`.
     """
     with _pipeline_connection() as conn:
-        return pipeline.apply_touch(conn, user_id, contact_id, kind, channel, note)
+        return pipeline.apply_touch(
+            conn, user_id, contact_id, kind, channel, note, now=now, source=source,
+        )
 
 
 def set_contact_state(

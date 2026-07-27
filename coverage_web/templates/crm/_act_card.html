@@ -16,9 +16,16 @@ activity stay in sync). `idx` drives the staggered entrance.
   <div class="act-badges"><span class="prio prio-{{ a.priority }}">{{ a.label }}</span></div>
   <div class="act-quick">
     <div class="act-primary">
-      <button type="button" class="btn btn-primary act-btn"
-              hx-post="{% url 'crm:today_act' a.contact.id 'sent' %}"
-              hx-vals='{"kind": "{{ a.touch_kind }}"}'>Sent</button>
+      {% if a.action == "park" %}
+        {# Park is a state change (thread_state -> 'parked'), not an
+           interaction -- its own verb, no fake "Sent" touch. #}
+        <button type="button" class="btn btn-primary act-btn"
+                hx-post="{% url 'crm:today_act' a.contact.id 'park' %}">Park it</button>
+      {% else %}
+        <button type="button" class="btn btn-primary act-btn"
+                hx-post="{% url 'crm:today_act' a.contact.id 'sent' %}"
+                hx-vals='{"kind": "{{ a.touch_kind }}"}'>Sent</button>
+      {% endif %}
       <button type="button" class="btn act-btn"
               hx-post="{% url 'crm:today_act' a.contact.id 'reply' %}">Reply</button>
       {% if a.contact.email %}<a class="btn act-btn" href="{{ a.mailto }}">Compose</a>

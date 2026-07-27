@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Archived Contacts · Coverage{% endblock %}
+
+{% block head %}{% include "crm/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page">
+  <nav class="subnav standalone">
+    <a href="{% url 'crm:week' %}">Today</a>
+    <a href="{% url 'crm:contact_list' %}">Network</a>
+    <span class="muted">/ Archived</span>
+  </nav>
+
+  <div class="row">
+    <div>
+      <h1>Archived Contacts</h1>
+      <p class="lede">
+        Off the board and out of the queue. Nothing is deleted: every touch
+        stays on the record and comes back with the person.
+      </p>
+    </div>
+  </div>
+
+  {% if not contacts %}
+    <div class="empty">
+      <p>Nothing archived.</p>
+      <p><a href="{% url 'crm:contact_list' %}">Back to Network</a></p>
+    </div>
+  {% else %}
+    <div class="panel">
+      <p class="small muted">{{ contact_total }} archived</p>
+      {% for c in contacts %}
+        <div class="row archived-row">
+          <div>
+            <a href="{% url 'crm:contact_detail' c.pk %}"><strong>{{ c.name|smart_title }}</strong></a>
+            <span class="muted small">
+              {% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}
+              {% if c.email %} · {{ c.email }}{% endif %}
+            </span>
+            {% if c.last_touch_ts %}
+              <p class="small muted">Last touch {{ c.last_touch_ts|date:"M j, Y" }}</p>
+            {% else %}
+              <p class="small muted">No touches on record</p>
+            {% endif %}
+          </div>
+          <form method="post" action="{% url 'crm:contact_unarchive' c.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn">Unarchive</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

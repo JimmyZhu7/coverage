@@ -117,6 +117,21 @@ def test_a_stated_class_year_for_another_class_is_a_penalty():
     assert on_target_firm < _score(JIMMY, firm_id=1)
 
 
+def test_class_year_mismatch_chip_reads_as_a_reason_against_not_for():
+    """A6: the mismatch chip used to read `f"Class of {stated}"`, byte-
+    identical to the MATCH branch's chip text — and `Recommendation.why`
+    joins on `.text` alone, so a reason AGAINST the role was typeset exactly
+    like a reason FOR it (only the tooltip differed). The mismatch text must
+    be its own, distinguishable string."""
+    match_reasons = _reasons(JIMMY, class_year=str(JIMMY.class_year))
+    mismatch_reasons = _reasons(JIMMY, class_year="2026")
+    match_text = next(t for t in match_reasons if "Class of" in t)
+    mismatch_text = next(t for t in mismatch_reasons if "Class" in t)
+    assert mismatch_text != match_text
+    assert mismatch_text == "Not Class of 2026"
+    assert match_text == f"Class of {JIMMY.class_year}"
+
+
 def test_a_programme_year_is_inference_and_is_labelled_as_such():
     """A 2028 summer internship implies 2029 graduates. That mapping is a
     convention, so the reason chip says "likely" and the tooltip admits the
@@ -157,6 +172,40 @@ def test_an_adjacent_year_scores_but_only_just():
 ])
 def test_target_cycle_parsing(raw, expected):
     assert parse_target_cycle(raw) == expected
+
+
+def test_year_first_cycle_shape_also_parses():
+    """B1's fix: `accounts.forms.CYCLE_CHOICES` has ALWAYS produced this
+    year-first shape ("2028 Summer Internship"), never the kind-first "SA
+    2028" shape above — so every one of its choices used to parse to None
+    and the 15-point cycle axis was dead for 100% of users. Both shapes
+    must now parse."""
+    assert parse_target_cycle("2028 Summer Internship") == ("internship", 2028)
+    assert parse_target_cycle("2029 Full-Time / Graduate") == ("entry_level", 2029)
+    assert parse_target_cycle("2027 Spring Week / Insight") == ("insight", 2027)
+
+
+def test_every_cycle_choices_value_parses_to_something():
+    """B1, exactly as specified: every value the settings dropdown can
+    actually produce must parse to a real (bucket, year) — none of them may
+    return None. `cycle_choices()` is the single source both
+    `accounts.forms.CYCLE_CHOICES` and this parser draw from, so producer
+    and consumer cannot drift the way "SA 2028" vs "2028 Summer Internship"
+    once did."""
+    from directory.recommend import cycle_choices
+
+    for value, _label in cycle_choices():
+        if value == "":
+            continue  # the unselected placeholder — not a real cycle
+        assert parse_target_cycle(value) is not None, value
+
+
+def test_off_cycle_choice_parses_against_the_current_year():
+    from directory.recommend import ENTRY_LEVEL, OFF_CYCLE_LABEL
+
+    bucket, year = parse_target_cycle(OFF_CYCLE_LABEL)
+    assert bucket == ENTRY_LEVEL
+    assert year == date.today().year
 
 
 def test_the_named_target_cycle_adds_on_top_of_the_class_fit():

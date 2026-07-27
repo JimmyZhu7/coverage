@@ -79,16 +79,23 @@ def content_hash_for(opp: ConnOpportunity) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _parse_deadline(value: str | None) -> date | None:
-    """`YYYY-MM-DD` -> date, anything else -> None. The connectors already
-    slice provider deadlines to `[:10]`, so this only ever sees ISO dates or
-    None; a malformed value degrades to null rather than raising."""
+def _parse_deadline(value: str | None) -> tuple[date | None, bool]:
+    """`YYYY-MM-DD` -> `(date, True)`. No value at all -> `(None, True)` —
+    the provider stated nothing, which honestly IS "no deadline posted".
+
+    A NON-empty but unparseable value -> `(None, False)`: the provider is
+    claiming a deadline exists but sent something this can't read (a format
+    change, a bad key, truncated garbage) — a materially different fact from
+    "there is no deadline", and collapsing it to the same `None` used to
+    silently relabel a parse FAILURE as the affirmative claim "No deadline
+    posted" (`views.deadline_marker`). The `bool` lets `_apply_opportunity`
+    count these into `stats` instead of losing the distinction."""
     if not value:
-        return None
+        return None, True
     try:
-        return date.fromisoformat(value[:10])
+        return date.fromisoformat(value[:10]), True
     except (ValueError, TypeError):
-        return None
+        return None, False
 
 
 # --------------------------------------------------------------------------- firm resolve
@@ -173,7 +180,21 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     `classify.board_is_campus`), which lets neutral Analyst titles on a
     students board classify as entry-level.
     """
-    deadline = _parse_deadline(opp.deadline)
+    deadline, deadline_ok = _parse_deadline(opp.deadline)
+    if not deadline_ok:
+        # A provider date that didn't parse must not vanish as a quiet
+        # `None` — the feed renders that as "No deadline posted", an
+        # affirmative claim the posting never made. Counted AND surfaced in
+        # `ScrapeRun.error` (see `ingest_results`, which joins `stats
+        # ["errors"]` into it) so a format change on a provider's date field
+        # is visible instead of silently relabeling every one of its
+        # postings as "rolling".
+        stats["deadline_parse_failed"] = stats.get("deadline_parse_failed", 0) + 1
+        stats["errors"].append({
+            "firm": firm.name, "provider": opp.source or "",
+            "error": f"unparseable deadline {opp.deadline!r} for {opp.url[:120]} "
+                     f"— stored as no-deadline-posted",
+        })
     h = content_hash_for(opp)
     bucket = classify_role(opp.title or "", campus_hint=campus_hint)
     cohort = opp.cohort or extract_cohort(opp.title or "")
@@ -258,6 +279,7 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
         "boards_total": 0, "boards_ok": 0, "boards_failed": 0,
         "fetched": 0, "skipped_no_url": 0,
         "created": 0, "updated": 0, "unchanged": 0, "reopened": 0, "closed": 0,
+        "deadline_parse_failed": 0,
         "providers": set(), "firms_touched": set(), "created_firms": [],
         "errors": [],
     }

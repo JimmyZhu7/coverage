@@ -21,6 +21,9 @@
     <a href="?scope=sg"{% if scope == 'sg' %} aria-current="page"{% endif %}>Singapore</a>
     <a href="?scope=eu"{% if scope == 'eu' %} aria-current="page"{% endif %}>Europe</a>
     <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School</a>
+    {# Not a scope — a separate list. Archived contacts are excluded from every #}
+    {# board query, so this is the only way back to them. #}
+    <a href="{% url 'crm:contact_archived' %}">Archived</a>
   </nav>
 
   {% comment %}
@@ -184,7 +187,7 @@
                     {% for b in card.bullets %}<li>{{ b }}.</li>{% endfor %}
                   </ul>
                 {% endif %}
-                {% if card.c.email %}<a class="cc-email" href="mailto:{{ card.c.email }}">{{ card.c.email }}</a>{% endif %}
+                {% if card.c.email %}<a class="cc-email" href="{{ card.mailto }}">{{ card.c.email }}</a>{% endif %}
                 <div class="cc-foot">
                   <span class="cc-since">
                     {% if card.days_since is not None %}{{ card.days_since }}d since last touch{% else %}Never contacted{% endif %}

@@ -7,6 +7,11 @@ names stable and snake_case; the canonical set the health check reads:
     signup, onboarded, import_completed, capture_email_received,
     touch_logged, score_viewed, digest_sent, digest_opened
 
+`import_completed` fires only when a CSV import actually created at least one
+contact — an unreadable file, an all-duplicate file, or an all-empty file
+records the sibling `import_failed` instead (accounts/services.py), so this
+funnel number never counts "the button was clicked" as "the import worked".
+
 `props` is free-form JSON (e.g. {"source": "capture"} on touch_logged so the
 email-vs-manual capture mix is measurable). Never put raw email bodies or
 secrets in props.

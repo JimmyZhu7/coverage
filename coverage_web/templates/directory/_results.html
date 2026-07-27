@@ -15,7 +15,11 @@ hidden rather than shown as a weak "0".{% endcomment %}
   <span class="ss-item"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num" style="--i:0">{{ total }}</b> Open Roles</span>
   <span class="ss-item"><b class="dash-num" style="--i:1">{{ clusters|length }}</b> Firms</span>
   {% if dash.closing_week %}<span class="ss-item ss-warn"><b class="dash-num" style="--i:2">{{ dash.closing_week }}</b> Closing This Week</span>{% endif %}
-  {% if dash.fresh_count %}<span class="ss-item"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh This Week</span>{% endif %}
+  {% comment %}"Fresh" is driven by `dash.fresh_days` (== `_FRESH_DAYS` in
+  views.py) rather than a hardcoded "This Week", so the window in the label
+  can never drift from the window actually computed — a 10-day window
+  labelled "This Week" was the bug this replaced.{% endcomment %}
+  {% if dash.fresh_count %}<span class="ss-item"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh ({{ dash.fresh_days }}d)</span>{% endif %}
 </div>
 
 {% if personalized %}
@@ -52,7 +56,12 @@ hidden rather than shown as a weak "0".{% endcomment %}
                 the only place a graduation year ever appears.{% endcomment %}
                 <span class="role-mini role-{{ r.bucket }}"{% if r.cohort %} title="{{ r.cohort }} programme year"{% endif %}>{{ r.bucket_label }}{% if r.cohort %} · {{ r.cohort }}{% endif %}</span>
                 <span class="rolecard-top-right">
-                  {% if r.is_fresh and not r.dated %}<span class="fresh-badge">New</span>{% endif %}
+                  {% comment %}"New" measured `first_seen` — when the row
+                  entered OUR db, not when the firm posted it, so a bulk
+                  import wore "New" on 794 of 805 open roles at once. The
+                  badge now says exactly what it measures, matching the
+                  rolling-tag's "seen Nd ago" phrasing just below.{% endcomment %}
+                  {% if r.is_fresh and not r.dated %}<span class="fresh-badge">{{ r.fresh_label }}</span>{% endif %}
                   {% if request.user.is_authenticated %}{% include "directory/_track_control.html" %}{% endif %}
                 </span>
               </div>

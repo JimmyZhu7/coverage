@@ -79,7 +79,13 @@ def fetch(board: OracleBoard) -> FetchResult:
                 continue
             seen.add(rid)
             reqs.append(req)
-    opportunities = [o for o in (_normalize(r, board) for r in reqs) if o.url]
+    try:
+        # Kept in its own try, separate from the per-keyword network try
+        # above — see greenhouse.py's fetch() for why a normalization
+        # failure must not propagate uncaught out of `fetch()`.
+        opportunities = [o for o in (_normalize(r, board) for r in reqs) if o.url]
+    except Exception as e:  # noqa: BLE001
+        return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(reqs))
 
 
@@ -93,8 +99,16 @@ def classify_url(url: str) -> dict | None:
 def verify(url: str) -> VerificationResult:
     """Ported from `_verify_oracle`: keyword-search the site for the
     requisition Id itself (Oracle's keyword search matches Ids). Found ->
-    verified-open with its real dates; an Id that the search can't find is
-    closed/filled; network trouble is unreachable, never closed."""
+    verified-open with its real dates; network trouble is unreachable.
+
+    An Id the search can't find is `needs-verification`, NOT closed:
+    `_search` returns `[]` both for a genuine "no results" AND for a missing
+    or renamed envelope key (`data.get("items", [])` / `items[0].get(
+    "requisitionList", [])`) — the two are indistinguishable at this call
+    site, and `reverify.py` acts on "closed" with zero corroboration. Only a
+    positive signal (the requisition present, or absent from a response we
+    can positively confirm parsed correctly) may close a row; this connector
+    has no way to make that distinction today, so it must not close."""
     info = classify_url(url)
     if not info:
         return VerificationResult("oracle", url, "needs-verification",
@@ -113,8 +127,12 @@ def verify(url: str) -> VerificationResult:
 
     match = next((r for r in reqs if str(r.get("Id")) == str(job_id)), None)
     if match is None:
-        return VerificationResult("oracle", url, "closed",
-                                   f"requisition Id {job_id} not found via keyword search — likely closed or filled", [])
+        return VerificationResult(
+            "oracle", url, "needs-verification",
+            f"requisition Id {job_id} not found via keyword search — "
+            f"indistinguishable here from a malformed/renamed response "
+            f"envelope, so not a confirmed closure", [],
+        )
     title = match.get("Title", "")
     posted = (match.get("PostedDate") or "")[:10]
     end = (match.get("PostingEndDate") or "")[:10]

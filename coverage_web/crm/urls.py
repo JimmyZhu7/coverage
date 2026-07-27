@@ -18,6 +18,14 @@ urlpatterns = [
     path("contacts/", views.contact_list, name="contact_list"),
     # Hand-add / edit a contact — the coffee-chat entry path.
     path("contacts/new/", views.contact_new, name="contact_new"),
+    # The archived list + its two POST controls. `archived` had no UI at all
+    # before these, which made it a one-way trapdoor — see crm/views.py.
+    # Declared ahead of "contacts/<int:pk>/" so the literal segment can't be
+    # shadowed by the int converter (it can't be, but the ordering keeps the
+    # relationship obvious).
+    path("contacts/archived/", views.contact_archived, name="contact_archived"),
+    path("contacts/<int:pk>/archive/", views.contact_archive, name="contact_archive"),
+    path("contacts/<int:pk>/unarchive/", views.contact_unarchive, name="contact_unarchive"),
     # Drag-and-drop tier changes from the Network board (POST firm+tier).
     path("firms/tier/", views.set_firm_tier, name="set_firm_tier"),
     path("contacts/<int:pk>/", views.contact_detail, name="contact_detail"),

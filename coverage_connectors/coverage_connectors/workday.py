@@ -119,10 +119,14 @@ def fetch(board: WorkdayBoard) -> FetchResult:
     try:
         data = _fetch_all(board.tenant_host, board.site, board.search_text,
                           board.tenant, board.domain)
+        jobs = data.get("jobPostings", [])
+        # Kept inside this try — see greenhouse.py's fetch() for why: a
+        # normalization failure on one malformed job must not propagate
+        # uncaught, which would make `fetch_many`'s `list(pool.map(...))`
+        # discard every OTHER board's already-fetched results too.
+        opportunities = [_normalize(j, board) for j in jobs]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    jobs = data.get("jobPostings", [])
-    opportunities = [_normalize(j, board) for j in jobs]
     return FetchResult(board=board, ok=True, opportunities=opportunities,
                         raw_count=data.get("total", len(jobs)))
 
@@ -162,8 +166,22 @@ def verify(url: str) -> VerificationResult:
             posting = data.get("jobPostingInfo", {})
             title = posting.get("title", "")
             if not title:
-                return VerificationResult("workday", url, "closed",
-                                           "job-detail endpoint returned no jobPostingInfo — likely removed", [])
+                # An HTTP 200 with no `jobPostingInfo.title` is NOT a
+                # positive "this posting is gone" signal — it is exactly as
+                # consistent with a WAF/interstitial page, a rate-limit
+                # envelope, a maintenance page, or Workday renaming a key,
+                # all of which return 200 with a shape this code doesn't
+                # recognize. Reporting "closed" here made this the
+                # fallthrough for "I don't understand the response", and
+                # `reverify.py` acts on "closed" with zero corroboration —
+                # a one-shot deletion from the feed for the wrong reason.
+                # Only a genuine gone-signal (a real 404, or a detail
+                # endpoint that positively says "not found") may close a
+                # row; an unrecognised-but-200 response must ask again
+                # later instead.
+                return VerificationResult("workday", url, "needs-verification",
+                                           "job-detail endpoint returned no jobPostingInfo — "
+                                           "unrecognized response shape, not a confirmed removal", [])
             posted = posting.get("postedOn", "")
             return VerificationResult("workday", url, "verified-open",
                                        f'title="{title}" postedOn={posted}', [], posted_date=posted or None)

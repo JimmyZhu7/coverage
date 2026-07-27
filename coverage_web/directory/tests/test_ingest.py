@@ -269,6 +269,26 @@ def test_null_deadline_stored_as_null(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_malformed_deadline_fails_loudly_instead_of_becoming_no_deadline(monkeypatch):
+    """C11: a provider date that doesn't parse must not silently become the
+    same `None` used for "the provider stated no deadline at all" — the feed
+    (`views.deadline_marker`) renders a null deadline as the affirmative
+    claim "No deadline posted", which would misrepresent a parse FAILURE as
+    a stated fact about the posting. The failure must be counted AND
+    surfaced in `ScrapeRun.error`."""
+    _patch(monkeypatch, [_result([_opp(U1, deadline="not-a-real-date")])])
+    run = ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    # Still degrades to a null deadline (never a fabricated date) — but the
+    # degradation is now loud, not silent.
+    assert o.deadline is None
+    assert run.stats["deadline_parse_failed"] == 1
+    assert any("unparseable deadline" in e["error"] for e in run.stats["errors"])
+    assert "unparseable deadline" in (run.error or "")
+
+
+@pytest.mark.django_db
 def test_unseeded_firm_is_autocreated(monkeypatch):
     _patch(monkeypatch, [_result([_opp(U1)])])
     run = ingest.ingest_boards([BOARD], label="greenhouse")

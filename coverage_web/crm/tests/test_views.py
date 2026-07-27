@@ -120,6 +120,35 @@ def test_log_touch_rejects_unknown_kind_without_writing(client):
 
 
 # ---------------------------------------------------------------------------
+# 2b. Today's "Park it" quick action is a state change, not a fake touch.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db(transaction=True)
+def test_today_park_sets_thread_state_and_writes_no_maintain_touch(client):
+    """Regression: `today_act`'s 'sent' verb used to route "park" through
+    `log_touch(kind='maintain')`. TOUCH_TRANSITIONS['maintain'] == (None,
+    None), so that logged a permanent "Kept warm" touch and changed no
+    state -- the contact reappeared in the queue with the same nag forever.
+    Parking must be an audited thread_state change instead."""
+    user = _user()
+    contact = Contact.all_objects.create(
+        user=user, name="Old Lead", warmth="cold", thread_state="no_reply",
+    )
+    client.force_login(user)
+
+    resp = client.post(reverse("crm:today_act", args=[contact.id, "park"]))
+    assert resp.status_code == 200
+
+    contact.refresh_from_db()
+    assert contact.thread_state == "parked"
+    assert not Touch.all_objects.filter(user=user, contact=contact, kind="maintain").exists()
+    # set_contact_state's own audit touch still leaves a trail -- just not a
+    # fabricated interaction.
+    assert Touch.all_objects.filter(
+        user=user, contact=contact, kind="manual_override"
+    ).exists()
+
+
+# ---------------------------------------------------------------------------
 # 3. mailto compose carries the correct BCC (the user's capture address).
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db
@@ -318,8 +347,15 @@ def test_multi_region_firm_no_longer_puts_one_contact_in_both_tabs(client):
 @pytest.mark.django_db
 def test_region_scope_matches_the_cadence_engines_answer(client):
     """The page and the engine must never disagree about where someone works.
-    A blank `region` column with an HK-flavoured `source` resolves to Hong Kong
-    in `cadence.contact_region`, so the HK tab has to agree."""
+
+    The invariant is unchanged; the answer both sides now give is not. This
+    test used to assert that a blank `region` with an HK-flavoured `source`
+    resolved to Hong Kong in BOTH places, because `cadence.contact_region`
+    fell back to `infer_region(source)`. That fallback is retired: a blank
+    region is unknown, in the engine and on the page alike, so the contact
+    takes the firm fallback and appears under both of the firm's regions
+    rather than being asserted into Hong Kong by a provenance string.
+    """
     user = _user()
     dual = Firm.objects.create(slug="dual-bank", name="Dual Bank", regions=["us", "hk"])
     # Blank region survives save() here: the firm spans both regions, so
@@ -329,11 +365,16 @@ def test_region_scope_matches_the_cadence_engines_answer(client):
         warmth="replied",
     )
     assert c.region == ""
-    assert cadence.contact_region({"region": c.region, "source": c.source}) == "hk"
+    assert cadence.contact_region({"region": c.region, "source": c.source}) is None
 
     client.force_login(user)
     assert _names_in_scope(client, "hk") == {"Legacy Row"}
-    assert _names_in_scope(client, "us") == set()
+    assert _names_in_scope(client, "us") == {"Legacy Row"}
+    # And the page says it's a guess rather than passing it off as confirmed —
+    # which under the old inference it could not, because the contact looked
+    # like a confident HK match.
+    resp = client.get(reverse("crm:contact_list"), {"scope": "hk"})
+    assert resp.context["unconfirmed_total"] == 1
 
 
 @pytest.mark.django_db
@@ -438,3 +479,111 @@ def test_singapore_tab_still_falls_back_to_the_firm(client):
     client.force_login(user)
     assert _names_in_scope(client, "sg") == {"Sinead SG"}
     assert "sg" not in Contact.REGION_VALUES
+
+
+# ---------------------------------------------------------------------------
+# Archive / unarchive — the contact lifecycle's exit AND its way back.
+#
+# `Contact.archived` shipped in the first migration and every board query
+# filters on it, but nothing could SET it from the UI and no page listed what
+# it hid. It was a one-way trapdoor operated only by automated paths: 25 of
+# the founder's 137 contacts sat archived and invisible, and because both
+# capture resolvers filter `archived=False`, a later genuine reply from one of
+# them forked a NEW contact rather than resurrecting the old one.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_archive_hides_a_contact_from_the_network_board(client):
+    user = _user()
+    keep = Contact.all_objects.create(user=user, name="Stays Visible", warmth="replied")
+    gone = Contact.all_objects.create(user=user, name="Gets Archived", warmth="replied")
+    client.force_login(user)
+
+    resp = client.post(reverse("crm:contact_archive", args=[gone.pk]))
+    assert resp.status_code == 302
+
+    gone.refresh_from_db()
+    assert gone.archived is True
+    keep.refresh_from_db()
+    assert keep.archived is False
+
+    listed = client.get(reverse("crm:contact_list"))
+    names = {
+        card["c"].name
+        for section in listed.context["sections"]
+        for card in section["cards"]
+    }
+    assert names == {"Stays Visible"}
+
+
+@pytest.mark.django_db
+def test_archived_contacts_have_a_view_of_their_own(client):
+    """The view that makes archiving reversible in practice rather than only
+    in principle — before it, an archived row appeared on no page at all."""
+    user = _user()
+    Contact.all_objects.create(user=user, name="Visible One", warmth="replied")
+    Contact.all_objects.create(user=user, name="Hidden One", warmth="replied",
+                               archived=True)
+    client.force_login(user)
+
+    resp = client.get(reverse("crm:contact_archived"))
+    assert resp.status_code == 200
+    assert [c.name for c in resp.context["contacts"]] == ["Hidden One"]
+    assert "Visible One" not in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_unarchive_round_trips_with_the_history_intact(client):
+    """Archive then unarchive must return the SAME row — not a new one — with
+    every touch still hanging off it. That identity is the whole point: a
+    forked contact loses the history the CRM exists to hold."""
+    user = _user()
+    c = Contact.all_objects.create(user=user, name="Round Trip", warmth="replied")
+    Touch.all_objects.create(
+        user=user, contact=c, ts=timezone.now() - timedelta(days=3),
+        kind="reply_received", channel="email",
+    )
+    client.force_login(user)
+
+    client.post(reverse("crm:contact_archive", args=[c.pk]))
+    c.refresh_from_db()
+    assert c.archived is True
+
+    client.post(reverse("crm:contact_unarchive", args=[c.pk]))
+    c.refresh_from_db()
+    assert c.archived is False
+
+    assert Contact.objects.for_user(user).count() == 1, "no fork"
+    assert Touch.objects.for_user(user).filter(contact=c).count() == 1
+    assert c.warmth == "replied", "warmth untouched by the lifecycle flag"
+
+
+@pytest.mark.django_db
+def test_an_archived_contacts_page_is_still_reachable(client):
+    """Otherwise the archived list would have nowhere to link and unarchiving
+    would have no home."""
+    user = _user()
+    c = Contact.all_objects.create(user=user, name="Hidden One", archived=True)
+    client.force_login(user)
+
+    resp = client.get(reverse("crm:contact_detail", args=[c.pk]))
+    assert resp.status_code == 200
+    assert "Unarchive" in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_archive_is_post_only_and_tenant_scoped(client):
+    """A GET that hides a contact would fire on any crawl or link prefetch;
+    and another tenant's id must 404 exactly like a missing one."""
+    user = _user()
+    other = _user("other@example.com")
+    mine = Contact.all_objects.create(user=user, name="Mine")
+    theirs = Contact.all_objects.create(user=other, name="Theirs")
+    client.force_login(user)
+
+    assert client.get(reverse("crm:contact_archive", args=[mine.pk])).status_code == 405
+    mine.refresh_from_db()
+    assert mine.archived is False
+
+    assert client.post(reverse("crm:contact_archive", args=[theirs.pk])).status_code == 404
+    theirs.refresh_from_db()
+    assert theirs.archived is False

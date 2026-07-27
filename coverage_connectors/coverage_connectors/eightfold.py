@@ -77,9 +77,12 @@ def fetch(board: EightfoldBoard) -> FetchResult:
             # caps a page below the requested `num`, so a fixed stride would
             # skip rows.
             start += len(batch)
+        # Kept inside the same try as the paging loop above — see
+        # greenhouse.py's fetch() for why a normalization failure must not
+        # propagate uncaught out of `fetch()`.
+        opportunities = [_normalize(p, board) for p in positions]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    opportunities = [_normalize(p, board) for p in positions]
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(positions))
 
 

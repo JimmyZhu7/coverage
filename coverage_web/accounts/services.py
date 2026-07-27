@@ -276,7 +276,19 @@ def import_contacts(user, *, file_bytes: bytes, filename: str) -> ImportResult:
         filename=(filename or "contacts.csv")[:255],
         row_stats=result.as_stats(),
     )
-    record_event("import_completed", user=user, count=result.created)
+    # `import_completed` is a named funnel event (see analytics/events.py's
+    # canonical list) — it must mean the import actually put rows in the
+    # user's CRM. Firing it unconditionally meant an unreadable CSV, an
+    # all-duplicate file, or an all-empty file counted as activation exactly
+    # like a real import. A no-op import now records `import_failed`
+    # instead, so the funnel number answers "did this work", not "was the
+    # button clicked".
+    if result.created > 0:
+        record_event("import_completed", user=user, count=result.created)
+    else:
+        record_event(
+            "import_failed", user=user, count=0, errors=list(result.errors)
+        )
     return result
 
 

@@ -96,6 +96,30 @@ def test_angle_never_leaks_into_mailto_in_the_cadence_queue(client):
 
 
 @pytest.mark.django_db
+def test_angle_never_leaks_into_mailto_on_the_network_board(client):
+    """The Network board's contact-card email link used to be a bare
+    `mailto:<email>` with no BCC and no body at all -- invisible to
+    Coverage's capture pipeline. Now that it's routed through the same
+    `_mailto` helper as every other compose surface (contact detail, the
+    Today queue), pin the same angle-never-leaks guarantee here too."""
+    user = _user()
+    Contact.all_objects.create(
+        user=user, name="Jane Banker", email="jane@acme.com",
+        angle=PRIVATE_ANGLE, opener=DRAFT_OPENER, warmth="replied",
+    )
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+
+    assert "jane@acme.com" in body  # the card is really there
+    for url in _mailto_urls(body):
+        for word in ("insecure", "exit", "opps"):
+            assert word not in url, f"angle leaked into a mailto body: {url}"
+    # And the fix is a positive one, not just an absence: the opener really
+    # is the body, same as everywhere else.
+    assert any("sophomore" in url for url in _mailto_urls(body))
+
+
+@pytest.mark.django_db
 def test_compose_body_comes_from_the_opener(client):
     user = _user()
     contact = Contact.all_objects.create(

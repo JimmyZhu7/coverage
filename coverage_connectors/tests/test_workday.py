@@ -219,12 +219,22 @@ def test_verify_open_via_job_path(monkeypatch):
     assert result.deadline_dates == []
 
 
-def test_verify_closed_via_job_path_missing_posting(monkeypatch):
+def test_verify_does_not_close_on_a_malformed_200(monkeypatch):
+    """PINS A FIXED BUG (C1): this test used to be named
+    `test_verify_closed_via_job_path_missing_posting` and asserted
+    `result.result == "closed"` — i.e. it pinned "empty jobPostingInfo means
+    closed" as correct behaviour. An HTTP 200 with no `jobPostingInfo.title`
+    is NOT a positive gone-signal: it is exactly as consistent with a WAF
+    page, a rate-limit envelope, a maintenance page, or a Workday key rename
+    as with a real removal, and `reverify.py` acts on "closed" with zero
+    corroboration — a one-shot deletion from a student's feed for the wrong
+    reason. An unrecognised-but-200 response must ask again later
+    (`needs-verification`), never close outright."""
     monkeypatch.setattr(workday, "fetch_json", lambda url, **kw: {"jobPostingInfo": {}})
     result = workday.verify(
         "https://citi.wd5.myworkdayjobs.com/Citi_Early_Careers_Events_Site/job/New-York/Role_R123"
     )
-    assert result.result == "closed"
+    assert result.result == "needs-verification"
 
 
 def test_verify_via_search_text_zero_results(monkeypatch):

@@ -128,15 +128,31 @@ def record(
     Every side effect is gated on its own already-done marker, so calling
     this again with the same payload is a no-op:
 
-      - the note append is gated on `learned` being empty on the row
+      - the note append is gated on `learned` having CHANGED
       - the referral contact + its task on `intro_contact_id` being NULL
       - the date task on `date_task_id` being NULL
 
-    First write wins per field. A user who left the intro blank the first
-    time can still add it later; a user who resubmits unchanged gets no
-    duplicates. Returns (debrief, created_things) where `created_things`
-    names what this particular call actually made — the caller uses it to
-    report truthfully instead of claiming work it didn't do.
+    The note gate is a changed-check rather than a first-write-wins check,
+    unlike the other two, and the difference is deliberate. A referral
+    contact and a task are objects in the world: making a second one is a
+    duplicate, so first write wins. `learned` is TEXT, and the view renders
+    the form bound to the existing row — so the box is editable, the user
+    edits it, and under a first-write-wins gate the branch was skipped, the
+    edit was thrown away, and the view still flashed "Debrief saved." The
+    resubmit is not a duplicate; it is a correction, and the only reason it
+    ever looked like one is that both arrive through the same POST.
+
+    A change appends a NEW dated block rather than rewriting the old one:
+    `Contact.notes` is an append-only journal everywhere else in this
+    codebase, and what the user thought after the chat and what they thought
+    two days later are both true things they wrote. `ChatDebrief.learned`
+    always holds the latest text, so the form round-trips what you last
+    typed.
+
+    Returns (debrief, created_things) where `created_things` names what this
+    particular call actually WROTE — empty means nothing was written, and the
+    caller uses that to report truthfully instead of claiming work it didn't
+    do.
     """
     today = today or timezone.localdate()
     contact = touch.contact
@@ -151,8 +167,8 @@ def record(
     made: dict[str, Any] = {}
     fields: list[str] = []
 
-    # 1. What you learned -> Contact.notes, once.
-    if learned and not debrief.learned:
+    # 1. What you learned -> Contact.notes, once per distinct version.
+    if learned and learned != (debrief.learned or ""):
         _append_note(contact, learned, on=today)
         debrief.learned = learned
         fields.append("learned")
@@ -218,11 +234,13 @@ def record(
     if advocate_answer and advocate_answer != debrief.advocate_answer:
         debrief.advocate_answer = advocate_answer
         fields.append("advocate_answer")
+        made["advocate_answer"] = advocate_answer
 
     # A dismissed debrief that later gets filled in is no longer dismissed.
     if debrief.dismissed:
         debrief.dismissed = False
         fields.append("dismissed")
+        made["undismissed"] = True
 
     if fields:
         debrief.save(update_fields=fields)

@@ -80,6 +80,22 @@ an audit `touches` row (kind=MANUAL_OVERRIDE_KIND). The original
 `contact_set` mutated `contacts` directly with no touches insert at all —
 without this addition the touches log would have a silent gap at the one
 place state can change outside apply_touch's ratchet.
+
+A second deliberate additive change (audit batch, safe-fixes pass):
+`apply_touch()` gained a `source` keyword (default "manual", so every
+existing caller is byte-for-byte unaffected) and now writes it into the
+`touches.source` column instead of hardcoding the literal `'manual'` in the
+INSERT. Before this, `Touch.SOURCE_CHOICES`'s `"capture"` value could never
+be written by anything, which made "captured vs typed touches" — the
+product's own risk metric — unanswerable from the DB. `apply_touch` also
+returns its result as a `TouchResult` (a `dict` subclass carrying one extra
+attribute, `touch_id`) instead of a plain `dict`. This is deliberately NOT a
+new key inside the dict: every existing caller and test that compares the
+result with `== {...}` or checks `bool(...)` sees exactly the same mapping
+as before (dict equality and truthiness only ever look at the mapping
+contents), while the one caller that needs the id of the row just inserted
+(`capture.services._apply_touch_for_event`, to populate `Touch.capture_event`
+after the fact) reads it off `.touch_id`.
 """
 
 from __future__ import annotations
@@ -128,6 +144,26 @@ THREAD_STATES: tuple[str, ...] = (
 MANUAL_OVERRIDE_KIND = "manual_override"
 
 
+class TouchResult(dict):
+    """What `apply_touch` returns: the same `{"warmth": ..., "thread_state":
+    ...}` (or empty) mapping it always has, plus one additive attribute —
+    `touch_id`, the id of the `touches` row this call just inserted.
+
+    Subclassing `dict` rather than returning a tuple or a dataclass is the
+    whole point: `TouchResult({...}) == {...}` and `bool(TouchResult({}))`
+    behave exactly like the plain dict this function used to return, because
+    dict equality and truthiness only ever look at the mapping's contents —
+    never at extra instance attributes. Every existing caller/test that
+    pattern-matches the old return value keeps working unchanged; the one
+    caller that needs the inserted row's id reads `.touch_id` off the same
+    object.
+    """
+
+    def __init__(self, mapping: dict[str, str], *, touch_id: int):
+        super().__init__(mapping)
+        self.touch_id = touch_id
+
+
 class ContactNotFound(LookupError):
     """Raised when contact_id doesn't exist, or doesn't belong to user_id.
 
@@ -162,7 +198,8 @@ def apply_touch(
     note: str | None,
     *,
     now: datetime | None = None,
-) -> dict[str, str]:
+    source: str = "manual",
+) -> TouchResult:
     """Log one interaction against contact_id and auto-advance warmth /
     thread_state where TOUCH_TRANSITIONS says to. See the module docstring
     for the full behavior contract (ratchet, terminal-advocate guard,
@@ -175,8 +212,19 @@ def apply_touch(
       someone.
     - thread_state advances per TOUCH_TRANSITIONS unless it's already
       'advocate' (terminal — only set_state() changes it once there).
-    - Returns the dict of `contacts` columns that were changed (empty if
-      nothing moved), e.g. {"warmth": "chatted", "thread_state": "chat_done"}.
+    - Returns a TouchResult: the dict of `contacts` columns that were
+      changed (empty if nothing moved), e.g. {"warmth": "chatted",
+      "thread_state": "chat_done"}, plus a `.touch_id` attribute carrying
+      the id of the row just inserted (see TouchResult's docstring for why
+      this is additive and not a behavior change for existing callers).
+    - `source` (default "manual", one of Touch.SOURCE_CHOICES on the Django
+      side — this module has no FK to validate against, so an unrecognized
+      value is written as-is rather than rejected) is stored verbatim on the
+      new row instead of the hardcoded literal 'manual' this used to write
+      regardless of who called it. That hardcoding meant "capture" (a
+      captured touch, vs. one a student typed in) could never be recorded —
+      the one metric the product most needs to answer was unanswerable from
+      the DB.
 
     `kind` is validated against TOUCH_TRANSITIONS (raises ValueError) so
     this can never silently do the wrong thing if called with a bad kind.
@@ -207,9 +255,10 @@ def apply_touch(
 
         cur.execute(
             "INSERT INTO touches (user_id, contact_id, ts, channel, kind, note, source) "
-            "VALUES (%s, %s, %s, %s, %s, %s, 'manual')",
-            (user_id, contact_id, ts, channel, kind, note),
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, contact_id, ts, channel, kind, note, source),
         )
+        touch_id = cur.fetchone()["id"]
 
         # The ratchet: both CASE expressions read live column values at
         # the moment THIS statement executes (contacts.warmth here, plus
@@ -261,7 +310,7 @@ def apply_touch(
         updates["warmth"] = after["warmth"]
     if after["thread_state"] != before["thread_state"]:
         updates["thread_state"] = after["thread_state"]
-    return updates
+    return TouchResult(updates, touch_id=touch_id)
 
 
 def set_state(

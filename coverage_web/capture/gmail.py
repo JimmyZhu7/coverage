@@ -59,6 +59,7 @@ from django.utils import timezone
 
 from analytics.events import record_event
 from capture.providers import CaptureProvider, InteractionEvent
+from capture.services import AmbiguousContactError
 from crm import services as crm_services
 from crm.models import Contact, Touch
 
@@ -86,24 +87,40 @@ class SyncResult:
 
     findings: int = 0
     emails_backfilled: int = 0
+    # A finding whose address DIFFERS from the one already on the contact.
+    # Counted separately from `emails_backfilled` because it is a different
+    # event with a different outcome: the alternate is written to the notes
+    # and the primary address is left alone. Lumping the two together is
+    # exactly how "backfill" quietly came to mean "overwrite".
+    alternate_emails_noted: int = 0
     outreach_logged: int = 0
     touches_logged: int = 0
-    archived_bounced: int = 0
+    # Bounced findings whose address was CLEARED off the contact (was
+    # `archived_bounced`, which named an action no automated path performs
+    # any more — see the bounce block in `apply_findings`).
+    bounced_cleared: int = 0
     skipped_not_found: int = 0
     skipped_already_logged: int = 0
     skipped_unmatched: int = 0
+    # Distinct from skipped_unmatched: the name matched MORE than one
+    # contact (e.g. two "Michael Chen"s at different firms), so there is
+    # no correct contact to log this finding against — not zero matches,
+    # too many. Reported separately so it doesn't hide inside "unmatched".
+    skipped_ambiguous: int = 0
     details: list[str] = field(default_factory=list)
 
     def as_stats(self) -> dict:
         return {
             "findings": self.findings,
             "emails_backfilled": self.emails_backfilled,
+            "alternate_emails_noted": self.alternate_emails_noted,
             "outreach_logged": self.outreach_logged,
             "touches_logged": self.touches_logged,
-            "archived_bounced": self.archived_bounced,
+            "bounced_cleared": self.bounced_cleared,
             "skipped_not_found": self.skipped_not_found,
             "skipped_already_logged": self.skipped_already_logged,
             "skipped_unmatched": self.skipped_unmatched,
+            "skipped_ambiguous": self.skipped_ambiguous,
         }
 
 
@@ -164,6 +181,13 @@ def _match_contact(user, finding: dict) -> Contact | None:
     NOT auto-create: a finding is the result of searching a mailbox for people
     already being tracked, so an unmatched one means the two systems have
     drifted — worth reporting, not worth inventing a contact for.
+
+    Raises:
+        AmbiguousContactError: more than one contact shares the normalized
+            name (e.g. two "Michael Chen"s at different firms) and there's
+            no email on the finding to disambiguate with. Silently picking
+            the first one found (the previous behavior) would land the
+            touch on whichever row the queryset happened to yield first.
     """
     scoped = Contact.objects.for_user(user).filter(archived=False)
     email = (finding.get("email") or "").strip()
@@ -176,9 +200,14 @@ def _match_contact(user, finding: dict) -> Contact | None:
         from capture import extractors
 
         norm = extractors.normalize_name(name)
-        for contact in scoped:
-            if contact.name and extractors.normalize_name(contact.name) == norm:
-                return contact
+        matches = [
+            contact for contact in scoped
+            if contact.name and extractors.normalize_name(contact.name) == norm
+        ]
+        if len(matches) > 1:
+            raise AmbiguousContactError(name, len(matches))
+        if matches:
+            return matches[0]
     return None
 
 
@@ -207,6 +236,34 @@ def _logged_recently(user, contact: Contact, kind: str) -> bool:
     )
 
 
+def _append_note(contact: Contact, line: str) -> None:
+    """Append one dated line to `Contact.notes`.
+
+    `notes` is an append-only journal everywhere else in this codebase
+    (`crm.debrief._append_note` writes the same shape), so a fact discovered
+    by the sync joins the record rather than replacing part of it. Does not
+    save — the caller batches this with whatever column it is also changing,
+    so one bounce is one UPDATE.
+    """
+    stamped = f"— {timezone.localdate():%b %d, %Y} — {line}"
+    existing = (contact.notes or "").rstrip()
+    contact.notes = f"{existing}\n{stamped}" if existing else stamped
+
+
+def _note_bounce(contact: Contact, address: str) -> None:
+    """Record the address that bounced before clearing the column, so the
+    information is moved rather than destroyed — the user may recognise a
+    typo, or want to try a variant of it."""
+    _append_note(contact, f"{address} bounced (Gmail sync) — cleared from the contact.")
+
+
+def _note_alternate_email(contact: Contact, address: str) -> None:
+    """Record a second address the sync found, leaving the primary in place.
+    Saves immediately: nothing else on the row is changing in this branch."""
+    _append_note(contact, f"Gmail sync also saw this person at {address}.")
+    contact.save(update_fields=["notes"])
+
+
 def _touch_kind_for(finding: dict) -> str | None:
     """The ladder stage a finding represents, or None if it shows no progress.
     Order matters: a completed chat outranks a mere reply on the same thread."""
@@ -230,6 +287,13 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
     Ordering follows the original exactly, because each step guards the next:
     bounce check first (an address that does not exist has nothing to log),
     then email backfill, then outreach, then at most one ladder touch.
+
+    Two things this function deliberately no longer does, both of which were
+    automated decisions about a contact's LIFECYCLE rather than about the
+    evidence in front of it: it never archives a contact (a bounce clears the
+    address instead — archiving is a user action with a UI and an undo), and
+    it never replaces a populated email (a differing address is noted, not
+    substituted). See the two blocks below.
 
     ``dry_run`` reports what would happen and writes nothing. It is a flag on
     THIS function rather than a caller-side `transaction.atomic()` rollback,
@@ -256,31 +320,81 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
             result.skipped_not_found += 1
             continue
 
-        contact = _match_contact(user, finding)
+        try:
+            contact = _match_contact(user, finding)
+        except AmbiguousContactError as exc:
+            result.skipped_ambiguous += 1
+            result.details.append(
+                f"{name}: {exc.count} contacts share this name — needs manual "
+                "review, skipped"
+            )
+            continue
         if contact is None:
             result.skipped_unmatched += 1
             result.details.append(f"{name}: no matching contact in Coverage — skipped")
             continue
 
-        # Bounced: the address does not exist. Archive (the soft-delete every
-        # other write path uses) rather than delete — a bounce heuristic can
-        # misfire on a reply that merely quotes failure language, and an
-        # archived contact is trivially recoverable.
+        # Bounced: the address does not exist. Clear the ADDRESS, keep the
+        # PERSON.
+        #
+        # This used to archive the contact, on the reasoning that archiving is
+        # a soft delete and "trivially recoverable". It isn't: `archived` had
+        # no UI at all — no control to set or unset it, no view that lists
+        # archived rows — and both resolvers filter `archived=False`, so a
+        # later genuine reply from that person FORKED a second contact instead
+        # of resurrecting the first. The bounce, which is a fact about one
+        # string in one column, was quietly deciding the fate of the whole
+        # relationship record. Clearing the email states exactly what is
+        # known, keeps the person on the board where the user can fix the
+        # address, and leaves archiving where it belongs: user-driven, from
+        # the CRM, and reversible there (see `crm.views.contact_archive`).
+        #
+        # Idempotent by construction — a second bounce for the same person
+        # finds the email already blank and does nothing, so the daily run
+        # can't stack notes.
         if finding.get("bounced"):
-            if not contact.archived:
+            if contact.email:
                 if not dry_run:
-                    contact.archived = True
-                    contact.save(update_fields=["archived"])
-                result.archived_bounced += 1
-                result.details.append(f"{name}: address bounced — archived")
+                    _note_bounce(contact, contact.email)
+                    contact.email = ""
+                    contact.save(update_fields=["email", "notes"])
+                result.bounced_cleared += 1
+                result.details.append(
+                    f"{name}: address bounced — cleared from the contact "
+                    "(kept in the notes)"
+                )
             continue
 
+        # Email: FILL a blank one, never REPLACE a populated one.
+        #
+        # The counter has always been called `emails_backfilled` and the
+        # docstring has always said "backfill", but the code replaced any
+        # differing value. Combined with name-only matching, a finding for
+        # "John Smith" from a personal Gmail could overwrite the work address
+        # on a contact matched by name alone — destroying the address the
+        # student actually needs and detaching the person from their firm. A
+        # second address is information; it is not a correction, and only the
+        # user knows which one to write to. So the alternate goes in the notes
+        # and the primary stands.
         email = (finding.get("email") or "").strip()
-        if email and email.lower() != (contact.email or "").lower():
+        current = (contact.email or "").strip()
+        if email and not current:
             if not dry_run:
                 contact.email = email[:254]
                 contact.save(update_fields=["email"])
             result.emails_backfilled += 1
+        elif email and email.lower() != current.lower():
+            # Guarded on the note text, not on a flag: this runs daily, and
+            # the same finding will resurface every day the thread stays in
+            # the search window.
+            if email.lower() not in (contact.notes or "").lower():
+                if not dry_run:
+                    _note_alternate_email(contact, email)
+                result.alternate_emails_noted += 1
+                result.details.append(
+                    f"{name}: found a second address ({email}) — noted, "
+                    f"primary ({current}) kept"
+                )
 
         thread_id = (finding.get("thread_id") or "").strip()
         marker = f"[gmail:{thread_id}] " if thread_id else ""
@@ -301,6 +415,7 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                     crm_services.log_touch(
                         user.id, contact.id, "outreach", TOUCH_CHANNEL,
                         note=f"{marker}{evidence}".strip() or None,
+                        source="capture",
                     )
                     _record(user, contact, event)
                 result.outreach_logged += 1
@@ -336,6 +451,7 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
             updates = crm_services.log_touch(
                 user.id, contact.id, kind, TOUCH_CHANNEL,
                 note=f"{marker}{evidence}".strip() or None,
+                source="capture",
             )
             _record(user, contact, event, warmth_changed=bool(updates))
         result.touches_logged += 1

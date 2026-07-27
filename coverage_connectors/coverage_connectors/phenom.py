@@ -81,7 +81,13 @@ def fetch(board: PhenomBoard) -> FetchResult:
         start += _PAGE_SIZE
         if not batch or start >= min(total, _MAX_JOBS):
             break
-    opportunities = [o for o in (_normalize(j, board) for j in jobs) if o.url]
+    try:
+        # Its own try, separate from the per-page network try above — see
+        # greenhouse.py's fetch() for why a normalization failure must not
+        # propagate uncaught out of `fetch()`.
+        opportunities = [o for o in (_normalize(j, board) for j in jobs) if o.url]
+    except Exception as e:  # noqa: BLE001
+        return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(jobs))
 
 

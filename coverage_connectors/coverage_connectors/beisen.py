@@ -30,11 +30,34 @@ _SENTINEL_YEAR = 2200
 
 
 def _capture(resp, holder: dict) -> None:
-    if _LIST_MARKER in resp.url:
-        try:
-            holder["data"] = resp.json()
-        except Exception:  # noqa: BLE001 — a non-JSON body just isn't the list
-            pass
+    """Record the biggest job list seen across every `GetJobAdPageList`
+    response captured on this page — not just the most recent one.
+
+    A page can fire more than one call to this endpoint (an initial broad
+    load followed by a narrower, already-filtered follow-up), and the
+    original `holder["data"] = resp.json()` unconditionally overwrote
+    whatever was captured before it: a narrower follow-up silently
+    discarded a broader response that had already arrived, with nothing
+    surfacing the loss — `fetch()` just returned fewer jobs than the page
+    actually listed. Comparing list sizes here means the largest capture
+    always wins regardless of arrival order.
+
+    A non-JSON body (`resp.json()` raising) is recorded rather than
+    swallowed outright — `except: pass` gave no visibility into how often
+    this happens; `holder["parse_errors"]` lets `fetch()` at least report a
+    count instead of it vanishing.
+    """
+    if _LIST_MARKER not in resp.url:
+        return
+    try:
+        payload = resp.json()
+    except Exception as e:  # noqa: BLE001 — a non-JSON body just isn't the list
+        holder.setdefault("parse_errors", []).append(str(e)[:200])
+        return
+    holder["captured"] = True
+    candidate = _biggest_job_list(payload)
+    if len(candidate) > len(holder.get("jobs") or []):
+        holder["jobs"] = candidate
 
 
 def _biggest_job_list(payload) -> list:
@@ -98,12 +121,14 @@ def fetch(board: BeisenBoard) -> FetchResult:
                            error="playwright not installed — browser tier unavailable")
 
     raw_jobs: list[dict] = []
+    any_captured = False
+    parse_error_count = 0
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
                 for slug in board.pages:
-                    holder: dict = {"data": None}
+                    holder: dict = {}
                     page = browser.new_page()
                     page.on("response", lambda r, h=holder: _capture(r, h))
                     try:
@@ -112,11 +137,26 @@ def fetch(board: BeisenBoard) -> FetchResult:
                         page.wait_for_timeout(_SETTLE_MS)
                     finally:
                         page.close()
-                    raw_jobs.extend(_biggest_job_list(holder["data"]) if holder["data"] else [])
+                    any_captured = any_captured or holder.get("captured", False)
+                    parse_error_count += len(holder.get("parse_errors") or [])
+                    raw_jobs.extend(holder.get("jobs") or [])
             finally:
                 browser.close()
     except Exception as e:  # noqa: BLE001 — a browser/nav failure is a board-level failure
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e)[:200])
+
+    if not any_captured:
+        # The browser ran and nothing raised, but not one `GetJobAdPageList`
+        # response was ever seen on ANY of `board.pages` — that is NOT the
+        # same as "the board genuinely has zero jobs". A UI change that
+        # renamed/moved the endpoint, or a slow/failed XHR, looks identical
+        # to a clean empty board unless this is reported as a failure
+        # (`ok=False`) rather than the previous behaviour: zero jobs with
+        # `ok=True`, which reads exactly like "checked, board is empty".
+        detail = "no GetJobAdPageList response captured on any page"
+        if parse_error_count:
+            detail += f" ({parse_error_count} non-JSON response(s) seen)"
+        return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=detail)
 
     seen: set = set()
     uniq: list[dict] = []
@@ -127,7 +167,13 @@ def fetch(board: BeisenBoard) -> FetchResult:
         seen.add(key)
         uniq.append(j)
 
-    opportunities = [_normalize(j, board) for j in uniq]
+    try:
+        # Kept in its own try — see greenhouse.py's fetch() for why a
+        # normalization failure must not propagate uncaught out of
+        # `fetch()`.
+        opportunities = [_normalize(j, board) for j in uniq]
+    except Exception as e:  # noqa: BLE001
+        return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(uniq))
 
 

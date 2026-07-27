@@ -265,6 +265,28 @@ def test_import_writes_import_row_and_event(user, firms):
     assert ProductEvent.all_objects.filter(user=user, event="import_completed").exists()
 
 
+def test_import_of_an_all_duplicate_file_does_not_fire_import_completed(user, firms):
+    """B5: `import_completed` is a named funnel event and must mean the
+    import actually created rows. An import that creates nothing (every row
+    a duplicate) used to fire it anyway — indistinguishable in the funnel
+    from a real import. It must fire `import_failed` instead."""
+    services.import_contacts(user, file_bytes=CSV_BASIC.encode("utf-8"), filename="first.csv")
+    assert ProductEvent.all_objects.filter(user=user, event="import_completed").count() == 1
+
+    result = services.import_contacts(user, file_bytes=CSV_BASIC.encode("utf-8"), filename="again.csv")
+    assert result.created == 0
+    # Still only the one `import_completed` from the first, real import.
+    assert ProductEvent.all_objects.filter(user=user, event="import_completed").count() == 1
+    assert ProductEvent.all_objects.filter(user=user, event="import_failed").exists()
+
+
+def test_import_of_an_unreadable_csv_fires_import_failed_not_completed(user):
+    result = services.import_contacts(user, file_bytes=b"foo,bar\n1,2\n", filename="bad.csv")
+    assert result.created == 0
+    assert not ProductEvent.all_objects.filter(user=user, event="import_completed").exists()
+    assert ProductEvent.all_objects.filter(user=user, event="import_failed").exists()
+
+
 def test_import_view_upload_flow(client, user, firms):
     from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -329,8 +351,8 @@ def test_settings_htmx_save_returns_partial(client, user):
     client.force_login(user)
     resp = client.post(
         reverse("accounts:settings"),
-        {"school": "HX School", "class_year": "2028", "target_cycle": "",
-         "regions": ["us"], "tracks": ["ib"]},
+        {"section": "profile", "school": "HX School", "class_year": "2028",
+         "target_cycle": "", "regions": ["us"], "tracks": ["ib"]},
         HTTP_HX_REQUEST="true",
     )
     assert resp.status_code == 200
@@ -345,14 +367,46 @@ def test_settings_saves_profile(client, user):
     client.force_login(user)
     resp = client.post(
         reverse("accounts:settings"),
-        {"school": "New School", "class_year": "2029", "target_cycle": "",
-         "regions": ["hk"], "tracks": ["consulting"]},
+        {"section": "profile", "school": "New School", "class_year": "2029",
+         "target_cycle": "", "regions": ["hk"], "tracks": ["consulting"]},
     )
     assert resp.status_code in (200, 302)
     user.refresh_from_db()
     assert user.school == "New School"
     assert user.class_year == 2029
     assert set(user.regions) == {"hk"}
+
+
+def test_settings_post_without_a_recognised_section_is_a_noop(client, user):
+    """Regression for the bug B2 fixes: every ProfileForm field is
+    `required=False`, so before the explicit `section="profile"` marker was
+    required, ANY POST that failed to name one of SECTION_FORMS's keys fell
+    straight through to `ProfileForm(request.POST, ...)` — including a POST
+    naming no section at all, or a stale/misspelled one. An empty POST
+    validated as a legitimate (if blank) profile save and silently erased
+    every profile field. It must now be a no-op instead."""
+    user.school = "Original School"
+    user.class_year = 2027
+    user.save(update_fields=["school", "class_year"])
+
+    resp = client.post(reverse("accounts:settings"), {})  # not logged in yet
+    assert resp.status_code == 302  # login redirect, not even reaching the view
+
+    client.force_login(user)
+    resp = client.post(reverse("accounts:settings"), {})
+    assert resp.status_code == 200
+    user.refresh_from_db()
+    assert user.school == "Original School"
+    assert user.class_year == 2027
+
+    # A stale/unrecognised section name is treated the same way.
+    resp = client.post(
+        reverse("accounts:settings"),
+        {"section": "not-a-real-section", "school": "Should Not Save"},
+    )
+    assert resp.status_code == 200
+    user.refresh_from_db()
+    assert user.school == "Original School"
 
 
 # ---------------------------------------------------------------------------
