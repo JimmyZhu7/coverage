@@ -23,7 +23,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from analytics.models import ProductEvent
-from crm.models import Contact, Touch
+from coverage_domain import cadence
+from crm.models import Contact, Touch, UserFirm
+from crm.views import TUNABLE_CADENCE_PARAMS, _cadence_params
+from directory.models import Firm
 
 User = get_user_model()
 
@@ -261,3 +264,177 @@ def test_user_b_cannot_edit_user_a_contact(client):
     assert resp.status_code == 404
     c.refresh_from_db()
     assert c.name == "Alan"
+
+
+# ---------------------------------------------------------------------------
+# Network page region scoping.
+# ---------------------------------------------------------------------------
+# The HK and US tabs used to filter on the FIRM's `regions` array. Most bulge
+# brackets carry ['us', 'hk'], so one contact matched BOTH tabs and the two
+# lists read as near-duplicates. A firm spans regions; a person does not.
+def _names_in_scope(client, scope):
+    """The contact names the Network page shows under one region tab."""
+    resp = client.get(reverse("crm:contact_list"), {"scope": scope})
+    assert resp.status_code == 200
+    return {
+        card["c"].name
+        for section in resp.context["sections"]
+        for card in section["cards"]
+    }
+
+
+@pytest.mark.django_db
+def test_explicit_region_puts_a_contact_in_one_tab_only(client):
+    """An explicitly-set region wins outright, even at a firm that recruits in
+    both places — the contact appears in her own tab and nowhere else."""
+    user = _user()
+    dual = Firm.objects.create(slug="dual-bank", name="Dual Bank", regions=["us", "hk"])
+    Contact.all_objects.create(user=user, name="Hana HK", firm=dual, region="hk",
+                              warmth="replied")
+    Contact.all_objects.create(user=user, name="Uma US", firm=dual, region="us",
+                              warmth="replied")
+
+    client.force_login(user)
+    assert _names_in_scope(client, "hk") == {"Hana HK"}
+    assert _names_in_scope(client, "us") == {"Uma US"}
+
+
+@pytest.mark.django_db
+def test_multi_region_firm_no_longer_puts_one_contact_in_both_tabs(client):
+    """The regression itself: one person at a dual-region firm must not be
+    counted by both lists."""
+    user = _user()
+    dual = Firm.objects.create(slug="dual-bank", name="Dual Bank", regions=["us", "hk"])
+    Contact.all_objects.create(user=user, name="Solo Person", firm=dual, region="hk",
+                              warmth="replied")
+
+    client.force_login(user)
+    hk, us = _names_in_scope(client, "hk"), _names_in_scope(client, "us")
+    assert hk == {"Solo Person"}
+    assert us == set()
+    assert hk & us == set()
+
+
+@pytest.mark.django_db
+def test_region_scope_matches_the_cadence_engines_answer(client):
+    """The page and the engine must never disagree about where someone works.
+    A blank `region` column with an HK-flavoured `source` resolves to Hong Kong
+    in `cadence.contact_region`, so the HK tab has to agree."""
+    user = _user()
+    dual = Firm.objects.create(slug="dual-bank", name="Dual Bank", regions=["us", "hk"])
+    # Blank region survives save() here: the firm spans both regions, so
+    # `default_region_from_firm` declines to guess.
+    c = Contact.all_objects.create(
+        user=user, name="Legacy Row", firm=dual, source="Apollo HK campaign",
+        warmth="replied",
+    )
+    assert c.region == ""
+    assert cadence.contact_region({"region": c.region, "source": c.source}) == "hk"
+
+    client.force_login(user)
+    assert _names_in_scope(client, "hk") == {"Legacy Row"}
+    assert _names_in_scope(client, "us") == set()
+
+
+@pytest.mark.django_db
+def test_genuinely_unknown_region_shows_in_both_tabs_but_flagged(client):
+    """No region set and no source to guess from is genuinely unknown. Hiding
+    the contact would be worse than showing her, so she appears under every
+    region her firm recruits in — but the page says so rather than passing the
+    guess off as a confirmed match."""
+    user = _user()
+    dual = Firm.objects.create(slug="dual-bank", name="Dual Bank", regions=["us", "hk"])
+    Contact.all_objects.create(user=user, name="Unknown Person", firm=dual, source="",
+                              warmth="replied")
+
+    client.force_login(user)
+    assert _names_in_scope(client, "hk") == {"Unknown Person"}
+    assert _names_in_scope(client, "us") == {"Unknown Person"}
+
+    resp = client.get(reverse("crm:contact_list"), {"scope": "hk"})
+    assert resp.context["unconfirmed_total"] == 1
+    body = resp.content.decode()
+    assert "no region set" in body
+    # ...and the card must not render a region pill asserting one.
+    card = resp.context["sections"][0]["cards"][0]
+    assert card["region"] == ""
+
+
+@pytest.mark.django_db
+def test_confirmed_region_contacts_are_not_flagged_as_guesses(client):
+    """The caveat is only for guesses — a set region must not trip it."""
+    user = _user()
+    dual = Firm.objects.create(slug="dual-bank", name="Dual Bank", regions=["us", "hk"])
+    Contact.all_objects.create(user=user, name="Hana HK", firm=dual, region="hk",
+                              warmth="replied")
+
+    client.force_login(user)
+    resp = client.get(reverse("crm:contact_list"), {"scope": "hk"})
+    assert resp.context["unconfirmed_total"] == 0
+    assert "no region set" not in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_firm_cards_still_span_regions(client):
+    """Line-710's firm filter is deliberately NOT changed: a firm legitimately
+    recruits in both places, so a dual-region firm belongs on both boards. Its
+    contact counts follow the scoped contact list, though, so the HK board
+    counts only its HK people."""
+    user = _user()
+    dual = Firm.objects.create(slug="dual-bank", name="Dual Bank", regions=["us", "hk"])
+    UserFirm.all_objects.create(user=user, firm=dual, tier=1)
+    Contact.all_objects.create(user=user, name="Hana HK", firm=dual, region="hk",
+                              warmth="replied")
+    Contact.all_objects.create(user=user, name="Uma US", firm=dual, region="us",
+                              warmth="replied")
+
+    client.force_login(user)
+    for scope in ("hk", "us"):
+        resp = client.get(reverse("crm:contact_list"), {"scope": scope})
+        cards = [c for s in resp.context["tier_sections"] for c in s["cards"]]
+        assert [c["firm"].name for c in cards] == ["Dual Bank"], scope
+        # One firm card on both boards, but one contact each, not two.
+        assert cards[0]["contact_count"] == 1, scope
+
+
+# ---------------------------------------------------------------------------
+# Cadence override whitelist.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_out_of_range_second_followup_override_is_dropped():
+    """`_cadence_params` is the read-side gate: an out-of-range value is
+    DROPPED, never handed to the engine, so the queue falls back to the
+    default rather than honoring a nonsense window."""
+    user = _user()
+    low, high = TUNABLE_CADENCE_PARAMS["second_followup_after_business_days"]
+
+    user.cadence_params = {"second_followup_after_business_days": high + 1}
+    assert "second_followup_after_business_days" not in _cadence_params(user)
+
+    user.cadence_params = {"second_followup_after_business_days": low - 1}
+    assert "second_followup_after_business_days" not in _cadence_params(user)
+
+    # Non-integers and bools are rejected too (bool is an int subclass).
+    user.cadence_params = {"second_followup_after_business_days": True}
+    assert "second_followup_after_business_days" not in _cadence_params(user)
+
+    # An in-range value survives.
+    user.cadence_params = {"second_followup_after_business_days": 12}
+    assert _cadence_params(user)["second_followup_after_business_days"] == 12
+
+
+@pytest.mark.django_db
+def test_singapore_tab_still_falls_back_to_the_firm(client):
+    """`Contact.region` is a us/hk vocabulary, so nobody can ever resolve to
+    "sg". Asking the contact there would empty the tab, so Singapore and Europe
+    keep filtering on the firm — the only evidence the model can express."""
+    user = _user()
+    sg = Firm.objects.create(slug="sg-bank", name="SG Bank", regions=["sg"])
+    # An explicit HK region must not hide her from the Singapore tab: "hk" is
+    # simply the nearest label the contact vocabulary offers.
+    Contact.all_objects.create(user=user, name="Sinead SG", firm=sg, region="hk",
+                               warmth="replied")
+
+    client.force_login(user)
+    assert _names_in_scope(client, "sg") == {"Sinead SG"}
+    assert "sg" not in Contact.REGION_VALUES

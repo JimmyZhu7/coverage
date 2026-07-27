@@ -310,10 +310,16 @@ class WorkAuthorizationForm(SectionForm):
 # exist and what range each accepts — this map only dresses them.
 CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
     "followup_after_business_days": (
-        "Follow-Up Window",
+        "First Follow-Up",
         "business days",
         "How long a cold contact sits without a reply before Coverage asks you "
-        "to follow up.",
+        "to follow up the first time.",
+    ),
+    "second_followup_after_business_days": (
+        "Second Follow-Up",
+        "business days",
+        "How long to wait after that follow-up before Coverage asks you to try "
+        "once more. Only applies if Max Cold Touches is 3 or higher.",
     ),
     "park_after_business_days": (
         "Park After",

@@ -168,6 +168,12 @@ def _touch_dicts(touches) -> list[dict[str, Any]]:
 # never parked) or a negative window (a follow-up due forever).
 TUNABLE_CADENCE_PARAMS: dict[str, tuple[int, int]] = {
     "followup_after_business_days": (1, 30),
+    # Allowed to run longer than the first window (30) because backing off
+    # further after a second unanswered note is the whole point of staging
+    # them. Capped at 45 business days — about nine calendar weeks — because
+    # past that a "follow-up" is really a fresh introduction, and the cadence
+    # should not pretend otherwise.
+    "second_followup_after_business_days": (1, 45),
     "park_after_business_days": (1, 120),
     "max_cold_touches": (1, 10),
     "advocate_touch_min_weeks": (1, 52),
@@ -571,6 +577,57 @@ _WARMTH_SECTIONS = [
 ]
 
 
+def contact_region(c) -> str | None:
+    """The region a Contact row belongs to, or None when it genuinely isn't
+    known — the SAME answer `cadence.contact_region` gives the engine.
+
+    Delegated rather than reimplemented on purpose. The cadence engine already
+    decides this question (branch 3 scopes its pre-deadline re-ping by region),
+    and if the Network page answered it differently the product would show a
+    person under "Hong Kong" while re-pinging them against US deadlines. One
+    function, one answer: explicit `Contact.region` wins, and the legacy
+    `source` inference is consulted only when that column is blank.
+    """
+    return cadence.contact_region({"region": c.region, "source": c.source})
+
+
+def _in_scope(c, scope: str) -> bool:
+    """Does contact `c` belong in the `scope` region tab?
+
+    Precedence, mirroring `cadence.contact_region` exactly so the two can never
+    disagree about a person:
+
+      1. Resolved region (explicit `Contact.region`, else the legacy `source`
+         inference) matches the scope -> in, and ONLY in, that one tab.
+      2. Resolved region is None — the contact has no region set and no source
+         to guess from, i.e. genuinely unknown — fall back to the firm's
+         regions, which can put the contact in more than one tab.
+
+    Step 2 is deliberately the LAST resort rather than the first, which is the
+    whole fix. A firm's `regions` describes the FIRM, not the person: most
+    bulge brackets carry ['us', 'hk'], so filtering on it put one contact in
+    both tabs and made the two lists near-duplicates. A person works in one
+    place; a firm recruits in several.
+
+    Showing a genuinely-unknown contact in every tab is the honest answer (we
+    do not know, so we do not hide them from the tab they might belong to), but
+    it is an admission of ignorance, not a regional match — so the caller marks
+    these unconfirmed and the contact card renders no region pill for them. It
+    never asserts a region nobody set.
+    """
+    # Singapore and Europe are tabs the FIRM directory supports but the contact
+    # vocabulary does not: `Contact.REGION_CHOICES` is us/hk only, so a person
+    # can never resolve to "sg" and asking their region would empty those tabs
+    # for everyone. There the firm is the only evidence that exists, so it stays
+    # the whole test — which is also exactly how these tabs behaved before.
+    if scope not in Contact.REGION_VALUES:
+        return bool(c.firm and scope in (c.firm.regions or []))
+    region = contact_region(c)
+    if region is not None:
+        return region == scope
+    return bool(c.firm and scope in (c.firm.regions or []))
+
+
 def _contact_card(c, *, tier, today):
     """One full contact card (radar style): initials, pills, firm · role,
     note bullets in plain grammar, and days since the last touch."""
@@ -623,7 +680,15 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     if scope == "school":
         contacts = [c for c in contacts if c.school or c.school_affiliation]
     elif scope in ("us", "hk", "sg", "eu"):
-        contacts = [c for c in contacts if c.firm and scope in (c.firm.regions or [])]
+        contacts = [c for c in contacts if _in_scope(c, scope)]
+    # How many of the shown contacts are here on a guess rather than a set
+    # region. Rendered as a one-line caveat under the Contacts header so a
+    # region tab never silently passes off "unknown" as "confirmed".
+    unconfirmed_total = (
+        sum(1 for c in contacts if not c.region)
+        if scope in ("us", "hk", "sg", "eu")
+        else 0
+    )
     scoped_ids = {c.id for c in contacts}
     scoped_firm_ids = {c.firm_id for c in contacts if c.firm_id}
 
@@ -707,6 +772,16 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     for tier, label in ((1, "Tier 1"), (2, "Tier 2"), (3, "Tier 3"), (None, "Unranked")):
         cards = [firm_card(uf) for uf in user_firms if uf.tier == tier]
         if scope in ("us", "hk", "sg", "eu"):
+            # CORRECT AS-IS — deliberately still `firm.regions`, and NOT the
+            # per-contact rule above. A firm genuinely does span regions:
+            # Goldman really recruits in both Hong Kong and the US, so it
+            # belongs on both boards. Only a PERSON has one location, which is
+            # why the contact filter had to stop asking the firm.
+            #
+            # The card's numbers are already region-correct without touching
+            # this line: `by_firm_contacts` is built from the scoped `contacts`
+            # list above, so under the HK tab Goldman's warmth bars, contact
+            # count and advocate fraction now count only its HK people.
             cards = [fc for fc in cards if scope in (fc["firm"].regions or [])]
         if cards or tier in (1, 2, 3):
             cards.sort(key=lambda fc: (-fc["act_now"], -fc["open"], fc["firm"].name))
@@ -807,6 +882,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "firm_total": len(user_firms),
             "sections": sections,
             "contact_total": len(contacts),
+            "unconfirmed_total": unconfirmed_total,
         },
     )
 

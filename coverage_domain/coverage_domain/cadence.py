@@ -16,8 +16,11 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
       4. parked / quiet                                         -> (skip)
       5. advocate idle >= advocate_touch_min_weeks             -> maintain
       6. cold / no_reply: 0 outbound -> first_outreach; else
-         follow_up at >= followup window; else park once
-         max_cold reached and idle >= park window
+         follow_up at >= the STAGED window for the next touch
+         (`followup_after_business_days` before follow-up #1,
+         `second_followup_after_business_days` before #2 and any
+         later one); else park once max_cold reached and idle >=
+         park window
       7. replied + idle >= 3 business days                      -> advance
     Sorted by (priority, firm tier, firm name).
 
@@ -43,6 +46,20 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
     "manual") silently read as US: re-pinged against US deadlines, skipped
     for HK ones. The fallback is kept rather than removed so rows written
     before the explicit field existed keep the exact meaning they had.
+
+  - DIVERGENCE from the original (deliberate, 2026-07-27): branch 6's
+    follow-up gap is now STAGED. The original reused one
+    `followup_after_business_days` window for every follow-up, measured from
+    the last touch, so the wait before follow-up #1 and follow-up #2 was
+    always identical — the cadence kept the same beat no matter how many
+    times it had already been ignored. A second unanswered note is evidence,
+    and the right response to evidence of disinterest is to back off, not to
+    keep knocking at the same rate. So `second_followup_after_business_days`
+    now governs follow-up #2 and any later one, selected purely by how many
+    outbound touches already exist. It is a separate key rather than a
+    multiplier on the first so the two gaps stay independently tunable from
+    Settings, and the first key keeps its name so existing overrides (the
+    founder's `7`) keep meaning exactly what they always meant.
 
   - `tasks_from_change()`: the backward planner. Fires ONLY on
     `confirmed_official` changes (rumor / reported never spawn a task).
@@ -82,7 +99,24 @@ from typing import Any
 # defaults here and still let a value be tuned without a code change.
 # ---------------------------------------------------------------------------
 CADENCE_DEFAULTS: dict[str, int] = {
-    "followup_after_business_days": 5,   # cold, no reply -> follow up in the 5-7 bd window
+    # STAGED follow-up gaps. Both are business days since the last touch, and
+    # both are set to clear a full calendar week, which takes some arithmetic:
+    # `business_days_since` counts Mon-Fri only, so 5 business days is exactly
+    # 7 calendar days. A window of 5 therefore sits ON one week, not beyond it
+    # — the boundary case, and the wrong side of the owner's "more than a
+    # week". 6 is the smallest window that always clears it.
+    #
+    #   6 bd -> 8 calendar days (touch Mon) .. 10 (touch Fri)
+    #   8 bd -> 10 calendar days (touch Mon) .. 12 (touch Fri)
+    #
+    # (Widest at a Friday touch, because the gap swallows two weekends.) So
+    # the first follow-up lands 8-10 days out and the second a further 10-12,
+    # putting the third touch a month after the first note. The second window
+    # is deliberately the LONGER of the two: someone who ignored two emails is
+    # telling you something, and the answer is to lengthen the leash rather
+    # than keep the same beat. The old single window of 5 did neither.
+    "followup_after_business_days": 6,   # gap before follow-up #1
+    "second_followup_after_business_days": 8,  # gap before #2 and any later one
     "park_after_business_days": 10,      # after max_cold_touches, no reply this long -> park
     "max_cold_touches": 2,               # initial note + 1 follow-up, then park
     "thank_you_within_hours": 24,        # after any chat
@@ -296,6 +330,7 @@ def due_actions(
     """
     p = _merged_params(params)
     followup_bd = int(p["followup_after_business_days"])
+    second_followup_bd = int(p["second_followup_after_business_days"])
     park_bd = int(p["park_after_business_days"])
     max_cold = int(p["max_cold_touches"])
     ty_hours = int(p["thank_you_within_hours"])
@@ -433,17 +468,23 @@ def due_actions(
                 add("first_outreach", "added but never contacted — send the first note", 1)
                 continue
             bd = business_days_since(lt_date, today) if lt_date else 999
+            # Which staged window applies is a function of how many outbound
+            # touches are already on the record, NOT of how long it has been:
+            # 1 prior outbound means the next note is follow-up #1, 2 or more
+            # means #2 or later. Park is checked first and is unchanged.
+            followup_window = followup_bd if outbound <= 1 else second_followup_bd
             if outbound >= max_cold and bd >= park_bd:
                 add(
                     "park",
                     f"{outbound} touches, no reply, {bd} business days silent — park it",
                     3, outbound=outbound, business_days=bd,
                 )
-            elif bd >= followup_bd and outbound < max_cold:
+            elif outbound < max_cold and bd >= followup_window:
                 add(
                     "follow_up",
                     f"no reply {bd} business days after touch {outbound} — follow up",
                     1, outbound=outbound, business_days=bd,
+                    window_business_days=followup_window,
                 )
             continue
 

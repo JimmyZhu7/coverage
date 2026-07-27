@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -64,12 +65,24 @@ def _build_payload(
     subject: str = "Following up",
     text: str = "Hi there, following up on our chat.",
     message_id: str = "<msg-001@mail.example>",
-    date: str = "Wed, 23 Jul 2026 10:00:00 -0400",
+    # Relative to now, NOT a literal. This header used to read
+    # "Wed, 23 Jul 2026 10:00:00 -0400" while the `past_dt` / `future_dt`
+    # fixtures are computed from the real clock. The two agreed only while the
+    # wall clock sat near that date: once it passed 2026-07-26, `past_dt`
+    # (now - 3d) landed AFTER the frozen header, so an ICS meeting the test
+    # calls "past" read as future and two capture tests began failing on a
+    # clean tree for reasons unrelated to any change. A fixture that decays
+    # with the calendar is worse than no fixture — it fails later, in someone
+    # else's diff. Anchoring both sides to the same clock makes the relation
+    # the test asserts (meeting before/after the email) permanently true.
+    date: str | None = None,
     headers: list[tuple[str, str]] | None = None,
     ics_text: str | None = None,
 ) -> dict:
     to = to or []
     bcc = bcc or []
+    if date is None:
+        date = format_datetime(datetime.now(timezone.utc))
 
     # pairs come in as (email, name)
     to_full = [{"Email": e, "Name": n, "MailboxHash": ""} for e, n in to]

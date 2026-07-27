@@ -150,6 +150,10 @@
   {# ---- Full contact cards, by warmth ---- #}
   <section class="net-contacts">
     <h2 class="strip-title">Contacts <span class="scrub-count">{{ contact_total }}</span></h2>
+    {% if unconfirmed_total %}
+      {# Never let a region tab pass off a guess as a confirmed match. #}
+      <p class="net-caveat">{{ unconfirmed_total }} of these have no region set. Shown on a guess.</p>
+    {% endif %}
     {% for section in sections %}
       {# Empty sections start collapsed so they don't take up the board. #}
       <details class="warmth-section"{% if section.cards %} open{% endif %}>
