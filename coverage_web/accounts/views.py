@@ -10,6 +10,9 @@ page and the live firm-search filter during onboarding.
 
 from __future__ import annotations
 
+from allauth.account.models import EmailAddress
+from allauth.socialaccount.models import SocialAccount
+from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
@@ -19,6 +22,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods
 
 from analytics.events import record_event
+from capture.services import capture_health
 from crm.models import Contact, UserFirm
 from directory.models import Firm
 
@@ -33,7 +37,6 @@ from .forms import (
     WeeklyPaceForm,
     WorkAuthorizationForm,
 )
-from .models import LANGUAGES
 
 # The independently-saving sections of /welcome/settings/, keyed by the value
 # their hidden `section` input posts. See accounts/forms.SectionForm.
@@ -241,23 +244,21 @@ def settings_view(request):
         name: cls.from_user(request.user) for name, cls in SECTION_FORMS.items()
     }
 
-    # Language is a small standalone form (its own POST carries `language`).
-    if request.method == "POST" and "language" in request.POST:
-        lang = (request.POST.get("language") or "en").strip()
-        if lang in {code for code, _ in LANGUAGES}:
-            request.user.language = lang
-            request.user.save(update_fields=["language"])
-            messages.success(request, "Language updated.")
-        return redirect(reverse("accounts:settings"))
-
+    # There used to be a Language branch here — its own <form>, sniffed by the
+    # presence of a `language` key rather than a section marker. It was cut on
+    # 2026-07-30 (docs/specs/settings-page.md audit #3): `User.language` was
+    # written by this branch and read back only to re-render the same dropdown.
+    # No LocaleMiddleware, no catalogs, no {% trans %} anywhere. Picking 中文
+    # changed nothing. The column stays (harmless, already populated); the
+    # control returns with an actual i18n pass, not before.
     section = request.POST.get("section") if request.method == "POST" else None
     if section in SECTION_FORMS:
         bound = SECTION_FORMS[section](request.POST)
         if bound.is_valid():
             bound.apply_to(request.user)
             messages.success(request, bound.success_message)
-            # PRG, same as the profile and language saves: a refresh after
-            # saving must not re-POST.
+            # PRG, same as the profile save: a refresh after saving must
+            # not re-POST.
             return redirect(reverse("accounts:settings"))
         # Invalid → fall through and re-render, this section showing errors.
         section_forms[section] = bound
@@ -294,6 +295,8 @@ def settings_view(request):
     if form is None:
         form = ProfileForm.from_user(request.user)
 
+    contacts = Contact.objects.for_user(request.user)
+    contact_count = contacts.count()
     return render(
         request,
         "accounts/settings.html",
@@ -302,17 +305,56 @@ def settings_view(request):
             "saved": saved,
             "cycle_suggestions": CYCLE_SUGGESTIONS,
             "capture_address": services.capture_address(request.user),
+            # `capture_health` is two aggregates over the user's own events —
+            # cheap enough to run on every settings render, and the whole point
+            # is that a student whose BCC has silently stopped working finds
+            # out on the page they'd actually check (risk register #3).
+            "capture": capture_health(request.user),
             "target_firm_count": UserFirm.objects.for_user(request.user).count(),
-            "contact_count": Contact.objects.for_user(request.user).count(),
-            "languages": LANGUAGES,
-            "current_language": request.user.language or "en",
+            "contact_count": contact_count,
+            # Split out rather than folded in: "Contacts: 137" counted archived
+            # rows while the Network page showed 112, so the two pages
+            # disagreed about the same number. Stating the population is rule
+            # D3 — a count must mean what it says.
+            "archived_count": contacts.filter(archived=True).count(),
             "assets_form": section_forms["assets"],
             "work_auth_form": section_forms["work_auth"],
             "cadence_form": section_forms["cadence"],
             "pace_form": section_forms["pace"],
             "default_weekly_goal": WeeklyPaceForm.DEFAULT_GOAL,
+            **_security_context(request.user),
         },
     )
+
+
+def _security_context(user) -> dict:
+    """Facts the Sign-In & Security card renders rows from.
+
+    Honesty rule D6: every row must reflect THIS account. A "Change password"
+    link on an account with no usable password dead-ends at a form that asks
+    for a current password that doesn't exist; a "Connected accounts" link
+    with no provider configured opens an empty page that reads like a bug. So
+    both are conditional on the real state rather than always drawn.
+    """
+    has_password = user.has_usable_password()
+    primary = (
+        EmailAddress.objects.filter(user=user, primary=True).first()
+        # A user created outside allauth's signup flow (createsuperuser, a
+        # fixture, the cutover import) has no EmailAddress row at all, so
+        # falling back to any row for this address keeps the badge truthful
+        # instead of showing "unverified" for a state allauth never recorded.
+        or EmailAddress.objects.filter(user=user, email__iexact=user.email).first()
+    )
+    return {
+        "has_usable_password": has_password,
+        "email_verified": bool(primary and primary.verified),
+        "connected_accounts": SocialAccount.objects.filter(user=user).count(),
+        # Read from the same env-derived list the auth pages use, so a provider
+        # that isn't configured never gets a link on this page either.
+        "social_providers_configured": bool(
+            getattr(django_settings, "ENABLED_SOCIAL_PROVIDERS", [])
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -322,19 +364,37 @@ def settings_view(request):
 @require_GET
 def export(request):
     kind = request.GET.get("kind")
+    if kind == "all":
+        # The everything-in-one-ZIP download the privacy policy's "export
+        # everything" line promises. `record_event` so the founder can see
+        # whether anyone actually exercises the portability promise.
+        record_event("export_downloaded", user=request.user, kind="all")
+        resp = HttpResponse(
+            services.export_zip(request.user), content_type="application/zip"
+        )
+        resp["Content-Disposition"] = 'attachment; filename="coverage-data.zip"'
+        return resp
     if kind == "contacts":
+        record_event("export_downloaded", user=request.user, kind="contacts")
         return _csv_download(
             services.contacts_csv(request.user), "coverage-contacts.csv"
         )
     if kind == "touches":
+        record_event("export_downloaded", user=request.user, kind="touches")
         return _csv_download(
             services.touches_csv(request.user), "coverage-touches.csv"
         )
+    contacts = Contact.objects.for_user(request.user)
     return render(
         request,
         "accounts/export.html",
         {
-            "contact_count": Contact.objects.for_user(request.user).count(),
+            "contact_count": contacts.count(),
+            "archived_count": contacts.filter(archived=True).count(),
+            # Enumerated from the builders themselves (accounts.services
+            # EXPORT_FILES), so the page cannot list a file the ZIP lacks.
+            "export_manifest": services.export_manifest(),
+            "export_exclusions": services.EXPORT_EXCLUSIONS,
         },
     )
 
@@ -346,8 +406,89 @@ def _csv_download(text: str, filename: str) -> HttpResponse:
 
 
 # ---------------------------------------------------------------------------
+# Consequential account actions, each on its own confirm page
+# ---------------------------------------------------------------------------
+# The shared pattern (GitHub's Danger Zone, and the existing delete page):
+# nothing consequential happens on a click within Settings. Every one of these
+# is a GET that states — in plain bullets — what changes, what survives, and
+# whether there is an undo, then a POST that does it. No JS-only modal; the
+# no-JS path is the only path.
+#
+# Type-to-confirm is reserved for account deletion, where the blast radius is
+# total and permanent. Regenerating the capture address and signing out other
+# devices are each recoverable BY ACTION (re-save a mail filter, sign in
+# again), so a single honest confirm button is the right friction — more would
+# train people to click through it.
+@login_required
+@require_http_methods(["GET", "POST"])
+def regenerate_capture_address(request):
+    if request.method == "POST":
+        new_address = services.regenerate_capture_address(request.user)
+        messages.success(
+            request,
+            f"New capture address: {new_address}. The old one stops working now.",
+        )
+        return redirect(f"{reverse('accounts:settings')}#capture")
+    return render(
+        request,
+        "accounts/capture_regenerate.html",
+        {"capture_address": services.capture_address(request.user)},
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def signout_other_sessions(request):
+    if request.method == "POST":
+        ended = services.sign_out_other_sessions(
+            request.user, keep_session_key=request.session.session_key
+        )
+        # The count is the receipt: "signed out everywhere" with nothing to
+        # sign out of is a claim the user can't check, and a student who
+        # expected a library computer to appear in that number deserves to
+        # see a zero rather than a reassuring sentence.
+        messages.success(
+            request,
+            f"Signed out on {ended} other device{'' if ended == 1 else 's'}."
+            if ended
+            else "No other devices were signed in. This is your only session.",
+        )
+        return redirect(f"{reverse('accounts:settings')}#security")
+    return render(request, "accounts/signout_all.html")
+
+
+# ---------------------------------------------------------------------------
 # Self-serve deletion  (/welcome/delete/)
 # ---------------------------------------------------------------------------
+# Labels for the per-table counts `delete_user_and_data` returns, so the
+# goodbye flash is an itemised receipt rather than a reassuring sentence. Keyed
+# by the same names as services._DELETE_ORDER.
+_DELETED_LABELS: list[tuple[str, str, str]] = [
+    ("contacts", "contact", "contacts"),
+    ("touches", "touch", "touches"),
+    ("user_firms", "target firm", "target firms"),
+    ("user_opportunities", "tracked role", "tracked roles"),
+    ("tasks", "task", "tasks"),
+    ("chat_debriefs", "chat debrief", "chat debriefs"),
+    ("capture_events", "capture event", "capture events"),
+    ("fit_scores", "fit score", "fit scores"),
+]
+
+
+def _deletion_receipt(counts: dict[str, int]) -> str:
+    """"Deleted 137 contacts, 138 touches, 69 target firms." Only non-zero
+    tables are named — listing "0 tasks" would pad the receipt with things
+    that were never there, which reads as boilerplate rather than as proof."""
+    parts = [
+        f"{counts[key]} {singular if counts[key] == 1 else plural}"
+        for key, singular, plural in _DELETED_LABELS
+        if counts.get(key)
+    ]
+    if not parts:
+        return "Your account has been deleted. There was no other data on it."
+    return "Deleted " + ", ".join(parts) + ", and your account. Nothing is retained."
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def delete_account(request):
@@ -357,14 +498,12 @@ def delete_account(request):
         if typed.lower() != request.user.email.lower():
             error = "That didn't match. Type your email address exactly to confirm."
         else:
-            services.delete_user_and_data(request.user)
+            counts = services.delete_user_and_data(request.user)
             # The session's user row is gone; flush it and send them home.
             from django.contrib.auth import logout
 
             logout(request)
-            messages.success(
-                request, "Your account and all of your data have been deleted."
-            )
+            messages.success(request, _deletion_receipt(counts))
             return redirect("/")
     return render(
         request,

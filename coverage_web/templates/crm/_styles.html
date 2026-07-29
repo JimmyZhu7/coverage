@@ -20,6 +20,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   a.dash-card { color: inherit; text-decoration: none; }
   a.dash-card:hover { text-decoration: none; }
 
+  /* ---- Today: compact header strip (replaces the tall hero) ---- */
+  .today-head { margin: 0 0 var(--s5); }
+  .today-eyebrow { font-size: var(--fs-micro); color: var(--ink-3); margin: 0;
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--w-med); }
+  .today-title { margin: 2px 0 var(--s2); line-height: 1.1; }
+  /* The page's thesis sentence, in real numbers. --ink-2 rather than --ink-3:
+     it doubles as the page's aria-describedby target, so it has to clear AA
+     against --paper at this size, and --ink-3 does not at --fs-s. */
+  .today-summary { margin: 0; color: var(--ink-2); font-size: var(--fs-s); }
+  .today-summary b { color: var(--ink); font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; font-weight: var(--w-bold); }
+
   /* ---- The Today cockpit: cadence queue + a sticky pace/activity rail ---- */
   .cockpit { display: grid; grid-template-columns: minmax(0, 1fr) 320px;
     gap: var(--s5); align-items: start; transition: opacity var(--t-fast); }
@@ -36,7 +48,32 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font-size: var(--fs-s); color: var(--ink-3); }
   .lane-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger);
     flex: none; animation: kin-pulse-ring 1800ms ease-out infinite; }
-  .lane-overdue .prio { background: var(--danger-soft); color: var(--danger); }
+  /* Semantic lanes. The dot and the tint are secondary signals only — each
+     lane carries its name in text, and each card carries its verb badge, so
+     colour is never the sole carrier of meaning. */
+  .lane-critical .prio { background: var(--danger-soft); color: var(--danger); }
+  .lane-critical .act-card { border-left-color: var(--danger); }
+  .lane-momentum .act-card { border-left-color: var(--ok); }
+  .lane-park .act-card { border-left-color: var(--line-strong); }
+  .lane-title .park-all { margin-left: auto; }
+
+  /* Up next: the held-back remainder. Collapsed by default, exact count in
+     the summary, complete list inside — the cap paces, it never filters. */
+  .upnext { margin-bottom: var(--s6); background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--r-panel);
+    padding: var(--s3) var(--s4); box-shadow: var(--shadow-1); }
+  .upnext > summary { cursor: pointer; list-style: none; display: flex;
+    align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
+  .upnext > summary::-webkit-details-marker { display: none; }
+  .upnext-count { font-weight: var(--w-bold); font-size: var(--fs-s); }
+  .upnext-why { color: var(--ink-2); font-size: var(--fs-xs); }
+  .upnext-toggle { margin-left: auto; color: var(--accent-ink);
+    font-size: var(--fs-xs); font-weight: var(--w-med); white-space: nowrap; }
+  .upnext[open] .upnext-toggle::after { content: " (hide)"; color: var(--ink-3); }
+  .upnext-grid { margin-top: var(--s4); }
+
+  /* Done for today: the product working, not an empty page. */
+  .empty--done h2 { color: var(--ok); }
 
   /* Inline quick actions — two standardized rows: primary (Sent / Reply /
      Compose) then ghosts (Snooze / Skip). Identical on every card. */
@@ -87,17 +124,64 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .activity-when { color: var(--ink-3); font-size: var(--fs-xs);
     font-family: var(--font-mono); white-space: nowrap; }
 
-  @media (max-width: 900px) {
+  /* Below 1024 the rail stacks under the queue, pace ring first. Cards flow
+     in a row while they fit and wrap rather than shrinking. */
+  @media (max-width: 1023px) {
     .cockpit { grid-template-columns: 1fr; }
     .cockpit-rail { position: static; flex-direction: row; flex-wrap: wrap; }
     .cockpit-rail .rail-card { flex: 1 1 240px; }
   }
 
-  /* Act Now: a compact card grid, four per row, uniform. */
-  .act-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); }
-  @media (max-width: 1180px) { .act-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-  @media (max-width: 820px) { .act-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 520px) { .act-grid { grid-template-columns: 1fr; } }
+  /* ---- Stat ribbon: the commodity layer, below the queue and slim ---- */
+  .ribbon { margin-top: var(--s6); border-top: 1px solid var(--line);
+    padding-top: var(--s4); }
+  /* The ribbon scrolls itself if it has to. The PAGE never does — a
+     horizontal scrollbar on <body> is the bug this container exists to
+     prevent. */
+  .ribbon-row { display: flex; gap: var(--s5); align-items: baseline;
+    overflow-x: auto; padding-bottom: var(--s2); scrollbar-width: thin; }
+  .ribbon-stat { display: flex; flex-direction: column; gap: 2px;
+    text-decoration: none; color: inherit; flex: 0 0 auto; min-width: 0; }
+  a.ribbon-stat:hover { text-decoration: none; }
+  a.ribbon-stat:hover .ribbon-num { color: var(--accent-ink); }
+  /* NOT `.dash-num` — see week.html. That class is count-animated site-wide
+     from base.html, which renders wrong numbers for the first ~700ms. */
+  .ribbon-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: var(--fs-l); font-weight: var(--w-bold); color: var(--ink);
+    line-height: 1.1; transition: color var(--t-fast); }
+  .ribbon-lbl { font-size: var(--fs-micro); color: var(--ink-2);
+    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .ribbon-funnel { margin-left: auto; }
+
+  @media (max-width: 700px) {
+    /* 2x2 at phone widths rather than a scroll-only row: four stats fit
+       comfortably stacked, and a wrapped grid needs no horizontal gesture. */
+    .ribbon-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--s4); overflow-x: visible; }
+    .ribbon-funnel { margin-left: 0; }
+    .ribbon-lbl { white-space: normal; }
+  }
+
+  /* Tap targets stay >= 44px at phone widths; the quick actions wrap to a
+     second row before any button is squeezed below that. */
+  @media (max-width: 560px) {
+    .act-primary { flex-wrap: wrap; }
+    .act-primary .btn { flex: 1 1 44%; min-height: 44px; }
+    .act-ghosts .btn { min-height: 44px; }
+    .upnext > summary { gap: var(--s2); }
+    .upnext-toggle { margin-left: 0; }
+  }
+
+  /* Act card grid. Three per row at the widest, not four: the cards now carry
+     a reason line and an evidence line, and a fourth column drops each card
+     below the measure at which a sentence stays readable. */
+  .act-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+  @media (max-width: 1180px) { .act-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .act-grid { grid-template-columns: 1fr; } }
+  /* NOTE: no `height` here, and none may be added — the card's content is
+     variable now (reason wraps, the pairing line is conditional) and this
+     codebase has shipped clipping twice from a fixed card height. Grid row
+     stretch already keeps a row's cards level. */
   .act-card { background: var(--surface); border: 1px solid var(--line);
     border-left: 3px solid var(--accent); border-radius: var(--r-panel);
     padding: var(--s4); display: flex; flex-direction: column; gap: 6px;
@@ -114,6 +198,24 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .act-role { margin: 0; color: var(--ink-2); font-size: var(--fs-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .act-badges { display: flex; gap: var(--s2); flex-wrap: wrap; }
+  .prio-close { background: var(--danger-soft); color: var(--danger);
+    border-color: var(--danger); }
+  /* School contacts: the firm slot holds a university, so it must not be
+     styled like an employer. */
+  .opp-firm.is-school { color: var(--stale-t); }
+
+  /* The card's evidence: WHY it's asking, and WHEN you last touched them.
+     Deliberately NOT truncated — a claim cut off mid-sentence is worse than
+     a card one line taller, and .act-card is min-height driven so it grows. */
+  .act-reason { margin: 0; color: var(--ink-2); font-size: var(--fs-xs);
+    line-height: 1.45; }
+  .act-last { margin: 0; color: var(--ink-3); font-size: var(--fs-micro);
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  /* The debrief/thank-you pair acknowledging itself. */
+  .act-pair { margin: 0; color: var(--accent-ink); font-size: var(--fs-micro); }
+  /* Compose opens an empty email when there's no opener. Say so on the
+     button rather than letting the click find out. */
+  .act-nodraft { color: var(--ink-3); font-size: var(--fs-micro); }
 
   /* Debrief lane: a chat that already happened and hasn't been written
      down. Toned as a capture prompt, not an alarm — it's a five-minute job,
@@ -374,7 +476,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cc-btns .btn { padding: 6px 14px; font-size: var(--fs-xs); }
 
   @media (max-width: 900px) {
-    .dash-stats { grid-template-columns: repeat(2, 1fr); }
     .net-board { grid-template-columns: 1fr; }
   }
 </style>

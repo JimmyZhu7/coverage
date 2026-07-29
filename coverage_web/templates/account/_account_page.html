@@ -1,0 +1,63 @@
+{% comment %}
+Shell styles for the allauth-served account pages linked from Settings'
+Sign-In & Security card: password change/set, email management, and connected
+accounts.
+
+Why this file exists: those routes have always worked, but nothing overrode
+their templates, so allauth served its own raw defaults — black text on
+Coverage's dark background, a bare "Menu:" <ul>, no nav, no shell. They were
+reachable only by typing the URL, and looked broken when you got there. The
+Settings page now links to all of them, so they had to become real pages
+first.
+
+Deliberately small: these pages are forms and lists, and `base.html` plus the
+existing `.panel` / `.btn` / `.msg` tokens already do most of the work. What's
+here is the handful of rules those tokens don't cover. Nothing is rebranded
+and no token is redefined.
+{% endcomment %}
+<style>
+  .acct-wrap { max-width: 620px; margin: 0 auto; }
+  .acct-back { display: inline-block; font-size: var(--fs-s); margin-bottom: var(--s3); }
+  .acct-lede { color: var(--ink-2); font-size: var(--fs-s); max-width: 60ch; }
+
+  /* allauth renders its forms as plain field stacks; give them the same
+     rhythm as the rest of the product's inputs. */
+  .acct-form label { display: block; margin: 0 0 var(--s1); font-size: var(--fs-s); }
+  .acct-form input[type="text"], .acct-form input[type="email"],
+  .acct-form input[type="password"] { width: 100%; margin-bottom: var(--s3); }
+  .acct-form .helptext { display: block; color: var(--ink-3);
+    font-size: var(--fs-xs); margin: -6px 0 var(--s3); }
+  .acct-form ul.errorlist { list-style: none; margin: -6px 0 var(--s3);
+    padding: 0; color: var(--danger); font-size: var(--fs-s); }
+
+  /* Email-address list: one row per address, its badges, and its controls.
+     min-height so a long address wraps instead of being clipped. */
+  .acct-list { list-style: none; margin: 0; padding: 0; }
+  .acct-item { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3);
+    align-items: center; justify-content: space-between; min-height: 48px;
+    padding: var(--s3) 0; border-top: 1px solid var(--line); }
+  .acct-item:first-child { border-top: 0; }
+  .acct-item-main { min-width: 0; display: flex; flex-wrap: wrap;
+    align-items: center; gap: var(--s2); }
+  .acct-addr { font-family: var(--font-mono); font-size: var(--fs-s);
+    overflow-wrap: anywhere; min-width: 0; }
+  .acct-tag { font-family: var(--font-mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px;
+    border-radius: 999px; border: 1px solid var(--line); color: var(--ink-3); }
+  .acct-tag.is-ok { border-color: var(--accent); color: var(--accent-ink);
+    background: var(--accent-soft); }
+  .acct-tag.is-warn { border-color: var(--danger-line); color: var(--danger); }
+  .acct-item-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  /* 44px minimum tap target on every control on these pages. Scoped to
+     .acct-wrap rather than added to the global .btn: these are the pages this
+     change owns, and coverage.css's 38px default is a product-wide decision
+     that isn't this change's to make. */
+  .acct-wrap .btn, .acct-wrap button { min-height: 44px; }
+
+  .acct-empty { color: var(--ink-3); font-size: var(--fs-s); margin: 0; }
+
+  @media (max-width: 560px) {
+    .acct-item { flex-direction: column; align-items: stretch; }
+    .acct-item-actions .btn { width: 100%; justify-content: center; }
+  }
+</style>

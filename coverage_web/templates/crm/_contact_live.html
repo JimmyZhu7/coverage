@@ -46,7 +46,7 @@
         hx-swap="outerHTML">
     {% csrf_token %}
     <select name="kind" aria-label="Interaction">
-      {% for value, label in touch_kinds %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      {% for value, label in touch_kinds %}<option value="{{ value }}"{% if value == preselect_kind %} selected{% endif %}>{{ label }}</option>{% endfor %}
     </select>
     <select name="channel" aria-label="Channel">
       {% for value, label in channels %}<option value="{{ value }}">{{ label }}</option>{% endfor %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Email Addresses · Coverage{% endblock %}
+
+{% block head %}{% include "account/_account_page.html" %}{% endblock %}
+
+{% block content %}
+<div class="page page--narrow acct-wrap">
+  <a class="acct-back" href="{% url 'accounts:settings' %}#security">← Back to settings</a>
+  <header class="page-head"><h1>Email Addresses</h1></header>
+  <p class="acct-lede">Your primary address is how you sign in and where password
+    resets go. Changing it means adding the new one, verifying it, then making it
+    primary.</p>
+
+  <div class="panel">
+    {% if emailaddresses %}
+      {% comment %}
+      Two separate <form>s on purpose. allauth's EmailView dispatches on which
+      submit button was named (action_primary / action_send / action_remove vs
+      action_add) and BOTH the radio group and the add field are called
+      "email" — one combined form would post two values under that name and
+      the wrong one would win.
+      {% endcomment %}
+      <form method="post" action="{% url 'account_email' %}">
+        {% csrf_token %}
+        <ul class="acct-list">
+          {% for radio in emailaddress_radios %}
+            {% with address=radio.emailaddress %}
+              <li class="acct-item">
+                <div class="acct-item-main">
+                  <input type="radio" name="email" id="{{ radio.id }}"
+                         value="{{ address.email }}"{% if radio.checked %} checked{% endif %}>
+                  <label class="acct-addr" for="{{ radio.id }}">{{ address.email }}</label>
+                  {% if address.verified %}
+                    <span class="acct-tag is-ok">Verified</span>
+                  {% else %}
+                    <span class="acct-tag is-warn">Unverified</span>
+                  {% endif %}
+                  {% if address.primary %}<span class="acct-tag">Primary</span>{% endif %}
+                </div>
+              </li>
+            {% endwith %}
+          {% endfor %}
+        </ul>
+        <div class="actions">
+          <button type="submit" name="action_primary" class="btn btn-primary">Make Primary</button>
+          <button type="submit" name="action_send" class="btn">Re-send Verification</button>
+          <button type="submit" name="action_remove" class="btn btn-danger"
+                  aria-label="Remove the selected email address">Remove</button>
+        </div>
+      </form>
+    {% else %}
+      <p class="acct-empty">No email address is on file for this account yet.</p>
+    {% endif %}
+  </div>
+
+  {% if can_add_email %}
+    <div class="panel">
+      <h2>Add an Address</h2>
+      <form class="acct-form" method="post" action="{% url 'account_email' %}">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <p class="msg error" role="alert">{{ form.non_field_errors|striptags }}</p>
+        {% endif %}
+        {% for field in form %}
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {{ field.errors }}
+        {% endfor %}
+        <div class="actions">
+          <button type="submit" name="action_add" class="btn btn-primary">Add Email</button>
+        </div>
+      </form>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

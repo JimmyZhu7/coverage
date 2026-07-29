@@ -26,7 +26,10 @@ from django.db import models
 
 
 # The five most-spoken languages (by total speakers) as an interface-language
-# preference. Stored per user now; actual UI translation is a later i18n pass.
+# preference. NOT rendered anywhere today — the Settings control that wrote
+# `User.language` was removed on 2026-07-30 because nothing read the value
+# (see that field below). Kept here, ready, for the i18n pass that brings the
+# control back alongside actual translations.
 LANGUAGES = [
     ("en", "English"),
     ("zh", "中文 (Chinese)"),
@@ -137,9 +140,29 @@ class User(AbstractUser):
     # Touches-per-week target for the Today pace ring. NULL means "use the
     # product default" (crm.views.WEEKLY_TOUCH_GOAL) rather than "no goal".
     weekly_touch_goal = models.PositiveSmallIntegerField(null=True, blank=True)
-    # Preferred interface language (code from accounts.LANGUAGES). Stored now;
-    # actual UI translation is a later i18n pass.
+    # Preferred interface language (code from accounts.LANGUAGES). Stored, and
+    # currently READ BY NOTHING: there is no LocaleMiddleware, no catalogs, and
+    # no {% trans %} in any template. The Settings control was removed on
+    # 2026-07-30 for exactly that reason (docs/specs/settings-page.md audit #3
+    # — a setting that saves a value the engine ignores is the same defect as
+    # the old target_cycle). The column stays because it is harmless and
+    # already populated; the control comes back WITH the i18n pass, not before.
     language = models.CharField(max_length=8, default="en", blank=True)
+    # IANA zone name ("Asia/Hong_Kong"). Blank means UNSET, and unset means
+    # UTC — which is what the whole product ran on before this column existed.
+    #
+    # Why it matters: every "today" in the product is `timezone.localdate()`
+    # (crm/views.py), so with TIME_ZONE="UTC" a Hong Kong student's cadence
+    # queue, pace week, and follow-up windows all rolled over at 8 a.m. their
+    # time, and Sunday-evening logging landed in the wrong week.
+    # `accounts.middleware.TimezoneMiddleware` activates this per request, and
+    # every localdate() call site becomes correct with no change of its own
+    # (coverage_domain.cadence already takes the as-of date as a parameter).
+    #
+    # Never guessed from `regions`: a timezone silently moving someone's week
+    # boundary on an inference is exactly the bug class Settings exists to
+    # avoid. Unset stays UTC, and the field says so out loud.
+    timezone = models.CharField(max_length=64, blank=True, default="")
     assets = models.JSONField(default=dict, blank=True)
     # Unique but nullable: multiple NULLs are fine in Postgres, and every
     # real user gets one assigned at creation time (see save() below), so

@@ -740,6 +740,202 @@ def test_maintain_reason_renders_tuned_advocate_week_range():
 
 
 # --------------------------------------------------------------------------
+# C2 (2026-07-30 divergence): idle clocks read the last REAL touch. A
+# `manual_override` audit row is the system writing to itself and must not
+# restart a relationship clock.
+# --------------------------------------------------------------------------
+def test_manual_override_does_not_reset_the_advocate_clock():
+    """The measured bug: promoting someone to advocate writes an audit row,
+    and branch 5's "last touch of any kind" clock read it as a fresh touch —
+    so the promotion itself silenced the advocate for four weeks."""
+    c = contact(1, warmth="advocate", thread_state="advocate")
+    touches = [
+        touch(1, "chat", "2026-05-01 10:00"),                  # real, 82d before AS_OF
+        touch(1, "manual_override", "2026-07-20 10:00",        # audit row, 2d before
+              note="warmth=advocate thread_state=advocate"),
+    ]
+    actions = cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS)
+    my = [a for a in actions if a["contact"]["id"] == 1]
+    assert [a["action"] for a in my] == ["maintain"], (
+        "the audit row restarted the 4-week clock and hid the advocate"
+    )
+    # ...and the day count is measured from the chat, not the audit row.
+    assert my[0]["ctx"]["days_since"] == 82
+
+
+def test_manual_override_only_contact_reads_as_no_dateable_touch():
+    """A contact whose ONLY touch is an audit row has no relationship history
+    at all — the honest reading is "nothing on record", not "touched today"."""
+    c = contact(1, warmth="advocate", thread_state="advocate")
+    touches = [touch(1, "manual_override", "2026-07-21 10:00", note="warmth=advocate")]
+    my = [a for a in cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS)
+          if a["contact"]["id"] == 1][0]
+    assert my["action"] == "maintain"
+    assert my["ctx"]["days_since"] is None
+    assert "no dateable touch on record" in my["reason"]
+
+
+def test_manual_override_does_not_reset_the_cold_followup_clock():
+    """Branch 6 reads the same clock: parking-adjacent bookkeeping on a cold
+    contact must not push their follow-up back out of range."""
+    c = contact(1, warmth="cold", thread_state="no_reply")
+    touches = [
+        touch(1, "outreach", "2026-07-10 10:00"),              # 8 business days before
+        touch(1, "manual_override", "2026-07-21 10:00", note="thread_state=no_reply"),
+    ]
+    assert "follow_up" in kinds_for(
+        cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1
+    )
+
+
+def test_manual_override_does_not_reset_the_confirm_chat_clock():
+    """Branch 2's staleness clock, same rule."""
+    c = contact(1, warmth="replied", thread_state="chat_scheduled")
+    touches = [
+        touch(1, "chat_scheduled", "2026-07-08 10:00"),
+        touch(1, "manual_override", "2026-07-21 10:00", note="warmth=replied"),
+    ]
+    assert "confirm_chat" in kinds_for(
+        cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1
+    )
+
+
+# --------------------------------------------------------------------------
+# C1 (2026-07-30 divergence): `keep_warm`, the branch that closes the chatted
+# dead end. The ported tree said nothing about a contact once the thank-you
+# window shut, which silenced the warmest people in the CRM.
+# --------------------------------------------------------------------------
+def test_chatted_contact_gets_keep_warm_once_the_thank_you_window_shuts():
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [
+        touch(1, "chat", "2026-06-01 10:00"),        # 51d before AS_OF: expired
+        touch(1, "thank_you", "2026-06-01 12:00"),
+    ]
+    my = [a for a in cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS)
+          if a["contact"]["id"] == 1]
+    assert [a["action"] for a in my] == ["keep_warm"]
+    assert my[0]["priority"] == 2
+    assert my[0]["ctx"]["days_since"] == 51
+
+
+def test_chatted_contact_inside_the_window_is_left_alone():
+    """The other side of the boundary: a chat three days ago is not a
+    relationship going cold, and 5b must not nag it."""
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [
+        touch(1, "chat", "2026-07-19 10:00"),
+        touch(1, "thank_you", "2026-07-19 12:00"),
+    ]
+    assert kinds_for(cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1) == set()
+
+
+def test_keep_warm_does_not_pre_empt_a_live_thank_you():
+    """Branch 1 still owns the first week after a chat — a thank-you that is
+    still timely must not be replaced by a keep-warm nudge."""
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-07-20 09:00")]  # 2d before AS_OF, not thanked
+    assert kinds_for(cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1) == {
+        "thank_you"
+    }
+
+
+def test_keep_warm_window_is_a_parameter_and_renders_its_range():
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-07-08 10:00")]  # 14d before AS_OF
+    default = kinds_for(cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1)
+    assert default == set(), "14d is inside the default 3-week window"
+
+    tuned = [a for a in cadence.due_actions(
+        [c], touches, [], as_of=AS_OF, firms=FIRMS,
+        params={"chatted_touch_min_weeks": 1, "chatted_touch_max_weeks": 2},
+    ) if a["contact"]["id"] == 1]
+    assert [a["action"] for a in tuned] == ["keep_warm"]
+    assert "1–2 weeks" in tuned[0]["reason"]
+    assert "3–5 weeks" not in tuned[0]["reason"]
+
+
+def test_keep_warm_reason_has_no_sentinel_when_undateable():
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    my = [a for a in cadence.due_actions([c], [], [], as_of=AS_OF, firms=FIRMS)
+          if a["contact"]["id"] == 1][0]
+    assert my["action"] == "keep_warm"
+    assert my["ctx"]["days_since"] is None
+    assert "no dateable touch on record" in my["reason"]
+
+
+def test_keep_warm_clock_ignores_audit_rows_too():
+    """C1 is born on the C2 clock: a promotion/correction row must not push a
+    chatted contact's keep-warm date out."""
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [
+        touch(1, "chat", "2026-06-01 10:00"),
+        touch(1, "thank_you", "2026-06-01 12:00"),
+        touch(1, "manual_override", "2026-07-21 10:00", note="thread_state=chat_done"),
+    ]
+    assert "keep_warm" in kinds_for(
+        cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1
+    )
+
+
+def test_advocates_keep_their_own_slower_clock():
+    """5b sits AFTER branch 5 so an advocate whose thread_state is chat_done
+    still gets `maintain`, on the advocate window, not `keep_warm`."""
+    c = contact(1, warmth="advocate", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-06-01 10:00")]
+    assert kinds_for(cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1) == {
+        "maintain"
+    }
+
+
+def test_keep_warm_never_pre_empts_a_pre_deadline_reping():
+    """Branch 3 outranks 5b: a confirmed close beats a keep-warm nudge."""
+    firm_dates = [{
+        "firm_id": "dualfirm", "event_kind": "app_close", "region": "hk",
+        "date": TODAY + timedelta(days=5), "confidence": "confirmed_official",
+    }]
+    c = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="chat_done",
+                region="hk")
+    touches = [touch(1, "chat", "2026-06-01 10:00")]
+    assert kinds_for(
+        cadence.due_actions([c], touches, firm_dates, as_of=AS_OF, firms=FIRMS), 1
+    ) == {"reping"}
+
+
+# --------------------------------------------------------------------------
+# C3 (2026-07-30 divergence): branch 7 now covers warmth='chatted'. Replying
+# again AFTER a chat used to make a contact LESS visible than never having
+# chatted at all.
+# --------------------------------------------------------------------------
+def test_chatted_contact_who_replies_again_gets_advance():
+    c = contact(1, warmth="chatted", thread_state="replied")
+    touches = [
+        touch(1, "chat", "2026-06-01 10:00"),
+        touch(1, "reply_received", "2026-07-15 10:00"),
+    ]
+    my = [a for a in cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS)
+          if a["contact"]["id"] == 1]
+    assert [a["action"] for a in my] == ["advance"]
+    assert my[0]["priority"] == 1
+
+
+def test_advocates_are_still_excluded_from_branch_seven():
+    """Branch 5 owns advocates and returns before branch 7 — widening the
+    warmth set must not have changed that."""
+    c = contact(1, warmth="advocate", thread_state="replied")
+    # A recent reply: branch 7 would fire `advance` here for any other warmth,
+    # and branch 5's own 4-week window has NOT elapsed, so the honest result
+    # is silence — the advocate is simply not due.
+    fresh = [touch(1, "reply_received", "2026-07-15 10:00")]
+    assert kinds_for(cadence.due_actions([c], fresh, [], as_of=AS_OF, firms=FIRMS), 1) == set()
+    # And once the advocate window does elapse, it is `maintain` that fires,
+    # not `advance` — branch 5 returned before branch 7 could be reached.
+    stale = [touch(1, "reply_received", "2026-05-01 10:00")]
+    assert kinds_for(cadence.due_actions([c], stale, [], as_of=AS_OF, firms=FIRMS), 1) == {
+        "maintain"
+    }
+
+
+# --------------------------------------------------------------------------
 # Audit fix 11a: the full warmth x thread_state cross-product, pinned. Every
 # combination either fires an action or is on the explicit allow-list of
 # CURRENT intentional silences below. This is the guard that would have
@@ -751,17 +947,21 @@ _ALL_WARMTH = ("cold", "replied", "chatted", "advocate")
 _ALL_THREAD_STATES = ("no_reply", "replied", "chat_scheduled", "chat_done", "advocate", "quiet", "parked")
 
 # Pins TODAY's behavior — do NOT add or remove entries here to "fix" a
-# silence; several of these (e.g. warmth=replied/chatted sitting idle in
-# thread_state=no_reply/chat_done, or warmth=chatted having replied) look
-# like real coverage gaps, but closing them is a product decision tracked
-# separately from this audit. This set only makes the current silences
-# visible and regression-tested, not correct.
+# silence; several of these (e.g. warmth=replied sitting idle in
+# thread_state=no_reply/chat_done) look like real coverage gaps, but closing
+# them is a product decision tracked separately from this audit. This set only
+# makes the current silences visible and regression-tested, not correct.
+#
+# Two entries LEFT this set on 2026-07-30, both deliberately:
+#   ("chatted", "chat_done") -> now fires `keep_warm` (C1). This was the
+#     costliest silence in the table: the people who actually met you.
+#   ("chatted", "replied")   -> now fires `advance` (C3).
 _INTENTIONALLY_SILENT_COMBOS = {
     ("cold", "chat_done"), ("cold", "advocate"), ("cold", "quiet"), ("cold", "parked"),
     ("replied", "no_reply"), ("replied", "chat_done"), ("replied", "advocate"),
     ("replied", "quiet"), ("replied", "parked"),
-    ("chatted", "no_reply"), ("chatted", "replied"), ("chatted", "chat_done"),
-    ("chatted", "advocate"), ("chatted", "quiet"), ("chatted", "parked"),
+    ("chatted", "no_reply"), ("chatted", "advocate"),
+    ("chatted", "quiet"), ("chatted", "parked"),
     ("advocate", "quiet"), ("advocate", "parked"),
 }
 
@@ -796,6 +996,7 @@ def test_priority_ordinal_pinned_per_action_kind():
         "follow_up": 1,
         "advance": 1,
         "maintain": 2,
+        "keep_warm": 2,
         "park": 3,
     }
 
@@ -862,3 +1063,9 @@ def test_priority_ordinal_pinned_per_action_kind():
         [touch(1, "chat", "2026-05-01 10:00")], [], as_of=AS_OF, firms=FIRMS,
     )
     assert prio_of("maintain", maintain_actions) == expected["maintain"]
+
+    keep_warm_actions = cadence.due_actions(
+        [contact(1, warmth="chatted", thread_state="chat_done")],
+        [touch(1, "chat", "2026-05-01 10:00")], [], as_of=AS_OF, firms=FIRMS,
+    )
+    assert prio_of("keep_warm", keep_warm_actions) == expected["keep_warm"]

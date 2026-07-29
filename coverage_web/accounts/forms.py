@@ -18,6 +18,8 @@ from __future__ import annotations
 import io
 import uuid
 from datetime import date
+from functools import lru_cache
+from zoneinfo import available_timezones
 
 from django import forms
 from django.core.files.uploadedfile import InMemoryUploadedFile
@@ -26,6 +28,12 @@ from PIL import Image, ImageOps
 from coverage_domain.cadence import CADENCE_DEFAULTS
 from directory.classify import REGION_LABELS, REGION_ORDER
 from directory.recommend import cycle_choices
+
+# Same rule for both of these as for the ranges below: import the value from
+# whatever module actually READS it, never restate it. `crm.coverage` is what
+# falls back to DEFAULT_ADVOCATE_TARGET when the key is missing, so it owns
+# the number the placeholder shows.
+from crm.coverage import DEFAULT_ADVOCATE_TARGET
 
 # The cadence whitelist + its valid ranges live at the point of use, in
 # crm.views — that module is what actually hands the overrides to
@@ -86,6 +94,60 @@ CYCLE_SUGGESTIONS: list[str] = [c for c, _ in CYCLE_CHOICES if c]
 # with room to spare and no reason to store more.
 MAX_AVATAR_BYTES = 8 * 1024 * 1024
 AVATAR_PX = 512
+
+# Timezone shortlist — the zones this product's stated audience actually lives
+# in (HK and US students, per docs/product-brief.md), plus the three other
+# markets the six-market region vocabulary already covers. They ride above the
+# fold of the select so the common case is one scroll-free click; the full
+# `zoneinfo` list follows in a second optgroup, so nobody is locked out.
+TIMEZONE_SHORTLIST: list[tuple[str, str]] = [
+    ("Asia/Hong_Kong", "Hong Kong (HKT)"),
+    ("America/New_York", "US Eastern (New York)"),
+    ("America/Chicago", "US Central (Chicago)"),
+    ("America/Denver", "US Mountain (Denver)"),
+    ("America/Los_Angeles", "US Pacific (Los Angeles)"),
+    ("Europe/London", "London (UK)"),
+    ("Asia/Singapore", "Singapore"),
+    ("Asia/Shanghai", "Mainland China (Shanghai)"),
+    ("Asia/Tokyo", "Tokyo"),
+]
+
+
+@lru_cache(maxsize=1)
+def known_timezones() -> frozenset[str]:
+    """Every IANA zone the host's tzdata carries. Cached: `available_timezones`
+    walks the tzdata tree on each call, and this is hit on every settings
+    render AND every validation — the answer only changes when the OS package
+    does, which is never within a process's life."""
+    return frozenset(available_timezones())
+
+
+@lru_cache(maxsize=1)
+def timezone_choices() -> list:
+    """Grouped choices for the Profile timezone select.
+
+    Built from `zoneinfo.available_timezones()` — the host's own tzdata — so
+    the validator and the widget can never disagree about what a valid zone
+    is. Cached because that call walks the tzdata tree and the answer only
+    changes when the OS package does.
+
+    The leading blank is the UNSET option, and it is worded as what actually
+    happens rather than as an absence: leaving it alone is a real answer, and
+    the honest label for it is "UTC days", not "—".
+    """
+    every = sorted(known_timezones())
+    return [
+        ("", "Not set — Coverage uses UTC days"),
+        ("Common", [(code, label) for code, label in TIMEZONE_SHORTLIST]),
+        (
+            "All timezones",
+            # The shortlist entries are NOT filtered out of this group: a
+            # student who knows they want "Asia/Hong_Kong" and types H-o-n
+            # into an open select should find it where the alphabet says it
+            # is. A duplicated <option> value selects identically either way.
+            [(code, code.replace("_", " ")) for code in every],
+        ),
+    ]
 
 
 class _StaleValueSelect(forms.Select):
@@ -155,9 +217,14 @@ class ProfileForm(forms.Form):
         required=False,
         widget=forms.CheckboxSelectMultiple,
     )
+    # Lives in Profile rather than a section of its own: it is a fact about the
+    # student, in the same breath as school and target regions. Choices are set
+    # per instance in __init__ (see timezone_choices' cache note).
+    timezone = forms.ChoiceField(required=False, widget=forms.Select)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["timezone"].choices = timezone_choices()
         # `target_cycle`'s choices are recomputed HERE, per instance, rather
         # than left at the class-level `CYCLE_CHOICES` binding above: that
         # binding is a module-level constant frozen at import (`_YEAR =
@@ -259,20 +326,43 @@ class ProfileForm(forms.Form):
                 "target_cycle": user.target_cycle,
                 "regions": list(user.regions or []),
                 "tracks": list(user.tracks or []),
+                # A stored zone the host's tzdata no longer carries would
+                # render as nothing selected — the same silent-clear the
+                # `target_cycle` stale-value widget exists to prevent. Here the
+                # fix is simpler because the vocabulary is huge and stable:
+                # show it only if it is still real, and let the honest "Not
+                # set" option speak for the rest.
+                "timezone": user.timezone if user.timezone in known_timezones() else "",
             }
         )
+
+    def clean_timezone(self) -> str:
+        """Blank stays blank (UNSET → UTC). Anything else must name a zone
+        `zoneinfo` actually knows, so the middleware's read can never be handed
+        a string it cannot construct."""
+        value = (self.cleaned_data.get("timezone") or "").strip()
+        if value and value not in known_timezones():
+            raise forms.ValidationError(
+                "That isn't a timezone we recognise. Pick one from the list."
+            )
+        return value
 
     def apply_to(self, user) -> None:
         """Persist validated values back onto the user row. Call only after
         `is_valid()`."""
         cd = self.cleaned_data
-        update_fields = ["name", "school", "class_year", "target_cycle", "regions", "tracks"]
+        update_fields = ["name", "school", "class_year", "target_cycle",
+                         "regions", "tracks", "timezone"]
         user.name = cd["name"]
         user.school = cd["school"]
         user.class_year = cd["class_year"]
         user.target_cycle = cd["target_cycle"]
         user.regions = cd["regions"]
         user.tracks = cd["tracks"]
+        # Blank means UNSET, which means UTC — stored as "" rather than a
+        # guessed "UTC" so "the user chose UTC" and "the user never answered"
+        # stay distinguishable in the column.
+        user.timezone = cd["timezone"]
         # remove_avatar wins over a simultaneous upload — the widget can't
         # produce both in one real submission, but a wrong-order check here
         # would silently discard whichever loses, so ties go to the more
@@ -405,11 +495,18 @@ class WorkAuthorizationForm(SectionForm):
             # required=False alone would let an unknown value through as ""
             # — ChoiceField still validates membership, so a hand-crafted
             # POST of e.g. "green-card" is rejected rather than stored.
-            self.fields[f"{self.FIELD_PREFIX}{code}"] = forms.ChoiceField(
+            name = f"{self.FIELD_PREFIX}{code}"
+            self.fields[name] = forms.ChoiceField(
                 label=label,
                 choices=[("", "Not specified")] + list(WORK_AUTH),
                 required=False,
-                widget=forms.Select,
+                # The row's explanation and its error are the control's
+                # accessible description. Both ids are always named; a browser
+                # ignores the one that isn't on the page, which is simpler and
+                # less fragile than recomputing the attribute per render.
+                widget=forms.Select(
+                    attrs={"aria-describedby": f"id_{name}-desc id_{name}-err"}
+                ),
             )
 
     @classmethod
@@ -469,6 +566,14 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
         "weeks",
         "How often your advocates get a keep-warm touch.",
     ),
+    # Paired with crm.views.TUNABLE_CADENCE_PARAMS — this dict is looked up by
+    # key with no fallback, so the two must be added and removed together.
+    "chatted_touch_min_weeks": (
+        "Keep-Warm Check-In",
+        "weeks",
+        "How long after a coffee chat before Coverage reminds you to circle "
+        "back — for people you've met who aren't advocates yet.",
+    ),
     "pre_deadline_reping_days": (
         "Pre-Deadline Re-Ping",
         "days",
@@ -490,8 +595,39 @@ class CadenceForm(SectionForm):
     section = "cadence"
     success_message = "Cadence updated."
 
+    # `User.assets["advocate_target"]` — the advocates-per-firm yardstick
+    # `crm.coverage.advocate_target()` already reads and `crm.views` already
+    # feeds into the gap ladder and the network axis of the firm fit score. It
+    # was a live engine parameter with no control anywhere: the founder's row
+    # carries the key (ported at cutover) and no UI could change it.
+    #
+    # Range: the read side rejects anything below 1 (a target of 0 makes every
+    # firm permanently "covered"), so 1 is the floor. 5 is the ceiling because
+    # above it the gap ladder's top rung is unreachable for any real student —
+    # nobody lands six advocates at one firm — and a target you can never meet
+    # renders every firm permanently short.
+    ADVOCATE_TARGET_RANGE = (1, 5)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        low, high = self.ADVOCATE_TARGET_RANGE
+        self.fields["advocate_target"] = forms.IntegerField(
+            label="Advocate Target",
+            required=False,
+            min_value=low,
+            max_value=high,
+            widget=forms.NumberInput(
+                attrs={"min": low, "max": high, "step": 1,
+                       "placeholder": DEFAULT_ADVOCATE_TARGET,
+                       "aria-describedby":
+                           "id_advocate_target-desc id_advocate_target-err"},
+            ),
+            error_messages={
+                "min_value": f"Advocate Target must be between {low} and {high} advocates.",
+                "max_value": f"Advocate Target must be between {low} and {high} advocates.",
+                "invalid": "Advocate Target must be a whole number of advocates.",
+            },
+        )
         for key, (low, high) in TUNABLE_CADENCE_PARAMS.items():
             label, unit, _desc = CADENCE_LABELS[key]
             # min_value/max_value mirror the server-side whitelist exactly, so
@@ -504,7 +640,8 @@ class CadenceForm(SectionForm):
                 max_value=high,
                 widget=forms.NumberInput(
                     attrs={"min": low, "max": high, "step": 1,
-                           "placeholder": CADENCE_DEFAULTS[key]}
+                           "placeholder": CADENCE_DEFAULTS[key],
+                           "aria-describedby": f"id_{key}-desc id_{key}-err"}
                 ),
                 error_messages={
                     "min_value": f"{label} must be between {low} and {high} {unit}.",
@@ -533,6 +670,17 @@ class CadenceForm(SectionForm):
             # the same value the engine was already ignoring, now no longer
             # left behind to confuse a human reading Settings or the raw
             # column.
+        # Same drop-what-the-engine-would-drop rule for the advocate target:
+        # `crm.coverage.advocate_target` falls back on a bool, a non-int, or
+        # anything below 1, so a stored 0 must not render as if honoured.
+        low, high = cls.ADVOCATE_TARGET_RANGE
+        stored_target = (user.assets or {}).get("advocate_target")
+        if (
+            isinstance(stored_target, int)
+            and not isinstance(stored_target, bool)
+            and low <= stored_target <= high
+        ):
+            initial["advocate_target"] = stored_target
         return initial
 
     @property
@@ -547,6 +695,19 @@ class CadenceForm(SectionForm):
                 "description": desc,
                 "default": CADENCE_DEFAULTS[key],
             })
+        # Sits with the other engine knobs rather than in a card of its own —
+        # it is the same class of thing (a number that changes what Coverage
+        # asks of you), and it saves on the same section POST.
+        rows.append({
+            "field": self["advocate_target"],
+            "unit": "advocates",
+            "description": (
+                "Advocates at a firm before Coverage calls that firm covered. "
+                "Feeds the gap ladder on Network and the network axis of your "
+                "firm fit score."
+            ),
+            "default": DEFAULT_ADVOCATE_TARGET,
+        })
         return rows
 
     def apply_to(self, user) -> None:
@@ -560,7 +721,20 @@ class CadenceForm(SectionForm):
             else:
                 params[key] = int(value)
         user.cadence_params = params
-        user.save(update_fields=["cadence_params"])
+        # `advocate_target` lives in `assets`, not `cadence_params`, because
+        # that is the key `crm.coverage.advocate_target()` already reads —
+        # moving it would be a migration for no gain. Copy-then-set, owning
+        # exactly this one key, same discipline as OutreachAssetsForm: blank
+        # REMOVES it so the product default applies, rather than storing a
+        # number that merely happens to equal the default.
+        target = self.cleaned_data.get("advocate_target")
+        assets = dict(user.assets or {})
+        if target is None:
+            assets.pop("advocate_target", None)
+        else:
+            assets["advocate_target"] = int(target)
+        user.assets = assets
+        user.save(update_fields=["cadence_params", "assets"])
 
 
 class WeeklyPaceForm(SectionForm):
@@ -584,7 +758,9 @@ class WeeklyPaceForm(SectionForm):
         min_value=1,
         max_value=MAX_GOAL,
         widget=forms.NumberInput(
-            attrs={"min": 1, "max": MAX_GOAL, "step": 1, "placeholder": DEFAULT_GOAL}
+            attrs={"min": 1, "max": MAX_GOAL, "step": 1, "placeholder": DEFAULT_GOAL,
+                   "aria-describedby":
+                       "id_weekly_touch_goal-desc id_weekly_touch_goal-err"}
         ),
         error_messages={
             "min_value": f"Pick a goal between 1 and {MAX_GOAL} touches a week.",

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% load socialaccount %}
+
+{% block title %}Connected Accounts · Coverage{% endblock %}
+
+{% block head %}{% include "account/_account_page.html" %}{% endblock %}
+
+{% block content %}
+<div class="page page--narrow acct-wrap">
+  <a class="acct-back" href="{% url 'accounts:settings' %}#security">← Back to settings</a>
+  <header class="page-head"><h1>Connected Accounts</h1></header>
+  {% comment %}
+  Sign-in only. Every provider in settings/base.py requests identity scopes
+  and nothing else — connecting one here never grants Coverage mailbox access,
+  and the copy must keep saying so (deploy.md §4 gate). Email capture is the
+  BCC address on Settings, which is a mailbox you send TO, not one we read.
+  {% endcomment %}
+  <p class="acct-lede">Accounts you can sign in with. These are sign-in only —
+    connecting one gives Coverage your name and email address, never access to
+    your mailbox.</p>
+
+  <div class="panel">
+    {% if form.accounts %}
+      <form method="post" action="{% url 'socialaccount_connections' %}">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <p class="msg error" role="alert">{{ form.non_field_errors|striptags }}</p>
+        {% endif %}
+        <ul class="acct-list">
+          {% for choice in form.fields.account.choices %}
+            {% with account=choice.0.instance.get_provider_account %}
+              <li class="acct-item">
+                <div class="acct-item-main">
+                  <input type="radio" name="account" id="id_account_{{ account.account.pk }}"
+                         value="{{ account.account.pk }}">
+                  <label class="acct-addr" for="id_account_{{ account.account.pk }}">{{ account }}</label>
+                  <span class="acct-tag">{{ account.get_brand.name }}</span>
+                </div>
+              </li>
+            {% endwith %}
+          {% endfor %}
+        </ul>
+        <div class="actions">
+          <button type="submit" class="btn btn-danger"
+                  aria-label="Disconnect the selected account">Disconnect</button>
+        </div>
+      </form>
+    {% else %}
+      <p class="acct-empty">No third-party account is connected. You sign in with your
+        email address and password.</p>
+    {% endif %}
+  </div>
+
+  {% comment %}
+  Only providers with a client id configured are offered — the same
+  ENABLED_SOCIAL_PROVIDERS list the login page reads. An unconfigured provider
+  renders nothing rather than a button that dead-ends at the OAuth redirect.
+  {% endcomment %}
+  {% if social_providers %}
+    <div class="panel">
+      <h2>Connect Another</h2>
+      <div class="actions">
+        {% for provider in social_providers %}
+          {% if provider.configured %}
+            <form method="post" action="{% provider_login_url provider.id process='connect' %}">
+              {% csrf_token %}
+              <button type="submit" class="btn">Connect {{ provider.label }}</button>
+            </form>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

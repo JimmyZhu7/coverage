@@ -15,12 +15,21 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
          within `pre_deadline_reping_days`, REGION-SCOPED       -> reping
       4. parked / quiet                                         -> (skip)
       5. advocate idle >= advocate_touch_min_weeks             -> maintain
+     5b. chatted + chat_done, idle >= chatted_touch_min_weeks  -> keep_warm
+         (NOT ported — see the 2026-07-30 C1 divergence below)
       6. cold / no_reply: 0 outbound -> first_outreach; 1 outbound and
          idle >= followup window -> follow_up (the ONLY one — see
          `max_cold_touches`'s comment); else park once max_cold
          reached and idle >= park window
       7. replied + idle >= 3 business days                      -> advance
+         (warmth set widened past the port — see the C3 divergence)
     Sorted by (priority, firm tier, firm name).
+
+    NOTE on that sort: it is the PORTED display order and stays here
+    untouched, golden fixtures and all. The Today page deliberately
+    re-sorts what it renders in its own view layer (`crm.views._TODAY_CLASS`)
+    because "who do I contact right now" is a different question from "what
+    does the engine consider urgent"; nothing about that belongs in here.
 
   - The second-chat thank-you fix and the "chat_done contacts re-enter the
     cadence once thanked" fix (both come free with the ported branch 1).
@@ -79,6 +88,47 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
     that LOOKS reachable is worse than no knob at all, because a future
     reader has to rediscover that it can't fire before trusting that it
     doesn't.
+
+  - DIVERGENCE from the original (deliberate, 2026-07-30, "C2"): every idle
+    clock now reads the latest REAL touch — every kind EXCEPT
+    `manual_override`. The original had no such rows at all (that kind was
+    invented here for `set_state`'s audit trail, see pipeline.py), so "the
+    last touch" and "the last real touch" named the same set there and the
+    distinction could not arise. Here it does, and reading it wrong was
+    actively silencing people: promoting a contact to advocate writes a
+    `manual_override` row, which branch 5 then read as a fresh touch and
+    restarted the 4-week advocate clock — measured on the founder's data,
+    both of his advocates were silent for exactly this reason, their clocks
+    reset by their own promotion. A bookkeeping row is the system writing to
+    itself; it is not evidence that a relationship was maintained, so it
+    must not reset a relationship clock. Branches 2, 5, 5b, 6 and 7 all read
+    the real-touch clock. Branch 1's thank-you scan and branch 3's re-ping
+    scan are untouched: both already filter to specific kinds.
+
+  - DIVERGENCE from the original (deliberate, 2026-07-30, "C1"): a new
+    branch 5b, `keep_warm`, for a contact who has actually had the chat
+    (warmth `chatted`, thread_state `chat_done`). The ported tree had no
+    case for them at all: branch 1 stops asking for a thank-you once the
+    note is sent or the window expires, and branches 4-7 all test something
+    else, so a chatted contact fell out of the cadence entirely and was
+    never surfaced again. Measured on the founder's data, that dead end was
+    hiding his 14 warmest non-advocate relationships — the people who
+    actually met him — while 29 strangers who ignored one cold email filled
+    the queue. The fix is the same shape as the advocate branch: a
+    keep-in-touch clock (`chatted_touch_min_weeks`) anchored to the last
+    real touch, prompting for a genuine reason to talk rather than a
+    belated courtesy. It sits AFTER branch 5 so advocates keep their own,
+    slower cadence, and BEFORE branch 6 so it can never be mistaken for
+    cold outreach.
+
+  - DIVERGENCE from the original (deliberate, 2026-07-30, "C3"): branch 7's
+    warmth set gained `chatted` (was `("replied", "cold")`, now
+    `("replied", "cold", "chatted")`). A contact who has chatted and then
+    replies again lands in thread_state `replied` with warmth already
+    ratcheted up to `chatted`, and the ported branch's warmth test excluded
+    exactly that combination — so re-engaging AFTER a chat made a contact
+    less visible than never having chatted at all. `advocate` stays out on
+    purpose: branch 5 owns advocates and returns before this branch runs.
 
   - `tasks_from_change()`: the backward planner. Fires ONLY on
     `confirmed_official` changes (rumor / reported never spawn a task).
@@ -145,6 +195,15 @@ CADENCE_DEFAULTS: dict[str, int] = {
     "thank_you_expires_after_days": 7,
     "advocate_touch_min_weeks": 4,       # keep advocates warm every 4-6 weeks
     "advocate_touch_max_weeks": 6,
+    # Branch 5b's keep-warm clock for contacts who have HAD the chat. Tighter
+    # than the advocate pair on purpose: an advocate is a settled relationship
+    # you are maintaining, a freshly-chatted contact is a live referral
+    # candidate mid-cycle, and the gap between "we spoke" and "who was that
+    # again" is shorter than a month. `chatted_touch_max_weeks` is display
+    # only — it renders the range in the reason string and gates nothing —
+    # exactly like `advocate_touch_max_weeks`.
+    "chatted_touch_min_weeks": 3,        # keep chatted contacts warm every 3-5 weeks
+    "chatted_touch_max_weeks": 5,
     "pre_deadline_reping_days": 14,      # re-ping warm contacts when a CONFIRMED app_close is this near
     "stale_thread_days": 21,             # (kept for parity; used by status-style reports, not due_actions)
     "advocate_target": 2,                # advocates-in-place yardstick (from profile.advocate_target)
@@ -160,6 +219,14 @@ _WARM = ("replied", "chatted", "advocate")
 # Outbound touch kinds — what counts as "you reached out" for the cold-cadence
 # touch count (branch 6).
 _OUTBOUND_KINDS = ("outreach", "follow_up")
+
+# The audit row `pipeline.set_state` writes when someone corrects a contact's
+# state by hand. Deliberately kept out of `pipeline.TOUCH_TRANSITIONS` there,
+# and excluded from every idle clock here (see the C2 DIVERGENCE note): it
+# records that the SYSTEM wrote something down, never that the relationship
+# was touched. Named rather than inlined so the one concept has one spelling
+# across the module.
+_MANUAL_OVERRIDE_KIND = "manual_override"
 
 
 def _merged_params(params: Mapping[str, Any] | None) -> dict[str, int]:
@@ -388,6 +455,9 @@ def due_actions(
     adv_min_weeks = int(p["advocate_touch_min_weeks"])
     adv_min_days = adv_min_weeks * 7
     adv_max_weeks = int(p["advocate_touch_max_weeks"])
+    chat_min_weeks = int(p["chatted_touch_min_weeks"])
+    chat_min_days = chat_min_weeks * 7
+    chat_max_weeks = int(p["chatted_touch_max_weeks"])
     reping_days = int(p["pre_deadline_reping_days"])
 
     today = as_of.date()
@@ -416,7 +486,14 @@ def due_actions(
         _tier = meta.get(firm_id, {}).get("tier")
         tier = 3 if _tier is None else _tier
 
-        last = ctouches[-1] if ctouches else None
+        # The idle clock reads the last REAL touch, skipping the audit rows
+        # `set_state` writes (C2). `ctouches` is already sorted ascending, so
+        # filtering preserves the order and the last element is still the
+        # most recent. Branch 1 and branch 3 keep reading `ctouches` — they
+        # scan for specific kinds ('chat'/'thank_you' and 'reping'), which a
+        # manual_override row can never be.
+        real_touches = [t for t in ctouches if t.get("kind") != _MANUAL_OVERRIDE_KIND]
+        last = real_touches[-1] if real_touches else None
         lt_date = _as_date(last.get("ts")) if last else None
 
         def add(action: str, reason: str, prio: int, **ctx: Any) -> None:
@@ -539,6 +616,30 @@ def due_actions(
                 add("maintain", reason, 2, days_since=days, target_min_weeks=adv_min_weeks)
             continue
 
+        # 5b (C1, NOT ported — see the module docstring). The chatted dead
+        # end: you had the conversation, the thank-you is sent or expired,
+        # and the ported tree had nothing else to say about this person ever
+        # again. Same shape as branch 5 above, on its own tighter clock.
+        #
+        # Unconditional `continue`, like branch 5: a chatted/chat_done
+        # contact who isn't due yet has no further branch that could match
+        # (6 needs cold/no_reply, 7 needs thread_state 'replied'), so falling
+        # through would only walk two tests that can't fire.
+        if warmth == "chatted" and thread_state == "chat_done":
+            days = (today - lt_date).days if lt_date else None
+            if days is None or days >= chat_min_days:
+                # Range rendered from the params, never hardcoded — the same
+                # rule (and the same bug) as the advocate branch above.
+                reason = (
+                    "chatted — no dateable touch on record — send an update or a "
+                    f"question (target every {chat_min_weeks}–{chat_max_weeks} weeks)"
+                    if days is None else
+                    f"chatted {days}d ago — send an update or a question "
+                    f"(target every {chat_min_weeks}–{chat_max_weeks} weeks)"
+                )
+                add("keep_warm", reason, 2, days_since=days, target_min_weeks=chat_min_weeks)
+            continue
+
         # 6. cold / no_reply cadence.
         if warmth == "cold" and thread_state == "no_reply":
             outbound = sum(1 for t in ctouches if t.get("kind") in _OUTBOUND_KINDS)
@@ -576,7 +677,11 @@ def due_actions(
             continue
 
         # 7. replied and idle >= 3 business days -> advance (propose a chat).
-        if thread_state == "replied" and warmth in ("replied", "cold"):
+        # `chatted` is in the warmth set past the port (C3): someone who
+        # chatted and then wrote back is MORE engaged than a first-time
+        # replier, and used to be the only one this branch ignored.
+        # `advocate` is absent because branch 5 already returned for them.
+        if thread_state == "replied" and warmth in ("replied", "cold", "chatted"):
             bd = business_days_since(lt_date, today) if lt_date else None
             if bd is None or bd >= 3:
                 reason = (

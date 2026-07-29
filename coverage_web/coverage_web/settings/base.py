@@ -94,6 +94,15 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Activates the signed-in user's own timezone for the rest of the request,
+    # so "today" means their day. Must sit AFTER AuthenticationMiddleware —
+    # it reads request.user, which does not exist before that.
+    #
+    # Without it every date boundary in the product is UTC's: the cadence
+    # engine's business-day math, the pace ring's week start, and the "closing
+    # soon" window all roll over at 08:00 for a Hong Kong student, a third of
+    # the way into their working day. See accounts/middleware.py.
+    "accounts.middleware.TimezoneMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # django-allauth requires this in addition to AuthenticationMiddleware.

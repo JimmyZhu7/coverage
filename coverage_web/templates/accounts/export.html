@@ -2,19 +2,63 @@
 
 {% block title %}Export Your Data · Coverage{% endblock %}
 
+{% block head %}
+<style>
+  /* Manifest rows: filename in mono on the left, what's in it on the right.
+     min-height, never a fixed height — a long description wraps rather than
+     being clipped. */
+  .exp-files { list-style: none; margin: var(--s3) 0 0; padding: 0;
+    border-top: 1px solid var(--line); }
+  .exp-file { display: flex; gap: var(--s4); align-items: baseline;
+    min-height: 40px; padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+  .exp-file code { font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--accent-ink); flex: none; width: 150px; overflow-wrap: anywhere; }
+  .exp-file span { color: var(--ink-2); font-size: var(--fs-s); min-width: 0; }
+  .exp-not { color: var(--ink-3); font-size: var(--fs-s); }
+  .exp-not li { margin-bottom: var(--s1); }
+  @media (max-width: 560px) {
+    .exp-file { flex-direction: column; gap: 2px; }
+    .exp-file code { width: auto; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="page page--narrow">
   <header class="page-head"><h1>Export Your Data</h1></header>
-  <p class="lede">Download your contacts and outreach history as CSV, any time.</p>
+  <p class="lede">Everything Coverage holds on you, as CSV, any time. No request, no wait.</p>
 
   <div class="panel">
-    <p><strong>Contacts:</strong> every person in your CRM, with firm, role, warmth, angle and notes. You have {{ contact_count }} contact{{ contact_count|pluralize }}.</p>
-    <a class="btn btn-primary" href="{% url 'accounts:export' %}?kind=contacts">Download Contacts.csv</a>
+    <p><strong>Everything, as one ZIP.</strong> One CSV per table, plus a README
+      listing what's in each. You have {{ contact_count }} contact{{ contact_count|pluralize }}{% if archived_count %},
+      {{ archived_count }} of them archived — flagged in the file, not dropped{% endif %}.</p>
+    <ul class="exp-files">
+      {% for name, description in export_manifest %}
+        <li class="exp-file"><code>{{ name }}</code><span>{{ description }}</span></li>
+      {% endfor %}
+    </ul>
+    <div class="actions">
+      <a class="btn btn-primary" href="{% url 'accounts:export' %}?kind=all">Download Everything (.zip)</a>
+    </div>
+    {% comment %}
+    Honesty rule D4 from docs/specs/settings-page.md: "everything" is only
+    written when it IS everything. These are the only things the archive
+    leaves out, so they are named here rather than quietly omitted — which is
+    exactly the gap this page and the privacy policy used to have.
+    {% endcomment %}
+    <p class="muted"><strong>Not included:</strong></p>
+    <ul class="exp-not">
+      {% for item in export_exclusions %}<li>{{ item }}</li>{% endfor %}
+    </ul>
   </div>
 
   <div class="panel">
-    <p><strong>Touches:</strong> your logged interactions, every outreach, reply, and chat, with the contact and firm it belongs to.</p>
-    <a class="btn btn-primary" href="{% url 'accounts:export' %}?kind=touches">Download Touches.csv</a>
+    <p><strong>Just one file?</strong> The two you're most likely to want open in
+      a spreadsheet, on their own.</p>
+    <div class="actions">
+      <a class="btn" href="{% url 'accounts:export' %}?kind=contacts">Contacts.csv</a>
+      <a class="btn" href="{% url 'accounts:export' %}?kind=touches">Touches.csv</a>
+    </div>
   </div>
 
   <p class="muted"><a href="{% url 'accounts:settings' %}">Back to settings</a></p>

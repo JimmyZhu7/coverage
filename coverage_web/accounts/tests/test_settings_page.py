@@ -1,0 +1,252 @@
+"""Structure and honesty assertions for /welcome/settings/ itself
+(docs/specs/settings-page.md Part 3A, B2, B5, D, E).
+
+These test the page's CLAIMS rather than any one form's save path: that the
+rail is grouped and complete, that the Language section is gone, that counts
+state their population, that the capture card tells the truth about a loop
+that has received nothing, and that every control has a programmatic label.
+
+The a11y block is the one that was outright broken before this change:
+`.set-row-label` was a `<div>`, so every work-authorization select, cadence
+number, and the pace input was associated with its label by visual adjacency
+only — a screen reader announced a column of unlabelled comboboxes.
+"""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+from django.utils import timezone
+
+from crm.models import CaptureEvent, Contact
+
+User = get_user_model()
+
+pytestmark = pytest.mark.django_db
+
+SETTINGS = "accounts:settings"
+
+
+@pytest.fixture
+def student():
+    return User.objects.create_user(email="page@example.com", password="x")
+
+
+@pytest.fixture
+def logged_in(client, student):
+    client.force_login(student)
+    return student
+
+
+@pytest.fixture
+def body(client, logged_in):
+    return client.get(reverse(SETTINGS)).content.decode()
+
+
+# ---------------------------------------------------------------------------
+# Structure
+# ---------------------------------------------------------------------------
+def test_the_rail_lists_every_section_and_every_section_exists(body):
+    """A rail entry with no section scrolls nowhere; a section with no rail
+    entry is unreachable on a long page. Both directions are asserted."""
+    railed = set(re.findall(r'class="settings-nav[^"]*"[^>]*>(.*?)</nav>', body, re.S))
+    nav = next(iter(railed))
+    anchors = set(re.findall(r'href="#([a-z-]+)"', nav))
+    sections = set(re.findall(r'<section class="set-card[^"]*" id="([a-z-]+)"', body))
+    assert anchors == sections
+    assert sections == {
+        "profile", "work-auth", "assets", "cadence", "pace", "capture",
+        "security", "data", "legal", "danger",
+    }
+
+
+def test_the_rail_is_grouped(body):
+    """Ten flat links was at the limit of scannable. The groups mirror what
+    LinkedIn, Notion and Linear all converged on: who you are / how the
+    product behaves / how you get in and what we hold."""
+    for group in ("You", "How Coverage Paces You", "Email Capture", "Account"):
+        assert f'class="settings-nav-group">{group}<' in body
+
+
+def test_the_danger_zone_is_last_and_holds_exactly_one_action(body):
+    """Regenerate lives in Email Capture and sign-out-everywhere in Sign-In &
+    Security on purpose — both protect data rather than destroy an account,
+    and burying them here would hide the capture rotation where nobody looks."""
+    sections = re.findall(r'<section class="set-card[^"]*" id="([a-z-]+)"', body)
+    assert sections[-1] == "danger"
+    danger = body.split('id="danger"', 1)[1]
+    assert danger.count("set-row-label") == 1
+
+
+def test_the_language_section_is_gone(body):
+    """It saved `User.language` and nothing ever read it — no LocaleMiddleware,
+    no catalogs, no {% trans %}. A control that does nothing is the same defect
+    as a setting the engine ignores."""
+    assert 'id="language"' not in body
+    assert 'href="#language"' not in body
+    assert 'name="language"' not in body
+
+
+def test_posting_a_language_no_longer_does_anything(client, logged_in):
+    """The old branch dispatched on the mere PRESENCE of a `language` key,
+    bypassing the section marker entirely. It must now be an unrecognised POST
+    — a no-op re-render, not a profile fallthrough."""
+    logged_in.school = "Unchanged U"
+    logged_in.save(update_fields=["school"])
+    resp = client.post(reverse(SETTINGS), {"language": "zh"})
+    assert resp.status_code == 200
+    logged_in.refresh_from_db()
+    assert logged_in.language == "en"
+    assert logged_in.school == "Unchanged U"
+
+
+# ---------------------------------------------------------------------------
+# Counts mean what they say (rule D3)
+# ---------------------------------------------------------------------------
+def test_the_contact_count_splits_out_archived_rows(client, logged_in):
+    """This said "137" while the Network page said "112", because it counted
+    archived rows and Network doesn't. Two pages disagreeing about the same
+    number is a trust problem, not a rounding one."""
+    for i in range(3):
+        Contact.all_objects.create(user=logged_in, name=f"Live {i}")
+    for i in range(2):
+        Contact.all_objects.create(user=logged_in, name=f"Gone {i}", archived=True)
+
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert ">5</div>" in body  # the total, stated
+    assert "2 archived" in body  # and its population, stated too
+    assert reverse("crm:contact_archived") in body
+
+
+def test_no_archived_note_when_there_is_nothing_archived(client, logged_in):
+    Contact.all_objects.create(user=logged_in, name="Only Live One")
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert "archived" not in body.split('id="data"', 1)[1].split("</section>", 1)[0]
+
+
+# ---------------------------------------------------------------------------
+# Email Capture card
+# ---------------------------------------------------------------------------
+def test_the_capture_card_says_nothing_received_yet_rather_than_showing_a_zero(body):
+    """A student whose BCC has silently stopped working checks this page. An
+    empty-looking zero reads like a rendering bug; a sentence doesn't."""
+    assert "Nothing received yet" in body
+
+
+def test_the_capture_card_reports_real_activity(client, logged_in):
+    CaptureEvent.all_objects.create(
+        user=logged_in, provider="postmark", provider_ref="<a@b>",
+        received_at=timezone.now(), status="needs_review",
+    )
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert "Nothing received yet" not in body
+    assert "Last received" in body
+    assert "need" in body  # the needs_review nudge
+    assert reverse("capture:review") in body
+
+
+def test_the_capture_card_links_health_and_warns_about_the_secret(body):
+    assert reverse("capture:health") in body
+    assert "anyone who has it can log mail into your CRM" in body
+
+
+def test_the_capture_card_makes_no_gmail_or_sync_claim(body):
+    """deploy.md §4 gate: the address is an inbound mailbox you send TO. No
+    "connect", no "sync", no "Gmail" anywhere near it."""
+    card = body.split('id="capture"', 1)[1].split("</section>", 1)[0]
+    lowered = card.lower()
+    for banned in ("gmail", "sync", "connect your"):
+        assert banned not in lowered
+
+
+# ---------------------------------------------------------------------------
+# Accessibility (E)
+# ---------------------------------------------------------------------------
+def test_every_single_control_row_has_a_real_label_for(body):
+    """`.set-row-label` used to be a <div>. Every row that owns exactly one
+    control now carries a <label for> pointing at it."""
+    labels = re.findall(r'<label class="set-row-label" for="([^"]+)"', body)
+    assert labels, "no set-row labels found — did the page render?"
+    for target in labels:
+        assert f'id="{target}"' in body, f"label points at missing control {target}"
+
+
+def test_the_work_auth_selects_are_all_labelled(body):
+    from accounts.forms import REGION_CHOICES
+
+    for code, _label in REGION_CHOICES:
+        assert f'<label class="set-row-label" for="id_work_auth_{code}"' in body
+
+
+def test_controls_are_described_by_their_explanation(body):
+    """The row's prose and its error are the control's accessible
+    description — without the association a screen reader reads the label and
+    nothing else."""
+    assert 'aria-describedby="id_weekly_touch_goal-desc id_weekly_touch_goal-err"' in body
+    assert 'id="id_weekly_touch_goal-desc"' in body
+
+
+def test_each_section_is_labelled_by_its_own_heading(body):
+    for section_id in ("profile", "cadence", "capture", "security", "data", "danger"):
+        assert f'aria-labelledby="{section_id}-h"' in body
+        assert f'id="{section_id}-h"' in body
+
+
+def test_the_rail_is_a_named_landmark_with_a_current_item(body):
+    assert 'aria-label="Settings sections"' in body
+    assert 'aria-current="true"' in body
+
+
+def test_flashes_carry_a_live_region_role(client, logged_in):
+    resp = client.post(
+        reverse(SETTINGS), {"section": "pace", "weekly_touch_goal": "12"}, follow=True
+    )
+    assert 'role="status"' in resp.content.decode()
+
+
+def test_an_error_flash_interrupts_rather_than_waits(client, logged_in):
+    """role="alert" for something the user must act on; role="status" for
+    "Saved." Using alert for both trains people to ignore it."""
+    resp = client.post(reverse("accounts:import"), {}, follow=True)
+    assert 'role="alert"' in resp.content.decode() or resp.status_code == 200
+
+
+def test_destructive_controls_have_descriptive_accessible_names(body):
+    assert 'aria-label="Delete account permanently"' in body
+    assert 'aria-label="Regenerate capture address"' in body
+    assert 'aria-label="Sign out on all other devices"' in body
+
+
+def test_the_copy_button_announces_itself(body):
+    assert 'aria-label="Copy your capture address"' in body
+    assert 'aria-live="polite"' in body
+
+
+# ---------------------------------------------------------------------------
+# Responsive rules that have to exist in the rendered CSS
+# ---------------------------------------------------------------------------
+def test_the_rows_stack_on_a_narrow_screen(body):
+    """At 375px a select beside a long label is crushed to unusable width."""
+    css = "\n".join(re.findall(r"<style>(.*?)</style>", body, re.S))
+    narrow = css.split("@media (max-width: 560px)", 1)[1]
+    assert "flex-direction: column" in narrow
+
+
+def test_the_capture_address_can_wrap(body):
+    css = "\n".join(re.findall(r"<style>(.*?)</style>", body, re.S))
+    assert "overflow-wrap: anywhere" in css
+
+
+def test_rows_use_min_height_never_a_fixed_height(body):
+    """House rule: a card or row must grow with its content."""
+    css = "\n".join(re.findall(r"<style>(.*?)</style>", body, re.S))
+    # Several `.set-row` blocks exist (base rule plus the ≤560px override), so
+    # min-height must appear in at least one and a fixed height in none.
+    row_rules = re.findall(r"\.set-row \{([^}]*)\}", css)
+    assert row_rules
+    assert any("min-height" in rule for rule in row_rules)
+    for rule in row_rules:
+        assert re.search(r"(^|[^-])height:\s*\d", rule) is None, rule

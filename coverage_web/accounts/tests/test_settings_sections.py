@@ -366,6 +366,87 @@ def test_weekly_pace_feeds_the_today_pace_ring(client, logged_in):
 
 
 # ---------------------------------------------------------------------------
+# Advocate Target — a live engine parameter that had no control at all
+# ---------------------------------------------------------------------------
+# `crm.coverage.advocate_target()` has always read `assets["advocate_target"]`,
+# and it drives the gap ladder on Network plus the network axis of the firm fit
+# score. No UI could set it: the founder's row carried the key from the cutover
+# import and nothing could change it. It saves on the Cadence section's POST,
+# beside the other engine knobs, but it lives in `assets` rather than
+# `cadence_params` because `assets` is the column the reader already reads.
+def test_advocate_target_saves_into_assets(client, logged_in):
+    resp = _post(client, **_cadence_post(), advocate_target="4")
+    assert resp.status_code == 302
+    logged_in.refresh_from_db()
+    assert logged_in.assets["advocate_target"] == 4
+
+
+def test_advocate_target_is_honoured_by_the_engine_that_reads_it(client, logged_in):
+    """The rule this page exists to keep: what Settings saves is exactly what
+    the engine honours, with no translation layer in between."""
+    from crm.coverage import advocate_target
+
+    _post(client, **_cadence_post(), advocate_target="4")
+    logged_in.refresh_from_db()
+    assert advocate_target(logged_in) == 4
+
+
+def test_advocate_target_blank_removes_the_key_and_restores_the_default(
+    client, logged_in
+):
+    from crm.coverage import DEFAULT_ADVOCATE_TARGET, advocate_target
+
+    logged_in.assets = {"advocate_target": 4}
+    logged_in.save(update_fields=["assets"])
+
+    _post(client, **_cadence_post(), advocate_target="")
+
+    logged_in.refresh_from_db()
+    # Absent, not stored-as-the-default: "the user didn't answer" and "the
+    # user chose 2" must stay distinguishable in the column.
+    assert "advocate_target" not in logged_in.assets
+    assert advocate_target(logged_in) == DEFAULT_ADVOCATE_TARGET
+
+
+@pytest.mark.parametrize("bad", ["0", "6", "-1", "many"])
+def test_advocate_target_rejects_values_the_engine_would_ignore(client, logged_in, bad):
+    """The read side falls back on anything below 1, and above 5 the gap
+    ladder's top rung is unreachable for any real student. Either way the
+    number would be saved and then ignored, which is the defect the whole
+    section-form contract exists to prevent."""
+    resp = _post(client, **_cadence_post(), advocate_target=bad)
+    assert resp.status_code == 200  # re-rendered with errors
+    logged_in.refresh_from_db()
+    assert "advocate_target" not in (logged_in.assets or {})
+
+
+def test_advocate_target_owns_only_its_own_key_in_assets(client, logged_in):
+    logged_in.assets = {"angles": ["Kept angle"], "current_status": "student"}
+    logged_in.save(update_fields=["assets"])
+
+    _post(client, **_cadence_post(), advocate_target="3")
+
+    logged_in.refresh_from_db()
+    assert logged_in.assets["angles"] == ["Kept angle"]
+    assert logged_in.assets["current_status"] == "student"
+    assert logged_in.assets["advocate_target"] == 3
+
+
+def test_advocate_target_initial_drops_an_out_of_range_stored_value(logged_in):
+    """Same rule as the cadence knobs: a value the engine would ignore is not
+    rendered as if it were honoured."""
+    logged_in.assets = {"advocate_target": 99}
+    form = CadenceForm.from_user(logged_in)
+    assert "advocate_target" not in form.initial
+
+
+def test_the_cadence_card_renders_the_advocate_target_row(client, logged_in):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert "Advocate Target" in body
+    assert 'name="advocate_target"' in body
+
+
+# ---------------------------------------------------------------------------
 # Section isolation — each saves on its own, none clobbers another
 # ---------------------------------------------------------------------------
 def test_each_section_saves_without_touching_the_others(client, logged_in):

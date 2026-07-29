@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Regenerate Capture Address · Coverage{% endblock %}
+
+{% block head %}
+<style>
+  .regen-addr { display: block; overflow-wrap: anywhere; margin: var(--s2) 0 0; }
+  .regen-list li { margin-bottom: var(--s2); }
+  .regen-wrap .btn { min-height: 44px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page page--narrow regen-wrap">
+  <header class="page-head"><h1>Regenerate Your Capture Address</h1></header>
+  <p class="lede">Do this if your address has been seen by anyone it shouldn't
+    have — a forwarded thread, a screenshot, a reply-all on a BCC'd chain.</p>
+
+  <div class="panel">
+    <p class="muted">Your current address</p>
+    <code class="capture-addr regen-addr">{{ capture_address }}</code>
+  </div>
+
+  <div class="panel" style="border-color: var(--danger-line);">
+    <p>Regenerating means:</p>
+    <ul class="regen-list">
+      <li><strong>This address stops working immediately.</strong> Anything sent to it
+        afterwards is ignored — not forwarded, not queued, not held for you.</li>
+      <li><strong>Anything you've already captured is untouched.</strong> Your contacts,
+        touches, and past capture events all stay exactly as they are.</li>
+      <li><strong>You'll need to update anything that uses the old address</strong> — a
+        Gmail filter, a saved BCC, an address-book entry.</li>
+      <li><strong>There's no undo.</strong> The old address can't be restored, and that's
+        the point: an address someone else has must stop working.</li>
+    </ul>
+  </div>
+
+  <form method="post" action="{% url 'accounts:capture_regenerate' %}">
+    {% csrf_token %}
+    <div class="actions">
+      <button type="submit" class="btn btn-primary"
+              aria-label="Regenerate my capture address now">Regenerate My Address</button>
+      <a class="btn" href="{% url 'accounts:settings' %}#capture">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

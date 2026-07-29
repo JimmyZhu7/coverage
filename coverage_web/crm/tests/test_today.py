@@ -1,0 +1,691 @@
+"""Today page: the honesty rules, the capacity policy, and the ordering.
+
+Everything here pins a claim the page makes to a student. The page's whole
+pitch is that it is more trustworthy than the spreadsheet they already keep,
+so a number that over-claims is not a cosmetic bug — each of these tests
+corresponds to a measured over-claim on the founder's live data.
+
+`transaction=True` on the module: several cases go through `crm.services`,
+which opens its own psycopg connection outside Django's test transaction and
+therefore cannot see uncommitted rows.
+"""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+from django.utils import timezone
+
+from crm.models import Contact, Touch, UserFirm
+from crm.views import (
+    PACE_TOUCH_KINDS,
+    TODAY_PLAN_MAX,
+    TODAY_PLAN_MIN,
+    _cockpit_context,
+    _daily_cap,
+    _workdays_left,
+)
+from directory.models import Firm
+
+pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def _user(email="today@example.com", **kw):
+    return get_user_model().objects.create_user(
+        email=email, password="pw12345!", **kw
+    )
+
+
+def _touch(user, contact, kind, *, days_ago=0, channel="email"):
+    return Touch.all_objects.create(
+        user=user, contact=contact, kind=kind, channel=channel,
+        ts=timezone.now() - timedelta(days=days_ago),
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1. The pace ring counts YOUR work, and nothing else.
+# ---------------------------------------------------------------------------
+def test_a_purely_inbound_week_reads_zero():
+    """The measured bug, reproduced. The founder's ring read 9/14 in a week he
+    had sent nothing: replies and scheduling confirmations written by the
+    capture pipeline off INBOUND mail, plus the audit rows the system writes
+    to itself. A progress meter that fills while you do nothing is worthless."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    for kind in ("reply_received", "chat_scheduled", "chat_scheduled",
+                 "chat_scheduled", "reply_received", "chat_scheduled",
+                 "chat_scheduled", "chat_scheduled", "manual_override"):
+        _touch(user, c, kind)
+
+    pace = _cockpit_context(user)["pace"]
+    assert pace["done"] == 0, "other people's actions must not fill your ring"
+    assert pace["goal"] == 14
+    assert pace["remaining"] == 14
+
+
+def test_your_own_work_does_count():
+    """The other side of the boundary — this must not become a ring that
+    never moves. Every kind the ratchet knows about counts except the two
+    inbound ones."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    for kind in ("outreach", "follow_up", "thank_you", "maintain", "reping", "chat"):
+        _touch(user, c, kind)
+
+    assert _cockpit_context(user)["pace"]["done"] == 6
+
+
+def test_manual_override_audit_rows_never_count():
+    """`set_state`'s audit row records that the SYSTEM wrote something down.
+    It is excluded structurally: pipeline keeps it out of TOUCH_TRANSITIONS,
+    and PACE_TOUCH_KINDS is derived from TOUCH_TRANSITIONS."""
+    assert "manual_override" not in PACE_TOUCH_KINDS
+    assert "reply_received" not in PACE_TOUCH_KINDS
+    assert "chat_scheduled" not in PACE_TOUCH_KINDS
+    assert {"outreach", "follow_up", "thank_you", "maintain", "reping", "chat"} <= PACE_TOUCH_KINDS
+
+
+def test_last_weeks_work_does_not_count_toward_this_week():
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Old Work")
+    _touch(user, c, "outreach", days_ago=14)
+    assert _cockpit_context(user)["pace"]["done"] == 0
+
+
+# ---------------------------------------------------------------------------
+# E9. "5 more touchs" — `pluralize` with no argument yields "touchs".
+# ---------------------------------------------------------------------------
+def test_pace_note_pluralizes_touches_correctly(client):
+    user = _user(weekly_touch_goal=14)
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "touchs" not in body
+    assert "14 more touches" in body
+
+
+# ---------------------------------------------------------------------------
+# B. Capacity: the cap derives from the existing weekly goal, and it caps.
+# ---------------------------------------------------------------------------
+def test_workdays_left_counts_mon_to_fri_through_sunday():
+    assert _workdays_left(date(2026, 7, 27)) == 5   # Monday
+    assert _workdays_left(date(2026, 7, 29)) == 3   # Wednesday
+    assert _workdays_left(date(2026, 7, 31)) == 1   # Friday
+    # A weekend has no workdays left; the floor of 1 keeps the plan sized as
+    # "everything still owed, today" rather than dividing by zero.
+    assert _workdays_left(date(2026, 8, 1)) == 1    # Saturday
+    assert _workdays_left(date(2026, 8, 2)) == 1    # Sunday
+
+
+def test_daily_cap_spreads_the_weekly_goal_over_the_days_left():
+    # The founder's measured case: goal 14, nothing done, Wednesday.
+    assert _daily_cap(14, 0, date(2026, 7, 29)) == 5
+    # Same goal on Monday spreads wider.
+    assert _daily_cap(14, 0, date(2026, 7, 27)) == 3
+    # Behind on a Friday: the cap climbs to catch up, like Linear capacity.
+    assert _daily_cap(14, 0, date(2026, 7, 31)) == 12
+
+
+def test_daily_cap_respects_its_floor_and_ceiling():
+    assert _daily_cap(1, 0, date(2026, 7, 27)) == TODAY_PLAN_MIN
+    assert _daily_cap(14, 14, date(2026, 7, 27)) == TODAY_PLAN_MIN
+    assert _daily_cap(500, 0, date(2026, 7, 31)) == TODAY_PLAN_MAX
+
+
+def test_the_cap_actually_caps_and_the_remainder_is_stated_exactly():
+    """A wall of identical cards converts to mass one-click logging (fabricated
+    data) or abandonment. The plan is capped; the rest is visible and counted,
+    never dropped."""
+    user = _user(weekly_touch_goal=14)
+    for i in range(30):
+        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        _touch(user, c, "outreach", days_ago=20)
+
+    ctx = _cockpit_context(user)
+    cap = ctx["daily_cap"]
+    assert ctx["queue_total"] == 30
+    assert ctx["planned_total"] == cap
+    # The remainder is the exact arithmetic complement — nothing vanished.
+    assert ctx["held_total"] == 30 - cap
+    assert ctx["planned_total"] + ctx["held_total"] == ctx["queue_total"]
+
+
+def test_held_items_are_still_reachable_in_full(client):
+    """E3: held is not gone. Show all expands to the complete queue."""
+    user = _user(weekly_touch_goal=14)
+    for i in range(30):
+        c = Contact.all_objects.create(user=user, name=f"Coldperson {i:02d}")
+        _touch(user, c, "outreach", days_ago=20)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    for i in range(30):
+        assert f"Coldperson {i:02d}" in body, "the cap paces, it must never filter"
+    assert "pacing out at" in body
+
+
+def test_a_capped_lane_header_carries_its_denominator(client):
+    """E2: never a count that mixes shown with hidden."""
+    user = _user(weekly_touch_goal=14)
+    for i in range(30):
+        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        _touch(user, c, "outreach", days_ago=20)
+
+    client.force_login(user)
+    ctx = client.get(reverse("crm:week")).context
+    cold = [lane for lane in ctx["lanes"] if lane["key"] == "cold"][0]
+    assert cold["capped"] is True
+    assert cold["count"] == ctx["daily_cap"]
+    assert cold["total"] == 30
+
+
+# ---------------------------------------------------------------------------
+# B. Ordering: momentum beats tier. The thesis, enforced in the sort key.
+# ---------------------------------------------------------------------------
+def test_a_warm_contact_at_an_unranked_firm_outranks_a_cold_one_at_tier_one():
+    """Measured: positions 1-29 were cold non-repliers at Citi/Goldman, every
+    warm contact below the fold, because all six common action kinds share
+    cadence priority 1 and the tiebreak was firm alphabet."""
+    user = _user(weekly_touch_goal=14)
+    citi = Firm.objects.create(name="Citi", slug="citi")
+    UserFirm.all_objects.create(user=user, firm=citi, tier=1)
+
+    for i in range(10):
+        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}", firm=citi)
+        _touch(user, c, "outreach", days_ago=20)
+
+    warm = Contact.all_objects.create(
+        user=user, name="Warm Alum", firm_text="USC",
+        warmth="replied", thread_state="replied",
+    )
+    _touch(user, warm, "reply_received", days_ago=10)
+
+    ctx = _cockpit_context(user)
+    planned = [a for lane in ctx["lanes"] for a in lane["items"]]
+    names = [a["contact"]["name"] for a in planned]
+    assert "Warm Alum" in names, "the replied human must make today's plan at all"
+    assert names[0] == "Warm Alum", f"momentum must outrank tier, got {names}"
+
+
+def test_within_a_class_the_longest_silent_goes_first():
+    user = _user(weekly_touch_goal=14)
+    for days in (8, 30, 15):
+        c = Contact.all_objects.create(user=user, name=f"Silent {days:02d}")
+        _touch(user, c, "outreach", days_ago=days)
+
+    ctx = _cockpit_context(user)
+    planned = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert [a["contact"]["name"] for a in planned] == ["Silent 30", "Silent 15", "Silent 08"]
+
+
+def test_a_confirmed_deadline_is_never_capped_away():
+    """Fill rule 1: class 0 shows in full even past the cap. A pre-deadline
+    re-ping is the highest-value nudge the engine has."""
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(name="Moelis", slug="moelis")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    from directory.models import FirmDate
+    FirmDate.objects.create(
+        firm=firm, event_kind="app_close", region="us",
+        date=timezone.localdate() + timedelta(days=5), confidence=1.0, precision="day",
+    )
+    for i in range(30):
+        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        _touch(user, c, "outreach", days_ago=20)
+    warm = Contact.all_objects.create(
+        user=user, name="Deadline Person", firm=firm, region="us",
+        warmth="chatted", thread_state="replied",
+    )
+    _touch(user, warm, "chat", days_ago=40)
+
+    ctx = _cockpit_context(user)
+    critical = [lane for lane in ctx["lanes"] if lane["key"] == "critical"][0]
+    assert [a["action"] for a in critical["items"]] == ["reping"]
+    assert ctx["planned_total"] > ctx["daily_cap"] or ctx["daily_cap"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# C1 reaching the page: the chatted dead end is closed.
+# ---------------------------------------------------------------------------
+def test_a_chatted_contact_reappears_on_today(client):
+    """13 of the founder's 14 chatted contacts produced nothing at all: the
+    thank-you prompt had expired and no branch covered them afterwards."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Grace Hopper", warmth="chatted", thread_state="chat_done",
+    )
+    _touch(user, c, "chat", days_ago=40)
+    _touch(user, c, "thank_you", days_ago=39)
+
+    client.force_login(user)
+    resp = client.get(reverse("crm:week"))
+    body = resp.content.decode()
+    assert "Grace Hopper" in body
+    planned = [a for lane in resp.context["lanes"] for a in lane["items"]]
+    assert [a["action"] for a in planned] == ["keep_warm"]
+
+
+def test_keep_warm_ranks_above_a_cold_follow_up():
+    user = _user(weekly_touch_goal=14)
+    citi = Firm.objects.create(name="Citi", slug="citi")
+    UserFirm.all_objects.create(user=user, firm=citi, tier=1)
+    for i in range(10):
+        cold = Contact.all_objects.create(user=user, name=f"Cold {i:02d}", firm=citi)
+        _touch(user, cold, "outreach", days_ago=20)
+
+    warm = Contact.all_objects.create(
+        user=user, name="Chatted Human", warmth="chatted", thread_state="chat_done",
+    )
+    _touch(warm.user, warm, "chat", days_ago=40)
+    _touch(warm.user, warm, "thank_you", days_ago=39)
+
+    ctx = _cockpit_context(user)
+    planned = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert planned[0]["contact"]["name"] == "Chatted Human"
+
+
+def test_keep_warm_logs_an_existing_touch_kind_and_moves_no_state(client):
+    """`keep_warm` maps to the `maintain` touch kind, whose TOUCH_TRANSITIONS
+    entry is (None, None) — the ratchet is untouched by this feature."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Marie Curie", warmth="chatted", thread_state="chat_done",
+    )
+    _touch(user, c, "chat", days_ago=40)
+    _touch(user, c, "thank_you", days_ago=39)
+
+    client.force_login(user)
+    resp = client.post(
+        reverse("crm:today_act", args=[c.id, "sent"]), {"kind": "maintain"}
+    )
+    assert resp.status_code == 200
+    c.refresh_from_db()
+    assert (c.warmth, c.thread_state) == ("chatted", "chat_done")
+    assert Touch.all_objects.filter(user=user, contact=c, kind="maintain").exists()
+
+
+# ---------------------------------------------------------------------------
+# F3 / D. The card says WHY, and shows its evidence.
+# ---------------------------------------------------------------------------
+def test_the_card_renders_the_reason_and_the_last_touch(client):
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    _touch(user, c, "outreach", days_ago=20)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "No reply" in body and "follow up" in body.lower()
+    assert "Last: Reached out" in body
+    assert "business day" in body
+
+
+def test_a_contact_with_no_touches_says_so_rather_than_guessing(client):
+    user = _user(weekly_touch_goal=14)
+    Contact.all_objects.create(user=user, name="Brand New")
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "No touches on record" in body
+
+
+def test_an_audit_row_is_not_shown_as_a_touch(client):
+    """The evidence line reads the same real-touch clock the engine does: a
+    state correction is not something you did to the relationship."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Corrected Person")
+    _touch(user, c, "outreach", days_ago=20)
+    _touch(user, c, "manual_override", days_ago=1)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Last: Reached out" in body
+    assert "Last: Manual_override" not in body
+
+
+# ---------------------------------------------------------------------------
+# F5 / D. Verb honesty.
+# ---------------------------------------------------------------------------
+def test_the_log_button_does_not_claim_to_have_sent_anything(client):
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    _touch(user, c, "outreach", days_ago=20)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert ">Log it<" in body
+    assert ">Sent<" not in body
+    assert ">They replied<" in body
+    assert ">Reply<" not in body
+
+
+def test_every_quick_action_names_its_contact_for_a_screen_reader(client):
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ethan Gao", email="e@x.com")
+    _touch(user, c, "outreach", days_ago=20)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    for label in (
+        'aria-label="Log follow up to Ethan Gao"',
+        'aria-label="Record that Ethan Gao replied"',
+        'aria-label="Compose an email to Ethan Gao"',
+        'aria-label="Snooze Ethan Gao for 3 days"',
+        'aria-label="Dismiss Ethan Gao for today"',
+    ):
+        assert label in body, label
+
+
+def test_confirm_chat_is_a_two_step_and_never_one_click_logs_a_chat(client):
+    """One click asserting a conversation happened is the biggest claim on the
+    page, made on the one card that exists because nobody knows if it did."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Rosalind Franklin", warmth="replied", thread_state="chat_scheduled",
+    )
+    _touch(user, c, "chat_scheduled", days_ago=14)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Log the chat" in body
+    assert '"kind": "chat"}' not in body, "a chat must never be one POST away"
+    # The two-step lands on a pre-filled form, not a fait accompli.
+    assert f"/app/contacts/{c.id}/?log=chat#contact-live" in body
+    detail = client.get(reverse("crm:contact_detail", args=[c.id]), {"log": "chat"})
+    assert '<option value="chat" selected>' in detail.content.decode()
+
+
+def test_compose_shows_a_no_draft_hint_when_the_opener_is_blank(client):
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="No Draft", email="nd@x.com")
+    _touch(user, c, "outreach", days_ago=20)
+    client.force_login(user)
+    assert "no draft" in client.get(reverse("crm:week")).content.decode()
+
+    c.opener = "Hi there, I'm a sophomore at USC..."
+    c.save(update_fields=["opener"])
+    assert "no draft" not in client.get(reverse("crm:week")).content.decode()
+
+
+def test_the_firm_slot_only_says_alum_for_an_actual_alum(client):
+    """A hand-added contact has no firm_id whether the free text says "USC" or
+    "HSBC". Keying the chip on a missing firm_id labelled eight HSBC bankers
+    alumni on the live page."""
+    user = _user(weekly_touch_goal=14)
+    alum = Contact.all_objects.create(
+        user=user, name="Kristin Welty", firm_text="USC", school_affiliation=True,
+    )
+    banker = Contact.all_objects.create(
+        user=user, name="Hsbc Banker", firm_text="HSBC", school_affiliation=False,
+    )
+    _touch(user, alum, "outreach", days_ago=20)
+    _touch(user, banker, "outreach", days_ago=20)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Usc · alum" in body or "USC · alum" in body.replace("Usc", "USC")
+    assert "Hsbc · alum" not in body
+    assert "HSBC · alum" not in body
+
+
+# ---------------------------------------------------------------------------
+# E8. Snooze hides a nag; it must not be able to hide a deadline.
+# ---------------------------------------------------------------------------
+def test_snooze_hides_the_follow_up_it_was_clicked_on():
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Snoozed Cold")
+    _touch(user, c, "outreach", days_ago=20)
+    Contact.all_objects.filter(pk=c.pk).update(
+        snoozed_until=timezone.now() + timedelta(days=3)
+    )
+    assert _cockpit_context(user)["queue_total"] == 0
+
+
+def test_snooze_cannot_swallow_a_pre_deadline_reping():
+    """The old implementation dropped the CONTACT from the engine's input, so
+    a 3-day snooze on a nagging follow-up also ate any priority-0 re-ping that
+    fell inside the window — silently, and it is the most valuable action the
+    engine produces."""
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(name="Moelis", slug="moelis")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    from directory.models import FirmDate
+    FirmDate.objects.create(
+        firm=firm, event_kind="app_close", region="us",
+        date=timezone.localdate() + timedelta(days=5), confidence=1.0, precision="day",
+    )
+    c = Contact.all_objects.create(
+        user=user, name="Snoozed Warm", firm=firm, region="us",
+        warmth="chatted", thread_state="replied",
+    )
+    _touch(user, c, "chat", days_ago=40)
+    Contact.all_objects.filter(pk=c.pk).update(
+        snoozed_until=timezone.now() + timedelta(days=3)
+    )
+
+    ctx = _cockpit_context(user)
+    actions = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert [a["action"] for a in actions] == ["reping"]
+
+
+# ---------------------------------------------------------------------------
+# E5 / E6. What the page must not write.
+# ---------------------------------------------------------------------------
+def test_compose_is_a_link_and_writes_nothing(client):
+    """A `mailto:` is not a send. Compose must never log a touch, or the ring
+    fills and the warmth clock resets for an email that was never written."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ethan Gao", email="e@x.com")
+    _touch(user, c, "outreach", days_ago=20)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    start = body.index('aria-label="Compose an email to Ethan Gao"')
+    tag = body[body.rindex("<", 0, start):body.index(">", start) + 1]
+    assert tag.startswith("<a "), tag
+    assert "hx-post" not in tag
+    assert Touch.all_objects.filter(user=user, contact=c).count() == 1
+
+
+def test_pacing_a_follow_up_out_never_produces_a_second_one(client):
+    """E6. Holding a follow-up back and surfacing it days later must leave it
+    follow-up #1-and-only. Once it is logged, the next thing that contact can
+    ever produce is a park — never another follow-up."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    _touch(user, c, "outreach", days_ago=40)
+
+    ctx = _cockpit_context(user)
+    planned = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert [a["action"] for a in planned] == ["follow_up"]
+
+    client.force_login(user)
+    client.post(reverse("crm:today_act", args=[c.id, "sent"]), {"kind": "follow_up"})
+
+    # Age the freshly logged follow-up past every window and look again.
+    Touch.all_objects.filter(user=user, contact=c, kind="follow_up").update(
+        ts=timezone.now() - timedelta(days=30)
+    )
+    again = [a["action"] for lane in _cockpit_context(user)["lanes"]
+             for a in lane["items"]]
+    assert "follow_up" not in again
+    assert [a["action"] for a in _cockpit_context(user)["park_actions"]] == ["park"]
+
+
+# ---------------------------------------------------------------------------
+# F9. The park wall.
+# ---------------------------------------------------------------------------
+def test_park_never_occupies_a_plan_slot_and_gets_a_bulk_button(client):
+    user = _user(weekly_touch_goal=14)
+    for i in range(8):
+        c = Contact.all_objects.create(user=user, name=f"Quiet {i:02d}")
+        _touch(user, c, "outreach", days_ago=40)
+        _touch(user, c, "follow_up", days_ago=30)
+
+    ctx = _cockpit_context(user)
+    assert ctx["park_total"] == 8
+    assert ctx["planned_total"] == 0
+    assert ctx["held_total"] == 0
+    assert ctx["park_bulk"] is True
+
+    client.force_login(user)
+    assert "Park all" in client.get(reverse("crm:week")).content.decode()
+
+
+def test_bulk_park_goes_through_the_audited_override_per_contact(client):
+    user = _user(weekly_touch_goal=14)
+    made = []
+    for i in range(8):
+        c = Contact.all_objects.create(user=user, name=f"Quiet {i:02d}")
+        _touch(user, c, "outreach", days_ago=40)
+        _touch(user, c, "follow_up", days_ago=30)
+        made.append(c)
+
+    client.force_login(user)
+    resp = client.post(reverse("crm:today_park_all"))
+    assert resp.status_code == 200
+    for c in made:
+        c.refresh_from_db()
+        assert c.thread_state == "parked"
+        # One audit row each: the ratchet stays the only writer, and the log
+        # has no gap saying who parked these people.
+        assert Touch.all_objects.filter(
+            user=user, contact=c, kind="manual_override"
+        ).count() == 1
+    assert _cockpit_context(user)["queue_total"] == 0
+
+
+def test_a_small_park_group_gets_no_bulk_button(client):
+    user = _user(weekly_touch_goal=14)
+    for i in range(2):
+        c = Contact.all_objects.create(user=user, name=f"Quiet {i:02d}")
+        _touch(user, c, "outreach", days_ago=40)
+        _touch(user, c, "follow_up", days_ago=30)
+    assert _cockpit_context(user)["park_bulk"] is False
+    client.force_login(user)
+    assert "Park all" not in client.get(reverse("crm:week")).content.decode()
+
+
+def test_bulk_park_is_tenant_scoped(client):
+    a = _user("a@example.com")
+    b = _user("b@example.com")
+    theirs = Contact.all_objects.create(user=b, name="Not Yours")
+    _touch(b, theirs, "outreach", days_ago=40)
+    _touch(b, theirs, "follow_up", days_ago=30)
+
+    client.force_login(a)
+    assert client.post(reverse("crm:today_park_all")).status_code == 200
+    theirs.refresh_from_db()
+    assert theirs.thread_state == "no_reply"
+
+
+# ---------------------------------------------------------------------------
+# A. Zero states — three of them, and they must not contradict each other.
+# ---------------------------------------------------------------------------
+def test_done_for_today_is_not_all_caught_up(client):
+    """E9: "You're all caught up" while 27 items pace out is the page arguing
+    with the line beneath it."""
+    user = _user(weekly_touch_goal=14)
+    for i in range(30):
+        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        _touch(user, c, "outreach", days_ago=20)
+        Contact.all_objects.filter(pk=c.pk).update(
+            snoozed_until=timezone.now() + timedelta(days=1)
+        )
+    # Un-snooze nothing: the whole queue is snoozed away, so the plan is empty
+    # and so is the remainder -> genuinely caught up.
+    body = _login_and_get(client, user)
+    assert "You're all caught up." in body
+
+
+def test_an_empty_plan_with_a_queue_behind_it_says_done_for_today(client):
+    user = _user(weekly_touch_goal=14)
+    for i in range(8):
+        # Parked-eligible contacts: they populate the queue but never the plan.
+        c = Contact.all_objects.create(user=user, name=f"Quiet {i:02d}")
+        _touch(user, c, "outreach", days_ago=40)
+        _touch(user, c, "follow_up", days_ago=30)
+
+    body = _login_and_get(client, user)
+    assert "Done for today." in body
+    assert "You're all caught up." not in body
+    # It names what's left instead of implying the database is empty.
+    assert "8 contacts have gone quiet" in body
+
+
+def test_no_contacts_still_says_no_contacts(client):
+    user = _user(weekly_touch_goal=14)
+    body = _login_and_get(client, user)
+    assert "No contacts yet." in body
+
+
+def _login_and_get(client, user) -> str:
+    client.force_login(user)
+    return client.get(reverse("crm:week")).content.decode()
+
+
+# ---------------------------------------------------------------------------
+# A6 / E4. Coming up says when the chat was SET UP, never when it is.
+# ---------------------------------------------------------------------------
+def test_coming_up_shows_a_fresh_scheduled_chat_without_inventing_a_time(client):
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Grace Hopper", warmth="replied", thread_state="chat_scheduled",
+    )
+    _touch(user, c, "chat_scheduled", days_ago=1)
+
+    ctx = _cockpit_context(user)
+    assert [r["contact"].name for r in ctx["coming_up"]] == ["Grace Hopper"]
+
+    body = _login_and_get(client, user)
+    assert "Coming Up" in body
+    assert "chat set up" in body
+    # We store no chat datetime; the page must never imply we do.
+    for invented in ("chat tomorrow", "Chat tomorrow", "chat at "):
+        assert invented not in body
+
+
+def test_coming_up_drops_a_chat_once_it_goes_stale():
+    """The exact complement of cadence branch 2: past 4 business days this
+    stops being "coming up" and becomes a confirm_chat action instead."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Stale Chat", warmth="replied", thread_state="chat_scheduled",
+    )
+    _touch(user, c, "chat_scheduled", days_ago=21)
+
+    ctx = _cockpit_context(user)
+    assert ctx["coming_up"] == []
+    actions = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert [a["action"] for a in actions] == ["confirm_chat"]
+
+
+# ---------------------------------------------------------------------------
+# A / E7. The page's shape: queue above the commodity stats, no count-up.
+# ---------------------------------------------------------------------------
+def test_the_queue_sits_above_the_directory_stats(client):
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    _touch(user, c, "outreach", days_ago=20)
+
+    body = _login_and_get(client, user)
+    assert body.index("today-cockpit") < body.index('class="ribbon"')
+
+
+def test_the_today_stats_are_not_count_animated(client):
+    """base.html count-animates every `.dash-num` from 0 on first paint, and
+    the intermediate frames are wrong numbers that screenshot as data."""
+    user = _user(weekly_touch_goal=14)
+    body = _login_and_get(client, user)
+    # Matched as a class ATTRIBUTE, not a substring: `_styles.html` names
+    # `.dash-num` in a comment explaining precisely why it isn't used here.
+    assert 'class="dash-num"' not in body
+    assert 'class="ribbon-num"' in body
+
+
+def test_an_empty_funnel_says_so_in_words_rather_than_drawing_zeroes(client):
+    user = _user(weekly_touch_goal=14)
+    body = _login_and_get(client, user)
+    assert "Nothing submitted yet." in body
+    assert "0 › 0 › 0" not in body

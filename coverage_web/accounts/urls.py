@@ -14,6 +14,14 @@ urlpatterns = [
     # University autocomplete (datalist options) for the School field.
     path("universities/", views.university_search, name="university_search"),
     path("export/", views.export, name="export"),
+    # Consequential actions, each on its own confirm page — never a one-click
+    # on the settings page itself. See views.py's shared-pattern note.
+    path(
+        "capture/regenerate/",
+        views.regenerate_capture_address,
+        name="capture_regenerate",
+    ),
+    path("security/signout-all/", views.signout_other_sessions, name="signout_all"),
     path("delete/", views.delete_account, name="delete"),
     path("privacy/", views.privacy, name="privacy"),
     path("terms/", views.terms, name="terms"),

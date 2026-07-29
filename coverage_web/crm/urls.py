@@ -8,7 +8,10 @@ app_name = "crm"
 urlpatterns = [
     # The authed hub: the weekly priority list (cadence.due_actions output).
     path("", views.week, name="week"),
-    # Today cockpit quick actions (htmx): sent / reply / snooze / skip.
+    # Today cockpit quick actions (htmx): sent / reply / park / snooze / skip.
+    # The literal segment is declared first so the <int:pk> converter can't
+    # shadow it.
+    path("today/park-all/", views.today_park_all, name="today_park_all"),
     path("today/<int:pk>/<str:verb>/", views.today_act, name="today_act"),
     # Post-chat debrief, keyed by the `chat` touch it belongs to (one
     # debrief per chat — see crm.models.ChatDebrief).

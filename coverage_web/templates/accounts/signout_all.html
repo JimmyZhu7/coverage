@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Sign Out Everywhere · Coverage{% endblock %}
+
+{% block head %}
+<style>
+  .sout-list li { margin-bottom: var(--s2); }
+  .sout-wrap .btn { min-height: 44px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page page--narrow sout-wrap">
+  <header class="page-head"><h1>Sign Out Everywhere</h1></header>
+  <p class="lede">For the library computer you forgot to sign out of.</p>
+
+  <div class="panel">
+    <ul class="sout-list">
+      <li><strong>Every other signed-in device is signed out</strong> — any browser,
+        anywhere, that still had your session.</li>
+      <li><strong>This device stays signed in.</strong> You won't be logged out of the
+        browser you're reading this in.</li>
+      <li><strong>Nothing is deleted.</strong> No contacts, no touches, no settings — this
+        only ends sessions.</li>
+      <li><strong>Your password is unchanged.</strong> If you think someone knows it,
+        <a href="{% url 'account_change_password' %}">change it</a> as well; signing out a
+        device someone can sign back into buys you nothing.</li>
+    </ul>
+  </div>
+
+  <form method="post" action="{% url 'accounts:signout_all' %}">
+    {% csrf_token %}
+    <div class="actions">
+      <button type="submit" class="btn btn-primary"
+              aria-label="Sign out on all other devices">Sign Out Other Devices</button>
+      <a class="btn" href="{% url 'accounts:settings' %}#security">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -7,47 +7,66 @@
 
 {% block content %}
 <div class="page page--wide">
-  <header class="kin-hero">
-    <span class="kin-hero-icon">{% include "_icon.html" with name="today" %}</span>
-    <p class="kin-hero-eyebrow">{% now "l · N j, Y" %}</p>
-    <h1 class="kin-hero-title">Today</h1>
-    <p class="kin-hero-sub">Who to reach, what's closing, and what moved since you last looked.</p>
+  {% comment %}
+  Compact header strip, not a hero. The old hero plus four stat cards spent
+  every pixel above the fold at 1440x800 on the commodity layer (deadlines)
+  and pushed the queue — the moat layer — below it. This is a date, a title,
+  and the page's thesis sentence in real numbers.
+  {% endcomment %}
+  <header class="today-head">
+    <p class="today-eyebrow">{% now "l · N j, Y" %}</p>
+    <h1 class="today-title">Today</h1>
+    <p class="today-summary" id="today-summary">
+      <b>{{ planned_total }}</b> to do{% if debriefs %} · <b>{{ debriefs|length }}</b> chat{{ debriefs|length|pluralize }} to write down{% endif %} · <b>{{ pace.done }}/{{ pace.goal }}</b> this week
+    </p>
   </header>
-
-  {# ---- Dashboard stat cards (clickable jumps) ---- #}
-  <div class="dash-stats">
-    <a class="dash-card" href="{% url 'opportunities' %}">
-      <span class="dash-num">{{ dash.open_now }}</span>
-      <span class="dash-lbl"><span class="live-dot"></span> Open Now</span>
-      <span class="dash-sub">Campus roles live</span>
-    </a>
-    <a class="dash-card" href="{% url 'opportunities' %}">
-      <span class="dash-num">{{ dash.closing_10 }}</span>
-      <span class="dash-lbl">Closing Soon</span>
-      <span class="dash-sub">Within 10 days</span>
-    </a>
-    <a class="dash-card" href="{% url 'crm:contact_list' %}">
-      <span class="dash-num">{{ dash.tracked_live }}</span>
-      <span class="dash-lbl">Tracked Live</span>
-      <span class="dash-sub">{{ dash.hk }} in HK · {{ dash.us }} in US</span>
-    </a>
-    <div class="dash-card dash-funnel">
-      <span class="dash-lbl">Application Funnel</span>
-      <div class="funnel-row">
-        <span class="funnel-step"><span class="dash-num">{{ dash.funnel.submitted }}</span><span class="dash-lbl">Submitted</span></span>
-        <span class="funnel-sep">›</span>
-        <span class="funnel-step"><span class="dash-num">{{ dash.funnel.interview }}</span><span class="dash-lbl">Interview</span></span>
-        <span class="funnel-sep">›</span>
-        <span class="funnel-step"><span class="dash-num">{{ dash.funnel.offer }}</span><span class="dash-lbl">Offer</span></span>
-      </div>
-    </div>
-  </div>
 
   {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}
   <div id="today-cockpit"
+       aria-describedby="today-summary"
        hx-target="#today-cockpit" hx-swap="innerHTML"
        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
     {% include "crm/_cockpit.html" %}
   </div>
+
+  {% comment %}
+  The directory stats, below the queue and compressed to one slim row. They
+  belong on the page — they're just not what it's for, and they were sitting
+  on top of it. Deliberately NOT `.dash-num`: base.html count-animates that
+  class from 0 on first paint, and the intermediate frames are wrong numbers
+  that screenshot as data (80, 152 and 886 were all captured for the same
+  "Open Now" figure). A number nobody can misread is worth more than the
+  flourish.
+  {% endcomment %}
+  <section class="ribbon" aria-label="Deadlines and applications">
+    <div class="ribbon-row">
+      <a class="ribbon-stat" href="{% url 'opportunities' %}">
+        <span class="ribbon-num">{{ dash.open_now }}</span>
+        <span class="ribbon-lbl"><span class="live-dot"></span> Open now</span>
+      </a>
+      <a class="ribbon-stat" href="{% url 'opportunities' %}">
+        <span class="ribbon-num">{{ dash.closing_10 }}</span>
+        <span class="ribbon-lbl">Closing in 10 days</span>
+      </a>
+      <a class="ribbon-stat" href="{% url 'crm:contact_list' %}">
+        <span class="ribbon-num">{{ dash.tracked_live }}</span>
+        <span class="ribbon-lbl">Tracked live · {{ dash.hk }} HK / {{ dash.us }} US</span>
+      </a>
+      {% comment %}
+      A funnel reading 0 › 0 › 0 is a diagram of nothing. While there is
+      genuinely nothing in it, say so in words instead.
+      {% endcomment %}
+      {% if dash.funnel.submitted or dash.funnel.interview or dash.funnel.offer %}
+        <span class="ribbon-stat ribbon-funnel">
+          <span class="ribbon-num">{{ dash.funnel.submitted }} › {{ dash.funnel.interview }} › {{ dash.funnel.offer }}</span>
+          <span class="ribbon-lbl">Submitted › Interview › Offer</span>
+        </span>
+      {% else %}
+        <span class="ribbon-stat ribbon-funnel">
+          <span class="ribbon-lbl">Nothing submitted yet.</span>
+        </span>
+      {% endif %}
+    </div>
+  </section>
 </div>
 {% endblock %}

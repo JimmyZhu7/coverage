@@ -13,16 +13,22 @@ from __future__ import annotations
 
 import csv
 import io
+import json as _json
 import re
+import zipfile
 from dataclasses import dataclass, field
 
 from django.conf import settings
-from django.db import transaction
+from django.contrib.sessions.models import Session
+from django.db import IntegrityError, transaction
+from django.utils import timezone
 
 from analytics.events import record_event
 from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
-from crm.models import CaptureEvent, Contact, Task, Touch, UserFirm
+from crm.models import CaptureEvent, ChatDebrief, Contact, Task, Touch, UserFirm
 from directory.models import Firm
+
+from .models import User, _generate_capture_slug
 
 # The tier assigned to every firm a user picks during onboarding. The plan
 # (docs/build-plan.md §2) declares `user_firms.tier smallint` but leaves its
@@ -44,6 +50,71 @@ def capture_address(user) -> str:
     """
     domain = getattr(settings, "CAPTURE_INBOUND_DOMAIN", "in.coverage.app")
     return f"u-{user.capture_slug}@{domain}"
+
+
+def regenerate_capture_address(user) -> str:
+    """Give the user a brand-new capture slug and return the new address.
+
+    WHY THIS EXISTS: the capture address is a bearer secret. `capture/
+    services.resolve_user` routes inbound mail purely by the `u-<slug>` in the
+    recipient list, so anyone who learns the address — a forwarded thread, a
+    screenshot, a recipient hitting reply-all on a BCC'd chain — can post mail
+    that lands as capture events, pending contacts, and (through the
+    deterministic extractors) touches in a student's private CRM. Before this,
+    the only remedy was deleting the account.
+
+    WHY IT IS SAFE: nothing durable stores the rendered address. mailto links
+    are built per request, and `capture_events.provider_ref` is the sending
+    system's Message-ID, not the slug. An address whose slug no longer matches
+    any row simply fails to resolve (`resolve_user` returns None) and the mail
+    is dropped — it is not misrouted to another user, because the slug is
+    unique and CSPRNG-generated.
+
+    The retry loop is for the unique constraint, not for entropy:
+    `token_urlsafe(9)` is ~72 bits, so a collision is a theoretical event, but
+    "theoretical" is not "handled", and the failure mode without a retry is a
+    500 on a security control.
+    """
+    for _attempt in range(5):
+        candidate = _generate_capture_slug()
+        if User.objects.filter(capture_slug=candidate).exists():
+            continue
+        user.capture_slug = candidate
+        try:
+            user.save(update_fields=["capture_slug"])
+        except IntegrityError:
+            continue  # lost a race between the check and the write
+        record_event("capture_address_regenerated", user=user)
+        return capture_address(user)
+    raise RuntimeError("Could not allocate a unique capture slug after 5 tries.")
+
+
+def sign_out_other_sessions(user, *, keep_session_key: str | None = None) -> int:
+    """Delete every DB-backed session belonging to `user` except the one they
+    are asking from. Returns how many were ended.
+
+    Sessions are opaque blobs, so this decodes each one to read its
+    `_auth_user_id` rather than filtering in SQL. That is a full-table scan of
+    `django_session`; at this product's scale (single-digit sessions per user,
+    pre-launch) it costs nothing, and a correct answer beats a clever one.
+    Revisit with a `user -> session` index table if the table ever grows past
+    a few thousand live rows.
+
+    Expired-but-unpurged rows are skipped: they cannot authenticate anyone, so
+    counting them would inflate the "signed out on N devices" receipt.
+    """
+    ended = 0
+    now = timezone.now()
+    target = str(user.pk)
+    for row in Session.objects.filter(expire_date__gt=now):
+        if row.session_key == keep_session_key:
+            continue
+        if row.get_decoded().get("_auth_user_id") == target:
+            row.delete()
+            ended += 1
+    if ended:
+        record_event("sessions_signed_out", user=user, count=ended)
+    return ended
 
 
 # ---------------------------------------------------------------------------
@@ -311,15 +382,64 @@ def import_template_csv() -> str:
 
 
 # ---------------------------------------------------------------------------
-# CSV export (the user's own data, portable — §10 trust feature)
+# Data export (the user's own data, portable — §10 trust feature)
 # ---------------------------------------------------------------------------
+# THE RULE THIS SECTION EXISTS TO KEEP: whatever `delete_user_and_data` below
+# destroys, the export must first be able to hand back. Those two lists were
+# allowed to drift — deletion swept nine private tables while the export
+# shipped two CSVs, under a privacy policy that promised "export everything as
+# CSV at any time" and a Settings line that said "download all your data".
+# `test_export.py` now asserts the containment (every model in `_DELETE_ORDER`
+# has a file in the ZIP), so the next table added to one list fails loudly
+# until it is added to the other.
+#
+# Shape follows the category norm (Huntr's "Download My Data"): ONE ZIP, one
+# CSV per data type, plus a README naming what is and isn't inside. The two
+# single-file buttons stay — a student who only wants their contacts in a
+# spreadsheet shouldn't have to unzip anything.
 CONTACT_EXPORT_COLUMNS = [
-    "name", "email", "firm", "role", "region", "warmth", "thread_state",
-    "angle", "opener", "notes", "source", "created",
+    # `linkedin`, `school`, `school_affiliation` and `archived` were missing.
+    # `archived` is the one that made the export actively wrong rather than
+    # merely thin: 25 of the founder's 137 contacts are archived, and without
+    # the column a re-import resurrects every one of them as an active person
+    # sitting back in the cadence queue.
+    "name", "email", "linkedin", "firm", "role", "region", "school",
+    "school_affiliation", "warmth", "thread_state", "angle", "opener",
+    "notes", "source", "archived", "created",
 ]
 TOUCH_EXPORT_COLUMNS = [
     "contact_name", "contact_email", "firm", "ts", "channel",
     "kind", "note", "source",
+]
+FIRM_EXPORT_COLUMNS = ["firm", "tier", "status"]
+APPLICATION_EXPORT_COLUMNS = [
+    "opportunity", "firm", "region", "deadline", "url",
+    "applied_status", "applied_at", "interview_dates", "dismissed",
+]
+TASK_EXPORT_COLUMNS = ["title", "why", "due", "kind", "firm", "status", "created"]
+# No raw MIME, no `raw_ref`: the stored original is a 30-day artifact (see
+# legal/privacy.html "Retention"), and the durable, meaningful record is the
+# structured event. `signals` is included because it is what the extractors
+# actually concluded, which is the part a student would want to check.
+CAPTURE_EVENT_EXPORT_COLUMNS = [
+    "occurred_at", "received_at", "provider", "direction",
+    "counterparty_name", "counterparty_email", "status", "signals",
+]
+DEBRIEF_EXPORT_COLUMNS = [
+    "created", "contact", "learned", "intro_name", "intro_email",
+    "tracked_date", "date_note", "advocate_answer", "promoted", "dismissed",
+]
+FIT_SCORE_EXPORT_COLUMNS = [
+    "subject_type", "subject", "composite", "axes", "reasoning",
+    "params_version", "computed_at",
+]
+IMPORT_EXPORT_COLUMNS = ["created", "kind", "filename", "row_stats"]
+PRODUCT_EVENT_EXPORT_COLUMNS = ["ts", "event", "props"]
+PROFILE_EXPORT_COLUMNS = [
+    "email", "name", "school", "class_year", "target_cycle", "regions",
+    "tracks", "work_authorization", "angles", "advocate_target",
+    "cadence_params", "weekly_touch_goal", "timezone", "language",
+    "capture_address", "joined", "onboarded_at",
 ]
 
 
@@ -327,53 +447,299 @@ def _firm_label(contact: Contact) -> str:
     return contact.firm.name if contact.firm_id else contact.firm_text
 
 
-def contacts_csv(user) -> str:
+def _json_cell(value) -> str:
+    """JSON columns go into a cell as compact JSON rather than Python's repr:
+    a spreadsheet shows it readably and a script can `json.loads` it back."""
+    if value in (None, "", [], {}):
+        return ""
+    return _json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _dt(value) -> str:
+    return value.isoformat() if value else ""
+
+
+def _csv(columns: list[str], rows) -> str:
+    """Header + rows -> CSV text. Every builder below is this plus a query."""
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(CONTACT_EXPORT_COLUMNS)
-    for c in Contact.objects.for_user(user).select_related("firm"):
-        writer.writerow(
-            [
-                c.name,
-                c.email,
-                _firm_label(c),
-                c.role,
-                c.region,
-                c.warmth,
-                c.thread_state,
-                c.angle,
-                c.opener,
-                c.notes,
-                c.source,
-                c.created.isoformat() if c.created else "",
-            ]
-        )
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow(row)
     return buf.getvalue()
 
 
+def contacts_csv(user) -> str:
+    return _csv(
+        CONTACT_EXPORT_COLUMNS,
+        (
+            [
+                c.name, c.email, c.linkedin, _firm_label(c), c.role, c.region,
+                c.school, c.school_affiliation, c.warmth, c.thread_state,
+                c.angle, c.opener, c.notes, c.source, c.archived, _dt(c.created),
+            ]
+            for c in Contact.objects.for_user(user).select_related("firm")
+        ),
+    )
+
+
 def touches_csv(user) -> str:
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(TOUCH_EXPORT_COLUMNS)
     touches = (
         Touch.objects.for_user(user)
         .select_related("contact", "contact__firm")
         .order_by("ts")
     )
-    for t in touches:
-        contact = t.contact
-        writer.writerow(
+    return _csv(
+        TOUCH_EXPORT_COLUMNS,
+        (
             [
-                contact.name if contact else "",
-                contact.email if contact else "",
-                _firm_label(contact) if contact else "",
-                t.ts.isoformat() if t.ts else "",
-                t.channel or "",
-                t.kind,
-                t.note or "",
-                t.source,
+                t.contact.name if t.contact else "",
+                t.contact.email if t.contact else "",
+                _firm_label(t.contact) if t.contact else "",
+                _dt(t.ts), t.channel or "", t.kind, t.note or "", t.source,
             ]
-        )
+            for t in touches
+        ),
+    )
+
+
+def firms_csv(user) -> str:
+    """The Network board's tiering — the user's own statement of priority, and
+    the single biggest input to the cadence engine's ordering."""
+    rows = (
+        UserFirm.objects.for_user(user).select_related("firm").order_by("firm__name")
+    )
+    return _csv(
+        FIRM_EXPORT_COLUMNS,
+        ([uf.firm.name if uf.firm_id else "", uf.tier, uf.status] for uf in rows),
+    )
+
+
+def applications_csv(user) -> str:
+    """Tracked roles from the Opportunities feed, with the interview dates the
+    student typed in — the only place those dates exist."""
+    rows = (
+        UserOpportunity.objects.for_user(user)
+        .select_related("opportunity", "opportunity__firm")
+        .order_by("-applied_at")
+    )
+    return _csv(
+        APPLICATION_EXPORT_COLUMNS,
+        (
+            [
+                uo.opportunity.title if uo.opportunity_id else "",
+                uo.opportunity.firm.name if uo.opportunity_id else "",
+                uo.opportunity.region if uo.opportunity_id else "",
+                uo.opportunity.deadline.isoformat()
+                if uo.opportunity_id and uo.opportunity.deadline else "",
+                uo.opportunity.url if uo.opportunity_id else "",
+                uo.applied_status, _dt(uo.applied_at),
+                _json_cell(uo.interview_dates), uo.dismissed,
+            ]
+            for uo in rows
+        ),
+    )
+
+
+def tasks_csv(user) -> str:
+    rows = Task.objects.for_user(user).select_related("firm")
+    return _csv(
+        TASK_EXPORT_COLUMNS,
+        (
+            [
+                t.title, t.why, t.due.isoformat() if t.due else "", t.kind,
+                t.firm.name if t.firm_id else "", t.status, _dt(t.created),
+            ]
+            for t in rows
+        ),
+    )
+
+
+def capture_events_csv(user) -> str:
+    rows = CaptureEvent.objects.for_user(user)
+    return _csv(
+        CAPTURE_EVENT_EXPORT_COLUMNS,
+        (
+            [
+                _dt(e.occurred_at), _dt(e.received_at), e.provider, e.direction,
+                e.counterparty_name, e.counterparty_email, e.status,
+                _json_cell(e.signals),
+            ]
+            for e in rows
+        ),
+    )
+
+
+def chat_debriefs_csv(user) -> str:
+    """What each coffee chat actually taught the student. Free text they wrote
+    once and would have no other way to get back."""
+    rows = ChatDebrief.objects.for_user(user).select_related("contact")
+    return _csv(
+        DEBRIEF_EXPORT_COLUMNS,
+        (
+            [
+                _dt(d.created), d.contact.name if d.contact_id else "", d.learned,
+                d.intro_name, d.intro_email,
+                d.tracked_date.isoformat() if d.tracked_date else "",
+                d.date_note, d.advocate_answer, d.promoted, d.dismissed,
+            ]
+            for d in rows
+        ),
+    )
+
+
+def fit_scores_csv(user) -> str:
+    """Derived and recomputable, but included anyway: `subject_id` alone is an
+    opaque integer, so each row is resolved to the name it scored. Leaving
+    this out would have meant the export page listing an exception, and an
+    exception on a page whose whole claim is "everything" is worse than two
+    lookups."""
+    rows = list(FitScore.objects.for_user(user))
+    contact_ids = {r.subject_id for r in rows if r.subject_type == "contact"}
+    firm_ids = {r.subject_id for r in rows if r.subject_type == "firm"}
+    names: dict[tuple[str, int], str] = {
+        ("contact", c.id): c.name
+        for c in Contact.objects.for_user(user).filter(id__in=contact_ids)
+    }
+    names.update(
+        {("firm", f.id): f.name for f in Firm.objects.filter(id__in=firm_ids)}
+    )
+    return _csv(
+        FIT_SCORE_EXPORT_COLUMNS,
+        (
+            [
+                r.subject_type,
+                names.get((r.subject_type, r.subject_id), str(r.subject_id)),
+                r.composite, _json_cell(r.axes), r.reasoning,
+                r.params_version, _dt(r.computed_at),
+            ]
+            for r in rows
+        ),
+    )
+
+
+def imports_csv(user) -> str:
+    rows = Import.objects.for_user(user)
+    return _csv(
+        IMPORT_EXPORT_COLUMNS,
+        (
+            [_dt(i.created), i.kind, i.filename, _json_cell(i.row_stats)]
+            for i in rows
+        ),
+    )
+
+
+def product_events_csv(user) -> str:
+    """"What you do in the app" (legal/privacy.html) is data we hold about the
+    student, so it is data the student gets back. No email bodies live here —
+    see the same policy section."""
+    rows = ProductEvent.objects.for_user(user)
+    return _csv(
+        PRODUCT_EVENT_EXPORT_COLUMNS,
+        ([_dt(e.ts), e.event, _json_cell(e.props)] for e in rows),
+    )
+
+
+def profile_csv(user) -> str:
+    """The `users` row itself — one header, one row. Everything Settings can
+    set, including the answers that feed the fit score (`work_authorization`)
+    and the engine (`cadence_params`, `advocate_target`, `weekly_touch_goal`).
+    Never the password hash, and never the session."""
+    assets = user.assets or {}
+    return _csv(
+        PROFILE_EXPORT_COLUMNS,
+        [[
+            user.email,
+            user.name,
+            user.school,
+            user.class_year if user.class_year else "",
+            user.target_cycle,
+            _json_cell(list(user.regions or [])),
+            _json_cell(list(user.tracks or [])),
+            _json_cell(user.work_authorization),
+            _json_cell(assets.get("angles")),
+            assets.get("advocate_target", ""),
+            _json_cell(user.cadence_params),
+            user.weekly_touch_goal if user.weekly_touch_goal else "",
+            getattr(user, "timezone", "") or "",
+            user.language,
+            capture_address(user),
+            _dt(user.created),
+            _dt(user.onboarded_at),
+        ]],
+    )
+
+
+# Filename -> (builder, one-line description shown on the export page and in
+# the ZIP's own README). Order is the order they're listed to the user:
+# the things a student thinks of as "my data" first, bookkeeping last.
+EXPORT_FILES: list[tuple[str, object, str]] = [
+    ("contacts.csv", contacts_csv,
+     "Every person in your CRM, including archived ones (flagged, not dropped)."),
+    ("touches.csv", touches_csv,
+     "Every logged interaction, with the contact and firm it belongs to."),
+    ("firms.csv", firms_csv, "Your target firms and the tier you gave each."),
+    ("applications.csv", applications_csv,
+     "Roles you're tracking, their status, and any interview dates you added."),
+    ("tasks.csv", tasks_csv, "Your tasks, open and done."),
+    ("chat_debriefs.csv", chat_debriefs_csv,
+     "What each coffee chat taught you, in your own words."),
+    ("capture_events.csv", capture_events_csv,
+     "Mail your capture address received. Structured record only, never raw email."),
+    ("fit_scores.csv", fit_scores_csv,
+     "Computed fit scores with the axes behind each one."),
+    ("imports.csv", imports_csv, "Your CSV imports and what each one did."),
+    ("product_events.csv", product_events_csv,
+     "Your own usage events — which pages and actions you used."),
+    ("profile.csv", profile_csv,
+     "Your profile row: school, cycle, regions, work authorization, angles, "
+     "and every engine setting."),
+]
+
+# Named out loud rather than quietly skipped, on the page and in the README —
+# rule D4: "everything" is only written when it is everything.
+EXPORT_EXCLUSIONS: list[str] = [
+    "Your password (we only ever store a one-way hash of it).",
+    "The raw original of captured email, which is discarded within 30 days.",
+    "Shared directory data — firms, roles, deadlines. It isn't yours; it's "
+    "the same for every user.",
+]
+
+
+def export_manifest() -> list[tuple[str, str]]:
+    """(filename, description) for the export page. Reads EXPORT_FILES so the
+    page can never list a file the ZIP doesn't contain, or miss one it does."""
+    return [(name, desc) for name, _builder, desc in EXPORT_FILES]
+
+
+def _export_readme() -> str:
+    lines = [
+        "Coverage — your data",
+        "=" * 20,
+        "",
+        "One CSV per table. Every row in here is yours; nothing is shared with",
+        "any other user. JSON columns are written as compact JSON in one cell.",
+        "",
+        "Files",
+        "-----",
+    ]
+    lines += [f"  {name:<22} {desc}" for name, desc in export_manifest()]
+    lines += ["", "Not in this archive", "-------------------"]
+    lines += [f"  - {item}" for item in EXPORT_EXCLUSIONS]
+    lines.append("")
+    return "\n".join(lines)
+
+
+def export_zip(user) -> bytes:
+    """Every CSV above plus a README, as one ZIP. Built in memory: the whole
+    archive is a few hundred KB even for a heavy user (the founder's 137
+    contacts / 131 touches come to well under 100 KB), so streaming it to a
+    temp file would buy nothing."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.txt", _export_readme())
+        for name, builder, _desc in EXPORT_FILES:
+            zf.writestr(name, builder(user))
     return buf.getvalue()
 
 
@@ -384,6 +750,12 @@ def touches_csv(user) -> str:
 # actually owns (touches are deleted before contacts/capture_events they
 # reference, so no cascade double-counts them).
 _DELETE_ORDER: list[tuple[str, type]] = [
+    # `chat_debriefs` was already swept — it CASCADEs from both `touch` and
+    # `contact` — but it was swept invisibly, so the returned counts (which the
+    # goodbye flash now shows the user) under-reported by however many
+    # debriefs they'd written. Deleting it explicitly, first, makes the receipt
+    # honest; the cascade is now a no-op rather than the mechanism.
+    ("chat_debriefs", ChatDebrief),
     ("touches", Touch),
     ("fit_scores", FitScore),
     ("tasks", Task),

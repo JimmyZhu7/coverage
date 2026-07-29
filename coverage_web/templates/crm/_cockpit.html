@@ -1,13 +1,20 @@
 {% load textstyle %}
 {% comment %}
-The Today cockpit (htmx swap target). Left: the cadence queue split into
-Overdue / Due Now / Keep Warm lanes of act cards with inline quick actions.
-Right: a weekly pace ring and a recent-activity feed. Re-rendered whole on
-every quick action so all three stay in sync.
+The Today cockpit (htmx swap target). Left: today's PLAN — the cadence queue
+capped to what a student with ~6 hours a week can actually do, ordered by
+relationship momentum rather than firm alphabet, split into three semantic
+lanes. Everything the cap held back is one click away under "Up next", with
+the exact count and the policy holding it. Right: the weekly pace ring, the
+chats already on the calendar, and a recent-activity feed. Re-rendered whole
+on every quick action so all of it stays in sync.
 {% endcomment %}
 <div class="cockpit">
   <div class="cockpit-main">
-    {# A pending debrief is work too — don't claim "all caught up" over one. #}
+    {% comment %}
+    Three distinct zero states, not two. "You're all caught up" is only true
+    when the QUEUE is empty; saying it while 27 items are pacing out would be
+    the page contradicting the line directly beneath it.
+    {% endcomment %}
     {% if not queue_total and not debriefs %}
       <div class="empty">
         {% if contact_count %}
@@ -19,6 +26,20 @@ every quick action so all three stay in sync.
         {% endif %}
         <a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>
       </div>
+    {% elif not lanes and not debriefs %}
+      {% comment %}
+      The plan is clear but the queue is not. This is the product working, so
+      it is styled as a win — and it names what's left rather than implying
+      the database is empty.
+      {% endcomment %}
+      <div class="empty empty--done">
+        <h2>Done for today.</h2>
+        <p>
+          {% if held_total %}{{ held_total }} more {% if held_total == 1 %}is{% else %}are{% endif %} pacing out over the coming days. {% endif %}
+          {% if park_total %}{{ park_total }} {% if park_total == 1 %}contact has{% else %}contacts have{% endif %} gone quiet; park them below when you're ready. {% endif %}
+          That's {{ pace.done }} of {{ pace.goal }} this week.
+        </p>
+      </div>
     {% endif %}
 
     {% comment %}
@@ -29,7 +50,7 @@ every quick action so all three stay in sync.
     {% endcomment %}
     {% if debriefs %}
       <section class="lane lane-debrief">
-        <h2 class="lane-title">Debrief <span class="lane-count">{{ debriefs|length }}</span></h2>
+        <h2 class="lane-title">Debrief <span class="lane-count" aria-live="polite">{{ debriefs|length }}</span></h2>
         <div class="act-grid">
           {% for d in debriefs %}
             <article class="act-card kin-reveal act-debrief" style="--i:{{ forloop.counter0 }}">
@@ -40,12 +61,16 @@ every quick action so all three stay in sync.
               <h3 class="act-name"><a href="{% url 'crm:contact_detail' d.contact.id %}">{{ d.contact.name|smart_title }}</a></h3>
               <p class="act-role">Chatted {% if d.days_ago %}{{ d.days_ago }}d ago{% else %}today{% endif %}</p>
               <div class="act-badges"><span class="prio prio-debrief">Write it down</span></div>
+              <p class="act-reason">Write down what you learned while it's fresh. It drafts your thank-you.</p>
               <div class="act-quick">
                 <div class="act-primary">
-                  <a class="btn btn-primary act-btn" href="{% url 'crm:debrief' d.touch.id %}">Debrief</a>
+                  <a class="btn btn-primary act-btn"
+                     aria-label="Debrief the chat with {{ d.contact.name }}"
+                     href="{% url 'crm:debrief' d.touch.id %}">Debrief</a>
                 </div>
                 <div class="act-ghosts">
                   <button type="button" class="btn act-ghost"
+                          aria-label="Don't ask about the chat with {{ d.contact.name }}"
                           hx-post="{% url 'crm:debrief_dismiss' d.touch.id %}"
                           title="Don't ask about this chat">Skip</button>
                 </div>
@@ -56,29 +81,60 @@ every quick action so all three stay in sync.
       </section>
     {% endif %}
 
-    {% if lanes.overdue %}
-      <section class="lane lane-overdue">
-        <h2 class="lane-title"><span class="lane-dot"></span> Overdue <span class="lane-count">{{ lanes.overdue|length }}</span></h2>
+    {% comment %}
+    Today's plan. Only non-empty lanes render. A capped lane says "N of M
+    today" — never a bare count that mixes what's shown with what isn't.
+    {% endcomment %}
+    {% for lane in lanes %}
+      <section class="lane lane-{{ lane.key }}">
+        <h2 class="lane-title">
+          {% if lane.key == "critical" %}<span class="lane-dot"></span>{% endif %}
+          {{ lane.label }}
+          <span class="lane-count" aria-live="polite">{% if lane.capped %}{{ lane.count }} of {{ lane.total }} today{% else %}{{ lane.count }}{% endif %}</span>
+        </h2>
         <div class="act-grid">
-          {% for a in lanes.overdue %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+          {% for a in lane.items %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
         </div>
       </section>
-    {% endif %}
+    {% endfor %}
 
-    {% if lanes.due %}
-      <section class="lane lane-due">
-        <h2 class="lane-title">Due Now <span class="lane-count">{{ lanes.due|length }}</span></h2>
-        <div class="act-grid">
-          {% for a in lanes.due %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+    {% comment %}
+    The remainder, stated. Held is not gone: the count is exact, the policy
+    holding it is named in words, and Show all opens the complete list with
+    fully working cards. The cap paces; it never filters.
+    {% endcomment %}
+    {% if held_total %}
+      <details class="upnext">
+        <summary>
+          <span class="upnext-count">{{ held_total }} more queued</span>
+          <span class="upnext-why">pacing out at {{ daily_cap }} a day</span>
+          <span class="upnext-toggle">Show all</span>
+        </summary>
+        <div class="act-grid upnext-grid">
+          {% for a in held %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
         </div>
-      </section>
+      </details>
     {% endif %}
 
-    {% if lanes.later %}
-      <section class="lane lane-later">
-        <h2 class="lane-title">Keep Warm <span class="lane-count">{{ lanes.later|length }}</span></h2>
+    {% comment %}
+    Gone-quiet strip. These are exits, not work, so they never occupy a plan
+    slot. The bulk button only appears once one-by-one parking has stopped
+    being a decision and started being make-work; it loops the audited
+    override per contact (see crm.views.today_park_all), never a bulk UPDATE.
+    {% endcomment %}
+    {% if park_total %}
+      <section class="lane lane-park">
+        <h2 class="lane-title">
+          Gone quiet <span class="lane-count" aria-live="polite">{{ park_total }}</span>
+          {% if park_bulk %}
+            <button type="button" class="btn act-ghost park-all"
+                    aria-label="Park all {{ park_total }} contacts who have gone quiet"
+                    title="Park every contact in this strip"
+                    hx-post="{% url 'crm:today_park_all' %}">Park all</button>
+          {% endif %}
+        </h2>
         <div class="act-grid">
-          {% for a in lanes.later %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+          {% for a in park_actions %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
         </div>
       </section>
     {% endif %}
@@ -92,15 +148,39 @@ every quick action so all three stay in sync.
           <circle class="pace-track" cx="60" cy="60" r="52"></circle>
           <circle class="pace-fill{% if pace.hit %} is-hit{% endif %}" cx="60" cy="60" r="52" style="--pct: {{ pace.pct }}"></circle>
         </svg>
+        {% comment %}
+        The SVG is decorative; this is the accessible value. It counts only
+        touches YOU logged — replies and state-correction audit rows are not
+        your work and never move this number.
+        {% endcomment %}
         <div class="pace-center">
           <span class="pace-done">{{ pace.done }}</span>
           <span class="pace-goal">/ {{ pace.goal }}</span>
         </div>
       </div>
       <p class="pace-note">
-        {% if pace.hit %}Weekly goal hit.{% else %}{{ pace.remaining }} more touch{{ pace.remaining|pluralize }} to hit your weekly goal.{% endif %}
+        {% if pace.hit %}Weekly goal hit.{% else %}{{ pace.remaining }} more touch{{ pace.remaining|pluralize:"es" }} to hit your weekly goal.{% endif %}
       </p>
     </div>
+
+    {% comment %}
+    Coming up. Says when the chat was SET UP, never when it is — we store no
+    chat datetime, so "chat tomorrow" would be invented. Prep, not a nag.
+    {% endcomment %}
+    {% if coming_up %}
+      <div class="rail-card">
+        <h3 class="rail-title">Coming Up</h3>
+        <ul class="activity">
+          {% for r in coming_up %}
+            <li class="activity-row">
+              <span class="activity-dot in"></span>
+              <span class="activity-text"><a href="{% url 'crm:contact_detail' r.contact.id %}">{{ r.contact.name|smart_title }}</a> <span class="activity-kind">chat set up</span></span>
+              <span class="activity-when">{% if r.days_ago %}{{ r.days_ago }}d ago{% else %}today{% endif %}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
 
     <div class="rail-card activity-card">
       <h3 class="rail-title">Recent Activity</h3>
@@ -110,7 +190,7 @@ every quick action so all three stay in sync.
             <li class="activity-row">
               <span class="activity-dot{% if e.inbound %} in{% endif %}"></span>
               <span class="activity-text"><a href="{% url 'crm:contact_detail' e.contact_id %}">{{ e.name|smart_title }}</a> <span class="activity-kind">{{ e.kind_label }}</span></span>
-              <span class="activity-when">{{ e.ts|timesince }}</span>
+              <span class="activity-when">{{ e.ago }}</span>
             </li>
           {% endfor %}
         </ul>
