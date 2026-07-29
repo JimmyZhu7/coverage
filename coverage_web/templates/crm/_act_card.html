@@ -17,8 +17,10 @@ activity stay in sync). `idx` drives the staggered entrance.
   <div class="act-quick">
     <div class="act-primary">
       {% if a.action == "park" %}
-        {# Park is a state change (thread_state -> 'parked'), not an
-           interaction -- its own verb, no fake "Sent" touch. #}
+        {% comment %}
+        Park is a state change (thread_state -> 'parked'), not an interaction --
+        its own verb, no fake "Sent" touch.
+        {% endcomment %}
         <button type="button" class="btn btn-primary act-btn"
                 hx-post="{% url 'crm:today_act' a.contact.id 'park' %}">Park it</button>
       {% else %}

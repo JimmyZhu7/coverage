@@ -8,11 +8,45 @@ personalized from the survey: the user's target firms and chosen tracks/regions
 float to the top.
 {% endcomment %}
 
+{% comment %}
+THE SUBSET SENTENCE, at the top. It used to render at the BOTTOM of this file,
+below 56 firm cards — so the single most important fact about the default view
+("this is not everything") was stated only to people who had already finished
+reading. It says what it excludes, in plain words: no "premium", no lock icon,
+no "unlock". The everything mode is free, it is one click away, and it is just
+noisier data.
+
+It has to live INSIDE #cov-results so its number refreshes with the filters;
+that is also why the bottom copy is gone rather than duplicated — said once,
+where it is read before scrolling.
+{% endcomment %}
+{% if hidden_other %}
+  <p class="scope-line">Showing campus roles only · {{ hidden_other }} experienced role{{ hidden_other|pluralize }} hidden ·
+    <a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a></p>
+{% endif %}
+
+{% comment %}
+Region honesty. A concrete market excludes every row whose location resolved to
+nothing — 297 of 886 on the live set — and the page used to say nothing at all
+about it. The link's querystring is built from the LIVE request in views.py
+(`show_unregioned_qs`), not hardcoded: the bare-`?` version of this bug shipped
+once already on the "Show everything" link and sent people to the very page
+that hid what it promised to reveal.
+{% endcomment %}
+{% if hidden_region %}
+  <p class="scope-line">{{ hidden_region }} role{{ hidden_region|pluralize }} here {{ hidden_region|pluralize:"has,have" }} no tracked region and {{ hidden_region|pluralize:"is,are" }} hidden by this filter.
+    <a href="{% url 'opportunities' %}?{{ show_unregioned_qs }}">Show them</a>.</p>
+{% endif %}
+
 {% comment %}Slim inline stat strip — one line under the hero instead of four
 oversized cards, so the roles start a screen sooner. Zero-value stats are
 hidden rather than shown as a weak "0".{% endcomment %}
 <div class="stat-strip">
-  <span class="ss-item"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num" style="--i:0">{{ total }}</b> Open Roles</span>
+  {% comment %}`role="status"` on this ONE figure, not the whole strip. The
+  results below swap silently for a screen-reader user, so the headline count
+  has to re-announce itself; making the whole strip a live region would read
+  four numbers back on every keystroke in Search.{% endcomment %}
+  <span class="ss-item" role="status"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num" style="--i:0">{{ total }}</b> Open Roles</span>
   <span class="ss-item"><b class="dash-num" style="--i:1">{{ clusters|length }}</b> Firms</span>
   {% if dash.closing_week %}<span class="ss-item ss-warn"><b class="dash-num" style="--i:2">{{ dash.closing_week }}</b> Closing This Week</span>{% endif %}
   {% comment %}"Fresh" is driven by `dash.fresh_days` (== `_FRESH_DAYS` in
@@ -108,7 +142,8 @@ hidden rather than shown as a weak "0".{% endcomment %}
   </div>
 {% endif %}
 
-{% if hidden_other %}
-  <p class="count-line"><span class="hidden-note">{{ hidden_other }} non-campus role{{ hidden_other|pluralize }} hidden.
-    <a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a>.</span></p>
-{% endif %}
+{% comment %}The subset sentence that used to live here now renders at the TOP
+of this file. Do not re-add a copy: it is one fact, and stating it twice on one
+page invites the two copies to drift.{% endcomment %}
+
+{% if is_htmx %}{% include "directory/_filter_counts.html" %}{% endif %}

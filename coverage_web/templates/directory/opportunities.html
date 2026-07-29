@@ -30,6 +30,18 @@
   {% endcomment %}
   {% include "directory/_recommend_bar.html" %}
 
+  {% comment %}
+  THE FILTER BAR. Two rows with two different jobs: row 1 answers "what is this
+  page", row 2 narrows it. That split is the redesign — the six controls used
+  to sit at equal weight in one row, which gave the page's single most
+  important scoping decision (campus roles vs the whole scrape) the same
+  billing as a track dropdown, and hid it inside a closed <select>.
+
+  The htmx contract is UNCHANGED and load-bearing: same URL, same target, same
+  swap, same triggers, still a plain GET form that works with JS off. The new
+  controls are all real form inputs with the same names, so serialization and
+  URL round-tripping cost zero new JS.
+  {% endcomment %}
   <form class="filters"
         hx-get="{% url 'opportunities' %}"
         hx-target="#cov-results"
@@ -38,59 +50,127 @@
         hx-trigger="change, keyup changed delay:350ms, submit"
         method="get"
         action="{% url 'opportunities' %}">
-    <label>Role Type
-      <select name="role">
-        {% for r in role_facet %}
-          <option value="{{ r.value }}"{% if r.value == selected.role %} selected{% endif %}>{{ r.label }} ({{ r.count }})</option>
-        {% endfor %}
-      </select>
-    </label>
+
     {% comment %}
-    "Programme Year", NOT "Class". The value behind this select is the intake
-    year printed in the posting ("2027 Summer Internship"), which is a cycle,
-    not a graduation year — only a handful of postings state a class year, and
-    those are matched here too. The hint carries that distinction to the
-    student; drop it and the control starts telling ~4,000 roles' worth of
-    lies. "No Year Stated" is a real option because most roles say nothing.
+    ROW 1 — Role Type as a segmented control.
+
+    A <fieldset> of visually-hidden radios plus styled labels. Native radio
+    semantics are the whole point: one Tab stop for the group, arrow keys to
+    move within it, a single serialized value — all for free, with no ARIA
+    re-implementation and no JS. The radios are clipped rather than
+    `display:none`d, because display:none removes them from the keyboard order
+    and would take the arrow-key behaviour with it.
+
+    The <legend> is visible, styled like the uppercase micro-captions on row 2.
+    It replaces the old "Role Type" caption rather than hiding beside it.
+
+    `other` and `all` are NOT drawn here. They are opt-in modes, reachable via
+    the subset sentence's link or a ?role= deep link — see the conditional
+    fifth segment below.
     {% endcomment %}
-    <label>Programme Year
-      <select name="year">
-        {% for y in year_facet %}
-          <option value="{{ y.value }}"{% if y.value == selected.year %} selected{% endif %}>{{ y.label }} ({{ y.count }})</option>
+    <fieldset class="seg">
+      <legend>Role type</legend>
+      <div class="seg-list">
+        {% for s in role_segments %}
+          <input class="seg-input" type="radio" name="role" id="{{ s.input_id }}" value="{{ s.value }}"{% if s.checked %} checked{% endif %}>
+          {% comment %}The count is plain text inside the label, not ::after
+          content, so a screen reader announces "Internship 639" as part of the
+          option's own name. The <span> exists only to give the out-of-band
+          swap something to address.{% endcomment %}
+          <label class="seg-pill {{ s.css }}" for="{{ s.input_id }}">{{ s.label }} (<span id="{{ s.count_id }}">{{ s.count }}</span>)</label>
         {% endfor %}
-      </select>
-      <small class="filter-hint">Intake year in the posting. Not a graduation year.</small>
-    </label>
-    <label>Region
-      <select name="region">
-        <option value="">Any Region</option>
-        {% for r in facets.regions %}
-          <option value="{{ r.value }}"{% if r.value == selected.region %} selected{% endif %}>{{ r.label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Track
-      <select name="track">
-        <option value="">Any Track</option>
-        {% for t in facets.tracks %}
-          <option value="{{ t.value }}"{% if t.value == selected.track %} selected{% endif %}>{{ t.label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Companies
-      <div class="cmulti" data-cmulti>
-        <button type="button" class="cmulti-btn" aria-haspopup="true" aria-expanded="false">
-          <span class="cmulti-label">All Companies</span>
-          <svg class="csel-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <div class="cmulti-menu" hidden>
-          {% for f in all_firms %}
-            <label class="cmulti-opt"><input type="checkbox" name="firm" value="{{ f.slug }}"{% if f.slug in selected.firm %} checked{% endif %}><span>{{ f.name|smart_title }}</span></label>
-          {% endfor %}
-        </div>
+        {% if role_optin_segment %}
+          {% comment %}
+          The conditional fifth segment. It exists for deep-link honesty — with
+          ?role=all the bar must not draw four campus pills over a feed showing
+          everything — but its structural job matters more: A RADIO GROUP WITH
+          NO CHECKED MEMBER SERIALIZES NOTHING. Without a checked radio here,
+          the next htmx GET (the moment the student touches Region or Search)
+          would carry no `role` at all, silently resetting the mode to campus
+          and dropping the roles the user explicitly asked to see. Muted grey,
+          full width, and never a sibling of the four campus options.
+          {% endcomment %}
+          <input class="seg-input" type="radio" name="role" id="{{ role_optin_segment.input_id }}" value="{{ role_optin_segment.value }}" checked>
+          <label class="seg-pill seg-optin" for="{{ role_optin_segment.input_id }}">{{ role_optin_segment.label }} (<span id="{{ role_optin_segment.count_id }}">{{ role_optin_segment.count }}</span>)</label>
+        {% endif %}
       </div>
-    </label>
-    <label>Search
+    </fieldset>
+
+    {% comment %}
+    ROW 2 — the narrowing controls.
+
+    Below 640px these four collapse behind one disclosure; at every wider width
+    `.filters-more` is `display: contents` and its children sit directly in the
+    bar's flex row, exactly as if the <details> were not there.
+
+    `open` is server-rendered ON, always. Three reasons, in order of
+    importance: with JS off (or before the script runs) a mobile visitor sees
+    the controls rather than nothing; a deep-linked filter is never invisible;
+    and `display: contents` on a CLOSED <details> would hide the whole of row 2
+    on desktop. The script below only ever CLOSES it, and only under 640px with
+    no active filter.
+
+    The controls stay inside the form. A <details> does not affect form
+    serialization and collapsed inputs still submit — which is precisely why
+    this is a <details> and not conditional rendering.
+    {% endcomment %}
+    <details class="filters-more" data-filters-more open>
+      <summary class="filters-more-summary">Filters{% if filters_more_active %} · {{ filters_more_active }}{% endif %}</summary>
+
+      {% comment %}
+      "Programme Year", NOT "Class". The value behind this select is the intake
+      year printed in the posting ("2027 Summer Internship"), which is a cycle,
+      not a graduation year — only a handful of postings state a class year, and
+      those are matched here too. The hint carries that distinction to the
+      student; drop it and the control starts telling ~4,000 roles' worth of
+      lies. It travels with its control into the mobile disclosure, so it is
+      present at every breakpoint. "No Year Stated" is a real option because
+      most roles say nothing.
+      {% endcomment %}
+      <label>Programme Year
+        <select name="year" id="f-year">{% include "directory/_facet_options.html" with options=year_facet current=selected.year %}</select>
+        <small class="filter-hint">Intake year in the posting. Not a graduation year.</small>
+      </label>
+
+      {% comment %}
+      Region now carries counts AND an "Other / Unstated" option. 297 of the
+      886 open campus roles resolve to no region, and picking "Hong Kong" used
+      to delete them with no trace. "Any Region" still means everything,
+      including unstated. See views.py's REGION_NONE for why the label is not
+      "No Region".
+      {% endcomment %}
+      <label>Region
+        <select name="region" id="f-region">{% include "directory/_facet_options.html" with options=facets.regions current=selected.region %}</select>
+      </label>
+
+      <label>Track
+        <select name="track" id="f-track">{% include "directory/_facet_options.html" with options=facets.tracks current=selected.track %}</select>
+      </label>
+
+      {% comment %}
+      Companies shows an ACTIVE-SELECTION count ("3 selected"), not a result
+      count — it is an identity control over 100+ firms, and a per-option
+      result count would be a promise made about a list nobody reads
+      exhaustively. Deliberately uncounted, per the bar's consistency rule.
+      {% endcomment %}
+      <label>Companies
+        <div class="cmulti" data-cmulti>
+          <button type="button" class="cmulti-btn" aria-haspopup="true" aria-expanded="false">
+            <span class="cmulti-label">All Companies</span>
+            <svg class="csel-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="cmulti-menu" hidden>
+            {% for f in all_firms %}
+              <label class="cmulti-opt"><input type="checkbox" name="firm" value="{{ f.slug }}"{% if f.slug in selected.firm %} checked{% endif %}><span>{{ f.name|smart_title }}</span></label>
+            {% endfor %}
+          </div>
+        </div>
+      </label>
+    </details>
+
+    {% comment %}Search never hides — it is the highest-value control over 886
+    scraped titles, and it is open-ended, so it carries no count.{% endcomment %}
+    <label class="filters-search">Search
       <input type="search" name="q" value="{{ selected.q }}" placeholder="Firm, role, city" autocomplete="off">
     </label>
     <noscript><button type="submit">Apply</button></noscript>
@@ -128,8 +208,81 @@
       }
       btn.addEventListener("click", function () { menu.hidden ? open() : close(); });
       menu.addEventListener("change", sync);
+      // Escape closes the popover and returns focus to the button that opened
+      // it. Without this a keyboard user who opens the panel and changes their
+      // mind has no way out that does not involve tabbing through 100+ firm
+      // checkboxes — and would land somewhere with no memory of where they
+      // started. Bound on the wrapper so it fires from the button or any
+      // checkbox inside the panel.
+      wrap.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !menu.hidden) {
+          e.preventDefault(); close(); btn.focus();
+        }
+      });
       sync();
     });
   })();
+
+  // The mobile filter disclosure. `open` is server-rendered ON and this script
+  // is the only thing that ever removes it, so every no-JS path — and every
+  // path before this runs — shows the controls rather than hiding them.
+  //
+  // Closing is correct ONLY when both are true: we are under 640px (above it
+  // `.filters-more` is `display: contents`, and a closed <details> would hide
+  // the whole of row 2), and no row-2 filter is engaged (a deep-linked filter
+  // must never be invisible). `filters_more_active` is computed server-side
+  // and frozen into the attribute below, so this makes no attempt to re-derive
+  // which controls count as active.
+  //
+  // Bound to a media-query listener, not just load: this page is resized in
+  // testing and on device rotation, and a bar that stayed collapsed after a
+  // 375px -> 1024px resize would render row 2 as nothing at all.
+  (function () {
+    var d = document.querySelector("[data-filters-more]");
+    if (!d) return;
+    var active = {{ filters_more_active }} > 0;
+    var mq = window.matchMedia("(max-width: 640px)");
+    function apply() { d.open = active || !mq.matches; }
+    apply();
+    mq.addEventListener("change", apply);
+  })();
+
+  // Re-settle each filter <select> after an htmx swap has refreshed its
+  // options with live counts. Two distinct repairs, both observed failing:
+  //
+  // 1. SELECTEDNESS. A <select>'s runtime selection ("selectedness") is a
+  //    different thing from its `selected` ATTRIBUTE, and once the element has
+  //    been rendered the attribute stops governing. htmx swaps innerHTML by
+  //    inserting the new options alongside the old ones and then removing the
+  //    old — and the HTML reset algorithm that runs during that dance leaves
+  //    selectedness on the LAST option. Measured, not theorised: after typing
+  //    in Search, #f-region had `selected` correctly on "Any Region (150)" and
+  //    a live value of "none" — the page would then have filtered to unstated
+  //    regions on the user's next keystroke. The server's rendered attribute
+  //    is the source of truth for what this request selected, so restore from
+  //    it. (Every counted facet guarantees the current selection is present as
+  //    an option, precisely so this always has something to restore from.)
+  //
+  // 2. THE ENHANCED LABEL. base.html wraps every <select> in a styled listbox
+  //    whose button text is a COPY of the selected option's text, taken when
+  //    that option was last read. Without a nudge the hidden native select
+  //    would be correct while the button the user actually reads still showed
+  //    page-load numbers — this redesign's own stale-count bug, one layer up.
+  //
+  // `new Event("change")` DOES NOT BUBBLE by default, and that is load-bearing.
+  // The enhancer's listener is attached directly to the <select>, so it fires;
+  // the form's hx-trigger="change" is attached to the FORM and needs the event
+  // to bubble up to it, so it does not. A bubbling event here would make every
+  // swap trigger another request — an endless loop of the page filtering
+  // itself. Setting `selectedIndex` does not fire `change` on its own.
+  document.body.addEventListener("htmx:afterSettle", function () {
+    document.querySelectorAll(".filters select").forEach(function (sel) {
+      var i = Array.prototype.findIndex.call(sel.options, function (o) {
+        return o.hasAttribute("selected");
+      });
+      if (i > -1 && sel.selectedIndex !== i) sel.selectedIndex = i;
+      sel.dispatchEvent(new Event("change"));
+    });
+  });
 </script>
 {% endblock %}

@@ -1,0 +1,17 @@
+{% comment %}
+One counted <select>'s option list. Rendered in exactly two places — inside
+the live control in `opportunities.html`, and inside the out-of-band fragment
+in `_filter_counts.html` that refreshes that control's numbers after an htmx
+swap. It lives in its own file so those two can never drift: a count that is
+formatted one way on page load and another way on refresh would flicker, and a
+`selected` rule that differed between them would move the user's filter.
+
+Takes `options` (a facet list of {value,label,count}) and `current` (the
+selected value).
+
+Every option carries a count, per the bar's consistency rule: closed
+vocabularies are counted, open-ended ones (Search) and identity ones
+(Companies) are not.
+{% endcomment %}
+{% for o in options %}<option value="{{ o.value }}"{% if o.value == current %} selected{% endif %}>{{ o.label }} ({{ o.count }})</option>
+{% endfor %}

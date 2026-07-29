@@ -1,0 +1,54 @@
+{% comment %}
+THE STALE-COUNT FIX. Included from the bottom of `_results.html`, htmx swaps
+only.
+
+The problem it solves: the filter bar sits OUTSIDE `#cov-results` — it has to,
+because a form that re-rendered itself on every keystroke would destroy focus
+and caret position in Search. But that also means nothing inside the bar was
+ever re-rendered after the first htmx interaction, so every count in it froze
+at page-load values. views.py cross-filters each facet per request; those
+honest numbers reached the user on a full page load and never again. "Counts
+that don't lie" was a code comment, not a product behaviour.
+
+The fix is htmx out-of-band swaps addressed at the SMALLEST element that
+carries a number. Nothing here targets the form, and nothing targets an input:
+widen the swap to include either and every keystroke in Search would blow away
+focus, selection and caret — trading a stale-number bug for a much worse one.
+
+TWO SHAPES, because HTML forces it:
+
+  1. Role segments swap a BARE <span>. Each segment's count lives in
+     `<span id="cnt-role-…">` inside its <label>, which is free to hold
+     elements. Only the number changes; the radio, the label and the checked
+     state are untouched.
+
+  2. The three <select>s swap their OPTION LIST. An <option> may contain text
+     and nothing else, so a per-option count physically cannot be wrapped in a
+     span — the span mechanism above is unavailable here, and this is the one
+     place the "bare spans only" rule cannot be honoured as written. The swap
+     targets the <select>'s innerHTML instead, which is a far smaller
+     concession than it looks: the <select> ELEMENT — the thing that holds
+     focus, its id and its enhancement state — is never removed, only its
+     children are. Verified in-browser: typing in Search keeps focus AND caret
+     position while all four sets of numbers update.
+
+     It does need two repairs on the client, both in `opportunities.html`'s
+     `htmx:afterSettle` handler, both for bugs seen live rather than imagined:
+     the swap leaves the select's runtime selectedness on the LAST option
+     (restored from the server's `selected` attribute), and the styled listbox
+     base.html builds over each <select> holds a stale copy of the selected
+     option's text (re-synced with a NON-BUBBLING `change` — see that comment
+     for why bubbling would loop). Every counted facet guarantees the current
+     selection is always present as an option so the first repair always has a
+     value to restore.
+
+Anything not covered by this mechanism must not render a count at all: a
+number that cannot stay live is worse than no number.
+{% endcomment %}
+{% for s in role_segments %}<span id="{{ s.count_id }}" hx-swap-oob="innerHTML">{{ s.count }}</span>
+{% endfor %}
+{% if role_optin_segment %}<span id="{{ role_optin_segment.count_id }}" hx-swap-oob="innerHTML">{{ role_optin_segment.count }}</span>
+{% endif %}
+<select id="f-year" hx-swap-oob="innerHTML">{% include "directory/_facet_options.html" with options=year_facet current=selected.year %}</select>
+<select id="f-region" hx-swap-oob="innerHTML">{% include "directory/_facet_options.html" with options=facets.regions current=selected.region %}</select>
+<select id="f-track" hx-swap-oob="innerHTML">{% include "directory/_facet_options.html" with options=facets.tracks current=selected.track %}</select>

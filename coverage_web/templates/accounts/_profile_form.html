@@ -5,18 +5,34 @@ htmx swap target on the settings page's in-place save.
 {% endcomment %}
 {% if saved %}<p class="msg success">Profile saved.</p>{% endif %}
 
-<div class="avatar-field">
-  {% if user.avatar %}
-    <img class="avatar-preview" src="{{ user.avatar.url }}" alt="">
-  {% else %}
-    <span class="avatar-preview avatar-preview-fallback">{{ user.name|default:user.email|first|upper }}</span>
-  {% endif %}
-  <div class="avatar-field-controls">
-    <label for="id_avatar" class="btn">Upload Photo</label>
-    {{ form.avatar }}
+{% comment %}
+Profile photo. The whole block is a drop target, and the preview swaps to the
+chosen file before the form is submitted — without that, a student picks a
+photo, sees nothing change, and cannot tell whether the click registered.
+Everything here degrades: with JS off you get exactly the previous behaviour
+(a styled label over a hidden file input), because the preview and the drop
+zone are progressive enhancements layered on a working control, not a
+replacement for one.
+{% endcomment %}
+<div class="avatar-field" data-avatar-field>
+  <span class="avatar-preview-wrap">
     {% if user.avatar %}
-      <label class="avatar-remove">{{ form.remove_avatar }} Remove</label>
+      <img class="avatar-preview" data-avatar-img src="{{ user.avatar.url }}" alt="Your profile photo">
+      <span class="avatar-preview avatar-preview-fallback" data-avatar-fallback hidden>{{ user.name|default:user.email|first|upper }}</span>
+    {% else %}
+      <img class="avatar-preview" data-avatar-img alt="Your profile photo" hidden>
+      <span class="avatar-preview avatar-preview-fallback" data-avatar-fallback>{{ user.name|default:user.email|first|upper }}</span>
     {% endif %}
+  </span>
+  <div class="avatar-field-controls">
+    <div class="avatar-actions">
+      <label for="id_avatar" class="btn">{% if user.avatar %}Change Photo{% else %}Upload Photo{% endif %}</label>
+      {{ form.avatar }}
+      {% if user.avatar %}
+        <label class="avatar-remove">{{ form.remove_avatar }} Remove</label>
+      {% endif %}
+    </div>
+    <p class="field-hint avatar-hint" data-avatar-hint>Drag an image here, or choose a file. JPEG or PNG, up to 8&nbsp;MB. Cropped to a square automatically.</p>
     {{ form.avatar.errors }}
   </div>
 </div>
@@ -58,3 +74,94 @@ htmx swap target on the settings page's in-place save.
 <label>Tracks of Interest</label>
 {{ form.tracks }}
 {{ form.tracks.errors }}
+
+{% comment %}
+Progressive enhancement for the photo field. Delegated from `document` and
+guarded by `dataset.avatarBound`, because this partial is ALSO an htmx swap
+target on the settings page — an inline listener bound directly to the node
+would be re-bound on every in-place save, stacking duplicates.
+{% endcomment %}
+<script>
+(function () {
+  if (document.documentElement.dataset.avatarBound) return;
+  document.documentElement.dataset.avatarBound = "1";
+
+  var MAX = 8 * 1024 * 1024;
+
+  function field(el) { return el && el.closest ? el.closest("[data-avatar-field]") : null; }
+
+  function show(f, file) {
+    var input = f.querySelector("#id_avatar");
+    var img = f.querySelector("[data-avatar-img]");
+    var fb = f.querySelector("[data-avatar-fallback]");
+    var hint = f.querySelector("[data-avatar-hint]");
+
+    if (!file || !/^image\//.test(file.type)) {
+      if (hint) { hint.textContent = "That doesn't look like an image. Choose a JPEG or PNG."; hint.classList.add("is-bad"); }
+      return;
+    }
+    if (file.size > MAX) {
+      // Mirrors clean_avatar's ceiling so the user hears it instantly rather
+      // than after a round trip. The server still enforces it — this is a
+      // courtesy, never the gate.
+      if (hint) { hint.textContent = "That image is " + (file.size / 1048576).toFixed(1) + " MB. Please use one under 8 MB."; hint.classList.add("is-bad"); }
+      return;
+    }
+
+    var url = URL.createObjectURL(file);
+    if (img) {
+      img.src = url;
+      img.hidden = false;
+      // Revoke only after paint, or the preview races the object URL away.
+      img.onload = function () { URL.revokeObjectURL(url); };
+    }
+    if (fb) fb.hidden = true;
+    if (hint) {
+      hint.textContent = "Ready to save — this replaces your current photo when you press Save Profile.";
+      hint.classList.remove("is-bad");
+    }
+    // Choosing a new photo contradicts "remove"; untick it so the two
+    // controls can't disagree about what the save means.
+    var rm = f.querySelector('input[name="remove_avatar"]');
+    if (rm) rm.checked = false;
+    if (input) input.dataset.dirty = "1";
+  }
+
+  document.addEventListener("change", function (e) {
+    if (e.target && e.target.id === "id_avatar") {
+      var f = field(e.target);
+      if (f) show(f, e.target.files && e.target.files[0]);
+    }
+  });
+
+  ["dragenter", "dragover"].forEach(function (t) {
+    document.addEventListener(t, function (e) {
+      var f = field(e.target);
+      if (!f) return;
+      e.preventDefault();
+      f.classList.add("is-dropping");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (t) {
+    document.addEventListener(t, function (e) {
+      var f = field(e.target);
+      if (!f) return;
+      f.classList.remove("is-dropping");
+    });
+  });
+  document.addEventListener("drop", function (e) {
+    var f = field(e.target);
+    if (!f) return;
+    e.preventDefault();
+    var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    var input = f.querySelector("#id_avatar");
+    if (input && e.dataTransfer.files) {
+      // Assigning the FileList is what actually makes the drop submit with
+      // the form; the preview alone would be a lie.
+      input.files = e.dataTransfer.files;
+    }
+    show(f, file);
+  });
+})();
+</script>

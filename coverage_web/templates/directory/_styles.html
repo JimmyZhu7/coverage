@@ -3,13 +3,153 @@ Directory-only extras. Everything generic (pills, deadline, markers, empty,
 honesty, timeline chrome) lives in static/css/coverage.css.
 {% endcomment %}
 <style>
-  /* Filter bar — v3: a centered row of pill controls. */
+  /* Filter bar — v4: two rows with two jobs. Row 1 (the segmented Role Type
+     control) answers "what is this page"; row 2 narrows it. */
   /* align-items: flex-start, not flex-end: one control (Programme Year)
      carries a sub-label underneath it, and bottom-alignment would float its
      select above the rest of the row. Every label is [caption, control], so
      aligning tops lines the controls up and lets the hint hang below. */
   .filters { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: flex-start;
     margin-bottom: var(--s5); justify-content: center; }
+
+  /* ======================================================================
+     ROW 1 — the Role Type segmented control.
+
+     A <fieldset> of clipped radios + styled labels. `flex-basis: 100%` is what
+     makes it a full row of its own, so row 2 wraps beneath it.
+
+     `min-width: 0` on the fieldset is not decoration: a <fieldset> has a
+     min-content intrinsic width by default, which inside a flex container
+     stops it shrinking and pushes the bar wider than the page.
+     ====================================================================== */
+  .seg { flex: 1 1 100%; min-width: 0; margin: 0; padding: 0; border: 0; }
+  /* The legend is VISIBLE and replaces the old "Role Type" caption — styled to
+     match the uppercase micro-captions on row 2 so the two rows read as one
+     control set rather than a heading plus a bar. */
+  .seg > legend { display: block; float: none; width: 100%; padding: 0;
+    margin: 0 0 var(--s2); text-align: center;
+    font-size: var(--fs-micro); color: var(--ink-3); text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: var(--w-med); }
+  /* wrap, not nowrap: the four pills measure ~636px and sit on one line at
+     every width down to 641px, but a label that grows (a longer count, a
+     larger user font size) must wrap rather than push the page into a
+     horizontal scroll. Wrapping is the fallback, not the intent. */
+  .seg-list { display: flex; flex-wrap: wrap; justify-content: center;
+    gap: var(--s2); }
+  /* Clip-rect, NOT display:none. display:none removes a radio from the
+     keyboard order, and native radio semantics — one Tab stop for the group,
+     arrow keys within it — are the entire reason this is a radio group and not
+     a row of buttons with JS. Absolute positioning also keeps the inputs out
+     of the 2x2 grid's cell flow at 640px. */
+  .seg-input { position: absolute; width: 1px; height: 1px; padding: 0;
+    margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+    white-space: nowrap; border: 0; }
+  /* The `.filters ` prefix on every pill rule is NOT decoration. A segment is
+     a <label>, so `.filters label` above (0,1,1) out-specifies a bare
+     `.seg-pill` (0,1,0) and silently imposed its own column direction,
+     uppercase transform and 11px caption size on the pills — which rendered
+     each one as a three-line stack reading "ALL CAMPUS (" / "886" / ")".
+     Anything styling a segment label has to clear that rule's specificity.
+
+     min-height, never height: the label holds a scraped-vocabulary count that
+     can reach four digits and, at 375px, wrap to two lines. This page has
+     shipped a clipping bug twice from fixed heights; the box gives way. */
+  .filters .seg-pill { display: inline-flex; flex-direction: row;
+    align-items: center; justify-content: center;
+    text-align: center; min-height: 40px; padding: 8px 16px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--surface); color: var(--ink-2);
+    font-size: var(--fs-s); font-weight: var(--w-med);
+    text-transform: none; letter-spacing: 0; line-height: 1.25;
+    /* The label is a flex container and its "Internship (" / span / ")" runs
+       are three separate flex items; without this they would each become a
+       wrap opportunity and break the count off its own label. */
+    white-space: nowrap; gap: 0;
+    box-shadow: var(--shadow-1);
+    transition: border-color var(--t-fast), background var(--t-fast),
+      color var(--t-fast), box-shadow var(--t-med); }
+  .filters .seg-pill:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
+  /* Selected state: the role-* colour families, plus WEIGHT and (on keyboard)
+     a focus ring. Never colour alone — a student who cannot separate the tints
+     still reads the bold and, tabbing, the outline. */
+  .seg-input:checked + .seg-pill { font-weight: var(--w-bold); box-shadow: var(--shadow-2); }
+  .seg-input:checked + .seg-campus { background: var(--accent-soft);
+    color: var(--accent-ink); border-color: var(--accent); }
+  .seg-input:checked + .seg-insight { background: var(--ok-soft);
+    color: var(--ok); border-color: var(--ok-line); }
+  .seg-input:checked + .seg-internship { background: var(--accent-soft);
+    color: var(--accent-ink); border-color: var(--accent-line); }
+  .seg-input:checked + .seg-entry_level { background: var(--surface);
+    color: var(--accent-ink); border-color: var(--accent); }
+  /* The conditional fifth segment (?role=all / ?role=other). Muted on purpose
+     — it states an opt-in mode honestly without dressing it up as a fifth
+     equal option. Grey, never an accent tint: this mode is not a
+     recommendation. It is only ever rendered CHECKED (it exists only while its
+     mode is active), so it has no unchecked state to contrast against; the
+     four unchecked campus pills beside it are what make it read as selected.
+
+     It sizes to its content here and only spans the full row at <=640px, where
+     the 2x2 grid gives it a row of its own. Stretched across 1392px of desktop
+     it stopped reading as a pill at all and became a banner. */
+  .seg-input:checked + .seg-optin { background: var(--surface);
+    color: var(--ink-3); border-color: var(--line-strong);
+    box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .seg-input:focus-visible + .seg-pill { outline: 2px solid var(--accent);
+    outline-offset: 2px; }
+
+  /* ======================================================================
+     ROW 2 — progressive disclosure.
+
+     Written mobile-first ON PURPOSE. The collapsed <details> is the state with
+     real UA behaviour behind it (Chrome hides the content via
+     `content-visibility` on `::details-content`), so it is left alone as the
+     base and the desktop "pretend there is no <details>" treatment is the
+     override. Doing it the other way round means overriding the closed state's
+     own hiding mechanism at the width where it actually has to work.
+     ====================================================================== */
+  .filters-more { display: block; flex: 1 1 100%; min-width: 0; }
+  .filters-more > summary { display: inline-flex; align-items: center; gap: 6px;
+    width: fit-content; cursor: pointer; list-style: none;
+    padding: 9px 16px 9px 14px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--surface); color: var(--ink-2);
+    font-size: var(--fs-s); font-weight: var(--w-med);
+    box-shadow: var(--shadow-1);
+    transition: border-color var(--t-fast), color var(--t-fast); }
+  /* Chrome silently drops the native disclosure triangle on a summary with
+     `display: inline-flex`, so the caret is drawn explicitly and rotated on
+     open — the same technique `.recbar-why-all` uses below. A disclosure with
+     no visible affordance is a disclosure nobody opens. */
+  .filters-more > summary::-webkit-details-marker { display: none; }
+  .filters-more > summary::before { content: ""; width: 7px; height: 7px;
+    flex: none; border-right: 1.6px solid currentColor;
+    border-bottom: 1.6px solid currentColor; transform: rotate(-45deg);
+    margin-top: -2px; transition: transform var(--t-med); }
+  .filters-more[open] > summary::before { transform: rotate(45deg);
+    margin-top: -4px; }
+  .filters-more > summary:hover { border-color: var(--accent-line);
+    color: var(--accent-ink); }
+  .filters-more > summary:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; }
+  .filters-more[open] > summary { margin-bottom: var(--s3); }
+
+  /* Above 640px the <details> stops being a box: Year / Region / Track /
+     Companies sit directly in the bar's flex row, exactly as if the element
+     were not there.
+
+     BOTH rules are required. `display: contents` on the <details> alone is not
+     enough in current Chrome (148 here), which wraps a details' non-summary
+     children in a `::details-content` box — so the four controls stayed a
+     single flex item and stacked into a vertical column while Search sat
+     beside the stack. The pseudo-element needs the same treatment as its host.
+
+     This only holds while the element is OPEN — a closed <details> hides its
+     content — which is why `open` is server-rendered on and the inline script
+     removes it below 640px only. Nothing here may assume JS ran. */
+  @media (min-width: 641px) {
+    .filters-more { display: contents; }
+    .filters-more::details-content { display: contents; }
+    .filters-more > summary { display: none; }
+  }
   .filters label { display: flex; flex-direction: column; gap: var(--s2); margin: 0;
     font-size: var(--fs-micro); color: var(--ink-3); text-transform: uppercase;
     letter-spacing: 0.06em; font-weight: var(--w-med); align-items: flex-start; }
@@ -37,6 +177,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .filters-clear:hover { background: var(--accent-soft); text-decoration: none; }
 
   .hidden-note { color: var(--ink-3); }
+
+  /* The scope sentences at the top of #cov-results: what this view excludes,
+     in its own voice. Quiet by design — plain words, a plain link, no
+     "premium", no lock, no "unlock". The everything mode is free; it is just
+     noisier data. They live inside the swap target so their numbers refresh
+     with the filters. */
+  .scope-line { margin: 0 0 var(--s3); text-align: center;
+    font-size: var(--fs-s); color: var(--ink-3); line-height: 1.5; }
+  .scope-line a { color: var(--accent-ink); }
 
   /* ======================================================================
      "Picked for you" bar — scored roles grouped by firm, between the hero and
@@ -474,5 +623,25 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     .filters select, .filters input[type="search"] { min-width: 0; width: 100%; }
     .filters label { flex: 1 1 46%; }
     .tl-date { min-width: 0; }
+
+    /* Role Type becomes a 2x2 grid — WRAPPING, never a horizontal scroller.
+       A scrolled-away segment hides the count that is the whole point of the
+       segment, and this file's firm-column lesson is that content parked
+       outside its own box needs affordances we would then have to build.
+       Vertical growth is free here; a hidden option is not. */
+    .seg-list { display: grid; grid-template-columns: 1fr 1fr; }
+    .filters .seg-pill { width: 100%; padding: 8px 10px; }
+    /* The fifth segment spans both columns: it is a mode, not a fourth-and-a-
+       half option, and its label is the longest text in the control. */
+    .filters .seg-optin { grid-column: 1 / -1; width: 100%; }
+
+    /* Stacked, full width, and each label keeps its own sub-hint — the
+       Programme Year sentence travels with its control into the disclosure
+       rather than being dropped at narrow widths. */
+    .filters-more > label { width: 100%; margin-bottom: var(--s3); }
+    .filter-hint { max-width: none; }
+    /* Search never hides and never shares a row at this width. Qualified to
+       clear `.filters label`'s `flex: 1 1 46%` just above. */
+    .filters .filters-search { flex: 1 1 100%; }
   }
 </style>

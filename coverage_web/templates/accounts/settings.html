@@ -124,8 +124,14 @@
                 hx-post="{% url 'accounts:settings' %}" hx-encoding="multipart/form-data"
                 hx-target="#profile-fields" hx-swap="innerHTML">
             {% csrf_token %}
-            {# Explicit marker, like every other section below — accounts.views.settings_view
-               now requires it before touching ProfileForm at all. #}
+            {% comment %}
+            Explicit marker, like every other section below — accounts.views.settings_view
+            now requires it before touching ProfileForm at all.
+
+            {% templatetag openbrace %}# #{% templatetag closebrace %} is SINGLE-LINE only;
+            spanning two lines leaves it unparsed and it renders as literal text on the page.
+            Multi-line notes use {% templatetag openblock %} comment {% templatetag closeblock %}.
+            {% endcomment %}
             <input type="hidden" name="section" value="profile">
             <div id="profile-fields">{% include "accounts/_profile_form.html" %}</div>
             <div class="actions"><button type="submit" class="btn btn-primary">Save Profile</button></div>

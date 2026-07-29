@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections import Counter
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Case, F, IntegerField, Q, Value, When
+from django.db.models import Case, Count, F, IntegerField, Q, Value, When
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
@@ -36,7 +36,8 @@ from analytics.events import record_event
 # tenant-scoped manager. No import cycle: crm.models imports directory.models.
 from crm.models import UserFirm
 from directory.classify import (
-    BUCKET_LABELS, OTHER, REGION_LABELS, REGION_ORDER, TARGET_BUCKETS,
+    BUCKET_LABELS, ENTRY_LEVEL, INSIGHT, INTERNSHIP, OTHER, REGION_LABELS,
+    REGION_ORDER, TARGET_BUCKETS,
 )
 # The one definition of "closing soon" — see deadlines.py for why it isn't
 # spelled out at each call site (and for the crm/views.py follow-up).
@@ -381,32 +382,113 @@ def _timeline(firm, *, today):
     return [_firm_date_row(fd, today=today) for fd in rows]
 
 
-def _facets(open_qs):
-    """Filter options drawn from the live open set. Opportunity-level region
-    is frequently blank on raw board data, so the firm's own regions stand in
-    — that's what makes the filter actually bite against real scraped rows.
-    Track comes from the firm's vertical (`Firm.tracks`: ib/consulting/...);
-    role type is the opportunity's own classified `bucket` and is a separate
-    facet — mixing the two dimensions into one "track" select is what this
-    replaced."""
-    regions, tracks, providers = set(), set(), set()
-    for opp in open_qs:
-        if opp.region in REGION_ORDER:
-            regions.add(opp.region)
-        for t in (opp.firm.tracks or []):
-            tracks.add(t)
-        if opp.source:
-            providers.add(opp.source)
-    return {
-        # Region is one of the four target markets, derived from each role's
-        # own location — shown in a fixed order, only those actually present.
-        "regions": [{"value": r, "label": REGION_LABELS[r]} for r in REGION_ORDER if r in regions],
-        "tracks": [
-            {"value": t, "label": TRACK_LABELS.get(t, t)}
-            for t in sorted(tracks, key=lambda t: TRACK_LABELS.get(t, t))
+# ---------------------------------------------------------------------------
+# Region filter (?region=). Region is one of the target markets a role's own
+# LOCATION resolves to (classify.py), not a claim in its title.
+#
+# `none` is a first-class option for the same reason `YEAR_NONE` is: 297 of the
+# 886 open campus rows resolve to no region at all — a third of the inventory.
+# Before this existed, picking "Hong Kong" silently deleted those 297 with no
+# trace, which is the "Region implies completeness" over-claim the redesign
+# spec's §D1 names. It is labelled "Other / Unstated", NOT "No Region", because
+# a blank conflates two genuinely different things — a location string the
+# parser could not resolve, and a real market the product does not track
+# (Sydney, Mumbai) — and the data cannot tell them apart, so the label must
+# not pretend it can.
+# ---------------------------------------------------------------------------
+REGION_NONE = "none"
+REGION_NONE_LABEL = "Other / Unstated"
+
+
+def _apply_region_filter(qs, region):
+    """Narrow to one market, or to the rows that resolve to none.
+
+    Anything unrecognised (a hand-typed or stale querystring) is a no-op rather
+    than an empty page — the same posture `_apply_role_filter` and
+    `_apply_year_filter` already take. NOTE: this IS a behaviour change. The
+    old inline `qs.filter(region__iexact=region)` gave `?region=uk` an empty
+    feed with no explanation; the three filters now agree with each other."""
+    if region == REGION_NONE:
+        return qs.filter(region="")
+    if region.lower() in REGION_ORDER:
+        return qs.filter(region__iexact=region)
+    return qs
+
+
+def _region_facet(qs, selected=""):
+    """Region options with live per-option counts, drawn from the (otherwise
+    filtered) set — so each number answers "under my current filters, how
+    many?" rather than "in the whole table".
+
+    One GROUP BY, not a Python walk over every row: the facet this replaced
+    iterated the whole role-scoped queryset with its firm join attached, which
+    measured 11.8ms at campus scope and 53.9ms at `role=all`. This computes
+    strictly more (options AND counts) in 1.5-2.0ms.
+
+    `selected` is load-bearing, not cosmetic. Options are cross-filtered
+    against every OTHER active filter, so a live selection can legitimately
+    fall to zero (region=hk + track=consulting with no consulting roles in
+    Hong Kong). Dropping a zero-count option would drop the one the user
+    picked, leaving the <select> with nothing selected — and the next htmx GET
+    would then serialize whatever option happens to be first, silently moving
+    the user's filter. Same failure mode as the role group's missing checked
+    radio; same fix."""
+    counts = dict(
+        qs.values_list("region").annotate(n=Count("id")).values_list("region", "n")
+    )
+    options = [{"value": "", "label": "Any Region", "count": sum(counts.values())}]
+    options += [
+        {"value": r, "label": REGION_LABELS[r], "count": counts.get(r, 0)}
+        for r in REGION_ORDER
+        if counts.get(r) or r == selected
+    ]
+    # "Other / Unstated" only when there is something unstated to offer (or it
+    # is the live selection). An option promising zero rows is noise, and the
+    # count is a promise: it must be a number worth reading.
+    if counts.get("") or selected == REGION_NONE:
+        options.append({
+            "value": REGION_NONE,
+            "label": REGION_NONE_LABEL,
+            "count": counts.get("", 0),
+        })
+    return options
+
+
+def _track_facet(qs, selected=""):
+    """Track options with live per-option counts. Track is the FIRM's vertical
+    (`Firm.tracks`: ib/consulting/...), a different dimension from the role's
+    own classified bucket — merging the two into one select is what the
+    separate Role Type facet replaced, and they must not re-merge.
+
+    OVERLAP, deliberately, same posture as `_year_facet`: a firm carrying both
+    `ib` and `st` counts its roles under BOTH, so these counts can sum to more
+    than the total. Deduping would mean picking one of a firm's real verticals
+    to lie about. Each individual number still keeps the count promise — pick
+    that track and you get exactly that many.
+
+    Two small queries instead of a row-by-row firm join: one GROUP BY firm_id
+    over the filtered set (~100 rows), one flat read of every firm's tracks.
+
+    See `_region_facet` for why `selected` is always kept in the options."""
+    tracks_by_firm = dict(Firm.objects.values_list("id", "tracks"))
+    counts: Counter[str] = Counter()
+    total = 0
+    for firm_id, n in (
+        qs.values_list("firm_id").annotate(n=Count("id")).values_list("firm_id", "n")
+    ):
+        total += n
+        for t in (tracks_by_firm.get(firm_id) or []):
+            counts[t] += n
+    return [
+        {"value": "", "label": "Any Track", "count": total},
+        *[
+            {"value": t, "label": TRACK_LABELS.get(t, t), "count": counts[t]}
+            for t in sorted(
+                set(counts) | ({selected} if selected else set()),
+                key=lambda t: TRACK_LABELS.get(t, t),
+            )
         ],
-        "providers": sorted(providers),
-    }
+    ]
 
 
 # The role-select vocabulary, in display order. "" (the default) means "the
@@ -419,6 +501,35 @@ ROLE_CHOICES = [
     (OTHER, "Other / Experienced"),
     ("all", "Everything We Scraped"),
 ]
+
+# The role values that reach `_apply_role_filter` as themselves. Anything else
+# in `?role=` falls through to the campus scope (see `_apply_role_filter`), and
+# the segmented control has to render THAT — see `_effective_role` below.
+ROLE_VALUES = frozenset(v for v, _ in ROLE_CHOICES)
+
+# The opt-in modes. Neither is a campus bucket and neither appears as a normal
+# segment; they are reachable only by deep link or by the subset sentence's
+# "Show everything" link, and when one is active the bar grows a fifth,
+# muted segment so it states its own mode honestly.
+ROLE_OPTIN = (OTHER, "all")
+
+# Short display labels for the segmented control. DISPLAY ONLY — the values
+# still come from ROLE_CHOICES, which stays the single source of truth for the
+# `?role=` vocabulary. The pills need shorter text than the old <select>
+# options did: at 375px the four campus segments render as a 2x2 grid whose
+# cells are ~160px, where "Insight Programme (46)" wraps to two lines and
+# "Insight (46)" does not.
+SEGMENT_LABELS = {
+    "": "All Campus",
+    INSIGHT: "Insight",
+    INTERNSHIP: "Internship",
+    ENTRY_LEVEL: "Entry-Level",
+    OTHER: "Other / Experienced",
+    "all": "Everything",
+}
+
+# The four segments that are always drawn, in display order.
+SEGMENT_VALUES = ("", *TARGET_BUCKETS)
 
 # Target-first ordering for firm pages: insight/internship/entry_level ahead
 # of experienced rows, campus buckets in TARGET_BUCKETS order.
@@ -440,6 +551,53 @@ def _apply_role_filter(qs, role):
     if role in TARGET_BUCKETS:
         return qs.filter(bucket=role)
     return qs.filter(bucket__in=TARGET_BUCKETS)
+
+
+def _effective_role(role):
+    """The role the page will ACTUALLY render, which is not always the role in
+    the querystring: `_apply_role_filter` sends every unrecognised value to the
+    campus scope.
+
+    The segmented control must reflect the effective role, not the raw one.
+    A `?role=banana` that rendered campus roles under a radio group with no
+    checked member would leave the form with no `role` to serialize at all —
+    the same mode-reset failure the fifth segment exists to prevent, arriving
+    by a different door."""
+    return role if role in ROLE_VALUES else ""
+
+
+def _apply_filters(qs, sel, *, skip=()):
+    """Apply every active filter in `sel` except the ones named in `skip`.
+
+    This exists so the cross-filter posture is stated once instead of being
+    re-derived at four call sites. THE RULE (unchanged, now enforceable): a
+    facet's counts are computed against every OTHER active filter and never
+    against its own, so each number honestly answers "under my current
+    filters, how many?". `skip=("region",)` is literally how the Region facet
+    asks that question.
+
+    `sel` is the same dict that ships to the template as `selected`, so the
+    controls and the counts can only ever read one description of the request.
+    """
+    if "region" not in skip:
+        qs = _apply_region_filter(qs, sel["region"])
+    if "track" not in skip and sel["track"]:
+        qs = qs.filter(firm__tracks__contains=[sel["track"]])
+    if "provider" not in skip and sel["provider"]:
+        qs = qs.filter(source__iexact=sel["provider"])
+    if "firm" not in skip and sel["firm"]:
+        qs = qs.filter(firm__slug__in=sel["firm"])
+    if "q" not in skip and sel["q"]:
+        qs = qs.filter(
+            Q(title__icontains=sel["q"])
+            | Q(firm__name__icontains=sel["q"])
+            | Q(location__icontains=sel["q"])
+        )
+    if "year" not in skip:
+        qs = _apply_year_filter(qs, sel["year"])
+    if "role" not in skip:
+        qs = _apply_role_filter(qs, sel["role"])
+    return qs
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +634,7 @@ def _apply_year_filter(qs, year):
     return qs
 
 
-def _year_facet(qs):
+def _year_facet(qs, selected=""):
     """Year options drawn from the live (otherwise-filtered) set, each with its
     own count, so the select answers "under my current filters, how many?".
 
@@ -495,11 +653,23 @@ def _year_facet(qs):
             counts[y] += 1
         if years:
             stated += 1
+    # The live selection always renders as an option, even when the other
+    # filters have driven it to zero (year=2027 + region=hk with no 2027 roles
+    # in Hong Kong). Two reasons, and the second is load-bearing rather than
+    # cosmetic: a <select> that dropped the value it is currently set to would
+    # display a selection it does not have, AND the out-of-band count refresh
+    # restores each select's state from exactly this option's `selected`
+    # attribute — with no matching option there is nothing to restore from.
+    # See `_filter_counts.html`. Same guarantee as `_region_facet` /
+    # `_track_facet` make for their own selections.
+    years = set(counts)
+    if selected.isdigit():
+        years.add(selected)
     return [
         {"value": "", "label": "Any Year", "count": total},
         *[
             {"value": y, "label": y, "count": counts[y]}
-            for y in sorted(counts, reverse=True)
+            for y in sorted(years, reverse=True)
         ],
         {"value": YEAR_NONE, "label": YEAR_NONE_LABEL, "count": total - stated},
     ]
@@ -659,46 +829,55 @@ def opportunities(request):
     firm_slugs = [s.strip() for s in request.GET.getlist("firm") if s.strip()]
     query = request.GET.get("q", "").strip()
 
-    # Facet options (region/track/provider) are drawn from the same
-    # role-bucket scope the view actually renders, not the whole open table.
-    # The default view hides the ~3,214 experienced/"other" rows, so faceting
-    # over all 4,019 open roles offered filter values that would return
-    # nothing under the very filters showing them — and cost a full-queryset
-    # scan on a public page for options nobody could use. Computed against
-    # `role` only (not region/track/provider/query themselves), same posture
-    # as `year_facet` below: a facet must not be crossed with its own filter.
-    facets = _facets(_apply_role_filter(open_qs, role))
+    selected = {
+        "role": role,
+        "year": year,
+        "region": region,
+        "track": track,
+        "provider": provider,
+        "firm": firm_slugs,
+        "q": query,
+    }
 
-    qs = open_qs
-    if region:
-        # Location-based: only roles whose own location resolves to this market
-        # (a title claiming "EMEA" doesn't count if the location says otherwise).
-        qs = qs.filter(region__iexact=region)
-    if track:
-        qs = qs.filter(firm__tracks__contains=[track])
-    if provider:
-        qs = qs.filter(source__iexact=provider)
-    if firm_slugs:
-        qs = qs.filter(firm__slug__in=firm_slugs)
-    if query:
-        qs = qs.filter(
-            Q(title__icontains=query)
-            | Q(firm__name__icontains=query)
-            | Q(location__icontains=query)
-        )
-
-    # Each facet's counts reflect every OTHER active filter, so its numbers
-    # answer "under my current filters, how many of each?" honestly. That
-    # means the two cross-cutting selects are counted against each other's
-    # applied filter, not against a shared pre-filter set: role counts see the
-    # year selection, year counts see the role selection. Two extra values()
-    # scans over an already-narrowed queryset, for numbers that don't lie when
-    # both selects are in use.
-    year_facet = _year_facet(_apply_role_filter(qs, role))
-    qs = _apply_year_filter(qs, year)
+    # ---- Facets. THE CONSISTENCY RULE: every closed-vocabulary control shows
+    # a live per-option count; open-ended (Search) and identity (Companies)
+    # controls show none. Each facet is computed against every OTHER active
+    # filter and never its own — `skip=("region",)` is that sentence in code —
+    # so every number honestly answers "under my current filters, how many?".
+    #
+    # Region and Track gained counts here. Cost was the open question: on a
+    # public unauthenticated page, is full cross-filtering affordable? Measured
+    # against the live 4,342-row open set before choosing. It is, comfortably —
+    # the GROUP BY implementations are cheaper than the row-by-row Python walk
+    # they replaced (campus scope: 6.8ms for options AND counts vs 11.8ms for
+    # options alone; role=all worst case: 15.2ms vs 53.9ms). No fallback taken.
+    #
+    # These read `open_qs`, not a pre-narrowed queryset, so each one composes
+    # its own filter set from scratch and cannot inherit a filter it is meant
+    # to exclude.
+    facets = {
+        "regions": _region_facet(
+            _apply_filters(open_qs, selected, skip=("region",)), region
+        ),
+        "tracks": _track_facet(
+            _apply_filters(open_qs, selected, skip=("track",)), track
+        ),
+        # URL-only filter (?provider=): no student thinks in ATS providers, so
+        # it earns no control in the bar and therefore no counts. The option
+        # list still travels so the vocabulary is inspectable.
+        "providers": sorted(
+            s for s in open_qs.values_list("source", flat=True).distinct() if s
+        ),
+    }
+    year_facet = _year_facet(
+        _apply_filters(open_qs, selected, skip=("year",)), year
+    )
 
     bucket_counts = Counter(
-        (b or OTHER) for b in qs.values_list("bucket", flat=True)
+        (b or OTHER)
+        for b in _apply_filters(open_qs, selected, skip=("role",)).values_list(
+            "bucket", flat=True
+        )
     )
     role_facet = [
         {
@@ -714,7 +893,56 @@ def opportunities(request):
         }
         for value, label in ROLE_CHOICES
     ]
-    hidden_other = bucket_counts.get(OTHER, 0) if role == "" else 0
+    role_count = {r["value"]: r["count"] for r in role_facet}
+
+    # ---- The segmented control (row 1). Scope is not a filter: "which campus
+    # role?" is a facet, but "campus vs everything" is a MODE, and a <select>
+    # gave all six values equal billing while hiding the page's single most
+    # important scoping decision behind a closed control.
+    #
+    # `other` and `all` are deliberately absent from the four drawn segments —
+    # they are opt-ins, reachable by deep link or by the subset sentence's
+    # "Show everything" link, never a sibling option.
+    effective_role = _effective_role(role)
+    role_segments = [
+        {
+            "value": v,
+            "label": SEGMENT_LABELS[v],
+            "count": role_count.get(v, 0),
+            "checked": v == effective_role,
+            # Stable ids: the radio's `for=` target and the count span the
+            # out-of-band swap addresses (see `_filter_counts.html`).
+            "input_id": f"seg-role-{v or 'campus'}",
+            "count_id": f"cnt-role-{v or 'campus'}",
+            "css": f"seg-{v or 'campus'}",
+        }
+        for v in SEGMENT_VALUES
+    ]
+
+    # THE CONDITIONAL FIFTH SEGMENT — deep-link honesty, and a real bug guard.
+    #
+    # Two jobs. (1) With `?role=all` active the bar must say so rather than
+    # drawing four campus pills, none checked, over a feed showing 4,342 rows.
+    # (2) Far less obvious and far more damaging: a radio GROUP WITH NO CHECKED
+    # MEMBER SERIALIZES NOTHING. Without this segment, `?role=all` renders four
+    # unchecked radios, and the moment the student touches Region or Search the
+    # htmx GET goes out with no `role` key at all — the mode silently resets to
+    # campus and 3,456 roles vanish mid-interaction. A checked fifth radio
+    # keeps `role` in the serialization, which is why it is an input and not a
+    # decorative chip.
+    role_optin_segment = None
+    if role in ROLE_OPTIN:
+        role_optin_segment = {
+            "value": role,
+            "label": SEGMENT_LABELS[role],
+            "count": role_count.get(role, 0),
+            "input_id": f"seg-role-{role}",
+            "count_id": f"cnt-role-{role}",
+        }
+
+    # `effective_role`, not `role`: an unrecognised `?role=` renders the campus
+    # scope, so it is hiding the experienced rows too and must say so.
+    hidden_other = bucket_counts.get(OTHER, 0) if effective_role == "" else 0
 
     # The "Show everything" escape hatch for `hidden_other`: role forced to
     # "all", every other active filter preserved. Built from the live
@@ -726,7 +954,22 @@ def opportunities(request):
     show_all_params["role"] = "all"
     show_all_qs = show_all_params.urlencode()
 
-    qs = _apply_role_filter(qs, role)
+    # ---- The region honesty line. Picking a concrete market excludes every
+    # row whose location resolved to nothing (297 of 886 on the live set), and
+    # before this the page said nothing about it. The number is read straight
+    # off the Region facet's own "Other / Unstated" option — already crossed
+    # against every other active filter — so the sentence and the option can
+    # never disagree. Same live-querystring construction as `show_all_qs`.
+    hidden_region = 0
+    if region.lower() in REGION_ORDER:
+        hidden_region = next(
+            (o["count"] for o in facets["regions"] if o["value"] == REGION_NONE), 0
+        )
+    show_unregioned_params = request.GET.copy()
+    show_unregioned_params["region"] = REGION_NONE
+    show_unregioned_qs = show_unregioned_params.urlencode()
+
+    qs = _apply_filters(open_qs, selected)
 
     # The urgency feed is the star: rank what to act on NOW. Two honest
     # bands, because the data has two kinds of urgency:
@@ -914,24 +1157,35 @@ def opportunities(request):
         "personalized": personalized,
         "facets": facets,
         "role_facet": role_facet,
+        # Row 1: the four drawn segments, plus the conditional fifth when an
+        # opt-in mode is active. The template renders these; it does not
+        # re-derive bucket membership.
+        "role_segments": role_segments,
+        "role_optin_segment": role_optin_segment,
         "year_facet": year_facet,
         "hidden_other": hidden_other,
         "show_all_qs": show_all_qs,
+        "hidden_region": hidden_region,
+        "show_unregioned_qs": show_unregioned_qs,
+        # How many of the four row-2 controls are engaged. Drives the mobile
+        # disclosure's "Filters · 2" summary AND the decision to server-render
+        # it open, so a deep-linked filter is never invisible at 375px.
+        "filters_more_active": (
+            sum(1 for v in (year, region, track) if v) + (1 if firm_slugs else 0)
+        ),
         "dash": dash,
         "all_firms": all_firms,
-        "selected": {
-            "role": role,
-            "year": year,
-            "region": region,
-            "track": track,
-            "provider": provider,
-            "firm": firm_slugs,
-            "q": query,
-        },
+        "selected": selected,
         "has_filters": any([role, year, region, track, provider, query]) or bool(firm_slugs),
+        # `_results.html` is included on a full render and returned bare on an
+        # htmx swap. The out-of-band count fragment must only ship on the
+        # second: on a full page load the counts are already correct in the
+        # markup, and an OOB element in the initial document is inert noise
+        # that htmx would never process.
+        "is_htmx": bool(request.headers.get("HX-Request")),
     }
 
-    if request.headers.get("HX-Request"):
+    if context["is_htmx"]:
         return render(request, "directory/_results.html", context)
     return render(request, "directory/opportunities.html", context)
 

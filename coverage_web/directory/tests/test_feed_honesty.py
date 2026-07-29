@@ -14,7 +14,8 @@ from django.utils import timezone
 
 from directory.models import Firm, Opportunity
 from directory.views import (
-    _FRESH_DAYS, _fresh_label, _sponsorship_tag, _urgency_feed, _urgency_item,
+    _FRESH_DAYS, REGION_NONE, _fresh_label, _sponsorship_tag, _urgency_feed,
+    _urgency_item,
 )
 
 TODAY = timezone.localdate()
@@ -237,6 +238,16 @@ def test_the_posting_s_own_field_still_wins_over_the_firm_fallback():
 # the whole open table (including the default-hidden "other" roles).
 # ---------------------------------------------------------------------------
 
+def _concrete(options):
+    """The real markets/verticals a facet offers, minus its two sentinels.
+
+    "" ("Any Region" / "Any Track") and "none" ("Other / Unstated") are always
+    part of the control's vocabulary rather than values drawn from the data, so
+    A7 — "don't offer options that only exist in hidden roles" — is a statement
+    about the CONCRETE options only."""
+    return {o["value"] for o in options} - {"", REGION_NONE}
+
+
 @pytest.mark.django_db
 def test_facets_do_not_offer_options_that_only_exist_in_hidden_roles(client):
     firm = _firm(tracks=["ib"])
@@ -245,12 +256,9 @@ def test_facets_do_not_offer_options_that_only_exist_in_hidden_roles(client):
     _opp(other_firm, "https://x/2", region="jp", bucket="other")  # hidden by default
 
     resp = client.get(reverse("opportunities"))
-    regions = {r["value"] for r in resp.context["facets"]["regions"]}
-    tracks = {t["value"] for t in resp.context["facets"]["tracks"]}
-    assert regions == {"us"}          # "jp" (from the hidden row) is not offered
-    assert tracks == {"ib"}
+    assert _concrete(resp.context["facets"]["regions"]) == {"us"}  # "jp" not offered
+    assert _concrete(resp.context["facets"]["tracks"]) == {"ib"}
 
     # Selecting role=all brings the hidden role's facets back.
     resp_all = client.get(reverse("opportunities"), {"role": "all"})
-    regions_all = {r["value"] for r in resp_all.context["facets"]["regions"]}
-    assert regions_all == {"us", "jp"}
+    assert _concrete(resp_all.context["facets"]["regions"]) == {"us", "jp"}

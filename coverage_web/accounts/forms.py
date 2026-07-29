@@ -15,9 +15,13 @@ firm-picker filters and the profile checkboxes never drift apart.
 
 from __future__ import annotations
 
+import io
+import uuid
 from datetime import date
 
 from django import forms
+from django.core.files.uploadedfile import InMemoryUploadedFile
+from PIL import Image, ImageOps
 
 from coverage_domain.cadence import CADENCE_DEFAULTS
 from directory.classify import REGION_LABELS, REGION_ORDER
@@ -76,6 +80,13 @@ CYCLE_CHOICES: list[tuple[str, str]] = cycle_choices()
 # Kept for backwards compatibility with any view still passing suggestions.
 CYCLE_SUGGESTIONS: list[str] = [c for c, _ in CYCLE_CHOICES if c]
 
+# Avatar limits. 8 MB is comfortably above any phone photo while still bounding
+# what reaches the decoder; 512px is 8x the largest place the avatar renders
+# (64px on this page, 22px in the nav), which keeps it crisp on a 2x display
+# with room to spare and no reason to store more.
+MAX_AVATAR_BYTES = 8 * 1024 * 1024
+AVATAR_PX = 512
+
 
 class _StaleValueSelect(forms.Select):
     """A <select> where exactly one option — the student's own stored value,
@@ -107,7 +118,13 @@ class ProfileForm(forms.Form):
     # the immutable email (USERNAME_FIELD, accounts/models.py). Optional:
     # falls back to the email locally in templates when blank.
     name = forms.CharField(max_length=255, required=False, strip=True)
-    avatar = forms.ImageField(required=False)
+    avatar = forms.ImageField(
+        required=False,
+        # accept= is a hint to the file picker, not a security control — the
+        # real check is clean_avatar below, which decodes the file rather than
+        # trusting its name or its Content-Type header.
+        widget=forms.ClearableFileInput(attrs={"accept": "image/*"}),
+    )
     # Onboarding's step-1 render of this form has no existing avatar to
     # clear, so this checkbox only really does anything on the settings
     # page — Django's ClearableFileInput would add its own "Clear" checkbox
@@ -162,6 +179,74 @@ class ProfileForm(forms.Form):
             choices = choices + [(stale, f"{stale} (no longer offered)")]
             self.fields["target_cycle"].widget = _StaleValueSelect(disabled_value=stale)
         self.fields["target_cycle"].choices = choices
+
+    def clean_avatar(self):
+        """Validate and NORMALISE the upload: never store what was handed to us.
+
+        Four things happen here, and each exists for a concrete reason:
+
+        * **Size ceiling before decode.** A modern phone photo is 3-8 MB and a
+          deliberately-crafted one can be far larger; refusing early means we
+          never hand an unbounded buffer to the decoder.
+        * **EXIF orientation is applied, then dropped.** Phone cameras store
+          the sensor's raw pixels plus an "actually, rotate this" tag. Browsers
+          honour it in an `<img>`; `<canvas>`, thumbnails, and most downstream
+          tools do not — so an unrotated portrait shows sideways in half the
+          places it appears. `exif_transpose` bakes the rotation into the
+          pixels. Dropping the rest of the block is a privacy decision, not a
+          size one: EXIF routinely carries GPS coordinates, and a student's
+          home location has no business riding along with their profile photo.
+        * **Centre-cropped square, capped at 512px.** Every surface renders
+          this in a circle (22px in the nav, 64px here), so a non-square image
+          would be squashed or arbitrarily cropped by CSS at each size. Doing
+          it once, server-side, means every surface gets the same face.
+        * **Re-encoded.** The bytes we store are ones Pillow wrote, not ones a
+          stranger uploaded — which also strips anything hiding in the
+          original container.
+        """
+        upload = self.cleaned_data.get("avatar")
+        if not upload:
+            return upload
+
+        if upload.size > MAX_AVATAR_BYTES:
+            raise forms.ValidationError(
+                f"That image is {upload.size / 1_048_576:.1f} MB. "
+                f"Please use one under {MAX_AVATAR_BYTES // 1_048_576} MB."
+            )
+
+        # ImageField already confirmed this decodes; reopen for real work.
+        try:
+            img = Image.open(upload)
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            raise forms.ValidationError(
+                "That file didn't read as an image. Try a JPEG or PNG."
+            ) from None
+
+        has_alpha = img.mode in ("RGBA", "LA", "P")
+        img = img.convert("RGBA" if has_alpha else "RGB")
+        # Centre-crop to a square, then downscale. `ImageOps.fit` does both in
+        # one resample, so the result stays sharp rather than being resized
+        # twice.
+        img = ImageOps.fit(img, (AVATAR_PX, AVATAR_PX), Image.LANCZOS, centering=(0.5, 0.5))
+
+        buf = io.BytesIO()
+        if has_alpha:
+            img.save(buf, format="PNG", optimize=True)
+            ext, content_type = "png", "image/png"
+        else:
+            img.save(buf, format="JPEG", quality=88, optimize=True, progressive=True)
+            ext, content_type = "jpg", "image/jpeg"
+        buf.seek(0)
+
+        # Random basename, not the user's: an uploaded filename is attacker-
+        # controlled text that would otherwise end up in a public URL, and two
+        # users uploading "profile.jpg" should not collide or be able to probe
+        # for each other's files.
+        name = f"{uuid.uuid4().hex}.{ext}"
+        return InMemoryUploadedFile(
+            buf, "avatar", name, content_type, buf.getbuffer().nbytes, None
+        )
 
     @classmethod
     def from_user(cls, user) -> "ProfileForm":
