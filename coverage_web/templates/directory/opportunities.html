@@ -7,9 +7,14 @@
 
 {% block content %}
 <div class="page page--full">
-  <header class="kin-hero">
-    <span class="kin-hero-icon">{% include "_icon.html" with name="opportunities" %}</span>
-    <p class="kin-hero-eyebrow">Insight · internships · entry-level</p>
+  {% comment %}
+  Compact title row, this page only. The marquee hero card (gradient, icon,
+  eyebrow, sheen) costs ~230px on the one page whose job is density — with the
+  recommend bar and filter band below it, the first role card sat a full
+  screen under the fold. Other pages keep the marquee; the overrides are
+  scoped to `.kin-hero--compact` in _styles.html.
+  {% endcomment %}
+  <header class="kin-hero kin-hero--compact">
     <h1 class="kin-hero-title">Opportunities</h1>
     <p class="kin-hero-sub">Open roles ranked by deadline, sorted to your firms.</p>
   </header>
@@ -114,6 +119,15 @@
     serialization and collapsed inputs still submit — which is precisely why
     this is a <details> and not conditional rendering.
     {% endcomment %}
+    {% comment %}Search never hides and now LEADS the band — it is the
+    highest-value control over 886 scraped titles. Moved in the DOM rather
+    than reordered with CSS `order`, so the visual order, the focus order,
+    and the serialized order all agree. It is open-ended, so it carries no
+    count.{% endcomment %}
+    <label class="filters-search"><span class="f-cap">Search</span>
+      <input type="search" name="q" value="{{ selected.q }}" placeholder="Search firm, role, city" autocomplete="off">
+    </label>
+
     <details class="filters-more" data-filters-more open>
       <summary class="filters-more-summary">Filters{% if filters_more_active %} · {{ filters_more_active }}{% endif %}</summary>
 
@@ -127,9 +141,15 @@
       present at every breakpoint. "No Year Stated" is a real option because
       most roles say nothing.
       {% endcomment %}
-      <label>Programme Year
-        <select name="year" id="f-year">{% include "directory/_facet_options.html" with options=year_facet current=selected.year %}</select>
-        <small class="filter-hint">Intake year in the posting. Not a graduation year.</small>
+      {% comment %}
+      Captions are wrapped in .f-cap and visually hidden: the controls
+      self-label ("Any Year (879)", "All Companies"), so five uppercase
+      captions at five x positions were pure noise. The text stays in the
+      DOM — screen readers still get "Programme Year", and the string is
+      pinned by test_the_programme_year_hint_ships_verbatim.
+      {% endcomment %}
+      <label><span class="f-cap">Programme Year</span>
+        <select name="year" id="f-year" aria-describedby="year-hint">{% include "directory/_facet_options.html" with options=year_facet current=selected.year %}</select>
       </label>
 
       {% comment %}
@@ -139,11 +159,11 @@
       including unstated. See views.py's REGION_NONE for why the label is not
       "No Region".
       {% endcomment %}
-      <label>Region
+      <label><span class="f-cap">Region</span>
         <select name="region" id="f-region">{% include "directory/_facet_options.html" with options=facets.regions current=selected.region %}</select>
       </label>
 
-      <label>Track
+      <label><span class="f-cap">Track</span>
         <select name="track" id="f-track">{% include "directory/_facet_options.html" with options=facets.tracks current=selected.track %}</select>
       </label>
 
@@ -153,7 +173,7 @@
       result count would be a promise made about a list nobody reads
       exhaustively. Deliberately uncounted, per the bar's consistency rule.
       {% endcomment %}
-      <label>Companies
+      <label><span class="f-cap">Companies</span>
         <div class="cmulti" data-cmulti>
           <button type="button" class="cmulti-btn" aria-haspopup="true" aria-expanded="false">
             <span class="cmulti-label">All Companies</span>
@@ -166,13 +186,19 @@
           </div>
         </div>
       </label>
+
+      {% comment %}
+      The Programme Year hint, relocated from under its select to the bar's
+      single footnote. The sentence is a tested honesty contract and ships
+      verbatim; `aria-describedby` on #f-year keeps it attached for screen
+      readers now that it is no longer inside the label. It stays INSIDE the
+      details so it collapses with the controls it explains on mobile —
+      "travels with its control" was the original placement's whole point,
+      and this keeps that true.
+      {% endcomment %}
+      <small class="filter-hint" id="year-hint">Intake year in the posting. Not a graduation year.</small>
     </details>
 
-    {% comment %}Search never hides — it is the highest-value control over 886
-    scraped titles, and it is open-ended, so it carries no count.{% endcomment %}
-    <label class="filters-search">Search
-      <input type="search" name="q" value="{{ selected.q }}" placeholder="Firm, role, city" autocomplete="off">
-    </label>
     <noscript><button type="submit">Apply</button></noscript>
     {% if has_filters %}<a class="filters-clear" href="{% url 'opportunities' %}">Clear</a>{% endif %}
   </form>
