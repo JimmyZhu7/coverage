@@ -70,3 +70,123 @@ def test_the_feeds_core_layout_rules_survive_rendering():
     css = "\n".join(blocks)
     for selector in (".rolecard {", ".firmcols", ".fuse-passed", ".recbar"):
         assert selector in css, f"{selector} missing from the feed's rendered CSS"
+
+
+# ---------------------------------------------------------------------------
+# Role-card standardisation.
+# ---------------------------------------------------------------------------
+# The feed's cards have now been through three states: a fixed height that
+# CLIPPED (190px of content in a 120px box), a min-height that stopped the
+# clipping but let them take SEVEN distinct heights from 122px to 205px, and
+# the current fixed height with every slot reserved and clamped. Only the third
+# both standardises and never cuts text off.
+#
+# These assert the CSS contract that makes the third state hold. They are
+# deliberately about the stylesheet rather than a headless layout pass: the
+# rule "the box is fixed AND every slot inside it is bounded" is the invariant,
+# and it is checkable without a browser.
+
+
+def _feed_css() -> str:
+    blocks = _style_blocks("/opportunities/")
+    assert blocks, "the feed should render its own <style> block"
+    return "\n".join(blocks)
+
+
+def test_the_role_card_pins_a_single_height():
+    """A fixed `height`, not `min-height` — min-height is what let the cards
+    take seven different heights and read as ragged."""
+    css = _feed_css()
+    rule = css.split(".rolecard {", 1)[1].split("}", 1)[0]
+    assert "height: 146px" in rule, rule
+    assert "min-height" not in rule, "min-height reintroduces the ragged heights"
+
+
+def test_every_variable_slot_inside_the_card_is_height_bounded():
+    """The other half of the contract. A fixed box with unbounded content is
+    the ORIGINAL clipping bug, so each slot that holds scraped text must
+    reserve its own height."""
+    css = _feed_css()
+    for selector in (".rolecard-top", ".rolecard-title", ".rolecard-sub", ".rolecard-meta"):
+        rule = css.split(selector + " {", 1)[1].split("}", 1)[0]
+        assert "height:" in rule, f"{selector} must reserve a height, got: {rule.strip()}"
+
+
+def test_the_title_is_clamped_to_two_lines():
+    """A scraped job title is unbounded. Without the clamp, a long one pushes
+    past the reserved 40px and the fixed box clips it."""
+    css = _feed_css()
+    rule = css.split(".rolecard-title a {", 1)[1].split("}", 1)[0]
+    assert "-webkit-line-clamp: 2" in rule
+    assert "overflow: hidden" in rule
+
+
+@pytest.fixture
+def two_roles(db):
+    """One rolling role and one with a real deadline — the two card shapes.
+
+    Both are needed: the whole point of the redesign is that a dated card and
+    a rolling one measure identically, which is only testable with one of each.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from directory.models import Firm, Opportunity
+
+    firm = Firm.objects.create(slug="evercore", name="Evercore", tracks=["ib"])
+    rolling = Opportunity.objects.create(
+        firm=firm, url="https://x.test/1", title="2027 Summer Analyst Programme",
+        bucket="internship", cohort="2027", status="open", region="us",
+        location="New York",
+    )
+    dated = Opportunity.objects.create(
+        firm=firm, url="https://x.test/2", title="Insight Evening",
+        bucket="insight", status="open", region="us", location="London",
+        deadline=timezone.localdate() + timedelta(days=6),
+        confidence=1.0,
+    )
+    return rolling, dated
+
+
+def _markup(client) -> str:
+    """The feed with its `<style>` block removed.
+
+    Counting class names across the whole response counts the stylesheet's own
+    selectors too — `.rolecard-meta {` is not a card. Strip the CSS and what
+    is left is markup, so a count means what it says.
+    """
+    html = client.get("/opportunities/").content.decode()
+    return _STYLE_RE.sub("", html)
+
+
+def test_first_seen_is_stated_once_per_card(client, two_roles):
+    """It used to render as a top-row badge AND in the tag below — the same
+    fact twice on 857 of 879 cards. Asserted against the card MARKUP, with
+    real rows on the page: an empty feed would pass this vacuously."""
+    html = _markup(client)
+
+    cards = html.count('class="rolecard ')
+    assert cards == 2, f"fixture should render two cards, got {cards}"
+
+    # Retired duplicates, gone from markup AND stylesheet.
+    assert "fresh-badge" not in html, "the retired duplicate badge is back"
+    assert "rolling-tag" not in html, "the retired duplicate tag is back"
+
+    # Exactly one meta row per card, and one provenance string in each.
+    assert html.count("rolecard-meta") == cards
+    assert html.count("first seen") == cards
+
+
+def test_the_card_carries_every_fact_the_feed_promises(client, two_roles):
+    """Programme year, location, first-seen, and a countdown on the dated role
+    but not the rolling one."""
+    html = _markup(client)
+
+    assert "role-mini" in html, "role type + programme year pill"
+    assert "· 2027" in html, "the programme year rides in the pill"
+    assert "New York" in html and "London" in html, "location"
+    assert "first seen" in html, "provenance"
+    assert "Rolling" in html, "the undated role says so"
+    # The countdown hairline belongs to the dated role only.
+    assert html.count("rolecard-fuse") == 1

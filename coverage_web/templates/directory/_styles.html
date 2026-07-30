@@ -384,11 +384,11 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      `_fresh_label` — the badge must say what it measures), so uppercase +
      wide letter-spacing (tuned for a 3-letter word) would both shout and
      wrap; sentence case + nowrap keeps it a single-line pill. */
-  .fresh-badge { flex: none; font-size: 10px; font-weight: var(--w-bold);
-    white-space: nowrap; color: #fff;
-    background: var(--ok); border-radius: 999px; padding: 2px 9px;
-    animation: pop-in 500ms cubic-bezier(0.22, 1.4, 0.4, 1) both; }
-  @keyframes pop-in { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: scale(1); } }
+  /* RETIRED. The badge said "First seen 3d ago" in the card's top row while the
+     tag below it said "· seen 3d ago" — the same fact twice, on 857 of 879
+     cards. It now appears once, in the meta row, next to the status it
+     qualifies. The rule is gone rather than left orphaned so nobody
+     reintroduces the duplicate by reaching for a class that still styles. */
 
   /* The fuse: a depleting countdown bar that "burns down" on load. */
   .fuse { display: flex; align-items: center; gap: var(--s2); margin-top: auto; padding-top: var(--s2); }
@@ -424,19 +424,18 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .urg-today .fuse-fill { animation: fuse-burn 900ms both, pulse-red 1.6s ease-in-out 1s infinite; }
   @keyframes pulse-red { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
-  /* Rolling tag: a live pulse dot + how-recently-seen. */
-  .rolling-tag { display: flex; align-items: center; gap: var(--s2); margin-top: auto;
-    padding-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-2); }
-  .rolling-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok);
+  /* The live pulse dot, now inside the card's meta row. Slightly smaller than
+     the retired standalone tag's, so it reads as punctuation beside the word
+     "Rolling" rather than as its own element. */
+  .rolling-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
     flex: none; position: relative; }
   .rolling-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
     background: var(--ok); animation: pulse-ring 1.8s ease-out infinite; }
   @keyframes pulse-ring { 0% { transform: scale(1); opacity: 0.6; }
     100% { transform: scale(3); opacity: 0; } }
-  .rolling-seen { color: var(--ink-3); }
 
   @media (prefers-reduced-motion: reduce) {
-    .fresh-badge, .rolling-dot::after, .fuse-fill, .firmcol { animation: none !important; }
+    .rolling-dot::after, .fuse-fill, .firmcol { animation: none !important; }
     .fuse-fill { width: var(--fuse); }
   }
 
@@ -533,9 +532,27 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      190px of content in a 120px box and spilled past the column edge. A fixed
      height is only safe when the content is fixed, and a scraped job title
      never is — so the box gives way, not the text. */
-  .rolecard { background: var(--paper); border: 1px solid var(--line);
-    border-left: 3px solid var(--line); border-radius: 12px;
-    padding: var(--s3) var(--s4); flex: none; min-height: 122px;
+  /* ======================================================================
+     STANDARDISED ROLE CARD — one height, every card, always.
+
+     146px is composed, not chosen: 12 top padding + 22 top row + 5 + 40 title
+     (two lines at fs-m/1.3, reserved whether the title needs one line or two)
+     + 5 + 18 sub row + 5 + 20 meta row + 12 bottom padding + 3 fuse hairline
+     + 2 borders + 2 rounding = 146.
+
+     A FIXED height is only safe because every slot below is height-reserved
+     AND its content clamped. The earlier fixed-height version clipped — 190px
+     of content in a 120px box — because it fixed the box without bounding the
+     content. Then min-height fixed the clipping but let the cards take SEVEN
+     distinct heights from 122px to 205px, which is what read as "flowing out".
+     Bounding both is the only combination that standardises without cutting
+     text off. If a slot is ever added here, give it a reserved height and
+     re-do the arithmetic above — do not simply let the box grow.
+     ====================================================================== */
+  .rolecard { position: relative; background: var(--paper);
+    border: 1px solid var(--line); border-left: 3px solid var(--line);
+    border-radius: 12px; overflow: hidden;
+    padding: var(--s3) var(--s4); flex: none; height: 146px;
     display: flex; flex-direction: column; gap: 5px;
     transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med); }
   .rolecard:hover { box-shadow: var(--shadow-1); transform: translateX(2px); }
@@ -543,7 +560,11 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rolecard.urg-soon { border-left-color: #c1652f; }
   .rolecard.urg-upcoming { border-left-color: var(--accent); }
   .rolecard.urg-rolling { border-left-color: var(--ok-line); }
-  .rolecard-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+  /* Reserved slot 1 — the top row. The fixed height is what makes the title
+     start at the same y whether or not the user is signed in, since the Save
+     control only renders when authenticated. */
+  .rolecard-top { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s2); height: 22px; flex: none; }
   .rolecard-top-right { display: inline-flex; align-items: center; gap: var(--s2); flex: none; }
 
   /* Track control: a one-click Save star on the feed; funnel stages show as a
@@ -568,15 +589,54 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* Done is terminal — it recedes instead of competing with the live stages. */
   .track-chip.track-closed { background: var(--paper); color: var(--ink-3);
     border: 1px solid var(--line); }
-  .rolecard-title { margin: 0; font-size: var(--fs-m); line-height: 1.3; font-weight: var(--w-med); }
+  /* Reserved slot 2 — the title. EXACTLY two lines' worth, always: `height`
+     (not max-height) is what stops a one-line title from shortening the card.
+     A scraped job title is unbounded, so the clamp is doing real work here —
+     "2027 Blackstone Strategic Partners Private Equity Secondaries Summer
+     Analyst, London" is a real row. */
+  .rolecard-title { margin: 0; height: 40px; flex: none;
+    font-size: var(--fs-m); line-height: 1.3; font-weight: var(--w-med); }
   .rolecard-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical; overflow: hidden; }
+    -webkit-box-orient: vertical; overflow: hidden;
+    transition: color var(--t-fast); }
   .rolecard-title a:hover { color: var(--accent-ink); }
-  /* Class year (when stated) + location share one line, so adding the chip
-     costs no card height. */
-  .rolecard-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  /* Reserved slot 3 — class year (when stated) + location on one line. The row
+     renders even when BOTH are absent (87 of 879 roles have no location at
+     all), because an empty-but-reserved row is what keeps the meta row below
+     it on the same baseline across every card. */
+  .rolecard-sub { display: flex; align-items: center; gap: 6px;
+    height: 18px; flex: none; min-width: 0; }
   .rolecard-loc { font-size: var(--fs-xs); color: var(--ink-3);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  /* Reserved slot 4 — the meta row: status, then provenance. `margin-top:auto`
+     pins it to the bottom edge, which also absorbs any sub-pixel rounding in
+     the slots above rather than letting it push the card taller. */
+  .rolecard-meta { display: flex; align-items: center; gap: 5px;
+    height: 20px; flex: none; margin-top: auto; min-width: 0;
+    font-size: var(--fs-xs); }
+  .meta-status { display: inline-flex; align-items: center; gap: 5px;
+    flex: none; font-weight: var(--w-med); white-space: nowrap; }
+  .meta-rolling { color: var(--ink-2); }
+  .meta-today { color: var(--danger); }
+  .meta-soon { color: #a8501f; }
+  .meta-upcoming { color: var(--accent-ink); }
+  .meta-passed { color: var(--ink-3); }
+  /* Truncates before the status does — a clipped "Closes in 6 d" would be
+     worse than a clipped "first seen 3d…", because one is the reason to act
+     today and the other is provenance. */
+  .meta-seen { color: var(--ink-3); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  /* The fuse, as a hairline on the card's bottom edge. It used to be an inline
+     track competing with the countdown for the meta row's width; on the edge it
+     reads as urgency at a glance and costs zero vertical space, so a dated card
+     and a rolling one measure identically. */
+  .rolecard-fuse { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+    background: var(--line); overflow: hidden; }
+  .rolecard-fuse .fuse-fill { display: block; height: 100%; width: var(--fuse);
+    border-radius: 0;
+    animation: fuse-burn 900ms cubic-bezier(0.4, 0, 0.2, 1) both; }
   /* Stated class year. Rare by design (only postings that literally say
      "Class of YYYY"), so it reads as a quiet fact chip rather than competing
      with the role pill or the fuse. `flex: none` is load-bearing: the chip

@@ -77,53 +77,76 @@ hidden rather than shown as a weak "0".{% endcomment %}
         </header>
         <div class="firmcol-scroll">
           {% for r in cl.roles %}
+            {% comment %}
+            STANDARDISED CARD. Every slot below is height-reserved and its
+            content clamped, so all 879 cards are the same height whatever the
+            scraped vocabulary throws at them. Before this the cards took SEVEN
+            distinct heights spanning 122-205px, because the title ran one line
+            or two and 87 roles carry no location at all, so the row collapsed.
+
+            Reserving is what makes a fixed height safe here. The earlier
+            fixed-height version clipped (190px of content in a 120px box)
+            precisely because it fixed the BOX without bounding the CONTENT;
+            this fixes both, which is the only combination that standardises
+            without cutting text off.
+            {% endcomment %}
             <div class="rolecard urg-{{ r.level }}">
               <div class="rolecard-top">
-                {% comment %}The year beside the role type is the PROGRAMME
-                year (a 2027 summer intake), not a class year — the title
-                attribute says so on hover, and the separate class-year pill
-                below is the only place a graduation year ever appears.
+                {% comment %}
+                The year beside the role type is the PROGRAMME year (a 2027
+                summer intake), not a graduation year — the title attribute
+                says so on hover, and the class-year chip below is the only
+                place a graduation year ever appears.
                 {% endcomment %}
-                  {% comment %}The year beside the role type is the PROGRAMME
-                year (a 2027 summer intake), not a class year — the title
-                attribute says so on hover, and the class-year chip below is
-                the only place a graduation year ever appears.{% endcomment %}
                 <span class="role-mini role-{{ r.bucket }}"{% if r.cohort %} title="{{ r.cohort }} programme year"{% endif %}>{{ r.bucket_label }}{% if r.cohort %} · {{ r.cohort }}{% endif %}</span>
                 <span class="rolecard-top-right">
-                  {% comment %}"New" measured `first_seen` — when the row
-                  entered OUR db, not when the firm posted it, so a bulk
-                  import wore "New" on 794 of 805 open roles at once. The
-                  badge now says exactly what it measures, matching the
-                  rolling-tag's "seen Nd ago" phrasing just below.{% endcomment %}
-                  {% if r.is_fresh and not r.dated %}<span class="fresh-badge">{{ r.fresh_label }}</span>{% endif %}
                   {% if request.user.is_authenticated %}{% include "directory/_track_control.html" %}{% endif %}
                 </span>
               </div>
+
               <h4 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a></h4>
-              {% comment %}One sub-line: the stated class year (only when the
-              posting said it outright — never derived from the programme year
-              above) followed by the location. They share a row rather than
-              taking one each because the card is pinned to exactly 122px with
-              the fuse on the bottom edge. The chip holds its width and the
-              location ellipsises instead: a half-rendered year would be worse
-              than no chip at all.{% endcomment %}
-              {% if r.class_year or r.location %}
-                <div class="rolecard-sub">
-                  {% if r.class_year %}<span class="class-chip" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
-                  {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_title }}</span>{% endif %}
-                </div>
-              {% endif %}
-              {% if r.dated %}
-                <div class="fuse fuse-{{ r.level }}">
-                  <span class="fuse-track"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>
-                  <span class="fuse-label">{{ r.countdown }}</span>
-                </div>
-              {% else %}
-                <div class="rolling-tag">
-                  <span class="rolling-dot"></span> Rolling
-                  {% if r.seen_days is not None %}<span class="rolling-seen">· {% if r.seen_days == 0 %}seen today{% elif r.seen_days == 1 %}seen 1d ago{% else %}seen {{ r.seen_days }}d ago{% endif %}</span>{% endif %}
-                </div>
-              {% endif %}
+
+              {% comment %}
+              Always rendered, even when empty, so the meta row below sits at
+              the same y on every card. The stated class year (never derived
+              from the programme year above) holds its width; the location
+              ellipsises, because a half-rendered year would be worse than a
+              truncated city.
+              {% endcomment %}
+              <div class="rolecard-sub">
+                {% if r.class_year %}<span class="class-chip" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
+                {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_title }}</span>{% endif %}
+              </div>
+
+              {% comment %}
+              One meta row, always present: status then provenance. "First seen"
+              used to ALSO ride as a badge in the top row, so 857 cards stated
+              the same fact twice — once as "First seen 3d ago" and again as
+              "· seen 3d ago". Said once, here, next to the status it
+              qualifies.
+
+              It is deliberately "first seen", not "posted": first_seen is when
+              the row entered OUR database. A bulk import once wore "New" on
+              794 of 805 roles at once, which is the bug this wording closes.
+              {% endcomment %}
+              <div class="rolecard-meta">
+                {% if r.dated %}
+                  <span class="meta-status meta-{{ r.level }}">{{ r.countdown }}</span>
+                {% else %}
+                  <span class="meta-status meta-rolling"><span class="rolling-dot"></span>Rolling</span>
+                {% endif %}
+                {% if r.seen_days is not None %}
+                  <span class="meta-seen">· first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>
+                {% endif %}
+              </div>
+
+              {% comment %}
+              The fuse is now a hairline on the card's bottom edge rather than a
+              track competing for the meta row's width — it reads as urgency at
+              a glance and costs no vertical space, so a dated card and a
+              rolling one measure identically.
+              {% endcomment %}
+              {% if r.dated %}<span class="rolecard-fuse fuse-{{ r.level }}"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>{% endif %}
             </div>
           {% endfor %}
         </div>
