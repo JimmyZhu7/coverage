@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date, timedelta
 
+import re
+
 import pytest
 from django.urls import reverse
 from django.utils import timezone
@@ -385,10 +387,14 @@ def live_board(db):
 
 # The page's CSS block mentions "Picked for you" in a comment, so the presence
 # of the heading is asserted on its markup, not on the bare phrase.
-_HEADING = "<h2 class=\"recbar-title\" id=\"recbar-h\">Picked for you</h2>"
-# The picks used to render as a horizontally scrolling rail. They are now a
-# wrapping grid of per-firm blocks — see _group_picks in directory/views.py.
-_RAIL = "<div class=\"recbar-grid\">"
+#
+# The picks have moved twice: a horizontally scrolling rail, then a wrapping
+# grid of per-firm blocks above the filter bar, and now the feed's pinned
+# FIRST COLUMN — same shape as a firm column, accent-tinted, sitting in the
+# same grid as the firms it recommends.
+_HEADING = '<span class="firmcol-name" id="pickcol-h">Picked for you</span>'
+_RAIL = '<article class="firmcol firmcol--picked'
+
 
 
 @pytest.mark.django_db
@@ -453,9 +459,14 @@ def test_a_profiled_user_with_no_matches_is_told_so(client):
 
 
 @pytest.mark.django_db
-def test_the_bar_does_not_respond_to_filters(client, live_board):
-    """It sits above the filter bar and is scored over the whole open campus
-    set, so a filter that empties the list below must not empty it."""
+def test_the_scoring_does_not_respond_to_filters(client, live_board):
+    """The RANKING is computed over the whole open campus set, so a filter can
+    never promote a weaker pick or change the order.
+
+    What the filter does reach is the DISPLAY — see the pinned-column tests
+    below. Scoring and display were the same thing while the picks lived above
+    the filter bar; they are separate now that the picks sit inside the
+    filtered pile, and this is the half that must stay filter-blind."""
     user = _user()
     user.class_year = 2029
     user.regions = ["us"]
@@ -470,3 +481,128 @@ def test_the_bar_does_not_respond_to_filters(client, live_board):
     assert [p["id"] for p in filtered.context["picks"]] == [
         p["id"] for p in unfiltered.context["picks"]
     ]
+
+
+# ---------------------------------------------------------------------------
+# The picks as the feed's pinned first column.
+# ---------------------------------------------------------------------------
+# They used to render as a band ABOVE the filter bar, which is what justified
+# ignoring the filters entirely. Sitting inside the filtered pile inverts that
+# reasoning: a column standing beside four filtered columns has to contain
+# what it claims to contain. These pin the consequences.
+
+
+_STYLE_RE = re.compile(r"<style>.*?</style>", re.S)
+
+
+def _markup(resp) -> str:
+    """The response with its `<style>` block removed.
+
+    Position and count assertions over class names are meaningless against the
+    raw response: the stylesheet names every selector it styles, in the
+    `<head>`, ahead of all markup. `firmcol--picked` "appeared" before
+    `class="firmcols"` for exactly that reason, and `rolecard-firm` counted
+    three times on a page with one such card."""
+    return _STYLE_RE.sub("", resp.content.decode())
+
+
+def _picked_user(firm):
+    user = _user()
+    user.class_year = 2029
+    user.regions = ["us"]
+    user.tracks = ["ib"]
+    user.save()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    return user
+
+
+@pytest.mark.django_db
+def test_the_picked_column_is_first_in_the_pile(client, live_board):
+    """Pinned left. It is rendered ahead of the loop over `clusters`, not
+    sorted into it, so no firm ordering can ever displace it."""
+    client.force_login(_picked_user(live_board))
+    body = _markup(client.get(reverse("opportunities")))
+
+    grid = body.index('class="firmcols"')
+    picked = body.index("firmcol--picked")
+    first_firm = body.index('<article class="firmcol', picked + 1)
+    assert grid < picked < first_firm
+
+
+@pytest.mark.django_db
+def test_the_picked_column_does_not_inflate_the_page_counts(client, live_board):
+    """Every pick is ALSO listed under its own firm further along the row. If
+    this column were folded into `clusters`, "N Open Roles" would count each
+    pick twice and "N Firms" would gain a firm that does not exist."""
+    client.force_login(_picked_user(live_board))
+    resp = client.get(reverse("opportunities"))
+
+    assert resp.context["pick_cluster"] is not None
+    # The pinned column is deliberately not a member of `clusters`.
+    assert all("firm_slug" in c for c in resp.context["clusters"])
+    assert resp.context["total"] == sum(
+        c["open_count"] for c in resp.context["clusters"]
+    )
+    assert len(resp.context["clusters"]) == 1
+
+
+@pytest.mark.django_db
+def test_the_picked_column_obeys_the_filters_and_says_what_it_hid(client, live_board):
+    """A column showing internships while the page is filtered to Insight
+    would be the only thing on screen lying about its own contents. It hides
+    what the filter excludes — and never silently: the count it dropped is
+    stated in the header."""
+    client.force_login(_picked_user(live_board))
+
+    shown = client.get(reverse("opportunities"))
+    assert shown.context["pick_cluster"]["open_count"] == 1
+    assert shown.context["pick_cluster"]["hidden_by_filter"] == 0
+
+    hidden = client.get(reverse("opportunities"), {"q": "nothing matches this"})
+    # Scoring is untouched — the pick is still ranked, just not displayed.
+    assert len(hidden.context["picks"]) == 1
+    # And the column STAYS, empty and saying so. A column that vanishes the
+    # moment a filter is touched reads as breakage, not as an answer.
+    col = hidden.context["pick_cluster"]
+    assert col is not None and col["roles"] == []
+    assert col["hidden_by_filter"] == 1
+    assert "All 1 of your picks are hidden by your filters" in _markup(hidden)
+
+
+@pytest.mark.django_db
+def test_a_partly_filtered_column_states_the_number_it_dropped(client, live_board):
+    """The honest middle case: some picks survive the filter, some don't."""
+    Opportunity.objects.create(
+        firm=live_board, url="https://x/insight-1", title="Spring Insight Week",
+        bucket="insight", status="open", region="us", cohort="2028",
+    )
+    client.force_login(_picked_user(live_board))
+
+    everything = client.get(reverse("opportunities"))
+    n = everything.context["pick_cluster"]["open_count"]
+    assert n >= 2, f"fixture should produce at least two picks, got {n}"
+
+    narrowed = client.get(reverse("opportunities"), {"role": "insight"})
+    col = narrowed.context["pick_cluster"]
+    assert col["open_count"] < n
+    assert col["hidden_by_filter"] == n - col["open_count"]
+    assert f"{col['hidden_by_filter']} more hidden by your filters" in _markup(narrowed)
+
+
+@pytest.mark.django_db
+def test_only_the_picked_column_names_the_firm_on_its_cards(client, live_board):
+    """The Picked column's cards come from several firms, so its header cannot
+    name one — the cards do it instead. A firm's own column already said it,
+    and repeating it per card would be the "first seen twice" bug again.
+
+    The flag lives on a COPY of the card dict; if it were set on the shared
+    item, the firm's own column would print the firm name too."""
+    client.force_login(_picked_user(live_board))
+    resp = client.get(reverse("opportunities"))
+
+    assert all(r.get("show_firm") for r in resp.context["pick_cluster"]["roles"])
+    for cluster in resp.context["clusters"]:
+        assert not any(r.get("show_firm") for r in cluster["roles"])
+
+    body = _markup(resp)
+    assert body.count("rolecard-firm") == resp.context["pick_cluster"]["open_count"]

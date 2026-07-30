@@ -1024,6 +1024,10 @@ def opportunities(request):
 
     qs = qs.order_by("firm__name", F("deadline").asc(nulls_last=True), "title")
     clusters: dict[int, dict] = {}
+    # The picks are also rendered as the pinned first column of the feed, so
+    # their cards are collected during the same pass rather than re-queried.
+    pick_ids = {p["id"] for p in picks}
+    pick_items: dict[int, dict] = {}
     for o in qs:
         cl = clusters.get(o.firm_id)
         if cl is None:
@@ -1050,6 +1054,12 @@ def opportunities(request):
             }
         item = _urgency_item(o, now=now, today=today, my_firm_ids=set(tier_by_firm))
         cl["roles"].append(item)
+        # Kept by reference here; the Picked column takes its COPY further
+        # down, after the track-status annotation has run over these dicts.
+        # Copying at this point would freeze a pre-annotation snapshot and
+        # every card in that column would draw an un-saved star.
+        if o.id in pick_ids:
+            pick_items[o.id] = item
         # A passed deadline is `dated` (see `_urgency_item`) but must not
         # inflate the firm's "N closing" pill or drag `next_days` negative —
         # both would misrepresent a dead posting as live urgency, and a
@@ -1108,6 +1118,58 @@ def opportunities(request):
                 if r["id"] in tracked:
                     r["track_status"] = tracked[r["id"]] or "saved"
 
+    # ---- The Picked column ------------------------------------------------
+    # The picks render as the pinned FIRST column of the feed, styled apart
+    # from the firm columns. Two consequences of that move, both deliberate:
+    #
+    # 1. IT IS BUILT AFTER `total` AND OUTSIDE `cluster_list`. Every pick is
+    #    already listed under its own firm further along the row, so folding
+    #    this column into either would double-count the roles in "N Open
+    #    Roles" and add a phantom firm to "N Firms".
+    #
+    # 2. IT RESPONDS TO THE FILTERS. While the bar sat ABOVE the filter bar,
+    #    ignoring them was the honest choice — it answered "what should I look
+    #    at" and a filter below it had no business rewriting that. Sitting
+    #    INSIDE the filtered pile inverts the reasoning: a column standing
+    #    beside four filtered columns, showing internships while the page is
+    #    filtered to Insight, would be the only thing on screen lying about
+    #    what it contains. The SCORING is still done over the whole open
+    #    campus set, so a filter never changes the ranking or promotes a
+    #    weaker pick; it only hides picks the student just said they don't
+    #    want to see, and the header says how many it hid.
+    pick_cluster = None
+    if picks:
+        # A COPY of each card, never the shared dict: this column names the
+        # firm on every card (its cards come from several firms), and setting
+        # that flag on the shared item would print the firm name on the firm's
+        # own column too.
+        visible = [
+            {**pick_items[p["id"]], "show_firm": True}
+            for p in picks if p["id"] in pick_items
+        ]
+        # Built even when the filter hid EVERY pick. A column that silently
+        # vanishes the moment you touch a filter reads as breakage, and this
+        # page's whole posture is to name what it is holding back rather than
+        # quietly shrink — the same rule as the subset sentence and the
+        # unregioned-roles line. Empty, it collapses to one honest sentence.
+        pick_cluster = {
+            "roles": visible,
+            "open_count": len(visible),
+            "firm_count": len({r["firm_slug"] for r in visible}),
+            # Never silently truncated: if the filter hid picks, the column's
+            # header says so in its own words.
+            "hidden_by_filter": len(picks) - len(visible),
+            "total_picks": len(picks),
+            # Only the reasons true of EVERY pick are chipped in the header
+            # — `pick_shared`, exactly as computed for the old bar. Not a
+            # dedupe of all reasons: "Tier 1" carries a different sentence per
+            # firm (see `_reason_key`), so three firms would put three
+            # identical-looking chips in one header, each justifying a
+            # different role. Everything below the shared level keeps its full
+            # sentence in the disclosure.
+            "reasons": pick_shared,
+        }
+
     # The two figures the stat strip actually renders. (The old hero widget's
     # total/for-you/funnel counts were dropped with it — they cost 5 queries a
     # request and nothing displayed them.)
@@ -1149,6 +1211,11 @@ def opportunities(request):
         # what the count in the head is drawn from and what tests read.
         "pick_shared": pick_shared,
         "pick_blocks": pick_blocks,
+        # The picks as the feed's pinned first column. None when there is
+        # nothing to pin — no profile, no picks, or the live filter hid every
+        # one of them. Deliberately NOT part of `clusters`: see its
+        # construction above for why the counts would go wrong.
+        "pick_cluster": pick_cluster,
         "has_profile": bool(profile and not profile.is_empty),
         # Whether the firm order was actually shaped by anything the student
         # told Coverage (target firms, survey regions/tracks). Computed above

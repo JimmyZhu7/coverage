@@ -93,11 +93,26 @@ def _feed_css() -> str:
     return "\n".join(blocks)
 
 
+def _rule(css: str, selector: str) -> str:
+    """The declaration body of `selector`'s own rule.
+
+    Anchored to the start of a line, which is what makes it the rule for that
+    selector rather than for any COMPOUND selector ending in it. Splitting on
+    the bare string matched `.firmcol--picked .rolecard {` — a one-declaration
+    override that happens to sit earlier in the file — and cheerfully reported
+    that the role card had no height. Descendant selectors are indented; the
+    rules these tests are about start their own line.
+    """
+    m = re.search(r"^\s*" + re.escape(selector) + r"\s*\{(.*?)\}", css, re.S | re.M)
+    assert m, f"no rule found for {selector}"
+    return m.group(1)
+
+
 def test_the_role_card_pins_a_single_height():
     """A fixed `height`, not `min-height` — min-height is what let the cards
     take seven different heights and read as ragged."""
     css = _feed_css()
-    rule = css.split(".rolecard {", 1)[1].split("}", 1)[0]
+    rule = _rule(css, ".rolecard")
     assert "height: 146px" in rule, rule
     assert "min-height" not in rule, "min-height reintroduces the ragged heights"
 
@@ -108,7 +123,7 @@ def test_every_variable_slot_inside_the_card_is_height_bounded():
     reserve its own height."""
     css = _feed_css()
     for selector in (".rolecard-top", ".rolecard-title", ".rolecard-sub", ".rolecard-meta"):
-        rule = css.split(selector + " {", 1)[1].split("}", 1)[0]
+        rule = _rule(css, selector)
         assert "height:" in rule, f"{selector} must reserve a height, got: {rule.strip()}"
 
 
@@ -116,7 +131,7 @@ def test_the_title_is_clamped_to_two_lines():
     """A scraped job title is unbounded. Without the clamp, a long one pushes
     past the reserved 40px and the fixed box clips it."""
     css = _feed_css()
-    rule = css.split(".rolecard-title a {", 1)[1].split("}", 1)[0]
+    rule = _rule(css, ".rolecard-title a")
     assert "-webkit-line-clamp: 2" in rule
     assert "overflow: hidden" in rule
 
