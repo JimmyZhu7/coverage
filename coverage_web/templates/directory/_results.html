@@ -118,7 +118,10 @@ exactly the moment it had something to say.
       </article>
     {% endif %}
     {% for cl in clusters %}
-      <article class="firmcol{% if cl.is_mine %} is-mine{% endif %} kin-reveal" style="--i:{{ forloop.counter0 }}">
+      {% comment %}`forloop.counter` (1-based), not `counter0`: the pinned
+      Picked column is index 0, and a 0-based firm loop made the first firm
+      animate in lockstep with it instead of after it.{% endcomment %}
+      <article class="firmcol{% if cl.is_mine %} is-mine{% endif %} kin-reveal" style="--i:{{ forloop.counter }}">
         <header class="firmcol-head">
           <span class="firmcol-logo" style="--hue: {{ cl.firm_slug|firm_hue }}">{{ cl.monogram }}</span>
           <div class="firmcol-id">

@@ -146,8 +146,8 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     transition: border-color var(--t-fast), color var(--t-fast); }
   /* Chrome silently drops the native disclosure triangle on a summary with
      `display: inline-flex`, so the caret is drawn explicitly and rotated on
-     open — the same technique `.recbar-why-all` uses below. A disclosure with
-     no visible affordance is a disclosure nobody opens. */
+     open. A disclosure with no visible affordance is a disclosure nobody
+     opens. */
   .filters-more > summary::-webkit-details-marker { display: none; }
   .filters-more > summary::before { content: ""; width: 7px; height: 7px;
     flex: none; border-right: 1.6px solid currentColor;
@@ -277,54 +277,16 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 
   /* The reasons true of every pick. Stated once, here, instead of repeated on
      each row — that repetition was the whole defect. */
-  .recbar-shared { display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
-    margin: 0 0 var(--s3); }
-  .recbar-shared-label { font-size: var(--fs-micro); text-transform: uppercase;
-    letter-spacing: 0.06em; font-weight: var(--w-med); color: var(--ink-3);
-    margin-right: 3px; }
 
-  .recbar-grid { display: grid; gap: var(--s3);
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
 
-  .recblock { display: flex; flex-direction: column; gap: var(--s2);
-    background: var(--surface); border: 1px solid var(--line);
-    border-left: 3px solid var(--accent); border-radius: 12px;
-    padding: var(--s3) var(--s4); box-shadow: var(--shadow-1); min-width: 0;
-    transition: border-color var(--t-med), box-shadow var(--t-med); }
-  .recblock:hover { box-shadow: var(--shadow-2); }
-  .recblock-head { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
-  .recblock-logo { width: 24px; height: 24px; flex: none; border-radius: 7px;
-    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 27%);
-    font-size: 10px; font-weight: var(--w-bold);
-    display: inline-flex; align-items: center; justify-content: center; }
-  .recblock-firmname { font-size: var(--fs-xs); color: var(--ink-2);
-    font-weight: var(--w-med); text-transform: uppercase; letter-spacing: 0.04em;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
-    transition: color var(--t-fast); }
-  .recblock-firmname:hover { color: var(--accent-ink); }
   /* How many roles this block holds — the number that stops a two-role block
      reading as one card that happens to be tall. */
-  .recblock-n { margin-left: auto; flex: none; font-family: var(--font-mono);
-    font-size: 10px; font-variant-numeric: tabular-nums; font-weight: var(--w-med);
-    color: var(--ink-2); background: var(--paper); border: 1px solid var(--line);
-    border-radius: 999px; padding: 1px 7px; }
 
   /* Roles inside a block. The hairline between them is what says "two roles",
      and the indent gives the firm head something to be the head OF. */
-  .recblock-roles { list-style: none; margin: 0; padding: 0; }
-  .recrole { padding: var(--s2) 0 0; }
-  .recrole + .recrole { margin-top: var(--s2); border-top: 1px solid var(--line); }
-  .recrole-title { margin: 0; font-size: var(--fs-m); line-height: 1.3;
-    font-weight: var(--w-med); }
-  .recrole-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical; overflow: hidden; transition: color var(--t-fast); }
-  .recrole-title a:hover { color: var(--accent-ink); }
 
   /* The "why". Wraps freely — the whole point is that every reason the scorer
      used is visible, so nothing here may truncate the list. */
-  .reccard-why { list-style: none; margin: 4px 0 0; padding: 0;
-    display: flex; flex-wrap: wrap; gap: 4px; }
-  .recblock-why { margin-top: 0; }
   /* 11px, not 10px: these carry the scoring rationale and were the smallest
      type on the page. --ink-2 on --paper measures 8.0:1; the tier and track
      variants are checked against their own tinted backgrounds below. */
@@ -339,52 +301,8 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .why-chip.why-track { border-color: var(--ok-line); background: var(--ok-soft);
     color: var(--ok); }
 
-  .recrole-foot { display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
-    margin: 6px 0 0; font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; }
-  .recrole-when { display: inline-flex; align-items: center; gap: 4px;
-    font-family: var(--font-mono); font-weight: var(--w-med);
-    font-variant-numeric: tabular-nums;
-    color: var(--ink-2); white-space: nowrap; flex: none; }
-  .recrole-gl { flex: none; }
   /* Rolling is green AND wears a different glyph AND says the word — never
      colour alone (ux: color-not-only, High). */
-  .recrole-rolling { color: var(--ok); cursor: help; }
-  .recrole-kind { flex: none; font-size: 10px; text-transform: uppercase;
-    letter-spacing: 0.05em; font-weight: var(--w-med); color: var(--ink-2);
-    border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; }
-  .recrole-loc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    min-width: 0; flex: 1 1 6rem; }
-
-  /* Every chip tooltip, in real text and in the tab order. `title` is
-     mouse-only, and the class-year sentence — the one that admits a year was
-     inferred from a programme year rather than stated — must not be reachable
-     by hover alone (ux: tooltip-keyboard). */
-  .recbar-why-all { margin-top: var(--s3); font-size: var(--fs-s); }
-  /* `display: inline-flex` on a <summary> silently drops the disclosure
-     triangle in Chrome, so the caret is drawn explicitly and rotated on open.
-     A disclosure with no visible affordance is a disclosure nobody opens. */
-  .recbar-why-all > summary { cursor: pointer; display: inline-flex; align-items: center;
-    gap: 5px; color: var(--ink-2); font-size: var(--fs-xs); width: fit-content;
-    padding: 3px 6px 3px 2px; border-radius: 6px; transition: color var(--t-fast); }
-  .recbar-why-all > summary::-webkit-details-marker { display: none; }
-  .recbar-why-all > summary::before { content: ""; width: 7px; height: 7px; flex: none;
-    border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor;
-    transform: rotate(-45deg); margin-left: 2px; margin-top: -2px;
-    transition: transform var(--t-med); }
-  .recbar-why-all[open] > summary::before { transform: rotate(45deg); margin-top: -4px; }
-  .recbar-why-all > summary:hover { color: var(--accent-ink); }
-  .recbar-why-all[open] > summary { margin-bottom: var(--s2); }
-  .recbar-why-all dl { display: grid; grid-template-columns: auto 1fr;
-    gap: 6px var(--s3); align-items: baseline; margin: 0;
-    padding: var(--s3) var(--s4); border: 1px solid var(--line);
-    border-radius: 12px; background: var(--surface); }
-  .recbar-why-all dt { cursor: default; justify-self: start; }
-  .recbar-why-all dd { margin: 0; color: var(--ink-2); line-height: 1.5;
-    font-size: var(--fs-s); }
-  @media (max-width: 560px) {
-    .recbar-why-all dl { grid-template-columns: 1fr; gap: 2px var(--s3); }
-    .recbar-why-all dd { margin-bottom: var(--s2); }
-  }
 
   /* Slim inline stat strip — replaces the four oversized stat cards. One line,
      numbers in the display family, a hairline divider between items. */
@@ -566,8 +484,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rolecard-firm + .rolecard-loc::before { content: "·"; margin-right: 4px;
     color: var(--line-strong); }
 
-  /* The standalone "why" disclosure, left behind where the picks bar was. */
-  .recbar-why-standalone { margin: 0 0 var(--s4); }
 
   /* Fixed header height so every firm card's header aligns, regardless of how
      the name wraps or which pills show. */

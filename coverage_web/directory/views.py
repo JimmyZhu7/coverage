@@ -290,21 +290,28 @@ def _group_picks(cards):
     WHY. Three of the four scoring axes (tier, track, region) read FIRM
     properties, so two roles at the same firm are structurally incapable of
     differing on them. Printed once per card, that produced a row of cards
-    whose "why" strings were byte-identical — a bar labelled "picked for you"
-    in which every card says the same thing tells the student nothing, and
-    buries the one thing that does differ (the role, its deadline, where it
-    is) under four chips that don't.
+    whose "why" strings were byte-identical — every card saying the same
+    thing tells the student nothing, and buries the one thing that does
+    differ (the role, its deadline, where it is) under chips that don't.
 
     This is a PRESENTATION regroup and nothing else. It does not rescore and
     does not reorder: blocks appear in the order their best-ranked role
-    appeared, roles keep their order inside a block, and no reason is dropped
-    — every reason the scorer produced is still printed exactly once, at the
-    broadest level where it is true. Only WHERE it prints changes.
+    appeared, and roles keep their order inside a block.
 
     A reason rises to the highest level at which it is universal:
-      * bar level  — identical on every pick, whatever the firm
+      * shared     — identical on every pick, whatever the firm
       * firm level — identical on every role at that one firm
       * role level — whatever is left, i.e. the genuinely distinguishing bits
+
+    WHAT THE PAGE CURRENTLY USES. Only `shared` is rendered — as the chips in
+    the pinned Picked column's header. The firm- and role-level tiers are
+    still computed and still correct, but nothing displays them since the
+    long-form disclosure was removed; `blocks` survives as the recommend
+    bar's "are there picks?" guard. This docstring used to promise that every
+    reason the scorer produced is printed exactly once somewhere, which is no
+    longer true, and saying so here is cheaper than letting the next reader
+    trust it. The tiering is kept rather than deleted because it is the thing
+    a per-card "why" would be rebuilt from.
 
     Returns `(shared, blocks)`.
     """
@@ -971,6 +978,18 @@ def opportunities(request):
 
     qs = _apply_filters(open_qs, selected)
 
+    # The user's target firms, read ONCE. This used to be two queries against
+    # the same rows — a `firm_id` set here and a `firm_id -> tier` dict thirty
+    # lines below — which is the same table fetched twice per request for
+    # strictly less information the first time. The set is just the dict's
+    # keys, so it is derived rather than re-queried.
+    tier_by_firm: dict[int, int | None] = {}
+    if request.user.is_authenticated:
+        tier_by_firm = dict(
+            UserFirm.objects.for_user(request.user).values_list("firm_id", "tier")
+        )
+    my_firm_ids: set[int] = set(tier_by_firm)
+
     # The urgency feed is the star: rank what to act on NOW. Two honest
     # bands, because the data has two kinds of urgency:
     #   1. Closing Soon — the few roles with a real posted deadline (a true
@@ -978,11 +997,6 @@ def opportunities(request):
     #   2. Fresh & Rolling — the many rolling-review roles, where "apply
     #      early" is the whole game, so we rank by how recently WE first saw
     #      the posting (Coverage's own first_seen — a signal no ATS exposes).
-    my_firm_ids: set[int] = set()
-    if request.user.is_authenticated:
-        my_firm_ids = set(
-            UserFirm.objects.for_user(request.user).values_list("firm_id", flat=True)
-        )
     feed = _urgency_feed(qs, now=now, today=today, my_firm_ids=my_firm_ids)
 
     # Firm clusters are the page: one firm, all its open roles listed below it
@@ -992,19 +1006,17 @@ def opportunities(request):
     # tracks/regions float to the top.
     user_regions = {r.lower() for r in (getattr(request.user, "regions", None) or [])}
     user_tracks = set(getattr(request.user, "tracks", None) or [])
-    tier_by_firm: dict[int, int | None] = {}
-    if request.user.is_authenticated:
-        tier_by_firm = dict(
-            UserFirm.objects.for_user(request.user).values_list("firm_id", "tier")
-        )
 
-    # Picked-for-you bar. Deliberately scored over the WHOLE open campus set,
-    # not the filtered `qs`: it sits above the filter bar and answers "what
-    # should I look at", which a filter narrowing the page below shouldn't
-    # silently rewrite. Signed-out (and profile-less) users get no bar at all —
-    # `recommend()` returns [] for an empty profile, and the template renders
-    # an honest sign-in line instead of six generic cards pretending to be
-    # tailored. See recommend.py for the scoring itself.
+    # Picked-for-you. Scored over the WHOLE open campus set, never the filtered
+    # `qs` — a filter must not be able to reorder the ranking or promote a
+    # weaker pick into view. (What a filter DOES reach is which of these picks
+    # the column displays; that is done further down, where the column is
+    # built, and the two halves are deliberately separate.)
+    #
+    # Signed-out and profile-less users get nothing: `recommend()` returns []
+    # for an empty profile, and the template renders an honest sign-in line
+    # instead of six generic cards pretending to be tailored. See recommend.py
+    # for the scoring itself.
     picks: list = []
     profile = None
     if request.user.is_authenticated:
@@ -1052,7 +1064,7 @@ def opportunities(request):
                 "next_days": None,
                 "roles": [],
             }
-        item = _urgency_item(o, now=now, today=today, my_firm_ids=set(tier_by_firm))
+        item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids)
         cl["roles"].append(item)
         # Kept by reference here; the Picked column takes its COPY further
         # down, after the track-status annotation has run over these dicts.
@@ -1205,11 +1217,11 @@ def opportunities(request):
         # signed-out / empty-survey state. The template needs to tell those
         # two apart, so both flags travel.
         "picks": picks,
-        # The same picks, regrouped for display: `pick_shared` are the reasons
-        # true of every pick (printed once, in the bar head), `pick_blocks` the
-        # per-firm blocks. `picks` stays as the flat, authoritative list — it is
-        # what the count in the head is drawn from and what tests read.
-        "pick_shared": pick_shared,
+        # `pick_blocks` survives only as the recommend bar's guard: non-empty
+        # means "there are picks", which is the one state that section does NOT
+        # render (the pinned column carries them instead). `pick_shared` is not
+        # passed — it reaches the template inside `pick_cluster.reasons`, and a
+        # second copy under its own key was read by nothing.
         "pick_blocks": pick_blocks,
         # The picks as the feed's pinned first column. None when there is
         # nothing to pin — no profile, no picks, or the live filter hid every

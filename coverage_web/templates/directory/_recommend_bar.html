@@ -1,46 +1,26 @@
-{% load textstyle %}
 {% comment %}
-The "Picked for you" bar. Three states, and the difference between them is the
-whole point of the component:
+The two honest NON-pick states of "Picked for you". The picks themselves are
+not here: they render as the feed's pinned first column (see _results.html).
+This file is what remains when there is nothing to pin, and the difference
+between its two states is the whole point of it:
 
-  1. No profile (signed out, or signed in with an empty survey) — one honest
-     line and a way to fix it. Never cards. A bar labelled "picked for you"
-     shown to someone we know nothing about is a lie that costs exactly the
-     trust this page exists to earn.
-  2. A profile, but nothing clears the score threshold — say so plainly. The
-     bar is allowed to be empty; padding it with the least-bad six would make
-     a full bar meaningless on the days it is genuinely full.
-  3. Picks — grouped by firm, each group carrying the reasons that put it
-     there.
+  1. No profile — signed out, or signed in with an empty survey. One honest
+     line and a way to fix it. Never cards. A section labelled "picked for
+     you" shown to someone we know nothing about is a lie that costs exactly
+     the trust this page exists to earn.
+  2. A profile, but nothing clears the score threshold — say so plainly. It
+     is allowed to come back empty; padding it with the least-bad six would
+     make a full column meaningless on the days it is genuinely full.
 
-WHY GROUPED, AND WHY THE REASONS SIT WHERE THEY DO. Three of the scorer's four
-axes (tier, track, region) read FIRM properties, so two roles at one firm
-cannot differ on them. One flat card per role therefore printed the same "why"
-string six times over three firms — the eye landed on four chips that were
-constant and slid past the role title, deadline and location, which were the
-only things that actually varied. `_group_picks` in directory/views.py now
-lifts each reason to the broadest level at which it is literally true:
+When there ARE picks, this section does not render at all — see the guard
+below. `pick_blocks` is used only as that guard: non-empty means the pinned
+column has the picks, so there is nothing left for this file to say.
 
-  bar head  -> reasons identical on every pick
-  firm head -> reasons identical on every role at that firm
-  role row  -> whatever is left
-
-Nothing is dropped and nothing is reworded — a reason prints exactly once, at
-its own level, with the scorer's own sentence. The ranking is untouched.
-
-Every reason's long form is BOTH the chip's `title` and the text inside the
-"What these mean" disclosure, because a `title` tooltip is mouse-only and the
-class-year admission — that a year was inferred from a programme year rather
-than stated by the posting — is the one sentence on this page that must never
-be reachable by hover alone.
-
-Layout note: this is a wrapping grid, not a scrolling rail. The rail it
-replaced overflowed its own box (1392px of room, 1761px of content) with no
-affordance saying so; a grid that wraps has no hidden content to signpost.
-Blocks are min-height, never fixed, and nothing here sets `overflow: hidden` —
-two previous bugs on this page were content clipped by a box smaller than its
-contents, so a block that needs more room grows instead.
+The reasons that used to be printed here (once per firm, in a long-form
+disclosure) now ride as chips in the pinned column's header, with the
+scorer's own sentence as each chip's `title`.
 {% endcomment %}
+{% if not has_profile or not pick_blocks %}
 <section class="recbar" aria-labelledby="recbar-h">
   {% if not has_profile %}
     <div class="recbar-head">
@@ -57,35 +37,6 @@ contents, so a block that needs more room grows instead.
         class year, university, tracks, and target firms.
       {% endif %}
     </p>
-  {% elif pick_blocks %}
-    {% comment %}
-    The picks themselves now render as the feed's pinned first column (see
-    _results.html) rather than as a grid of blocks up here. What stays behind
-    is the part a column cannot carry: the keyboard-reachable full text of
-    every reason the scorer used.
-
-    That disclosure is not optional polish. The chips in the column header are
-    terse and their long form is a `title` tooltip, which is mouse-only — and
-    one of these sentences admits that a class year was INFERRED from a
-    programme year rather than stated by the posting. A caveat that only
-    hover reveals is a caveat most students never read.
-    {% endcomment %}
-    <details class="recbar-why-all recbar-why-standalone">
-      <summary>Why these roles were picked for you</summary>
-      <dl>
-        {% for r in pick_shared %}
-          <dt class="why-chip why-{{ r.kind }}">{{ r.text }}</dt><dd>{{ r.detail }}</dd>
-        {% endfor %}
-        {% for b in pick_blocks %}
-          {% for r in b.reasons %}
-            <dt class="why-chip why-{{ r.kind }}">{{ r.text }}</dt><dd>{{ b.firm_name|smart_title }} — {{ r.detail }}</dd>
-          {% endfor %}
-          {% for p in b.roles %}{% for r in p.reasons %}
-            <dt class="why-chip why-{{ r.kind }}">{{ r.text }}</dt><dd>{{ p.title|smart_title }} — {{ r.detail }}</dd>
-          {% endfor %}{% endfor %}
-        {% endfor %}
-      </dl>
-    </details>
   {% else %}
     <div class="recbar-head">
       <h2 class="recbar-title" id="recbar-h">Picked for you</h2>
@@ -98,3 +49,4 @@ contents, so a block that needs more room grows instead.
     </p>
   {% endif %}
 </section>
+{% endif %}
