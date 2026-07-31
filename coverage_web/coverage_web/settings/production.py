@@ -21,6 +21,20 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS")
 # No default: refuse to boot with the insecure dev key from base.py.
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 
+# No default, for the same reason and with sharper teeth. `/capture/inbound/`
+# is csrf_exempt, unauthenticated by session, and WRITES — it runs the ingest
+# pipeline on whatever JSON it is handed. Its only gate is a shared secret
+# compared with hmac.compare_digest.
+#
+# base.py gives that secret a development fallback ("local-dev-…") so the app
+# runs out of the box locally. Inheriting that fallback in production would
+# publish the key: it is committed to this repository, so anyone who can read
+# the source could POST arbitrary email into a real user's capture pipeline.
+# This module's stated policy is "no defaults for the values that must never
+# be guessed"; the webhook secret belongs on that list and was missing from
+# it.
+CAPTURE_INBOUND_SECRET = env("CAPTURE_INBOUND_SECRET")
+
 # Standard HTTPS hardening. The PaaS terminates TLS and forwards
 # X-Forwarded-Proto, which is why SECURE_PROXY_SSL_HEADER is set below.
 SECURE_SSL_REDIRECT = env.bool("DJANGO_SECURE_SSL_REDIRECT", default=True)
