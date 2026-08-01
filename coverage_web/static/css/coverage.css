@@ -472,9 +472,16 @@ main { min-height: 60vh; }
   margin: 0 0 var(--s3); justify-content: flex-start;
 }
 /* First link flush to the rail: the pill padding would otherwise inset the
-   text 12px and break alignment with the title beneath it. */
-.page > .subnav:first-child > :first-child,
-.subnav.standalone > :first-child { margin-left: -12px; }
+   text 12px and break alignment with the title beneath it.
+ *
+ * `:not(.scope-tabs)` is load-bearing. A BREADCRUMB is bare links on the page
+ * background, so pulling the first one left by its own padding aligns its
+ * text with the title. A SCOPE-TAB strip is those same links inside a drawn
+ * pill container with only 4px of padding — the same -12px there dragged the
+ * selected tab 8px outside its own container, which is exactly what it looked
+ * like. Two components, one class; only one of them wants this. */
+.page > .subnav:first-child:not(.scope-tabs) > :first-child,
+.subnav.standalone:not(.scope-tabs) > :first-child { margin-left: -12px; }
 .subnav a[aria-current="page"], .subnav strong {
   color: var(--accent-ink); font-weight: var(--w-med); background: var(--accent-soft);
   border-radius: 999px; padding: 4px 12px;
