@@ -13,12 +13,20 @@
   and pushed the queue — the moat layer — below it. This is a date, a title,
   and the page's thesis sentence in real numbers.
   {% endcomment %}
-  <header class="today-head">
-    <p class="today-eyebrow">{% now "l · N j, Y" %}</p>
-    <h1 class="today-title">Today</h1>
-    <p class="today-summary" id="today-summary">
-      <b>{{ planned_total }}</b> to do{% if debriefs %} · <b>{{ debriefs|length }}</b> chat{{ debriefs|length|pluralize }} to write down{% endif %} · <b>{{ pace.done }}/{{ pace.goal }}</b> this week
-    </p>
+  {% comment %}
+  Written out rather than {% include %}d: the summary line is this page's
+  aria-describedby target, so it needs its own id, and the include has no
+  slot for that. Same three classes, so it stays visually identical to every
+  other page header.
+  {% endcomment %}
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <p class="pagehead-eyebrow">{% now "l · N j, Y" %}</p>
+      <h1 class="pagehead-title">Today</h1>
+      <p class="pagehead-sub" id="today-summary">
+        <b>{{ planned_total }}</b> to do{% if debriefs %} · <b>{{ debriefs|length }}</b> chat{{ debriefs|length|pluralize }} to write down{% endif %} · <b>{{ pace.done }}/{{ pace.goal }}</b> this week
+      </p>
+    </div>
   </header>
 
   {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}

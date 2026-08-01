@@ -116,12 +116,7 @@
 
 {% block content %}
 <div class="page">
-  <header class="kin-hero">
-    <span class="kin-hero-icon">{% include "_icon.html" with name="settings" %}</span>
-    <p class="kin-hero-eyebrow">Your account</p>
-    <h1 class="kin-hero-title">Settings</h1>
-  </header>
-
+  {% include "_pagehead.html" with eyebrow="Your account" title="Settings" sub="Your profile, your targets, and how hard Coverage pushes you." %}
   {% if messages %}
     <div class="settings-msgs">
       {% for m in messages %}

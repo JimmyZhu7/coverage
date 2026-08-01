@@ -15,15 +15,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      design, and the field's best boards reach content in ~150px.
      ====================================================================== */
 
-  /* Compact hero, this page only. The shared .kin-hero marquee (gradient
-     card, sheen, icon) stays intact for Today/Network/Settings; these
-     overrides win on specificity, not on editing the shared file. */
-  .kin-hero.kin-hero--compact { background: none; border: 0; box-shadow: none;
-    border-radius: 0; padding: 0; margin-bottom: var(--s4); overflow: visible; }
-  .kin-hero.kin-hero--compact::after { display: none; }
-  .kin-hero--compact .kin-hero-title { font-size: clamp(24px, 3vw, 30px); }
-  .kin-hero--compact .kin-hero-sub { margin-top: var(--s1); font-size: var(--fs-s); }
-
   /* Filter bar — v5: one left-aligned band. Search leads (it is first in the
      DOM too), the selects follow, and the pills sit on their own row above. */
   /* align-items: flex-start, not flex-end: every label is [caption, control],
@@ -251,9 +242,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      slot; 116px of content in a 90px box). A block that needs room takes it.
      ====================================================================== */
   .recbar { margin: 0 0 var(--s4); }
-  /* The authed Browse/Applications tabs join the left rail (the shared rule
-     centers them). */
-  .page--full .subnav.scope-tabs.standalone { margin-left: 0; margin-right: 0; }
   .recbar-head { display: flex; align-items: baseline; gap: var(--s3);
     flex-wrap: wrap; margin-bottom: var(--s2); }
   .recbar-title { font-size: var(--fs-l); margin: 0; letter-spacing: -0.01em; }

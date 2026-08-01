@@ -4,13 +4,7 @@
 
 {% block content %}
 <div class="page page--narrow">
-  <header class="kin-hero">
-    <span class="kin-hero-icon">{% include "_icon.html" with name="capture" %}</span>
-    <p class="kin-hero-eyebrow">Inbox → CRM</p>
-    <h1 class="kin-hero-title">Email Capture</h1>
-    <p class="kin-hero-sub">BCC your recruiting mail and Coverage updates the contact for you.</p>
-  </header>
-
+  {% include "_pagehead.html" with eyebrow="Inbox → CRM" title="Email Capture" sub="BCC your recruiting mail and Coverage updates the contact for you." %}
   <div class="panel kin-reveal" style="--i:0" aria-label="Your capture address">
     <p>BCC or forward your recruiting mail to:</p>
     <p class="capture-addr">{{ address }}</p>

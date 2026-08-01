@@ -48,14 +48,15 @@
 
 {% block content %}
 <div class="page db-wrap">
-  <header class="kin-hero">
-    <span class="kin-hero-icon">{% include "_icon.html" with name="network" %}</span>
-    <p class="kin-hero-eyebrow">Chat on {{ touch.ts|date:"N j, Y" }}</p>
-    <h1 class="kin-hero-title">Debrief</h1>
-    <p class="kin-hero-sub">
-      What did your chat with {{ contact.name|smart_title }} actually teach you?
-      Write it down now, while you still have it.
-    </p>
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <p class="pagehead-eyebrow">Chat on {{ touch.ts|date:"N j, Y" }}</p>
+      <h1 class="pagehead-title">Debrief</h1>
+      <p class="pagehead-sub">
+        What did your chat with {{ contact.name|smart_title }} actually teach you?
+        Write it down now, while you still have it.
+      </p>
+    </div>
   </header>
 
   {% if offer_promotion %}

@@ -1,0 +1,31 @@
+{% comment %}
+The app page header. One component, every signed-in page — see `.pagehead` in
+static/css/coverage.css for why the app and the marketing pages get different
+headers at all.
+
+Usage:
+
+  {% include "_pagehead.html" with eyebrow="Your relationships" title="Network" sub="…" %}
+
+`eyebrow` and `sub` are optional; `title` is not. For an action button on the
+right, pass `action_url` + `action_label`:
+
+  {% include "_pagehead.html" with title="Network" action_url=… action_label="Add contact" %}
+
+A page needing richer content on either side (Today's live counters, a page
+with two buttons) writes the same three classes itself rather than growing
+this include a parameter per case — the CSS is what enforces consistency, and
+`{% include %}` has no slots worth faking.
+{% endcomment %}
+<header class="pagehead">
+  <div class="pagehead-text">
+    {% if eyebrow %}<p class="pagehead-eyebrow">{{ eyebrow }}</p>{% endif %}
+    <h1 class="pagehead-title">{{ title }}</h1>
+    {% if sub %}<p class="pagehead-sub">{{ sub }}</p>{% endif %}
+  </div>
+  {% if action_url %}
+    <div class="pagehead-actions">
+      <a class="btn btn-primary" href="{{ action_url }}">{{ action_label }}</a>
+    </div>
+  {% endif %}
+</header>

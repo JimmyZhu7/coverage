@@ -7,13 +7,8 @@
 
 {% block content %}
 <div class="page page--full">
-  <header class="kin-hero">
-    <span class="kin-hero-icon">{% include "_icon.html" with name="network" %}</span>
-    <p class="kin-hero-eyebrow">Your relationships</p>
-    <h1 class="kin-hero-title">Network</h1>
-    <p class="kin-hero-sub">Everyone you know at each firm, how warm they are, and who's next.</p>
-    <div class="actions"><a class="btn btn-primary" href="{% url 'crm:contact_new' %}">＋ Add Contact</a></div>
-  </header>
+  {% url 'crm:contact_new' as add_contact_url %}
+  {% include "_pagehead.html" with eyebrow="Your relationships" title="Network" sub="Everyone you know at each firm, how warm they are, and who's next." action_url=add_contact_url action_label="＋ Add Contact" %}
   <nav class="subnav scope-tabs standalone">
     <a href="{% url 'crm:contact_list' %}"{% if not scope %} aria-current="page"{% endif %}>All</a>
     <a href="?scope=hk"{% if scope == 'hk' %} aria-current="page"{% endif %}>Hong Kong</a>

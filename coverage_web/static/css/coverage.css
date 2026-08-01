@@ -287,6 +287,79 @@ main { min-height: 60vh; }
 .footer-logo:hover .logo-mark { transform: translateY(-1px); }
 
 /* ---- 4. Page furniture ---------------------------------------------------- */
+
+/* THE APP PAGE HEADER — one component, every signed-in page.
+ *
+ * The app had four header patterns across five nav pages: a tall marquee
+ * card (.kin-hero) on Network/Settings/Capture, a compact variant on
+ * Opportunities, a bespoke strip on Today, and a centered .page-head
+ * elsewhere. Same product, four different first impressions.
+ *
+ * The split this settles on is the one every serious app makes — Linear,
+ * Stripe's dashboard, Vercel, GitHub, Notion all do it: MARKETING pages get
+ * the decorated hero (art, gradient, big claim), TOOL pages get a compact
+ * left-aligned header (eyebrow, title, one line of orientation, actions on
+ * the right) and then get out of the way. A gradient card on a page whose
+ * job is a 900-row list is decoration charged to the content's budget.
+ *
+ * So: `.pagehead` on every app page, `.kin-hero` retained for `/` and
+ * `/pricing/` only.
+ *
+ * The hairline underneath is doing real work — it gives every page one
+ * shared horizontal datum, which is what makes different pages feel like
+ * one product rather than several. It is `--line`, not a border colour with
+ * weight, because the separation should register without being read.
+ */
+.pagehead {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--s4) var(--s5); flex-wrap: wrap;
+  padding-bottom: var(--s3); margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+.pagehead-text { min-width: 0; }
+/* Uppercase micro-label. Carries page context — a date on Today, a section
+   name elsewhere — and is the one place the eyebrow earns its keep, because
+   the title below it is a single word on most pages. */
+.pagehead-eyebrow {
+  margin: 0; font-family: var(--font-mono); font-size: var(--fs-micro);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  font-weight: var(--w-med); color: var(--ink-3);
+}
+/* Deliberately smaller than the marketing hero's clamp(30px, 4.4vw, 46px):
+   this is a label for a working page, not a claim. */
+.pagehead-title {
+  margin: 3px 0 0; line-height: 1.1; letter-spacing: -0.015em;
+  font: var(--w-black) clamp(24px, 2.6vw, 30px)/1.1 var(--font-display);
+  color: var(--ink);
+}
+.pagehead-sub {
+  margin: var(--s2) 0 0; color: var(--ink-2); font-size: var(--fs-s);
+  max-width: 68ch; line-height: 1.5;
+}
+/* Figures inside the sub line (Today's "7 to do · 7/14 this week") read as
+   data, not emphasis — mono + tabular so they never jiggle as they change. */
+.pagehead-sub b {
+  color: var(--ink); font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; font-weight: var(--w-bold);
+}
+/* Right-aligned actions. `margin-left: auto` rather than relying on
+   space-between alone, so a wrapped row still pins them to the right edge. */
+.pagehead-actions {
+  display: flex; align-items: center; gap: var(--s2);
+  margin-left: auto; flex: none;
+}
+@media (max-width: 640px) {
+  .pagehead { align-items: flex-start; }
+  .pagehead-actions { margin-left: 0; }
+}
+
+/* Scope tabs sit on the page's left rail, not centred. `.standalone` gets
+   `margin: auto` from the shared rule so it can centre under a centred
+   .page-head; under the left-aligned .pagehead that auto-centring was the
+   one element on each page that broke the rail. */
+.pagehead + .subnav.scope-tabs.standalone,
+.page .subnav.scope-tabs.standalone { margin-left: 0; margin-right: 0; }
+
 /* v3: page heads are centered and breathe — the rule below them is gone,
    whitespace does the separating now. */
 .page-head { text-align: center; padding-bottom: var(--s5); margin-bottom: var(--s5); }
@@ -322,6 +395,16 @@ main { min-height: 60vh; }
    sideways on narrow screens instead of wrapping. */
 .subnav.scope-tabs {
   width: max-content; max-width: 100%; overflow-x: auto;
+  /* flex-start, NOT center. This is a horizontal scroll container, and
+     `justify-content: center` on one whose content overflows pushes the
+     leading items into negative space that cannot be scrolled to — the
+     scrollbar's origin is 0, so anything laid out left of it is simply
+     unreachable. Measured at 375px: the strip was 516px of content in 349px,
+     with the active "All" tab at -162px and `scrollLeft` pinned to 0. The
+     first two filters on the Network page could not be tapped at all on a
+     phone. Centering is what `.standalone`'s auto margins are for, and those
+     only apply when the strip FITS. */
+  justify-content: flex-start;
   align-items: center; gap: 4px; padding: 4px; flex-wrap: nowrap;
   border: 1px solid var(--line); border-radius: 999px;
   background: var(--surface); box-shadow: var(--shadow-1);

@@ -186,12 +186,7 @@
 
 {% block content %}
 <div class="page">
-  <header class="kin-hero">
-    <span class="kin-hero-icon">{% include "_icon.html" with name="opportunities" %}</span>
-    <p class="kin-hero-eyebrow">Your pipeline</p>
-    <h1 class="kin-hero-title">My Applications</h1>
-    <p class="kin-hero-sub">Every role you saved or applied to, moving through the stages.</p>
-  </header>
+  {% include "_pagehead.html" with eyebrow="Your pipeline" title="My Applications" sub="Every role you saved or applied to, moving through the stages." %}
 
   <nav class="subnav scope-tabs standalone">
     <a href="{% url 'opportunities' %}">Browse Openings</a>

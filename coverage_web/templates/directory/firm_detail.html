@@ -7,16 +7,20 @@
 
 {% block content %}
 <div class="page">
-  <header class="page-head">
-    <p class="subnav"><a href="{% url 'opportunities' %}">← Opportunities</a></p>
-    <h1>{{ firm.name|smart_title }}</h1>
-    <p class="lede">
-      {% if firm.regions %}{{ firm.regions|join:", " }}{% endif %}
-      {% if firm.regions and firm.tracks %} · {% endif %}
-      {% if firm.tracks %}{{ firm.tracks|join:", " }}{% endif %}
-    </p>
+  <p class="subnav"><a href="{% url 'opportunities' %}">← Opportunities</a></p>
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <p class="pagehead-eyebrow">
+        {% if firm.regions %}{{ firm.regions|join:", " }}{% endif %}
+        {% if firm.regions and firm.tracks %} · {% endif %}
+        {% if firm.tracks %}{{ firm.tracks|join:", " }}{% endif %}
+      </p>
+      <h1 class="pagehead-title">{{ firm.name|smart_title }}</h1>
+    </div>
     {% if user.is_authenticated %}
-    <div class="actions"><a class="btn" href="{% url 'crm:contact_new' %}?firm={{ firm.slug }}">＋ Add a Contact Here</a></div>
+      <div class="pagehead-actions">
+        <a class="btn" href="{% url 'crm:contact_new' %}?firm={{ firm.slug }}">＋ Add a Contact Here</a>
+      </div>
     {% endif %}
   </header>
 

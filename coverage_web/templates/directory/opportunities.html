@@ -8,22 +8,15 @@
 {% block content %}
 <div class="page page--full">
   {% comment %}
-  Compact title row, this page only. The marquee hero card (gradient, icon,
-  eyebrow, sheen) costs ~230px on the one page whose job is density — with the
-  recommend bar and filter band below it, the first role card sat a full
-  screen under the fold. Other pages keep the marquee; the overrides are
-  scoped to `.kin-hero--compact` in _styles.html.
+  `personalized` is what makes the subtitle honest: unconditional, it told
+  every signed-out visitor their feed was "sorted to your firms" when no firm
+  of theirs was known. See the retired "Sorted for you" chip in _results.html.
   {% endcomment %}
-  <header class="kin-hero kin-hero--compact">
-    <h1 class="kin-hero-title">Opportunities</h1>
-    {% comment %}
-    Conditional on `personalized`, and that is the whole honesty contract now
-    that the "Sorted for you" chip is gone. Unconditional, this line told every
-    signed-out visitor their feed was "sorted to your firms" when no firm of
-    theirs was known — a claim the chip below used to be careful never to make.
-    {% endcomment %}
-    <p class="kin-hero-sub">Open roles ranked by deadline{% if personalized %}, sorted to your firms{% endif %}.</p>
-  </header>
+  {% if personalized %}
+    {% include "_pagehead.html" with eyebrow="Insight · internships · entry-level" title="Opportunities" sub="Open roles ranked by deadline, sorted to your firms." %}
+  {% else %}
+    {% include "_pagehead.html" with eyebrow="Insight · internships · entry-level" title="Opportunities" sub="Open roles ranked by deadline." %}
+  {% endif %}
 
   {% if user.is_authenticated %}
   <nav class="subnav scope-tabs standalone">

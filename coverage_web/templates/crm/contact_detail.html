@@ -13,15 +13,15 @@
     <span class="muted">/ {{ contact.name|smart_title }}</span>
   </nav>
 
-  <div class="row">
-    <div>
-      <h1>{{ contact.name|smart_title }}</h1>
-      <p class="lede">
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <p class="pagehead-eyebrow">
         {% if firm %}{{ firm.name|smart_title }}{% elif contact.firm_text %}{{ contact.firm_text|smart_title }}{% endif %}{% if contact.role %} · {{ contact.role }}{% endif %}
-        {% if contact.school_affiliation %} · <span class="chip">alum</span>{% endif %}
+        {% if contact.school_affiliation %} · alum{% endif %}
       </p>
+      <h1 class="pagehead-title">{{ contact.name|smart_title }}</h1>
     </div>
-    <div class="actions">
+    <div class="pagehead-actions">
       <a class="btn" href="{% url 'crm:contact_edit' contact.pk %}">Edit</a>
       {% comment %}
       Archive is a POST, not a link: it changes state, and a GET that hides a
@@ -34,7 +34,7 @@
         </form>
       {% endif %}
     </div>
-  </div>
+  </header>
 
   {% if contact.archived %}
     <div class="panel">
