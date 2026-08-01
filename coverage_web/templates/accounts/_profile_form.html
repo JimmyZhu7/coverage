@@ -74,11 +74,11 @@ styling for a group heading lives on the element. Every SINGLE control on this
 page does get a real `for` — see the a11y note in settings.html.
 {% endcomment %}
 <label>Regions of Interest</label>
-{{ form.regions }}
+<div class="chipset">{{ form.regions }}</div>
 {{ form.regions.errors }}
 
 <label>Tracks of Interest</label>
-{{ form.tracks }}
+<div class="chipset">{{ form.tracks }}</div>
 {{ form.tracks.errors }}
 
 <label for="{{ form.timezone.id_for_label }}">Timezone</label>

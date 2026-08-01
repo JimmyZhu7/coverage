@@ -367,6 +367,80 @@ main { min-height: 60vh; }
 .lede { color: var(--ink-2); margin: 0 auto var(--s3); font-size: var(--fs-m); max-width: 56ch; }
 .page-head .subnav, .page-head .stats { justify-content: center; }
 
+/* ---- Chip set — multi-select taxonomy as toggle pills --------------------
+ * Regions and Tracks were `CheckboxSelectMultiple` stacked one per line: 13
+ * rows and ~900px of scroll to answer two questions, with the checkbox
+ * carrying all the state and the label carrying none of it. As pills they
+ * wrap into four rows, and the whole selection is legible in one glance
+ * because the SHAPE changes, not a 13px box at the far left.
+ *
+ * Django nests the input INSIDE its label, so there is no sibling to hang
+ * `:checked +` off — hence `:has()`. The entire visual treatment lives inside
+ * `@supports selector(:has(*))`: a browser without it keeps native
+ * checkboxes, which are plain but completely usable. The control is never
+ * hidden unless something is drawn in its place.
+ *
+ * The input stays in the DOM and keeps focus, so keyboard and screen-reader
+ * behaviour is the native one — Tab to each, Space to toggle, state announced
+ * by the checkbox itself. `:has(:focus-visible)` moves the ring to the pill.
+ */
+.chipset > div { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0 0 var(--s2); }
+/* The per-choice wrapper Django emits carries no meaning — let the labels be
+   the flex items directly. */
+.chipset > div > div { display: contents; }
+
+@supports selector(:has(*)) {
+  .chipset input[type="checkbox"] {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+    white-space: nowrap; border: 0;
+  }
+  .chipset > div > div > label {
+    display: inline-flex; align-items: center; gap: var(--s2);
+    padding: 7px 15px 7px 11px; cursor: pointer; user-select: none;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--surface); color: var(--ink-2);
+    font-size: var(--fs-s); font-weight: var(--w-med); line-height: 1.25;
+    box-shadow: var(--shadow-1); white-space: nowrap;
+    transition: background var(--t-fast), border-color var(--t-fast),
+      color var(--t-fast), box-shadow var(--t-med), transform var(--t-fast);
+  }
+  /* The indicator. A hollow ring that fills and gains a tick — the state is
+     carried by fill AND glyph AND weight, never by colour alone. */
+  .chipset > div > div > label::before {
+    content: ""; flex: none; width: 17px; height: 17px; border-radius: 50%;
+    border: 1.5px solid var(--line-strong); background: transparent;
+    background-repeat: no-repeat; background-position: center;
+    background-size: 11px 11px;
+    transition: background-color var(--t-fast), border-color var(--t-fast),
+      transform var(--t-med);
+  }
+  .chipset > div > div > label:hover {
+    border-color: var(--accent-line); box-shadow: var(--shadow-2);
+    transform: translateY(-1px);
+  }
+  /* Tactile: the pill gives under the press, then springs back. */
+  .chipset > div > div > label:active { transform: translateY(0) scale(0.97); }
+  .chipset > div > div > label:has(:focus-visible) {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .chipset > div > div > label:has(:checked) {
+    background: var(--accent-soft); border-color: var(--accent);
+    color: var(--accent-ink); font-weight: var(--w-bold);
+  }
+  .chipset > div > div > label:has(:checked)::before {
+    background-color: var(--accent); border-color: var(--accent);
+    /* Inline tick, so there is no request and it stays crisp at any zoom. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    animation: chip-check 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes chip-check {
+    0%   { transform: scale(0.6); }
+    60%  { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+}
+
 /* v2: stat strip — ledger figures for a page's key counts (Today, home). */
 .stats { display: flex; gap: var(--s5); flex-wrap: wrap; margin: var(--s4) 0 0; }
 .stat { display: flex; flex-direction: column; gap: 2px; min-width: 72px; }
@@ -382,9 +456,25 @@ main { min-height: 60vh; }
 .subnav { display: flex; gap: var(--s2); font-size: var(--fs-s); margin: var(--s3) 0 0; flex-wrap: wrap; }
 .subnav a { padding: 4px 12px; border-radius: 999px; transition: background-color var(--t-fast); }
 .subnav a:hover { background: var(--accent-soft); text-decoration: none; }
+/* Breadcrumbs sit on the page's LEFT RAIL, directly above the title.
+ *
+ * They used to be `justify-content: center` while spanning the full width, so
+ * on a 1440px page the "back" links floated in the middle with the title at
+ * x=24 — they read as stray links belonging to nothing, and a reader scanning
+ * the left edge for a way back never passed over them. Reported as "once you
+ * go into this page you can't go back": the links worked, they just weren't
+ * where anyone looks for them.
+ *
+ * `margin-bottom` is tightened too: a breadcrumb belongs to the header it
+ * precedes, and 24px of air made it look like a separate band.
+ */
 .page > .subnav:first-child, .subnav.standalone {
-  margin: 0 0 var(--s5); justify-content: center;
+  margin: 0 0 var(--s3); justify-content: flex-start;
 }
+/* First link flush to the rail: the pill padding would otherwise inset the
+   text 12px and break alignment with the title beneath it. */
+.page > .subnav:first-child > :first-child,
+.subnav.standalone > :first-child { margin-left: -12px; }
 .subnav a[aria-current="page"], .subnav strong {
   color: var(--accent-ink); font-weight: var(--w-med); background: var(--accent-soft);
   border-radius: 999px; padding: 4px 12px;

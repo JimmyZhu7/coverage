@@ -7,10 +7,11 @@
 
 {% block content %}
 <div class="page">
+  {% comment %}One link, pointing at the page this one came from. The old
+  three-item crumb ("Today · Network · / Archived") gave the parent page the
+  same weight as an unrelated one and buried it mid-row.{% endcomment %}
   <nav class="subnav standalone">
-    <a href="{% url 'crm:week' %}">Today</a>
-    <a href="{% url 'crm:contact_list' %}">Network</a>
-    <span class="muted">/ Archived</span>
+    <a href="{% url 'crm:contact_list' %}">← Network</a>
   </nav>
 
   <header class="pagehead">

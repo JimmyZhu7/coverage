@@ -7,10 +7,10 @@
 
 {% block content %}
 <div class="page">
+  {% comment %}The contact's own name is already the <h1> directly below, so
+  the crumb doesn't repeat it — it just points back.{% endcomment %}
   <nav class="subnav standalone">
-    <a href="{% url 'crm:week' %}">Today</a>
-    <a href="{% url 'crm:contact_list' %}">Network</a>
-    <span class="muted">/ {{ contact.name|smart_title }}</span>
+    <a href="{% url 'crm:contact_list' %}">← Network</a>
   </nav>
 
   <header class="pagehead">
