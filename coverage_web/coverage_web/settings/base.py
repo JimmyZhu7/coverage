@@ -225,6 +225,19 @@ ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 
+# The email page is a CHANGE flow, not an address collection. Without this,
+# allauth's account_email view is its multi-address manager — add as many
+# addresses as you like, mark one primary — which is a mental model no
+# consumer product ships (GitHub/Linear/Notion all model "your email, and a
+# verified flow to replace it"). With it, adding a new address + verifying it
+# atomically replaces the old one, and the old address keeps working until
+# the new one is confirmed. Sign-in stays email-only, so the sign-in
+# identifier and this flow can never disagree.
+ACCOUNT_CHANGE_EMAIL = True
+# The ceiling the change flow needs: the current address plus the one
+# awaiting verification. Not user-facing inventory.
+ACCOUNT_MAX_EMAIL_ADDRESSES = 2
+
 SOCIALACCOUNT_PROVIDERS = {
     "google": {
         # LOGIN-ONLY. Never add a scope starting with "gmail" here — see the

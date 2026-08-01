@@ -547,6 +547,11 @@ main { min-height: 60vh; }
 }
 .honesty strong { color: var(--accent-ink); }
 
+/* Flash landing zone on the marketing page — the deletion receipt renders
+   here. Width-capped and centred so a one-line receipt doesn't span 1392px. */
+.home-msgs { max-width: 720px; margin: 0 auto var(--s4); }
+.home-msgs .msg { text-align: center; }
+
 .msg { padding: var(--s2) var(--s3); border-radius: var(--r-ctl);
   margin: var(--s2) 0; font-size: var(--fs-s); border: 1px solid var(--line); }
 .msg.success { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }

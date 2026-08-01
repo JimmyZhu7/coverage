@@ -7,13 +7,10 @@ of your data have been deleted" — a sentence the user has to take on faith at
 the exact moment they have the least reason to. The counts cost nothing extra
 (they are the ORM's own return values) and turn the claim into a receipt.
 
-KNOWN GAP, asserted here rather than hidden: the redirect target is the
-marketing landing page, and neither `templates/core/home.html` nor
-`templates/base.html` renders `{% for m in messages %}`. So this flash — and
-the plainer one that preceded it — is queued and never displayed. Those two
-templates were outside this change's ownership; the one-line fix is reported
-alongside it. These tests pin the message's CONTENT so the fix is a one-liner
-in the template and nothing here has to change.
+The gap this file used to document is closed: home.html (the redirect
+target) now renders a messages block, so the receipt is actually displayed
+at the only moment it can be. `test_the_receipt_renders_on_the_landing_page`
+pins that end to end; the earlier tests keep pinning the CONTENT.
 """
 
 from __future__ import annotations
@@ -95,3 +92,28 @@ def test_a_wrong_confirmation_deletes_nothing(client, student):
     # The apostrophe renders escaped, so match the half that doesn't.
     assert "t match. Type your email address exactly" in resp.content.decode()
     assert User.objects.filter(email="goodbye@example.com").exists()
+
+
+def test_the_receipt_renders_on_the_landing_page(client, student):
+    """End to end: delete, follow the redirect, and the receipt is IN THE
+    RESPONSE BODY — not merely queued in the session. This is the half no
+    content assertion covers: `get_messages` passing while the template
+    dropped the flash on the floor is precisely the bug this file used to
+    document as a known gap."""
+    firm = Firm.objects.create(name="Evercore", slug="evercore")
+    c = Contact.all_objects.create(user=student, name="A", firm=firm)
+    Touch.all_objects.create(
+        user=student, contact=c, kind="outreach", channel="email",
+        ts=timezone.now(),
+    )
+    client.force_login(student)
+
+    resp = client.post(
+        reverse("accounts:delete"),
+        {"confirm": "goodbye@example.com"},
+        follow=True,
+    )
+    assert resp.status_code == 200
+    assert resp.request["PATH_INFO"] == "/"
+    body = resp.content.decode()
+    assert "1 contact" in body and "1 touch" in body

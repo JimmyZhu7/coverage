@@ -182,6 +182,21 @@
 
 {% block content %}
 <div class="page">
+  {% comment %}
+  Account deletion ends here: delete_account writes its receipt ("Deleted 137
+  contacts, 138 touches, …") with messages.success and redirects to "/", the
+  only page a just-deleted user can still see. This block is the receipt's
+  ONLY chance to render — without it the flash sat in the session unread and
+  the strongest honesty gesture the product makes was invisible. role=status,
+  not alert: it confirms a completed action, it doesn't interrupt.
+  {% endcomment %}
+  {% if messages %}
+    <div class="home-msgs">
+      {% for m in messages %}
+        <p class="msg {% if m.tags %}{{ m.tags }}{% endif %}" role="status">{{ m }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
   <header class="kin-hero">
     <span class="kin-hero-icon">{% include "_icon.html" with name="home" %}</span>
     <p class="kin-hero-eyebrow">Campus recruiting · finance &amp; consulting</p>

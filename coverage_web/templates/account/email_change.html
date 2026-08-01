@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% comment %}
+The template ACCOUNT_CHANGE_EMAIL = True actually renders. allauth's
+account_email view switches from email.html to THIS name when the change
+flow is on — the styled email.html kept working right up until the setting
+landed, and then the page silently fell back to allauth's bare default
+(caught by test_the_allauth_pages_render_in_the_coverage_shell).
+
+Context contract, from allauth's own email_change.html:
+  current_emailaddress — the verified address in use (may be None pre-verify)
+  new_emailaddress     — the replacement awaiting verification, or None
+  form                 — one "email" field; submit name is action_add
+The re-send / cancel buttons post the PENDING address, so they ride a second,
+hidden form exactly as the default does — one combined form would post two
+values named "email" and the wrong one would win.
+{% endcomment %}
+
+{% block title %}Email Address · Coverage{% endblock %}
+
+{% block head %}{% include "account/_account_page.html" %}{% endblock %}
+
+{% block content %}
+<div class="page page--narrow acct-wrap">
+  <a class="acct-back" href="{% url 'accounts:settings' %}#security">← Back to settings</a>
+  <header class="page-head"><h1>Email Address</h1></header>
+  <p class="acct-lede">How you sign in, and where password resets go. Changing
+    it is a two-step swap: enter the new address, then click the link we send
+    it. Your current address keeps working until the new one is confirmed.</p>
+
+  <div class="panel">
+    {% if current_emailaddress %}
+      <label for="acct-current-email">Current email</label>
+      <input id="acct-current-email" type="email" disabled
+             value="{{ current_emailaddress.email }}">
+    {% endif %}
+
+    {% if new_emailaddress %}
+      <label for="acct-pending-email">{% if current_emailaddress %}Changing to{% else %}Current email{% endif %}</label>
+      <input id="acct-pending-email" type="email" disabled
+             value="{{ new_emailaddress.email }}">
+      <p class="field-hint">Still pending — check that inbox for the
+        verification link.</p>
+      <div class="actions">
+        <button form="pending-email" type="submit" name="action_send" class="btn">Re-send Verification</button>
+        {% if current_emailaddress %}
+          <button form="pending-email" type="submit" name="action_remove" class="btn btn-danger">Cancel Change</button>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <form class="acct-form" method="post" action="{% url 'account_email' %}">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <p class="msg error" role="alert">{{ form.non_field_errors|striptags }}</p>
+      {% endif %}
+      <label for="{{ form.email.id_for_label }}">Change to</label>
+      {{ form.email }}
+      {{ form.email.errors }}
+      <div class="actions">
+        <button type="submit" name="action_add" class="btn btn-primary">Change Email</button>
+      </div>
+    </form>
+  </div>
+
+  {% if new_emailaddress %}
+    <form id="pending-email" hidden method="post" action="{% url 'account_email' %}">
+      {% csrf_token %}
+      <input type="hidden" name="email" value="{{ new_emailaddress.email }}">
+    </form>
+  {% endif %}
+</div>
+{% endblock %}
