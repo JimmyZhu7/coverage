@@ -211,14 +211,25 @@ def test_a_warm_contact_at_an_unranked_firm_outranks_a_cold_one_at_tier_one():
 
 
 def test_within_a_class_the_longest_silent_goes_first():
+    """Ordering only — every contact here must already be DUE.
+
+    The offsets are calendar days but the cadence threshold
+    (`followup_after_business_days`, 6) is in BUSINESS days, and the two
+    diverge by weekday: 8 calendar days is 6 business days Mon-Fri but only 5
+    on a Saturday. The original 8 therefore made this test pass five days a
+    week and fail on the weekend — a real failure, seen on Sat 2026-08-01,
+    not flakiness. 10 is the smallest offset that clears 6 business days on
+    every weekday (and still sits under the park threshold), so the test now
+    measures the ordering it is named for rather than the day it runs on.
+    """
     user = _user(weekly_touch_goal=14)
-    for days in (8, 30, 15):
+    for days in (10, 30, 15):
         c = Contact.all_objects.create(user=user, name=f"Silent {days:02d}")
         _touch(user, c, "outreach", days_ago=days)
 
     ctx = _cockpit_context(user)
     planned = [a for lane in ctx["lanes"] for a in lane["items"]]
-    assert [a["contact"]["name"] for a in planned] == ["Silent 30", "Silent 15", "Silent 08"]
+    assert [a["contact"]["name"] for a in planned] == ["Silent 30", "Silent 15", "Silent 10"]
 
 
 def test_a_confirmed_deadline_is_never_capped_away():

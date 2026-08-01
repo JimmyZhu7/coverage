@@ -16,7 +16,13 @@
   {% endcomment %}
   <header class="kin-hero kin-hero--compact">
     <h1 class="kin-hero-title">Opportunities</h1>
-    <p class="kin-hero-sub">Open roles ranked by deadline, sorted to your firms.</p>
+    {% comment %}
+    Conditional on `personalized`, and that is the whole honesty contract now
+    that the "Sorted for you" chip is gone. Unconditional, this line told every
+    signed-out visitor their feed was "sorted to your firms" when no firm of
+    theirs was known — a claim the chip below used to be careful never to make.
+    {% endcomment %}
+    <p class="kin-hero-sub">Open roles ranked by deadline{% if personalized %}, sorted to your firms{% endif %}.</p>
   </header>
 
   {% if user.is_authenticated %}

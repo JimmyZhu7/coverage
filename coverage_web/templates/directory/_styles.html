@@ -227,16 +227,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.5; }
   .scope-line a { color: var(--accent-ink); }
 
-  /* The personalization marker was a full-width accent banner holding four
-     words; it is a status chip, not a section. Overrides the shared .honesty
-     rule (coverage.css) on this page only. Its wording never appears in this
-     stylesheet: the feed-honesty tests assert the phrase is ABSENT from the
-     whole response for a signed-out visitor, comments included. */
-  .stat-strip + .honesty, .honesty { display: inline-flex; align-items: center;
-    gap: 5px; width: fit-content; max-width: none; margin: 0 0 var(--s3);
-    padding: 3px 11px; font-size: var(--fs-xs); text-align: left;
-    background: var(--accent-soft); border: 1px solid var(--accent-line);
-    border-radius: 999px; }
 
   /* ======================================================================
      "Picked for you" bar — scored roles grouped by firm, between the hero and

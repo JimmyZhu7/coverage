@@ -56,9 +56,15 @@ hidden rather than shown as a weak "0".{% endcomment %}
   {% if dash.fresh_count %}<span class="ss-item"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh ({{ dash.fresh_days }}d)</span>{% endif %}
 </div>
 
-{% if personalized %}
-  <p class="honesty">★ <strong>Sorted for you.</strong></p>
-{% endif %}
+{% comment %}
+The "Sorted for you" chip used to sit here. It said one thing, once, and the
+hero's subtitle already says it — so it was a second label for a fact the page
+had stated two inches higher. Removed rather than restyled.
+
+The honesty contract it carried did NOT go with it: the subtitle is now
+conditional on `personalized`, so the page still never claims an ordering it
+did not perform. See opportunities.html.
+{% endcomment %}
 
 {% comment %}
 `clusters or pick_cluster`, not `clusters` alone. A filter that matches no

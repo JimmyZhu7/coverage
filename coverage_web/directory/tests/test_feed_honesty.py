@@ -166,7 +166,13 @@ def test_show_all_qs_actually_shows_the_hidden_roles(client):
 
 
 # ---------------------------------------------------------------------------
-# A4 — "Sorted for you" must actually render when the order was personalized.
+# A4 — the page must claim a personalized ordering ONLY when it performed one.
+#
+# The claim used to live in a "Sorted for you" chip above the results. That
+# chip is gone (it restated the hero subtitle two inches below it), so the
+# subtitle carries the contract alone and is conditional on `personalized`.
+# Unconditional, it told every signed-out visitor their feed was "sorted to
+# your firms" — exactly the lie the chip had been careful not to tell.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
@@ -183,7 +189,9 @@ def test_personalized_flag_is_in_context_and_renders(client):
 
     resp = client.get(reverse("opportunities"))
     assert resp.context["personalized"] is True
-    assert "Sorted for you" in resp.content.decode()
+    assert "sorted to your firms" in resp.content.decode()
+    # The retired chip must not come back alongside it.
+    assert "Sorted for you" not in resp.content.decode()
 
 
 @pytest.mark.django_db
@@ -192,7 +200,9 @@ def test_signed_out_feed_is_not_personalized(client):
     _opp(firm, "https://x/1")
     resp = client.get(reverse("opportunities"))
     assert resp.context["personalized"] is False
-    assert "Sorted for you" not in resp.content.decode()
+    body = resp.content.decode()
+    assert "sorted to your firms" not in body
+    assert "Sorted for you" not in body
 
 
 # ---------------------------------------------------------------------------
