@@ -107,6 +107,12 @@
        long label gets crushed to unusable width. */
     .set-row { flex-direction: column; align-items: stretch; gap: var(--s3); }
     .set-row-control { justify-content: flex-start; flex-wrap: wrap; }
+    /* A stacked row's BUTTON stretches to the row's full width — centred by
+       construction, and a bigger tap target where taps are the input. Left
+       hanging at flex-start it floated in dead space (reported against the
+       Danger Zone's Delete Account, and true of every stacked row's button).
+       Buttons only: a select or toggle at full width reads as a text field. */
+    .set-row-control .btn { flex: 1 1 auto; text-align: center; justify-content: center; }
     .set-row-value { align-self: flex-start; }
     .set-copy { flex-direction: column; }
   }
