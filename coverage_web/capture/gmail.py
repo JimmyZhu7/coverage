@@ -55,6 +55,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import timedelta
 
+from django.db import models
 from django.utils import timezone
 
 from analytics.events import record_event
@@ -62,6 +63,7 @@ from capture.providers import CaptureProvider, InteractionEvent
 from capture.services import AmbiguousContactError
 from crm import services as crm_services
 from crm.models import Contact, Touch
+from directory.models import EmailPatternStats
 
 EXTRACTION_VERSION = "gmail-findings-1"
 TOUCH_CHANNEL = "email"  # every finding here comes from a Gmail thread
@@ -107,6 +109,13 @@ class SyncResult:
     # no correct contact to log this finding against — not zero matches,
     # too many. Reported separately so it doesn't hide inside "unmatched".
     skipped_ambiguous: int = 0
+    # Per-firm email-format evidence. A delivered message proves the address
+    # format guessed for that firm works; a bounce proves it doesn't. The
+    # counts live on the SHARED `EmailPatternStats` (keyed on firm, no user
+    # column) because the aggregate helps everyone while the raw events stay
+    # in the user's own private Touch rows — build-plan §2's split exactly.
+    pattern_delivered: int = 0
+    pattern_bounced: int = 0
     details: list[str] = field(default_factory=list)
 
     def as_stats(self) -> dict:
@@ -121,6 +130,8 @@ class SyncResult:
             "skipped_already_logged": self.skipped_already_logged,
             "skipped_unmatched": self.skipped_unmatched,
             "skipped_ambiguous": self.skipped_ambiguous,
+            "pattern_delivered": self.pattern_delivered,
+            "pattern_bounced": self.pattern_bounced,
         }
 
 
@@ -264,6 +275,32 @@ def _note_alternate_email(contact: Contact, address: str) -> None:
     contact.save(update_fields=["notes"])
 
 
+def _record_pattern_evidence(contact: Contact, *, delivered: bool) -> bool:
+    """Bank one firm-level data point about whether its address format works.
+
+    Called at most once per contact, ever: `Contact.email_pattern_recorded`
+    is the guard. Without it a contact whose thread stays in the search
+    window would re-bank the same evidence every single day, and a firm's
+    confidence would climb on one real send.
+
+    Returns True if a row was actually updated, so the caller can count it.
+    A contact with no firm has nothing to say about any firm's format.
+    """
+    if contact.firm_id is None or contact.email_pattern_recorded:
+        return False
+
+    stats, _ = EmailPatternStats.objects.get_or_create(firm_id=contact.firm_id)
+    if delivered:
+        stats.delivered = models.F("delivered") + 1
+    else:
+        stats.bounced = models.F("bounced") + 1
+    stats.save(update_fields=["delivered" if delivered else "bounced", "last_updated"])
+
+    contact.email_pattern_recorded = True
+    contact.save(update_fields=["email_pattern_recorded"])
+    return True
+
+
 def _touch_kind_for(finding: dict) -> str | None:
     """The ladder stage a finding represents, or None if it shows no progress.
     Order matters: a completed chat outranks a mere reply on the same thread."""
@@ -353,6 +390,13 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # finds the email already blank and does nothing, so the daily run
         # can't stack notes.
         if finding.get("bounced"):
+            # Bank the evidence BEFORE clearing the address: the bounce is a
+            # fact about the format the firm uses, and clearing wipes the
+            # only copy of what was tried.
+            if not dry_run and _record_pattern_evidence(contact, delivered=False):
+                result.pattern_bounced += 1
+            elif dry_run and contact.firm_id and not contact.email_pattern_recorded:
+                result.pattern_bounced += 1
             if contact.email:
                 if not dry_run:
                     _note_bounce(contact, contact.email)
@@ -395,6 +439,18 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                     f"{name}: found a second address ({email}) — noted, "
                     f"primary ({current}) kept"
                 )
+
+        # A reply is the strongest proof an address format works: the person
+        # received the mail and answered. `outreach_sent` alone is weaker —
+        # it proves the message left, not that it landed — so only a reply or
+        # a chat banks a "delivered". Recorded once per contact ever, guarded
+        # by `email_pattern_recorded`.
+        if finding.get("replied") or finding.get("chat_status") in ("scheduled", "completed"):
+            if not dry_run:
+                if _record_pattern_evidence(contact, delivered=True):
+                    result.pattern_delivered += 1
+            elif contact.firm_id and not contact.email_pattern_recorded:
+                result.pattern_delivered += 1
 
         thread_id = (finding.get("thread_id") or "").strip()
         marker = f"[gmail:{thread_id}] " if thread_id else ""

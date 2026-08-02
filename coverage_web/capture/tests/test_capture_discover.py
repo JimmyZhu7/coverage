@@ -1,0 +1,135 @@
+"""The discovery door: people a mailbox scan found who aren't on the board yet.
+
+`capture_gmail` never creates a contact, and that rule is right for matching —
+an unmatched finding there means the systems drifted, and inventing a row
+would hide it. Discovery is the opposite intent and gets its own command
+rather than a flag that softens the other one's contract.
+
+The tests below are mostly about what it REFUSES to do, because that is where
+an automated nightly job can quietly do damage.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from django.core.management import call_command
+
+from crm.models import Contact, Touch
+from directory.models import Firm
+
+pytestmark = pytest.mark.django_db(transaction=True)
+
+
+@pytest.fixture
+def user(django_user_model):
+    return django_user_model.objects.create_user(email="jimmy@example.com", password="x")
+
+
+@pytest.fixture
+def run(tmp_path, user):
+    n = {"i": 0}
+
+    def _run(people, **opts):
+        n["i"] += 1
+        path = tmp_path / f"people-{n['i']}.json"
+        path.write_text(json.dumps(people), encoding="utf-8")
+        call_command("capture_discover", email=user.email, findings=str(path), **opts)
+
+    return _run
+
+
+def test_a_new_person_becomes_a_contact(run, user):
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "role_guess": "Analyst"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    assert c.email == "ada@gs.com"
+    assert c.role == "Analyst"
+    assert c.source == "capture"
+    assert "Discovered by mailbox scan" in c.notes
+
+
+def test_someone_already_tracked_is_not_duplicated(run, user):
+    Contact.all_objects.create(user=user, name="Ada Lovelace", email="ada@gs.com")
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com"}])
+    assert Contact.objects.for_user(user).filter(name="Ada Lovelace").count() == 1
+
+
+def test_a_name_match_alone_is_enough_to_dedupe(run, user):
+    """The scan often has no address — a person found on a CC line, say."""
+    Contact.all_objects.create(user=user, name="Ada Lovelace")
+    run([{"name": "ada lovelace"}])
+    assert Contact.objects.for_user(user).count() == 1
+
+
+def test_an_archived_person_is_reported_never_resurrected(run, user):
+    """Archiving is a deliberate user action. A scan finding them again is
+    not consent to undo it — and silently creating a second row would fork
+    the relationship's history."""
+    Contact.all_objects.create(
+        user=user, name="Ada Lovelace", email="ada@gs.com", archived=True
+    )
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com"}])
+
+    rows = Contact.objects.for_user(user).filter(name="Ada Lovelace")
+    assert rows.count() == 1, "no second row was forked"
+    assert rows.first().archived is True, "still archived"
+
+
+def test_a_chat_logs_a_real_touch_through_the_ratchet(run, user):
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "chatted": True}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    assert c.warmth == "chatted"
+    assert c.thread_state == "chat_done"
+    assert Touch.objects.for_user(user).filter(contact=c, kind="chat").exists()
+
+
+def test_a_reply_logs_a_reply_not_a_chat(run, user):
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "replied": True}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    assert c.warmth == "replied"
+
+
+def test_no_evidence_means_no_touch_and_no_warmth(run, user):
+    """Someone found on a distribution list never wrote to you. Inventing
+    warmth would put them in the cadence queue as if they had."""
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    assert c.warmth == "cold"
+    assert Touch.objects.for_user(user).filter(contact=c).count() == 0
+
+
+def test_a_known_firm_slug_links_the_contact_to_the_directory(run, user):
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    run([{"name": "Ada Lovelace", "firm": "gs"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    assert c.firm_id == firm.id
+
+
+def test_an_unknown_firm_is_kept_as_text_not_dropped(run, user):
+    """`firm_text` exists so capture never blocks on directory coverage."""
+    run([{"name": "Ada Lovelace", "firm": "some-boutique"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    assert c.firm_id is None
+    assert c.firm_text == "some-boutique"
+
+
+def test_dry_run_creates_nothing(run, user):
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com"}], dry_run=True)
+    assert Contact.objects.for_user(user).count() == 0
+
+
+def test_a_nameless_finding_is_skipped(run, user):
+    run([{"email": "someone@gs.com"}, {"name": "  "}])
+    assert Contact.objects.for_user(user).count() == 0
+
+
+def test_discovery_is_scoped_to_the_named_user(run, user, django_user_model):
+    """Another user's contact with the same name must not suppress this
+    user's discovery — the dedup has to be tenant-scoped."""
+    other = django_user_model.objects.create_user(email="other@x.com", password="x")
+    Contact.all_objects.create(user=other, name="Ada Lovelace", email="ada@gs.com")
+
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com"}])
+    assert Contact.objects.for_user(user).filter(name="Ada Lovelace").count() == 1
+    assert Contact.objects.for_user(other).filter(name="Ada Lovelace").count() == 1

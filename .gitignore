@@ -62,3 +62,9 @@ coverage.xml
 .idea/
 *.swp
 *.swo
+
+# One-shot import markers are LOCAL state. The email-pattern import adds to
+# existing counts rather than replacing them, so a fresh clone that inherited
+# a "already imported" marker would skip a real import — and one that
+# inherited nothing would double-count. Keep it per-machine.
+data/imports/.*_imported

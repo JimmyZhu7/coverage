@@ -458,15 +458,23 @@ def test_cadence_params_tolerates_a_non_dict_column():
 
 @pytest.mark.django_db
 def test_user_cadence_params_change_the_queue():
-    """The override reaches the engine: a contact 2 business days past one
-    cold outreach isn't due under the default 5-business-day window, but is
-    once the user tightens it."""
+    """The override reaches the engine: a contact a few days past one cold
+    outreach isn't due under the default window, but is once the user
+    tightens it to 1 business day.
+
+    THREE calendar days, not two. The threshold is in BUSINESS days and the
+    backdate is in CALENDAR days, and the two diverge across a weekend: two
+    calendar days before a Sunday is a Friday, which is ZERO business days
+    elapsed, so the tightened window had nothing to fire on and the test
+    failed every Saturday and Sunday since it was written (caught Sun
+    2026-08-02). Three is the smallest offset that clears 1 business day on
+    every weekday."""
     user = _user()
     contact = Contact.all_objects.create(
         user=user, name="Recently Emailed", warmth="cold", thread_state="no_reply",
     )
     Touch.all_objects.create(
-        user=user, contact=contact, ts=timezone.now() - timedelta(days=2),
+        user=user, contact=contact, ts=timezone.now() - timedelta(days=3),
         kind="outreach", channel="email",
     )
 

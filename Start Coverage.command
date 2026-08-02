@@ -27,10 +27,15 @@ echo "• Waking the database…"
 open -a Postgres
 for _ in $(seq 1 30); do pg_isready -h localhost -p 5432 -q 2>/dev/null && break; sleep 1; done
 
-# 2) Make sure the tables and the demo student exist (safe to repeat).
+# 2) Make sure the tables exist (safe to repeat).
+#
+# The demo-student seed used to run here on every launch. It was right when
+# nobody had signed up yet and an empty app looked broken; it is just noise
+# now that the real account has 139 contacts of its own. The demo user still
+# exists and is tenant-isolated — run `scripts/demo_seed.py` by hand if you
+# ever need a populated account to show someone.
 echo "• Preparing your data…"
 uv run --package coverage-web python coverage_web/manage.py migrate --noinput >/dev/null 2>&1
-uv run --package coverage-web python coverage_web/manage.py shell < scripts/demo_seed.py 2>/dev/null | grep -i demo || true
 
 # 2b) If the listings haven't been refreshed in 12+ hours, refresh them in the
 #     background (scrape + classify + re-verify) so the feed is never stale
