@@ -68,3 +68,13 @@ coverage.xml
 # a "already imported" marker would skip a real import — and one that
 # inherited nothing would double-count. Keep it per-machine.
 data/imports/.*_imported
+
+# ---- Private: never commit, this repo is PUBLIC -------------------------
+# Real people's names, private assessments of them, personal research, and
+# the founder's own target list. Scrubbed from history 2026-08-02; these
+# rules stop them coming back. Local copies live here and are backed up to
+# ~/Desktop/coverage-private-not-in-git.
+docs/research/
+data/
+scripts/import_hk_coffee_chats.py
+scripts/seed_founder.py
