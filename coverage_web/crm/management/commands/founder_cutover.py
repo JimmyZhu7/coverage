@@ -54,6 +54,9 @@ from crm.models import Contact, Touch, UserFirm
 from crm.services import _pipeline_connection
 
 _DEFAULT_DB = Path(
+    # Retired 2026-08-02: the live folder is gone. This default is kept only
+    # so the error message names what happened; the real file is inside
+    # ~/Desktop/recruitment-opportunities-final-archive-2026-08-02.zip.
     "/Users/zhujimmy/Claude/Projects/Recruitment Opportunities/campaign/campaign.db"
 )
 _DEFAULT_FIRMS_YAML = _DEFAULT_DB.parent / "firms.yaml"
@@ -85,7 +88,9 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         db_path = Path(opts["db"])
         if not db_path.exists():
-            raise CommandError(f"campaign.db not found at {db_path}")
+            raise CommandError(
+                f"campaign.db not found at {db_path}. The source system was retired and its folder deleted on 2026-08-02. This import already ran (its data is in Postgres). To ever run it again, unzip ~/Desktop/recruitment-opportunities-final-archive-2026-08-02.zip and pass the extracted path explicitly."
+            )
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
 

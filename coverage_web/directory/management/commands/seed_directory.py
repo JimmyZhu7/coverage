@@ -30,8 +30,12 @@ from django.db import transaction
 from directory.models import Firm, FirmDate
 from directory.seed_parsers import parse_firms_yaml, parse_timeline_yaml
 
-# Founder's personal tool — the canonical source of shared firm facts.
-_DEFAULT_CAMPAIGN = Path("/Users/zhujimmy/Claude/Projects/Recruitment Opportunities/campaign")
+# The seed data used to be read live out of the founder's pre-Coverage
+# project folder. That system is retired and its folder deleted (final
+# archive: ~/Desktop/recruitment-opportunities-final-archive-2026-08-02.zip),
+# so the canonical copies now live in THIS repo — which also means a fresh
+# clone can seed itself without any external directory existing.
+_DEFAULT_SEEDS = Path(__file__).resolve().parents[4] / "data" / "seeds"
 
 # The founder's timeline confidence is a string label (see confidence.py's
 # rumor < reported < confirmed_official ladder). The shared `firm_dates.confidence`
@@ -88,8 +92,8 @@ class Command(BaseCommand):
     help = "Seed shared firms + firm_dates from the founder's firms.yaml and kb/timeline_*.yaml (idempotent)."
 
     def add_arguments(self, parser):
-        parser.add_argument("--firms-file", default=str(_DEFAULT_CAMPAIGN / "firms.yaml"))
-        parser.add_argument("--timeline-dir", default=str(_DEFAULT_CAMPAIGN / "kb"))
+        parser.add_argument("--firms-file", default=str(_DEFAULT_SEEDS / "firms.yaml"))
+        parser.add_argument("--timeline-dir", default=str(_DEFAULT_SEEDS))
         parser.add_argument("--dry-run", action="store_true",
                             help="Parse and report counts without writing to the DB.")
 

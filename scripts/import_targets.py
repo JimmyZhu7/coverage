@@ -43,6 +43,9 @@ from directory.models import Firm
 TARGETS_PATH = os.environ.get(
     "COVERAGE_TARGETS_PATH",
     "/Users/zhujimmy/Claude/Projects/Recruitment Opportunities/recruiting-radar/targets.yaml",
+    # Retired 2026-08-02 — folder deleted; the 70 targets are already in
+    # Postgres (UserFirm rows). The yaml survives inside
+    # ~/Desktop/recruitment-opportunities-final-archive-2026-08-02.zip.
 )
 OWNER_EMAIL = os.environ.get("COVERAGE_TARGETS_OWNER", "you@example.com")
 

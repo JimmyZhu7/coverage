@@ -68,7 +68,8 @@ def main() -> int:
               "Pass --force only if you mean it.")
         return 0
     if not CAMPAIGN_DB.exists():
-        print(f"campaign.db not found at {CAMPAIGN_DB}", file=sys.stderr)
+        print(f"campaign.db not found at {CAMPAIGN_DB}. The source system was retired and its folder deleted on 2026-08-02. This import already ran (its data is in Postgres). To ever run it again, unzip ~/Desktop/recruitment-opportunities-final-archive-2026-08-02.zip and pass the extracted path explicitly.",
+              file=sys.stderr)
         return 1
 
     conn = sqlite3.connect(f"file:{CAMPAIGN_DB}?mode=ro", uri=True)
