@@ -215,7 +215,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .act-pair { margin: 0; color: var(--accent-ink); font-size: var(--fs-micro); }
   /* Compose opens an empty email when there's no opener. Say so on the
      button rather than letting the click find out. */
-  .act-nodraft { color: var(--ink-3); font-size: var(--fs-micro); }
+  /* Marks the EXCEPTION — a contact that already has an opener written.
+     Inverted 2026-08-02: the badge used to announce the ABSENCE of a draft,
+     which was true of 115 of 115 real contacts, so it rendered on every card
+     on the page forever and distinguished nothing. A badge that is always
+     present is furniture, not information.
+
+     The wording is deliberately paraphrased rather than quoted: this comment
+     ships inside a <style> block in the rendered page, and the test asserting
+     the old phrase is gone greps the whole response — quoting it here would
+     fail that test from a stylesheet comment. Same trap the feed's honesty
+     tests hit. */
+  .act-draft { color: var(--ok); font-size: var(--fs-micro); font-weight: var(--w-med); }
 
   /* Debrief lane: a chat that already happened and hasn't been written
      down. Toned as a capture prompt, not an alarm — it's a five-minute job,

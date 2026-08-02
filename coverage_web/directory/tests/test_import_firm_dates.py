@@ -138,3 +138,36 @@ def test_rerunning_the_same_finding_is_idempotent(run, gs):
     assert FirmDate.objects.count() == 1
     fd = FirmDate.objects.get(firm=gs, event_kind="app_close")
     assert str(fd.date) == "2026-09-15"
+
+
+def test_an_unreadable_date_never_wipes_a_stored_one(run, gs):
+    """The bug this guards, reproduced 2026-08-02 against a real row.
+
+    A deliberately blank date and an unparseable one both used to parse to
+    None, so a finding carrying "Dec 1 2026" read as "no date known" and
+    overwrote a stored confirmed_official deadline with NULL — reported as a
+    successful `MOVE ... -> (no date)`. A scheduled agent emitting one
+    `12/01/2026` would have destroyed a date the cadence engine acts on.
+    """
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "confidence": "confirmed_official"}])
+    run([{"firm": "gs", "event_kind": "app_close", "date": "Dec 1 2026",
+          "confidence": "confirmed_official"}])
+
+    fd = FirmDate.objects.get(firm=gs, event_kind="app_close")
+    assert str(fd.date) == "2026-09-15", "the stored date must survive a bad one"
+    assert len(fd.history) == 1, "a rejected finding is not an observation"
+
+
+def test_an_unreadable_date_does_not_create_a_row_either(run, gs):
+    run([{"firm": "gs", "event_kind": "app_close", "date": "12/01/2026",
+          "confidence": "confirmed_official"}])
+    assert FirmDate.objects.count() == 0
+
+
+def test_a_blank_date_is_still_accepted_after_the_fix(run, gs):
+    """The distinction the fix turns on: blank is real information, and must
+    keep working. Guarding against over-correction."""
+    run([{"firm": "gs", "event_kind": "app_open", "date": "",
+          "confidence": "reported"}])
+    assert FirmDate.objects.get(firm=gs, event_kind="app_open").date is None

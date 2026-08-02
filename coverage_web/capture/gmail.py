@@ -275,7 +275,9 @@ def _note_alternate_email(contact: Contact, address: str) -> None:
     contact.save(update_fields=["notes"])
 
 
-def _record_pattern_evidence(contact: Contact, *, delivered: bool) -> bool:
+def _record_pattern_evidence(
+    contact: Contact, *, delivered: bool, dry_run: bool = False
+) -> bool:
     """Bank one firm-level data point about whether its address format works.
 
     Called at most once per contact, ever: `Contact.email_pattern_recorded`
@@ -283,11 +285,18 @@ def _record_pattern_evidence(contact: Contact, *, delivered: bool) -> bool:
     window would re-bank the same evidence every single day, and a firm's
     confidence would climb on one real send.
 
-    Returns True if a row was actually updated, so the caller can count it.
+    Returns True when the evidence was banked — or, under `dry_run`, when it
+    WOULD have been. `dry_run` lives in here rather than at the call sites on
+    purpose: both callers previously re-derived this eligibility rule
+    themselves to keep their dry-run counters right, which is the same rule
+    written three times and free to drift the moment the guard below changes.
+
     A contact with no firm has nothing to say about any firm's format.
     """
     if contact.firm_id is None or contact.email_pattern_recorded:
         return False
+    if dry_run:
+        return True
 
     stats, _ = EmailPatternStats.objects.get_or_create(firm_id=contact.firm_id)
     if delivered:
@@ -393,9 +402,7 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
             # Bank the evidence BEFORE clearing the address: the bounce is a
             # fact about the format the firm uses, and clearing wipes the
             # only copy of what was tried.
-            if not dry_run and _record_pattern_evidence(contact, delivered=False):
-                result.pattern_bounced += 1
-            elif dry_run and contact.firm_id and not contact.email_pattern_recorded:
+            if _record_pattern_evidence(contact, delivered=False, dry_run=dry_run):
                 result.pattern_bounced += 1
             if contact.email:
                 if not dry_run:
@@ -446,10 +453,7 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # a chat banks a "delivered". Recorded once per contact ever, guarded
         # by `email_pattern_recorded`.
         if finding.get("replied") or finding.get("chat_status") in ("scheduled", "completed"):
-            if not dry_run:
-                if _record_pattern_evidence(contact, delivered=True):
-                    result.pattern_delivered += 1
-            elif contact.firm_id and not contact.email_pattern_recorded:
+            if _record_pattern_evidence(contact, delivered=True, dry_run=dry_run):
                 result.pattern_delivered += 1
 
         thread_id = (finding.get("thread_id") or "").strip()

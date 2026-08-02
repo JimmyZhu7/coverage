@@ -94,11 +94,18 @@ class Command(BaseCommand):
             if not isinstance(person, dict):
                 skipped += 1
                 continue
-            name = str(person.get("name", "")).strip()
+            # Truncated to the column width, not passed through. An agent
+            # writes these findings, and an agent that hands back a whole
+            # email signature as a "name" would otherwise raise
+            # `DataError: value too long for type character varying(255)`
+            # mid-batch — killing the run and taking every VALID row after it
+            # down too. Verified 2026-08-02: a 300-char name crashed the
+            # command and the good contact behind it was never created.
+            name = str(person.get("name", "")).strip()[:255]
             if not name:
                 skipped += 1
                 continue
-            email = normalize_email(str(person.get("email", "")).strip())
+            email = normalize_email(str(person.get("email", "")).strip())[:254]
 
             # Match against EVERY row including archived, so an archived
             # person is recognised rather than duplicated.
@@ -137,7 +144,8 @@ class Command(BaseCommand):
 
             contact = Contact(
                 user=user, name=name, email=email or "",
-                firm=firm, firm_text="" if firm else str(person.get("firm", "")).strip(),
+                firm=firm,
+                firm_text="" if firm else str(person.get("firm", "")).strip()[:255],
                 role=str(person.get("role_guess", "")).strip()[:255],
                 region=opts["region"], source=opts["source"],
                 notes=f"Discovered by mailbox scan · {timezone.localdate():%b %d, %Y}"

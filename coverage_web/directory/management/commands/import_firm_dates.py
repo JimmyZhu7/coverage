@@ -68,16 +68,33 @@ CONFIDENCE_BAND = {"rumor": 0.3, "reported": 0.6, "confirmed_official": 1.0}
 EVENT_KINDS = ("app_open", "app_close", "insight_open", "insight_deadline")
 
 
+class BadDate(ValueError):
+    """A `date` that was supplied but could not be read."""
+
+
 def _parse_date(value) -> date | None:
-    """ISO date, or None. A blank is legitimate — 'we know this event exists
-    and not yet when' is a real state the radar reports."""
+    """ISO date, or None for a DELIBERATELY blank one.
+
+    The distinction is the whole point. A blank is real information — "we
+    know this event exists and not yet when" is a state the radar genuinely
+    reports. An unparseable string is a broken finding, and the two must not
+    collapse to the same answer.
+
+    They used to. Both returned None, so a finding carrying `"Dec 1 2026"`
+    read as "no date known" and OVERWROTE a stored `confirmed_official`
+    deadline with NULL — reported cheerfully as `MOVE ... -> (no date)`.
+    Reproduced 2026-08-02 against a real row. With a scheduled agent writing
+    these weekly, one `12/01/2026` would have silently destroyed a date the
+    cadence engine acts on. Now it raises, and the caller skips the finding
+    with the firm named.
+    """
     text = str(value or "").strip()
     if not text:
         return None
     try:
         return datetime.strptime(text[:10], "%Y-%m-%d").date()
-    except ValueError:
-        return None
+    except ValueError as exc:
+        raise BadDate(text) from exc
 
 
 class Command(BaseCommand):
@@ -138,7 +155,15 @@ class Command(BaseCommand):
             region = str(entry.get("region", "")).strip().lower()
             conf_label = str(entry.get("confidence", "")).strip()
             conf = CONFIDENCE_BAND.get(conf_label, 0.0)
-            new_date = _parse_date(entry.get("date"))
+            try:
+                new_date = _parse_date(entry.get("date"))
+            except BadDate as exc:
+                self.stderr.write(self.style.WARNING(
+                    f"skip {slug}/{event_kind}: unreadable date {exc!s:.40} "
+                    f"(expected YYYY-MM-DD, or \"\" for a known-unknown). "
+                    f"Any stored date is left alone."))
+                skipped += 1
+                continue
 
             observation = {
                 "date": str(entry.get("date", "")),

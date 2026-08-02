@@ -407,16 +407,22 @@ def test_confirm_chat_is_a_two_step_and_never_one_click_logs_a_chat(client):
     assert '<option value="chat" selected>' in detail.content.decode()
 
 
-def test_compose_shows_a_no_draft_hint_when_the_opener_is_blank(client):
+def test_compose_flags_a_ready_draft_and_stays_quiet_otherwise(client):
+    """Inverted 2026-08-02. The badge used to read "no draft" and fire when
+    the opener was blank — true of 115 of 115 real contacts, so it appeared
+    on every card on the page and distinguished nothing. It now marks the
+    exception, which is the state actually worth seeing."""
     user = _user(weekly_touch_goal=14)
     c = Contact.all_objects.create(user=user, name="No Draft", email="nd@x.com")
     _touch(user, c, "outreach", days_ago=20)
     client.force_login(user)
-    assert "no draft" in client.get(reverse("crm:week")).content.decode()
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "draft ready" not in body, "the common case earns no badge"
+    assert "no draft" not in body, "and no badge for its negation either"
 
     c.opener = "Hi there, I'm a sophomore at USC..."
     c.save(update_fields=["opener"])
-    assert "no draft" not in client.get(reverse("crm:week")).content.decode()
+    assert "draft ready" in client.get(reverse("crm:week")).content.decode()
 
 
 def test_the_firm_slot_only_says_alum_for_an_actual_alum(client):

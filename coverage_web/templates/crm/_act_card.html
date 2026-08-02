@@ -97,7 +97,7 @@ buttons whose visible text is identical, which is unusable read aloud.
       {% endif %}
       {% if a.contact.email %}
         <a class="btn act-btn" href="{{ a.mailto }}"
-           aria-label="Compose an email to {{ a.contact.name }}">Compose{% if not a.has_draft %} <span class="act-nodraft">no draft</span>{% endif %}</a>
+           aria-label="Compose an email to {{ a.contact.name }}{% if a.has_draft %}, a draft is ready{% endif %}">Compose{% if a.has_draft %} <span class="act-draft">draft ready</span>{% endif %}</a>
       {% else %}
         <a class="btn act-btn" href="{% url 'crm:contact_detail' a.contact.id %}"
            aria-label="Add an email address for {{ a.contact.name }}">Email</a>

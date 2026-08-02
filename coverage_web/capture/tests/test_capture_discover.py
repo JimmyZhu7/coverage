@@ -133,3 +133,27 @@ def test_discovery_is_scoped_to_the_named_user(run, user, django_user_model):
     run([{"name": "Ada Lovelace", "email": "ada@gs.com"}])
     assert Contact.objects.for_user(user).filter(name="Ada Lovelace").count() == 1
     assert Contact.objects.for_user(other).filter(name="Ada Lovelace").count() == 1
+
+
+def test_an_over_long_name_is_truncated_not_fatal(run, user):
+    """An AGENT writes these findings. One that hands back a whole email
+    signature as a "name" used to raise `DataError: value too long for type
+    character varying(255)` mid-batch — killing the run and taking every
+    valid row after it down with it. Verified 2026-08-02 against Postgres.
+    """
+    long_name = "A" * 300
+    run([{"name": long_name, "email": "bad@gs.com"},
+         {"name": "Real Person", "email": "good@gs.com"}])
+
+    names = set(Contact.objects.for_user(user).values_list("name", flat=True))
+    assert "Real Person" in names, "the valid row behind the bad one must survive"
+    assert len("A" * 255) == max(len(n) for n in names)
+
+
+def test_an_over_long_firm_text_and_email_are_bounded_too(run, user):
+    """Same exposure on the other two free-text columns the agent fills."""
+    run([{"name": "Ada Lovelace", "firm": "B" * 400,
+          "email": "c" * 300 + "@gs.com"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    assert len(c.firm_text) <= 255
+    assert len(c.email) <= 254
