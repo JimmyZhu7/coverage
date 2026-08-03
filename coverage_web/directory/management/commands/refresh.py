@@ -63,4 +63,14 @@ class Command(BaseCommand):
                 "refresh completed but zero opportunities are open — "
                 "treating as a failed pass (all connectors likely broken)."
             )
+
+        # Board health, announced where a failure used to hide. These are
+        # warnings, not failures: the pass succeeded, but a board that fails
+        # every run (or has never yielded a row) means specific firms' data
+        # is going stale while the overall run reports green.
+        from directory.health import health_report
+
+        for line in health_report():
+            self.stderr.write(self.style.WARNING(line))
+
         self.stdout.write(self.style.SUCCESS(f"refresh complete. {open_count} open."))

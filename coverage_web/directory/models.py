@@ -72,6 +72,23 @@ class Opportunity(models.Model):
     first_seen = models.DateTimeField(auto_now_add=True)
     last_verified = models.DateTimeField(null=True, blank=True)
     last_checked = models.DateTimeField(null=True, blank=True)
+    # When this posting was last observed to CLOSE (open -> closed), cleared
+    # again on reopen, so `status == "closed"` iff this is set. The scraper
+    # had been flipping rows closed daily and recording nothing — every cycle
+    # of "when do this firm's postings actually die" was measured and then
+    # thrown away, which is precisely the timing evidence FirmDate estimates
+    # need next cycle. Unrecoverable retroactively; captured from now on.
+    closed_at = models.DateTimeField(null=True, blank=True)
+    # The provider's own raw JSON for this posting, verbatim. Ingest used to
+    # drop it ("no destination column"), and that one decision is why
+    # sponsorship reads unknown on every scraped row and Workday multi-city
+    # roles say "3 Locations": the real data was in the payload and nowhere
+    # else. Stored as evidence — extraction stays in classify/ingest where it
+    # is testable and re-runnable over rows fetched long ago.
+    raw = models.JSONField(default=dict, blank=True)
+    # The provider's "posted/updated" date string, evidence only — never a
+    # deadline stand-in (see the connector package's docstring).
+    posted_at = models.CharField(max_length=64, blank=True, default="")
     content_hash = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:

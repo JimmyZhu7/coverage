@@ -35,6 +35,7 @@ Ordering is load-bearing and documented at `classify_role`.
 from __future__ import annotations
 
 import re
+from datetime import date
 
 INSIGHT = "insight"
 INTERNSHIP = "internship"
@@ -89,6 +90,10 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "lisbon", "portugal", "vienna", "austria", "budapest", "hungary",
         "prague", "czech", "bucharest", "romania", "athens", "greece",
         "helsinki", "finland", "europe", "emea",
+        # Added 2026-08-03, same census: Barclays' HQ address renders as
+        # "Canary Wharf, 1 Churchill Place" with no city; Glasgow and
+        # Henley-on-Thames (Invesco) are UK sites the country list missed.
+        "canary wharf", "glasgow", "henley-on-thames",
     )),
     ("us", (
         "united states", "u.s.", "usa", "new york", ", ny", "jersey city",
@@ -96,6 +101,14 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "los angeles", ", ca", "seattle", ", wa", "houston", "dallas", ", tx",
         "atlanta", ", ga", "charlotte", ", nc", "washington, d", "miami", ", fl",
         "nashville", ", tn", "malvern", "philadelphia", ", pa", "denver", ", co",
+        # Added 2026-08-03 from the live unmatched-location census (each key
+        # below had real rows stuck at region=""): T. Rowe's Maryland offices,
+        # Stamford/Short Hills/Wilmington suburbs, "NYC (1285)"-style
+        # shorthands, Baird's Milwaukee. ", de" is deliberately ABSENT even
+        # though Wilmington is in Delaware: as a substring it is inside
+        # ", denmark", and a Copenhagen row must not become American.
+        ", md", ", ct", ", nj", "baltimore", "milwaukee", "nyc",
+        "wilmington", "stamford",
     )),
     # After hk so "香港" never falls through to the mainland bucket.
     ("cn", (
@@ -368,3 +381,124 @@ def board_is_campus(board) -> bool:
         for attr in ("site", "token", "org", "board_url", "path_filter")
     )
     return bool(_CAMPUS_BOARD.search(ident))
+
+
+# ---------------------------------------------------------------------------
+# Prose extraction over the posting's own text (title + stored raw payload).
+#
+# These exist because the answers were ALREADY IN the fetched data and being
+# thrown away: postings state "unable to sponsor" in body text while the
+# sponsorship column read unknown on all 4,319 scraped rows, and a minority
+# state an application deadline in prose while the deadline column was null
+# on 99% of them. Both extractors are deliberately conservative — on shared
+# directory data, a wrong "sponsors" or a fabricated deadline is worse than
+# an honest unknown, so anything ambiguous returns the null answer.
+# ---------------------------------------------------------------------------
+
+# Negative phrasings FIRST, and checked first: sponsorship language is mostly
+# negation, and several negative phrases contain a positive one verbatim
+# ("no visa sponsorship available" contains "visa sponsorship available").
+_SPONSOR_NO = (
+    "unable to sponsor", "not able to sponsor", "cannot sponsor",
+    "will not sponsor", "does not sponsor", "not provide sponsorship",
+    "not provide visa sponsorship", "not offer sponsorship",
+    "not offer visa sponsorship", "no visa sponsorship",
+    "sponsorship is not available", "sponsorship will not be",
+    "without sponsorship", "without the need for sponsorship",
+    "without the need for visa sponsorship", "now or in the future",
+    "not eligible for sponsorship",
+)
+_SPONSOR_YES = (
+    "visa sponsorship available", "sponsorship is available",
+    "will sponsor", "provides visa sponsorship", "offers visa sponsorship",
+    "provide visa sponsorship", "offer visa sponsorship",
+    "h-1b sponsorship", "h1b sponsorship",
+)
+
+
+def extract_sponsorship(text: str | None) -> str:
+    """"yes" / "no" / "unknown" from posting prose.
+
+    "now or in the future" is in the NO list because it is the standard US
+    phrasing of exactly that answer ("must be authorized to work ... without
+    the need for sponsorship now or in the future") and never appears in a
+    sponsoring posting's boilerplate.
+    """
+    t = (text or "").lower()
+    if not t:
+        return "unknown"
+    if any(k in t for k in _SPONSOR_NO):
+        return "no"
+    if any(k in t for k in _SPONSOR_YES):
+        return "yes"
+    return "unknown"
+
+
+_MONTHS = {m: i + 1 for i, m in enumerate((
+    "january", "february", "march", "april", "may", "june", "july",
+    "august", "september", "october", "november", "december"))}
+# A deadline KEYWORD, then a date within the next ~80 characters. The keyword
+# gate is what keeps this conservative: a bare date in a posting is usually a
+# start date or a posted date, and treating those as deadlines would put
+# false countdowns on the feed.
+_DEADLINE_KEY = re.compile(
+    r"(?:apply by|application deadline|applications?\s+(?:close[sd]?|due|must be "
+    r"(?:received|submitted))|closing date|deadline)", re.IGNORECASE)
+_DATE_ISO = re.compile(r"(20\d{2})-(\d{2})-(\d{2})")
+_DATE_MDY = re.compile(
+    r"(january|february|march|april|may|june|july|august|september|october|"
+    r"november|december)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})", re.IGNORECASE)
+_DATE_DMY = re.compile(
+    r"(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|"
+    r"august|september|october|november|december),?\s+(20\d{2})", re.IGNORECASE)
+
+
+def extract_deadline_from_text(text: str | None) -> str | None:
+    """An ISO date string, only when a deadline keyword sits within 80
+    characters before a fully-specified date (a 4-digit year is required —
+    "closes January 5" with no year is a guess, and guesses don't ship)."""
+    t = text or ""
+    if not t:
+        return None
+    for key_match in _DEADLINE_KEY.finditer(t):
+        window = t[key_match.end():key_match.end() + 80]
+        iso = _DATE_ISO.search(window)
+        if iso:
+            y, m, d = int(iso.group(1)), int(iso.group(2)), int(iso.group(3))
+        else:
+            mdy = _DATE_MDY.search(window)
+            dmy = _DATE_DMY.search(window)
+            if mdy:
+                y, m, d = int(mdy.group(3)), _MONTHS[mdy.group(1).lower()], int(mdy.group(2))
+            elif dmy:
+                y, m, d = int(dmy.group(3)), _MONTHS[dmy.group(2).lower()], int(dmy.group(1))
+            else:
+                continue
+        try:
+            return date(y, m, d).isoformat()
+        except ValueError:
+            continue  # "February 30" — keep scanning, don't invent
+    return None
+
+
+def posting_text(title: str | None, raw: dict | None) -> str:
+    """Every string in the posting, flattened for the extractors: the title
+    plus all string values in the provider's raw payload, recursively.
+    Capped, because a payload is untrusted input and one pathological
+    posting must not make extraction quadratic."""
+    parts: list[str] = [(title or "")]
+
+    def walk(node, depth=0):
+        if depth > 6 or sum(len(p) for p in parts) > 40_000:
+            return
+        if isinstance(node, str):
+            parts.append(node)
+        elif isinstance(node, dict):
+            for v in node.values():
+                walk(v, depth + 1)
+        elif isinstance(node, (list, tuple)):
+            for v in node:
+                walk(v, depth + 1)
+
+    walk(raw or {})
+    return "\n".join(parts)[:40_000]

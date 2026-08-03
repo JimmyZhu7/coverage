@@ -93,7 +93,8 @@ class Command(BaseCommand):
                 opp.save(update_fields=["last_checked", "last_verified"])
             elif verdict == "closed":
                 opp.status = "closed"
-                opp.save(update_fields=["last_checked", "status"])
+                opp.closed_at = now
+                opp.save(update_fields=["last_checked", "status", "closed_at"])
             else:
                 # unreachable / needs-verification: we looked, we can't say —
                 # last_verified deliberately does NOT move.

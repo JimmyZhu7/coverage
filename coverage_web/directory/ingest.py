@@ -46,7 +46,7 @@ from coverage_connectors import BoardConfig, FetchResult, Opportunity as ConnOpp
 
 from .classify import (
     board_is_campus, classify_role, clean_title, extract_class_year, extract_cohort,
-    normalize_region,
+    extract_deadline_from_text, extract_sponsorship, normalize_region, posting_text,
 )
 from .models import Firm, Opportunity, ScrapeRun
 
@@ -163,10 +163,19 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
       sponsorship     -> sponsorship (or default) connector: always None -> "unknown"
       (computed)      -> content_hash, first_seen, last_verified, last_checked
 
-    Dropped on purpose (no destination column in the Django model, which omits
-    them by design): `posted_at` (evidence-only "posted/updated" date) and
-    `raw` (the provider's raw JSON). `confidence` has no connector source and
-    keeps its model default (0.0). See project report.
+      posted_at       -> posted_at (or "")       evidence-only "posted/updated" text
+      raw             -> raw                      the provider's JSON, verbatim
+
+    Both were DROPPED here until 2026-08-03, and that one decision was the
+    root of most of the feed's blind spots: sponsorship read "unknown" on
+    every scraped row while postings said "unable to sponsor" in text the
+    fetch had already paid for, and Workday multi-city roles stored the
+    placeholder "3 Locations" while the real cities sat in the payload.
+    Stored now as evidence; extraction lives in classify/ingest where it is
+    testable and re-runnable over old rows. `confidence` is set below: 1.0
+    when the DEADLINE came from the provider's own API field, because that is
+    what the field measures on an opportunity (how sure are we of the date),
+    and an API date is the firm's own statement.
 
     `bucket` and (when the connector gives none) `cohort` are DERIVED here via
     directory.classify — the one deliberate exception to "store only what the
@@ -214,6 +223,22 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     # connector never sets region, so the location text is the only signal.
     region = (opp.region or "").strip() or normalize_region(location)
 
+    # Prose extraction over what the fetch already carried. FILL-ONLY, both
+    # of them: a provider's own field always wins, and prose only answers
+    # where the API said nothing. Deadline-from-prose carries confidence 0.6
+    # ("reported" — the posting said it, but through our regex rather than a
+    # structured field); an API deadline carries 1.0.
+    text = posting_text(title, opp.raw)
+    prose_sponsorship = extract_sponsorship(text)
+    prose_deadline, prose_ok = (None, False)
+    if deadline is None:
+        prose_deadline, prose_ok = _parse_deadline(extract_deadline_from_text(text))
+    final_deadline = deadline if deadline is not None else (prose_deadline if prose_ok else None)
+    final_sponsorship = (opp.sponsorship or "").strip() or (
+        prose_sponsorship if prose_sponsorship != "unknown" else ""
+    ) or "unknown"
+    final_confidence = 1.0 if deadline else (0.6 if (prose_ok and prose_deadline) else 0.0)
+
     existing = Opportunity.objects.filter(firm=firm, url=opp.url).first()
     if existing is None:
         Opportunity.objects.create(
@@ -225,11 +250,14 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
             source=opp.source or "",
             status="open",
             region=region,
-            deadline=deadline,
-            deadline_precision="day" if deadline else "",
+            deadline=final_deadline,
+            deadline_precision="day" if final_deadline else "",
             cohort=cohort,
             class_year=class_year,
-            sponsorship=opp.sponsorship or "unknown",
+            sponsorship=final_sponsorship,
+            confidence=final_confidence,
+            raw=opp.raw or {},
+            posted_at=(opp.posted_at or "")[:64],
             content_hash=h,
             last_verified=now,
             last_checked=now,
@@ -245,13 +273,19 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     existing.location = location
     existing.source = opp.source or ""
     existing.region = region
-    existing.deadline = deadline
-    existing.deadline_precision = "day" if deadline else ""
+    existing.deadline = final_deadline
+    existing.deadline_precision = "day" if final_deadline else ""
     existing.cohort = cohort
     existing.class_year = class_year
-    existing.sponsorship = opp.sponsorship or "unknown"
+    existing.sponsorship = final_sponsorship
+    existing.confidence = max(existing.confidence, final_confidence)
+    existing.raw = opp.raw or {}
+    existing.posted_at = (opp.posted_at or "")[:64]
     existing.content_hash = h
     existing.status = "open"
+    # status == "closed" iff closed_at is set; a fetch that sees the posting
+    # live again clears the close timestamp along with the status.
+    existing.closed_at = None
     existing.last_verified = now
     existing.last_checked = now
     existing.save()
@@ -357,7 +391,9 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
                              "skipped auto-close (suspected shape change)",
                 })
                 continue
-            closed = open_qs.exclude(url__in=seen).update(status="closed", last_checked=now)
+            closed = open_qs.exclude(url__in=seen).update(
+                status="closed", last_checked=now, closed_at=now
+            )
             stats["closed"] += closed
 
     stats["created_firms"] = resolver.created_firms

@@ -33,11 +33,13 @@ from __future__ import annotations
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils.dateparse import parse_date
 
 from directory.boards import BOARDS
 from directory.classify import (
     board_is_campus, classify_role, clean_title, extract_class_year, extract_cohort,
-    normalize_region,
+    extract_deadline_from_text, extract_sponsorship, normalize_region,
+    posting_text,
 )
 from directory.models import Opportunity
 
@@ -67,9 +69,38 @@ class Command(BaseCommand):
                 class_year = extract_class_year(title)
                 region = normalize_region(opp.location)
                 counts[bucket] = counts.get(bucket, 0) + 1
+
+                # Prose re-extraction over the STORED raw payload — the whole
+                # point of keeping it. Fill-only, same rules as ingest: prose
+                # answers only where nothing is recorded, so a re-run can
+                # improve rows and can never overwrite a provider's field.
+                text = posting_text(title, opp.raw)
+                sponsorship = opp.sponsorship
+                if sponsorship in ("", "unknown"):
+                    extracted = extract_sponsorship(text)
+                    if extracted != "unknown":
+                        sponsorship = extracted
+                deadline = opp.deadline
+                precision = opp.deadline_precision
+                confidence = opp.confidence
+                if deadline is None:
+                    from_text = extract_deadline_from_text(text)
+                    if from_text:
+                        parsed = parse_date(from_text)
+                        if parsed:
+                            deadline, precision, confidence = parsed, "day", 0.6
+                elif confidence == 0.0 and precision == "day":
+                    # Backfill: rows dated BEFORE confidence had meaning all
+                    # got their date from a provider API field (prose
+                    # extraction didn't exist yet), which is the 1.0 tier.
+                    confidence = 1.0
+
                 if (bucket != opp.bucket or cohort != opp.cohort
                         or class_year != opp.class_year
-                        or region != opp.region or title != opp.title):
+                        or region != opp.region or title != opp.title
+                        or sponsorship != opp.sponsorship
+                        or deadline != opp.deadline
+                        or confidence != opp.confidence):
                     changed += 1
                     if not dry:
                         opp.title = title
@@ -77,8 +108,14 @@ class Command(BaseCommand):
                         opp.cohort = cohort
                         opp.class_year = class_year
                         opp.region = region
+                        opp.sponsorship = sponsorship
+                        opp.deadline = deadline
+                        opp.deadline_precision = precision
+                        opp.confidence = confidence
                         opp.save(update_fields=[
                             "title", "bucket", "cohort", "class_year", "region",
+                            "sponsorship", "deadline", "deadline_precision",
+                            "confidence",
                         ])
             if dry:
                 transaction.set_rollback(True)

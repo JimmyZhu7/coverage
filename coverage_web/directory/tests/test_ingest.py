@@ -321,3 +321,66 @@ def test_per_row_error_does_not_close_an_existing_open_row(monkeypatch):
     assert Opportunity.objects.get(url=U2).status == "open"
     assert run.stats["closed"] == 0
     assert any("row failed" in e["error"] for e in run.stats["errors"])
+
+
+# ---------------------------------------------------------------------------
+# closed_at + raw: the two pieces of evidence ingest used to throw away.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_close_is_timestamped_and_a_reopen_clears_it(monkeypatch):
+    """The invariant: `status == "closed"` iff `closed_at` is set.
+
+    The scraper had been flipping rows closed daily and recording nothing —
+    the one dataset that could turn this cycle's observations into next
+    cycle's deadline estimates ("this firm's postings actually die in
+    mid-September") was measured and discarded every run.
+    """
+    _patch(monkeypatch, [_result([_opp(U1), _opp(U2)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    # Next fetch: U2 is gone -> closed, with the moment recorded.
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    gone = Opportunity.objects.get(url=U2)
+    assert gone.status == "closed"
+    assert gone.closed_at is not None
+
+    # It comes back -> open again, and the close timestamp clears with it.
+    _patch(monkeypatch, [_result([_opp(U1), _opp(U2)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    back = Opportunity.objects.get(url=U2)
+    assert back.status == "open"
+    assert back.closed_at is None
+
+
+@pytest.mark.django_db
+def test_the_providers_raw_json_is_stored_verbatim(monkeypatch):
+    """What the API said, kept as evidence — extraction can now be improved
+    and re-run over rows fetched long ago instead of being lost at fetch
+    time (sponsorship text, Workday's real city list, posted dates)."""
+    rich = ConnOpp(
+        firm="William Blair", title="Summer Analyst", location="Chicago",
+        url=U1, source="greenhouse", posted_at="2026-07-30",
+        raw={"id": 123, "content": "We are unable to sponsor visas."},
+    )
+    _patch(monkeypatch, [_result([rich])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    assert o.raw == {"id": 123, "content": "We are unable to sponsor visas."}
+    assert o.posted_at == "2026-07-30"
+
+
+@pytest.mark.django_db
+def test_an_api_deadline_sets_full_confidence(monkeypatch):
+    """`confidence` was a dead field — 0.0 on all 4,319 scraped rows. It now
+    means one thing: how sure are we of the DATE. A deadline from the
+    provider's own API field is the firm's own statement -> 1.0. A row with
+    no date keeps 0.0, which renders as unrated, honestly."""
+    _patch(monkeypatch, [_result([_opp(U1, deadline="2026-09-15"), _opp(U2)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    assert Opportunity.objects.get(url=U1).confidence == 1.0
+    assert Opportunity.objects.get(url=U2).confidence == 0.0

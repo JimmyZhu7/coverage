@@ -45,6 +45,7 @@ Usage:
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
@@ -123,15 +124,54 @@ def fetch(board: BoardConfig) -> FetchResult:
     return connector.fetch(board)
 
 
+# Error text that marks a fetch worth retrying: the failure is about the
+# NETWORK MOMENT, not the board. Measured need, not speculation — Evercore's
+# board timed out in 5 of 14 recent daily runs and each one silently cost a
+# day of that firm's freshness, because a failed board correctly closes
+# nothing but also fetches nothing.
+_TRANSIENT_MARKERS = (
+    "timed out", "timeout", "connection reset", "connection aborted",
+    "connection refused", "temporarily unavailable",
+    " 502", " 503", " 504", "bad gateway", "service unavailable",
+)
+
+
+def _is_transient(error: str | None) -> bool:
+    text = (error or "").lower()
+    return any(m in text for m in _TRANSIENT_MARKERS)
+
+
+def fetch_with_retry(
+    board: BoardConfig, *, retries: int = 1, backoff_s: float = 3.0,
+    _sleep: Callable[[float], None] = time.sleep,
+) -> FetchResult:
+    """`fetch`, retried once on a transient network failure.
+
+    Only transient errors retry: a 404 or an auth failure is a fact about
+    the BOARD and will not improve on a second attempt seconds later, so
+    retrying it would just double the load and delay the honest error.
+    `_sleep` is injectable for tests; the backoff grows linearly because two
+    attempts is the ceiling — this is a courtesy retry, not a retry loop.
+    """
+    result = fetch(board)
+    attempt = 0
+    while not result.ok and _is_transient(result.error) and attempt < retries:
+        attempt += 1
+        _sleep(backoff_s * attempt)
+        result = fetch(board)
+    return result
+
+
 def fetch_many(boards: list[BoardConfig], *, max_workers: int = 8) -> list[FetchResult]:
     """Fetch every board concurrently (ported from `sources.py`'s
     `ats_candidates()`, which ran its ~37 boards through a
     `ThreadPoolExecutor(max_workers=8)` rather than 15s-timeout-each in
     strict sequence). `pool.map` preserves input order in its results, so
     the returned list lines up with `boards` even though the fetches
-    themselves run out of order."""
+    themselves run out of order. Each fetch carries the one-shot transient
+    retry — see `fetch_with_retry`."""
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return list(pool.map(fetch, boards))
+        return list(pool.map(fetch_with_retry, boards))
 
 
 def verify(url: str) -> VerificationResult:
