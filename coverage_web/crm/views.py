@@ -650,6 +650,46 @@ def _schedule(user, today) -> list[dict]:
     return rows[:6]
 
 
+_DAYBAR_START, _DAYBAR_END = 8 * 60, 20 * 60      # 8am -> 8pm
+
+
+def _daybar(schedule, now) -> dict:
+    """Today's timed events as positions on one 8am-8pm track.
+
+    A list tells you WHAT is on today; it does not tell you the shape of the
+    day — whether the three things are stacked into one morning or spread from
+    breakfast to dinner. One track answers that before a word is read, and it
+    is the only place on this page where the answer is free: the times are
+    already loaded.
+
+    Times outside the window clamp to its ends rather than vanishing. A 7am
+    call is genuinely "first thing", and dropping it to keep the scale honest
+    would lose the event to keep the axis pretty.
+    """
+    span = _DAYBAR_END - _DAYBAR_START
+    dots = []
+    for row in schedule:
+        if not (row["is_today"] and row["timed"] and row["at"]):
+            continue
+        minutes = row["at"].hour * 60 + row["at"].minute
+        pct = (min(max(minutes, _DAYBAR_START), _DAYBAR_END) - _DAYBAR_START) / span
+        dots.append({
+            "pct": round(pct * 100, 2),
+            "label": row["title"],
+            "when": row["when"],
+            "kind": row["kind"],
+        })
+
+    now_minutes = now.hour * 60 + now.minute
+    in_window = _DAYBAR_START <= now_minutes <= _DAYBAR_END
+    return {
+        "dots": dots,
+        "now_pct": round((now_minutes - _DAYBAR_START) / span * 100, 2) if in_window else None,
+        # The track is only worth its pixels once something is actually on it.
+        "show": bool(dots),
+    }
+
+
 def _next_deadlines(user, today, limit=4) -> list[dict]:
     """The next confirmed firm dates, NAMED.
 
@@ -829,7 +869,10 @@ def _cockpit_context(user) -> dict:
 
     # Activity feed: the last touches logged — what changed since last look.
     kind_labels = dict(TOUCH_KIND_LABELS)
-    recent = Touch.objects.for_user(user).select_related("contact").order_by("-ts")[:8]
+    # Six, not eight. The rail carries four cards now; the feed is the
+    # longest and the least time-critical of them, so it is the one that
+    # gives ground to keep the whole column inside a laptop viewport.
+    recent = Touch.objects.for_user(user).select_related("contact").order_by("-ts")[:6]
     now = timezone.now()
     activity = [
         {
@@ -877,6 +920,7 @@ def _cockpit_context(user) -> dict:
         # chats nobody has put a time on yet; `chat_prep` is the subset
         # happening today, with the last debrief pulled up alongside.
         "schedule": schedule,
+        "daybar": _daybar(schedule, timezone.localtime(timezone.now())),
         "chat_prep": _chat_prep(user, today, schedule),
         "deadlines": _next_deadlines(user, today),
         "waiting": _waiting_on_reply(user, busy_ids),

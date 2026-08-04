@@ -21,11 +21,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     gap: var(--s5); align-items: start; transition: opacity var(--t-fast); }
   #today-cockpit.htmx-request .cockpit { opacity: 0.55; }
   .cockpit-main { min-width: 0; }
-  /* The rail carries four cards now (pace, schedule, deadlines, activity).
-     A sticky column taller than the viewport pins its TOP and leaves the
-     bottom permanently unreachable, so it gets its own bounded scroll — the
-     one place on this page where a nested scrollbar is the right answer,
-     because the alternative is a card nobody can ever see. */
+  /* Four cards, bounded. Laying the pace ring sideways saved ~90px and the
+     activity feed was trimmed, but the rail still measures ~950px with a full
+     schedule and four deadlines — taller than a 900px viewport. A sticky
+     column taller than the viewport pins its top and leaves its bottom
+     permanently unreachable, so the cap stays: `max-height` + `auto` means a
+     scrollbar appears only on the viewports that actually need one, and tall
+     screens never see it. */
   .cockpit-rail { position: sticky; top: 88px; display: flex; flex-direction: column;
     gap: var(--s4); max-height: calc(100vh - 104px); overflow-y: auto;
     overscroll-behavior: contain; padding-right: 2px;
@@ -34,6 +36,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cockpit-rail::-webkit-scrollbar-thumb { background: var(--line-strong);
     border-radius: 999px; }
   .cockpit-rail::-webkit-scrollbar-track { background: transparent; }
+  /* Cards cascade in rather than appearing as one block, top-down, so the eye
+     is led from the week's number to what is on today. Capped by the shared
+     .kin-reveal rule; these are four fixed positions, so they are explicit. */
+  .cockpit-rail > .rail-card { animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .cockpit-rail > .rail-card:nth-child(2) { animation-delay: 70ms; }
+  .cockpit-rail > .rail-card:nth-child(3) { animation-delay: 140ms; }
+  .cockpit-rail > .rail-card:nth-child(4) { animation-delay: 210ms; }
 
   /* ---- Quick add: a disclosure menu in the page header ---- */
   .quickadd { position: relative; }
@@ -99,22 +108,54 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     padding: 3px 8px; font-size: var(--fs-xs); }
   .act-ghost:hover { background: var(--paper); border-color: var(--line); color: var(--ink-2); }
 
-  /* Pace ring — a weekly-goal donut that fills on load. */
-  .pace { position: relative; width: 132px; height: 132px; margin: var(--s2) auto var(--s3); }
-  .pace-ring { position: absolute; inset: 0; width: 132px; height: 132px;
-    transform: rotate(-90deg); }
-  .pace-track { fill: none; stroke: var(--band-cold-s); stroke-width: 10; }
-  .pace-fill { fill: none; stroke: var(--accent); stroke-width: 10; stroke-linecap: round;
+  /* Pace — a weekly-goal donut that fills on load, laid out SIDEWAYS. The
+     ring was 132px square with the figure centred in it and a caption below,
+     which spent a third of the rail's height on one fraction and was what
+     pushed the rail past the viewport. Same ring, half the height. */
+  .pace-card { padding: var(--s4) var(--s5); }
+  .pace { display: flex; align-items: center; gap: var(--s4); }
+  .pace-ring { width: 56px; height: 56px; flex: none; transform: rotate(-90deg); }
+  .pace-track { fill: none; stroke: var(--band-cold-s); stroke-width: 12; }
+  .pace-fill { fill: none; stroke: var(--accent); stroke-width: 12; stroke-linecap: round;
     stroke-dasharray: 327; stroke-dashoffset: calc(327 - 327 * var(--pct) / 100);
     animation: pace-grow 950ms cubic-bezier(0.22, 1, 0.36, 1) both; }
   .pace-fill.is-hit { stroke: var(--ok); }
   @keyframes pace-grow { from { stroke-dashoffset: 327; } }
-  .pace-center { position: absolute; inset: 0; display: flex; align-items: center;
-    justify-content: center; gap: 3px; }
-  .pace-done { font: var(--w-black) 30px/1 var(--font-display); color: var(--ink); }
-  .pace-goal { color: var(--ink-3); font-family: var(--font-mono);
+  .pace-text { min-width: 0; }
+  .pace-figure { margin: 0; display: flex; align-items: baseline; gap: 4px; }
+  .pace-done { font: var(--w-black) 26px/1 var(--font-display); color: var(--ink);
     font-variant-numeric: tabular-nums; }
-  .pace-note { text-align: center; color: var(--ink-2); font-size: var(--fs-s); margin: 0; }
+  .pace-goal { color: var(--ink-3); font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; font-size: var(--fs-s); }
+  .pace-lbl { font-size: var(--fs-micro); color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.07em; font-weight: var(--w-med);
+    margin-left: 2px; }
+  .pace-note { color: var(--ink-2); font-size: var(--fs-xs); margin: 3px 0 0; }
+  .pace-note b { color: var(--ink); font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; font-weight: var(--w-bold); }
+
+  /* ---- The day as one track ----
+     8am to 8pm, a dot per timed thing, a marker for now. Answers "is my day
+     stacked or spread?" before a word is read. aria-hidden: every dot is
+     also a labelled row underneath, so this adds shape, never sole meaning. */
+  .daybar { margin: 0 0 var(--s3); }
+  .daybar-track { position: relative; height: 6px; border-radius: 999px;
+    background: var(--band-cold-s); }
+  .daybar-dot { position: absolute; top: 50%; width: 11px; height: 11px;
+    border-radius: 50%; background: var(--accent); border: 2px solid var(--surface);
+    transform: translate(-50%, -50%);
+    animation: daybar-pop 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 70ms + 260ms); }
+  .daybar-chat { background: var(--w-chatted-bar); }
+  /* Now. A hairline rather than a dot, so it reads as a position on the axis
+     and never competes with the things actually scheduled. */
+  .daybar-now { position: absolute; top: -3px; bottom: -3px; width: 2px;
+    border-radius: 1px; background: var(--ink-3); opacity: 0.75; }
+  .daybar-scale { display: flex; justify-content: space-between; margin-top: 5px;
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
+    letter-spacing: 0.04em; }
+  @keyframes daybar-pop { from { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+    to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
 
   .rail-card { background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s5); box-shadow: var(--shadow-1); }

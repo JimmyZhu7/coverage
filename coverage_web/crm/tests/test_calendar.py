@@ -380,12 +380,18 @@ def test_intensity_stops_climbing_past_three(client, logged_in):
 def test_the_rail_spans_two_years_around_today_and_marks_where_you_are(client, logged_in):
     today = timezone.localdate()
     body = client.get(reverse("crm:calendar")).content.decode()
-    assert body.count('class="cal-rail-m') == 24
+    assert body.count('class="mrail-m') == 24
     back = _shift_for_test(today.year, today.month, -6)
     fwd = _shift_for_test(today.year, today.month, 17)
     assert f'href="?y={back[0]}&m={back[1]}"' in body
     assert f'href="?y={fwd[0]}&m={fwd[1]}"' in body
     assert 'aria-current="page"' in body
+    # Twenty zeroes down the strip is twenty things to read past. An
+    # empty column says "nothing" by being flat; the count still reaches
+    # a screen reader through the link's accessible name.
+    assert 'Feb 2026, 0 items' in body, 'the count stays in the a11y name'
+    assert '<span class="mrail-n" aria-hidden="true"></span>' in body, \
+        'and an empty month prints no visible figure'
 
 
 def test_the_rail_counts_both_your_events_and_confirmed_deadlines(client, logged_in):

@@ -44,49 +44,65 @@
   .cal-key b { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     color: var(--ink); }
 
-  /* ---- The month rail ---------------------------------------------------
-     24 months you can scroll through, each carrying its own count. The
-     counts are what make it worth the space: a strip of month names is just
-     navigation, but a strip that shows October holding eleven things and
-     July holding none is a read of the whole cycle.
+  /* ---- The month rail: a histogram you can click ------------------------
+     Was 24 bordered chips, twenty of which printed a "0". That is twenty
+     boxes of nothing to scan past to find the three months that hold
+     something — the rail cost more attention than the answer was worth.
+
+     Now it is one continuous strip of columns whose HEIGHT is the count.
+     Empty months collapse to a baseline tick and go visually silent; a busy
+     month stands up and is found without reading a digit. Same links, same
+     targets, and the count still reaches a screen reader through each link's
+     accessible name, so height is never the only carrier.
      -------------------------------------------------------------------- */
-  .cal-rail-wrap { position: relative; margin-bottom: var(--s4); }
-  .cal-rail { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 10px;
-    scroll-snap-type: x proximity; overscroll-behavior-x: contain;
+  .mrail-wrap { margin-bottom: var(--s4); }
+  .mrail { display: flex; align-items: flex-end; gap: 1px;
+    padding: 0 0 2px; overflow-x: auto; overscroll-behavior-x: contain;
+    border-bottom: 1px solid var(--line);
     scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-  .cal-rail::-webkit-scrollbar { height: 6px; }
-  .cal-rail::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
-  .cal-rail::-webkit-scrollbar-track { background: transparent; }
-  .cal-rail-m { flex: none; scroll-snap-align: center; width: 64px;
+  .mrail::-webkit-scrollbar { height: 5px; }
+  .mrail::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+  .mrail::-webkit-scrollbar-track { background: transparent; }
+  /* 24 x ~46px fits 1120px, so at desktop the whole two years are visible and
+     the scroller never engages. It stays a scroller for narrow screens. */
+  .mrail-m { flex: 1 0 46px; min-width: 40px;
     display: flex; flex-direction: column; align-items: center; gap: 3px;
-    padding: 7px 0 6px; border: 1px solid var(--line); border-radius: 10px;
-    background: var(--surface); color: var(--ink-2); text-decoration: none;
-    transition: transform var(--t-fast), border-color var(--t-fast),
-      background-color var(--t-fast), color var(--t-fast), box-shadow var(--t-med); }
-  .cal-rail-m:hover { transform: translateY(-2px); border-color: var(--accent-line);
-    color: var(--accent-ink); text-decoration: none; box-shadow: var(--shadow-2); }
-  .cal-rail-m:active { transform: translateY(0) scale(0.96); }
-  .cal-rail-m.is-active { background: var(--accent); border-color: var(--accent);
-    color: #fff; box-shadow: var(--shadow-2); }
-  .cal-rail-m.is-active .cal-rail-dots { background: rgba(255,255,255,0.85); }
-  /* This month, when you are looking at a different one: a ring, not a fill,
-     so "today lives here" and "you are reading this" stay distinguishable. */
-  .cal-rail-m.is-now:not(.is-active) { border-color: var(--accent-line); }
-  .cal-rail-lab { font-family: var(--font-mono); font-size: var(--fs-xs);
-    text-transform: uppercase; letter-spacing: 0.04em; font-weight: var(--w-med); }
-  /* Reserved whether or not a year is printed. The year only appears at a
-     January boundary, and letting it add a line there made that one chip
-     taller than its 23 neighbours — the rail stopped being a row. */
-  .cal-rail-yr { font-family: var(--font-mono); font-size: 9px; opacity: 0.6;
-    display: block; height: 11px; line-height: 11px; }
-  /* The load bar. Width tracks the count against the busiest month on the
-     rail, so it is a comparison rather than an absolute nobody can read. */
-  .cal-rail-track { width: 34px; height: 3px; border-radius: 999px;
-    background: var(--line); overflow: hidden; }
-  .cal-rail-dots { height: 100%; background: var(--accent); border-radius: 999px;
-    transition: width var(--t-med); }
-  .cal-rail-n { font-family: var(--font-mono); font-size: 9px;
-    font-variant-numeric: tabular-nums; opacity: 0.75; }
+    padding: 4px 0 5px; border-radius: 8px 8px 0 0;
+    color: var(--ink-3); text-decoration: none;
+    transition: background-color var(--t-fast), color var(--t-fast); }
+  .mrail-m:hover { background: var(--accent-soft); color: var(--accent-ink);
+    text-decoration: none; }
+  .mrail-n { font-family: var(--font-mono); font-size: 9px; line-height: 1;
+    font-variant-numeric: tabular-nums; height: 10px; font-weight: var(--w-bold);
+    color: var(--ink-2); }
+  .mrail-plot { height: 30px; width: 100%; display: flex; align-items: flex-end;
+    justify-content: center; }
+  .mrail-bar { width: 56%; min-height: 2px; border-radius: 3px 3px 0 0;
+    background: var(--accent-line);
+    height: var(--h); transform-origin: bottom;
+    animation: mrail-grow 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 18ms);
+    transition: background-color var(--t-fast); }
+  @keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  .mrail-m:hover .mrail-bar { background: var(--accent); }
+  .mrail-lab { font-family: var(--font-mono); font-size: 10px; line-height: 1;
+    text-transform: uppercase; letter-spacing: 0.05em; font-weight: var(--w-med); }
+  /* Reserved whether or not a year prints, so a January column is not taller
+     than its eleven neighbours and the labels stay on one baseline. */
+  .mrail-yr { font-family: var(--font-mono); font-size: 8px; line-height: 1;
+    height: 8px; opacity: 0.55; }
+
+  /* The month you are reading: filled bar, inked label, and a rule under the
+     column. Three signals, so it survives being the only navy thing here. */
+  .mrail-m.is-active { background: var(--accent-soft);
+    box-shadow: inset 0 -2px 0 0 var(--accent); }
+  .mrail-m.is-active .mrail-bar { background: var(--accent); }
+  .mrail-m.is-active .mrail-lab { color: var(--accent-ink); font-weight: var(--w-bold); }
+  .mrail-m.is-active .mrail-n { color: var(--accent-ink); }
+  /* The month TODAY is in, when you have navigated away from it. A dot under
+     the label rather than a colour, so "today lives here" and "you are
+     reading this" never have to be told apart by hue. */
+  .mrail-m.is-now:not(.is-active) .mrail-lab::after { content: " •"; color: var(--accent); }
 
   .cal-grid { border: 1px solid var(--line); border-radius: var(--r-panel);
     overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
@@ -327,19 +343,23 @@
   the active chip is scrolled into view on load by the small script at the
   foot of this template.
   {% endcomment %}
-  <div class="cal-rail-wrap">
-    <nav class="cal-rail" id="cal-rail" aria-label="Jump to a month">
+  <div class="mrail-wrap">
+    <nav class="mrail" id="cal-rail" aria-label="Jump to a month">
       {% for mo in rail %}
-        <a class="cal-rail-m{% if mo.active %} is-active{% endif %}{% if mo.is_now %} is-now{% endif %}"
+        <a class="mrail-m{% if mo.active %} is-active{% endif %}{% if mo.is_now %} is-now{% endif %}"
            href="?y={{ mo.y }}&m={{ mo.m }}"
            {% if mo.active %}aria-current="page"{% endif %}
            aria-label="{{ mo.label }} {{ mo.year }}, {{ mo.count }} item{{ mo.count|pluralize }}">
-          <span class="cal-rail-lab">{{ mo.label }}</span>
-          <span class="cal-rail-yr">{% if mo.show_year %}{{ mo.year }}{% endif %}</span>
-          <span class="cal-rail-track" aria-hidden="true">
-            <span class="cal-rail-dots" style="width: {{ mo.bar_pct }}%"></span>
+          {% comment %}The figure prints only when there IS one. Twenty zeroes
+          down a strip is twenty things to read past to find the month that
+          matters; an empty column already says "nothing" by being flat.
+          {% endcomment %}
+          <span class="mrail-n" aria-hidden="true">{% if mo.count %}{{ mo.count }}{% endif %}</span>
+          <span class="mrail-plot" aria-hidden="true">
+            <span class="mrail-bar" style="--h: {{ mo.bar_pct }}%; --i: {{ forloop.counter0 }}"></span>
           </span>
-          <span class="cal-rail-n" aria-hidden="true">{{ mo.count }}</span>
+          <span class="mrail-lab">{{ mo.label }}</span>
+          <span class="mrail-yr">{% if mo.show_year %}{{ mo.year }}{% endif %}</span>
         </a>
       {% endfor %}
     </nav>

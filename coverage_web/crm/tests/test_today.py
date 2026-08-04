@@ -105,7 +105,8 @@ def test_pace_note_pluralizes_touches_correctly(client):
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
     assert "touchs" not in body
-    assert "14 more touches" in body
+    # The figure is bolded now, so the sentence is not one contiguous string.
+    assert "<b>14</b> more touches to go" in body
 
 
 # ---------------------------------------------------------------------------
@@ -912,3 +913,49 @@ def test_the_page_header_outranks_page_content_in_paint_order(client):
     body = client.get(reverse("crm:week")).content.decode()
     assert "quickadd-menu" in body
     assert "Quick add" in body
+
+
+def test_the_day_track_places_today_on_an_eight_to_eight_axis(client):
+    """Shape, not just contents: a list says what is on today, the track says
+    whether it is stacked into one morning or spread across the day."""
+    user = _user(weekly_touch_goal=14)
+    for hour, minute, name in [(8, 0, "Dawn"), (14, 0, "Midday"), (20, 0, "Dusk")]:
+        c = Contact.all_objects.create(user=user, name=f"{name} Person")
+        CalendarEvent.all_objects.create(
+            user=user, contact=c, title=f"Chat with {name}",
+            starts_at=timezone.localtime(timezone.now()).replace(
+                hour=hour, minute=minute, second=0, microsecond=0),
+            kind="chat", thread_id=f"t-{name}")
+
+    bar = _cockpit_context(user)["daybar"]
+    assert bar["show"] is True
+    assert [d["pct"] for d in bar["dots"]] == [0.0, 50.0, 100.0]
+
+
+def test_times_outside_the_window_clamp_instead_of_vanishing():
+    """A 7am call is genuinely "first thing". Dropping it to keep the axis
+    tidy would lose an event to protect a scale."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Early Bird")
+    CalendarEvent.all_objects.create(
+        user=user, contact=c, title="Chat with Early Bird",
+        starts_at=timezone.localtime(timezone.now()).replace(
+            hour=6, minute=0, second=0, microsecond=0),
+        kind="chat", thread_id="t-early")
+
+    bar = _cockpit_context(user)["daybar"]
+    assert [d["pct"] for d in bar["dots"]] == [0.0]
+    assert len(bar["dots"]) == 1, "clamped, not dropped"
+
+
+def test_the_track_stays_away_when_nothing_is_timed_today():
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="All Day")
+    CalendarEvent.all_objects.create(
+        user=user, contact=c, title="Superday", all_day=True,
+        starts_at=timezone.localtime(timezone.now()).replace(hour=0, minute=0),
+        kind="event", thread_id="t-allday")
+
+    bar = _cockpit_context(user)["daybar"]
+    assert bar["show"] is False
+    assert bar["dots"] == []

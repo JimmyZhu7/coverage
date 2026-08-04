@@ -212,8 +212,13 @@ on every quick action so all of it stays in sync.
   </div>
 
   <aside class="cockpit-rail">
+    {% comment %}
+    Pace, laid out sideways. The ring used to be 120px tall with the figure
+    inside it and a caption underneath — a third of the rail's height for one
+    fraction, which is what pushed the rail past the viewport and forced it to
+    grow its own scrollbar. Same ring, same number, one row.
+    {% endcomment %}
     <div class="rail-card pace-card">
-      <h3 class="rail-title">This Week</h3>
       <div class="pace">
         <svg class="pace-ring" viewBox="0 0 120 120" aria-hidden="true">
           <circle class="pace-track" cx="60" cy="60" r="52"></circle>
@@ -224,14 +229,16 @@ on every quick action so all of it stays in sync.
         touches YOU logged — replies and state-correction audit rows are not
         your work and never move this number.
         {% endcomment %}
-        <div class="pace-center">
-          <span class="pace-done">{{ pace.done }}</span>
-          <span class="pace-goal">/ {{ pace.goal }}</span>
+        <div class="pace-text">
+          <p class="pace-figure">
+            <span class="pace-done">{{ pace.done }}</span><span class="pace-goal">/{{ pace.goal }}</span>
+            <span class="pace-lbl">this week</span>
+          </p>
+          <p class="pace-note">
+            {% if pace.hit %}Weekly goal hit.{% else %}<b>{{ pace.remaining }}</b> more touch{{ pace.remaining|pluralize:"es" }} to go.{% endif %}
+          </p>
         </div>
       </div>
-      <p class="pace-note">
-        {% if pace.hit %}Weekly goal hit.{% else %}{{ pace.remaining }} more touch{{ pace.remaining|pluralize:"es" }} to hit your weekly goal.{% endif %}
-      </p>
     </div>
 
     {% comment %}
@@ -245,6 +252,26 @@ on every quick action so all of it stays in sync.
         <h3 class="rail-title">Schedule
           <a class="rail-more" href="{% url 'crm:calendar' %}">Calendar</a>
         </h3>
+        {% comment %}
+        The day, as one 8am-8pm track. A list says WHAT is on today; it does
+        not say whether the three things are stacked into one morning or run
+        from breakfast to dinner. The track answers that before a word is
+        read, and the times were already loaded. Decorative — every dot is
+        also a labelled row below, so nothing here is the sole carrier.
+        {% endcomment %}
+        {% if daybar.show %}
+          <div class="daybar" aria-hidden="true">
+            <div class="daybar-track">
+              {% if daybar.now_pct is not None %}
+                <span class="daybar-now" style="left: {{ daybar.now_pct }}%"></span>
+              {% endif %}
+              {% for d in daybar.dots %}
+                <span class="daybar-dot daybar-{{ d.kind }}" style="left: {{ d.pct }}%; --i: {{ forloop.counter0 }}"></span>
+              {% endfor %}
+            </div>
+            <div class="daybar-scale"><span>8a</span><span>2p</span><span>8p</span></div>
+          </div>
+        {% endif %}
         <ul class="activity">
           {% for r in schedule %}
             <li class="activity-row{% if r.is_today %} is-now{% endif %}">
