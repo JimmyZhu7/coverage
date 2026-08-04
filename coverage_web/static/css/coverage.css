@@ -936,29 +936,16 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .legal p, .legal li { max-width: 65ch; }
 .legal h2 { margin-top: var(--s6); }
 
-/* ---- 14b. Dashboard stat cards (Today + Opportunities) -------------------- */
-.dash-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s4);
-  margin-bottom: var(--s6); }
-.dash-card { background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--r-panel); padding: var(--s5); text-align: center;
-  display: flex; flex-direction: column; gap: var(--s1); align-items: center;
-  /* Center vertically too — the funnel card sets the row height, and the
-     simple number cards must sit on its midline, not hang from the top. */
-  justify-content: center;
-  box-shadow: var(--shadow-1);
-  transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
-.dash-card:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2);
-  transform: translateY(-2px); }
+/* ---- 14b. Ledger numbers ---------------------------------------------------
+   What survives of the old dashboard stat cards. The card grid itself
+   (.dash-stats/.dash-card and the funnel) died with the dashboard — no
+   template has rendered them since Today became the cockpit — but these two
+   live on: the marketing hero's stat band uses them, and base.html
+   count-animates every .dash-num on load. */
 .dash-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: 32px; font-weight: var(--w-med); line-height: 1.1; color: var(--accent-ink); }
 .dash-lbl { font-size: var(--fs-micro); color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.06em; font-weight: var(--w-med); }
-.dash-sub { font-size: var(--fs-s); color: var(--ink-2); }
-.dash-funnel .funnel-row { display: flex; gap: var(--s3); align-items: center;
-  justify-content: center; margin-top: var(--s2); }
-.funnel-step { display: flex; flex-direction: column; gap: 2px; align-items: center; }
-.funnel-step .dash-num { font-size: 22px; }
-.funnel-sep { color: var(--ink-3); }
 
 
 /* ---- 15. htmx niceties ----------------------------------------------------- */
@@ -989,15 +976,10 @@ main > .page { animation: page-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .page-head { animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .page > .panel,
 .page > section,
-.dash-stats > .dash-card,
 .warmth-section,
 .net-actions, .net-coverage {
   animation: rise-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-/* Downward stagger for grid/stack children so they cascade, not pop. */
-.dash-stats > .dash-card:nth-child(2) { animation-delay: 55ms; }
-.dash-stats > .dash-card:nth-child(3) { animation-delay: 110ms; }
-.dash-stats > .dash-card:nth-child(4) { animation-delay: 165ms; }
 .net-coverage { animation-delay: 90ms; }
 @keyframes rise-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
@@ -1005,7 +987,7 @@ main > .page { animation: page-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
    whole UI feels responsive to touch, not just the hover-lift cards. */
 .btn:active, .pill:active, .site-nav a:active, .subnav a:active,
 .scope-tabs a:active, .net-mini:active,
-.dash-card:active, .firm-card:active, .contact-card:active {
+.firm-card:active, .contact-card:active {
   transform: scale(0.97);
 }
 .btn, .pill, .net-mini {
@@ -1099,10 +1081,15 @@ select:focus-visible, input:focus-visible {
 /* Buttons sit on the light band, so they use the site's default treatment:
    one solid navy primary CTA, ghost/outline secondaries. */
 
-/* Index-driven staggered reveal: set style="--i:N" on each child to cascade. */
+/* Index-driven staggered reveal: set style="--i:N" on each child to cascade.
+   The delay is CAPPED. Uncapped, the Network page's 84-card warmth section
+   put its last card 83 × 55ms ≈ 4.6 SECONDS out — most of the page was
+   blank-then-popping long after load, which reads as the page being slow,
+   not as motion. Six items of cascade sells the effect; everything past the
+   cap arrives together with the seventh. */
 .kin-reveal {
   animation: rise-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--i, 0) * 55ms);
+  animation-delay: min(calc(var(--i, 0) * 55ms), 330ms);
 }
 
 /* Live pulse dot — a "live now / fresh" marker with an expanding ring. */
