@@ -311,31 +311,57 @@ main { min-height: 60vh; }
  * weight, because the separation should register without being read.
  */
 .pagehead {
+  position: relative;
   display: flex; align-items: flex-end; justify-content: space-between;
   gap: var(--s4) var(--s5); flex-wrap: wrap;
   padding-bottom: var(--s3); margin-bottom: var(--s5);
   border-bottom: 1px solid var(--line);
 }
+/* The header's one kinetic signature: a short accent stroke that draws
+   itself along the hairline datum, left to right, once, after the text has
+   landed. It rides ON the shared line rather than under the title so the
+   motion reinforces the element that makes the pages feel like one product
+   — and one stroke is the budget. A header that keeps moving on a page you
+   read twenty times a day stops being kinetic and starts being weather. */
+.pagehead::after {
+  content: ""; position: absolute; left: 0; bottom: -1px;
+  width: 64px; height: 2px; border-radius: 999px; background: var(--accent);
+  transform-origin: left;
+  animation: ph-stroke 520ms cubic-bezier(0.22, 1, 0.36, 1) 240ms both;
+}
 .pagehead-text { min-width: 0; }
 /* Uppercase micro-label. Carries page context — a date on Today, a section
    name elsewhere — and is the one place the eyebrow earns its keep, because
-   the title below it is a single word on most pages. */
+   the title below it is a single word on most pages. The dash before it is
+   drawn, not typed: it grows in first and hands off to the title, so the
+   header reads top-to-bottom in the order the eye actually takes it. */
 .pagehead-eyebrow {
   margin: 0; font-family: var(--font-mono); font-size: var(--fs-micro);
   text-transform: uppercase; letter-spacing: 0.08em;
   font-weight: var(--w-med); color: var(--ink-3);
+  display: flex; align-items: center; gap: 8px;
+  animation: rise-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-/* Deliberately smaller than the marketing hero's clamp(30px, 4.4vw, 46px):
-   this is a label for a working page, not a claim. */
+.pagehead-eyebrow::before {
+  content: ""; width: 18px; height: 2px; border-radius: 999px;
+  background: var(--accent); flex: none; transform-origin: left;
+  animation: ph-stroke 420ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+}
+/* Bigger than the old clamp(24px, 2.6vw, 30px) working-label size by owner
+   request, but still under the marketing hero's 46px ceiling — the page
+   title now leads the page without competing with the wordmark. */
 .pagehead-title {
-  margin: 3px 0 0; line-height: 1.1; letter-spacing: -0.015em;
-  font: var(--w-black) clamp(24px, 2.6vw, 30px)/1.1 var(--font-display);
+  margin: 4px 0 0; letter-spacing: -0.018em;
+  font: var(--w-black) clamp(30px, 3.6vw, 42px)/1.06 var(--font-display);
   color: var(--ink);
+  animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
 }
 .pagehead-sub {
   margin: var(--s2) 0 0; color: var(--ink-2); font-size: var(--fs-s);
   max-width: 68ch; line-height: 1.5;
+  animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
 }
+@keyframes ph-stroke { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 /* Figures inside the sub line (Today's "7 to do · 7/14 this week") read as
    data, not emphasis — mono + tabular so they never jiggle as they change. */
 .pagehead-sub b {
@@ -343,14 +369,20 @@ main { min-height: 60vh; }
   font-variant-numeric: tabular-nums; font-weight: var(--w-bold);
 }
 /* Right-aligned actions. `margin-left: auto` rather than relying on
-   space-between alone, so a wrapped row still pins them to the right edge. */
+   space-between alone, so a wrapped row still pins them to the right edge.
+   They arrive last in the stagger — orientation before controls. */
 .pagehead-actions {
   display: flex; align-items: center; gap: var(--s2);
   margin-left: auto; flex: none;
+  animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both;
 }
 @media (max-width: 640px) {
   .pagehead { align-items: flex-start; }
   .pagehead-actions { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pagehead::after, .pagehead-eyebrow, .pagehead-eyebrow::before,
+  .pagehead-title, .pagehead-sub, .pagehead-actions { animation: none; }
 }
 
 /* Scope tabs sit on the page's left rail, not centred. `.standalone` gets
