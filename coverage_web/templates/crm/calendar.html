@@ -5,10 +5,14 @@
 
 {% block head %}<style>
   /* ---- The month grid ---------------------------------------------------
-     Seven columns, whole weeks, Monday first. Cells are min-height rather
-     than fixed: a day with four things on it grows instead of clipping —
-     this page has shipped a clipping bug twice from fixed heights, and a
-     hidden calendar entry is a missed chat.
+     Seven columns, whole weeks, Monday first. Every cell is the SAME height,
+     so the grid reads as a grid rather than as five rows of different sizes
+     that jump when one day gets busy.
+
+     Fixed heights have shipped a clipping bug on this page twice, and a
+     hidden calendar entry is a missed chat — so the height is fixed on the
+     CELL and the entries inside it scroll. Nothing is unreachable; the day
+     just stops shoving the week below it down the page.
      -------------------------------------------------------------------- */
   .cal-bar { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
     margin-bottom: var(--s4); }
@@ -40,6 +44,50 @@
   .cal-key b { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     color: var(--ink); }
 
+  /* ---- The month rail ---------------------------------------------------
+     24 months you can scroll through, each carrying its own count. The
+     counts are what make it worth the space: a strip of month names is just
+     navigation, but a strip that shows October holding eleven things and
+     July holding none is a read of the whole cycle.
+     -------------------------------------------------------------------- */
+  .cal-rail-wrap { position: relative; margin-bottom: var(--s4); }
+  .cal-rail { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 10px;
+    scroll-snap-type: x proximity; overscroll-behavior-x: contain;
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .cal-rail::-webkit-scrollbar { height: 6px; }
+  .cal-rail::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+  .cal-rail::-webkit-scrollbar-track { background: transparent; }
+  .cal-rail-m { flex: none; scroll-snap-align: center; width: 64px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 7px 0 6px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--surface); color: var(--ink-2); text-decoration: none;
+    transition: transform var(--t-fast), border-color var(--t-fast),
+      background-color var(--t-fast), color var(--t-fast), box-shadow var(--t-med); }
+  .cal-rail-m:hover { transform: translateY(-2px); border-color: var(--accent-line);
+    color: var(--accent-ink); text-decoration: none; box-shadow: var(--shadow-2); }
+  .cal-rail-m:active { transform: translateY(0) scale(0.96); }
+  .cal-rail-m.is-active { background: var(--accent); border-color: var(--accent);
+    color: #fff; box-shadow: var(--shadow-2); }
+  .cal-rail-m.is-active .cal-rail-dots { background: rgba(255,255,255,0.85); }
+  /* This month, when you are looking at a different one: a ring, not a fill,
+     so "today lives here" and "you are reading this" stay distinguishable. */
+  .cal-rail-m.is-now:not(.is-active) { border-color: var(--accent-line); }
+  .cal-rail-lab { font-family: var(--font-mono); font-size: var(--fs-xs);
+    text-transform: uppercase; letter-spacing: 0.04em; font-weight: var(--w-med); }
+  /* Reserved whether or not a year is printed. The year only appears at a
+     January boundary, and letting it add a line there made that one chip
+     taller than its 23 neighbours — the rail stopped being a row. */
+  .cal-rail-yr { font-family: var(--font-mono); font-size: 9px; opacity: 0.6;
+    display: block; height: 11px; line-height: 11px; }
+  /* The load bar. Width tracks the count against the busiest month on the
+     rail, so it is a comparison rather than an absolute nobody can read. */
+  .cal-rail-track { width: 34px; height: 3px; border-radius: 999px;
+    background: var(--line); overflow: hidden; }
+  .cal-rail-dots { height: 100%; background: var(--accent); border-radius: 999px;
+    transition: width var(--t-med); }
+  .cal-rail-n { font-family: var(--font-mono); font-size: 9px;
+    font-variant-numeric: tabular-nums; opacity: 0.75; }
+
   .cal-grid { border: 1px solid var(--line); border-radius: var(--r-panel);
     overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
   .cal-dow, .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); }
@@ -48,11 +96,22 @@
     font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--ink-3); font-weight: var(--w-med); }
   .cal-week + .cal-week { border-top: 1px solid var(--line); }
-  .cal-day { min-height: 116px; padding: var(--s2); border-left: 1px solid var(--line);
+  .cal-day { position: relative; height: 132px; padding: var(--s2);
+    border-left: 1px solid var(--line);
     display: flex; flex-direction: column; gap: 4px;
-    transition: background-color var(--t-fast); }
+    transition: background-color var(--t-fast), box-shadow var(--t-med); }
   .cal-day:first-child { border-left: 0; }
-  .cal-day:hover { background: var(--paper); }
+
+  /* Intensity. The tint is the accent at four steps, so a heavy week reads
+     as a band of colour before you have read a single title. It stays under
+     10% even at the top step: this sits behind body text, and a heat map you
+     cannot read the labels on has traded one job for another. */
+  .cal-day.load-0 { background: var(--surface); }
+  .cal-day.load-1 { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+  .cal-day.load-2 { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+  .cal-day.load-3 { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
+  .cal-day:hover { box-shadow: inset 0 0 0 1px var(--accent-line); z-index: 1; }
+
   /* Days from the neighbouring months stay visible but recede — removing
      them would leave ragged weeks, and greying them keeps the grid honest
      about which month you are reading. */
@@ -61,11 +120,30 @@
   .cal-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: var(--fs-xs); color: var(--ink-2); align-self: flex-start;
     width: 24px; height: 24px; display: inline-flex; align-items: center;
-    justify-content: center; border-radius: 50%; flex: none; }
+    justify-content: center; border-radius: 50%; flex: none;
+    transition: background-color var(--t-fast), color var(--t-fast); }
   .cal-day.is-today .cal-num { background: var(--accent); color: #fff;
     font-weight: var(--w-bold); animation: chip-check 320ms cubic-bezier(0.22,1,0.36,1); }
+  .cal-day.is-today { box-shadow: inset 0 0 0 1.5px var(--accent-line); }
 
-  .cal-day { position: relative; }
+  /* The scroll container. `min-height: 0` is load-bearing: a flex child
+     defaults to min-height:auto and refuses to shrink below its content, so
+     without it the list pushes the fixed cell height back out and the
+     overflow never scrolls. */
+  .cal-day-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    display: flex; flex-direction: column; gap: 3px;
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+    /* Overlay scrollbars are invisible until touched, so a full day would
+       look identical to a day with three things on it. This fades the last
+       10px of the scroll box: with nothing down there it fades empty space
+       and cannot be seen, and the moment a card reaches the bottom edge the
+       day says so. No JS, no guess about how many cards happen to fit. */
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 10px), transparent);
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 10px), transparent); }
+  .cal-day-list::-webkit-scrollbar { width: 5px; }
+  .cal-day-list::-webkit-scrollbar-thumb { background: var(--line-strong);
+    border-radius: 999px; }
+  .cal-day-list::-webkit-scrollbar-track { background: transparent; }
   /* Per-day add. Quiet until you approach it; always reachable by keyboard,
      which is why it fades on :focus-visible as well as on cell hover. */
   .cal-day-add { position: absolute; top: 5px; right: 5px; width: 22px; height: 22px;
@@ -83,10 +161,16 @@
   /* An entry. Colour + a left bar per kind; never colour alone — each row
      also carries its title in words, and the chat rows carry the person's
      name, which is the real identifier. */
-  .cal-ev { display: block; text-align: left; width: 100%; border: 0;
+  /* ONE LINE, always, whatever the entry is. The time used to sit on its own
+     row above the title, so a timed chat was twice the height of a deadline
+     and no two cards in a week matched. Time and title now share the line:
+     the time is a fixed-width mono prefix, the title takes the rest and
+     ellipses. Every card in the grid is the same 22px. */
+  .cal-ev { display: flex; align-items: center; gap: 5px; height: 22px; flex: none;
+    text-align: left; width: 100%; border: 0;
     background: var(--paper); border-left: 3px solid var(--line-strong);
-    border-radius: 6px; padding: 4px 7px; font-size: var(--fs-xs);
-    color: var(--ink); line-height: 1.3; list-style: none;
+    border-radius: 5px; padding: 0 6px; font-size: var(--fs-xs);
+    color: var(--ink); line-height: 1; list-style: none;
     transition: transform var(--t-fast), box-shadow var(--t-med),
       background-color var(--t-fast); }
   .cal-ev::-webkit-details-marker { display: none; }
@@ -113,14 +197,16 @@
   .cal-ev-chat { border-left-color: var(--w-chatted-bar); }
   .cal-ev-event { border-left-color: var(--accent); }
   .cal-ev-deadline { border-left-color: var(--stale-t); }
-  .cal-ev-time { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3);
-    display: block; }
-  .cal-ev-title { display: block; overflow: hidden; text-overflow: ellipsis;
+  .cal-ev-time { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
+    flex: none; letter-spacing: -0.02em; }
+  .cal-ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; font-weight: var(--w-med); }
   /* Captured from the mailbox rather than typed — a small provenance mark,
      because "did I add this or did Coverage find it?" is a real question. */
-  .cal-ev-auto::after { content: "↻"; float: right; color: var(--ink-3);
-    font-size: 10px; margin-left: 4px; }
+  /* A flex item, not a float: the card is a flex row now, and a float inside
+     one is ignored — the mark would simply not appear. */
+  .cal-ev-auto::after { content: "↻"; flex: none; color: var(--ink-3);
+    font-size: 10px; }
 
   /* ---- Add-event panel --------------------------------------------------
      A <details> so it costs nothing when closed and needs no JS. Open state
@@ -225,6 +311,28 @@
     </form>
   </details>
 
+  {% comment %}The month rail. Scrolls horizontally through two years, and
+  the active chip is scrolled into view on load by the small script at the
+  foot of this template.
+  {% endcomment %}
+  <div class="cal-rail-wrap">
+    <nav class="cal-rail" id="cal-rail" aria-label="Jump to a month">
+      {% for mo in rail %}
+        <a class="cal-rail-m{% if mo.active %} is-active{% endif %}{% if mo.is_now %} is-now{% endif %}"
+           href="?y={{ mo.y }}&m={{ mo.m }}"
+           {% if mo.active %}aria-current="page"{% endif %}
+           aria-label="{{ mo.label }} {{ mo.year }}, {{ mo.count }} item{{ mo.count|pluralize }}">
+          <span class="cal-rail-lab">{{ mo.label }}</span>
+          <span class="cal-rail-yr">{% if mo.show_year %}{{ mo.year }}{% endif %}</span>
+          <span class="cal-rail-track" aria-hidden="true">
+            <span class="cal-rail-dots" style="width: {{ mo.bar_pct }}%"></span>
+          </span>
+          <span class="cal-rail-n" aria-hidden="true">{{ mo.count }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+  </div>
+
   {# ---- Month grid (>=820px) ---- #}
   <div class="cal-grid">
     <div class="cal-dow" aria-hidden="true">
@@ -233,7 +341,8 @@
     {% for week in weeks %}
       <div class="cal-week">
         {% for day in week %}
-          <div class="cal-day{% if not day.in_month %} is-out{% endif %}{% if day.is_today %} is-today{% endif %}">
+          <div class="cal-day load-{{ day.load }}{% if not day.in_month %} is-out{% endif %}{% if day.is_today %} is-today{% endif %}"
+               {% if day.load_label %}title="{{ day.load_label }}"{% endif %}>
             <span class="cal-num">{{ day.date.day }}</span>
             {% if day.in_month %}
               {% comment %}Adds on THIS day: prefills the date and opens the
@@ -244,9 +353,11 @@
               <a class="cal-day-add" href="?y={{ year }}&m={{ month }}&day={{ day.date.day }}#add"
                  aria-label="Add something on {{ day.date|date:'j F' }}">+</a>
             {% endif %}
-            {% for ev in day.events %}
-              {% include "crm/_calendar_event.html" %}
-            {% endfor %}
+            <div class="cal-day-list">
+              {% for ev in day.events %}
+                {% include "crm/_calendar_event.html" %}
+              {% endfor %}
+            </div>
           </div>
         {% endfor %}
       </div>
@@ -272,4 +383,20 @@
     {% endif %}
   </div>
 </div>
+
+{% comment %}The rail is 24 months wide and the month you are reading is
+rarely the leftmost, so bring it into view. Everything else on this page
+works without JavaScript and this does too — the rail is a plain row of
+links you can scroll by hand; this only saves the scroll. `instant`, not
+`smooth`: an animation firing on every page load is motion you did not ask
+for, and it fights the browser's own scroll restoration on a back button.
+{% endcomment %}
+<script>
+  (function () {
+    var rail = document.getElementById("cal-rail");
+    var active = rail && rail.querySelector(".is-active");
+    if (!active) return;
+    rail.scrollLeft = active.offsetLeft - (rail.clientWidth - active.offsetWidth) / 2;
+  })();
+</script>
 {% endblock %}

@@ -346,3 +346,78 @@ def test_the_agenda_is_never_hidden_by_a_rule_that_outranks_the_breakpoint(clien
     assert "@media (max-width: 820px)" in css and "@media (min-width: 821px)" in css
     # And the counterweight: the scan is reading a real stylesheet.
     assert ".cal-grid {" in base
+
+
+# ---------------------------------------------------------------------------
+# The grid as a readable surface: uniform cells, intensity, the month rail.
+# ---------------------------------------------------------------------------
+
+def test_a_day_is_tinted_by_how_much_is_on_it(client, logged_in):
+    day = timezone.localtime(timezone.now()).replace(
+        day=20, hour=9, minute=0, second=0, microsecond=0)
+    for i in range(2):
+        CalendarEvent.all_objects.create(
+            user=logged_in, title=f"Thing {i}", starts_at=day + timedelta(hours=i))
+    body = client.get(reverse("crm:calendar")).content.decode()
+    assert 'class="cal-day load-2' in body
+    assert 'class="cal-day load-0' in body, "quiet days stay untinted"
+
+
+def test_intensity_stops_climbing_past_three(client, logged_in):
+    """Capped on purpose. A day with nine things is not three times harder to
+    read than a day with three, and an uncapped ramp just goes muddy."""
+    day = timezone.localtime(timezone.now()).replace(
+        day=20, hour=9, minute=0, second=0, microsecond=0)
+    for i in range(9):
+        CalendarEvent.all_objects.create(
+            user=logged_in, title=f"Thing {i}", starts_at=day + timedelta(minutes=i))
+    body = client.get(reverse("crm:calendar")).content.decode()
+    assert "load-3" in body
+    assert "load-4" not in body and "load-9" not in body
+    assert "9 on this day" in body, "the exact count still reaches the tooltip"
+
+
+def test_the_rail_spans_two_years_around_today_and_marks_where_you_are(client, logged_in):
+    today = timezone.localdate()
+    body = client.get(reverse("crm:calendar")).content.decode()
+    assert body.count('class="cal-rail-m') == 24
+    back = _shift_for_test(today.year, today.month, -6)
+    fwd = _shift_for_test(today.year, today.month, 17)
+    assert f'href="?y={back[0]}&m={back[1]}"' in body
+    assert f'href="?y={fwd[0]}&m={fwd[1]}"' in body
+    assert 'aria-current="page"' in body
+
+
+def test_the_rail_counts_both_your_events_and_confirmed_deadlines(client, logged_in):
+    today = timezone.localdate()
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="app_close",
+                            date=today.replace(day=15), confidence=1.0)
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+                            event_kind="app_open",
+                            date=today.replace(day=16), confidence=0.3)
+    CalendarEvent.all_objects.create(
+        user=logged_in, title="Superday",
+        starts_at=timezone.localtime(timezone.now()).replace(day=20))
+
+    rail = client.get(reverse("crm:calendar")).context["rail"]
+    now = next(m for m in rail if m["is_now"])
+    assert now["count"] == 2, "one confirmed deadline plus one event; the rumour is not counted"
+    assert now["bar_pct"] == 100, "and it is the busiest month on the rail"
+
+
+def test_a_month_you_are_not_looking_at_is_not_marked_active(client, logged_in):
+    today = timezone.localdate()
+    other_y, other_m = _shift_for_test(today.year, today.month, 3)
+    rail = client.get(reverse("crm:calendar"),
+                      {"y": other_y, "m": other_m}).context["rail"]
+    active = [m for m in rail if m["active"]]
+    assert len(active) == 1 and (active[0]["y"], active[0]["m"]) == (other_y, other_m)
+    now = next(m for m in rail if m["is_now"])
+    assert not now["active"], "today's month is still marked, but as now, not as active"
+
+
+def _shift_for_test(year, month, by):
+    m = month - 1 + by
+    return year + m // 12, m % 12 + 1

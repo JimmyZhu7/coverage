@@ -19,6 +19,8 @@ import calendar as calmod
 from datetime import date, datetime, timedelta
 
 from django.contrib.auth.decorators import login_required
+from django.db.models import Count
+from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -32,6 +34,12 @@ from .models import CalendarEvent
 # Monday-first weeks: every market this product covers starts its week on a
 # Monday, and the cadence engine's business-day maths already assumes it.
 _CAL = calmod.Calendar(firstweekday=0)
+
+# How far the month rail reaches either side of today. A recruiting cycle runs
+# roughly a year ahead — applications for SA 2028 open the summer before — so
+# the rail leans forward, and keeps half a year back for looking up a chat you
+# have already had.
+_RAIL_BACK, _RAIL_FORWARD = 6, 17
 
 
 def _month_bounds(year: int, month: int):
@@ -119,6 +127,67 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
     return buckets
 
 
+def _month_rail(user, year: int, month: int, today: date) -> list[dict]:
+    """The scrolling strip of months above the grid, each with its own count.
+
+    The counts are the point. A bare list of month names tells you nothing
+    about where to look; a strip that shows October carrying eleven things and
+    July carrying none turns navigation into a read of the cycle. Two grouped
+    queries rather than one per month — the rail is 24 wide.
+    """
+    months: list[tuple[int, int]] = []
+    y, m = _shift(today.year, today.month, -_RAIL_BACK)
+    for _ in range(_RAIL_BACK + _RAIL_FORWARD + 1):
+        months.append((y, m))
+        y, m = _shift(y, m, 1)
+
+    first = date(*months[0], 1)
+    last_y, last_m = months[-1]
+    last = date(last_y, last_m, calmod.monthrange(last_y, last_m)[1])
+
+    counts: dict[tuple[int, int], int] = {}
+
+    # TruncMonth converts to the ACTIVE timezone before truncating, which is
+    # the same local-day rule `_events_by_day` buckets on. Without that the
+    # rail and the grid could disagree about which month a late-night Hong
+    # Kong chat belongs to.
+    window_start = timezone.make_aware(datetime.combine(first, datetime.min.time()))
+    window_end = timezone.make_aware(datetime.combine(last + timedelta(days=1), datetime.min.time()))
+    for row in (CalendarEvent.objects.for_user(user)
+                .filter(starts_at__gte=window_start, starts_at__lt=window_end)
+                .annotate(bucket=TruncMonth("starts_at"))
+                .values("bucket").annotate(n=Count("id"))):
+        key = (row["bucket"].year, row["bucket"].month)
+        counts[key] = counts.get(key, 0) + row["n"]
+
+    for row in (FirmDate.objects.filter(date__gte=first, date__lte=last, confidence=1.0)
+                .annotate(bucket=TruncMonth("date"))
+                .values("bucket").annotate(n=Count("id"))):
+        key = (row["bucket"].year, row["bucket"].month)
+        counts[key] = counts.get(key, 0) + row["n"]
+
+    # The bar is a comparison against the busiest month on the rail, not an
+    # absolute — "eleven" means nothing on its own, but "twice October" does.
+    busiest = max(counts.values(), default=0)
+
+    rail = []
+    for ry, rm in months:
+        n = counts.get((ry, rm), 0)
+        rail.append({
+            "bar_pct": round(100 * n / busiest) if busiest else 0,
+            "y": ry, "m": rm,
+            "label": date(ry, rm, 1).strftime("%b"),
+            "year": ry,
+            # The year only when it changes, so the strip reads
+            # "Nov Dec | 2027 Jan Feb" instead of repeating itself 24 times.
+            "show_year": rm == 1 or (ry, rm) == months[0],
+            "count": n,
+            "active": ry == year and rm == month,
+            "is_now": ry == today.year and rm == today.month,
+        })
+    return rail
+
+
 def _resolve_month(y, m, today: date) -> tuple[int, int]:
     """A year/month pair from untrusted input, or this month.
 
@@ -149,13 +218,26 @@ def _month_context(user, year: int, month: int, today: date) -> dict:
     buckets = _events_by_day(user, first, last)
     prev_y, prev_m = _shift(year, month, -1)
     next_y, next_m = _shift(year, month, 1)
-    return {
-        "weeks": [[{
+    def cell(d: date) -> dict:
+        events = buckets.get(d, [])
+        return {
             "date": d,
             "in_month": d.month == month,
             "is_today": d == today,
-            "events": buckets.get(d, []),
-        } for d in week] for week in _CAL.monthdatescalendar(year, month)],
+            "events": events,
+            # Intensity, capped at 3. A day with nine things on it is not
+            # nine times busier to look at than a day with three — past a
+            # point the tint stops carrying information and just goes muddy.
+            # Cells are a fixed height and scroll, so the count is the only
+            # thing that can signal a heavy day at a glance.
+            "load": min(len(events), 3),
+            "load_label": f"{len(events)} on this day" if events else "",
+        }
+
+    return {
+        "weeks": [[cell(d) for d in week]
+                  for week in _CAL.monthdatescalendar(year, month)],
+        "rail": _month_rail(user, year, month, today),
         "month_label": first.strftime("%B %Y"),
         "year": year, "month": month,
         "prev_y": prev_y, "prev_m": prev_m,
