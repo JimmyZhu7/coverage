@@ -21,8 +21,36 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     gap: var(--s5); align-items: start; transition: opacity var(--t-fast); }
   #today-cockpit.htmx-request .cockpit { opacity: 0.55; }
   .cockpit-main { min-width: 0; }
+  /* The rail carries four cards now (pace, schedule, deadlines, activity).
+     A sticky column taller than the viewport pins its TOP and leaves the
+     bottom permanently unreachable, so it gets its own bounded scroll — the
+     one place on this page where a nested scrollbar is the right answer,
+     because the alternative is a card nobody can ever see. */
   .cockpit-rail { position: sticky; top: 88px; display: flex; flex-direction: column;
-    gap: var(--s4); }
+    gap: var(--s4); max-height: calc(100vh - 104px); overflow-y: auto;
+    overscroll-behavior: contain; padding-right: 2px;
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .cockpit-rail::-webkit-scrollbar { width: 5px; }
+  .cockpit-rail::-webkit-scrollbar-thumb { background: var(--line-strong);
+    border-radius: 999px; }
+  .cockpit-rail::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---- Quick add: a disclosure menu in the page header ---- */
+  .quickadd { position: relative; }
+  .quickadd > summary { list-style: none; cursor: pointer; }
+  .quickadd > summary::-webkit-details-marker { display: none; }
+  .quickadd-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+    min-width: 232px; display: flex; flex-direction: column;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-2); padding: 6px;
+    animation: csel-open 140ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
+  .quickadd-menu a { display: flex; flex-direction: column; gap: 1px;
+    padding: 9px 11px; border-radius: 8px; color: var(--ink);
+    font-size: var(--fs-s); font-weight: var(--w-med); text-decoration: none;
+    transition: background-color var(--t-fast); }
+  .quickadd-menu a:hover { background: var(--paper); text-decoration: none; }
+  .quickadd-hint { color: var(--ink-3); font-size: var(--fs-micro);
+    font-weight: var(--w-reg); }
 
   .lane { margin-bottom: var(--s6); }
   .lane-title { display: flex; align-items: center; gap: var(--s2);
@@ -102,17 +130,35 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .activity-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
     flex: none; align-self: center; }
   .activity-dot.in { background: var(--ok); }
+  .activity-dot.is-urgent { background: var(--danger); }
   .activity-text { flex: 1; min-width: 0; }
   .activity-text a { color: var(--ink); font-weight: var(--w-med); }
   .activity-kind { color: var(--ink-3); }
   .activity-when { color: var(--ink-3); font-size: var(--fs-xs);
     font-family: var(--font-mono); white-space: nowrap; }
+  /* Today, and a deadline inside a week, are the two things in the rail
+     worth raising the contrast for. Both also say so in words — "today",
+     "2d" — so the colour is never carrying the meaning alone. */
+  .activity-when.is-now { color: var(--accent-ink); font-weight: var(--w-bold); }
+  .activity-when.is-urgent { color: var(--danger); font-weight: var(--w-med); }
+  /* A "see all" link in a rail heading. Sits at the far right of the label
+     row so the two read as one line, not as a heading plus a stray link. */
+  .rail-title { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s2); }
+  .rail-more { font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: none; letter-spacing: 0; color: var(--ink-3);
+    font-weight: var(--w-med); }
+  .rail-more:hover { color: var(--accent-ink); }
 
   /* Below 1024 the rail stacks under the queue, pace ring first. Cards flow
      in a row while they fit and wrap rather than shrinking. */
   @media (max-width: 1023px) {
     .cockpit { grid-template-columns: 1fr; }
-    .cockpit-rail { position: static; flex-direction: row; flex-wrap: wrap; }
+    /* Unstick AND uncap: stacked under the queue the rail is just page
+       content, and leaving the max-height on would trap four cards in a
+       ~700px scroller in the middle of a page that already scrolls. */
+    .cockpit-rail { position: static; flex-direction: row; flex-wrap: wrap;
+      max-height: none; overflow: visible; }
     .cockpit-rail .rail-card { flex: 1 1 240px; }
   }
 
@@ -218,6 +264,56 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .lane-debrief .prio-debrief { background: var(--accent-soft); color: var(--accent-ink);
     border-color: var(--accent-line); }
   .act-card.act-debrief { border-left-color: var(--accent-ink); }
+
+  /* Prep lane: a chat happening in a few hours. The only lane above Debrief,
+     and the only one whose card leads with a clock — everything else on this
+     page is "sometime today", and this one is not. */
+  .lane-prep .lane-dot { background: var(--accent); }
+  .act-card.act-prep { border-left-color: var(--accent); }
+  .prep-at { font-family: var(--font-mono); font-size: var(--fs-xs);
+    font-weight: var(--w-bold); color: var(--accent-ink);
+    background: var(--accent-soft); border-radius: 999px; padding: 2px 8px;
+    white-space: nowrap; }
+  .lane-prep .prio-prep { background: var(--stale-s); color: var(--stale-t);
+    border-color: var(--stale-l); }
+  /* Last time's debrief, verbatim. Clamped rather than truncated server-side
+     so the full text stays selectable and searchable in the page, and three
+     lines is where a card stops being glanceable. */
+  .prep-learned { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3;
+    -webkit-box-orient: vertical; overflow: hidden; }
+  /* A lone prep card takes two columns. Every other act-card carries a
+     one-line reason; this one carries a paragraph of quoted debrief, and at
+     a third of the width that paragraph is four ragged lines next to two
+     thirds of empty row. Content-driven, so it reverts the moment there is a
+     second chat and the row fills honestly. */
+  .lane-prep .act-card:only-child { grid-column: span 2; }
+  @media (max-width: 560px) { .lane-prep .act-card:only-child { grid-column: auto; } }
+
+  /* ---- Waiting on reply: the page's one no-action block ----
+     Deliberately the quietest thing in the main column — no card chrome, no
+     buttons, one line of chips. It answers "did I drop anything?" and then
+     gets out of the way. Giving it actions would turn reassurance back into
+     a queue, which is the state the cadence cap exists to prevent. */
+  .waiting { margin-bottom: var(--s6); padding-top: var(--s4);
+    border-top: 1px solid var(--line); }
+  .waiting-title { display: flex; align-items: center; gap: var(--s2);
+    font-size: var(--fs-s); font-weight: var(--w-bold); margin: 0 0 var(--s3);
+    color: var(--ink-2); }
+  .waiting-note { font-size: var(--fs-xs); color: var(--ink-3);
+    font-weight: var(--w-reg); }
+  .waiting-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .waiting-chip { display: inline-flex; align-items: baseline; gap: 6px;
+    padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--surface); color: var(--ink); font-size: var(--fs-xs);
+    font-weight: var(--w-med); text-decoration: none;
+    transition: border-color var(--t-fast), color var(--t-fast),
+      transform var(--t-fast); }
+  .waiting-chip:hover { border-color: var(--accent-line); color: var(--accent-ink);
+    text-decoration: none; transform: translateY(-1px); }
+  .waiting-firm { color: var(--ink-3); font-weight: var(--w-reg);
+    font-size: var(--fs-micro); }
+  .waiting-more { align-self: center; font-family: var(--font-mono);
+    font-size: var(--fs-micro); color: var(--ink-3); }
 
   /* ---- Coverage Gaps strip: where you are least covered, worst first ---- */
   .gap-strip { margin-bottom: var(--s5); }

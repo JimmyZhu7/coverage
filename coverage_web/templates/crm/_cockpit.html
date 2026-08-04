@@ -43,6 +43,52 @@ on every quick action so all of it stays in sync.
     {% endif %}
 
     {% comment %}
+    Chat prep. First on the page whenever it exists: a conversation happening
+    in a few hours outranks every follow-up email, and the work is not
+    remembering it — it is walking in with the last one in your head. Only
+    ever today, and only chats with a real time on them.
+    {% endcomment %}
+    {% if chat_prep %}
+      <section class="lane lane-prep">
+        <h2 class="lane-title">
+          <span class="lane-dot"></span>
+          Chat{{ chat_prep|length|pluralize }} today
+          <span class="lane-count" aria-live="polite">{{ chat_prep|length }}</span>
+        </h2>
+        <div class="act-grid">
+          {% for p in chat_prep %}
+            <article class="act-card kin-reveal act-prep" style="--i:{{ forloop.counter0 }}">
+              <div class="act-top">
+                <span class="opp-firm">{% if p.contact.firm %}{{ p.contact.firm.name|smart_title }}{% else %}{{ p.contact.firm_text|smart_title }}{% endif %}</span>
+                <span class="prep-at">{{ p.when }}</span>
+              </div>
+              <h3 class="act-name"><a href="{% url 'crm:contact_detail' p.contact.id %}">{{ p.contact.name|smart_title }}</a></h3>
+              {% if p.contact.role %}<p class="act-role">{{ p.contact.role|smart_title }}</p>{% endif %}
+              <div class="act-badges">
+                <span class="chip warmth-{{ p.contact.warmth }}">{{ p.contact.warmth }}</span>
+                {% if p.firm_date %}
+                  <span class="prio prio-prep">{{ p.firm_date_label }} · {{ p.firm_date_days }}d</span>
+                {% endif %}
+              </div>
+              {% if p.learned %}
+                {% comment %}Last time's debrief, verbatim and clamped. This is
+                the whole reason the card exists.{% endcomment %}
+                <p class="act-reason prep-learned">Last time: {{ p.learned }}</p>
+              {% else %}
+                <p class="act-reason">No notes from last time. Debrief this one afterwards and there will be.</p>
+              {% endif %}
+              <div class="act-quick">
+                <div class="act-primary">
+                  <a class="btn btn-primary act-btn" href="{% url 'crm:contact_detail' p.contact.id %}">Open their file</a>
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% comment %}
     Debrief lane. Sits above the cadence lanes because it is about a
     conversation that ALREADY happened — what you remember from it is
     decaying while the rest of the queue waits. Empties itself: a chat
@@ -117,6 +163,31 @@ on every quick action so all of it stays in sync.
     {% endif %}
 
     {% comment %}
+    Waiting on reply. The page's quiet bucket: people who owe YOU an answer
+    and about whom the cadence engine is correctly silent, because the
+    follow-up is not due yet. Names, no buttons — this exists to answer "did
+    I drop anything?", and giving it actions would turn reassurance back into
+    a queue. Anyone already on this page is excluded upstream.
+    {% endcomment %}
+    {% if waiting.total %}
+      <section class="waiting">
+        <h2 class="waiting-title">
+          Waiting on reply <span class="lane-count">{{ waiting.total }}</span>
+          <span class="waiting-note">nothing due yet</span>
+        </h2>
+        <div class="waiting-chips">
+          {% for c in waiting.people %}
+            <a class="waiting-chip" href="{% url 'crm:contact_detail' c.id %}">
+              {{ c.name|smart_title }}
+              <span class="waiting-firm">{% if c.firm %}{{ c.firm.name|smart_title }}{% else %}{{ c.firm_text|smart_title }}{% endif %}</span>
+            </a>
+          {% endfor %}
+          {% if waiting.more %}<span class="waiting-more">+{{ waiting.more }} more</span>{% endif %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% comment %}
     Gone-quiet strip. These are exits, not work, so they never occupy a plan
     slot. The bulk button only appears once one-by-one parking has stopped
     being a decision and started being make-work; it loops the audited
@@ -164,18 +235,49 @@ on every quick action so all of it stays in sync.
     </div>
 
     {% comment %}
-    Coming up. Says when the chat was SET UP, never when it is — we store no
-    chat datetime, so "chat tomorrow" would be invented. Prep, not a nag.
+    Schedule. Real datetimes now that CalendarEvent exists, so this finally
+    says WHEN a chat is rather than when it was set up. Chats with no time on
+    them still appear, saying so — the old card could only ever say that, and
+    dropping those rows to keep the card tidy would hide people.
     {% endcomment %}
-    {% if coming_up %}
+    {% if schedule %}
       <div class="rail-card">
-        <h3 class="rail-title">Coming Up</h3>
+        <h3 class="rail-title">Schedule
+          <a class="rail-more" href="{% url 'crm:calendar' %}">Calendar</a>
+        </h3>
         <ul class="activity">
-          {% for r in coming_up %}
+          {% for r in schedule %}
+            <li class="activity-row{% if r.is_today %} is-now{% endif %}">
+              <span class="activity-dot{% if r.timed %} in{% endif %}"></span>
+              <span class="activity-text">
+                {% if r.contact %}<a href="{% url 'crm:contact_detail' r.contact.id %}">{{ r.title }}</a>{% else %}{{ r.title }}{% endif %}
+              </span>
+              <span class="activity-when{% if r.is_today %} is-now{% endif %}">{{ r.when }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    {% comment %}
+    Deadlines, named. The ribbon at the foot of the page counts these; a count
+    creates a click and a name creates an action. Confirmed dates only — the
+    same bar the cadence engine acts on.
+    {% endcomment %}
+    {% if deadlines %}
+      <div class="rail-card">
+        <h3 class="rail-title">Deadlines
+          <a class="rail-more" href="{% url 'opportunities' %}">All</a>
+        </h3>
+        <ul class="activity">
+          {% for d in deadlines %}
             <li class="activity-row">
-              <span class="activity-dot in"></span>
-              <span class="activity-text"><a href="{% url 'crm:contact_detail' r.contact.id %}">{{ r.contact.name|smart_title }}</a> <span class="activity-kind">chat set up</span></span>
-              <span class="activity-when">{% if r.days_ago %}{{ r.days_ago }}d ago{% else %}today{% endif %}</span>
+              <span class="activity-dot{% if d.urgent %} is-urgent{% endif %}"></span>
+              <span class="activity-text">
+                <a href="{% url 'directory:firm_detail' d.firm.slug %}">{{ d.firm.name|smart_title }}</a>
+                <span class="activity-kind">{{ d.label }}</span>
+              </span>
+              <span class="activity-when{% if d.urgent %} is-urgent{% endif %}">{{ d.when }}</span>
             </li>
           {% endfor %}
         </ul>

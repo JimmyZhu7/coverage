@@ -421,3 +421,20 @@ def test_a_month_you_are_not_looking_at_is_not_marked_active(client, logged_in):
 def _shift_for_test(year, month, by):
     m = month - 1 + by
     return year + m // 12, m % 12 + 1
+
+
+def test_every_week_lays_out_on_identical_columns(client, logged_in):
+    """Each week is its own grid container, so a bare `1fr` — which is
+    `minmax(auto, 1fr)` — lets a long title set that column's minimum in ITS
+    week alone, and the six weeks stop lining up down the page. Reported as
+    "each date box should be the same". A zero floor makes the tracks purely
+    proportional so all six grids agree.
+    """
+    css = _style_block(client.get(reverse("crm:calendar")).content.decode())
+    grid = [line for line in css.splitlines() if ".cal-week {" in line]
+    assert grid, "the week grid rule moved; this guard needs updating"
+    assert "repeat(7, minmax(0, 1fr))" in grid[0], (
+        "Week columns must have a zero minimum, or long entry titles widen "
+        "their own week's column and the weeks misalign."
+    )
+    assert "repeat(7, 1fr)" not in grid[0]

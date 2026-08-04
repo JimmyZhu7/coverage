@@ -15,11 +15,12 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pytest
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
-from crm.models import Contact, Touch, UserFirm
+from crm.models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
 from crm.views import (
     PACE_TOUCH_KINDS,
     TODAY_PLAN_MAX,
@@ -28,7 +29,7 @@ from crm.views import (
     _daily_cap,
     _workdays_left,
 )
-from directory.models import Firm
+from directory.models import Firm, FirmDate
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -643,9 +644,12 @@ def _login_and_get(client, user) -> str:
 
 
 # ---------------------------------------------------------------------------
-# A6 / E4. Coming up says when the chat was SET UP, never when it is.
+# A6 / E4. The Schedule rail: a real time when one is known, and never
+# otherwise. This was "Coming Up", which could only ever report when a chat
+# was SET UP because no chat datetime was stored anywhere. CalendarEvent
+# changed that — for chats somebody knows the time of. These pin both halves.
 # ---------------------------------------------------------------------------
-def test_coming_up_shows_a_fresh_scheduled_chat_without_inventing_a_time(client):
+def test_a_scheduled_chat_with_no_event_still_shows_and_claims_no_time(client):
     user = _user(weekly_touch_goal=14)
     c = Contact.all_objects.create(
         user=user, name="Grace Hopper", warmth="replied", thread_state="chat_scheduled",
@@ -653,19 +657,38 @@ def test_coming_up_shows_a_fresh_scheduled_chat_without_inventing_a_time(client)
     _touch(user, c, "chat_scheduled", days_ago=1)
 
     ctx = _cockpit_context(user)
-    assert [r["contact"].name for r in ctx["coming_up"]] == ["Grace Hopper"]
+    assert [r["contact"].name for r in ctx["schedule"]] == ["Grace Hopper"]
+    assert ctx["schedule"][0]["when"] == "no time yet"
 
     body = _login_and_get(client, user)
-    assert "Coming Up" in body
+    assert "Schedule" in body
     assert "chat set up" in body
-    # We store no chat datetime; the page must never imply we do.
+    # Nobody stated a time, so the page must not imply one.
     for invented in ("chat tomorrow", "Chat tomorrow", "chat at "):
         assert invented not in body
 
 
-def test_coming_up_drops_a_chat_once_it_goes_stale():
+def test_an_event_with_a_real_time_states_it(client):
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Ada Lovelace", warmth="replied", thread_state="chat_scheduled",
+    )
+    _touch(user, c, "chat_scheduled", days_ago=1)
+    at = timezone.localtime(timezone.now()).replace(
+        hour=15, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    CalendarEvent.all_objects.create(
+        user=user, contact=c, title="Chat with Ada Lovelace",
+        starts_at=at, kind="chat", thread_id="t-1")
+
+    ctx = _cockpit_context(user)
+    assert [r["when"] for r in ctx["schedule"]] == ["3pm tmrw"]
+    # And the contact is not double-listed as an untimed chat.
+    assert len(ctx["schedule"]) == 1
+
+
+def test_a_scheduled_chat_drops_off_the_schedule_once_it_goes_stale():
     """The exact complement of cadence branch 2: past 4 business days this
-    stops being "coming up" and becomes a confirm_chat action instead."""
+    stops being upcoming and becomes a confirm_chat action instead."""
     user = _user(weekly_touch_goal=14)
     c = Contact.all_objects.create(
         user=user, name="Stale Chat", warmth="replied", thread_state="chat_scheduled",
@@ -673,7 +696,7 @@ def test_coming_up_drops_a_chat_once_it_goes_stale():
     _touch(user, c, "chat_scheduled", days_ago=21)
 
     ctx = _cockpit_context(user)
-    assert ctx["coming_up"] == []
+    assert ctx["schedule"] == []
     actions = [a for lane in ctx["lanes"] for a in lane["items"]]
     assert [a["action"] for a in actions] == ["confirm_chat"]
 
@@ -706,3 +729,186 @@ def test_an_empty_funnel_says_so_in_words_rather_than_drawing_zeroes(client):
     body = _login_and_get(client, user)
     assert "Nothing submitted yet." in body
     assert "0 › 0 › 0" not in body
+
+
+# ---------------------------------------------------------------------------
+# The renovation: deadlines by name, the silent bucket, and chat prep.
+# ---------------------------------------------------------------------------
+def test_deadlines_are_named_not_just_counted(client):
+    """The ribbon counts these. A count creates a click; a name creates an
+    action you can take this morning."""
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    today = timezone.localdate()
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="insight_deadline",
+                            date=today + timedelta(days=2), confidence=1.0)
+
+    ctx = _cockpit_context(user)
+    assert [d["firm"].name for d in ctx["deadlines"]] == ["Morgan Stanley"]
+    assert ctx["deadlines"][0]["when"] == "2d"
+    assert ctx["deadlines"][0]["urgent"] is True
+
+    body = _login_and_get(client, user)
+    assert "insight deadline" in body
+
+
+def test_an_unconfirmed_date_never_reaches_the_rail():
+    """Same bar the cadence engine acts on. A countdown built on a rumour is
+    worse than no countdown."""
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+                            event_kind="app_close",
+                            date=timezone.localdate() + timedelta(days=3),
+                            confidence=0.3)
+    assert _cockpit_context(user)["deadlines"] == []
+
+
+def test_a_past_deadline_is_not_upcoming():
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="app_close",
+                            date=timezone.localdate() - timedelta(days=1),
+                            confidence=1.0)
+    assert _cockpit_context(user)["deadlines"] == []
+
+
+def test_waiting_on_reply_names_people_the_queue_is_silent_about(client):
+    """The gap between "you sent it" and "the follow-up is due", where the
+    cadence engine correctly says nothing and the contact vanished entirely."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Recently Emailed")
+    _touch(user, c, "outreach", days_ago=1)
+
+    ctx = _cockpit_context(user)
+    assert [p.name for p in ctx["waiting"]["people"]] == ["Recently Emailed"]
+    assert ctx["waiting"]["total"] == 1
+
+    body = _login_and_get(client, user)
+    assert "Waiting on reply" in body
+    assert "Recently Emailed" in body
+
+
+def test_waiting_never_repeats_somebody_already_on_the_page():
+    """A contact with a card six inches up must not also appear in the quiet
+    bucket — the page would be asking and reassuring about one person."""
+    user = _user(weekly_touch_goal=14)
+    due = Contact.all_objects.create(user=user, name="Due For Followup")
+    _touch(user, due, "outreach", days_ago=20)
+
+    ctx = _cockpit_context(user)
+    queued = {a["contact"]["id"] for lane in ctx["lanes"] for a in lane["items"]}
+    assert due.id in queued, "precondition: this contact is in the queue"
+    assert [p.id for p in ctx["waiting"]["people"]] == []
+
+
+def test_waiting_ignores_people_who_never_got_a_first_note():
+    """`no_reply` is also the default for a contact nobody has written to.
+    "Waiting on reply" from someone you never emailed is a lie."""
+    user = _user(weekly_touch_goal=14)
+    Contact.all_objects.create(user=user, name="Never Contacted")
+    assert _cockpit_context(user)["waiting"]["total"] == 0
+
+
+def test_waiting_counts_the_overflow_rather_than_truncating_silently():
+    user = _user(weekly_touch_goal=14)
+    for i in range(15):
+        c = Contact.all_objects.create(user=user, name=f"Sent {i:02d}")
+        _touch(user, c, "outreach", days_ago=1)
+
+    waiting = _cockpit_context(user)["waiting"]
+    assert waiting["total"] == 15
+    assert len(waiting["people"]) == 12
+    assert waiting["more"] == 3
+
+
+def test_a_chat_today_gets_a_prep_card_with_what_you_learned_last_time(client):
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace", firm=firm,
+                                   warmth="chatted", thread_state="chat_done")
+    chat = _touch(user, c, "chat", days_ago=30)
+    ChatDebrief.all_objects.create(
+        user=user, contact=c, touch=chat,
+        learned="She runs the TMT desk and offered to introduce me to Ben.")
+    at = timezone.localtime(timezone.now()).replace(
+        hour=15, minute=0, second=0, microsecond=0)
+    CalendarEvent.all_objects.create(
+        user=user, contact=c, title="Chat with Ada Lovelace",
+        starts_at=at, kind="chat", thread_id="t-prep")
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="app_close",
+                            date=timezone.localdate() + timedelta(days=9),
+                            confidence=1.0)
+
+    ctx = _cockpit_context(user)
+    assert len(ctx["chat_prep"]) == 1
+    prep = ctx["chat_prep"][0]
+    assert prep["contact"].name == "Ada Lovelace"
+    assert "TMT desk" in prep["learned"]
+    assert prep["firm_date_days"] == 9
+    assert prep["firm_date_label"] == "applications close"
+
+    body = _login_and_get(client, user)
+    assert "Chat today" in body
+    assert "TMT desk" in body
+
+
+def test_prep_only_covers_today_and_only_timed_chats():
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Tomorrow Person")
+    tomorrow = timezone.localtime(timezone.now()).replace(
+        hour=15, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    CalendarEvent.all_objects.create(
+        user=user, contact=c, title="Chat with Tomorrow Person",
+        starts_at=tomorrow, kind="chat", thread_id="t-1")
+    allday = Contact.all_objects.create(user=user, name="Allday Person")
+    CalendarEvent.all_objects.create(
+        user=user, contact=allday, title="Superday",
+        starts_at=timezone.localtime(timezone.now()).replace(hour=0, minute=0),
+        all_day=True, kind="event", thread_id="t-2")
+
+    ctx = _cockpit_context(user)
+    assert ctx["chat_prep"] == [], "prep is for a conversation happening today"
+    assert len(ctx["schedule"]) == 2, "both still appear on the schedule"
+
+
+def test_a_dismissed_debrief_is_not_used_as_prep_material():
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    chat = _touch(user, c, "chat", days_ago=30)
+    ChatDebrief.all_objects.create(user=user, contact=c, touch=chat,
+                                   learned="Should not surface.", dismissed=True)
+    CalendarEvent.all_objects.create(
+        user=user, contact=c, title="Chat with Ada Lovelace",
+        starts_at=timezone.localtime(timezone.now()).replace(hour=15, minute=0),
+        kind="chat", thread_id="t-3")
+
+    assert _cockpit_context(user)["chat_prep"][0]["learned"] == ""
+
+
+def test_the_page_header_outranks_page_content_in_paint_order(client):
+    """Quick add opens a menu out of the header, and the header sits above a
+    sticky rail card that comes later in the document.
+
+    `.pagehead-actions` carries a `rise-in` animation with fill `both`, which
+    leaves a real transform on the element permanently — and a transformed
+    element is a stacking context, so any z-index set on the menu inside it is
+    sealed at the parent's level. The menu rendered behind the rail card until
+    `.pagehead` itself was raised. Asserted on the stylesheet because paint
+    order is not observable from a Django test client.
+    """
+    user = _user(weekly_touch_goal=14)
+    client.force_login(user)
+    css = (settings.BASE_DIR / "static" / "css" / "coverage.css").read_text()
+    head = css.split(".pagehead {", 1)[1].split("}", 1)[0]
+    assert "z-index" in head, (
+        "The page header must declare its own stacking level; without it a "
+        "menu opened from the header paints behind page content."
+    )
+
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "quickadd-menu" in body
+    assert "Quick add" in body

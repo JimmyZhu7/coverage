@@ -33,11 +33,10 @@ from coverage_domain import cadence, scoring
 from coverage_domain.pipeline import CHANNELS, MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS
 from crm.forms import ChatDebriefForm, ContactForm
 from directory.classify import TARGET_BUCKETS
-from directory.models import Firm
 from directory.models import Firm, FirmDate, Opportunity
 
 from . import coverage, debrief as debrief_svc, services
-from .models import ChatDebrief, Contact, Touch, UserFirm
+from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
 
 # ---------------------------------------------------------------------------
 # Persistence -> domain adapter.
@@ -556,39 +555,215 @@ def _pace(user, today) -> dict:
     }
 
 
-def _coming_up(user, today) -> list[dict]:
-    """Chats that are on the calendar and not yet stale — visibility, not a nag.
+def _clock(at) -> str:
+    """A time short enough for a rail row: "9am", "12:30pm"."""
+    minutes = f":{at.minute:02d}" if at.minute else ""
+    return f"{at.strftime('%I').lstrip('0') or '12'}{minutes}{at.strftime('%p').lower()}"
 
-    The exact complement of cadence branch 2: that branch stays silent for the
-    first 4 business days after a chat is scheduled (correctly — there is
-    nothing to chase yet), which left these people invisible on the one page
-    that is supposed to know about them. Deliberately NOT a cadence branch of
-    its own: the engine emits ACTIONS, and "a chat exists" is not an action.
 
-    The copy says when the chat was SET UP, never when it is. We do not store a
-    chat datetime anywhere, so any "chat tomorrow" here would be invented."""
-    rows = (
+_SCHEDULE_HORIZON_DAYS = 14
+
+
+def _schedule(user, today) -> list[dict]:
+    """What is actually coming, in time order — the page's missing clock.
+
+    Two sources, deliberately merged rather than shown as two cards:
+
+    1. `CalendarEvent` — chats and events with a REAL datetime, whether the
+       Gmail sync found them on an invite or the user typed them in.
+    2. Contacts sitting at `thread_state="chat_scheduled"` for which no event
+       exists. This used to be the whole of "Coming Up", and its docstring
+       said the copy could never state when a chat was "because we do not
+       store a chat datetime anywhere". That stopped being true when
+       CalendarEvent landed — but only for chats whose time somebody knows,
+       so these rows survive, saying honestly that no time is set yet.
+
+    A merged list is the point: "what's next" is one question, and answering
+    it across two cards makes the reader do the interleaving.
+    """
+    now = timezone.localtime(timezone.now())
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    horizon = start + timedelta(days=_SCHEDULE_HORIZON_DAYS)
+
+    rows: list[dict] = []
+    seen_contacts: set[int] = set()
+
+    for ev in (CalendarEvent.objects.for_user(user)
+               .filter(starts_at__gte=start, starts_at__lt=horizon)
+               .select_related("contact")
+               .order_by("starts_at")):
+        at = timezone.localtime(ev.starts_at)
+        day = at.date()
+        offset = (day - today).days
+        if offset == 0:
+            when = "today" if ev.all_day else f"{_clock(at)} today"
+        elif offset == 1:
+            when = "tomorrow" if ev.all_day else f"{_clock(at)} tmrw"
+        else:
+            label = day.strftime("%a")
+            when = label if ev.all_day else f"{_clock(at)} {label}"
+        if ev.contact_id:
+            seen_contacts.add(ev.contact_id)
+        rows.append({
+            "sort": (at, 0),
+            "title": ev.title,
+            "contact": ev.contact,
+            "when": when,
+            "is_today": offset == 0,
+            "timed": not ev.all_day,
+            "at": at,
+            "kind": ev.kind,
+        })
+
+    # Scheduled chats with no event on the books. Same 4-business-day gate the
+    # old Coming Up used: it is the exact complement of cadence branch 2, which
+    # stays silent that long because there is nothing to chase yet.
+    untimed = (
         Contact.objects.for_user(user)
         .filter(archived=False, thread_state="chat_scheduled")
         .annotate(
             last_ts=models_Max("touches__ts", filter=~Q(touches__kind=MANUAL_OVERRIDE_KIND))
         )
     )
-    out = []
-    for c in rows:
-        if not c.last_ts:
+    for c in untimed:
+        if not c.last_ts or c.id in seen_contacts:
             continue
         set_up = timezone.localtime(c.last_ts).date()
-        # Gate in business days (branch 2's unit, so the two can't disagree
-        # about who is stale); display in calendar days, which is how a person
-        # reads "set up 3 days ago".
         if cadence.business_days_since(set_up, today) > 4:
             continue
+        days_ago = (today - set_up).days
+        rows.append({
+            # Sorts after every timed row on the same day: a thing with a
+            # known time outranks a thing without one.
+            "sort": (now.replace(hour=23, minute=59), 1),
+            "title": f"{c.name} · chat set up",
+            "contact": c,
+            "when": "no time yet",
+            "is_today": False,
+            "timed": False,
+            "at": None,
+            "kind": "chat",
+            "days_ago": days_ago,
+        })
+
+    rows.sort(key=lambda r: r["sort"])
+    return rows[:6]
+
+
+def _next_deadlines(user, today, limit=4) -> list[dict]:
+    """The next confirmed firm dates, NAMED.
+
+    The ribbon at the foot of the page already counts these ("3 closing in 10
+    days"). A count creates a click; a name creates an action — "Morgan
+    Stanley insight deadline, 2 days" is a thing you can do something about
+    this morning.
+
+    `confidence=1.0` only, the same bar the cadence engine acts on. A calendar
+    countdown built on a rumour is worse than no countdown.
+    """
+    rows = (FirmDate.objects
+            .filter(date__gte=today, confidence=1.0)
+            .select_related("firm")
+            .order_by("date")[:limit])
+    out = []
+    for fd in rows:
+        days = (fd.date - today).days
+        out.append({
+            "firm": fd.firm,
+            "label": _FIRM_DATE_LABELS.get(
+                fd.event_kind, fd.event_kind.replace("_", " ")),
+            "date": fd.date,
+            "days": days,
+            "when": "today" if days == 0 else ("1d" if days == 1 else f"{days}d"),
+            # Mirrors the cadence engine's own urgency bar, so the colour here
+            # and the lane a contact lands in cannot disagree.
+            "urgent": days <= 7,
+        })
+    return out
+
+
+_FIRM_DATE_LABELS = {
+    "app_open": "applications open",
+    "app_close": "applications close",
+    "insight_open": "insight programme opens",
+    "insight_deadline": "insight deadline",
+}
+
+
+def _waiting_on_reply(user, busy_ids: set[int], limit=12) -> dict:
+    """People you have written to who owe you an answer, and who the queue is
+    deliberately silent about.
+
+    The gap this fills: between "you sent it" and "the follow-up is due" the
+    cadence engine says nothing — correctly, there is no action yet — so those
+    contacts vanish from Today entirely. That silence reads as "did I drop
+    something?", which is the anxiety a networking tool exists to remove. This
+    is reassurance, not work: names only, no buttons, and it never occupies a
+    plan slot.
+
+    `busy_ids` is every contact the queue is already talking about, so nobody
+    appears twice on one page.
+    """
+    rows = (
+        Contact.objects.for_user(user)
+        .filter(archived=False, thread_state="no_reply")
+        .exclude(id__in=busy_ids)
+        .annotate(
+            last_ts=models_Max("touches__ts", filter=~Q(touches__kind=MANUAL_OVERRIDE_KIND))
+        )
+        .filter(last_ts__isnull=False)
+        .order_by("-last_ts")
+    )
+    people = list(rows[:limit])
+    total = rows.count()
+    return {
+        "people": people,
+        "total": total,
+        # Named, or counted honestly — never a truncated list passed off as
+        # the whole set.
+        "more": max(0, total - len(people)),
+    }
+
+
+def _chat_prep(user, today, schedule) -> list[dict]:
+    """Chats happening TODAY, with what you knew last time already pulled up.
+
+    A chat at 3pm is the most consequential thing on the page, and the work is
+    not "remember it" — it is arriving with the last conversation in your
+    head. Everything here already exists in the database; this is assembly,
+    not new data: who they are, how warm, what the last debrief taught you,
+    and whether their firm has a deadline worth raising.
+    """
+    out = []
+    for row in schedule:
+        if not (row["is_today"] and row["timed"] and row["contact"]):
+            continue
+        c = row["contact"]
+        last = (ChatDebrief.objects.for_user(user)
+                .filter(contact=c, dismissed=False)
+                .exclude(learned="")
+                .order_by("-created")
+                .first())
+        firm_date = None
+        if c.firm_id:
+            firm_date = (FirmDate.objects
+                         .filter(firm_id=c.firm_id, date__gte=today, confidence=1.0)
+                         .order_by("date")
+                         .first())
         out.append({
             "contact": c,
-            "days_ago": (today - set_up).days,
+            "at": row["at"],
+            "when": row["when"],
+            "title": row["title"],
+            "learned": last.learned if last else "",
+            "firm_date": firm_date,
+            "firm_date_days": (firm_date.date - today).days if firm_date else None,
+            "firm_date_label": (
+                _FIRM_DATE_LABELS.get(firm_date.event_kind,
+                                      firm_date.event_kind.replace("_", " "))
+                if firm_date else ""
+            ),
         })
-    out.sort(key=lambda r: r["days_ago"])
     return out
 
 
@@ -670,6 +845,15 @@ def _cockpit_context(user) -> dict:
         for t in recent
     ]
 
+    schedule = _schedule(user, today)
+
+    # Every contact the queue is already speaking about. "Waiting on reply" is
+    # the page's silent bucket, so it must not re-list somebody who has a card
+    # six inches above it.
+    busy_ids = {a["contact"]["id"] for a in planned + held + park}
+    busy_ids |= debrief_contact_ids
+    busy_ids |= {r["contact"].id for r in schedule if r["contact"]}
+
     return {
         "lanes": lanes,
         "planned_total": len(planned),
@@ -689,7 +873,13 @@ def _cockpit_context(user) -> dict:
         # what already happened rather than about the next outbound move.
         "debriefs": debriefs,
         "pace": pace,
-        "coming_up": _coming_up(user, today),
+        # The timed layer. `schedule` merges real calendar datetimes with the
+        # chats nobody has put a time on yet; `chat_prep` is the subset
+        # happening today, with the last debrief pulled up alongside.
+        "schedule": schedule,
+        "chat_prep": _chat_prep(user, today, schedule),
+        "deadlines": _next_deadlines(user, today),
+        "waiting": _waiting_on_reply(user, busy_ids),
         "activity": activity,
         "contact_count": len(contacts),
     }

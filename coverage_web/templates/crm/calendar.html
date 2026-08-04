@@ -90,13 +90,25 @@
 
   .cal-grid { border: 1px solid var(--line); border-radius: var(--r-panel);
     overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
-  .cal-dow, .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); }
+  /* minmax(0, 1fr), NOT 1fr. Every week is its own grid container, and a bare
+     `1fr` is `minmax(auto, 1fr)` — the auto floor lets content set a column's
+     minimum width. So a long firm-and-event title widened the Saturday column
+     in ITS week only, and the six weeks stopped lining up with each other:
+     the boxes were visibly different sizes down the page. A zero floor makes
+     the seven columns purely proportional, so all six grids compute identical
+     tracks and the calendar reads as one grid.
+
+     Deliberately paraphrased rather than quoting the entry that exposed it:
+     this comment ships inside a <style> block in the rendered page, and the
+     tests that assert an unconfirmed date is ABSENT grep the whole response.
+     Quoting a real label here fails them from a stylesheet comment. */
+  .cal-dow, .cal-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .cal-dow { background: var(--paper); border-bottom: 1px solid var(--line-strong); }
   .cal-dow span { padding: var(--s2) var(--s3); font-family: var(--font-mono);
     font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--ink-3); font-weight: var(--w-med); }
   .cal-week + .cal-week { border-top: 1px solid var(--line); }
-  .cal-day { position: relative; height: 132px; padding: var(--s2);
+  .cal-day { position: relative; height: 132px; min-width: 0; padding: var(--s2);
     border-left: 1px solid var(--line);
     display: flex; flex-direction: column; gap: 4px;
     transition: background-color var(--t-fast), box-shadow var(--t-med); }

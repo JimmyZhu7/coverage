@@ -27,6 +27,28 @@
         <b>{{ planned_total }}</b> to do{% if debriefs %} · <b>{{ debriefs|length }}</b> chat{{ debriefs|length|pluralize }} to write down{% endif %} · <b>{{ pace.done }}/{{ pace.goal }}</b> this week
       </p>
     </div>
+    {% comment %}
+    Quick add. Something worth recording — a person you just met, a chat that
+    just got booked — happens away from the page it belongs on, and the cost
+    of capturing it was two navigations from here. A <details> menu rather
+    than a modal: no JS, no focus trap to get wrong, and Escape already works.
+    {% endcomment %}
+    <div class="pagehead-actions">
+      <details class="quickadd">
+        <summary class="btn btn-primary">＋ Quick add</summary>
+        <div class="quickadd-menu">
+          <a href="{% url 'crm:contact_new' %}">
+            <span>A person</span><span class="quickadd-hint">Someone new to track</span>
+          </a>
+          <a href="{% url 'crm:calendar' %}?day={% now 'j' %}#add">
+            <span>Something dated</span><span class="quickadd-hint">A chat, superday, or flight</span>
+          </a>
+          <a href="{% url 'crm:contact_list' %}">
+            <span>A touch you sent</span><span class="quickadd-hint">Find them in Network</span>
+          </a>
+        </div>
+      </details>
+    </div>
   </header>
 
   {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}

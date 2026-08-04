@@ -312,6 +312,14 @@ main { min-height: 60vh; }
  */
 .pagehead {
   position: relative;
+  /* Above page content, so a menu opened from the header is not painted over
+     by whatever the page renders next. It has to live HERE rather than on the
+     menu: `.pagehead-actions` carries a `rise-in` animation with fill `both`,
+     which leaves a real `transform` on the element forever, and a transformed
+     element is a stacking context — any z-index set inside it is sealed in at
+     the parent's level. Today's Quick add menu was painting behind the
+     sticky rail card for exactly that reason. */
+  z-index: 20;
   display: flex; align-items: flex-end; justify-content: space-between;
   gap: var(--s4) var(--s5); flex-wrap: wrap;
   padding-bottom: var(--s3); margin-bottom: var(--s5);
