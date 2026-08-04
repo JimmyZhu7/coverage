@@ -116,4 +116,4 @@ def test_the_settings_page_still_renders_its_profile_section(client, student):
     client.force_login(student)
     body = client.get(reverse("accounts:settings")).content.decode()
     assert "Work Authorization" in body
-    assert "Outreach Assets" in body
+    assert "Cadence" in body

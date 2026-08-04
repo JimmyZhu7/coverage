@@ -959,3 +959,38 @@ def test_the_track_stays_away_when_nothing_is_timed_today():
     bar = _cockpit_context(user)["daybar"]
     assert bar["show"] is False
     assert bar["dots"] == []
+
+
+def test_beyond_a_week_the_schedule_names_the_date_not_the_weekday():
+    """With 14 days in view there are two Fridays; "Fri" on the second one
+    reads as the first. Past a week the date is the only honest label."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Far Out")
+    at = timezone.localtime(timezone.now()).replace(
+        hour=15, minute=0, second=0, microsecond=0) + timedelta(days=10)
+    CalendarEvent.all_objects.create(
+        user=user, contact=c, title="Chat with Far Out",
+        starts_at=at, kind="chat", thread_id="t-far")
+
+    row = _cockpit_context(user)["schedule"][0]
+    assert row["when"] == f"{at.strftime('%b')} {at.day}"
+    assert at.strftime("%a") not in row["when"], "no ambiguous weekday"
+
+
+def test_a_seventh_event_today_still_gets_its_dot_and_its_prep():
+    """The schedule rail shows six rows, but the day track and chat prep read
+    the FULL list — capping at the source lost the seventh event's dot and
+    prep card while the rail looked complete."""
+    user = _user(weekly_touch_goal=14)
+    for i in range(7):
+        c = Contact.all_objects.create(user=user, name=f"Busy {i}")
+        CalendarEvent.all_objects.create(
+            user=user, contact=c, title=f"Chat with Busy {i}",
+            starts_at=timezone.localtime(timezone.now()).replace(
+                hour=9 + i, minute=0, second=0, microsecond=0),
+            kind="chat", thread_id=f"t-busy-{i}")
+
+    ctx = _cockpit_context(user)
+    assert len(ctx["schedule"]) == 6, "the rail stays capped"
+    assert len(ctx["daybar"]["dots"]) == 7, "the track shows the whole day"
+    assert len(ctx["chat_prep"]) == 7, "every chat gets its prep"

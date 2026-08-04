@@ -413,66 +413,6 @@ class SectionForm(forms.Form):
         raise NotImplementedError
 
 
-class OutreachAssetsForm(SectionForm):
-    """`User.assets["angles"]` — the things the user leads with in outreach
-    ("London M&A boutique internship (live deal exposure)").
-
-    ONE TEXTAREA, ONE ANGLE PER LINE, deliberately — not a JS row manager.
-    Add/remove/reorder are all just text editing, which every user already
-    knows how to do; it degrades to a working form with JS off, it survives a
-    validation round-trip without rebuilding DOM state, and it has no
-    index-shuffling bugs. A row manager would buy drag handles and cost a few
-    hundred lines of JS plus a POST format that has to be reassembled
-    server-side. If ordering ever needs to be more than "the order you typed
-    them", revisit; today it doesn't.
-    """
-
-    section = "assets"
-    success_message = "Outreach assets saved."
-
-    # A generous ceiling, not a product opinion: `assets` is a JSON column on
-    # every row of `users`, so an accidental paste of a whole CV shouldn't be
-    # able to grow it without bound. Nobody leads with 50 different angles.
-    MAX_ANGLES = 50
-
-    angles = forms.CharField(
-        required=False,
-        widget=forms.Textarea(attrs={"rows": 6, "placeholder": "One angle per line…"}),
-    )
-
-    @classmethod
-    def initial_for(cls, user) -> dict:
-        angles = (user.assets or {}).get("angles") or []
-        return {"angles": "\n".join(str(a) for a in angles)}
-
-    def clean_angles(self) -> list[str]:
-        """Text -> list of non-empty lines, order preserved."""
-        raw = self.cleaned_data.get("angles") or ""
-        lines = [line.strip() for line in raw.splitlines()]
-        angles = [line for line in lines if line]
-        if len(angles) > self.MAX_ANGLES:
-            raise forms.ValidationError(
-                f"That's more than {self.MAX_ANGLES} angles. Keep the ones you "
-                f"actually use."
-            )
-        return angles
-
-    def apply_to(self, user) -> None:
-        # Copy-then-set, never assign a fresh dict: `assets` also holds
-        # languages / current_status / advocate_target, and this form owns
-        # exactly one key of it.
-        assets = dict(user.assets or {})
-        angles = self.cleaned_data["angles"]
-        if angles:
-            assets["angles"] = angles
-        else:
-            # Blank means "no angles recorded", which is the absence of the
-            # key — not an empty list sitting there looking like an answer.
-            assets.pop("angles", None)
-        user.assets = assets
-        user.save(update_fields=["assets"])
-
-
 class WorkAuthorizationForm(SectionForm):
     """`User.work_authorization` — one select per region in REGION_CHOICES.
 
@@ -730,7 +670,7 @@ class CadenceForm(SectionForm):
         # `advocate_target` lives in `assets`, not `cadence_params`, because
         # that is the key `crm.coverage.advocate_target()` already reads —
         # moving it would be a migration for no gain. Copy-then-set, owning
-        # exactly this one key, same discipline as OutreachAssetsForm: blank
+        # exactly this one key — copy-then-set, never a fresh dict: blank
         # REMOVES it so the product default applies, rather than storing a
         # number that merely happens to equal the default.
         target = self.cleaned_data.get("advocate_target")

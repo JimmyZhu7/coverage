@@ -554,7 +554,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     border-radius: 12px; overflow: hidden;
     padding: var(--s3) var(--s4); flex: none; height: 146px;
     display: flex; flex-direction: column; gap: 5px;
-    transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med); }
+    transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med);
+    /* This page renders every open role — ~1,500 cards on live data, 1.27MB
+       of HTML — and nearly all of them sit outside both the viewport and
+       their cluster's scroll window. Skip layout and paint for the offscreen
+       ones; the height is already fixed at 146px, so the placeholder is
+       exact and the scrollbars cannot jump. Same remedy as the Network
+       page's contact grid, at ten times the card count. */
+    content-visibility: auto; contain-intrinsic-size: auto 146px; }
   .rolecard:hover { box-shadow: var(--shadow-1); transform: translateX(2px); }
   .rolecard.urg-today { border-left-color: var(--danger); }
   .rolecard.urg-soon { border-left-color: #c1652f; }

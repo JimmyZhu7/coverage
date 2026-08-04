@@ -51,7 +51,7 @@ def test_settings_renders_the_new_sections(client, logged_in):
     resp = client.get(reverse(SETTINGS))
     assert resp.status_code == 200
     body = resp.content.decode()
-    for anchor in ("work-auth", "assets", "cadence", "pace"):
+    for anchor in ("work-auth", "cadence", "pace"):
         assert f'id="{anchor}"' in body
         assert f'href="#{anchor}"' in body  # rail entry
 
@@ -66,70 +66,36 @@ def test_cadence_section_shows_each_default_inline(client, logged_in):
 
 
 # ---------------------------------------------------------------------------
-# Outreach Assets  (User.assets["angles"])
+# Outreach Assets — DELETED (owner's call, 2026-08-05). The section was
+# write-only: the form saved User.assets["angles"] and nothing in the product
+# ever read it back. These pin the removal.
 # ---------------------------------------------------------------------------
-def test_assets_saves_one_angle_per_line_in_order(client, logged_in):
-    resp = _post(
-        client,
-        section="assets",
-        angles="London M&A boutique internship\nRowing at the same club\nMandarin",
-    )
-    assert resp.status_code == 302
+def test_the_assets_section_is_gone_from_settings(client, logged_in):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert "Outreach Assets" not in body
+    assert "Your Angles" not in body
+
+
+def test_a_stale_assets_post_is_a_no_op_not_a_crash(client, logged_in):
+    """A tab left open from before the removal can still POST section=assets.
+    It takes the unrecognised-section path: a no-op re-render, nothing
+    written — the same guard that stops an empty POST wiping the profile."""
+    resp = _post(client, section="assets", angles="Left over")
+    assert resp.status_code == 200
     logged_in.refresh_from_db()
-    assert logged_in.assets["angles"] == [
-        "London M&A boutique internship",
-        "Rowing at the same club",
-        "Mandarin",
-    ]
+    assert "angles" not in (logged_in.assets or {})
 
 
-def test_assets_drops_blank_lines_and_surrounding_whitespace(client, logged_in):
-    _post(client, section="assets", angles="  First angle  \n\n\n   \n Second angle\n")
-    logged_in.refresh_from_db()
-    assert logged_in.assets["angles"] == ["First angle", "Second angle"]
-
-
-def test_assets_preserves_the_other_keys_in_the_dict(client, logged_in):
-    logged_in.assets = {
-        "languages": ["en", "zh"],
-        "current_status": "Penultimate year",
-        "advocate_target": 2,
-    }
-    logged_in.save(update_fields=["assets"])
-
-    _post(client, section="assets", angles="Only angle")
-
-    logged_in.refresh_from_db()
-    assert logged_in.assets["angles"] == ["Only angle"]
-    assert logged_in.assets["languages"] == ["en", "zh"]
-    assert logged_in.assets["current_status"] == "Penultimate year"
-    assert logged_in.assets["advocate_target"] == 2
-
-
-def test_assets_blank_removes_the_key_rather_than_storing_an_empty_list(client, logged_in):
+def test_stored_angles_survive_the_feature_removal(client, logged_in):
+    """Deleting the UI must not delete the data: the key stays in `assets`
+    (and stays in the export) until the owner clears it deliberately."""
     logged_in.assets = {"angles": ["Old angle"], "advocate_target": 2}
     logged_in.save(update_fields=["assets"])
 
-    _post(client, section="assets", angles="   \n\n")
+    _post(client, section="work_auth", work_auth_us="citizen")
 
     logged_in.refresh_from_db()
-    # Absent, not [] — an empty list sitting in the column reads like an answer.
-    assert "angles" not in logged_in.assets
-    assert logged_in.assets["advocate_target"] == 2
-
-
-def test_assets_rejects_an_absurd_number_of_angles(client, logged_in):
-    too_many = "\n".join(f"angle {i}" for i in range(60))
-    resp = _post(client, section="assets", angles=too_many)
-    assert resp.status_code == 200  # re-rendered with errors, no redirect
-    logged_in.refresh_from_db()
-    assert logged_in.assets.get("angles") is None
-
-
-def test_assets_round_trips_into_the_textarea(client, logged_in):
-    _post(client, section="assets", angles="Alpha\nBeta")
-    body = client.get(reverse(SETTINGS)).content.decode()
-    assert "Alpha\nBeta" in body
+    assert logged_in.assets["angles"] == ["Old angle"]
 
 
 # ---------------------------------------------------------------------------
@@ -460,13 +426,11 @@ def test_the_cadence_card_renders_the_advocate_target_row(client, logged_in):
 # ---------------------------------------------------------------------------
 def test_each_section_saves_without_touching_the_others(client, logged_in):
     _post(client, section="work_auth", work_auth_us="citizen", work_auth_hk="")
-    _post(client, section="assets", angles="An angle")
     _post(client, **_cadence_post(max_cold_touches=1))
     _post(client, section="pace", weekly_touch_goal="12")
 
     logged_in.refresh_from_db()
     assert logged_in.work_authorization == {"us": "citizen"}
-    assert logged_in.assets["angles"] == ["An angle"]
     assert logged_in.cadence_params == {"max_cold_touches": 1}
     assert logged_in.weekly_touch_goal == 12
 
@@ -524,7 +488,6 @@ def test_unknown_section_value_is_a_noop_not_a_profile_fallthrough(client, logge
 
 def test_each_section_flashes_a_success_message(client, logged_in):
     for data in (
-        {"section": "assets", "angles": "An angle"},
         {"section": "work_auth", "work_auth_us": "citizen", "work_auth_hk": ""},
         _cadence_post(max_cold_touches=1),
         {"section": "pace", "weekly_touch_goal": "12"},
@@ -543,7 +506,6 @@ def _step(step: str) -> str:
 
 @pytest.mark.parametrize("step,following", [
     ("work_auth", "firms"),
-    ("assets", "import"),
 ])
 def test_new_onboarding_steps_render_and_offer_a_skip(client, logged_in, step, following):
     resp = client.get(_step(step))
@@ -581,29 +543,14 @@ def test_onboarding_work_auth_step_is_skippable_by_link(client, logged_in):
     assert logged_in.work_authorization == {}
 
 
-def test_onboarding_assets_step_saves_and_advances(client, logged_in):
-    resp = client.post(_step("assets"), {
-        "step": "assets", "angles": "Rowing\nMandarin",
-    })
-    assert resp.status_code == 302
-    assert "step=import" in resp["Location"]
-    logged_in.refresh_from_db()
-    assert logged_in.assets["angles"] == ["Rowing", "Mandarin"]
-
-
-def test_onboarding_assets_step_is_skippable_by_submitting_blank(client, logged_in):
-    resp = client.post(_step("assets"), {"step": "assets", "angles": ""})
-    assert resp.status_code == 302
-    assert "step=import" in resp["Location"]
-    logged_in.refresh_from_db()
-    assert logged_in.assets == {}
-
-
-def test_onboarding_assets_step_is_skippable_by_link(client, logged_in):
-    resp = client.get(_step("import"))
-    assert resp.status_code == 200
-    logged_in.refresh_from_db()
-    assert logged_in.assets == {}
+def test_the_onboarding_wizard_no_longer_offers_an_assets_step(client, logged_in):
+    """The step key survives in old bookmarks. An unknown step must fall back
+    to the wizard's first step rather than 404 or render a ghost form."""
+    resp = client.get(_step("assets"))
+    assert resp.status_code in (200, 302)
+    body = (resp.content.decode() if resp.status_code == 200
+            else client.get(resp["Location"]).content.decode())
+    assert "Your Angles" not in body
 
 
 def test_onboarding_step_counter_covers_every_step(client, logged_in):
@@ -613,13 +560,13 @@ def test_onboarding_step_counter_covers_every_step(client, logged_in):
         resp = client.get(_step(step))
         assert resp.status_code == 200
         assert resp.context["step_number"] == i
-        assert resp.context["step_total"] == len(ONBOARDING_STEPS) == 7
+        assert resp.context["step_total"] == len(ONBOARDING_STEPS) == 6
 
 
 def test_onboarding_rail_labels_every_step_readably(client, logged_in):
     resp = client.get(_step("work_auth"))
     body = resp.content.decode()
-    for label in ("Profile", "Work", "Firms", "Ranking", "Angles", "Import", "Capture"):
+    for label in ("Profile", "Work", "Firms", "Ranking", "Import", "Capture"):
         assert f"<span>{label}</span>" in body
 
 

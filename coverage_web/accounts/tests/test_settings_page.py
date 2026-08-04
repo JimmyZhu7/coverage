@@ -58,7 +58,7 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
     sections = set(re.findall(r'<section class="set-card[^"]*" id="([a-z-]+)"', body))
     assert anchors == sections
     assert sections == {
-        "profile", "work-auth", "assets", "cadence", "pace", "capture",
+        "profile", "work-auth", "cadence", "pace", "capture",
         "security", "data", "legal", "danger",
     }
 

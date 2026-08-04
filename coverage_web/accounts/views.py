@@ -32,7 +32,6 @@ from .forms import (
     REGION_CHOICES,
     TRACK_CHOICES,
     CadenceForm,
-    OutreachAssetsForm,
     ProfileForm,
     WeeklyPaceForm,
     WorkAuthorizationForm,
@@ -42,7 +41,7 @@ from .forms import (
 # their hidden `section` input posts. See accounts/forms.SectionForm.
 SECTION_FORMS = {
     form_cls.section: form_cls
-    for form_cls in (OutreachAssetsForm, WorkAuthorizationForm, CadenceForm, WeeklyPaceForm)
+    for form_cls in (WorkAuthorizationForm, CadenceForm, WeeklyPaceForm)
 }
 
 # Step order of the onboarding wizard.
@@ -57,7 +56,7 @@ SECTION_FORMS = {
 # outreach ammunition, so they only need to exist by the time the user starts
 # sending, but they read as a natural close to "who you are and what you're
 # going after" rather than as part of the mail plumbing at the end.
-ONBOARDING_STEPS = ["profile", "work_auth", "firms", "survey", "assets", "import", "capture"]
+ONBOARDING_STEPS = ["profile", "work_auth", "firms", "survey", "import", "capture"]
 
 # Rail labels — the raw step keys don't all title-case into English
 # ("work_auth"), and the rail is the user's map of how much is left.
@@ -66,7 +65,6 @@ ONBOARDING_STEP_LABELS = {
     "work_auth": "Work",
     "firms": "Firms",
     "survey": "Ranking",
-    "assets": "Angles",
     "import": "Import",
     "capture": "Capture",
 }
@@ -112,7 +110,7 @@ def onboarding(request):
                 form.apply_to(request.user)
                 return redirect(_step_url(_next_step(step)))
             # invalid → fall through and re-render this step with errors
-        elif step in ("work_auth", "assets"):
+        elif step == "work_auth":
             # Both reuse the settings-page section forms, so onboarding and
             # Settings can never disagree about what's valid. Every field on
             # them is optional, so an untouched form validates and writes
@@ -317,7 +315,6 @@ def settings_view(request):
             # disagreed about the same number. Stating the population is rule
             # D3 — a count must mean what it says.
             "archived_count": contacts.filter(archived=True).count(),
-            "assets_form": section_forms["assets"],
             "work_auth_form": section_forms["work_auth"],
             "cadence_form": section_forms["cadence"],
             "pace_form": section_forms["pace"],

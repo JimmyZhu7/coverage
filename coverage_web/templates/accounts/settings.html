@@ -192,7 +192,6 @@
       <p class="settings-nav-group">You</p>
       <a href="#profile" class="is-active" aria-current="true">Profile</a>
       <a href="#work-auth">Work Authorization</a>
-      <a href="#assets">Outreach Assets</a>
       <p class="settings-nav-group">How Coverage Paces You</p>
       <a href="#cadence">Cadence</a>
       <a href="#pace">Weekly Pace</a>
@@ -261,31 +260,8 @@
         </div>
       </section>
 
-      {# ---- Outreach Assets ---- #}
-      <section class="set-card kin-reveal" id="assets" style="--i:2"
-               aria-labelledby="assets-h">
-        <div class="set-head">
-          <h2 id="assets-h">Outreach Assets</h2>
-          <p>What You Lead With</p>
-        </div>
-        <div class="set-body">
-          <form method="post" action="{% url 'accounts:settings' %}">
-            {% csrf_token %}
-            <input type="hidden" name="section" value="assets">
-            <div class="set-stack">
-              <label for="{{ assets_form.angles.id_for_label }}">Your Angles</label>
-              <p class="field-hint">One per line, strongest first. These are the specifics
-                you open with — an internship, a shared team, a class, a city.</p>
-              {{ assets_form.angles }}
-              {% if assets_form.angles.errors %}<div class="set-row-err">{{ assets_form.angles.errors }}</div>{% endif %}
-            </div>
-            <div class="set-save"><button type="submit" class="btn btn-primary">Save Angles</button></div>
-          </form>
-        </div>
-      </section>
-
       {# ---- Cadence ---- #}
-      <section class="set-card kin-reveal" id="cadence" style="--i:3"
+      <section class="set-card kin-reveal" id="cadence" style="--i:2"
                aria-labelledby="cadence-h">
         <div class="set-head">
           <h2 id="cadence-h">Cadence</h2>
@@ -316,7 +292,7 @@
       </section>
 
       {# ---- Weekly Pace ---- #}
-      <section class="set-card kin-reveal" id="pace" style="--i:4"
+      <section class="set-card kin-reveal" id="pace" style="--i:3"
                aria-labelledby="pace-h">
         <div class="set-head">
           <h2 id="pace-h">Weekly Pace</h2>
@@ -346,7 +322,7 @@
       </section>
 
       {# ---- Email Capture ---- #}
-      <section class="set-card kin-reveal" id="capture" style="--i:5"
+      <section class="set-card kin-reveal" id="capture" style="--i:4"
                aria-labelledby="capture-h">
         <div class="set-head">
           <h2 id="capture-h">Email Capture</h2>
@@ -421,7 +397,7 @@
       {% endcomment %}
 
       {# ---- Sign-In & Security ---- #}
-      <section class="set-card kin-reveal" id="security" style="--i:6"
+      <section class="set-card kin-reveal" id="security" style="--i:5"
                aria-labelledby="security-h">
         <div class="set-head">
           <h2 id="security-h">Sign-In &amp; Security</h2>
@@ -503,7 +479,7 @@
       </section>
 
       {# ---- Your Data ---- #}
-      <section class="set-card kin-reveal" id="data" style="--i:7"
+      <section class="set-card kin-reveal" id="data" style="--i:6"
                aria-labelledby="data-h">
         <div class="set-head">
           <h2 id="data-h">Your Data</h2>
@@ -552,7 +528,7 @@
       </section>
 
       {# ---- Legal ---- #}
-      <section class="set-card kin-reveal" id="legal" style="--i:8"
+      <section class="set-card kin-reveal" id="legal" style="--i:7"
                aria-labelledby="legal-h">
         <div class="set-head">
           <h2 id="legal-h">Legal</h2>
@@ -583,7 +559,7 @@
       bury the capture rotation where nobody would look for it.
       {% endcomment %}
       {# ---- Danger Zone ---- #}
-      <section class="set-card is-danger kin-reveal" id="danger" style="--i:9"
+      <section class="set-card is-danger kin-reveal" id="danger" style="--i:8"
                aria-labelledby="danger-h">
         <div class="set-head">
           <h2 id="danger-h">Danger Zone</h2>

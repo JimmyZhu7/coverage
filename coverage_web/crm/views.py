@@ -599,9 +599,15 @@ def _schedule(user, today) -> list[dict]:
             when = "today" if ev.all_day else f"{_clock(at)} today"
         elif offset == 1:
             when = "tomorrow" if ev.all_day else f"{_clock(at)} tmrw"
-        else:
+        elif offset < 7:
             label = day.strftime("%a")
             when = label if ev.all_day else f"{_clock(at)} {label}"
+        else:
+            # Beyond a week a weekday is AMBIGUOUS on this horizon: with 14
+            # days in view there are two Fridays, and "Fri" on the second one
+            # reads as the first. Past that point the date is the only honest
+            # label, and the clock time matters less than which week it is.
+            when = f"{day.strftime('%b')} {day.day}"
         if ev.contact_id:
             seen_contacts.add(ev.contact_id)
         rows.append({
@@ -646,8 +652,12 @@ def _schedule(user, today) -> list[dict]:
             "days_ago": days_ago,
         })
 
+    # NOT capped here. The rail shows six, but `_chat_prep` and `_daybar`
+    # read this list too — capping at the source meant a seventh event today
+    # silently lost its prep card and its dot on the day track. The cap is a
+    # display decision, so it happens where the display is built.
     rows.sort(key=lambda r: r["sort"])
-    return rows[:6]
+    return rows
 
 
 _DAYBAR_START, _DAYBAR_END = 8 * 60, 20 * 60      # 8am -> 8pm
@@ -919,7 +929,7 @@ def _cockpit_context(user) -> dict:
         # The timed layer. `schedule` merges real calendar datetimes with the
         # chats nobody has put a time on yet; `chat_prep` is the subset
         # happening today, with the last debrief pulled up alongside.
-        "schedule": schedule,
+        "schedule": schedule[:6],
         "daybar": _daybar(schedule, timezone.localtime(timezone.now())),
         "chat_prep": _chat_prep(user, today, schedule),
         "deadlines": _next_deadlines(user, today),
