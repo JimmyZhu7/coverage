@@ -138,6 +138,18 @@ class Command(BaseCommand):
             f"{result.skipped_not_found} not found, "
             f"{result.skipped_unmatched} unmatched in Coverage"
         )
+        # Only when they happen. These three are rare next to the counts above
+        # — most runs schedule no chat and bank no pattern evidence — and a
+        # permanent "0 chats scheduled" trains the reader to skip the line that
+        # matters on the day it isn't zero.
+        extras = [
+            (result.chats_scheduled, "chats put on the calendar"),
+            (result.pattern_delivered, "email patterns confirmed"),
+            (result.pattern_bounced, "email patterns disproved"),
+        ]
+        shown = [f"{count} {label}" for count, label in extras if count]
+        if shown:
+            self.stdout.write(f"{prefix}{', '.join(shown)}")
 
 
 def _read(path: str) -> str:

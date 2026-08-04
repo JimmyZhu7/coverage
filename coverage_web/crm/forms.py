@@ -6,9 +6,11 @@ are owned entirely by the coverage_domain ratchet, not the form.
 
 from __future__ import annotations
 
+from datetime import datetime, time
+from django.utils import timezone
 from django import forms
 
-from crm.models import ChatDebrief, Contact
+from crm.models import CalendarEvent, ChatDebrief, Contact
 from directory.models import Firm
 
 
@@ -123,3 +125,73 @@ class ChatDebriefForm(forms.ModelForm):
         if cleaned.get("date_note") and not cleaned.get("tracked_date"):
             self.add_error("tracked_date", "Pick the date this refers to.")
         return cleaned
+
+
+class CalendarEventForm(forms.ModelForm):
+    """Add one event to the calendar by hand.
+
+    The date and the time are SEPARATE inputs, and the time is optional. A
+    single `datetime-local` would force a clock time on everything, and half
+    of what belongs on a recruiting calendar genuinely has none — "Superday
+    on the 14th" is a fact about a day. Leaving time blank stores local
+    midnight with `all_day` set, so the row sorts with the day rather than
+    claiming to happen at 00:00.
+    """
+
+    day = forms.DateField(
+        label="Date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    at = forms.TimeField(
+        label="Time",
+        required=False,
+        widget=forms.TimeInput(attrs={"type": "time"}),
+        help_text="Leave blank for an all-day entry.",
+    )
+
+    class Meta:
+        model = CalendarEvent
+        fields = ["title", "kind", "contact", "location", "description"]
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 3}),
+            "title": forms.TextInput(attrs={"placeholder": "Coffee with…, Superday, flight"}),
+            "location": forms.TextInput(attrs={"placeholder": "Zoom, their office, …"}),
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["contact"].required = False
+        self.fields["location"].required = False
+        self.fields["description"].required = False
+        # Only the user's own, unarchived contacts can be attached. Without
+        # scoping, the dropdown would list every contact in the database.
+        # `all_objects.none()`, not `objects.none()`: the tenant manager
+        # raises on ANY queryset built through it, `.none()` included, and an
+        # unbound form (no user) must still render.
+        qs = Contact.all_objects.none()
+        if user is not None:
+            qs = Contact.objects.for_user(user).filter(archived=False).order_by("name")
+        self.fields["contact"].queryset = qs
+        self.fields["contact"].empty_label = "No one in particular"
+
+    def clean(self):
+        cleaned = super().clean()
+        day, at = cleaned.get("day"), cleaned.get("at")
+        if day:
+            naive = datetime.combine(day, at or time.min)
+            # Interpreted in the USER's timezone (TimezoneMiddleware activates
+            # it per request), so "3pm" means 3pm where they are — storing the
+            # server's 3pm would slide every entry for an HK user.
+            cleaned["starts_at"] = timezone.make_aware(
+                naive, timezone.get_current_timezone()
+            )
+            cleaned["all_day"] = at is None
+        return cleaned
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.starts_at = self.cleaned_data["starts_at"]
+        obj.all_day = self.cleaned_data["all_day"]
+        if commit:
+            obj.save()
+        return obj

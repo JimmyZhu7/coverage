@@ -331,3 +331,82 @@ class Task(PrivateModel):
 
     def __str__(self) -> str:
         return self.title
+
+
+class CalendarEvent(PrivateModel):
+    """Something with a DATE on it: a scheduled coffee chat, or anything the
+    user puts on the calendar by hand.
+
+    WHY THIS TABLE EXISTS. Coverage knew a chat had been *scheduled*
+    (`thread_state="chat_scheduled"`) but never when it actually was — the
+    Today page's "Coming up" says out loud that it reports when a chat was
+    SET UP, "because we do not store a chat datetime anywhere, so any 'chat
+    tomorrow' here would be invented". Meanwhile `capture.extractors` was
+    already pulling a real `chat_scheduled_at` off calendar invites (DTSTART)
+    and dropping it on the floor. This is the destination that was missing.
+
+    TWO SOURCES, ONE SHAPE. A captured chat and a hand-added event are the
+    same kind of row and are deliberately not split into two models: the
+    calendar renders one timeline, and `source` records where each came from
+    so a captured time can be told from a typed one.
+
+    `contact` is nullable because a hand-added event ("Superday", "flight to
+    HK") need not be about anyone. When it IS set, deleting the contact takes
+    the event with them — an orphaned "chat with <deleted person>" is noise.
+    """
+
+    KIND_CHAT = "chat"
+    KIND_EVENT = "event"
+    KIND_CHOICES = [
+        (KIND_CHAT, "Coffee chat"),
+        (KIND_EVENT, "Event"),
+    ]
+    SOURCE_MANUAL = "manual"
+    SOURCE_CAPTURE = "capture"
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, "Added by you"),
+        (SOURCE_CAPTURE, "From your mailbox"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    starts_at = models.DateTimeField()
+    # Blank means "no stated end" — a coffee chat pulled off an invite often
+    # has one, a hand-typed note usually doesn't, and inventing "+1 hour"
+    # would put a fake block on the calendar.
+    ends_at = models.DateTimeField(null=True, blank=True)
+    # A date with no clock time: "Superday, the 14th". Stored as a datetime
+    # at local midnight with this flag set, so ordering stays one comparison
+    # rather than a union over two columns.
+    all_day = models.BooleanField(default=False)
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_EVENT)
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=SOURCE_MANUAL)
+    contact = models.ForeignKey(
+        Contact, null=True, blank=True, on_delete=models.CASCADE,
+        related_name="calendar_events",
+    )
+    location = models.CharField(max_length=255, blank=True, default="")
+    # The Gmail thread a captured event came from. Its uniqueness per user is
+    # what stops a twice-daily sync stacking the same chat every run.
+    thread_id = models.CharField(max_length=128, blank=True, default="")
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "calendar_events"
+        ordering = ["starts_at", "id"]
+        constraints = [
+            # One event per (user, thread) for CAPTURED rows only. Hand-added
+            # events carry a blank thread_id and must never collide with each
+            # other — Postgres treats NULLs as distinct but NOT empty strings,
+            # so the condition excludes blanks rather than relying on that.
+            models.UniqueConstraint(
+                fields=["user", "thread_id"],
+                condition=~models.Q(thread_id=""),
+                name="uniq_calendar_event_user_thread",
+            ),
+        ]
+        indexes = [models.Index(fields=["user", "starts_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.title} @ {self.starts_at:%Y-%m-%d %H:%M}"

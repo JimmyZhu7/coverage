@@ -32,8 +32,9 @@
     <form method="post" action="{% url 'accounts:onboarding' %}?step=work_auth">
       {% csrf_token %}
       <input type="hidden" name="step" value="work_auth">
-      {# Same widget as the settings page, so the control a student learns
-         here is the one they meet again later. #}
+      {% comment %}Same widget as the settings page, so the control a student
+      learns here is the one they meet again later.
+      {% endcomment %}
       {% include "accounts/_work_auth_matrix.html" with form=section_form %}
       <div class="actions">
         <button type="submit" class="btn btn-primary">Continue</button>

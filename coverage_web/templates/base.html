@@ -23,8 +23,9 @@
           /app/ hosts both Today (the hub) and Network (contacts) — the
           contacts prefix must win before the bare /app/ match.
         {% endcomment %}
-        <a href="/app/"{% if request.path|slice:":4" == "/app" and request.path|slice:":13" != "/app/contacts" %} class="active"{% endif %}>Today</a>
+        <a href="/app/"{% if request.path|slice:":4" == "/app" and request.path|slice:":13" != "/app/contacts" and request.path|slice:":13" != "/app/calendar" %} class="active"{% endif %}>Today</a>
         <a href="/opportunities/"{% if request.path|slice:":14" == "/opportunities" %} class="active"{% endif %}>Opportunities</a>
+        <a href="/app/calendar/"{% if request.path|slice:":13" == "/app/calendar" %} class="active"{% endif %}>Calendar</a>
         <a href="/app/contacts/"{% if request.path|slice:":13" == "/app/contacts" %} class="active"{% endif %}>Network</a>
         <a href="/capture/health/"{% if request.path|slice:":8" == "/capture" %} class="active"{% endif %}>Email Capture</a>
         <a href="/welcome/"{% if request.path|slice:":8" == "/welcome" %} class="active"{% endif %}>Settings</a>

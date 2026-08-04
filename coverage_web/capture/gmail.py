@@ -57,12 +57,13 @@ from datetime import timedelta
 
 from django.db import models
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
 from capture.providers import CaptureProvider, InteractionEvent
 from capture.services import AmbiguousContactError
 from crm import services as crm_services
-from crm.models import Contact, Touch
+from crm.models import CalendarEvent, Contact, Touch
 from directory.models import EmailPatternStats
 
 EXTRACTION_VERSION = "gmail-findings-1"
@@ -116,6 +117,8 @@ class SyncResult:
     # in the user's own private Touch rows — build-plan §2's split exactly.
     pattern_delivered: int = 0
     pattern_bounced: int = 0
+    # Scheduled chats that carried a real datetime and landed on the calendar.
+    chats_scheduled: int = 0
     details: list[str] = field(default_factory=list)
 
     def as_stats(self) -> dict:
@@ -132,6 +135,7 @@ class SyncResult:
             "skipped_ambiguous": self.skipped_ambiguous,
             "pattern_delivered": self.pattern_delivered,
             "pattern_bounced": self.pattern_bounced,
+            "chats_scheduled": self.chats_scheduled,
         }
 
 
@@ -310,6 +314,45 @@ def _record_pattern_evidence(
     return True
 
 
+def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
+    """Put a scheduled chat on the calendar when the finding carries a time.
+
+    `capture.extractors` has always pulled a real datetime off calendar
+    invites (DTSTART) as `chat_scheduled_at`, and it had nowhere to go — the
+    Today page's "Coming up" says so out loud, reporting when a chat was SET
+    UP because "we do not store a chat datetime anywhere". This is that
+    destination.
+
+    Keyed on (user, thread_id) so the twice-daily sync updates the one row
+    rather than stacking a duplicate every run, and so a rescheduled invite
+    on the same thread MOVES the event instead of leaving two. A finding
+    with no time is not an error — most are — it simply makes no event.
+    """
+    raw = (finding.get("chat_scheduled_at") or "").strip()
+    thread_id = (finding.get("thread_id") or "").strip()
+    if not raw or not thread_id:
+        return False
+    when = parse_datetime(raw)
+    if when is None:
+        return False
+    if timezone.is_naive(when):
+        when = timezone.make_aware(when, timezone.get_current_timezone())
+
+    label = contact.name or "Coffee chat"
+    CalendarEvent.all_objects.update_or_create(
+        user=user, thread_id=thread_id[:128],
+        defaults={
+            "title": f"Chat with {label}",
+            "starts_at": when,
+            "all_day": False,
+            "kind": CalendarEvent.KIND_CHAT,
+            "source": CalendarEvent.SOURCE_CAPTURE,
+            "contact": contact,
+        },
+    )
+    return True
+
+
 def _touch_kind_for(finding: dict) -> str | None:
     """The ladder stage a finding represents, or None if it shows no progress.
     Order matters: a completed chat outranks a mere reply on the same thread."""
@@ -455,6 +498,14 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         if finding.get("replied") or finding.get("chat_status") in ("scheduled", "completed"):
             if _record_pattern_evidence(contact, delivered=True, dry_run=dry_run):
                 result.pattern_delivered += 1
+
+        # A stated time turns a "chat_scheduled" into a dated calendar entry.
+        if finding.get("chat_status") in ("scheduled", "completed"):
+            if not dry_run:
+                if _upsert_scheduled_chat(user, contact, finding):
+                    result.chats_scheduled += 1
+            elif (finding.get("chat_scheduled_at") or "").strip():
+                result.chats_scheduled += 1
 
         thread_id = (finding.get("thread_id") or "").strip()
         marker = f"[gmail:{thread_id}] " if thread_id else ""

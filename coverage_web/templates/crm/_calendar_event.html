@@ -1,0 +1,44 @@
+{% comment %}
+One entry on the calendar. Shared by the month grid and the narrow-screen
+agenda so the two can't drift apart.
+
+Two shapes, decided by `ev.editable`:
+
+- The user's own rows (a captured chat, a typed event) are a <details>. The
+  chip is the summary; opening it in place reveals where, who, the notes, and
+  a Remove button. That button is the reason this partial exists — the delete
+  endpoint shipped with no way to reach it, and the description you typed was
+  only readable as a hover tooltip, which is no use on a touch screen and no
+  use to a screen reader either.
+- Firm deadlines are directory data nobody can edit here, so they stay a
+  plain <span> with nothing to open. Styling them as clickable and then doing
+  nothing is the lie this page used to tell about every row.
+{% endcomment %}
+{% if ev.editable %}
+  <details class="cal-ev-wrap">
+    <summary class="cal-ev cal-ev-{{ ev.kind }}{% if ev.source == 'capture' %} cal-ev-auto{% endif %}">
+      {% if ev.at_label %}<span class="cal-ev-time">{{ ev.at_label }}</span>{% endif %}
+      <span class="cal-ev-title">{{ ev.title }}</span>
+    </summary>
+    <div class="cal-ev-body">
+      {% if ev.all_day %}<p class="cal-ev-meta">All day</p>{% endif %}
+      {% if ev.contact %}<p class="cal-ev-meta">{{ ev.contact.name }}</p>{% endif %}
+      {% if ev.location %}<p class="cal-ev-meta">{{ ev.location }}</p>{% endif %}
+      {% if ev.description %}<p class="cal-ev-note">{{ ev.description|linebreaksbr }}</p>{% endif %}
+      {% if ev.source == 'capture' %}
+        <p class="cal-ev-meta cal-ev-prov">Found in your mail</p>
+      {% endif %}
+      <form method="post" action="{% url 'crm:calendar_delete' ev.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="y" value="{{ year }}">
+        <input type="hidden" name="m" value="{{ month }}">
+        <button type="submit" class="cal-ev-del">Remove</button>
+      </form>
+    </div>
+  </details>
+{% else %}
+  <span class="cal-ev cal-ev-{{ ev.kind }} is-static"
+        title="{{ ev.title }}">
+    <span class="cal-ev-title">{{ ev.title }}</span>
+  </span>
+{% endif %}

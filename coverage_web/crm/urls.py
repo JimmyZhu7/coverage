@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import calendar_views, views
 
 app_name = "crm"
 
@@ -18,6 +18,10 @@ urlpatterns = [
     path("debrief/<int:pk>/", views.debrief, name="debrief"),
     path("debrief/<int:pk>/dismiss/", views.debrief_dismiss, name="debrief_dismiss"),
     path("debrief/<int:pk>/promote/", views.debrief_promote, name="debrief_promote"),
+    # The calendar: scheduled chats, hand-added events, confirmed deadlines.
+    path("calendar/", calendar_views.calendar, name="calendar"),
+    path("calendar/add/", calendar_views.calendar_add, name="calendar_add"),
+    path("calendar/<int:pk>/delete/", calendar_views.calendar_delete, name="calendar_delete"),
     path("contacts/", views.contact_list, name="contact_list"),
     # Hand-add / edit a contact — the coffee-chat entry path.
     path("contacts/new/", views.contact_new, name="contact_new"),

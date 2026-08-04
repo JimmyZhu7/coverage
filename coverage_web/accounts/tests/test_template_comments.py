@@ -24,9 +24,12 @@ Multi-line notes belong in `{% comment %}...{% endcomment %}`.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import Client
 from django.urls import reverse
 
 pytestmark = pytest.mark.django_db
@@ -37,6 +40,7 @@ PATHS = [
     "/welcome/settings/",
     "/welcome/",
     "/app/",
+    "/app/calendar/",
     "/app/contacts/",
     "/opportunities/",
 ]
@@ -62,6 +66,47 @@ def test_no_template_comment_leaks_into_the_page(client, student, path):
     # The closing half leaks on its own if someone splits a comment the other
     # way round, so check it independently rather than assuming they pair up.
     assert "#}" not in body, f"A dangling template-comment terminator rendered on {path}."
+
+
+def _template_files() -> list[Path]:
+    roots = [Path(d) for engine in settings.TEMPLATES for d in engine.get("DIRS", [])]
+    return sorted({p for root in roots for p in Path(root).rglob("*.html")})
+
+
+def test_no_template_opens_a_brace_hash_comment_it_does_not_close():
+    """The same rule as above, read off the SOURCE of every template.
+
+    The rendered-output guard is a hand-maintained list of five URLs, so it
+    only ever protected pages someone remembered to add. It missed the leak
+    twice over: a two-line comment printed itself across the whole Calendar
+    page, and another sat unnoticed in the onboarding work-authorization step.
+    A page that does not exist yet cannot be added to a list, so this one
+    walks the template directories instead and needs no upkeep.
+
+    It complements rather than replaces the render tests: those still catch a
+    leak arriving through an `{% include %}` or through context data, which no
+    amount of source scanning would see.
+    """
+    offenders = []
+    for path in _template_files():
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            for match in re.finditer(r"\{#", line):
+                if "#}" not in line[match.end():]:
+                    offenders.append(f"{path.name}:{lineno}: {line.strip()[:80]}")
+
+    assert not offenders, (
+        "Django's brace-hash comment is SINGLE-LINE ONLY; these open one that "
+        "never closes on the same line, so it renders as literal page text. "
+        "Use {% comment %}...{% endcomment %} instead:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_source_scan_is_actually_reading_templates():
+    """Counterweight: an empty file list would make the scan above pass
+    vacuously and keep passing forever if the template dirs ever move."""
+    names = {p.name for p in _template_files()}
+    assert len(names) > 20
+    assert "base.html" in names
 
 
 def test_the_settings_page_still_renders_its_profile_section(client, student):
