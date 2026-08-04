@@ -254,8 +254,17 @@ def test_cadence_error_leaves_the_other_sections_intact(client, logged_in):
 
     resp = _post(client, **_cadence_post(max_cold_touches=99))
     body = resp.content.decode()
-    # The Work Authorization select still shows the saved value.
-    assert 'value="citizen" selected' in body
+    # Work Authorization still shows the saved value. It is a radio matrix
+    # now rather than six selects, so the saved state reads as a checked
+    # radio — the behaviour under test (an error in ONE section must not
+    # blank another) is unchanged. Matched on the ONE input that must carry
+    # it: `"checked" in body` would pass on any checked radio anywhere.
+    import re
+
+    citizen = re.search(
+        r'<input[^>]*name="work_auth_us"[^>]*value="citizen"[^>]*>', body)
+    assert citizen and "checked" in citizen.group(0), (
+        "the saved US answer must survive an error in another section")
 
 
 def test_cadence_rejects_a_non_integer(client, logged_in):

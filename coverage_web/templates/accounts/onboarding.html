@@ -32,16 +32,9 @@
     <form method="post" action="{% url 'accounts:onboarding' %}?step=work_auth">
       {% csrf_token %}
       <input type="hidden" name="step" value="work_auth">
-      <div class="panel">
-        {% for field in section_form.rows %}
-          <div class="row survey-row">
-            <span>{{ field.label }}</span>
-            {# width:auto so the select sizes to its longest option, matching the tier selects on the ranking step. #}
-            <span style="flex:none">{{ field }}</span>
-          </div>
-          {{ field.errors }}
-        {% endfor %}
-      </div>
+      {# Same widget as the settings page, so the control a student learns
+         here is the one they meet again later. #}
+      {% include "accounts/_work_auth_matrix.html" with form=section_form %}
       <div class="actions">
         <button type="submit" class="btn btn-primary">Continue</button>
         <a class="muted" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>

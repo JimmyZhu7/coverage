@@ -174,11 +174,23 @@ def test_every_single_control_row_has_a_real_label_for(body):
         assert f'id="{target}"' in body, f"label points at missing control {target}"
 
 
-def test_the_work_auth_selects_are_all_labelled(body):
+def test_every_work_auth_region_is_a_labelled_radiogroup(body):
+    """The six selects became one matrix (regions x three states), so the
+    accessible structure changed shape: each region is now a radiogroup
+    labelled by its own name, rather than a select with a <label for>. The
+    guarantee is the same — no unlabelled control — and this asserts the new
+    shape rather than the old markup."""
     from accounts.forms import REGION_CHOICES
 
+    assert body.count('role="radiogroup"') >= len(REGION_CHOICES)
     for code, _label in REGION_CHOICES:
-        assert f'<label class="set-row-label" for="id_work_auth_{code}"' in body
+        # The row names its own label element, and that element exists.
+        assert f'aria-labelledby="id_work_auth_{code}-lab"' in body
+        assert f'id="id_work_auth_{code}-lab"' in body
+    # The explanation is stated ONCE now and described by every row, instead
+    # of being repeated per region.
+    assert body.count('aria-describedby="wa-note"') >= len(REGION_CHOICES)
+    assert body.count('id="wa-note"') == 1
 
 
 def test_controls_are_described_by_their_explanation(body):

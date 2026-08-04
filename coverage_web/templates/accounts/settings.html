@@ -207,26 +207,16 @@
             {% csrf_token %}
             <input type="hidden" name="section" value="work_auth">
             {% comment %}
-            The `.set-row-label` used to be a <div>: every select on this page
-            was associated with its label by visual adjacency only, so a screen
-            reader announced six unlabelled comboboxes. It is a real
-            <label for> now, and `aria-describedby` ties the explanation and
-            any error to the control as well — same class, identical styling.
+            One matrix instead of six near-identical rows. The old rendering
+            repeated the same explanation sentence six times and named the
+            three-state vocabulary inside six closed selects; the matrix says
+            each once and shows the whole answer at a glance. Accessibility is
+            unchanged in substance — each region is a labelled radiogroup and
+            the note is its description, where before each select carried its
+            own label and aria-describedby.
             {% endcomment %}
-            {% for field in work_auth_form.rows %}
-              <div class="set-row">
-                <div class="set-row-main">
-                  <label class="set-row-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
-                  <div class="set-row-desc" id="{{ field.auto_id }}-desc">Feeds the structural axis of your firm fit
-                    score. Leave it unspecified and that region stays honestly unknown
-                    — never guessed either way.</div>
-                  {% if field.errors %}
-                    <div class="set-row-err" id="{{ field.auto_id }}-err">{{ field.errors }}</div>
-                  {% endif %}
-                </div>
-                <div class="set-row-control">{{ field }}</div>
-              </div>
-            {% endfor %}
+            {% include "accounts/_work_auth_matrix.html" with form=work_auth_form %}
+
             <div class="set-save"><button type="submit" class="btn btn-primary">Save Work Authorization</button></div>
           </form>
         </div>

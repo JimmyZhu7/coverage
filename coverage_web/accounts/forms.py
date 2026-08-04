@@ -498,15 +498,21 @@ class WorkAuthorizationForm(SectionForm):
             name = f"{self.FIELD_PREFIX}{code}"
             self.fields[name] = forms.ChoiceField(
                 label=label,
-                choices=[("", "Not specified")] + list(WORK_AUTH),
+                # Blank LAST, not first: the widget is a three-column radio
+                # matrix now (see accounts/_work_auth_matrix.html), and the
+                # columns read best as answer / answer / abstain. The blank
+                # is still a real, selectable state — an initial of "" checks
+                # it, so "Unspecified" renders as a deliberate choice rather
+                # than an absence.
+                choices=list(WORK_AUTH) + [("", "Not specified")],
                 required=False,
-                # The row's explanation and its error are the control's
-                # accessible description. Both ids are always named; a browser
-                # ignores the one that isn't on the page, which is simpler and
-                # less fragile than recomputing the attribute per render.
-                widget=forms.Select(
-                    attrs={"aria-describedby": f"id_{name}-desc id_{name}-err"}
-                ),
+                # Radios, not a select: three states per region is a visible
+                # 6x3 matrix, and one column caption can label a state ONCE
+                # for every region instead of each closed dropdown repeating
+                # the whole vocabulary. Native radios keep the keyboard and
+                # screen-reader behaviour for free; the template's radiogroup
+                # wrapper carries the accessible description.
+                widget=forms.RadioSelect,
             )
 
     @classmethod

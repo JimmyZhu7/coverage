@@ -1,0 +1,47 @@
+{% comment %}
+The work-authorization MATRIX — one kinetic widget in place of six repeated
+rows.
+
+The old rendering said the same explanation sentence six times, named the
+three-state vocabulary inside six closed <select>s, and gave the page's one
+structural fact the visual weight of a settings miscellany. As a matrix the
+vocabulary is said ONCE (the column captions), the sentence is said ONCE
+(the footnote), and the whole answer is legible at a glance — six rows of
+dots, coloured by state.
+
+Interaction is pure CSS over NATIVE radios (see `.wa-` in coverage.css):
+click a cell and its dot fills with the state's colour, stamps a glyph
+(✓ can work / ! needs visa / – abstain: never colour alone) and springs with
+the same `chip-check` pop the Regions/Tracks chips use. No JS; keyboard and
+screen-reader behaviour is the browser's own — arrows move within a region's
+radiogroup, and each row is labelled by its region name.
+
+Used by BOTH the settings page and the onboarding step: pass the bound form
+as `form`. Field names and values are unchanged, so saved data and every
+POST contract stay exactly as they were.
+{% endcomment %}
+<div class="wa-matrix">
+  <div class="wa-head" aria-hidden="true">
+    <span class="wa-corner"></span>
+    {% comment %}Two wordings per column: the full one, and a short one that
+    takes over under 560px, where the full text overran its column by 11px
+    and the matrix's `overflow: hidden` silently cut it. This header is
+    aria-hidden — it is a visual legend — and each radio's own label carries
+    the accessible name, so swapping the visible wording changes nothing that
+    is announced.{% endcomment %}
+    <span class="wa-col wa-col-yes"><span class="wa-col-full">No visa needed</span><span class="wa-col-short">No visa</span></span>
+    <span class="wa-col wa-col-need"><span class="wa-col-full">Needs sponsorship</span><span class="wa-col-short">Visa</span></span>
+    <span class="wa-col wa-col-unk"><span class="wa-col-full">Unspecified</span><span class="wa-col-short">Unsure</span></span>
+  </div>
+  {% for field in form.rows %}
+    <div class="wa-row" role="radiogroup"
+         aria-labelledby="{{ field.auto_id }}-lab" aria-describedby="wa-note">
+      <span class="wa-region" id="{{ field.auto_id }}-lab">{{ field.label }}</span>
+      {{ field }}
+      {% if field.errors %}<span class="wa-err">{{ field.errors }}</span>{% endif %}
+    </div>
+  {% endfor %}
+</div>
+<p class="wa-note" id="wa-note">Feeds the structural axis of your firm fit
+  score. A region left unspecified stays honestly unknown — never guessed
+  either way.</p>
