@@ -23,16 +23,23 @@ WHAT IT REFUSES TO DO
   action; a scan finding that person again is not consent to undo it. The
   match is REPORTED so the user can unarchive by hand.
 - It will not fabricate warmth. A discovered person starts cold with no
-  touches unless the finding carries real evidence of a reply or a chat, in
-  which case the touch is logged through the normal ratchet so the cadence
-  engine sees the same history it would from any other source.
+  touches unless the finding carries real evidence — outreach you sent, a
+  reply, or a chat — in which case the touch is logged through the normal
+  ratchet so the cadence engine sees the same history it would from any
+  other source.
 
 FINDINGS SHAPE
 --------------
-A JSON array of `{"name", "email", "role_guess", "firm", "replied",
-"chatted", "evidence"}`. `firm` is an optional Coverage slug; an unknown one
-is kept as free text rather than dropped, because `Contact.firm_text` exists
-precisely so capture never blocks on directory coverage.
+A JSON array of `{"name", "email", "role_guess", "firm", "outreach_sent",
+"replied", "chatted", "evidence"}`. `firm` is an optional Coverage slug; an
+unknown one is kept as free text rather than dropped, because
+`Contact.firm_text` exists precisely so capture never blocks on directory
+coverage.
+
+The three evidence flags are a ladder, and at least one of them should be
+true for anyone worth creating: you cannot discover a stranger. If none is
+set the contact is still created (someone met at an event and added by hand
+is real) but stays cold with no touches.
 """
 
 from __future__ import annotations
@@ -156,8 +163,24 @@ class Command(BaseCommand):
             # Real evidence -> a real touch, through the same ratchet every
             # other source uses. Never invented: a person found on a CC line
             # with no reply stays cold, which is the truth about them.
+            #
+            # `outreach_sent` is the case this used to drop on the floor, and
+            # dropping it produced a page that contradicted itself. The
+            # discovery agent would find a thread where the user had emailed
+            # someone who never wrote back, create the contact, and record
+            # "Follow-up outreach sent … no reply yet" in the notes — while
+            # logging no touch at all. The contact therefore had zero touches,
+            # so the cadence engine's never-contacted branch fired and Today
+            # said "Added but never contacted. Send the first note." about a
+            # person whose own notes said the note had been sent. Observed on
+            # live data 2026-08-05 (Jason Law, Christine Lee — both from the
+            # ICC alumni panel thread) and reported by the owner.
+            #
+            # Ordering is the ladder's, strongest evidence first: a chat
+            # outranks a reply outranks outreach.
             kind = ("chat" if person.get("chatted")
-                    else "reply_received" if person.get("replied") else None)
+                    else "reply_received" if person.get("replied")
+                    else "outreach" if person.get("outreach_sent") else None)
             if kind:
                 crm_services.log_touch(
                     user.id, contact.id, kind, "email",

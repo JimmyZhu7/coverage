@@ -298,7 +298,12 @@
 
 {% block content %}
 <div class="page page--full">
-  {% include "_pagehead.html" with eyebrow="Chats, events, deadlines" title="Calendar" sub="Everything with a date on it — coffee chats found in your mail, whatever you add by hand, and the deadlines a scan has confirmed." %}
+  {% comment %}The sub does NOT re-list the three layers: the eyebrow above
+  already names them, and saying them twice is what pushed this line to ~110
+  characters and two rows while every other page's sub is one row of ~55. It
+  says the thing the eyebrow cannot — where the entries come from.
+  {% endcomment %}
+  {% include "_pagehead.html" with eyebrow="Chats, events, deadlines" title="Calendar" sub="Everything with a date on it, from your mail or by hand." %}
 
   <div class="cal-bar">
     <h2 class="cal-month">{{ month_label }}</h2>

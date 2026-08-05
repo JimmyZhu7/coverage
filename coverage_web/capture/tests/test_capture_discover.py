@@ -157,3 +157,33 @@ def test_an_over_long_firm_text_and_email_are_bounded_too(run, user):
     c = Contact.objects.for_user(user).get(name="Ada Lovelace")
     assert len(c.firm_text) <= 255
     assert len(c.email) <= 254
+
+
+def test_outreach_you_already_sent_is_logged_as_a_touch(run, user):
+    """The page used to contradict itself.
+
+    Discovery would find a thread where Jimmy had emailed someone who never
+    wrote back, create the contact, and write "Follow-up outreach sent … no
+    reply yet" into its notes — while logging no touch, because only
+    `replied`/`chatted` counted. Zero touches means the cadence engine's
+    never-contacted branch fires, so Today said "Added but never contacted.
+    Send the first note." about a person whose own notes said otherwise.
+    Observed on live data 2026-08-05 and reported by the owner.
+    """
+    run([{"name": "Jason Law", "email": "jason_law@intuit.com",
+          "outreach_sent": True,
+          "evidence": "Follow-up outreach sent for ICC alumni panel, no reply yet"}])
+    c = Contact.objects.for_user(user).get(name="Jason Law")
+    kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
+    assert kinds == ["outreach"], "the note he already sent is on the record"
+
+
+def test_the_evidence_ladder_takes_the_strongest_signal(run, user):
+    """A thread can show all three. A chat outranks a reply outranks outreach
+    — the same order the touch ratchet uses everywhere else."""
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com",
+          "outreach_sent": True, "replied": True, "chatted": True}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
+    assert kinds == ["chat"]
+
