@@ -547,7 +547,7 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
         "Keep-Warm Check-In",
         "weeks",
         "How long after a coffee chat before Coverage reminds you to circle "
-        "back — for people you've met who aren't advocates yet.",
+        "back, for people you've met who aren't advocates yet.",
     ),
     "pre_deadline_reping_days": (
         "Pre-Deadline Re-Ping",

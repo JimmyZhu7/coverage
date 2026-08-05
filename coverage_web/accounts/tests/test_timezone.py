@@ -223,7 +223,7 @@ def test_the_settings_page_states_the_following_behaviour_honestly(client, stude
     # Whitespace-normalised: the hint wraps across source lines, so a raw
     # substring match would depend on where the template happens to break.
     body = " ".join(client.get(reverse("accounts:settings")).content.decode().split())
-    assert "follows whatever this device says" in body
+    assert "On automatic it follows this device" in body
     assert "stops following" in body, "and how to take manual control"
 
 

@@ -454,7 +454,7 @@
                   {% if connected_accounts %}
                     {{ connected_accounts }} account{{ connected_accounts|pluralize }} connected.
                   {% else %}
-                    None connected. Sign-in only — never mailbox access.
+                    None connected. Sign-in only, never mailbox access.
                   {% endif %}
                 </div>
               </div>
@@ -467,8 +467,7 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Sign Out Everywhere</span>
-              <div class="set-row-desc">End every other signed-in session — the library
-                computer you forgot about. This device stays signed in.</div>
+              <div class="set-row-desc">End every other signed-in session, like the library computer you forgot about. This device stays signed in.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:signout_all' %}"
@@ -515,7 +514,7 @@
             <div class="set-row-main">
               <span class="set-row-label">Import &amp; Export</span>
               <div class="set-row-desc">Bring contacts in from a CSV, or download
-                everything Coverage holds on you as one ZIP of CSVs — contacts,
+                everything Coverage holds on you as one ZIP of CSVs: contacts,
                 touches, firms, applications, tasks, debriefs, capture events, scores,
                 and your profile.</div>
             </div>

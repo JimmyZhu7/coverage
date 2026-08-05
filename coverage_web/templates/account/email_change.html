@@ -39,7 +39,7 @@ values named "email" and the wrong one would win.
       <label for="acct-pending-email">{% if current_emailaddress %}Changing to{% else %}Current email{% endif %}</label>
       <input id="acct-pending-email" type="email" disabled
              value="{{ new_emailaddress.email }}">
-      <p class="field-hint">Still pending — check that inbox for the
+      <p class="field-hint">Still pending. Check that inbox for the
         verification link.</p>
       <div class="actions">
         <button form="pending-email" type="submit" name="action_send" class="btn">Re-send Verification</button>

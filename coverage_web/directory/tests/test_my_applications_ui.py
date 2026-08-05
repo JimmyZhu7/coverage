@@ -194,4 +194,4 @@ def test_a_done_row_states_that_it_is_done(client, pipeline):
     """Terminal cards recede visually, but "finished" must not rest on the
     background tint alone."""
     body = client.get(reverse("my_applications")).content.decode()
-    assert "Done — no longer live" in body
+    assert "Done, no longer live" in body

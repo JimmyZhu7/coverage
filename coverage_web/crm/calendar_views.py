@@ -97,7 +97,7 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             "id": None,
             "kind": "deadline",
             "source": "directory",
-            "title": f"{fd.firm.name} — {label}",
+            "title": f"{fd.firm.name} · {label}",
             "description": "",
             "location": "",
             "all_day": True,

@@ -83,10 +83,9 @@ page does get a real `for` — see the a11y note in settings.html.
 
 <label for="{{ form.timezone.id_for_label }}">Timezone</label>
 {{ form.timezone }}
-<p class="field-hint">Which day Coverage means by "today" — your cadence queue,
-  your pace week, and every follow-up window. Left on automatic, it follows
-  whatever this device says, so flying LA to Hong Kong moves your day with
-  you. Pick a zone yourself and Coverage stops following and keeps that one.</p>
+<p class="field-hint">Sets which day Coverage means by "today". On automatic it follows
+  this device, so flying LA to Hong Kong moves your day with you. Pick a zone
+  and it stops following.</p>
 {{ form.timezone.errors }}
 
 {% comment %}
@@ -131,7 +130,7 @@ would be re-bound on every in-place save, stacking duplicates.
     }
     if (fb) fb.hidden = true;
     if (hint) {
-      hint.textContent = "Ready to save — this replaces your current photo when you press Save Profile.";
+      hint.textContent = "Ready to save. This replaces your current photo when you press Save Profile.";
       hint.classList.remove("is-bad");
     }
     // Choosing a new photo contradicts "remove"; untick it so the two

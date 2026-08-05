@@ -123,7 +123,7 @@ def debrief(request: HttpRequest, pk: int) -> HttpResponse:
             if made:
                 messages.success(
                     request,
-                    "Debrief saved" + (f" — {', '.join(notes)}." if notes else "."),
+                    "Debrief saved" + (f": {', '.join(notes)}." if notes else "."),
                 )
             else:
                 messages.info(request, "No changes to save.")

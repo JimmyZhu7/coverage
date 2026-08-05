@@ -27,10 +27,10 @@
     {% if last_received %}
       <p><strong>Yes.</strong> Last BCC received {{ last_received }} ({{ total }} total captured).</p>
     {% elif sync_last %}
-      <p><strong>Yes — through the mailbox sync.</strong> Last run {{ sync_last }},
+      <p><strong>Yes, through the mailbox sync.</strong> Last run {{ sync_last }},
         reading {{ sync_findings }} finding{{ sync_findings|pluralize }}{% if sync_touches %} and logging {{ sync_touches }} touch{{ sync_touches|pluralize:"es" }}{% endif %}.
-        Nothing has come through the BCC address below yet, which is fine —
-        it is a second way in, not a requirement.</p>
+        Nothing has come through the BCC address below yet, which is
+        fine: it is a second way in, not a requirement.</p>
     {% else %}
       <p><strong>Nothing has come through yet.</strong> BCC the address above on
         your next outreach and it will log itself.</p>

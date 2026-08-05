@@ -28,7 +28,7 @@
 
   {% elif step == "work_auth" %}
     <h1>Where Can You Work?</h1>
-    <p class="lede">This is the one structural fact that moves your firm-fit score. Leave a region blank if you're not sure — unknown is a real answer here, and Coverage scores it neutral rather than guessing.</p>
+    <p class="lede">This is the one structural fact that moves your firm-fit score. Leave a region blank if you're not sure; unknown is a real answer here, and Coverage scores it neutral rather than guessing.</p>
     <form method="post" action="{% url 'accounts:onboarding' %}?step=work_auth">
       {% csrf_token %}
       <input type="hidden" name="step" value="work_auth">
@@ -78,7 +78,6 @@
 
   {% elif step == "capture" %}
     <h1>Your Capture Address</h1>
-    <p class="lede"></p>
     <div class="panel">
       <p class="capture-addr">{{ capture_address }}</p>
       <p><strong>BCC this address on your outreach.</strong> Every email you send with it in the BCC line is logged against the right contact automatically. Forward replies to it too, and your warmth updates on their own.</p>
