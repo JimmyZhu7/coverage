@@ -561,7 +561,14 @@ def contact_new(request: HttpRequest) -> HttpResponse:
         if firm_slug:
             initial["firm"] = Firm.objects.filter(slug=firm_slug).first()
         form = ContactForm(initial=initial)
-    return render(request, "crm/contact_form.html", {"form": form, "mode": "new"})
+    # ?quick renders the three-field fast path: the real moment this page
+    # serves is "met someone, have ten seconds", and the full form is 11
+    # fields of friction against a name you are about to forget. Same form
+    # class, same POST, same validation — only the fields SHOWN change, and
+    # everything hidden stays editable later on the contact page.
+    quick = "quick" in request.GET or request.POST.get("quick") == "1"
+    return render(request, "crm/contact_form.html",
+                  {"form": form, "mode": "new", "quick": quick})
 
 
 @login_required
@@ -910,3 +917,22 @@ def _contact_live_context(
         ),
         "capture_address": _capture_address(user),
     }
+
+
+@login_required
+@require_POST
+def contact_opener(request: HttpRequest, pk: int) -> HttpResponse:
+    """Save the contact's opener — the draft their Compose button carries.
+
+    This closes a loop that shipped half-built: Compose has always prefilled
+    the email body from `contact.opener`, and the Today card wears a "draft
+    ready" badge when one exists — but nothing in the product ever WROTE the
+    field, so zero of 129 real contacts had one and the badge could never
+    appear. One textarea, saved here, and both ends start working.
+    """
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    contact.opener = (request.POST.get("opener") or "").strip()
+    contact.save(update_fields=["opener"])
+    record_event("opener_saved", user=request.user)
+    return render(request, "crm/_contact_live.html",
+                  _contact_live_context(request, contact))

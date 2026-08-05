@@ -239,6 +239,16 @@ on every quick action so all of it stays in sync.
           </p>
         </div>
       </div>
+      {% comment %}Eight weeks of the same number the ring shows, so the ring
+      has a memory. Height against the best of (goal, busiest week); filled
+      bars hit goal. Each bar carries its week in the title for hover and in
+      aria-label for readers.{% endcomment %}
+      <div class="pace-spark" role="img" aria-label="Last 8 weeks:{% for w in pace_history %} {{ w.n }}{% endfor %}">
+        {% for w in pace_history %}
+          <span class="pace-spark-bar{% if w.hit %} is-hit{% endif %}{% if forloop.last %} is-now{% endif %}"
+                style="--h: {{ w.pct }}%; --i: {{ forloop.counter0 }}" title="{{ w.label }}"></span>
+        {% endfor %}
+      </div>
     </div>
 
     {% comment %}

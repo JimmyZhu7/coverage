@@ -25,7 +25,7 @@
     <div class="pagehead-text">
       <p class="pagehead-eyebrow">{% if mode == "edit" %}Edit{% else %}New{% endif %} contact</p>
       <h1 class="pagehead-title">{% if mode == "edit" %}Edit Contact{% else %}Add a Contact{% endif %}</h1>
-      <p class="pagehead-sub">{% if mode == "edit" %}Update {{ contact.name }}.{% else %}Someone you met: a coffee chat, a recruiter, an alum. Warmth and cadence take it from here.{% endif %}</p>
+      <p class="pagehead-sub">{% if mode == "edit" %}Update {{ contact.name }}.{% elif quick %}Ten seconds: who, where, one line so you remember them. Everything else can wait.{% else %}Someone you met: a coffee chat, a recruiter, an alum. Warmth and cadence take it from here.{% endif %}</p>
     </div>
   </header>
 
@@ -49,6 +49,7 @@
           <label for="{{ form.firm_text.id_for_label }}">Firm (if not listed)</label>
           {{ form.firm_text }}
         </div>
+        {% if not quick %}
         <div>
           <label for="{{ form.role.id_for_label }}">Role</label>
           {{ form.role }}
@@ -72,8 +73,10 @@
           {{ form.region }}
           {% if form.region.errors %}<p class="cf-err">{{ form.region.errors|striptags }}</p>{% endif %}
         </div>
+        {% endif %}
       </div>
 
+      {% if not quick %}
       <div class="cf-full">
         <label for="{{ form.angle.id_for_label }}">Angle</label>
         {{ form.angle }}
@@ -84,13 +87,20 @@
         {{ form.opener }}
         <p class="note">The draft email itself. Seeds the compose body.</p>
       </div>
+      {% endif %}
       <div class="cf-full">
         <label for="{{ form.notes.id_for_label }}">Notes</label>
         {{ form.notes }}
       </div>
 
       <div class="cf-actions">
+        {% if quick %}<input type="hidden" name="quick" value="1">{% endif %}
         <button type="submit" class="btn btn-primary">{% if mode == "edit" %}Save Changes{% else %}Add Contact{% endif %}</button>
+        {% if quick %}
+          <a class="cf-cancel" href="{% url 'crm:contact_new' %}">Every field</a>
+        {% elif mode != "edit" %}
+          <a class="cf-cancel" href="{% url 'crm:contact_new' %}?quick=1">Quick add</a>
+        {% endif %}
         <a class="cf-cancel" href="{% if mode == "edit" %}{% url 'crm:contact_detail' contact.pk %}{% else %}{% url 'crm:contact_list' %}{% endif %}">Cancel</a>
       </div>
     </form>

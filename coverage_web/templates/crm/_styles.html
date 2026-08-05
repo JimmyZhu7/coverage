@@ -685,4 +685,31 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   @media (max-width: 900px) {
     .net-board { grid-template-columns: 1fr; }
   }
+
+  /* The Compose draft editor on the contact page. */
+  .cd-opener { margin-top: var(--s3); }
+  .cd-opener > summary { cursor: pointer; list-style: none; font-size: var(--fs-s);
+    font-weight: var(--w-med); color: var(--ink-2); display: inline-flex;
+    align-items: center; gap: 7px; }
+  .cd-opener > summary::-webkit-details-marker { display: none; }
+  .cd-opener > summary::before { content: "+"; transition: transform var(--t-med); }
+  .cd-opener[open] > summary::before { transform: rotate(45deg); }
+  .cd-opener-on { font-size: var(--fs-micro); font-weight: var(--w-med);
+    color: var(--ok); background: var(--ok-soft); border-radius: 999px;
+    padding: 1px 8px; }
+  .cd-opener textarea { width: 100%; margin-top: var(--s2); font-size: var(--fs-s); }
+  .cd-opener-foot { display: flex; justify-content: flex-end; margin-top: var(--s2); }
+
+  /* Eight-week trace under the pace ring. */
+  .pace-spark { display: flex; align-items: flex-end; gap: 3px; height: 26px;
+    margin-top: var(--s3); padding-top: var(--s2);
+    border-top: 1px solid var(--line); }
+  .pace-spark-bar { flex: 1; min-height: 2px; height: var(--h, 0%);
+    border-radius: 2px 2px 0 0; background: var(--line-strong);
+    transform-origin: bottom;
+    animation: mrail-grow 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 40ms); }
+  .pace-spark-bar.is-hit { background: var(--ok-line); }
+  .pace-spark-bar.is-now { background: var(--accent); }
+  @keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 </style>

@@ -37,8 +37,8 @@
       <details class="quickadd">
         <summary class="btn btn-primary">＋ Quick add</summary>
         <div class="quickadd-menu">
-          <a href="{% url 'crm:contact_new' %}">
-            <span>A person</span><span class="quickadd-hint">Someone new to track</span>
+          <a href="{% url 'crm:contact_new' %}?quick=1">
+            <span>A person</span><span class="quickadd-hint">Name and firm, ten seconds</span>
           </a>
           <a href="{% url 'crm:calendar' %}?day={% now 'j' %}#add">
             <span>Something dated</span><span class="quickadd-hint">A chat, superday, or flight</span>

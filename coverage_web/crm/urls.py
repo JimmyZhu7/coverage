@@ -42,4 +42,6 @@ urlpatterns = [
     path("contacts/<int:pk>/edit/", views.contact_edit, name="contact_edit"),
     # htmx: log a touch, re-render the live panel with visible warmth movement.
     path("contacts/<int:pk>/touch/", views.log_touch, name="log_touch"),
+    # htmx: save the Compose draft (contact.opener) in place.
+    path("contacts/<int:pk>/opener/", views.contact_opener, name="contact_opener"),
 ]

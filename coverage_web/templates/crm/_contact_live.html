@@ -40,6 +40,24 @@ values.
       {% if contact.angle %}
         <p class="cd-angle"><span class="cd-k">Angle</span> {{ contact.angle }}</p>
       {% endif %}
+      {% if contact.email %}
+        {% comment %}The Compose draft. Compose has always prefilled its body
+        from this field and the Today card has a "draft ready" badge for it;
+        this textarea is the missing writer. Kept inside the swap fragment so
+        saving re-renders in place, mailto included.{% endcomment %}
+        <details class="cd-opener"{% if contact.opener %} open{% endif %}>
+          <summary>Compose draft{% if contact.opener %} <span class="cd-opener-on">ready</span>{% endif %}</summary>
+          <form hx-post="{% url 'crm:contact_opener' contact.pk %}"
+                hx-target="#contact-live" hx-swap="outerHTML">
+            {% csrf_token %}
+            <textarea name="opener" rows="4"
+                      placeholder="The note you'd send them. Compose opens with this as the body.">{{ contact.opener }}</textarea>
+            <div class="cd-opener-foot">
+              <button type="submit" class="btn">Save draft</button>
+            </div>
+          </form>
+        </details>
+      {% endif %}
       {% if contact.notes %}
         <p class="cd-notes">{{ contact.notes|linebreaksbr }}</p>
       {% endif %}
