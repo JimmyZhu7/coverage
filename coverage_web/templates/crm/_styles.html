@@ -158,9 +158,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      Compose) then ghosts (Snooze / Skip). Identical on every card. */
   .act-quick { margin-top: auto; padding-top: var(--s3);
     display: flex; flex-direction: column; gap: var(--s2); }
-  .act-primary { display: flex; gap: 6px; }
-  .act-primary .btn { flex: 1 1 0; min-width: 0; padding: 6px 6px; font-size: var(--fs-xs);
-    text-align: center; }
+  /* `flex: 1 1 0` split the row into equal columns regardless of what the
+     labels needed, so on the four-button card (Log the chat / Reschedule /
+     They replied / Compose) each got ~78px and two of them broke mid-phrase
+     — "Log the / chat" beside a single-line "Reschedule", every button a
+     different height.
+     `auto` basis + nowrap instead: a button is never narrower than its own
+     words, and when the row runs out of width the BUTTONS wrap, not the
+     text. They still stretch to fill whatever row they land on, so three
+     buttons look exactly as they did before. */
+  .act-primary { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; }
+  .act-primary .btn { flex: 1 1 auto; padding: 6px 10px; font-size: var(--fs-xs);
+    text-align: center; white-space: nowrap; }
   .act-ghosts { display: flex; gap: var(--s4); }
   .act-ghost { background: transparent; border-color: transparent; color: var(--ink-3);
     padding: 3px 8px; font-size: var(--fs-xs); }
@@ -294,8 +303,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* Tap targets stay >= 44px at phone widths; the quick actions wrap to a
      second row before any button is squeezed below that. */
   @media (max-width: 560px) {
-    .act-primary { flex-wrap: wrap; }
-    .act-primary .btn { flex: 1 1 44%; min-height: 44px; }
+    .act-primary .btn { min-height: 44px; }
     .act-ghosts .btn { min-height: 44px; }
     .upnext > summary { gap: var(--s2); }
     .upnext-toggle { margin-left: 0; }
