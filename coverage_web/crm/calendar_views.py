@@ -122,7 +122,7 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             "id": None,
             "kind": "deadline",
             "source": "tracked",
-            "title": f"{opp.firm.name} · {opp.title}",
+            "title": _role_label(opp),
             "description": "",
             "location": "",
             "all_day": True,
@@ -141,6 +141,20 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
         # fact about the whole day and belongs above the 3pm coffee.
         buckets[day].sort(key=lambda e: (not e["all_day"], e["at"] or timezone.now()))
     return buckets
+
+
+def _role_label(opp) -> str:
+    """"Firm · Role", unless the role already says the firm.
+
+    Scraped titles often carry their own firm name ("Bank of America |
+    Insight Day"), and prefixing it produces "Bank of America · Bank of
+    America | Insight Day" on the calendar and in the feed.
+    """
+    title = (opp.title or "").strip()
+    firm = (opp.firm.name or "").strip()
+    if firm and title.lower().startswith(firm.lower()):
+        return title
+    return f"{firm} · {title}"
 
 
 def _tracked_deadlines(user, first: date, last: date):
@@ -459,7 +473,7 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
     # intention, and this feed is what turns it into a reminder.
     for uo in _tracked_deadlines(user, window_start.date(), window_end.date()):
         opp = uo.opportunity
-        summary = f"{opp.firm.name} · {opp.title} closes"
+        summary = f"{_role_label(opp)} closes"
         lines += ["BEGIN:VEVENT",
                   f"UID:coverage-uo-{uo.id}@coverage.app",
                   f"DTSTAMP:{stamp}",

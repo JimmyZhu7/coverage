@@ -19,6 +19,9 @@ urlpatterns = [
     # The user's saved / applied roles, and the track toggle behind each card.
     path("opportunities/mine/", directory_views.my_applications, name="my_applications"),
     path("opportunities/<int:pk>/track/", directory_views.track_opportunity, name="track_opportunity"),
+    # The description we already fetched, read inline instead of behind a
+    # four-second Workday shell. Public: the posting itself is public.
+    path("opportunities/<int:pk>/read/", directory_views.role_description, name="role_description"),
     # Per-firm detail pages linked from the feed.
     path("firms/", include("directory.urls")),
     path("app/", include("crm.urls")),               # authed hub: today, network

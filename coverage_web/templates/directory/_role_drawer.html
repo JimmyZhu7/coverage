@@ -1,0 +1,53 @@
+{% load textstyle %}
+{% comment %}
+One posting, read inline. Fetched on demand rather than rendered into all 900
+cards: the feed is already 1.27MB of HTML and the median description is
+another 3,825 characters, so inlining them would multiply the page by four to
+show text almost nobody opens.
+
+Order is deliberate. What the posting STATES comes first, each fact beside the
+sentence that produced it, because that is the part a student cannot get by
+skimming the firm's own page. The description follows, and the link out is
+last and unmissable — this drawer is for deciding, not for applying.
+{% endcomment %}
+<header class="drawer-head">
+  <p class="drawer-firm">{{ firm.name|smart_title }}{% if o.location %} · {{ o.location|smart_title }}{% endif %}</p>
+  <h2 class="drawer-title">{{ o.title|smart_title }}</h2>
+  <p class="drawer-meta">
+    {% if deadline %}<span class="drawer-deadline">{{ deadline.label }}</span>{% endif %}
+    {% if o.cohort %}<span>{{ o.cohort }} intake</span>{% endif %}
+    {% if o.bucket %}<span>{{ o.bucket_label|default:o.bucket }}</span>{% endif %}
+  </p>
+</header>
+
+{% if facts %}
+  {% comment %}Every row carries its own evidence. A fact whose sentence we
+  cannot show is a fact this product does not state.{% endcomment %}
+  <section class="drawer-facts" aria-label="What the posting states">
+    {% for f in facts %}
+      <div class="drawer-fact">
+        <span class="df-k">{{ f.label }}</span>
+        <span class="df-v">{{ f.value }}</span>
+        <span class="df-why">{{ f.phrase }}</span>
+      </div>
+    {% endfor %}
+  </section>
+{% endif %}
+
+{% if fetched %}
+  <div class="drawer-body">
+    {% for block in blocks %}<p>{{ block|linebreaksbr }}</p>{% endfor %}
+    <p class="drawer-note">Read from the posting as it stood when we last checked it. The firm's page is the record.</p>
+  </div>
+{% else %}
+  {% comment %}Never an empty drawer. Not every posting has been fetched (854
+  of 4,321 open roles), and a blank panel reads as breakage rather than as an
+  honest "we don't hold this one".{% endcomment %}
+  <div class="drawer-body drawer-empty">
+    <p>We haven't fetched this posting's text yet. The firm's page has it.</p>
+  </div>
+{% endif %}
+
+<a class="drawer-apply" href="{{ o.url }}" target="_blank" rel="nofollow noopener">
+  Open the application on {{ firm.name|smart_title }} ↗
+</a>

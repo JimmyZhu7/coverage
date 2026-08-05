@@ -214,6 +214,21 @@
   </div>
 </div>
 
+{% comment %}
+The read-it-here drawer. ONE dialog for the whole page rather than one per
+card: 900 cards would otherwise ship 900 empty dialogs, and the content is
+fetched on click anyway.
+
+A native <dialog>, so the browser owns the focus trap, Escape, inertness of
+the page behind it and the top layer — the same reason the Cmd-K palette is
+one. The only script here is what opens it and what clears it; everything
+else is htmx and the platform.
+{% endcomment %}
+<dialog class="drawer" id="role-drawer" aria-label="Posting">
+  <button type="button" class="drawer-x" data-drawer-close aria-label="Close">✕</button>
+  <div id="role-drawer-body"></div>
+</dialog>
+
 <script>
   // "Companies" multi-select: toggle the checkbox panel and keep the button
   // label in sync. The checkboxes are real form inputs (name="firm"), so the
@@ -307,6 +322,28 @@
   // to bubble up to it, so it does not. A bubbling event here would make every
   // swap trigger another request — an endless loop of the page filtering
   // itself. Setting `selectedIndex` does not fire `change` on its own.
+  // ---- The posting drawer ------------------------------------------------
+  // Open on click, not on htmx's response: the fetch is fast but not
+  // instant, and a button that does nothing for 200ms reads as broken. The
+  // placeholder is replaced by the swap when it lands.
+  (function () {
+    var dlg = document.getElementById("role-drawer");
+    var body = document.getElementById("role-drawer-body");
+    if (!dlg) return;
+    document.body.addEventListener("click", function (e) {
+      if (e.target.closest("[data-role-read]")) {
+        body.innerHTML = '<p class="drawer-loading">Opening…</p>';
+        dlg.showModal();
+      } else if (e.target.closest("[data-drawer-close]")) {
+        dlg.close();
+      }
+    });
+    // Backdrop click closes; native <dialog> only closes on Escape.
+    dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+    // Emptied on close so the next open cannot flash the previous posting.
+    dlg.addEventListener("close", function () { body.innerHTML = ""; });
+  })();
+
   document.body.addEventListener("htmx:afterSettle", function () {
     document.querySelectorAll(".filters select").forEach(function (sel) {
       var i = Array.prototype.findIndex.call(sel.options, function (o) {

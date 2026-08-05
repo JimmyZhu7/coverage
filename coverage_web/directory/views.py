@@ -42,6 +42,7 @@ from directory.classify import (
 # The one definition of "closing soon" — see deadlines.py for why it isn't
 # spelled out at each call site (and for the crm/views.py follow-up).
 from directory.deadlines import CLOSING_SOON_DAYS, is_closing_soon
+from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
 from directory.recommend import Candidate, Profile, recommend
 from directory.timeline import EVENT_LABELS
@@ -824,6 +825,10 @@ def _urgency_item(o, *, now, today, my_firm_ids):
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
         "fresh_label": _fresh_label(seen_days),
         "facts": _fact_chips(o),
+        # Whether the Read control has anything to open. Checked here, not in
+        # the template, so the card never offers a drawer that would come back
+        # empty.
+        "has_text": bool((o.raw or {}).get("detail_text")),
     }
     # Three states, not two. "Rolling" must mean "no posted deadline" (it is
     # tested that way at my_applications, views.py's `rolling` lens above) —
@@ -1451,6 +1456,46 @@ def _track_control(request, opp):
     ).first()
     return render(request, "directory/_track_control.html", {
         "r": {"id": opp.id, "track_status": (uo.applied_status or "saved") if uo else None},
+    })
+
+
+# The fact kinds a drawer shows in full, and what to call each one. The card
+# has room for two chips; this has room for everything the posting states,
+# each beside the sentence it came from — which is the difference between a
+# claim and a quotation.
+_FACT_LABELS = (
+    ("pay", "Pay"),
+    ("language", "Language"),
+    ("grad", "Graduating"),
+    ("gpa", "GPA"),
+    ("cover_letter", "Cover letter"),
+    ("assessment", "Assessment"),
+    ("rolling", "Closing"),
+)
+
+
+def role_description(request, pk):
+    """One posting's own description, read from the copy we already hold.
+
+    Every role card links out to a Workday page that renders client-side and
+    takes seconds to paint, for text `enrich_postings` has already fetched and
+    stored. This serves that text back immediately.
+
+    It never invents the absence: a role we never fetched says so and offers
+    the link, rather than rendering an empty drawer that reads as breakage.
+    """
+    opp = get_object_or_404(Opportunity.objects.select_related("firm"), pk=pk)
+    raw = opp.raw or {}
+    facts = raw.get("facts") or {}
+    today = timezone.localdate()
+    return render(request, "directory/_role_drawer.html", {
+        "o": opp,
+        "firm": opp.firm,
+        "blocks": paragraphs(raw.get("detail_text")),
+        "fetched": bool(raw.get("detail_text")),
+        "deadline": deadline_marker(opp.deadline, opp.deadline_precision, today=today),
+        "facts": [{"label": label, **facts[kind]}
+                  for kind, label in _FACT_LABELS if kind in facts],
     })
 
 

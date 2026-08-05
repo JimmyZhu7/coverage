@@ -92,6 +92,18 @@ without cutting text off.
     {% if r.seen_days is not None %}
       <span class="meta-seen">· first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>
     {% endif %}
+    {% comment %}
+    Read, only where there is something to read. The description was fetched
+    once already and sits in the database; the firm's own page renders it
+    client-side and takes seconds. The button is rendered only when we hold
+    the text (`r.has_text`) — offering to show something we do not have is the
+    same lie as an empty drawer, one step earlier.
+    {% endcomment %}
+    {% if r.has_text %}
+      <button type="button" class="meta-read" data-role-read
+              hx-get="{% url 'role_description' r.id %}"
+              hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>
+    {% endif %}
   </div>
 
   {% comment %}

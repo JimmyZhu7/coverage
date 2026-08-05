@@ -67,15 +67,48 @@ def _sentence(text: str, start: int, end: int) -> str:
     return out[:180]
 
 
+# Page furniture that came along for the ride. `enrich_postings` reads
+# Workday through its JSON API and gets the description alone, but a plain
+# HTML board gives up its whole page: 153 of 854 stored descriptions open with
+# a cookie-consent notice and a navigation bar before reaching a word about
+# the job. The drawer rendered that as the posting, which is the firm's cookie
+# policy wearing a job's title.
+#
+# Cutting at the LAST marker found in the opening stretch, not the first, is
+# what makes this safe on a page where the banner and the nav both appear:
+# everything up to the deepest piece of chrome is chrome.
+_CHROME_MARKERS = (
+    "read more about our cookie policy", "disable non-essential cookies",
+    "accept all cookies", "i accept the cookie policy", "skip to content",
+    "toggle navigation", "browse all programs", "login | register",
+    "cookie preferences", "manage cookies",
+)
+
+
+def _strip_chrome(text: str) -> str:
+    head = text[:2500].lower()
+    cut = 0
+    for marker in _CHROME_MARKERS:
+        i = head.rfind(marker)
+        if i != -1:
+            cut = max(cut, i + len(marker))
+    if not cut:
+        return text
+    rest = text[cut:].lstrip(" -->|\n\t\xa0")
+    # Never trade a real description for an empty one: if the cut leaves
+    # almost nothing, the markers matched something that wasn't chrome.
+    return rest if len(rest) > 200 else text
+
+
 def _clean(text: str) -> str:
-    """Entity-decoded, whitespace-collapsed text.
+    """Entity-decoded, whitespace-collapsed, chrome-free text.
 
     The detail pages were stored as fetched, so `&#160;` and `&amp;` are
     literal in the cache. Left alone they land inside the fixed-width windows
     every pattern below uses (six characters spent on one space), which
     silently shortens the reach of every gate.
     """
-    return re.sub(r"[ \t\xa0]+", " ", html.unescape(text))
+    return _strip_chrome(re.sub(r"[ \t\xa0]+", " ", html.unescape(text)))
 
 
 # --- GPA -------------------------------------------------------------------
@@ -318,3 +351,70 @@ def extract_facts(text: str | None) -> dict:
         if got:
             out[kind] = got
     return out
+
+
+# --- Reading the description at all ----------------------------------------
+# The stored text is one unbroken line. Workday's own JSON delivers the
+# description as HTML and `enrich_postings` strips the tags, so every <p>,
+# <li> and <h3> that gave the posting its shape is gone by the time it
+# reaches us — the median document is 3,825 characters with no newline in it
+# and only 38 of 854 carry a bullet character.
+#
+# So the breaks are re-derived from the one structural signal that survived:
+# these firms all write the same section headings. The list is explicit and
+# short on purpose. A cleverer rule (break before any Capitalised Run) shatters
+# every "Bank of America" and "New York" in the body.
+_SECTIONS = (
+    "job description summary", "job description", "about the team",
+    "about the role", "about the program", "about the programme",
+    "what you'll do", "what you will do", "what you'll need",
+    "what we are looking for", "what we're looking for", "who can apply",
+    "your role", "your team", "responsibilities", "key responsibilities",
+    "qualifications", "basic qualifications", "desired qualifications",
+    "preferred qualifications", "requirements", "eligibility",
+    "skills and qualifications", "selection process", "recruitment process",
+    "our recruitment process", "how to apply", "application process",
+    "program locations", "pay range", "salary range", "benefits",
+    "equal opportunity", "diversity", "why join", "next steps",
+)
+
+def _heading_alt(phrase: str) -> str:
+    """One heading as a pattern whose FIRST letter must be capital.
+
+    Case matters here and a plain IGNORECASE match proved it: "Requirements"
+    and "Responsibilities" are headings, but the same words occur mid-sentence
+    ("...the requirements of the AMP Program are designed to...") and an
+    insensitive match broke the paragraph there, leaving blocks that start
+    halfway through a sentence. A heading is capitalised; prose is not.
+    """
+    first, rest = re.escape(phrase[0]), re.escape(phrase[1:])
+    return f"{first.upper()}(?i:{rest})"
+
+
+_SECTION_RX = re.compile(
+    r"(?<=[a-z.,;:)])\s+(?=(?:%s)\b)" % "|".join(
+        _heading_alt(s) for s in sorted(_SECTIONS, key=len, reverse=True)))
+_BULLET_RX = re.compile(r"\s*[•●▪]\s*")
+
+
+def paragraphs(text: str | None, *, limit: int = 4000) -> list[str]:
+    """The description as readable blocks, longest-first-heading order kept.
+
+    `limit` is a reading budget, not a storage one: past ~4,000 characters a
+    posting is boilerplate about the firm rather than about the job, and the
+    drawer says so and links out rather than pretending to be the posting.
+    """
+    if not text:
+        return []
+    body = _clean(text).strip()
+    if len(body) > limit:
+        cut = body.rfind(" ", 0, limit)
+        body = body[:cut if cut > limit - 200 else limit].rstrip() + "…"
+    if _BULLET_RX.search(body):
+        body = _BULLET_RX.sub("\n· ", body)
+    blocks = []
+    for chunk in _SECTION_RX.split(body):
+        chunk = chunk.strip()
+        if chunk:
+            blocks.append(chunk)
+    return blocks
