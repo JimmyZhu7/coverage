@@ -1050,9 +1050,12 @@ def opportunities(request):
             cl = clusters[o.firm_id] = {
                 "firm_name": o.firm.name,
                 "firm_slug": o.firm.slug,
-                # First seeded email domain drives the logo lookup; the
-                # monogram is the always-works fallback.
-                "domain": (o.firm.domains or [""])[0],
+                # The firm's own mark, fetched once into our media by
+                # `fetch_firm_logos` — never hotlinked, so looking at this
+                # board tells no third party which firms you are chasing.
+                # Blank for the ~7 firms whose only favicon is 16px, and the
+                # monogram remains the always-works fallback for them.
+                "logo_url": o.firm.logo.url if o.firm.logo else "",
                 "monogram": "".join(p[0] for p in name_parts[:2]).upper() or "?",
                 "category": category,
                 "sponsorship": _sponsorship_tag(o),

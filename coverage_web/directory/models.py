@@ -23,6 +23,13 @@ class Firm(models.Model):
     )
     regions = ArrayField(models.CharField(max_length=64), default=list, blank=True)
     tracks = ArrayField(models.CharField(max_length=64), default=list, blank=True)
+    # The firm's own mark, fetched ONCE by `fetch_firm_logos` and served from
+    # our own media — never hotlinked. A hotlinked logo would tell a third
+    # party, on every page load, which firms this student is researching;
+    # that is exactly the kind of leak the rest of this product refuses to
+    # make. Blank is a first-class state: the board falls back to the
+    # monogram, which is why nothing here can ever be missing-image-icon.
+    logo = models.ImageField(upload_to="firm-logos/", blank=True, null=True)
     # Plan lists this column with no explicit type (unlike the text[]
     # columns above) — kept as a flexible JSON blob rather than a single
     # boolean since sponsorship status is realistically per-region/track

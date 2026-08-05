@@ -473,7 +473,19 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 31%);
     box-shadow: inset 0 0 0 1px hsl(var(--hue, 210) 40% 82%);
     font-weight: var(--w-bold); font-size: var(--fs-s); letter-spacing: 0.02em;
-    display: inline-flex; align-items: center; justify-content: center; }
+    display: inline-flex; align-items: center; justify-content: center;
+    overflow: hidden; }
+  /* A real logo brings its own colour, so the tinted chip is dropped. White,
+     not --surface: most of these marks are drawn for a white page and ship
+     with transparency, so white is what makes them melt in rather than sit
+     on a tinted square. The hairline is what still reads as a tile. */
+  .firmcol-logo.has-logo { background: #fff;
+    box-shadow: inset 0 0 0 1px var(--line); padding: 5px; }
+  /* `contain`, never `cover`: these marks are wordmarks as often as glyphs,
+     and cover would crop the words off. */
+  .firmcol-logo.has-logo img { width: 100%; height: 100%; object-fit: contain;
+    display: block; transition: transform var(--t-med); }
+  .firmcol:hover .firmcol-logo.has-logo img { transform: scale(1.06); }
   .firmcol-id { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
   /* Full name, wrapping up to 2 lines — no mid-word "Bank of Amer…" cut. */
   .firmcol-name { font-weight: var(--w-bold); font-size: var(--fs-m); color: var(--ink);

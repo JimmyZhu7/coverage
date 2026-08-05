@@ -129,7 +129,17 @@ exactly the moment it had something to say.
       animate in lockstep with it instead of after it.{% endcomment %}
       <article class="firmcol{% if cl.is_mine %} is-mine{% endif %} kin-reveal" style="--i:{{ forloop.counter }}">
         <header class="firmcol-head">
-          <span class="firmcol-logo" style="--hue: {{ cl.firm_slug|firm_hue }}">{{ cl.monogram }}</span>
+          {% comment %}The firm's real mark when we have one, its monogram
+          otherwise — never a broken-image icon, because the URL is only
+          emitted when the file exists. `loading="lazy"` because a filtered
+          board can carry 13 of these below the fold.{% endcomment %}
+          {% if cl.logo_url %}
+            <span class="firmcol-logo has-logo">
+              <img src="{{ cl.logo_url }}" alt="" loading="lazy" decoding="async" width="128" height="128">
+            </span>
+          {% else %}
+            <span class="firmcol-logo" style="--hue: {{ cl.firm_slug|firm_hue }}">{{ cl.monogram }}</span>
+          {% endif %}
           <div class="firmcol-id">
             <a class="firmcol-name" href="{% url 'directory:firm_detail' cl.firm_slug %}">{{ cl.firm_name|smart_title }}</a>
             <span class="firmcol-meta">{% if cl.category %}{{ cl.category }} · {% endif %}{{ cl.open_count }} open</span>
