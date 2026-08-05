@@ -30,6 +30,7 @@ from directory.models import FirmDate
 
 from .forms import CalendarEventForm
 from .models import CalendarEvent
+from .utils import FIRM_DATE_LABELS, _clock
 
 # Monday-first weeks: every market this product covers starts its week on a
 # Monday, and the cadence engine's business-day maths already assumes it.
@@ -62,15 +63,6 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
     """
     buckets: dict[date, list[dict]] = {}
 
-    def clock(at) -> str:
-        """A time short enough to sit in a calendar chip: "9am", "12:30pm".
-
-        Django's `time:"g:ia"` renders "12:00p.m." — three glyphs of noise on
-        every on-the-hour entry, in the narrowest column on the page.
-        """
-        minutes = f":{at.minute:02d}" if at.minute else ""
-        return f"{at.strftime('%I').lstrip('0') or '12'}{minutes}{at.strftime('%p').lower()}"
-
     # Layers 1 + 2 — the user's own events. `starts_at` is a datetime, so the
     # window is widened by a day at each end before filtering to be sure a
     # local-midnight event at either edge is caught.
@@ -84,7 +76,7 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
         if not (first <= day <= last):
             continue
         buckets.setdefault(day, []).append({
-            "at_label": "" if ev.all_day else clock(local),
+            "at_label": "" if ev.all_day else _clock(local),
             "id": ev.id,
             "kind": ev.kind,
             "source": ev.source,
@@ -100,12 +92,7 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
     # Layer 3 — confirmed firm deadlines, read-only.
     for fd in (FirmDate.objects.filter(date__gte=first, date__lte=last, confidence=1.0)
                .select_related("firm")):
-        label = {
-            "app_open": "applications open",
-            "app_close": "applications close",
-            "insight_open": "insight programme opens",
-            "insight_deadline": "insight deadline",
-        }.get(fd.event_kind, fd.event_kind.replace("_", " "))
+        label = FIRM_DATE_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " "))
         buckets.setdefault(fd.date, []).append({
             "id": None,
             "kind": "deadline",

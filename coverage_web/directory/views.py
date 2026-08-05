@@ -714,14 +714,13 @@ def _urgency_item(o, *, now, today, my_firm_ids):
     """One feed card: firm identity + the honest urgency signal for this
     role (a real countdown when dated, freshness when rolling, or an
     explicit "deadline passed" state — see the three-way split below)."""
-    name_parts = [p for p in o.firm.name.split() if p[:1].isalnum()]
     bucket = o.bucket or OTHER
     seen_days = (now - o.first_seen).days if o.first_seen else None
     item = {
         "id": o.id,
         "firm_name": o.firm.name,
         "firm_slug": o.firm.slug,
-        "monogram": "".join(p[0] for p in name_parts[:2]).upper() or "?",
+        "monogram": _monogram(o.firm.name),
         "category": FIRM_CATEGORIES.get(o.firm.slug, ""),
         "title": o.title,
         "url": o.url,
@@ -997,7 +996,13 @@ def opportunities(request):
     #   2. Fresh & Rolling — the many rolling-review roles, where "apply
     #      early" is the whole game, so we rank by how recently WE first saw
     #      the posting (Coverage's own first_seen — a signal no ATS exposes).
-    feed = _urgency_feed(qs, now=now, today=today, my_firm_ids=my_firm_ids)
+    # ONE trip to the database for the page's big query. `qs` used to be
+    # iterated twice — once here, once for the firm clusters below — which
+    # executed the same ~900-row, firm-joined SELECT twice per view. The
+    # cluster loop's ordering is applied here; `_urgency_feed` sorts its
+    # bands in Python and never cared about SQL order.
+    rows = list(qs.order_by("firm__name", F("deadline").asc(nulls_last=True), "title"))
+    feed = _urgency_feed(rows, now=now, today=today, my_firm_ids=my_firm_ids)
 
     # Firm clusters are the page: one firm, all its open roles listed below it
     # in its own scroll window. Each role keeps its honest urgency signal (a
@@ -1034,19 +1039,17 @@ def opportunities(request):
             ]
     pick_shared, pick_blocks = _group_picks(picks)
 
-    qs = qs.order_by("firm__name", F("deadline").asc(nulls_last=True), "title")
     clusters: dict[int, dict] = {}
     # The picks are also rendered as the pinned first column of the feed, so
     # their cards are collected during the same pass rather than re-queried.
     pick_ids = {p["id"] for p in picks}
     pick_items: dict[int, dict] = {}
-    for o in qs:
+    for o in rows:
         cl = clusters.get(o.firm_id)
         if cl is None:
             category = FIRM_CATEGORIES.get(o.firm.slug) or next(
                 (TRACK_LABELS.get(t, "") for t in (o.firm.tracks or [])), ""
             )
-            name_parts = [p for p in o.firm.name.split() if p[:1].isalnum()]
             cl = clusters[o.firm_id] = {
                 "firm_name": o.firm.name,
                 "firm_slug": o.firm.slug,
@@ -1056,7 +1059,7 @@ def opportunities(request):
                 # Blank for the ~7 firms whose only favicon is 16px, and the
                 # monogram remains the always-works fallback for them.
                 "logo_url": o.firm.logo.url if o.firm.logo else "",
-                "monogram": "".join(p[0] for p in name_parts[:2]).upper() or "?",
+                "monogram": _monogram(o.firm.name),
                 "category": category,
                 "sponsorship": _sponsorship_tag(o),
                 "is_mine": o.firm_id in tier_by_firm,
