@@ -12,10 +12,17 @@
   every signed-out visitor their feed was "sorted to your firms" when no firm
   of theirs was known. See the retired "Sorted for you" chip in _results.html.
   {% endcomment %}
+  {% comment %}
+  "Deadlines where firms publish them", not "ranked by deadline": after the
+  detail-page enrichment, 12% of open campus roles carry a real deadline and
+  the other 88% of pages state none at all (rolling review). The sort is
+  still deadline-first with nulls last; the sentence just stops implying
+  every card has one.
+  {% endcomment %}
   {% if personalized %}
-    {% include "_pagehead.html" with eyebrow="Insight · internships · entry-level" title="Opportunities" sub="Open roles ranked by deadline, sorted to your firms." %}
+    {% include "_pagehead.html" with eyebrow="Insight · internships · entry-level" title="Opportunities" sub="Every open role, sorted to your firms. Deadlines where firms publish them." %}
   {% else %}
-    {% include "_pagehead.html" with eyebrow="Insight · internships · entry-level" title="Opportunities" sub="Open roles ranked by deadline." %}
+    {% include "_pagehead.html" with eyebrow="Insight · internships · entry-level" title="Opportunities" sub="Every open role. Deadlines where firms publish them." %}
   {% endif %}
 
   {% if user.is_authenticated %}
