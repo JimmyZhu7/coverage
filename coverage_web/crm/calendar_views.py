@@ -16,7 +16,7 @@ countdowns on the page for events nobody has confirmed.
 from __future__ import annotations
 
 import calendar as calmod
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count
@@ -297,3 +297,81 @@ def calendar_delete(request: HttpRequest, pk: int) -> HttpResponse:
     m = request.POST.get("m") or timezone.localdate().month
     CalendarEvent.objects.for_user(request.user).filter(pk=pk).delete()
     return redirect(f"/app/calendar/?y={y}&m={m}")
+
+
+def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
+    """The calendar as an ICS feed, for the calendar app the user already
+    lives in.
+
+    Token-authenticated, not session: Calendar.app and Google Calendar fetch
+    feeds from their own servers with no cookies. The token is its own column
+    (never the capture slug — that one can WRITE into the CRM) and revoking
+    every stale subscription is "blank the field, save".
+
+    Contents mirror the page exactly: the user's own events with real times,
+    plus confirmed firm deadlines as all-day entries. Unconfirmed dates stay
+    out for the same reason they stay off the page — a rumour with an alarm
+    on it is worse than a rumour.
+    """
+    from django.contrib.auth import get_user_model
+    from django.http import Http404
+
+    user = get_user_model().objects.filter(
+        calendar_token=token, deleted_at__isnull=True
+    ).first()
+    if user is None or not token:
+        raise Http404
+
+    def esc(text: str) -> str:
+        return (text or "").replace("\\", "\\\\").replace(";", r"\;").replace(
+            ",", r"\,").replace("\n", r"\n")
+
+    now = timezone.now()
+    window_start = now - timedelta(days=30)
+    window_end = now + timedelta(days=400)
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Coverage//Calendar//EN",
+        "X-WR-CALNAME:Coverage",
+        "X-WR-CALDESC:Chats and confirmed recruiting deadlines from Coverage",
+    ]
+    stamp = now.strftime("%Y%m%dT%H%M%SZ")
+
+    for ev in (CalendarEvent.objects.for_user(user)
+               .filter(starts_at__gte=window_start, starts_at__lt=window_end)
+               .select_related("contact")):
+        lines += ["BEGIN:VEVENT",
+                  f"UID:coverage-ev-{ev.id}@coverage.app",
+                  f"DTSTAMP:{stamp}",
+                  f"SUMMARY:{esc(ev.title)}"]
+        if ev.all_day:
+            day = timezone.localtime(ev.starts_at).date()
+            lines.append(f"DTSTART;VALUE=DATE:{day:%Y%m%d}")
+        else:
+            utc = ev.starts_at.astimezone(dt_timezone.utc)
+            lines.append(f"DTSTART:{utc:%Y%m%dT%H%M%S}Z")
+            end = (ev.ends_at or ev.starts_at + timedelta(minutes=30))
+            lines.append(f"DTEND:{end.astimezone(dt_timezone.utc):%Y%m%dT%H%M%S}Z")
+        if ev.location:
+            lines.append(f"LOCATION:{esc(ev.location)}")
+        if ev.description:
+            lines.append(f"DESCRIPTION:{esc(ev.description)}")
+        lines.append("END:VEVENT")
+
+    for fd in (FirmDate.objects.filter(
+            confidence=1.0, date__isnull=False,
+            date__gte=window_start.date(), date__lte=window_end.date())
+            .select_related("firm")):
+        label = FIRM_DATE_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " "))
+        lines += ["BEGIN:VEVENT",
+                  f"UID:coverage-fd-{fd.id}@coverage.app",
+                  f"DTSTAMP:{stamp}",
+                  f"SUMMARY:{esc(f'{fd.firm.name} · {label}')}",
+                  f"DTSTART;VALUE=DATE:{fd.date:%Y%m%d}",
+                  "END:VEVENT"]
+
+    lines.append("END:VCALENDAR")
+    return HttpResponse("\r\n".join(lines) + "\r\n",
+                        content_type="text/calendar; charset=utf-8")

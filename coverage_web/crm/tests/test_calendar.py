@@ -490,3 +490,51 @@ def test_an_unset_or_garbage_zone_falls_back_to_the_project_default(user):
         "chat_scheduled_at": "2026-08-05T10:00:00"}])
     ev = CalendarEvent.objects.for_user(user).get()
     assert ev.starts_at.isoformat() == "2026-08-05T10:00:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# The ICS feed — the calendar reaching the calendar app the user lives in.
+# ---------------------------------------------------------------------------
+
+def test_the_feed_serves_events_and_confirmed_deadlines(client, user):
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    CalendarEvent.all_objects.create(
+        user=user, contact=c, title="Chat with Ada Lovelace",
+        starts_at=_at(days=2), kind="chat", thread_id="t-ics")
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="app_close",
+                            date=timezone.localdate() + timedelta(days=9),
+                            confidence=1.0)
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+                            event_kind="app_open",
+                            date=timezone.localdate() + timedelta(days=9),
+                            confidence=0.3)
+
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+    assert "BEGIN:VCALENDAR" in body
+    assert "Chat with Ada Lovelace" in body
+    assert "applications close" in body
+    assert "applications open" not in body, "rumours stay off the feed too"
+
+
+def test_a_wrong_token_is_a_404_not_an_empty_calendar(client, user):
+    resp = client.get("/app/calendar/feed/not-a-real-token.ics")
+    assert resp.status_code == 404
+
+
+def test_the_feed_is_tenant_scoped(client, user, django_user_model):
+    other = django_user_model.objects.create_user(
+        email="other-ics@x.com", password="x")
+    CalendarEvent.all_objects.create(
+        user=other, title="Their private chat", starts_at=_at(days=1))
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+    assert "Their private chat" not in body
+
+
+def test_the_feed_needs_no_session(client, user):
+    """Calendar apps fetch from their own servers, cookie-less. The token IS
+    the auth."""
+    c = client.get(f"/app/calendar/feed/{user.calendar_token}.ics")
+    assert c.status_code == 200
+    assert c["Content-Type"].startswith("text/calendar")

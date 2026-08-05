@@ -312,6 +312,11 @@
       <a href="?y={{ next_y }}&m={{ next_m }}" aria-label="Next month" rel="next">›</a>
     </div>
     <a class="cal-today-link" href="{% url 'crm:calendar' %}">Today</a>
+    {% comment %}Feed URL for the calendar app the user already lives in.
+    webcal:// so Calendar.app opens a subscribe dialog instead of downloading
+    a one-off snapshot.{% endcomment %}
+    <a class="cal-today-link" title="Live-updating feed for Apple/Google Calendar"
+       href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe</a>
     <p class="cal-legend">
       <span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> chats</span>
       <span class="cal-key cal-key-event"><b>{{ counts.event }}</b> events</span>

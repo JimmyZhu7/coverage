@@ -181,6 +181,12 @@ class User(AbstractUser):
     # in practice this is never blank — nullable only leaves room for a
     # pre-slug-era row/import edge case rather than forcing a placeholder.
     capture_slug = models.SlugField(max_length=32, unique=True, null=True, blank=True)
+    # Read-only key for the ICS calendar feed. Its own token, NOT the capture
+    # slug: the capture address can WRITE into the CRM, so it must never ride
+    # in a URL a calendar app stores and syncs through third-party servers.
+    # Leaking this one leaks a read-only calendar, and regenerating it (drop
+    # the value, save) revokes every stale subscription at once.
+    calendar_token = models.CharField(max_length=64, unique=True, null=True, blank=True)
     onboarded_at = models.DateTimeField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -196,4 +202,7 @@ class User(AbstractUser):
     def save(self, *args, **kwargs):
         if not self.capture_slug:
             self.capture_slug = _generate_capture_slug()
+        if not self.calendar_token:
+            import secrets
+            self.calendar_token = secrets.token_urlsafe(24)
         super().save(*args, **kwargs)

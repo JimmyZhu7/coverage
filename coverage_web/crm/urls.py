@@ -20,6 +20,9 @@ urlpatterns = [
     path("debrief/<int:pk>/promote/", views.debrief_promote, name="debrief_promote"),
     # The calendar: scheduled chats, hand-added events, confirmed deadlines.
     path("calendar/", calendar_views.calendar, name="calendar"),
+    # Token-authenticated ICS feed — no session; calendar apps fetch from
+    # their own servers. The token is the auth, so this is NOT login_required.
+    path("calendar/feed/<str:token>.ics", calendar_views.calendar_ics, name="calendar_ics"),
     path("calendar/add/", calendar_views.calendar_add, name="calendar_add"),
     path("calendar/<int:pk>/delete/", calendar_views.calendar_delete, name="calendar_delete"),
     path("contacts/", views.contact_list, name="contact_list"),
