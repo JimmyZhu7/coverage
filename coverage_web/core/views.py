@@ -64,3 +64,57 @@ def healthz(request):
     if a PaaS health check ever needs them.
     """
     return JsonResponse({"status": "ok"})
+
+
+@require_GET
+def search(request):
+    """The Cmd-K palette's data: contacts, firms, and open roles in one query.
+
+    One endpoint rather than three because the palette's question is "take me
+    to the thing named X" and the user should not have to know which table X
+    lives in. Contacts are tenant-scoped and need a login; firms and roles are
+    shared-zone. Everything is capped, `icontains`, newest-effort-first — a
+    palette is navigation, not a report.
+    """
+    from django.http import JsonResponse
+
+    q = (request.GET.get("q") or "").strip()
+    if len(q) < 2:
+        return JsonResponse({"contacts": [], "firms": [], "roles": []})
+
+    out = {"contacts": [], "firms": [], "roles": []}
+
+    if request.user.is_authenticated:
+        from crm.models import Contact
+        out["contacts"] = [
+            {
+                "name": c.name,
+                "firm": c.firm.name if c.firm else c.firm_text,
+                "warmth": c.warmth,
+                "url": f"/app/contacts/{c.id}/",
+            }
+            for c in Contact.objects.for_user(request.user)
+            .filter(archived=False, name__icontains=q)
+            .select_related("firm")
+            .order_by("name")[:8]
+        ]
+
+    out["firms"] = [
+        {"name": f.name, "url": f"/firms/{f.slug}/"}
+        for f in Firm.objects.filter(name__icontains=q).order_by("name")[:6]
+    ]
+
+    out["roles"] = [
+        {
+            "title": o.title,
+            "firm": o.firm.name,
+            "url": o.url,
+            "external": True,
+        }
+        for o in Opportunity.objects.filter(
+            status="open", bucket__in=TARGET_BUCKETS, title__icontains=q
+        )
+        .select_related("firm")
+        .order_by("firm__name", "title")[:8]
+    ]
+    return JsonResponse(out)

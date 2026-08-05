@@ -216,6 +216,106 @@
     })();
   </script>
 
+  {% if user.is_authenticated %}
+  {% comment %}
+  Cmd-K palette. One box over contacts, firms, and open roles, because the
+  question is "take me to X" and the user should not need to know which page
+  X lives on. 129 contacts and 894 roles made every lookup a scroll; this
+  makes it a keystroke: Cmd/Ctrl-K or "/" opens, arrows move, Enter goes,
+  Escape leaves. A native <dialog>, so focus trapping and Escape are the
+  browser's job, not ours.
+  {% endcomment %}
+  <dialog class="palette" id="cmdk" aria-label="Search Coverage">
+    <input type="search" id="cmdk-q" placeholder="Search people, firms, roles…"
+           autocomplete="off" spellcheck="false">
+    <ul id="cmdk-results" role="listbox"></ul>
+    <p class="palette-hint">↑↓ move · Enter open · Esc close</p>
+  </dialog>
+  <script>
+    (function () {
+      var dlg = document.getElementById("cmdk");
+      var input = document.getElementById("cmdk-q");
+      var list = document.getElementById("cmdk-results");
+      var items = [], active = -1, timer = null;
+
+      function open() { dlg.showModal(); input.value = ""; render({contacts:[],firms:[],roles:[]}); input.focus(); }
+      function esc(s) { var d = document.createElement("span"); d.textContent = s || ""; return d.innerHTML; }
+
+      function render(data) {
+        items = [];
+        var html = "";
+        function section(label, rows, fmt) {
+          if (!rows.length) return;
+          html += '<li class="palette-sec">' + label + "</li>";
+          rows.forEach(function (r) {
+            var i = items.length;
+            items.push(r);
+            html += '<li class="palette-item" data-i="' + i + '" role="option">' + fmt(r) + "</li>";
+          });
+        }
+        section("People", data.contacts, function (r) {
+          return "<b>" + esc(r.name) + "</b><span>" + esc(r.firm) + " · " + esc(r.warmth) + "</span>";
+        });
+        section("Firms", data.firms, function (r) { return "<b>" + esc(r.name) + "</b>"; });
+        section("Open roles", data.roles, function (r) {
+          return "<b>" + esc(r.title) + "</b><span>" + esc(r.firm) + " ↗</span>";
+        });
+        list.innerHTML = html || '<li class="palette-none">' +
+          (input.value.trim().length > 1 ? "Nothing matches." : "Type to search.") + "</li>";
+        active = items.length ? 0 : -1;
+        highlight();
+      }
+
+      function highlight() {
+        list.querySelectorAll(".palette-item").forEach(function (li) {
+          li.classList.toggle("is-active", +li.dataset.i === active);
+        });
+        var el = list.querySelector(".palette-item.is-active");
+        if (el) el.scrollIntoView({ block: "nearest" });
+      }
+
+      function go(i) {
+        var r = items[i];
+        if (!r) return;
+        dlg.close();
+        if (r.external) window.open(r.url, "_blank", "noopener");
+        else window.location.href = r.url;
+      }
+
+      input.addEventListener("input", function () {
+        clearTimeout(timer);
+        var q = input.value.trim();
+        timer = setTimeout(function () {
+          if (q.length < 2) { render({contacts:[],firms:[],roles:[]}); return; }
+          fetch("/search/?q=" + encodeURIComponent(q))
+            .then(function (r) { return r.json(); })
+            .then(render)
+            .catch(function () {});
+        }, 140);
+      });
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowDown") { e.preventDefault(); if (active < items.length - 1) active++; highlight(); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); if (active > 0) active--; highlight(); }
+        else if (e.key === "Enter") { e.preventDefault(); go(active); }
+      });
+      list.addEventListener("click", function (e) {
+        var li = e.target.closest(".palette-item");
+        if (li) go(+li.dataset.i);
+      });
+      document.addEventListener("keydown", function (e) {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); dlg.open ? dlg.close() : open(); }
+        else if (e.key === "/" && !dlg.open) {
+          var t = e.target;
+          var typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+          if (!typing) { e.preventDefault(); open(); }
+        }
+      });
+      // Click on the backdrop closes; native <dialog> only closes on Esc.
+      dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+    })();
+  </script>
+  {% endif %}
+
   {% if user.is_authenticated and user.timezone_auto %}
   {% comment %}
   Timezone follow. The server cannot know where somebody is — an IP guess is
