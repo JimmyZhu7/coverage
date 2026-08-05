@@ -127,9 +127,7 @@ BOARDS: list[tuple[str, BoardConfig]] = [
                           path_filter="/emergingtalent/job/")),
     # Nomura's campus platform is also tal.net (live-verified 2026-07-23:
     # jobs board returns off-cycle internships, events board the "Insider
-    # Series" insight evenings). Probed and rejected the same day: Jefferies'
-    # jefferies.tal.net resolves but lists nothing on either board path —
-    # not added until it can be verified against real rows.
+    # Series" insight evenings).
     ("nomura", TalnetBoard(firm="Nomura", kind="jobs",
                            board_url="https://nomuracampus.tal.net/vx/mobile-0/candidate/jobboard/vacancy/1/adv/")),
     ("nomura", TalnetBoard(firm="Nomura", kind="events",
@@ -147,6 +145,11 @@ BOARDS: list[tuple[str, BoardConfig]] = [
                              board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/2/adv/")),
     ("evercore", TalnetBoard(firm="Evercore", kind="jobs",
                              board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/3/adv/")),
+    # Live and EMPTY, not broken (re-verified 2026-08-05: the page serves
+    # ~108KB with zero vacancy links). Kept configured so the day Jefferies
+    # posts campus roles they land without anyone remembering to re-add the
+    # board; health reports it as "fetches cleanly, no rows" rather than as
+    # a config bug.
     ("jefferies", TalnetBoard(firm="Jefferies", kind="jobs",
                               board_url="https://jefferies.tal.net/vx/lang-en-GB/mobile-0/appcentre-ext/brand-4/xf-016c915b0a67/candidate/jobboard/vacancy/2/adv/")),
     # Solomon's students board is real but empty out of season; the

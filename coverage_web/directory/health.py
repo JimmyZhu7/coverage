@@ -48,11 +48,27 @@ def repeat_failures(limit_runs: int = CONSECUTIVE_FAILURES) -> list[str]:
     return sorted(always)
 
 
-def boards_that_never_yield() -> list[str]:
-    """Catalog entries whose firm has never produced a single row, from any
-    provider, ever. Not "no open roles" — literally nothing has ever landed,
-    which means the board URL is wrong, the board is empty, or the firm name
-    doesn't resolve. Each is a configuration problem, not a market fact."""
+def boards_that_never_yield() -> dict[str, list[str]]:
+    """Catalog entries whose firm has never produced a single row, split by
+    what the scrape logs say about WHY.
+
+    The old version lumped them together and called every one "a config bug,
+    not a market fact". Checked by hand 2026-08-05, that was wrong for both
+    of its live hits: HPS's Greenhouse token resolves and returns
+    `{"jobs": [], "total": 0}` (their hiring moved under BlackRock after the
+    acquisition), and jefferies.tal.net serves a full board page containing
+    zero vacancy links. Both boards are live and genuinely empty — exactly
+    the "market fact" the message insisted they weren't.
+
+    The scrape runs already record which firms ERRORED, so the two cases are
+    distinguishable from data on hand:
+
+    - "broken": never yielded AND erroring in the most recent run — the URL
+      is wrong or the fetch is failing. A real configuration bug.
+    - "empty": never yielded and fetching cleanly — the board just has
+      nothing on it. Worth a quiet eye (an empty board and a silently
+      wrong-but-resolving URL look identical from here), not an alarm.
+    """
     producing_firm_ids = set(
         Opportunity.objects.values_list("firm_id", flat=True).distinct()
     )
@@ -60,7 +76,20 @@ def boards_that_never_yield() -> list[str]:
         Firm.objects.filter(id__in=producing_firm_ids).values_list("slug", flat=True)
     )
     configured = {slug for slug, _ in BOARDS}
-    return sorted(configured - producing_slugs)
+    silent = configured - producing_slugs
+
+    latest = (ScrapeRun.objects.exclude(connector="reverify")
+              .order_by("-started").first())
+    erroring_firms = {
+        e.get("firm", "").lower()
+        for e in ((latest.stats or {}).get("errors", []) if latest else [])
+    }
+    firm_names = dict(
+        Firm.objects.filter(slug__in=silent).values_list("slug", "name")
+    )
+    broken = {s for s in silent
+              if firm_names.get(s, s).lower() in erroring_firms}
+    return {"broken": sorted(broken), "empty": sorted(silent - broken)}
 
 
 def health_report() -> list[str]:
@@ -73,9 +102,15 @@ def health_report() -> list[str]:
             f"(stale data being presented as fresh): {', '.join(failing)}"
         )
     silent = boards_that_never_yield()
-    if silent:
+    if silent["broken"]:
         lines.append(
-            "⚠ configured but has NEVER produced a row (bad board URL or empty "
-            f"board — a config bug, not a market fact): {', '.join(silent)}"
+            "⚠ never produced a row AND erroring in the latest run (bad board "
+            f"URL or failing fetch — fix the config): {', '.join(silent['broken'])}"
+        )
+    if silent["empty"]:
+        lines.append(
+            "· never produced a row but fetches cleanly (board is live and "
+            "empty — plausible market fact, worth a manual look now and then): "
+            f"{', '.join(silent['empty'])}"
         )
     return lines

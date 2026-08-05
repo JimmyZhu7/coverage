@@ -57,17 +57,34 @@ def test_reverify_runs_do_not_count():
     assert health.repeat_failures() == ["Evercore"]
 
 
-def test_a_configured_board_with_no_rows_ever_is_named(monkeypatch):
-    """Jefferies' live state: a catalog entry, zero rows ever. From outside
-    that is indistinguishable from "no openings"; it is actually a config
-    bug wearing an empty feed as a disguise."""
+def test_a_never_yielding_board_that_fetches_cleanly_is_empty_not_broken(monkeypatch):
+    """Jefferies' actual live state, hand-verified 2026-08-05: the board page
+    serves fine and simply lists nothing. The report used to call every
+    never-yielding board "a config bug, not a market fact" — for both of its
+    real hits it was the market fact."""
     yielding = Firm.objects.create(slug="evercore", name="Evercore")
     Firm.objects.create(slug="jefferies", name="Jefferies")
     Opportunity.objects.create(firm=yielding, url="https://x/1", title="SA",
                                bucket="internship", status="open")
     monkeypatch.setattr(health, "BOARDS", [("evercore", object()), ("jefferies", object())])
+    _run([], ago_minutes=60)   # latest run fetched everything cleanly
 
-    assert health.boards_that_never_yield() == ["jefferies"]
+    assert health.boards_that_never_yield() == {"broken": [], "empty": ["jefferies"]}
+    report = "\n".join(health.health_report())
+    assert "fetches cleanly" in report
+    assert "config bug" not in report
+
+
+def test_a_never_yielding_board_that_also_errors_is_broken(monkeypatch):
+    """The other half: zero rows ever AND the latest run recorded a fetch
+    error for the firm — that one really is a config problem and keeps the
+    loud warning."""
+    Firm.objects.create(slug="jefferies", name="Jefferies")
+    monkeypatch.setattr(health, "BOARDS", [("jefferies", object())])
+    _run(["Jefferies"], ago_minutes=60)
+
+    assert health.boards_that_never_yield() == {"broken": ["jefferies"], "empty": []}
+    assert "fix the config" in "\n".join(health.health_report())
 
 
 def test_the_report_is_empty_when_healthy(monkeypatch):
