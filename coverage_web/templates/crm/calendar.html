@@ -225,6 +225,14 @@
   .cal-ev-chat { border-left-color: var(--w-chatted-bar); }
   .cal-ev-event { border-left-color: var(--accent); }
   .cal-ev-deadline { border-left-color: var(--stale-t); }
+  /* A tracked role's own closing date. Same deadline family, but it is YOUR
+     row and it opens the posting, so it carries the accent bar and an arrow.
+     Colour alone never distinguishes it: the arrow is the affordance. */
+  .cal-ev-tracked { border-left-color: var(--danger); color: inherit;
+    text-decoration: none; }
+  .cal-ev-tracked::after { content: "↗"; flex: none; color: var(--ink-3);
+    font-size: 10px; }
+  .cal-ev-tracked:hover { background: var(--surface); box-shadow: var(--shadow-1); }
   .cal-ev-time { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
     flex: none; letter-spacing: -0.02em; }
   .cal-ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
@@ -298,12 +306,12 @@
 
 {% block content %}
 <div class="page page--full">
-  {% comment %}The sub does NOT re-list the three layers: the eyebrow above
+  {% comment %}The sub does NOT re-list the four layers: the eyebrow above
   already names them, and saying them twice is what pushed this line to ~110
   characters and two rows while every other page's sub is one row of ~55. It
   says the thing the eyebrow cannot — where the entries come from.
   {% endcomment %}
-  {% include "_pagehead.html" with eyebrow="Chats, events, deadlines" title="Calendar" sub="Everything with a date on it, from your mail or by hand." %}
+  {% include "_pagehead.html" with eyebrow="Chats, events, deadlines" title="Calendar" sub="Your mail, your hand, and the roles you track." %}
 
   <div class="cal-bar">
     <h2 class="cal-month">{{ month_label }}</h2>

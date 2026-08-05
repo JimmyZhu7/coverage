@@ -538,3 +538,89 @@ def test_the_feed_needs_no_session(client, user):
     c = client.get(f"/app/calendar/feed/{user.calendar_token}.ics")
     assert c.status_code == 200
     assert c["Content-Type"].startswith("text/calendar")
+
+
+# ---------------------------------------------------------------------------
+# Layer 4 — the closing dates of roles this user tracks.
+#
+# The layer exists because layer 3 answers a different question: a FirmDate is
+# the firm's whole cycle, while these are the postings the user actually
+# starred. They were extracted, stored, shown on the feed, and invisible on the
+# two surfaces that exist to warn you.
+# ---------------------------------------------------------------------------
+
+def _tracked_role(user, *, days, title="Summer Analyst", status="", dismissed=False,
+                  firm=None, url=None):
+    from analytics.models import UserOpportunity
+    from directory.models import Opportunity
+
+    firm = firm or Firm.objects.filter(slug="gs").first() or Firm.objects.create(
+        slug="gs", name="Goldman Sachs")
+    opp = Opportunity.objects.create(
+        firm=firm, title=title, status="open",
+        deadline=timezone.localdate() + timedelta(days=days),
+        url=url or f"https://gs.com/{title.lower().replace(' ', '-')}-{days}")
+    UserOpportunity.all_objects.create(
+        user=user, opportunity=opp, applied_status=status, dismissed=dismissed)
+    return opp
+
+
+def test_a_tracked_roles_deadline_lands_on_the_calendar(logged_in, client):
+    _tracked_role(logged_in, days=5, title="Summer Analyst")
+    body = client.get("/app/calendar/").content.decode()
+    assert "Summer Analyst" in body
+
+
+def test_an_untracked_roles_deadline_stays_off_the_calendar(logged_in, client):
+    from directory.models import Opportunity
+
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    Opportunity.objects.create(
+        firm=firm, title="Nobody Tracks This", status="open",
+        deadline=timezone.localdate() + timedelta(days=5),
+        url="https://ms.com/untracked")
+    body = client.get("/app/calendar/").content.decode()
+    assert "Nobody Tracks This" not in body
+
+
+def test_a_dismissed_role_stays_off_the_calendar(logged_in, client):
+    _tracked_role(logged_in, days=5, title="Not For Me", dismissed=True)
+    body = client.get("/app/calendar/").content.decode()
+    assert "Not For Me" not in body
+
+
+def test_a_finished_application_stops_showing_its_deadline(logged_in, client):
+    _tracked_role(logged_in, days=5, title="Already Done", status="closed")
+    body = client.get("/app/calendar/").content.decode()
+    assert "Already Done" not in body
+
+
+def test_one_users_tracked_deadline_is_not_anothers(client, user, django_user_model):
+    other = django_user_model.objects.create_user(email="other-uo@x.com", password="x")
+    _tracked_role(other, days=5, title="Their Saved Role")
+    client.force_login(user)
+    body = client.get("/app/calendar/").content.decode()
+    assert "Their Saved Role" not in body
+
+
+def test_the_feed_carries_tracked_deadlines_with_alarms(client, user):
+    _tracked_role(user, days=6, title="Summer Analyst",
+                  url="https://gs.com/sa-2028")
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+    assert "Summer Analyst closes" in body
+    assert "https://gs.com/sa-2028" in body
+    # A week out and a day out. The alarms are the reason to subscribe rather
+    # than visit: a deadline you have to remember to check is one you can miss.
+    assert "TRIGGER;RELATED=START:-P7D" in body
+    assert "TRIGGER;RELATED=START:-P1D" in body
+
+
+def test_a_date_that_opens_something_gets_no_alarm(client, user):
+    firm = Firm.objects.create(slug="jpm", name="J.P. Morgan")
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="app_open",
+                            date=timezone.localdate() + timedelta(days=9),
+                            confidence=1.0)
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+    assert "applications open" in body
+    assert "BEGIN:VALARM" not in body, "nothing is lost by reading an opening late"

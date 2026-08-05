@@ -1,16 +1,23 @@
 """The Calendar: everything with a date on it, in one month grid.
 
-THREE LAYERS, ONE TIMELINE, EACH HONESTLY LABELLED:
+FOUR LAYERS, ONE TIMELINE, EACH HONESTLY LABELLED:
 
 1. Coffee chats captured from the mailbox (`CalendarEvent`, source=capture).
 2. Events the user typed in (`CalendarEvent`, source=manual).
 3. CONFIRMED firm deadlines (`FirmDate`, read-only here).
+4. Closing dates on the ROLES THIS USER TRACKS (`UserOpportunity`, read-only).
 
-Layer 3 is read-only on purpose: firm dates are shared directory data, not
-the user's, so the calendar shows them and the weekly radar owns them. Only
-dates the scan marked `confirmed_official` appear — the cadence engine acts
-on that same bar, and a calendar that mixed rumours into it would put
-countdowns on the page for events nobody has confirmed.
+Layers 3 and 4 are read-only on purpose: both are directory data, not the
+user's, so the calendar shows them and the weekly radar owns them. Only
+dates the scan marked `confirmed_official` appear in layer 3 — the cadence
+engine acts on that same bar, and a calendar that mixed rumours into it
+would put countdowns on the page for events nobody has confirmed.
+
+Layer 4 exists because layer 3 answers the wrong question. A FirmDate is the
+whole firm's cycle ("Goldman Sachs, applications close"); what a student
+needs on the day is the posting they actually starred. Those dates were
+extracted, stored, and shown on the feed, and were invisible here and in the
+subscribed feed — the two surfaces meant to tell you before it is too late.
 """
 
 from __future__ import annotations
@@ -26,6 +33,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from analytics.models import UserOpportunity
 from directory.models import FirmDate
 
 from .forms import CalendarEventForm
@@ -107,11 +115,50 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             "editable": False,
         })
 
+    # Layer 4 — closing dates on roles this user tracks.
+    for uo in _tracked_deadlines(user, first, last):
+        opp = uo.opportunity
+        buckets.setdefault(opp.deadline, []).append({
+            "id": None,
+            "kind": "deadline",
+            "source": "tracked",
+            "title": f"{opp.firm.name} · {opp.title}",
+            "description": "",
+            "location": "",
+            "all_day": True,
+            "at": None,
+            "at_label": "",
+            "contact": None,
+            "editable": False,
+            # The one row on this page that can send you somewhere useful:
+            # the posting itself, on the day it closes.
+            "url": opp.url,
+            "stage": uo.applied_status or "saved",
+        })
+
     for day in buckets:
         # All-day first, then by clock time: a dated-but-untimed item is a
         # fact about the whole day and belongs above the 3pm coffee.
         buckets[day].sort(key=lambda e: (not e["all_day"], e["at"] or timezone.now()))
     return buckets
+
+
+def _tracked_deadlines(user, first: date, last: date):
+    """Tracked roles closing between two dates, newest stage wins.
+
+    `dismissed=False` because a role you marked "not for me" should not turn
+    up on your calendar, and `closed` (the terminal "Done" stage in
+    directory.views.TRACK_CLOSED) because a finished application's deadline
+    is history. The status string is written in exactly one place; it is
+    matched here as a literal rather than imported to keep the directory app
+    out of the CRM's import graph.
+    """
+    return (UserOpportunity.objects.for_user(user)
+            .filter(dismissed=False,
+                    opportunity__deadline__gte=first,
+                    opportunity__deadline__lte=last)
+            .exclude(applied_status="closed")
+            .select_related("opportunity", "opportunity__firm"))
 
 
 def _month_rail(user, year: int, month: int, today: date) -> list[dict]:
@@ -149,6 +196,14 @@ def _month_rail(user, year: int, month: int, today: date) -> list[dict]:
 
     for row in (FirmDate.objects.filter(date__gte=first, date__lte=last, confidence=1.0)
                 .annotate(bucket=TruncMonth("date"))
+                .values("bucket").annotate(n=Count("id"))):
+        key = (row["bucket"].year, row["bucket"].month)
+        counts[key] = counts.get(key, 0) + row["n"]
+
+    # Layer 4 in the rail too. A month strip that counts three of the four
+    # layers sends you to a month that looks empty and isn't.
+    for row in (_tracked_deadlines(user, first, last)
+                .annotate(bucket=TruncMonth("opportunity__deadline"))
                 .values("bucket").annotate(n=Count("id"))):
         key = (row["bucket"].year, row["bucket"].month)
         counts[key] = counts.get(key, 0) + row["n"]
@@ -309,9 +364,16 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
     every stale subscription is "blank the field, save".
 
     Contents mirror the page exactly: the user's own events with real times,
-    plus confirmed firm deadlines as all-day entries. Unconfirmed dates stay
-    out for the same reason they stay off the page — a rumour with an alarm
-    on it is worse than a rumour.
+    confirmed firm deadlines, and the closing dates of the roles this user
+    tracks, all as all-day entries. Unconfirmed dates stay out for the same
+    reason they stay off the page — a rumour with an alarm on it is worse
+    than a rumour.
+
+    Every closing date carries two VALARMs, a week out and a day out. That is
+    the whole point of subscribing rather than visiting: a deadline you have
+    to remember to go and look at is one you can still miss. Dates that open
+    something (applications open, insight programme opens) get no alarm —
+    nothing is lost by reading those late.
     """
     from django.contrib.auth import get_user_model
     from django.http import Http404
@@ -360,17 +422,54 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
             lines.append(f"DESCRIPTION:{esc(ev.description)}")
         lines.append("END:VEVENT")
 
+    def alarms(summary: str) -> list[str]:
+        """A week out and a day out, as DISPLAY alarms.
+
+        TRIGGER is relative to DTSTART and negative, so -P7D fires seven days
+        BEFORE the close. Calendar apps that ignore VALARM on subscribed
+        feeds (iOS does, unless the subscription is set to keep alerts) lose
+        nothing else — the event itself still lands.
+        """
+        out = []
+        for trigger, when in (("-P7D", "in a week"), ("-P1D", "tomorrow")):
+            out += ["BEGIN:VALARM", "ACTION:DISPLAY",
+                    f"TRIGGER;RELATED=START:{trigger}",
+                    f"DESCRIPTION:{esc(f'{summary} — {when}')}",
+                    "END:VALARM"]
+        return out
+
     for fd in (FirmDate.objects.filter(
             confidence=1.0, date__isnull=False,
             date__gte=window_start.date(), date__lte=window_end.date())
             .select_related("firm")):
         label = FIRM_DATE_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " "))
+        summary = f"{fd.firm.name} · {label}"
         lines += ["BEGIN:VEVENT",
                   f"UID:coverage-fd-{fd.id}@coverage.app",
                   f"DTSTAMP:{stamp}",
-                  f"SUMMARY:{esc(f'{fd.firm.name} · {label}')}",
-                  f"DTSTART;VALUE=DATE:{fd.date:%Y%m%d}",
-                  "END:VEVENT"]
+                  f"SUMMARY:{esc(summary)}",
+                  f"DTSTART;VALUE=DATE:{fd.date:%Y%m%d}"]
+        # Only the dates you can MISS get an alarm.
+        if "close" in fd.event_kind or "deadline" in fd.event_kind:
+            lines += alarms(summary)
+        lines.append("END:VEVENT")
+
+    # Layer 4 — the roles this user tracks, on the day they close. These are
+    # the rows that most deserve the alarm: a starred posting is a stated
+    # intention, and this feed is what turns it into a reminder.
+    for uo in _tracked_deadlines(user, window_start.date(), window_end.date()):
+        opp = uo.opportunity
+        summary = f"{opp.firm.name} · {opp.title} closes"
+        lines += ["BEGIN:VEVENT",
+                  f"UID:coverage-uo-{uo.id}@coverage.app",
+                  f"DTSTAMP:{stamp}",
+                  f"SUMMARY:{esc(summary)}",
+                  f"DTSTART;VALUE=DATE:{opp.deadline:%Y%m%d}"]
+        if opp.url:
+            lines += [f"URL:{esc(opp.url)}",
+                      f"DESCRIPTION:{esc(opp.url)}"]
+        lines += alarms(summary)
+        lines.append("END:VEVENT")
 
     lines.append("END:VCALENDAR")
     return HttpResponse("\r\n".join(lines) + "\r\n",
