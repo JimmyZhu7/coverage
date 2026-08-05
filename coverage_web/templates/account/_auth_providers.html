@@ -17,14 +17,14 @@ that would dead-end at the OAuth redirect. `action` is "Sign In" / "Sign Up".
           <span>Continue with {{ p.label }}</span>
         </button>
       </form>
-    {% else %}
-      <button type="button" class="auth-provider is-off" disabled
-              title="{{ p.label }} sign-in needs its OAuth credentials before it goes live.">
-        <span class="auth-provider-mark auth-mark-{{ p.id }}" aria-hidden="true"></span>
-        <span>Continue with {{ p.label }}</span>
-        <span class="auth-provider-soon">Setup Needed</span>
-      </button>
     {% endif %}
+    {% comment %}Unconfigured providers render NOTHING. They used to render
+    as disabled buttons wearing "Setup Needed" chips, which put the owner's
+    to-do list on the product's front door: three of four sign-in options
+    advertising that they do not work. A sign-in page offers what it can do.
+    The provider setup itself is tracked for later (Apple needs the paid
+    developer account; Microsoft and LinkedIn need app registrations).
+    {% endcomment %}
   {% endfor %}
 </div>
 <p class="auth-scope-note">Coverage never reads your inbox.</p>

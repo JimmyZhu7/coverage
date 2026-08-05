@@ -837,6 +837,16 @@ def _urgency_feed(qs, *, now, today, my_firm_ids):
     }
 
 
+def _last_checked() -> str:
+    """"3 hours" / "2 days" since the newest scrape run, or ""."""
+    from django.utils.timesince import timesince
+
+    from .models import ScrapeRun
+
+    latest = ScrapeRun.objects.exclude(connector="reverify").order_by("-started").first()
+    return timesince(latest.started, depth=1) if latest else ""
+
+
 def opportunities(request):
     """The Opportunities page (public, no login): open campus roles joined
     to firms, sorted by deadline proximity (nulls last), with querystring
@@ -1266,6 +1276,10 @@ def opportunities(request):
     context = {
         "clusters": cluster_list,
         "hidden_count": len(hidden_ids),
+        # When the scrape last ran. The strip's pulsing dot said "live"
+        # while the data is radar-cadence; naming the age is what makes the
+        # pulse honest.
+        "checked_ago": _last_checked(),
         "total": total,
         # Recommendation bar. `picks` empty + `has_profile` true is the honest
         # "nothing clears the bar" state; `has_profile` false is the
