@@ -38,13 +38,20 @@ class Command(BaseCommand):
                 unknown += 1
                 self.stdout.write(f"{tag}?    no firm with slug {slug!r}")
                 continue
-            if firm.domains:
+            if domain in (firm.domains or []):
                 skipped += 1
                 continue
+            # APPEND, never replace. `Firm.domains` also drives email-pattern
+            # matching (a contact's address resolving to their firm), so
+            # swapping `rbc.com` for the `jobs.rbc.com` that happens to serve
+            # a better icon would quietly break contact matching to fix a
+            # picture. Logo lookup tries every candidate and keeps the best,
+            # so appending is all it needs.
             added += 1
-            self.stdout.write(f"{tag}+    {firm.name}: {domain}")
+            where = "only domain" if not firm.domains else "added for logo lookup"
+            self.stdout.write(f"{tag}+    {firm.name}: {domain} ({where})")
             if not opts["dry_run"]:
-                firm.domains = [domain]
+                firm.domains = [*(firm.domains or []), domain]
                 firm.save(update_fields=["domains"])
 
         self.stdout.write(self.style.SUCCESS(

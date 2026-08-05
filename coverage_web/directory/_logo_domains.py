@@ -23,8 +23,20 @@ DOMAINS = {
     "tpg": "tpg.com", "eqt": "eqtgroup.com", "statestreet": "statestreet.com",
     "wellington": "wellington.com", "solomonpartners": "solomonpartners.com",
     "mangroup": "man.com",
-    # Firms that HAVE a domain but whose logo fetch failed — better front doors.
-    "blackrock": "blackrock.com", "clsa": "clsa.com", "cicc": "cicc.com",
-    "boci": "bocigroup.com", "guggenheim": "guggenheimpartners.com",
+    # Firms whose first domain yielded nothing usable. Each replacement was
+    # probed against all three sources before being written here (2026-08-05,
+    # after the owner reported specific firms missing or looking wrong).
+    "guggenheim": "guggenheiminvestments.com",   # partners.com serves no icon
+    "rbc": "jobs.rbc.com",                       # 114px vs 32px on rbc.com
+    "tpg": "tpginc.com",                         # 64px clean vs 32px tiled
+    "macquarie": "macquarie.com.au",             # 96px vs 32px
+    "millennium": "mlp.com",                     # 192px clean
+    "clsa": "clsa.com",                          # 48px, resolves now
+    "boci": "bocigroup.com",
     "huatai": "htsc.com.cn", "guotaijunan": "gtjai.com",
+    # blackrock is DELIBERATELY absent. Its own domains serve nothing above
+    # 16px, and the tempting fallback — ishares.com, 32px and clean — is a
+    # DIFFERENT BRAND's mark. A wrong logo is worse than a monogram.
+    # cicc, franklintempleton, huatai and statestreet are the same story with
+    # no near-miss at all: every candidate probed empty. They keep monograms.
 }

@@ -14,7 +14,7 @@ import pytest
 from PIL import Image
 
 from directory.management.commands.fetch_firm_logos import (
-    MIN_SOURCE_PX, VENDOR_DOMAINS, candidates, melts_in, root_domain, to_png,
+    MIN_SOURCE_PX, VENDOR_DOMAINS, candidates, melts_in, root_domain, to_png, trim,
 )
 from directory.models import Firm
 
@@ -105,3 +105,51 @@ def test_the_minimum_source_is_big_enough_to_not_be_mush():
     """A 16px favicon upscaled to a 38px tile is mush, and mush is worse than
     the monogram it would replace."""
     assert MIN_SOURCE_PX >= 32
+
+
+# ---------------------------------------------------------------------------
+# Sizing and centering — the "too small" bug the owner reported
+# ---------------------------------------------------------------------------
+def test_a_small_source_is_scaled_up_to_fill_its_tile():
+    """The shipped bug. `thumbnail` only ever SHRINKS, so a 32px favicon was
+    left at 32px and pasted into the middle of a 128px canvas — Macquarie,
+    RBC, Raymond James and TPG each rendered as a speck occupying a quarter
+    of their tile while their neighbours filled theirs."""
+    out = Image.open(io.BytesIO(to_png(_img(32, (255, 255, 255, 255)))))
+    assert out.size == (128, 128)
+    bbox = out.getchannel("A").getbbox()
+    assert max(bbox[2] - bbox[0], bbox[3] - bbox[1]) == 128, "fills, not floats"
+
+
+def test_built_in_transparent_padding_is_trimmed_first():
+    """Icons pad themselves by wildly different amounts. Without trimming,
+    one firm's mark reads half the size of its neighbour's on the same row."""
+    padded = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    for x in range(56, 72):
+        for y in range(56, 72):
+            padded.putpixel((x, y), (200, 0, 0, 255))
+    out = Image.open(io.BytesIO(to_png(padded)))
+    bbox = out.getchannel("A").getbbox()
+    assert max(bbox[2] - bbox[0], bbox[3] - bbox[1]) == 128
+
+
+def test_the_mark_lands_centred_on_both_axes():
+    wide = Image.new("RGBA", (400, 100), (0, 0, 0, 0))
+    for x in range(400):
+        for y in range(100):
+            wide.putpixel((x, y), (0, 0, 200, 255))
+    out = Image.open(io.BytesIO(to_png(wide)))
+    left, top, right, bottom = out.getchannel("A").getbbox()
+    assert abs((left + right) / 2 - 64) <= 1, "horizontally centred"
+    assert abs((top + bottom) / 2 - 64) <= 1, "vertically centred"
+
+
+def test_aspect_ratio_survives_the_fit():
+    """A 4:1 wordmark squeezed into a square would be unreadable."""
+    wide = Image.new("RGBA", (400, 100), (0, 0, 0, 0))
+    for x in range(400):
+        for y in range(100):
+            wide.putpixel((x, y), (0, 0, 200, 255))
+    out = Image.open(io.BytesIO(to_png(wide)))
+    left, top, right, bottom = out.getchannel("A").getbbox()
+    assert round((right - left) / (bottom - top)) == 4

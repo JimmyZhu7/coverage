@@ -232,11 +232,35 @@ def best_logo(firm: Firm) -> tuple[Image.Image | None, str]:
     return best, best_from
 
 
+def trim(img: Image.Image) -> Image.Image:
+    """Drop a fully transparent border.
+
+    Icons carry wildly different built-in padding — some are edge-to-edge,
+    some float a small mark in a big transparent field. Trimming first is what
+    makes every tile on the board carry the same visual weight instead of one
+    firm's mark reading half the size of its neighbour's.
+    """
+    bbox = img.convert("RGBA").getchannel("A").getbbox()
+    return img.crop(bbox) if bbox else img
+
+
 def to_png(img: Image.Image) -> bytes:
-    """A square RGBA PNG at STORE_PX, transparency preserved, never upscaled
-    past its own resolution beyond the final fit."""
-    img = img.convert("RGBA")
-    img.thumbnail((STORE_PX, STORE_PX), Image.LANCZOS)
+    """A square RGBA PNG at STORE_PX, the mark FILLING it, aspect preserved.
+
+    The scale is computed and applied with `resize`, not `thumbnail`, because
+    thumbnail only ever shrinks. That is the bug the owner saw as "too small":
+    a 32px favicon came back, was left at 32px, and got pasted into the middle
+    of a 128px canvas — so Macquarie, RBC, Raymond James and TPG rendered as a
+    speck occupying a quarter of their tile while their neighbours filled
+    theirs. Upscaling a small source is soft, but soft-and-legible beats
+    sharp-and-tiny, and MIN_SOURCE_PX still keeps the truly hopeless out.
+    """
+    img = trim(img.convert("RGBA"))
+    scale = STORE_PX / max(img.size)
+    img = img.resize(
+        (max(1, round(img.width * scale)), max(1, round(img.height * scale))),
+        Image.LANCZOS,
+    )
     canvas = Image.new("RGBA", (STORE_PX, STORE_PX), (0, 0, 0, 0))
     canvas.paste(img, ((STORE_PX - img.width) // 2, (STORE_PX - img.height) // 2), img)
     buf = io.BytesIO()
