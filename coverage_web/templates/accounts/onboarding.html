@@ -54,39 +54,7 @@
       {% include "accounts/_firm_list.html" %}
       <div class="actions">
         <button type="submit" class="btn btn-primary">Continue</button>
-        {% comment %}Skipping the firm picker leaves the ranking step with nothing to rank, so this jumps past it to the next step that still has something to ask.{% endcomment %}
-        <a class="muted" href="{% url 'accounts:onboarding' %}?step=import">Skip for now</a>
-      </div>
-    </form>
-
-  {% elif step == "survey" %}
-    <h1>Set Up Your Preferences</h1>
-    <p class="lede">Rank your firms and choose how Coverage should work for you. Everything here can change later in Settings.</p>
-    <form method="post" action="{% url 'accounts:onboarding' %}?step=survey">
-      {% csrf_token %}
-      <input type="hidden" name="step" value="survey">
-
-      <div class="panel">
-        <h2 style="margin-top:0">Rank Your Firms</h2>
-        <p class="muted small">Tier 1 firms get the most attention in your action queue. Drag them between tiers any time on the Network page.</p>
-        {% if ranked_firms %}
-          {% for uf in ranked_firms %}
-            <div class="row survey-row">
-              <span>{{ uf.firm.name }}</span>
-              <select name="tier-{{ uf.firm_id }}" style="width:auto">
-                <option value="1"{% if uf.tier == 1 %} selected{% endif %}>Tier 1</option>
-                <option value="2"{% if uf.tier == 2 or uf.tier is None %} selected{% endif %}>Tier 2</option>
-                <option value="3"{% if uf.tier == 3 %} selected{% endif %}>Tier 3</option>
-              </select>
-            </div>
-          {% endfor %}
-        {% else %}
-          <p class="muted small">No firms picked yet. Go back a step to choose some.</p>
-        {% endif %}
-      </div>
-
-      <div class="actions">
-        <button type="submit" class="btn btn-primary">Continue</button>
+        <a class="muted" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
       </div>
     </form>
 

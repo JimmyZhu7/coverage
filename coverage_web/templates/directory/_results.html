@@ -25,6 +25,14 @@ where it is read before scrolling.
     <a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a></p>
 {% endif %}
 
+{% comment %}Roles the user dismissed. Stated for the same reason the line
+above is: a board that quietly holds things back is a board you cannot trust
+the counts on. Reversible from My Applications.{% endcomment %}
+{% if hidden_count %}
+  <p class="scope-line">{{ hidden_count }} role{{ hidden_count|pluralize }} you marked "not for me" ·
+    <a href="{% url 'my_applications' %}#hidden">Show them</a></p>
+{% endif %}
+
 {% comment %}
 Region honesty. A concrete market excludes every row whose location resolved to
 nothing — 297 of 886 on the live set — and the page used to say nothing at all

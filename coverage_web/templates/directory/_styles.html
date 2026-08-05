@@ -723,4 +723,57 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        clear `.filters label`'s `flex: 1 1 46%` just above. */
     .filters .filters-search { flex: 1 1 100%; }
   }
+
+  /* ---- Firm page: your own relationship slice ----
+     The only section on this page that differs between two students looking
+     at the same firm, so it leads and it is visually distinct from the
+     directory data below it. */
+  .fd-mine { background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); padding: var(--s5); box-shadow: var(--shadow-1); }
+  .fd-mine h2 { display: flex; align-items: center; gap: var(--s2); margin-top: 0; }
+  .fd-adv { font-size: var(--fs-xs); font-weight: var(--w-med);
+    color: var(--w-advocate-t); background: var(--w-advocate-s);
+    border-radius: 999px; padding: 2px 9px; }
+  .fd-next { margin: 0 0 var(--s3); font-size: var(--fs-s); color: var(--ink-2); }
+  .fd-next a { font-weight: var(--w-med); }
+  .fd-people { display: grid; gap: 4px;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  .fd-person { display: flex; align-items: center; gap: var(--s2);
+    padding: 7px 10px; border-radius: 8px; text-decoration: none;
+    color: var(--ink); font-size: var(--fs-s);
+    transition: background-color var(--t-fast), transform var(--t-fast); }
+  .fd-person:hover { background: var(--paper); text-decoration: none;
+    transform: translateX(2px); }
+  .fd-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  /* Warmth by colour AND by position in the list (sorted strongest first),
+     never colour alone. */
+  .warmth-dot-cold     { background: var(--w-cold-bar); }
+  .warmth-dot-replied  { background: var(--w-replied-bar); }
+  .warmth-dot-chatted  { background: var(--w-chatted-bar); }
+  .warmth-dot-advocate { background: var(--w-advocate-bar); }
+  .fd-person-id { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .fd-person-id b { font-weight: var(--w-med); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .fd-role { color: var(--ink-3); font-size: var(--fs-micro);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fd-when { font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--ink-3); flex: none; }
+  .fd-none { margin: 0; color: var(--ink-2); font-size: var(--fs-s); }
+
+  /* "Not for me" — Save's opposite, and deliberately quieter than it: this
+     is the verb you use while scrolling past, not the one you came for. */
+  .track-hide { border: 0; background: none; padding: 2px 4px; cursor: pointer;
+    font-size: var(--fs-micro); color: var(--ink-3); font-family: inherit;
+    border-radius: 6px; opacity: 0; transition: opacity var(--t-fast), color var(--t-fast); }
+  .rolecard:hover .track-hide, .track-hide:focus-visible { opacity: 1; }
+  .track-hide:hover { color: var(--danger); }
+
+  /* The reversal list on My Applications. */
+  .apps-hidden { display: flex; flex-direction: column; gap: 2px; }
+  .apps-hidden-row { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s3); padding: var(--s2) var(--s3); border-radius: 8px;
+    border: 1px solid var(--line); background: var(--surface); font-size: var(--fs-s); }
+  .apps-hidden-id { display: flex; flex-direction: column; min-width: 0; }
+  .apps-hidden-id span { color: var(--ink-3); font-size: var(--fs-xs);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

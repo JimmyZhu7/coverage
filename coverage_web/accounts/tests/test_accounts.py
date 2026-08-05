@@ -97,8 +97,11 @@ def test_onboarding_firms_step_creates_userfirms_with_default_tier(client, user,
         {"step": "firms", "firms": [firms["gs"].id, firms["jpm"].id]},
     )
     assert resp.status_code == 302
-    # The firms step now hands off to the survey (tier ranking + prefs).
-    assert "step=survey" in resp["Location"]
+    # The firms step hands off to import. Tiering is NOT asked here any more:
+    # ranking firms you picked ten seconds ago, before seeing a deadline or a
+    # contact, is a judgement nobody can make — it lives on the Network page
+    # as a drag, with the board visible.
+    assert "step=import" in resp["Location"]
     rows = list(UserFirm.objects.for_user(user))
     assert {r.firm_id for r in rows} == {firms["gs"].id, firms["jpm"].id}
     assert all(r.tier == services.DEFAULT_FIRM_TIER for r in rows)

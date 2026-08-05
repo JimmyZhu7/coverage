@@ -115,7 +115,35 @@ def test_health_shows_address_and_counts(client, user, known_contact, make_paylo
     resp = client.get(reverse("capture:health"))
     assert resp.status_code == 200
     assert capture_addr.encode() in resp.content
-    assert b"Last received" in resp.content
+    assert b"Last BCC received" in resp.content
+    assert b"Nothing has come through yet" not in resp.content
+
+
+def test_health_credits_the_mailbox_sync_when_bcc_is_unused(client, user):
+    """The page used to read only the BCC pipeline, so an account fed by the
+    twice-daily Gmail sync saw "No captured email yet" over four zeroes
+    forever — a nav item permanently reporting the product broken while it
+    was applying 104 findings a day. That was the founder's own account."""
+    from analytics.models import Import
+
+    Import.all_objects.create(
+        user=user, kind="gmail_findings", filename="findings.json",
+        row_stats={"findings": 104, "touches_logged": 5},
+    )
+    client.force_login(user)
+    body = client.get(reverse("capture:health")).content.decode()
+    assert "through the mailbox sync" in body
+    assert "104 findings" in body
+    assert "Nothing has come through yet" not in body
+
+
+def test_health_is_honest_when_nothing_has_run_at_all(client, user):
+    client.force_login(user)
+    body = client.get(reverse("capture:health")).content.decode()
+    assert "Nothing has come through yet" in body
+    # No zero-counter table for a user who has never captured anything: four
+    # zeroes read as a broken system rather than an unused one.
+    assert "Applied (logged a touch)" not in body
 
 
 def test_review_confirm_via_view_applies_touch(client, user, known_contact, make_payload, capture_addr):

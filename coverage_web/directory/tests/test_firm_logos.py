@@ -208,3 +208,23 @@ def test_transparency_alone_proves_it_melts_in():
         for y in range(20, 40):
             edge_to_edge.putpixel((x, y), (0, 0, 200, 255))
     assert melts_in(edge_to_edge) is True
+
+
+# ---------------------------------------------------------------------------
+# Cycle labels — the raw slug that leaked into body copy
+# ---------------------------------------------------------------------------
+def test_a_cycle_slug_is_rendered_as_english():
+    """`SA2028_IB` sat in the product's own copy on the Jefferies page. The
+    column holds two spellings of one vocabulary (importers wrote the slug,
+    seeds wrote the prose), so this formats on READ — rewriting the stored
+    value would break the importer's own matching for a display bug."""
+    from directory.views import cycle_label
+    assert cycle_label("sa2028_ib") == "SA 2028 · IB"
+    assert cycle_label("sa2028_hk") == "SA 2028 · Hong Kong"
+    assert cycle_label("insight") == "Insight"
+
+
+def test_an_already_human_cycle_is_left_alone():
+    from directory.views import cycle_label
+    assert cycle_label("SA 2028") == "SA 2028"
+    assert cycle_label("") == ""

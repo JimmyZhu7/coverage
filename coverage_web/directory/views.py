@@ -24,8 +24,8 @@ from __future__ import annotations
 from collections import Counter
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Case, Count, F, IntegerField, Q, Value, When
-from django.http import HttpResponseBadRequest
+from django.db.models import Case, Count, F, IntegerField, Max, Q, Value, When
+from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -34,7 +34,7 @@ from analytics.events import record_event
 # Read-only, cross-app import (build-plan.md §2's private zone). directory
 # never writes crm rows; the opportunities feed only reads UserFirm via the
 # tenant-scoped manager. No import cycle: crm.models imports directory.models.
-from crm.models import UserFirm
+from crm.models import Contact, UserFirm
 from directory.classify import (
     BUCKET_LABELS, ENTRY_LEVEL, INSIGHT, INTERNSHIP, OTHER, REGION_LABELS,
     REGION_ORDER, TARGET_BUCKETS,
@@ -354,6 +354,39 @@ def _group_picks(cards):
     return shared, order
 
 
+# Track suffixes the seeds append to a cycle slug.
+_CYCLE_TRACKS = {
+    "ib": "IB", "pe": "PE", "st": "S&T", "am": "AM",
+    "hk": "Hong Kong", "us": "US", "eu": "Europe", "sg": "Singapore",
+}
+
+
+def cycle_label(cycle: str) -> str:
+    """`sa2028_ib` -> `SA 2028 · IB`.
+
+    The column holds two spellings of one vocabulary — importers wrote
+    `sa2028_ib`, the seeds wrote `SA 2028` — and the firm page printed
+    whichever it found, so a student reading Jefferies saw the raw slug
+    `SA2028_IB` sitting in the product's own body copy. Formatting on read
+    rather than migrating: the stored value is what the importer matched on,
+    and rewriting it would break re-imports for a display bug.
+    """
+    raw = (cycle or "").strip()
+    if not raw:
+        return ""
+    if " " in raw:                      # already human ("SA 2028")
+        return raw
+    head, _, tail = raw.partition("_")
+    season = head[:2].upper()
+    year = head[2:]
+    if season in ("SA", "FT") and year.isdigit():
+        label = f"{season} {year}"
+    else:
+        label = head.replace("-", " ").title()
+    track = _CYCLE_TRACKS.get(tail.lower(), tail.replace("-", " ").title() if tail else "")
+    return f"{label} · {track}" if track else label
+
+
 def _firm_date_row(fd, *, today):
     """One firm_dates row as a timeline entry. confirmed vs rumored is read
     off confidence + precision: a high-confidence, non-estimated date is
@@ -372,7 +405,7 @@ def _firm_date_row(fd, *, today):
 
     confirmed = (fd.confidence or 0.0) >= 0.8 and prec in ("day", "month", "")
     return {
-        "cycle": fd.cycle,
+        "cycle": cycle_label(fd.cycle),
         "region": fd.region,
         "event_kind": fd.event_kind,
         "event_label": EVENT_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " ").capitalize()),
@@ -825,6 +858,21 @@ def opportunities(request):
 
     open_qs = Opportunity.objects.filter(status="open").select_related("firm")
 
+    # Roles the user has said are not for them leave the feed. Reversible —
+    # `hidden_count` below offers them back — but a decision the board ignores
+    # is not a decision. Signed-out visitors have no dismissals, so this costs
+    # them a set literal and no query.
+    hidden_ids: set[int] = set()
+    if request.user.is_authenticated:
+        from analytics.models import UserOpportunity
+        hidden_ids = set(
+            UserOpportunity.objects.for_user(request.user)
+            .filter(dismissed=True)
+            .values_list("opportunity_id", flat=True)
+        )
+        if hidden_ids:
+            open_qs = open_qs.exclude(id__in=hidden_ids)
+
     role = request.GET.get("role", "").strip()
     # Programme/intake year, or `none` for the rows that state no year at all.
     year = request.GET.get("year", "").strip()
@@ -1217,6 +1265,7 @@ def opportunities(request):
 
     context = {
         "clusters": cluster_list,
+        "hidden_count": len(hidden_ids),
         "total": total,
         # Recommendation bar. `picks` empty + `has_profile` true is the honest
         # "nothing clears the bar" state; `has_profile` false is the
@@ -1340,6 +1389,23 @@ def track_opportunity(request, pk):
     if status == "clear":
         UserOpportunity.objects.for_user(request.user).filter(opportunity=opp).delete()
         record_event("opportunity_untracked", user=request.user)
+    elif status == "dismiss":
+        # "Not for me." Save had no opposite, so a student scrolling 894 roles
+        # could act on a row or scroll past it forever — the feed never
+        # shrank, and deciding against something left no trace. `dismissed`
+        # was modelled for exactly this and nothing ever set it.
+        uo, _ = UserOpportunity.all_objects.get_or_create(
+            user=request.user, opportunity=opp
+        )
+        uo.dismissed = True
+        uo.applied_status = ""
+        uo.save(update_fields=["dismissed", "applied_status"])
+        record_event("opportunity_dismissed", user=request.user)
+    elif status == "undismiss":
+        # Reversible by construction: hiding is a judgement, and judgements
+        # about a cycle you have not started change.
+        UserOpportunity.objects.for_user(request.user).filter(opportunity=opp).delete()
+        record_event("opportunity_undismissed", user=request.user)
     elif status not in _TRACK_STATES:
         return HttpResponseBadRequest("unknown status")
     else:
@@ -1357,6 +1423,11 @@ def track_opportunity(request, pk):
     # The feed swaps just the one card's control (htmx); the My Applications
     # page posts a plain form and wants a redirect back to itself.
     if request.headers.get("HX-Request"):
+        if status == "dismiss":
+            # The card's own target is `closest .rolecard`, so an empty body
+            # removes the row from the feed. Anything else here would leave a
+            # control behind on a card the user just said was not for them.
+            return HttpResponse("")
         return _track_control(request, opp)
     from django.shortcuts import redirect, resolve_url
     from django.utils.http import url_has_allowed_host_and_scheme
@@ -1492,12 +1563,23 @@ def my_applications(request):
             "note": "No posted deadline. Reviewed as they arrive, so apply early.",
         },
     ]
+    # Roles the student marked "not for me". They live here rather than in
+    # the feed for the obvious reason, but they must live SOMEWHERE: a hidden
+    # thing with no way back is a decision the product made permanent on the
+    # user's behalf.
+    hidden = list(
+        UserOpportunity.objects.for_user(request.user)
+        .filter(dismissed=True)
+        .select_related("opportunity", "opportunity__firm")
+        .order_by("opportunity__firm__name", "opportunity__title")
+    )
     return render(request, "directory/my_applications.html", {
         "stages": stages,
         "lenses": lenses,
         "total": len(rows),
         "live_total": len(live),
         "closing_soon_days": CLOSING_SOON_DAYS,
+        "hidden": hidden,
     })
 
 
@@ -1519,5 +1601,55 @@ def firm_detail(request, slug):
         "cards": [_card(o, now=now, today=today) for o in opps],
         "timeline": _timeline(firm, today=today),
         "total": opps.count(),
+        **_my_network_at(request.user, firm, today=today),
     }
     return render(request, "directory/firm_detail.html", context)
+
+
+# Warmth, strongest first — the order the roster and the "best" pick use.
+_WARMTH_RANK = {"advocate": 0, "chatted": 1, "replied": 2, "cold": 3}
+
+
+def _my_network_at(user, firm, *, today) -> dict:
+    """The signed-in user's own relationship slice for this firm.
+
+    The product's whole pitch is "everyone tracks deadlines, nobody tracks the
+    relationship" — and this page, the one place a firm's deadlines and a
+    student's people could meet, showed only the deadlines. It offered "Add a
+    Contact Here" while the contacts already there were invisible, so the page
+    argued for the product's thesis and then declined to demonstrate it.
+
+    Signed-out gets nothing, deliberately: there is no relationship to show,
+    and inventing an empty shell would be noise on a page a visitor reads as
+    a firm profile.
+    """
+    if not user.is_authenticated:
+        return {"my_contacts": [], "my_total": 0, "my_advocates": 0, "my_next": None}
+
+    rows = list(
+        Contact.objects.for_user(user)
+        .filter(firm=firm, archived=False)
+        .annotate(last_ts=Max("touches__ts"))
+        .order_by("name")
+    )
+    rows.sort(key=lambda c: (_WARMTH_RANK.get(c.warmth, 9), c.name.lower()))
+
+    people = [
+        {
+            "c": c,
+            "days_since": (today - timezone.localtime(c.last_ts).date()).days
+            if c.last_ts else None,
+        }
+        for c in rows
+    ]
+    return {
+        "my_contacts": people,
+        "my_total": len(people),
+        "my_advocates": sum(1 for c in rows if c.warmth == "advocate"),
+        # The one person worth opening first: warmest, and among equals the
+        # one who has waited longest to hear from you.
+        "my_next": max(
+            people,
+            key=lambda p: (-_WARMTH_RANK.get(p["c"].warmth, 9), p["days_since"] or 0),
+        )["c"] if people else None,
+    }

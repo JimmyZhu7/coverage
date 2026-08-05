@@ -14,6 +14,13 @@ so a stray feed click can't un-apply someone.
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11.5l-3.5 2 .9-3.9L2.5 6.9l4-.35L8 3l1.5 3.55 4 .35-2.9 2.7.9 3.9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
       Save
     </button>
+    {% comment %}Save's opposite. Without it the only verbs were "act on
+    this" and "scroll past it forever", so a feed of 894 roles never got
+    smaller no matter how many decisions the student made.{% endcomment %}
+    <button type="button" class="track-hide"
+            hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "dismiss"}'
+            hx-target="closest .rolecard" hx-swap="outerHTML swap:120ms"
+            title="Hide this role — not for me">Not for me</button>
   {% elif r.track_status == "saved" %}
     <button type="button" class="track-btn is-saved"
             hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "clear"}'

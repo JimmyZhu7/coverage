@@ -19,16 +19,22 @@
       <a class="wordmark" href="/">{% include "_logo.html" %}Coverage</a>
       <nav class="site-nav" aria-label="Primary">
         {% comment %}
-          Site IA: Today, Opportunities, Network, Email capture, Settings.
+          Site IA: Today, Opportunities, Network, Calendar, Settings.
+
+          The order is the product's own order of value: the daily plan, then
+          the listings that are the wedge, then the network that is the moat,
+          then the timeline over both. Email Capture used to sit here with
+          equal billing and it is CONFIGURATION — it now lives in Settings,
+          which is also why /capture/ lights the Settings tab.
+
           /app/ hosts both Today (the hub) and Network (contacts) — the
           contacts prefix must win before the bare /app/ match.
         {% endcomment %}
         <a href="/app/"{% if request.path|slice:":4" == "/app" and request.path|slice:":13" != "/app/contacts" and request.path|slice:":13" != "/app/calendar" %} class="active"{% endif %}>Today</a>
         <a href="/opportunities/"{% if request.path|slice:":14" == "/opportunities" %} class="active"{% endif %}>Opportunities</a>
-        <a href="/app/calendar/"{% if request.path|slice:":13" == "/app/calendar" %} class="active"{% endif %}>Calendar</a>
         <a href="/app/contacts/"{% if request.path|slice:":13" == "/app/contacts" %} class="active"{% endif %}>Network</a>
-        <a href="/capture/health/"{% if request.path|slice:":8" == "/capture" %} class="active"{% endif %}>Email Capture</a>
-        <a href="/welcome/"{% if request.path|slice:":8" == "/welcome" %} class="active"{% endif %}>Settings</a>
+        <a href="/app/calendar/"{% if request.path|slice:":13" == "/app/calendar" %} class="active"{% endif %}>Calendar</a>
+        <a href="/welcome/"{% if request.path|slice:":8" == "/welcome" or request.path|slice:":8" == "/capture" %} class="active"{% endif %}>Settings</a>
       </nav>
       <div class="site-auth">
         {% if user.is_authenticated %}

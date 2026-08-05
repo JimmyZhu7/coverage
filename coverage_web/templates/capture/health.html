@@ -15,20 +15,34 @@
   </div>
 
   <section class="kin-reveal" style="--i:1" aria-label="Capture status">
+    {% comment %}Two pipelines feed this CRM: BCC capture and the twice-daily
+    Gmail sync. The page used to read only the first, so an account on the
+    second saw "No captured email yet" over four zeroes forever — a nav item
+    permanently reporting the product broken while it was applying 104
+    findings a day. `working` is true if EITHER has ever run.
+    {% endcomment %}
     <h2>
-      {% if last_received %}<span class="live-dot"></span> {% endif %}Is It Working?
+      {% if working %}<span class="live-dot"></span> {% endif %}Is It Working?
     </h2>
     {% if last_received %}
-      <p><strong>Last received:</strong> {{ last_received }} ({{ total }} total captured)</p>
+      <p><strong>Yes.</strong> Last BCC received {{ last_received }} ({{ total }} total captured).</p>
+    {% elif sync_last %}
+      <p><strong>Yes — through the mailbox sync.</strong> Last run {{ sync_last }},
+        reading {{ sync_findings }} finding{{ sync_findings|pluralize }}{% if sync_touches %} and logging {{ sync_touches }} touch{{ sync_touches|pluralize:"es" }}{% endif %}.
+        Nothing has come through the BCC address below yet, which is fine —
+        it is a second way in, not a requirement.</p>
     {% else %}
-      <p><strong>No captured email yet.</strong> Send a test message to the address above.</p>
+      <p><strong>Nothing has come through yet.</strong> BCC the address above on
+        your next outreach and it will log itself.</p>
     {% endif %}
-    <div class="deflist">
-      <div><span>Applied (logged a touch)</span><span class="v">{{ counts.applied }}</span></div>
-      <div><span>Needs review{% if counts.needs_review %} · <a href="{% url 'capture:review' %}">review now</a>{% endif %}</span><span class="v">{{ counts.needs_review }}</span></div>
-      <div><span>Pending</span><span class="v">{{ counts.pending }}</span></div>
-      <div><span>Ignored</span><span class="v">{{ counts.ignored }}</span></div>
-    </div>
+    {% if last_received or counts.needs_review %}
+      <div class="deflist">
+        <div><span>Applied (logged a touch)</span><span class="v">{{ counts.applied }}</span></div>
+        <div><span>Needs review{% if counts.needs_review %} · <a href="{% url 'capture:review' %}">review now</a>{% endif %}</span><span class="v">{{ counts.needs_review }}</span></div>
+        <div><span>Pending</span><span class="v">{{ counts.pending }}</span></div>
+        <div><span>Ignored</span><span class="v">{{ counts.ignored }}</span></div>
+      </div>
+    {% endif %}
   </section>
 </div>
 {% endblock %}

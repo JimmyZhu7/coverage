@@ -560,13 +560,13 @@ def test_onboarding_step_counter_covers_every_step(client, logged_in):
         resp = client.get(_step(step))
         assert resp.status_code == 200
         assert resp.context["step_number"] == i
-        assert resp.context["step_total"] == len(ONBOARDING_STEPS) == 6
+        assert resp.context["step_total"] == len(ONBOARDING_STEPS) == 5
 
 
 def test_onboarding_rail_labels_every_step_readably(client, logged_in):
     resp = client.get(_step("work_auth"))
     body = resp.content.decode()
-    for label in ("Profile", "Work", "Firms", "Ranking", "Import", "Capture"):
+    for label in ("Profile", "Work", "Firms", "Import", "Capture"):
         assert f"<span>{label}</span>" in body
 
 

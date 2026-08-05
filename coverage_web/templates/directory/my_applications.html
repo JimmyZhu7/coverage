@@ -331,9 +331,36 @@
     {% endfor %}
   {% else %}
     <div class="empty">
-      <h2>Nothing tracked yet.</h2>
-      <p>Save a role from the feed and it lands here. <a href="{% url 'opportunities' %}">Browse openings</a>.</p>
+      <h2>No roles saved yet.</h2>
+      <p>Star a role in the feed to keep it here, and it moves through the
+        stages as you apply. <a href="{% url 'opportunities' %}">Browse openings</a>.</p>
     </div>
+  {% endif %}
+
+  {% comment %}Dismissed roles. Kept reachable and reversible — hiding is a
+  judgement, and judgements about a cycle you have not started change.
+  {% endcomment %}
+  {% if hidden %}
+    <section class="section" id="hidden">
+      <h2 class="apps-stage-h">Not for me <span class="scrub-count">{{ hidden|length }}</span></h2>
+      <p class="lede">Hidden from the feed. Put any of them back.</p>
+      <div class="apps-hidden">
+        {% for uo in hidden %}
+          <div class="apps-hidden-row">
+            <span class="apps-hidden-id">
+              <b>{{ uo.opportunity.firm.name|smart_title }}</b>
+              <span>{{ uo.opportunity.title }}</span>
+            </span>
+            <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{% url 'my_applications' %}#hidden">
+              <input type="hidden" name="status" value="undismiss">
+              <button type="submit" class="btn apps-remove">Put back</button>
+            </form>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
   {% endif %}
 </div>
 {% endblock %}

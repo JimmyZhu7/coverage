@@ -52,7 +52,13 @@ SECTION_FORMS = {
 # regions — and because the very next step (picking firms) is the first place
 # the fit score it feeds becomes visible. Asking for it after the firm board
 # is built would mean showing the user a set of scores computed without it.
-ONBOARDING_STEPS = ["profile", "work_auth", "firms", "survey", "import", "capture"]
+# Five steps, not six. `survey` asked a brand-new account to RANK the firms
+# it had picked ten seconds earlier — a judgement nobody can make before
+# seeing a single deadline or contact, on a page whose only effect is a
+# number they have never seen used. Tiering lives on the Network page, where
+# it is a drag between columns with the board visible; it did not need a
+# wizard step, and asking early is how a wizard gets abandoned.
+ONBOARDING_STEPS = ["profile", "work_auth", "firms", "import", "capture"]
 
 # Rail labels — the raw step keys don't all title-case into English
 # ("work_auth"), and the rail is the user's map of how much is left.
@@ -60,7 +66,6 @@ ONBOARDING_STEP_LABELS = {
     "profile": "Profile",
     "work_auth": "Work",
     "firms": "Firms",
-    "survey": "Ranking",
     "import": "Import",
     "capture": "Capture",
 }
@@ -120,16 +125,6 @@ def onboarding(request):
         elif step == "firms":
             services.set_target_firms(request.user, request.POST.getlist("firms"))
             return redirect(_step_url(_next_step(step)))
-        elif step == "survey":
-            # Tier ranking: tier-<firm_id> selects; only the user's own rows
-            # are ever touched. Tier drives the cadence engine's priorities.
-            for uf in UserFirm.objects.for_user(request.user):
-                raw = request.POST.get(f"tier-{uf.firm_id}", "")
-                tier = int(raw) if raw in ("1", "2", "3") else None
-                if tier != uf.tier:
-                    UserFirm.all_objects.filter(pk=uf.pk).update(tier=tier)
-            record_event("survey_completed", user=request.user)
-            return redirect(_step_url(_next_step(step)))
         elif step == "import":
             return redirect(_step_url(_next_step(step)))
         elif step == "capture":
@@ -160,10 +155,6 @@ def onboarding(request):
     }
     if step == "firms":
         context.update(_firm_picker_context(request.user))
-    if step == "survey":
-        context["ranked_firms"] = list(
-            UserFirm.objects.for_user(request.user).select_related("firm").order_by("firm__name")
-        )
     if step == "capture":
         context["capture_address"] = services.capture_address(request.user)
     return render(request, "accounts/onboarding.html", context)

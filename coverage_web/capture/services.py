@@ -452,6 +452,22 @@ def capture_health(user) -> dict:
         row["status"]: row["n"]
         for row in events.values("status").annotate(n=Count("id"))
     }
+    # BCC is not the only way mail reaches this CRM. The Gmail sync applies
+    # findings through `capture_gmail`, recording an `Import` per run, and for
+    # a user on that path the BCC counters are all zero forever — so the page
+    # asked "Is it working?", answered "No captured email yet", and was WRONG
+    # about a pipeline that had processed 104 findings that morning. Reading
+    # both sources is what makes the answer true.
+    from analytics.models import Import
+
+    sync = (
+        Import.objects.for_user(user)
+        .filter(kind="gmail_findings")
+        .order_by("-created")
+        .first()
+    )
+    sync_stats = (sync.row_stats or {}) if sync else {}
+
     return {
         "address": capture_address(user),
         "last_received": agg["last_received"],
@@ -462,6 +478,11 @@ def capture_health(user) -> dict:
             "pending": by_status.get("pending", 0),
             "ignored": by_status.get("ignored", 0),
         },
+        # The other pipeline, so "working" can mean either.
+        "sync_last": sync.created if sync else None,
+        "sync_findings": sync_stats.get("findings", 0),
+        "sync_touches": sync_stats.get("touches_logged", 0),
+        "working": bool(agg["total"]) or sync is not None,
     }
 
 

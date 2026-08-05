@@ -24,6 +24,45 @@
     {% endif %}
   </header>
 
+  {% if user.is_authenticated %}
+    {% comment %}Your people at this firm. The page used to show a firm's
+    deadlines and nothing about the relationship — on the product whose pitch
+    is that everyone already tracks deadlines. Deadlines are the same for
+    everyone; this section is the only thing on the page that is yours.
+    {% endcomment %}
+    <section class="section fd-mine">
+      <h2>Your Network Here
+        <span class="scrub-count">{{ my_total }}</span>
+        {% if my_advocates %}<span class="fd-adv">{{ my_advocates }} advocate{{ my_advocates|pluralize }}</span>{% endif %}
+      </h2>
+      {% if my_contacts %}
+        {% if my_next %}
+          <p class="fd-next">Warmest here:
+            <a href="{% url 'crm:contact_detail' my_next.id %}">{{ my_next.name|smart_title }}</a>{% if my_next.role %} · {{ my_next.role|smart_title }}{% endif %}
+          </p>
+        {% endif %}
+        <div class="fd-people">
+          {% for p in my_contacts %}
+            <a class="fd-person" href="{% url 'crm:contact_detail' p.c.id %}">
+              <span class="fd-dot warmth-dot-{{ p.c.warmth }}" aria-hidden="true"></span>
+              <span class="fd-person-id">
+                <b>{{ p.c.name|smart_title }}</b>
+                {% if p.c.role %}<span class="fd-role">{{ p.c.role|smart_title }}</span>{% endif %}
+              </span>
+              <span class="fd-when">
+                {% if p.days_since is not None %}{{ p.days_since }}d{% else %}never{% endif %}
+              </span>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="fd-none">Nobody here yet. One contact at a firm is the
+          difference between a deadline and a way in.
+          <a href="{% url 'crm:contact_new' %}?firm={{ firm.slug }}">Add your first</a>.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+
   <section class="section">
     <h2>Cycle Dates</h2>
     <p class="lede">Confirmed dates are solid; anything we haven't nailed down is marked rumored, with its confidence shown.</p>
