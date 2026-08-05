@@ -15,6 +15,8 @@ Two DB modes are used deliberately:
 
 from __future__ import annotations
 
+import re
+
 from datetime import timedelta
 
 import pytest
@@ -606,3 +608,67 @@ def test_archive_is_post_only_and_tenant_scoped(client):
     assert client.post(reverse("crm:contact_archive", args=[theirs.pk])).status_code == 404
     theirs.refresh_from_db()
     assert theirs.archived is False
+
+
+# ---------------------------------------------------------------------------
+# Contact detail redesign (2026-08-05): the page speaks in words, not enums.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_contact_detail_never_shows_raw_state_enums(client):
+    """The old page printed a chip reading `no_reply` and history rows like
+    `reply_received · email`. The enums stay in the database now."""
+    user = _user()
+    contact = Contact.all_objects.create(
+        user=user, name="Jane Banker", email="jane@acme.com",
+        warmth="cold", thread_state="no_reply",
+    )
+    Touch.all_objects.create(user=user, contact=contact, kind="reply_received",
+                             channel="email", ts=timezone.now())
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    # The log form's <option value="reply_received"> is POST vocabulary, not
+    # display text — strip form controls before asserting what the page SAYS.
+    display = re.sub(r"<select.*?</select>", "", body, flags=re.DOTALL)
+    assert "no_reply" not in display
+    assert "reply_received" not in display
+    assert "No reply yet" in display, "the state, in words"
+    assert "They replied" in display, "the history row, in words"
+
+
+@pytest.mark.django_db
+def test_the_state_line_does_not_say_one_thing_twice(client):
+    """warmth=replied + thread=replied used to render "Replied · They
+    replied" — the exact redundancy the sentence exists to remove."""
+    user = _user()
+    contact = Contact.all_objects.create(
+        user=user, name="Jane Banker", email="jane@acme.com",
+        warmth="replied", thread_state="replied",
+    )
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    assert "They replied" in body
+    assert "Replied · They replied" not in body
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_swap_fragment_is_the_whole_grid(client):
+    # transaction=True: log_touch goes through crm.services, which opens its
+    # OWN psycopg connection and cannot see rows inside the test transaction.
+    """log_touch returns #contact-live for an outerHTML swap. The redesign
+    made that element the two-column grid, so the swap must carry BOTH
+    columns — a fragment missing the rail would blank the scores on the
+    first logged touch."""
+    user = _user()
+    contact = Contact.all_objects.create(
+        user=user, name="Jane Banker", email="jane@acme.com",
+    )
+    client.force_login(user)
+    resp = client.post(
+        reverse("crm:log_touch", args=[contact.id]),
+        {"kind": "outreach", "channel": "email", "note": ""},
+    )
+    body = resp.content.decode()
+    assert 'id="contact-live"' in body and "cd-grid" in body
+    assert "Fit Score" in body, "the rail rides in the swap"
+    assert "Compose (BCC Capture)" in body, "so does the reach card"
+    assert "Logged" in body, "and the movement flag"

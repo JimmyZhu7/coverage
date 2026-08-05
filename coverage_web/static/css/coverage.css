@@ -853,14 +853,27 @@ a.pill:hover { text-decoration: underline; }
 .reasoning { font-style: italic; color: var(--ink-2); margin: var(--s2) 0 0; font-size: var(--fs-s); }
 
 .axes { display: grid; grid-template-columns: 1fr; gap: var(--s2); margin-top: var(--s3); }
-.axis { display: grid; grid-template-columns: 110px 1fr auto; align-items: center;
-  gap: var(--s3); font-size: var(--fs-s); }
-.axis .name { color: var(--ink-2); }
-.axis .bar { height: 6px; border-radius: var(--r-badge); background: var(--band-cold-s);
-  overflow: hidden; border: 1px solid var(--line); }
-.axis .bar > i { display: block; height: 100%; background: var(--accent); }
-.axis .val { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: var(--w-med); }
-.axis .meta { grid-column: 2 / -1; color: var(--ink-3); font-size: var(--fs-xs); margin-top: -2px; }
+/* Sized for the contact page's 340px rail (its only home) — the name sits
+   ABOVE its bar rather than beside it, because a 110px name column plus a
+   value leaves a 340px card a bar too short to read as one. */
+.axis { display: grid; grid-template-columns: 1fr auto; align-items: center;
+  gap: 2px var(--s3); font-size: var(--fs-s); }
+.axis .name { color: var(--ink-2); font-size: var(--fs-xs); font-weight: var(--w-med); }
+.axis .val { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-weight: var(--w-med); font-size: var(--fs-xs); }
+.axis .bar { grid-column: 1 / -1; height: 6px; border-radius: var(--r-badge);
+  background: var(--band-cold-s); overflow: hidden; border: 1px solid var(--line); }
+/* Bars GROW to their value on render, staggered by the axis's --i. Width
+   rides a custom property so the htmx swap after a logged touch replays the
+   growth at the new value — the same same-session reward as the warmth
+   meter. Transform-free on purpose: scaleX would distort the rounded ends. */
+.axis .bar > i { display: block; height: 100%; background: var(--accent);
+  width: var(--w, 0%); border-radius: inherit;
+  animation: axis-grow 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 90ms + 120ms); }
+@keyframes axis-grow { from { width: 0%; } to { width: var(--w, 0%); } }
+.axis .meta { grid-column: 1 / -1; color: var(--ink-3); font-size: var(--fs-xs);
+  margin-top: -1px; }
 
 /* ---- 10. Warmth meter (animation contract: inline --from/--to) ------------ */
 .meter { margin: var(--s2) 0 var(--s1); }
@@ -1219,7 +1232,6 @@ select:focus-visible, input:focus-visible {
   .page { padding: var(--s4) var(--s3) var(--s6); }
   .site-header-inner { gap: var(--s3); padding: var(--s2) var(--s3); }
   .site-user { display: none; }
-  .axis { grid-template-columns: 88px 1fr auto; gap: var(--s2); }
   .touches .when { min-width: 78px; }
   h1 { font-size: var(--fs-xl); }
 }

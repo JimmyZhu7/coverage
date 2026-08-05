@@ -47,19 +47,10 @@
     </div>
   {% endif %}
 
-  <div class="panel">
-    {% if contact.email %}
-      <a class="btn btn-primary" href="{{ mailto }}">Compose (BCC Capture)</a>
-      <span class="muted small">{{ contact.email }}</span>
-      <p class="note">BCC → <code class="addr">{{ capture_address }}</code> captures this outreach automatically.</p>
-    {% else %}
-      <p class="muted small">No email on file. Add one to compose with BCC capture.</p>
-    {% endif %}
-    {% if contact.angle %}<p class="small"><strong>Angle:</strong> {{ contact.angle }}</p>{% endif %}
-    {% if contact.notes %}<p class="small muted">{{ contact.notes }}</p>{% endif %}
-    {% if contact.linkedin %}<p class="small"><a href="{{ contact.linkedin }}">LinkedIn</a></p>{% endif %}
-  </div>
-
+  {% comment %}Everything else — compose, warmth, history, both fit scores —
+  lives inside the live fragment, which is also what the log-touch htmx swap
+  returns whole. One root, one layout, no drift between first render and
+  swap.{% endcomment %}
   {% include "crm/_contact_live.html" %}
 </div>
 {% endblock %}

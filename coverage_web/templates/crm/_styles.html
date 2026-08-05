@@ -8,6 +8,64 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .logform select { width: auto; }
   .logform input[type="text"] { flex: 1 1 180px; min-width: 140px; width: auto; }
 
+  /* ---- Contact detail: action column + scores rail ----
+     The old page was one full-width stack, so four 1300px score bars for a
+     brand-new contact outweighed the compose button. The grid says what the
+     hierarchy is: left is what you DO, right is what the engine thinks. */
+  .cd-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px;
+    gap: var(--s5); align-items: start; }
+  @media (max-width: 1023px) { .cd-grid { grid-template-columns: 1fr; } }
+  .cd-main { min-width: 0; display: flex; flex-direction: column; gap: var(--s4); }
+  .cd-rail { position: sticky; top: 88px; display: flex; flex-direction: column;
+    gap: var(--s4); }
+  @media (max-width: 1023px) { .cd-rail { position: static; } }
+  .cd-card { background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); padding: var(--s5); box-shadow: var(--shadow-1); }
+  .cd-h { display: flex; align-items: center; gap: var(--s2);
+    font-size: var(--fs-l); margin: 0 0 var(--s3); letter-spacing: -0.01em; }
+  .cd-count { font-family: var(--font-mono); font-size: var(--fs-s);
+    color: var(--ink-3); font-weight: var(--w-med); }
+
+  /* Reach card */
+  .cd-reach { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+  .cd-email { font-family: var(--font-mono); font-size: var(--fs-s); color: var(--ink-2);
+    overflow-wrap: anywhere; }
+  .cd-li { font-size: var(--fs-s); }
+  .cd-bcc { margin: var(--s2) 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+  .cd-noemail { margin: 0; color: var(--ink-2); font-size: var(--fs-s); }
+  .cd-angle { margin: var(--s3) 0 0; font-size: var(--fs-s); }
+  .cd-k { font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3);
+    margin-right: 6px; }
+  .cd-notes { margin: var(--s2) 0 0; font-size: var(--fs-s); color: var(--ink-2);
+    line-height: 1.5; }
+
+  /* One sentence of state instead of three chips. */
+  .cd-state { display: flex; align-items: baseline; justify-content: space-between;
+    gap: var(--s3); flex-wrap: wrap; }
+  .cd-state .cd-h { margin-bottom: 0; }
+  .cd-state-line { font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink); }
+  .cd-firmname { margin: 0 0 var(--s1); font-size: var(--fs-s); font-weight: var(--w-med); }
+  .cd-none { margin: 0; color: var(--ink-3); font-size: var(--fs-s); }
+
+  /* History timeline: a spine of dots, inbound green like the activity feed,
+     rising in with a capped stagger. */
+  .cd-log { list-style: none; margin: 0; padding: 0; }
+  .cd-log-row { display: flex; align-items: baseline; gap: var(--s3);
+    padding: var(--s2) 0; border-top: 1px solid var(--line); font-size: var(--fs-s);
+    animation: rise-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: min(calc(var(--i, 0) * 40ms), 240ms); }
+  .cd-log-row:first-child { border-top: 0; }
+  .cd-log-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    flex: none; align-self: center; }
+  .cd-log-dot.in { background: var(--ok); }
+  .cd-log-what { flex: 1; min-width: 0; }
+  .cd-log-what b { font-weight: var(--w-med); }
+  .cd-log-note { display: block; color: var(--ink-3); font-size: var(--fs-xs);
+    margin-top: 1px; overflow-wrap: anywhere; }
+  .cd-log-when { color: var(--ink-3); font-family: var(--font-mono);
+    font-size: var(--fs-xs); white-space: nowrap; }
+
   .strip-title { font-size: var(--fs-micro); color: var(--ink-3); margin: 0 0 var(--s3);
     text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--w-med); }
 

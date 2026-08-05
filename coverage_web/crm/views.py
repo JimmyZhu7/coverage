@@ -1704,6 +1704,10 @@ def log_touch(request: HttpRequest, pk: int) -> HttpResponse:
         "changed": bool(updates),
         "from_warmth": before_warmth,
         "from_state": before_state,
+        # Words for the flag: the enums ("no_reply → replied") had leaked
+        # into the one sentence whose whole job is celebrating the change.
+        "from_state_label": _STATE_LINES.get(before_state, before_state),
+        "to_state_label": _STATE_LINES.get(contact.thread_state, contact.thread_state),
     }
     context = _contact_live_context(request, contact, moved=moved)
     return render(request, "crm/_contact_live.html", context)
@@ -1713,6 +1717,39 @@ def log_touch(request: HttpRequest, pk: int) -> HttpResponse:
 # Shared context for the live panel (used by the detail page and the htmx
 # fragment, so both render identically).
 # ---------------------------------------------------------------------------
+# Thread state, said in words. The page used to print the raw enum — a chip
+# reading "no_reply" — right next to a warmth chip and a fit-score band that
+# both said "cold", three spellings of one fact. One human sentence carries
+# the pair; the enums stay in the database where they belong.
+_STATE_LINES = {
+    "no_reply": "No reply yet",
+    "replied": "They replied",
+    "chat_scheduled": "A chat is set up",
+    "chat_done": "You have chatted",
+    "advocate": "In your corner",
+    "quiet": "Gone quiet",
+    "parked": "Parked",
+}
+
+# (warmth, thread_state) pairs where the state sentence already implies the
+# warmth — "Replied · They replied" says one thing twice, and the whole point
+# of the sentence was replacing three chips that did exactly that.
+_STATE_IMPLIES_WARMTH = {
+    ("replied", "replied"),
+    ("chatted", "chat_done"),
+    ("advocate", "advocate"),
+}
+
+
+def _status_line(contact: Contact) -> str:
+    state = _STATE_LINES.get(
+        contact.thread_state, contact.thread_state.replace("_", " ").capitalize()
+    )
+    if (contact.warmth, contact.thread_state) in _STATE_IMPLIES_WARMTH:
+        return state
+    return f"{contact.warmth.capitalize()} · {state}"
+
+
 def _contact_live_context(
     request: HttpRequest, contact: Contact, *, moved: dict | None = None
 ) -> dict[str, Any]:
@@ -1722,6 +1759,22 @@ def _contact_live_context(
     touches = list(
         Touch.objects.for_user(user).filter(contact=contact).order_by("-ts")
     )
+    kind_labels = dict(TOUCH_KIND_LABELS)
+    channel_labels = dict(CHANNEL_LABELS)
+    # Display rows for the history: the raw model rows leak enum spellings
+    # ("reply_received · email") into the page. Labels here, once, instead of
+    # a template filter per cell.
+    touch_rows = [
+        {
+            "ts": t.ts,
+            "kind": t.kind,
+            "kind_label": kind_labels.get(t.kind, t.kind.replace("_", " ").capitalize()),
+            "channel_label": channel_labels.get(t.channel, t.channel),
+            "note": t.note,
+            "inbound": t.kind in _INBOUND_TOUCH_KINDS,
+        }
+        for t in touches
+    ]
     touch_dicts = _touch_dicts(touches)
 
     contact_score = scoring.score_contact(
@@ -1820,6 +1873,8 @@ def _contact_live_context(
     return {
         "contact": contact,
         "touches": touches,
+        "touch_rows": touch_rows,
+        "state_line": _status_line(contact),
         "contact_score": contact_score,
         "firm_score": firm_score,
         "firm": firm,
