@@ -84,8 +84,9 @@ page does get a real `for` — see the a11y note in settings.html.
 <label for="{{ form.timezone.id_for_label }}">Timezone</label>
 {{ form.timezone }}
 <p class="field-hint">Which day Coverage means by "today" — your cadence queue,
-  your pace week, and every follow-up window. Leave it unset and Coverage uses
-  UTC days, so the day rolls over at midnight UTC (8am in Hong Kong).</p>
+  your pace week, and every follow-up window. Left on automatic, it follows
+  whatever this device says, so flying LA to Hong Kong moves your day with
+  you. Pick a zone yourself and Coverage stops following and keeps that one.</p>
 {{ form.timezone.errors }}
 
 {% comment %}

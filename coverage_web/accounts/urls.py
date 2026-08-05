@@ -23,6 +23,7 @@ urlpatterns = [
     ),
     path("security/signout-all/", views.signout_other_sessions, name="signout_all"),
     path("delete/", views.delete_account, name="delete"),
+    path("timezone/", views.timezone_detect, name="timezone_detect"),
     path("privacy/", views.privacy, name="privacy"),
     path("terms/", views.terms, name="terms"),
 ]

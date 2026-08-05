@@ -163,6 +163,18 @@ class User(AbstractUser):
     # boundary on an inference is exactly the bug class Settings exists to
     # avoid. Unset stays UTC, and the field says so out loud.
     timezone = models.CharField(max_length=64, blank=True, default="")
+    # Whether `timezone` is kept in step with the browser's own zone
+    # (`Intl.DateTimeFormat().resolvedOptions().timeZone`, posted by the
+    # snippet in base.html) or is a choice the user made and owns.
+    #
+    # This exists because the two cases genuinely differ. A student who flies
+    # LA -> Hong Kong for a networking trip wants every "today" to follow
+    # them without visiting Settings; a student who deliberately set a zone —
+    # working US hours from abroad, say — would be furious to find the
+    # product quietly overruling them on the next page load. So: auto is the
+    # default for accounts that never chose, and picking any zone by hand
+    # turns it off. Choosing "Detect automatically" turns it back on.
+    timezone_auto = models.BooleanField(default=True)
     assets = models.JSONField(default=dict, blank=True)
     # Unique but nullable: multiple NULLs are fine in Postgres, and every
     # real user gets one assigned at creation time (see save() below), so

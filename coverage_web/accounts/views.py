@@ -35,6 +35,7 @@ from .forms import (
     ProfileForm,
     WeeklyPaceForm,
     WorkAuthorizationForm,
+    known_timezones,
 )
 
 # The independently-saving sections of /welcome/settings/, keyed by the value
@@ -51,11 +52,6 @@ SECTION_FORMS = {
 # regions — and because the very next step (picking firms) is the first place
 # the fit score it feeds becomes visible. Asking for it after the firm board
 # is built would mean showing the user a set of scores computed without it.
-#
-# `assets` sits after the firm steps and before `import`/`capture`: angles are
-# outreach ammunition, so they only need to exist by the time the user starts
-# sending, but they read as a natural close to "who you are and what you're
-# going after" rather than as part of the mail plumbing at the end.
 ONBOARDING_STEPS = ["profile", "work_auth", "firms", "survey", "import", "capture"]
 
 # Rail labels — the raw step keys don't all title-case into English
@@ -507,6 +503,48 @@ def delete_account(request):
         "accounts/delete.html",
         {"error": error},
     )
+
+
+# ---------------------------------------------------------------------------
+# Timezone auto-detection  (/welcome/timezone/)
+# ---------------------------------------------------------------------------
+@login_required
+@require_http_methods(["POST"])
+def timezone_detect(request):
+    """Store the browser's own timezone, when the account is set to follow it.
+
+    The server cannot work out where somebody is — an IP guess is wrong on a
+    VPN and creepy either way — but the BROWSER already knows, because the OS
+    told it. `Intl.DateTimeFormat().resolvedOptions().timeZone` returns a real
+    IANA name ("Asia/Hong_Kong"), which is exactly what `User.timezone`
+    stores, so this is a copy rather than a translation.
+
+    Three refusals, each deliberate:
+
+    - `timezone_auto` off means the user chose a zone by hand. Their choice
+      wins over their laptop, always, and this returns 204 without looking at
+      the posted value.
+    - An unrecognised zone name is dropped, not stored. `known_timezones()` is
+      the same host tzdata the Settings validator uses, so the two can never
+      disagree about what is valid.
+    - No change means no write. This runs on every page load; the common case
+      must not be a database write.
+
+    Returns 200 only when something actually changed — the page script uses
+    that to decide whether a reload is needed, and the 204s are what stop it
+    looping.
+    """
+    posted = (request.POST.get("timezone") or "").strip()
+    if (not request.user.timezone_auto
+            or not posted
+            or posted not in known_timezones()
+            or posted == request.user.timezone):
+        return HttpResponse(status=204)
+
+    request.user.timezone = posted
+    request.user.save(update_fields=["timezone"])
+    record_event("timezone_autodetected", user=request.user, timezone=posted)
+    return HttpResponse(status=200)
 
 
 # ---------------------------------------------------------------------------

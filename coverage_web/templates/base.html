@@ -209,5 +209,42 @@
       document.body.addEventListener("htmx:afterSettle", function (e) { enhanceAll(e.target); });
     })();
   </script>
+
+  {% if user.is_authenticated and user.timezone_auto %}
+  {% comment %}
+  Timezone follow. The server cannot know where somebody is — an IP guess is
+  wrong behind a VPN and creepy either way — but the browser was told by the
+  OS, and it reports a real IANA name, which is exactly what User.timezone
+  stores. So this is a copy, not a guess.
+
+  Only rendered when the account is actually FOLLOWING (see
+  User.timezone_auto); a user who picked a zone by hand never runs this at
+  all, so there is no path by which their choice gets overwritten.
+
+  The reload is what makes a landing flight feel instant rather than
+  one-page-late: every "today" on the page — the cadence queue, the pace
+  week, chat times — is rendered server-side in the old zone. It cannot loop,
+  because the endpoint answers 200 only when it CHANGED something, and after
+  the reload the detected zone equals the stored one and this returns early.
+  {% endcomment %}
+  <script>
+    (function () {
+      var detected;
+      try { detected = Intl.DateTimeFormat().resolvedOptions().timeZone; }
+      catch (e) { return; }
+      if (!detected || detected === "{{ user.timezone|escapejs }}") return;
+      fetch("{% url 'accounts:timezone_detect' %}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRFToken": "{{ csrf_token }}",
+        },
+        body: "timezone=" + encodeURIComponent(detected),
+      }).then(function (r) {
+        if (r.status === 200) window.location.reload();
+      }).catch(function () {});
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>

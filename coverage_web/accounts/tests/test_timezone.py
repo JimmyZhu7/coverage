@@ -30,7 +30,7 @@ from django.test import RequestFactory
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
 
-from accounts.forms import ProfileForm, known_timezones, timezone_choices
+from accounts.forms import AUTO_TIMEZONE, ProfileForm, known_timezones, timezone_choices
 from accounts.middleware import TimezoneMiddleware
 
 User = get_user_model()
@@ -192,16 +192,22 @@ def test_nothing_else_on_the_profile_is_wiped_by_a_rejected_zone(client, student
 
 def test_a_stored_zone_the_host_no_longer_knows_renders_as_unset(student):
     """Rather than as nothing-selected, which is the silent-clear failure the
-    stale-cycle widget exists to prevent elsewhere."""
+    stale-cycle widget exists to prevent elsewhere.
+
+    Checked with following OFF: a following account renders as automatic
+    whatever its stored value, so it could not show this fallback at all."""
     student.timezone = "Mars/Olympus_Mons"
+    student.timezone_auto = False
     form = ProfileForm.from_user(student)
     assert form.initial["timezone"] == ""
 
 
 def test_the_select_offers_the_shortlist_and_the_full_list():
     choices = timezone_choices()
-    assert choices[0][0] == ""
-    assert "UTC days" in choices[0][1]
+    # The first entry is AUTO, not blank: following the device is the default
+    # and "not set" stopped being the honest label for it.
+    assert choices[0][0] == AUTO_TIMEZONE
+    assert "automatically" in choices[0][1].lower()
     groups = dict(choices[1:])
     assert ("Asia/Hong_Kong", "Hong Kong (HKT)") in groups["Common"]
     every = {code for code, _label in groups["All timezones"]}
@@ -209,13 +215,16 @@ def test_the_select_offers_the_shortlist_and_the_full_list():
     assert "Europe/Zurich" in every
 
 
-def test_the_settings_page_states_the_unset_behaviour_honestly(client, student):
+def test_the_settings_page_states_the_following_behaviour_honestly(client, student):
+    """The control has to say what it DOES. It used to explain the UTC-days
+    fallback; the default behaviour is now "follows this device", and the
+    consequence a student needs told is what happens when they fly."""
     client.force_login(student)
-    body = client.get(reverse("accounts:settings")).content.decode()
-    assert "UTC days" in body
-    # Named consequence, not a shrug — "midnight UTC" means nothing to a
-    # student unless you say what time that is where they are.
-    assert "8am in Hong Kong" in body
+    # Whitespace-normalised: the hint wraps across source lines, so a raw
+    # substring match would depend on where the template happens to break.
+    body = " ".join(client.get(reverse("accounts:settings")).content.decode().split())
+    assert "follows whatever this device says" in body
+    assert "stops following" in body, "and how to take manual control"
 
 
 def test_the_zone_round_trips_through_zoneinfo():

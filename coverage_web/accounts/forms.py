@@ -122,6 +122,12 @@ def known_timezones() -> frozenset[str]:
     return frozenset(available_timezones())
 
 
+# The <option> value meaning "follow this device". Not a real IANA name and
+# deliberately unlikely to collide with one, since it travels through the same
+# select as ~600 genuine zone names.
+AUTO_TIMEZONE = "__auto__"
+
+
 @lru_cache(maxsize=1)
 def timezone_choices() -> list:
     """Grouped choices for the Profile timezone select.
@@ -131,13 +137,16 @@ def timezone_choices() -> list:
     is. Cached because that call walks the tzdata tree and the answer only
     changes when the OS package does.
 
-    The leading blank is the UNSET option, and it is worded as what actually
-    happens rather than as an absence: leaving it alone is a real answer, and
-    the honest label for it is "UTC days", not "—".
+    The leading option is AUTO, not blank. It is the default for every new
+    account, and it is worded as what actually happens rather than as an
+    absence — the browser reports its own IANA zone and Coverage follows it,
+    so "not set" stopped being the honest label for the first entry the day
+    auto-detection landed. Picking any explicit zone below turns following
+    off; see `User.timezone_auto`.
     """
     every = sorted(known_timezones())
     return [
-        ("", "Not set — Coverage uses UTC days"),
+        (AUTO_TIMEZONE, "Detect automatically from this device"),
         ("Common", [(code, label) for code, label in TIMEZONE_SHORTLIST]),
         (
             "All timezones",
@@ -332,15 +341,25 @@ class ProfileForm(forms.Form):
                 # fix is simpler because the vocabulary is huge and stable:
                 # show it only if it is still real, and let the honest "Not
                 # set" option speak for the rest.
-                "timezone": user.timezone if user.timezone in known_timezones() else "",
+                # Auto shows as auto, whatever zone the browser last filled
+                # in — the stored value is a consequence of the setting, not
+                # the setting itself, and showing "Asia/Hong_Kong" selected
+                # would invite the user to "confirm" it and silently turn
+                # following off.
+                "timezone": (
+                    AUTO_TIMEZONE if user.timezone_auto
+                    else (user.timezone if user.timezone in known_timezones() else "")
+                ),
             }
         )
 
     def clean_timezone(self) -> str:
-        """Blank stays blank (UNSET → UTC). Anything else must name a zone
-        `zoneinfo` actually knows, so the middleware's read can never be handed
-        a string it cannot construct."""
+        """AUTO and blank both pass through untouched; anything else must name
+        a zone `zoneinfo` actually knows, so the middleware's read can never be
+        handed a string it cannot construct."""
         value = (self.cleaned_data.get("timezone") or "").strip()
+        if value == AUTO_TIMEZONE:
+            return value
         if value and value not in known_timezones():
             raise forms.ValidationError(
                 "That isn't a timezone we recognise. Pick one from the list."
@@ -352,17 +371,27 @@ class ProfileForm(forms.Form):
         `is_valid()`."""
         cd = self.cleaned_data
         update_fields = ["name", "school", "class_year", "target_cycle",
-                         "regions", "tracks", "timezone"]
+                         "regions", "tracks", "timezone", "timezone_auto"]
         user.name = cd["name"]
         user.school = cd["school"]
         user.class_year = cd["class_year"]
         user.target_cycle = cd["target_cycle"]
         user.regions = cd["regions"]
         user.tracks = cd["tracks"]
-        # Blank means UNSET, which means UTC — stored as "" rather than a
-        # guessed "UTC" so "the user chose UTC" and "the user never answered"
-        # stay distinguishable in the column.
-        user.timezone = cd["timezone"]
+        # AUTO turns following back on and leaves `timezone` alone: whatever
+        # the browser last reported stays correct until the next page load
+        # says otherwise, and clearing it here would give the user a UTC day
+        # for the rest of this request for no reason.
+        #
+        # Any explicit pick turns following OFF — that is the whole contract
+        # of the flag, and it is what stops the next page load overruling a
+        # deliberate choice. Blank still means UNSET → UTC, stored as "" so
+        # "chose UTC" and "never answered" stay distinguishable.
+        if cd["timezone"] == AUTO_TIMEZONE:
+            user.timezone_auto = True
+        else:
+            user.timezone_auto = False
+            user.timezone = cd["timezone"]
         # remove_avatar wins over a simultaneous upload — the widget can't
         # produce both in one real submission, but a wrong-order check here
         # would silently discard whichever loses, so ties go to the more
