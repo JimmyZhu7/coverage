@@ -743,6 +743,60 @@ def _fresh_label(seen_days: int | None) -> str:
     return f"First seen {seen_days}d ago"
 
 
+# The chips a feed card can carry, in the order a student needs them. Order is
+# a judgement about attention, not about how confident the extraction is: if a
+# role will not sponsor you, that is the one fact that can end the decision
+# before any of the others matter. Pay comes next because no campus board
+# shows it; the language wall next because it is the other hard gate; then
+# eligibility, then the ones that cost you time rather than rule you out.
+#
+# TWO, not three, and that is a measurement rather than a preference. At
+# 1440px a feed card is 302px wide, leaving 266px inside the fact row, and a
+# mono chip measures ~97px: two fit with room (198px), three do not (299px).
+# The rest of what a posting says is on the posting, one click away, and a
+# chip cut in half is worse than a chip that isn't there.
+_FACT_CHIP_ORDER = ("sponsorship", "pay", "language", "grad", "gpa",
+                    "cover_letter", "assessment")
+_FACT_CHIPS_MAX = 2
+
+
+def _fact_chips(o) -> list[dict]:
+    """What this posting states about applying, as at most three chips.
+
+    Every chip carries `why` — the sentence it was extracted from — which the
+    template hangs on `title`. That is the honesty contract from
+    directory/facts.py reaching the page: a chip that cannot show the words
+    that produced it should not be on the card.
+    """
+    facts = (o.raw or {}).get("facts") or {}
+    made = {}
+
+    spon = (o.sponsorship or "unknown").lower()
+    if spon == "no":
+        made["sponsorship"] = {"label": "No sponsorship", "css": "fact-wall",
+                               "why": "The posting says it cannot sponsor a visa"}
+    elif spon == "yes":
+        made["sponsorship"] = {"label": "Sponsors visas", "css": "fact-ok",
+                               "why": "The posting says sponsorship is available"}
+
+    labels = {
+        "pay": lambda f: f["value"],
+        "language": lambda f: f"{f['value']} needed",
+        "grad": lambda f: f"Grad {f['value']}",
+        "gpa": lambda f: f"GPA {f['value']}",
+        "cover_letter": lambda f: "Cover letter",
+        "assessment": lambda f: f["value"],
+    }
+    css = {"language": "fact-wall", "pay": "fact-pay"}
+    for kind, label in labels.items():
+        fact = facts.get(kind)
+        if fact:
+            made[kind] = {"label": label(fact), "css": css.get(kind, "fact-plain"),
+                          "why": fact.get("phrase", "")}
+
+    return [made[k] for k in _FACT_CHIP_ORDER if k in made][:_FACT_CHIPS_MAX]
+
+
 def _urgency_item(o, *, now, today, my_firm_ids):
     """One feed card: firm identity + the honest urgency signal for this
     role (a real countdown when dated, freshness when rolling, or an
@@ -769,6 +823,7 @@ def _urgency_item(o, *, now, today, my_firm_ids):
         "seen_days": seen_days,
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
         "fresh_label": _fresh_label(seen_days),
+        "facts": _fact_chips(o),
     }
     # Three states, not two. "Rolling" must mean "no posted deadline" (it is
     # tested that way at my_applications, views.py's `rolling` lens above) —
@@ -782,7 +837,17 @@ def _urgency_item(o, *, now, today, my_firm_ids):
     # `not dated` in the template, never shows on it) but neither "closing"
     # nor "rolling"; `_urgency_feed` below sorts it to the very end.
     if o.deadline is None:
-        item.update({"dated": False, "days_left": None, "level": "rolling"})
+        # "Rolling" is a CLAIM, and until now the page made it about every
+        # undated role — ~600 of which simply never said anything about when
+        # they close. The word is kept for the postings whose own text states
+        # rolling review (facts["rolling"], extracted from the description we
+        # already hold) and the rest say the true thing instead: no date was
+        # posted. Same sort position, same band; only the label divides.
+        stated = bool(((o.raw or {}).get("facts") or {}).get("rolling"))
+        item.update({"dated": False, "days_left": None, "level": "rolling",
+                     "rolling_stated": stated,
+                     "rolling_why": (((o.raw or {}).get("facts") or {})
+                                     .get("rolling", {}).get("phrase", ""))})
     elif o.deadline >= today:
         days = (o.deadline - today).days
         item.update({

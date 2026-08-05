@@ -60,11 +60,34 @@ without cutting text off.
   the row entered OUR database. A bulk import once wore "New" on
   794 of 805 roles at once, which is the bug this wording closes.
   {% endcomment %}
+  {% comment %}
+  FACT CHIPS — what the posting itself says about applying: sponsorship, pay,
+  a language wall, the graduation years it accepts, a GPA bar, a cover letter,
+  a named assessment. At most three, ordered by what can end the decision
+  soonest (see `_FACT_CHIP_ORDER` in views.py).
+
+  The row is rendered whether or not it holds anything, because these cards
+  are a fixed height and a slot that only sometimes exists is the bug this
+  file's opening comment is about. Every chip's `title` is the sentence it was
+  extracted from — a chip that cannot show its own evidence does not ship.
+  {% endcomment %}
+  <div class="rolecard-facts">
+    {% for f in r.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
+  </div>
+
   <div class="rolecard-meta">
     {% if r.dated %}
       <span class="meta-status meta-{{ r.level }}">{{ r.countdown }}</span>
+    {% elif r.rolling_stated %}
+      {% comment %}The posting's own words say rolling review, so the word is
+      earned and its evidence hangs on the title.{% endcomment %}
+      <span class="meta-status meta-rolling" title="{{ r.rolling_why }}"><span class="rolling-dot"></span>Rolling</span>
     {% else %}
-      <span class="meta-status meta-rolling"><span class="rolling-dot"></span>Rolling</span>
+      {% comment %}No deadline anywhere in the data. It used to say "Rolling",
+      which is a different and unearned claim: ~600 open roles never state how
+      they close, and calling that rolling review invented a fact about every
+      one of them.{% endcomment %}
+      <span class="meta-status meta-undated">No date posted</span>
     {% endif %}
     {% if r.seen_days is not None %}
       <span class="meta-seen">· first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>

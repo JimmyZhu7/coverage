@@ -547,10 +547,16 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* ======================================================================
      STANDARDISED ROLE CARD — one height, every card, always.
 
-     146px is composed, not chosen: 12 top padding + 22 top row + 5 + 40 title
+     168px is composed, not chosen: 12 top padding + 22 top row + 5 + 40 title
      (two lines at fs-m/1.3, reserved whether the title needs one line or two)
-     + 5 + 18 sub row + 5 + 20 meta row + 12 bottom padding + 3 fuse hairline
-     + 2 borders + 2 rounding = 146.
+     + 5 + 18 sub row + 5 + 17 fact row + 5 + 20 meta row + 12 bottom padding
+     + 3 fuse hairline + 2 borders + 2 rounding = 168.
+
+     The fact row was the first slot added since this arithmetic was written,
+     and it was added the way the note below demands: a reserved 17px whether
+     or not the posting states anything, and the total re-derived rather than
+     letting the box grow. 146 -> 168 costs roughly one card per column of
+     scroll, which is what three facts about applying are worth.
 
      A FIXED height is only safe because every slot below is height-reserved
      AND its content clamped. The earlier fixed-height version clipped — 190px
@@ -564,7 +570,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rolecard { position: relative; background: var(--paper);
     border: 1px solid var(--line); border-left: 3px solid var(--line);
     border-radius: 12px; overflow: hidden;
-    padding: var(--s3) var(--s4); flex: none; height: 146px;
+    padding: var(--s3) var(--s4); flex: none; height: 168px;
     display: flex; flex-direction: column; gap: 5px;
     transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med);
     /* This page renders every open role — ~1,500 cards on live data, 1.27MB
@@ -573,7 +579,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        ones; the height is already fixed at 146px, so the placeholder is
        exact and the scrollbars cannot jump. Same remedy as the Network
        page's contact grid, at ten times the card count. */
-    content-visibility: auto; contain-intrinsic-size: auto 146px; }
+    content-visibility: auto; contain-intrinsic-size: auto 168px; }
   .rolecard:hover { box-shadow: var(--shadow-1); transform: translateX(2px); }
   .rolecard.urg-today { border-left-color: var(--danger); }
   .rolecard.urg-soon { border-left-color: #c1652f; }
@@ -628,7 +634,40 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rolecard-loc { font-size: var(--fs-xs); color: var(--ink-3);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
-  /* Reserved slot 4 — the meta row: status, then provenance. `margin-top:auto`
+  /* Reserved slot 4 — the fact chips. Reserved whether or not the posting
+     said anything: ~640 of 894 open roles state none of these, and a row that
+     only sometimes exists is exactly the bug the block comment above is
+     about. `overflow: hidden` on a nowrap row is the clamp of last resort;
+     the real bound is `_FACT_CHIPS_MAX` in views.py, which is two because a
+     302px card leaves 266px here and a chip measures ~97px. Hiding overflow is
+     not the same as choosing what to show: CSS would silently cut whichever
+     chip happened to be last, while the cap drops the least decisive one. */
+  .rolecard-facts { display: flex; align-items: center; gap: 4px;
+    height: 17px; flex: none; min-width: 0; overflow: hidden;
+    white-space: nowrap; }
+  .fact-chip { display: inline-flex; align-items: center; flex: none;
+    border-radius: 4px; padding: 1px 6px; font-family: var(--font-mono);
+    font-size: 10px; line-height: 15px; letter-spacing: -0.01em;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+    /* 18ch, not 15: "No sponsorship" and "Grad 2027-2028" both measure ~16
+       characters in the mono face, so 235 of 483 chips rendered clipped at
+       15ch (95px of label in 88px of box) — the same "fixed the box, not the
+       content" mistake this file's card comment is about, one slot down. The
+       cap still exists because a
+       language chip can carry two names; it just sits above the longest
+       label the extractors actually produce. */
+    max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+  /* A wall — sponsorship refused, a language you may not have. Bordered in
+     the danger tint rather than filled: it is a fact about the posting, not
+     an alarm about the student, and eight filled red chips down a column
+     would read as breakage. */
+  .fact-wall { border-color: var(--danger); color: var(--danger); }
+  .fact-ok { border-color: var(--ok-line); color: var(--ok); }
+  /* Pay is the one chip nobody else on a campus board shows. */
+  .fact-pay { border-color: var(--accent-line); color: var(--accent-ink);
+    background: var(--accent-soft); font-weight: var(--w-med); }
+
+  /* Reserved slot 5 — the meta row: status, then provenance. `margin-top:auto`
      pins it to the bottom edge, which also absorbs any sub-pixel rounding in
      the slots above rather than letting it push the card taller. */
   .rolecard-meta { display: flex; align-items: center; gap: 5px;
@@ -637,6 +676,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .meta-status { display: inline-flex; align-items: center; gap: 5px;
     flex: none; font-weight: var(--w-med); white-space: nowrap; }
   .meta-rolling { color: var(--ink-2); }
+  /* No deadline anywhere in the data — stated plainly, and quieter than the
+     rolling label it replaced on ~600 cards. Grey because it is an absence of
+     information, not a status. */
+  .meta-undated { color: var(--ink-3); }
   .meta-today { color: var(--danger); }
   .meta-soon { color: #a8501f; }
   .meta-upcoming { color: var(--accent-ink); }

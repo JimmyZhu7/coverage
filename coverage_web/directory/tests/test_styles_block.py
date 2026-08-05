@@ -113,7 +113,7 @@ def test_the_role_card_pins_a_single_height():
     take seven different heights and read as ragged."""
     css = _feed_css()
     rule = _rule(css, ".rolecard")
-    assert "height: 146px" in rule, rule
+    assert "height: 168px" in rule, rule
     assert "min-height" not in rule, "min-height reintroduces the ragged heights"
 
 
@@ -122,7 +122,8 @@ def test_every_variable_slot_inside_the_card_is_height_bounded():
     the ORIGINAL clipping bug, so each slot that holds scraped text must
     reserve its own height."""
     css = _feed_css()
-    for selector in (".rolecard-top", ".rolecard-title", ".rolecard-sub", ".rolecard-meta"):
+    for selector in (".rolecard-top", ".rolecard-title", ".rolecard-sub",
+                     ".rolecard-facts", ".rolecard-meta"):
         rule = _rule(css, selector)
         assert "height:" in rule, f"{selector} must reserve a height, got: {rule.strip()}"
 
@@ -202,6 +203,9 @@ def test_the_card_carries_every_fact_the_feed_promises(client, two_roles):
     assert "· 2027" in html, "the programme year rides in the pill"
     assert "New York" in html and "London" in html, "location"
     assert "first seen" in html, "provenance"
-    assert "Rolling" in html, "the undated role says so"
+    # NOT "Rolling": that word is now reserved for postings whose own text
+    # states rolling review. A role with no deadline in the data says the
+    # true thing instead, because nobody posted a date.
+    assert "No date posted" in html, "the undated role says what is known"
     # The countdown hairline belongs to the dated role only.
     assert html.count("rolecard-fuse") == 1
