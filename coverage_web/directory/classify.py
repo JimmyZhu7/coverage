@@ -120,6 +120,24 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+# A two-letter US state suffix (", NY", ", CO") cannot be tested as a bare
+# substring, and testing it that way was a live bug: ", ca" sits inside
+# "Toronto, Canada", ", co" inside "Bogota, Colombia" and inside the ordinary
+# English phrase "timely, complete and accurate", ", ma" inside ", Macau".
+# Five Canadian roles were filed under the United States on live data, and any
+# prose fed to this function resolved to "us" on the strength of a comma.
+#
+# The fix is a boundary, not a shorter list: a state code is followed by the
+# end of the string or by a non-letter. The ", de"/", denmark" note in the key
+# table above is the same hazard, caught once by hand and left to recur.
+_STATE_SUFFIX = re.compile(
+    r",\s*(?:ny|il|ma|ca|wa|tx|ga|nc|fl|tn|pa|co|md|ct|nj)(?![a-z])",
+    re.IGNORECASE)
+_US_STATE_KEYS = frozenset({", ny", ", il", ", ma", ", ca", ", wa", ", tx",
+                            ", ga", ", nc", ", fl", ", tn", ", pa", ", co",
+                            ", md", ", ct", ", nj"})
+
+
 def normalize_region(location: str | None, *, fallback: str = "") -> str:
     """Map a free-text location to "hk" / "us" / "sg" / "eu", or `fallback`
     (default "") when it isn't one of the four target markets."""
@@ -127,7 +145,13 @@ def normalize_region(location: str | None, *, fallback: str = "") -> str:
     if not text:
         return fallback
     for code, keys in _REGION_KEYS:
-        if any(k in text for k in keys):
+        for k in keys:
+            # State codes are skipped here and checked below as one
+            # boundary-aware pass; a plain `in` test on them is the bug
+            # described above.
+            if k not in _US_STATE_KEYS and k in text:
+                return code
+        if code == "us" and _STATE_SUFFIX.search(text):
             return code
     return fallback
 

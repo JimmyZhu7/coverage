@@ -68,6 +68,23 @@ class Command(BaseCommand):
                 cohort = opp.cohort or extract_cohort(title)
                 class_year = extract_class_year(title)
                 region = normalize_region(opp.location)
+                # Title fallback, and ONLY when the row carries no location at
+                # all (327 open campus rows on live data — boards that route
+                # the city into the title instead: "2027 Investment Banking
+                # Summer Internship Program - Singapore", "Financial Advisor
+                # Trainee (Macon, GA)"). Those rows are invisible to every
+                # concrete Region filter, which is a worse answer than a
+                # derived one.
+                #
+                # Gated on an EMPTY location rather than an unresolved one,
+                # because a title's market word is often the desk it covers
+                # and not the office it sits in: "Analyst - UKCB Origination"
+                # is based in Noida, "Equity Research, China Industrials" in
+                # Hong Kong, "Head of Compliance, Hong Kong" in Singapore. A
+                # row that stated a location we could not parse has already
+                # told us the title is not where it is.
+                if not region and not (opp.location or "").strip():
+                    region = normalize_region(title)
                 counts[bucket] = counts.get(bucket, 0) + 1
 
                 # Prose re-extraction over the STORED raw payload — the whole

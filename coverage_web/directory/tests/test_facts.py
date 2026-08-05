@@ -186,3 +186,34 @@ def test_evidence_contains_the_fact_it_proves():
     text = ("The team covers a wide range of sectors and geographies " * 6 +
             "and candidates need a minimum GPA of 3.5 to apply.")
     assert "3.5" in extract_facts(text)["gpa"]["phrase"]
+
+
+# ---------------------------------------------------------------------------
+# Region mapping — a bug found while feeding this function prose.
+# ---------------------------------------------------------------------------
+
+def test_a_us_state_suffix_still_maps_to_the_us():
+    from directory.classify import normalize_region
+
+    for place in ("Denver, CO", "Boston, MA", "New York, NY",
+                  "Charlotte, NC / Dallas, TX"):
+        assert normalize_region(place) == "us", place
+
+
+def test_a_country_that_starts_with_a_state_code_is_not_the_us():
+    """Live bug: ", ca" sits inside "Toronto, Canada" and ", co" inside
+    "Bogota, Colombia", so five Canadian roles were filed under the United
+    States. A two-letter state code needs a boundary after it."""
+    from directory.classify import normalize_region
+
+    for place in ("Toronto, Canada", "Vancouver, Canada", "Bogota, Colombia",
+                  "San Jose, Costa Rica", "Phnom Penh, Cambodia"):
+        assert normalize_region(place) == "", place
+
+
+def test_ordinary_prose_has_no_region():
+    """The same bug with a comma in a sentence: "timely, complete and
+    accurate" resolved to the United States."""
+    from directory.classify import normalize_region
+
+    assert normalize_region("ensuring timely, complete and accurate reporting") == ""
