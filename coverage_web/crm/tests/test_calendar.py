@@ -444,3 +444,49 @@ def test_every_week_lays_out_on_identical_columns(client, logged_in):
         "their own week's column and the weeks misalign."
     )
     assert "repeat(7, 1fr)" not in grid[0]
+
+
+# ---------------------------------------------------------------------------
+# Timezone anchoring: what a reported time MEANS.
+# ---------------------------------------------------------------------------
+
+def test_an_offset_carrying_time_passes_through_untouched(user):
+    """"10am HKT" arrives as +08:00. The stored instant must be exactly that
+    instant — 02:00 UTC — regardless of server or account settings."""
+    Contact.all_objects.create(user=user, name="Jim Li", email="jim@jefferies.com")
+    apply_findings(user, [{
+        "name": "Jim Li", "found": True, "email": "jim@jefferies.com",
+        "thread_id": "t-hk", "chat_status": "scheduled",
+        "chat_scheduled_at": "2026-08-05T10:00:00+08:00"}])
+    ev = CalendarEvent.objects.for_user(user).get()
+    assert ev.starts_at.isoformat() == "2026-08-05T02:00:00+00:00"
+
+
+def test_a_naive_time_is_anchored_to_the_users_own_zone(user, django_user_model):
+    """The sync runs in a management command, which never passes through
+    TimezoneMiddleware — so "the current timezone" there is the server's UTC.
+    A naive "10am" from a Hong Kong user's thread must still mean 10am in
+    Hong Kong (02:00 UTC), not 10am UTC (6pm her time)."""
+    user.timezone = "Asia/Hong_Kong"
+    user.save(update_fields=["timezone"])
+    Contact.all_objects.create(user=user, name="Jim Li", email="jim@jefferies.com")
+    apply_findings(user, [{
+        "name": "Jim Li", "found": True, "email": "jim@jefferies.com",
+        "thread_id": "t-naive", "chat_status": "scheduled",
+        "chat_scheduled_at": "2026-08-05T10:00:00"}])
+    ev = CalendarEvent.objects.for_user(user).get()
+    assert ev.starts_at.isoformat() == "2026-08-05T02:00:00+00:00"
+
+
+def test_an_unset_or_garbage_zone_falls_back_to_the_project_default(user):
+    """Same discipline as TimezoneMiddleware: a blank or unloadable zone name
+    must not crash the sync — it falls back to settings.TIME_ZONE (UTC)."""
+    user.timezone = "Not/A_Zone"
+    user.save(update_fields=["timezone"])
+    Contact.all_objects.create(user=user, name="Jim Li", email="jim@jefferies.com")
+    apply_findings(user, [{
+        "name": "Jim Li", "found": True, "email": "jim@jefferies.com",
+        "thread_id": "t-bad", "chat_status": "scheduled",
+        "chat_scheduled_at": "2026-08-05T10:00:00"}])
+    ev = CalendarEvent.objects.for_user(user).get()
+    assert ev.starts_at.isoformat() == "2026-08-05T10:00:00+00:00"

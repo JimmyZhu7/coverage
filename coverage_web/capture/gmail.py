@@ -54,6 +54,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.db import models
 from django.utils import timezone
@@ -336,7 +337,20 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     if when is None:
         return False
     if timezone.is_naive(when):
-        when = timezone.make_aware(when, timezone.get_current_timezone())
+        # A naive timestamp means "this clock time, on the user's own clock".
+        # It must be anchored to the USER's zone, not the process default:
+        # this runs inside a management command, which never passes through
+        # TimezoneMiddleware, so get_current_timezone() here is the server's
+        # UTC — and a "10am" chat stored as 10:00 UTC reads as 6pm the moment
+        # the user sets Asia/Hong_Kong in Settings. Same fallback discipline
+        # as the middleware: a blank or unloadable zone name falls back to
+        # the project default rather than crashing the sync.
+        tzname = (getattr(user, "timezone", "") or "").strip()
+        try:
+            zone = ZoneInfo(tzname) if tzname else timezone.get_current_timezone()
+        except (ZoneInfoNotFoundError, ValueError):
+            zone = timezone.get_current_timezone()
+        when = timezone.make_aware(when, zone)
 
     label = contact.name or "Coffee chat"
     CalendarEvent.all_objects.update_or_create(
