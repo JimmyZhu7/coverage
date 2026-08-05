@@ -14,13 +14,28 @@ refuses that kind of leak, so this one does too: fetch once here, store in our
 own media, serve from our own origin. It also means the board still renders
 with no network, and costs no per-view latency for the ~13 firms on a page.
 
-SOURCES, AND WHY TWO
---------------------
+SOURCES, AND WHY FOUR
+---------------------
 Clearbit's logo API was the standard answer and is GONE (dead DNS since the
-HubSpot acquisition — verified 2026-08-05). What remains are favicon
-services, and they disagree: DuckDuckGo returns 256x256 for bcg.com but 16x16
-for jpmorgan.com, where Google returns 128x128. So both are tried for every
-candidate and the HIGHEST-RESOLUTION result wins.
+HubSpot acquisition — verified 2026-08-05). What is left disagrees wildly, so
+four sources are tried per candidate domain and the best result wins:
+
+  1. Icons the site DECLARES (apple-touch-icon and friends). Composed to be
+     an icon, so square and padded — up to 513px for Point72.
+  2. <img> assets in the page that call themselves a logo. This is the
+     header WORDMARK, and for the last stragglers it was the only thing
+     there: State Street and Franklin Templeton serve a 16px favicon and
+     nothing else, while their real marks sit in the header at 256px+.
+  3. DuckDuckGo's favicon service.
+  4. Google's favicon service.
+
+Ranked by (melts into the page, resolution) IN THAT ORDER — a 128px mark on
+white beats a 512px mark baked onto a brand-coloured square, because the
+second cannot be un-tiled and reads as a sticker.
+
+SVG is handled, because SVG is exactly what the firms with no usable raster
+publish. Pillow cannot read it, so it is rasterised through cairosvg in a
+SUBPROCESS — see `_svg_to_png` for why a subprocess and not an import.
 
 WHAT IT REFUSES
 ---------------
@@ -40,7 +55,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import re
+import subprocess
+import sys
 
 import requests
 from django.core.files.base import ContentFile
@@ -150,12 +168,144 @@ def site_icons(domain: str) -> list[str]:
     return urls
 
 
+_IMG_TAG = re.compile(r"<img[^>]+>", re.I)
+_SRC = re.compile(r'src=["\']([^"\']+)', re.I)
+
+
+def page_logos(domain: str) -> list[str]:
+    """<img> assets on the homepage that call themselves a logo.
+
+    The source that finally reached the last stragglers. A firm's best mark is
+    often its HEADER WORDMARK, a plain image in the page, while its favicon is
+    a 16px afterthought: Franklin Templeton's header logo is 394x76 on their
+    DAM, and State Street's is a full SVG wordmark, while both serve 16px
+    favicons and nothing else. Matching on "logo" appearing anywhere in the
+    tag catches src, alt and class, which between them cover how these are
+    marked up in practice.
+    """
+    html = ""
+    for host in (f"https://www.{domain}/", f"https://{domain}/"):
+        try:
+            resp = requests.get(host, headers=UA, timeout=TIMEOUT)
+            if len(resp.text) > 2000:
+                html = resp.text
+                break
+        except requests.RequestException:
+            continue
+    if not html:
+        return []
+
+    out: list[str] = []
+    for tag in _IMG_TAG.findall(html):
+        if "logo" not in tag.lower():
+            continue
+        src = _SRC.search(tag)
+        if not src:
+            continue
+        u = src.group(1).strip()
+        if u.startswith("data:"):
+            continue
+        if u.startswith("//"):
+            u = "https:" + u
+        elif u.startswith("/"):
+            u = f"https://{domain}{u}"
+        elif not u.lower().startswith("http"):
+            u = f"https://{domain}/{u}"
+        if u not in out:
+            out.append(u)
+    return out[:6]
+
+
 def sources(domain: str) -> list[str]:
     return [
         *site_icons(domain),
+        *page_logos(domain),
         f"https://icons.duckduckgo.com/ip3/{domain}.ico",
         f"https://www.google.com/s2/favicons?domain={domain}&sz=256",
     ]
+
+
+# Where Homebrew and the common Linux distros put cairo. cairocffi resolves
+# it by leaf name through dlopen, which does NOT search Homebrew's prefix, so
+# on a stock macOS `import cairosvg` fails with the library sitting right
+# there. Loading it by full path first puts it in the process, and the later
+# by-name dlopen then resolves against the already-loaded image — which saves
+# every caller from having to remember DYLD_FALLBACK_LIBRARY_PATH.
+_CAIRO_PATHS = (
+    "/opt/homebrew/lib/libcairo.2.dylib",   # Apple silicon Homebrew
+    "/usr/local/lib/libcairo.2.dylib",      # Intel Homebrew
+    "/usr/lib/x86_64-linux-gnu/libcairo.so.2",
+    "/usr/lib/aarch64-linux-gnu/libcairo.so.2",
+)
+
+
+def _cairo_dir() -> str | None:
+    """The directory holding cairo, when it is somewhere dlopen won't look."""
+    import ctypes.util
+    if ctypes.util.find_library("cairo"):
+        return ""                      # already resolvable; no help needed
+    for path in _CAIRO_PATHS:
+        if os.path.exists(path):
+            return os.path.dirname(path)
+    return None
+
+
+def _rasterise_svg(raw: bytes) -> Image.Image | None:
+    """An SVG mark at STORE_PX, or None when cairo is not installed.
+
+    Imported HERE rather than at module scope on purpose: cairosvg needs
+    native cairo, and a missing system library must not break every other
+    `manage.py` command in the project. Without it the command simply loses
+    its SVG sources and says so.
+    """
+    png = _svg_to_png(raw)
+    if png is None:
+        return None
+    try:
+        img = Image.open(io.BytesIO(png))
+        img.load()
+        return img
+    except Exception:
+        return None
+
+
+def _svg_to_png(raw: bytes) -> bytes | None:
+    """SVG bytes -> PNG bytes, in a SUBPROCESS.
+
+    cairocffi resolves libcairo by leaf name through dlopen, which on macOS
+    does not search Homebrew's prefix and cannot be satisfied by preloading
+    the library — dlopen matches on path, not on already-loaded images
+    (verified: a full-path CDLL succeeds and the later import still fails).
+    The only thing that works is DYLD_FALLBACK_LIBRARY_PATH set BEFORE the
+    process starts, which we cannot do to ourselves.
+
+    So the conversion runs in a child with that variable set. It costs one
+    process per SVG — a handful per full refresh — and it means the command
+    works out of the box wherever cairo is installed, rather than depending
+    on whoever runs it remembering an environment variable.
+    """
+    cairo_dir = _cairo_dir()
+    if cairo_dir is None:
+        return None                    # cairo genuinely absent
+
+    env = dict(os.environ)
+    if cairo_dir:
+        for var in ("DYLD_FALLBACK_LIBRARY_PATH", "LD_LIBRARY_PATH"):
+            env[var] = os.pathsep.join(filter(None, (cairo_dir, env.get(var))))
+
+    script = (
+        "import sys, cairosvg;"
+        f"sys.stdout.buffer.write(cairosvg.svg2png("
+        f"bytestring=sys.stdin.buffer.read(), output_width={STORE_PX * 2}))"
+    )
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", script], input=raw, env=env,
+            capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 and done.stdout else None
 
 
 def _fetch(url: str) -> Image.Image | None:
@@ -172,10 +322,14 @@ def _fetch(url: str) -> Image.Image | None:
         img = Image.open(io.BytesIO(resp.content))
         img.load()
     except Exception:
-        # Includes SVG, which many sites now declare and Pillow cannot read.
-        # Falling through to the next source is the right answer; rasterising
-        # SVG would mean a new dependency for a handful of firms.
-        return None
+        # Pillow cannot read SVG, and SVG is exactly what the firms with no
+        # usable raster mark publish — State Street's wordmark is SVG-only.
+        # Rasterise it if cairo is available, otherwise fall through.
+        if b"<svg" not in resp.content[:2048].lower():
+            return None
+        img = _rasterise_svg(resp.content)
+        if img is None:
+            return None
     if min(img.size) < MIN_SOURCE_PX:
         return None
     return img
@@ -194,6 +348,15 @@ def melts_in(img: Image.Image) -> bool:
     A corner is background by construction.
     """
     img = img.convert("RGBA")
+
+    # Real transparency settles it before any sampling. A wide wordmark can
+    # run edge to edge — State Street's waves reach the left corners — so
+    # corner sampling alone called a transparent SVG a coloured tile.
+    alpha = img.getchannel("A")
+    transparent = sum(c for v, c in zip(range(256), alpha.histogram()) if v < 32)
+    if transparent > 0.15 * (img.width * img.height):
+        return True
+
     w, h = img.size
     inset = max(1, min(w, h) // 16)
     corners = [

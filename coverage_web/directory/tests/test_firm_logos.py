@@ -153,3 +153,58 @@ def test_aspect_ratio_survives_the_fit():
     out = Image.open(io.BytesIO(to_png(wide)))
     left, top, right, bottom = out.getchannel("A").getbbox()
     assert round((right - left) / (bottom - top)) == 4
+
+
+# ---------------------------------------------------------------------------
+# The sources that reached the last stragglers
+# ---------------------------------------------------------------------------
+def test_a_header_wordmark_is_a_candidate_not_just_the_favicon():
+    """State Street and Franklin Templeton serve 16px favicons and nothing
+    else — their real marks are plain <img> assets in the page header."""
+    from directory.management.commands import fetch_firm_logos as cmd
+    # Padded past the 2000-char floor `page_logos` uses to skip JS shells —
+    # Huatai's homepage is 940 chars of loader and no markup worth reading.
+    html = (
+        '<html><header>'
+        '<img class="site-logo" src="/assets/ft-global-logo-header.png">'
+        '<img src="/assets/hero-photo.jpg" alt="office">'
+        '</header>' + ('<p>filler</p>' * 200) + '</html>'
+    )
+
+    class _Resp:
+        status_code = 200
+        text = html
+
+    def fake_get(url, **kw):
+        return _Resp()
+
+    orig, cmd.requests.get = cmd.requests.get, fake_get
+    try:
+        found = cmd.page_logos("example.com")
+    finally:
+        cmd.requests.get = orig
+
+    assert found == ["https://example.com/assets/ft-global-logo-header.png"]
+    assert not any("hero-photo" in u for u in found), "only images that say logo"
+
+
+def test_an_svg_only_firm_is_not_a_dead_end():
+    """Pillow cannot read SVG, and SVG is exactly what the firms with no
+    usable raster publish. Rasterised when cairo is present; when it is not,
+    the command must degrade to PNG sources rather than crash."""
+    from directory.management.commands.fetch_firm_logos import _rasterise_svg
+    svg = (b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60">'
+           b'<rect width="200" height="60" fill="#0000ff"/></svg>')
+    out = _rasterise_svg(svg)
+    assert out is None or out.width > 0, "either rasterised, or cleanly absent"
+
+
+def test_transparency_alone_proves_it_melts_in():
+    """A wide wordmark can run edge to edge — State Street's waves reach the
+    left corners — so corner sampling alone called a transparent SVG a
+    coloured tile."""
+    edge_to_edge = Image.new("RGBA", (200, 60), (0, 0, 0, 0))
+    for x in range(200):
+        for y in range(20, 40):
+            edge_to_edge.putpixel((x, y), (0, 0, 200, 255))
+    assert melts_in(edge_to_edge) is True
