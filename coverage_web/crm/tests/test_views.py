@@ -672,3 +672,32 @@ def test_the_swap_fragment_is_the_whole_grid(client):
     assert "Fit Score" in body, "the rail rides in the swap"
     assert "Compose (BCC Capture)" in body, "so does the reach card"
     assert "Logged" in body, "and the movement flag"
+
+
+@pytest.mark.django_db
+def test_sync_bookkeeping_markers_never_reach_the_page(client):
+    """`[gmail:<thread>]` is the sync's idempotency marker and
+    `[capture:<id>]` the BCC pipeline's provenance pointer — load-bearing in
+    the database, noise on the page ("the user doesn't learn anything").
+    Stripped at display only: the stored note keeps its marker."""
+    user = _user()
+    contact = Contact.all_objects.create(
+        user=user, name="Jane Banker", email="jane@acme.com",
+    )
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="outreach", channel="email",
+        ts=timezone.now(),
+        note="[gmail:19f893368bdf46ac] outreach sent 2026-07-24, no reply yet",
+    )
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="reply_received", channel="email",
+        ts=timezone.now(),
+        note="[capture:42] inbound via gmail",
+    )
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    assert "[gmail:" not in body and "[capture:" not in body
+    assert "outreach sent 2026-07-24, no reply yet" in body, "the human half survives"
+    # And the database still carries the marker — display-only stripping.
+    stored = Touch.all_objects.filter(contact=contact, kind="outreach").get()
+    assert stored.note.startswith("[gmail:")

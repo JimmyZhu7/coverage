@@ -12,6 +12,7 @@ adapter) only — never a hand-rolled UPDATE.
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from math import ceil
 from typing import Any
@@ -1741,6 +1742,19 @@ _STATE_IMPLIES_WARMTH = {
 }
 
 
+# Machine bookkeeping prefixes on touch notes. `[gmail:<thread>]` is the
+# sync's idempotency marker (how a re-scanned thread knows it is already
+# logged) and `[capture:<event>]` is the BCC pipeline's provenance pointer.
+# Both are load-bearing IN THE DATABASE and meaningless ON THE PAGE — the
+# owner's words: "the user doesn't learn anything". Stripped at display,
+# never at rest; the export still carries them raw.
+_NOTE_MARKER = re.compile(r"^\[(?:gmail|capture):[^\]]*\]\s*")
+
+
+def _display_note(note: str | None) -> str:
+    return _NOTE_MARKER.sub("", note or "").strip()
+
+
 def _status_line(contact: Contact) -> str:
     state = _STATE_LINES.get(
         contact.thread_state, contact.thread_state.replace("_", " ").capitalize()
@@ -1770,7 +1784,7 @@ def _contact_live_context(
             "kind": t.kind,
             "kind_label": kind_labels.get(t.kind, t.kind.replace("_", " ").capitalize()),
             "channel_label": channel_labels.get(t.channel, t.channel),
-            "note": t.note,
+            "note": _display_note(t.note),
             "inbound": t.kind in _INBOUND_TOUCH_KINDS,
         }
         for t in touches
