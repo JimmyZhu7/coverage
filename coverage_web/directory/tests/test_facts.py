@@ -28,6 +28,32 @@ def test_a_whole_number_cutoff_keeps_its_decimal():
     assert extract_gpa("GPA above 3.0 out of 4.")["value"] == "3.0"
 
 
+def test_a_gpa_scale_is_not_a_gpa_requirement():
+    """Live on Citi: "a minimum 3.0 GPA out of 4.0" rendered "GPA 4.0". The
+    forward pattern reached the denominator first, so the card stated a
+    different requirement from the one the posting made — not a stricter
+    reading of it, a wrong one."""
+    got = extract_gpa("a minimum 3.0 GPA out of 4.0 at undergraduate level")
+    assert got["value"] == "3.0"
+
+
+def test_a_number_before_the_word_is_the_cutoff():
+    assert extract_gpa("cumulative 3.2 GPA or above")["value"] == "3.2"
+
+
+def test_a_bare_scale_states_no_requirement():
+    """Naming the scale is not naming a bar to clear."""
+    assert extract_gpa("Grades are reported on a 4.0 scale.") is None
+
+
+def test_the_evidence_never_opens_mid_number():
+    """A full stop with digits either side is a decimal point. Treating it as
+    a sentence end opened the evidence for a 3.0 cutoff at "0 GPA out of
+    4.0", which reads as a parsing failure even where the value is right."""
+    phrase = extract_gpa("We require a minimum 3.0 GPA out of 4.0.")["phrase"]
+    assert phrase.startswith("We require")
+
+
 def test_a_year_beside_the_word_gpa_is_not_a_gpa():
     assert extract_gpa("Class of 2028. GPA discussed at interview.") is None
 

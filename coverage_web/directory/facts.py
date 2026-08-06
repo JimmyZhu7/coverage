@@ -36,6 +36,23 @@ import re
 _NEAR = 60
 
 
+# A full stop with a digit on either side is a decimal point, not the end of a
+# sentence. Treating it as one made the evidence for "GPA 3.0 out of 4.0" open
+# mid-number — "0 GPA out of 4.0" — which reads as a parsing failure even
+# where the value is right. Observed on Citi's summer analyst postings.
+_SENTENCE_END = re.compile(r"(?<!\d)\.(?!\d)")
+
+
+def _boundary_before(text: str, pos: int) -> int:
+    ends = [m.start() for m in _SENTENCE_END.finditer(text, 0, pos)]
+    return ends[-1] if ends else -1
+
+
+def _boundary_after(text: str, pos: int) -> int:
+    m = _SENTENCE_END.search(text, pos)
+    return m.start() if m else -1
+
+
 def _sentence(text: str, start: int, end: int) -> str:
     """The phrase a match sits in, trimmed AROUND the match.
 
@@ -47,9 +64,9 @@ def _sentence(text: str, start: int, end: int) -> str:
     evidence at all — it reads as a mis-extraction even when the value is
     right. The window is anchored on the match and grows outward.
     """
-    left = max(text.rfind(".", 0, start), text.rfind("\n", 0, start)) + 1
-    right = min((i for i in (text.find(".", end), text.find("\n", end)) if i != -1),
-                default=len(text))
+    left = max(_boundary_before(text, start), text.rfind("\n", 0, start)) + 1
+    right = min((i for i in (_boundary_after(text, end), text.find("\n", end))
+                 if i != -1), default=len(text))
     cut_left = cut_right = False
     if right - left > 180:
         pad = (180 - (end - start)) // 2
@@ -114,15 +131,27 @@ def _clean(text: str) -> str:
 # --- GPA -------------------------------------------------------------------
 # Gated on the word itself. The scale check ("<= 4.5") is the second gate:
 # "GPA" near "3.5" is a cutoff, "GPA" near "2027" is a coincidence.
-_GPA = re.compile(r"\bG\.?P\.?A\.?\b[^.\n]{0,%d}?(\d\.\d{1,2})" % _NEAR, re.IGNORECASE)
+# The gap between the keyword and the number is captured, because it is what
+# tells a cutoff from a SCALE. "a minimum 3.0 GPA out of 4.0" contains both
+# numbers and the forward pattern reaches the wrong one first: the page said
+# 3.0 and the card said "GPA 4.0", which is not a stricter reading of the
+# posting but a different claim from the one it made. Observed live on Citi.
+_GPA = re.compile(r"\bG\.?P\.?A\.?\b([^.\n]{0,%d}?)(\d\.\d{1,2})" % _NEAR, re.IGNORECASE)
 _GPA_REVERSED = re.compile(r"(\d\.\d{1,2})[^.\n]{0,20}?\bG\.?P\.?A\.?\b", re.IGNORECASE)
+# What sits between "GPA" and a denominator, never between "GPA" and a cutoff.
+_GPA_SCALE = re.compile(r"(?:out\s+of|on\s+an?|scale|max(?:imum)?|/)\s*$", re.IGNORECASE)
 
 
 def extract_gpa(text: str) -> dict | None:
-    for rx in (_GPA, _GPA_REVERSED):
+    # Reversed FIRST: a number sitting immediately before the word ("a 3.5
+    # GPA") is always the requirement, never the scale.
+    for rx in (_GPA_REVERSED, _GPA):
         for m in rx.finditer(text):
+            gap = m.group(1) if rx is _GPA else ""
+            if gap and _GPA_SCALE.search(gap):
+                continue
             try:
-                value = float(m.group(1))
+                value = float(m.group(2) if rx is _GPA else m.group(1))
             except ValueError:
                 continue
             # 4.5 rather than 4.0: some schools run a 4.3 scale, and a value
