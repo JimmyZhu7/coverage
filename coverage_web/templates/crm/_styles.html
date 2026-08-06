@@ -276,7 +276,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   }
 
   /* ---- Stat ribbon: the commodity layer, below the queue and slim ---- */
-  .ribbon { margin-top: var(--s6); border-top: 1px solid var(--line);
+  /* --s5, matching every other band-to-band gap on the app's pages (the
+     pagehead's own bottom margin included). It carried --s6 + the border's
+     padding, which put a 31px seam on a page whose every other seam is 24 —
+     the one break in the vertical rhythm the geometry audit found. */
+  .ribbon { margin-top: var(--s5); border-top: 1px solid var(--line);
     padding-top: var(--s4); }
   /* The ribbon scrolls itself if it has to. The PAGE never does — a
      horizontal scrollbar on <body> is the bug this container exists to

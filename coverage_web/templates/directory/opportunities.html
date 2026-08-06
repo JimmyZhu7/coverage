@@ -53,6 +53,10 @@
   controls are all real form inputs with the same names, so serialization and
   URL round-tripping cost zero new JS.
   {% endcomment %}
+  {% comment %}Zero-height sentinel: when it leaves the viewport under the
+  sticky masthead, the filter bar is stuck and earns its panel skin.
+  {% endcomment %}
+  <div data-filters-sentinel aria-hidden="true"></div>
   <form class="filters"
         hx-get="{% url 'opportunities' %}"
         hx-target="#cov-results"
@@ -332,6 +336,41 @@ else is htmx and the platform.
   // to bubble up to it, so it does not. A bubbling event here would make every
   // swap trigger another request — an endless loop of the page filtering
   // itself. Setting `selectedIndex` does not fire `change` on its own.
+
+  // The filter bar's stuck-state skin. A passive scroll listener rather
+  // than an IntersectionObserver: the observer's callbacks are deferrable
+  // (background tabs, embedded panes) in a way that leaves the bar stuck
+  // with no panel behind it, and this check is one getBoundingClientRect
+  // against a number — not worth an observer's machinery.
+  (function () {
+    var bar = document.querySelector(".filters");
+    var sentinel = document.querySelector("[data-filters-sentinel]");
+    var header = document.querySelector(".site-header");
+    if (!bar || !sentinel || !header) return;
+    var stuck = null, calibrated = false;
+    function headerBottom() { return header.getBoundingClientRect().bottom; }
+    function check() {
+      var hb = headerBottom();
+      var now = sentinel.getBoundingClientRect().top < hb;
+      if (now !== stuck) { stuck = now; bar.classList.toggle("is-stuck", now); }
+      // One-shot calibration, measured rather than assumed: the CSS `top`
+      // is a first guess, but where a sticky element actually pins varies
+      // (masthead wrap at intermediate widths; one embedded engine renders
+      // sticky descendants a constant 8px low). While stuck, read where the
+      // bar really sits and correct `top` by the difference, once, so the
+      // bar kisses the masthead instead of floating a stripe below it.
+      if (now && !calibrated) {
+        calibrated = true;
+        var delta = bar.getBoundingClientRect().top - (hb - 1);
+        if (Math.abs(delta) > 1) {
+          bar.style.top = (parseFloat(getComputedStyle(bar).top) - delta) + "px";
+        }
+      }
+    }
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", function () { calibrated = false; }, { passive: true });
+    check();
+  })();
 
   document.body.addEventListener("htmx:afterSettle", function () {
     document.querySelectorAll(".filters select").forEach(function (sel) {

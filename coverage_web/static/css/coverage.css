@@ -393,6 +393,26 @@ main { min-height: 60vh; }
   animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both;
 }
 @media (max-width: 640px) {
+  /* The header used to wrap: logo row, two rows of nav pills, Sign Out on
+     its own line — ~290px of chrome before "Today" on an 812px phone. One
+     scrollable nav row now (momentum scroll, scrollbar hidden, right-edge
+     fade as the overflow affordance), and the greeting drops — the avatar
+     chip and Sign Out stay. Saves ~150px on every page for exactly the
+     audience most likely to check a deadline from a phone. */
+  .site-header-inner { flex-wrap: nowrap; gap: var(--s3); padding: 10px var(--s4); }
+  /* flex-start, never center: a centred flex row that overflows spills
+     half its content LEFT of the scroll origin, where scrollLeft cannot
+     reach — the first pill sat at x=-42 with the row already at 0. */
+  .site-nav { overflow-x: auto; flex: 1 1 auto; min-width: 0;
+    flex-wrap: nowrap; justify-content: flex-start;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+  .site-nav::-webkit-scrollbar { display: none; }
+  .site-nav a { white-space: nowrap; }
+  .site-auth { white-space: nowrap; }
+  .site-auth .site-user-name { display: none; }
+
   .pagehead { align-items: flex-start; }
   .pagehead-actions { margin-left: 0; }
 }

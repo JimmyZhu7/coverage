@@ -71,3 +71,16 @@ def test_a_new_user_is_nudged_to_finish_setup(client, django_user_model):
     u.save(update_fields=["onboarded_at"])
     body = client.get("/app/").content.decode()
     assert "Finish setting up" not in body
+
+
+def test_the_favicon_is_a_real_file_with_an_ico_fallback(client):
+    """A data-URI favicon vanished from the tab on the Opportunities page:
+    hx-push-url calls pushState, Chrome re-resolves the icon after a history
+    change, falls back to /favicon.ico, and our 404 blanked the tab. Both
+    paths must resolve now."""
+    body = client.get("/").content.decode()
+    assert 'rel="icon"' in body and "favicon.svg" in body
+    assert "data:image/svg" not in body.split("</head>")[0]
+    resp = client.get("/favicon.ico")
+    assert resp.status_code == 301
+    assert "favicon.svg" in resp["Location"]

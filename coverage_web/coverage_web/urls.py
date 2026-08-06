@@ -30,6 +30,9 @@ urlpatterns = [
     # The legal pages live under /welcome/, but /privacy/ and /terms/ are what
     # people type and what link scanners probe. Permanent redirects, not
     # duplicate routes: one canonical URL per document.
+    # Chrome falls back to /favicon.ico after pushState history changes;
+    # without this route that fallback 404s and blanks the tab icon.
+    path("favicon.ico", RedirectView.as_view(url="/static/img/favicon.svg", permanent=True)),
     path("privacy/", RedirectView.as_view(pattern_name="accounts:privacy", permanent=True)),
     path("terms/", RedirectView.as_view(pattern_name="accounts:terms", permanent=True)),
     path("capture/", include("capture.urls")),       # inbound-email webhook + capture settings

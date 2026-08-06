@@ -14,9 +14,13 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="{% block og_title %}Coverage — recruiting deadlines and the people behind them{% endblock %}">
   <meta property="og:description" content="{% block og_description %}Everyone tracks deadlines. Nobody tracks the relationship.{% endblock %}">
-  {% comment %}The logo mark as its own favicon: an inline SVG data URI, so
-  there is no extra request and no binary asset to keep in sync.{% endcomment %}
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 16a9 9 0 0 1 18 0' fill='none' stroke='%231d3a5f' stroke-width='3.4' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='16.6' r='2.6' fill='%23b3592e'/%3E%3C/svg%3E">
+  {% comment %}A real FILE, not a data URI. The data-URI version vanished
+  from the tab on the Opportunities page: htmx's hx-push-url calls
+  pushState, Chrome re-resolves the icon after a history change, falls
+  back to /favicon.ico, got our 404, and blanked the tab. A fetchable URL
+  survives that re-resolution, and /favicon.ico redirects here so the
+  fallback path lands on the same mark.{% endcomment %}
+  <link rel="icon" type="image/svg+xml" href="{% static 'img/favicon.svg' %}">
   <link rel="stylesheet" href="{% static 'css/coverage.css' %}">
   {# Vendored static asset, not a CDN or Node build — see coverage_web/static/vendor/. #}
   <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
@@ -49,6 +53,19 @@
         <a href="/app/calendar/"{% if request.path|slice:":13" == "/app/calendar" %} class="active"{% endif %}>Calendar</a>
         <a href="/welcome/"{% if request.path|slice:":8" == "/welcome" or request.path|slice:":8" == "/capture" %} class="active"{% endif %}>Settings</a>
       </nav>
+      {% comment %}On the phone the nav is one scrollable row; without this
+      the row can open scrolled to wherever the browser left it, with the
+      page you are ON out of view. block:'nearest' so centring the pill can
+      never scroll the page itself.{% endcomment %}
+      <script>
+        (function () {
+          var here = document.querySelector(".site-nav a.active");
+          if (here && document.querySelector(".site-nav").scrollWidth >
+              document.querySelector(".site-nav").clientWidth) {
+            here.scrollIntoView({ inline: "center", block: "nearest" });
+          }
+        })();
+      </script>
       <div class="site-auth">
         {% if user.is_authenticated %}
           <a href="/welcome/#profile" class="site-user">
@@ -57,7 +74,10 @@
             {% else %}
               <span class="site-user-avatar site-user-avatar-fallback">{{ user.name|default:user.email|first|upper }}</span>
             {% endif %}
-            {{ user.name|default:user.email }}
+            {% comment %}In a span so the phone can drop the name and keep
+            the avatar: the face is the identity affordance, the text is
+            what cost the header its second line.{% endcomment %}
+            <span class="site-user-name">{{ user.name|default:user.email }}</span>
           </a>
           <a href="/accounts/logout/">Sign Out</a>
         {% else %}

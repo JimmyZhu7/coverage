@@ -19,8 +19,28 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      DOM too), the selects follow, and the pills sit on their own row above. */
   /* align-items: flex-start, not flex-end: every label is [caption, control],
      so aligning tops lines the controls up. */
+  /* STICKY, below the masthead. A 900-role board whose controls scroll away
+     makes every filter change a round trip to the top; boards people live in
+     (Linear, LinkedIn Jobs) pin the controls. top is the masthead's 67px
+     minus one so the borders kiss. The .is-stuck skin (opaque blur panel,
+     hairline, shadow) only exists while actually stuck — toggled by an
+     IntersectionObserver sentinel in opportunities.html, the standard trick,
+     because position:sticky has no native :stuck state. Under 900px the
+     masthead can wrap taller than 67px and the phone's disclosure paradigm
+     takes over, so sticky switches off rather than overlap. */
   .filters { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s2);
-    align-items: flex-start; margin-bottom: var(--s4); justify-content: flex-start; }
+    align-items: flex-start; margin-bottom: var(--s4); justify-content: flex-start;
+    position: sticky; top: 66px; z-index: 30;
+    padding: var(--s2) var(--s3); margin-left: calc(-1 * var(--s3));
+    margin-right: calc(-1 * var(--s3)); border-radius: 14px;
+    border: 1px solid transparent;
+    transition: box-shadow var(--t-med), border-color var(--t-med),
+      background-color var(--t-med); }
+  .filters.is-stuck { background: color-mix(in srgb, var(--paper) 90%, transparent);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    border-color: var(--line); box-shadow: var(--shadow-2); }
+  @media (max-width: 900px) { .filters { position: static; padding: 0;
+    margin-left: 0; margin-right: 0; border: 0; } }
 
   /* Visually-hidden caption. The caption text ("Programme Year", "Region"…)
      stays in the DOM for screen readers and for the tested verbatim strings,
