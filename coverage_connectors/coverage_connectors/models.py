@@ -86,6 +86,15 @@ class WorkdayBoard:
 
 
 @dataclass(frozen=True, slots=True)
+class SocGenBoard:
+    """Société Générale's Quantum search behind careers.societegenerale.com.
+    One firm-wide board; everything else is fixed in the connector."""
+
+    firm: str
+    provider: str = field(default="socgen", init=False)
+
+
+@dataclass(frozen=True, slots=True)
 class LumesseBoard:
     """One Lumesse TalentLink FO-REST board. `host` is the datacenter FO
     host ("au01-foc.lumessetalentlink.com"); `tech_id` is the site's

@@ -40,12 +40,19 @@ from __future__ import annotations
 
 from coverage_connectors import (
     AvatureBoard, BeisenBoard, BoardConfig, EightfoldBoard, GoldmanSachsBoard,
-    GreenhouseBoard, LumesseBoard, McKinseyBoard, OracleBoard, PhenomBoard,
+    GreenhouseBoard, LumesseBoard, McKinseyBoard, OracleBoard, PhenomBoard, SocGenBoard,
     SitemapBoard, TalentGatewayBoard, TalnetBoard, WorkdayBoard,
 )
 
 # (firm_slug, BoardConfig). board.firm carries the display name.
 BOARDS: list[tuple[str, BoardConfig]] = [
+    # ---- Société Générale (Quantum search via the site's own proxy) ----
+    # Deferred July as "3-step CSRF+token+proxy — complex but pure HTTP";
+    # cracked 2026-08-07. ~640 EN-language postings incl. GRADUATE_JOB /
+    # INTERNSHIP / VIE contract types. See the connector's docstring for the
+    # three steps and why the language filter exists.
+    ("socgen", SocGenBoard(firm="Société Générale")),  # live-verified 2026-08-07
+
     # ---- Lumesse TalentLink FO-REST (recruitmentplatform.com widget API) ----
     # Deferred July as "needs live URL verification"; cracked 2026-08-07 —
     # guest auth is two literal headers (see the connector's docstring), and
