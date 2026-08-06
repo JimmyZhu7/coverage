@@ -87,6 +87,16 @@ def test_a_never_yielding_board_that_also_errors_is_broken(monkeypatch):
     assert "fix the config" in "\n".join(health.health_report())
 
 
+def _enrich_run(*, ago_days=0, queued=50, fetched=48, unreachable=2):
+    return ScrapeRun.objects.create(
+        connector="enrich",
+        started=timezone.now() - timedelta(days=ago_days),
+        finished=timezone.now() - timedelta(days=ago_days),
+        status="ok",
+        stats={"queued": queued, "fetched": fetched, "unreachable": unreachable},
+    )
+
+
 def test_the_report_is_empty_when_healthy(monkeypatch):
     firm = Firm.objects.create(slug="evercore", name="Evercore")
     Opportunity.objects.create(firm=firm, url="https://x/1", title="SA",
@@ -95,4 +105,40 @@ def test_the_report_is_empty_when_healthy(monkeypatch):
     _run([], ago_minutes=120)
     _run([], ago_minutes=60)
     _run([], ago_minutes=30)
+    _enrich_run()
     assert health.health_report() == []
+
+
+# ---------------------------------------------------------------------------
+# The detail-page pass. It earns its own checks because its failure is
+# invisible in every other signal: the scrape still succeeds, the counts still
+# look right, the roles still list — what quietly stops is the deadlines. An
+# entire enrichment run was once lost to an overnight scrape and nothing
+# anywhere went red.
+# ---------------------------------------------------------------------------
+
+def test_a_board_that_has_never_enriched_says_so():
+    assert any("never run" in line for line in health.enrichment_health())
+
+
+def test_a_silent_enrichment_pass_is_reported():
+    _enrich_run(ago_days=5)
+    assert any("has not run in 5 days" in line for line in health.enrichment_health())
+
+
+def test_a_recent_enrichment_pass_is_quiet():
+    _enrich_run(ago_days=1)
+    assert health.enrichment_health() == []
+
+
+def test_a_pass_that_read_nothing_it_queued_is_not_a_healthy_pass():
+    """The failure mode that exits zero and looks green: a run that queues
+    hundreds of pages, is blocked on every one, writes nothing, and reports
+    "0 pages read"."""
+    _enrich_run(queued=300, fetched=0, unreachable=300)
+    assert any("read none" in line for line in health.enrichment_health())
+
+
+def test_a_pass_failing_more_than_it_reads_is_reported():
+    _enrich_run(queued=100, fetched=20, unreachable=80)
+    assert any("unreachable" in line for line in health.enrichment_health())

@@ -24,7 +24,7 @@ from django.utils import timezone
 
 from directory.classify import TARGET_BUCKETS
 from directory.facts import EXTRACTORS, extract_facts
-from directory.models import Opportunity
+from directory.models import Opportunity, ScrapeRun
 
 
 class Command(BaseCommand):
@@ -48,6 +48,7 @@ class Command(BaseCommand):
               .select_related("firm").order_by("id"))
         hits: Counter = Counter()
         seen = changed = 0
+        started = timezone.now()
 
         for opp in qs.iterator(chunk_size=200):
             text = (opp.raw or {}).get("detail_text") or ""
@@ -79,6 +80,16 @@ class Command(BaseCommand):
 
             if limit and seen >= limit:
                 break
+
+        if not dry:
+            # Recorded like the fetch stage beside it. This one cannot fail on
+            # a network, but it CAN quietly stop producing: a pattern edited
+            # into uselessness shows up here as a kind count falling to zero,
+            # and nowhere else.
+            ScrapeRun.objects.create(
+                connector="extract", started=started, finished=timezone.now(),
+                status="ok",
+                stats={"read": seen, "changed": changed, **dict(hits)})
 
         summary = " · ".join(f"{k} {n}" for k, n in hits.most_common()) or "nothing found"
         self.stdout.write(self.style.SUCCESS(

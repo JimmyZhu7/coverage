@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import datetime
 from collections import defaultdict, deque
 from urllib.parse import urlsplit
 
@@ -46,7 +47,7 @@ from django.utils import timezone
 
 from directory.classify import TARGET_BUCKETS, extract_deadline_from_text, extract_sponsorship
 from directory.ingest import _parse_deadline
-from directory.models import Opportunity
+from directory.models import Opportunity, ScrapeRun
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"}
@@ -112,6 +113,118 @@ def page_text(html: str) -> str:
     return _WS.sub(" ", text).strip()[:MAX_TEXT]
 
 
+# How long a reading of a posting stays good. A page is not a snapshot: firms
+# extend deadlines, swap the eligibility line, and add an assessment step
+# without ever touching the list payload the scraper sees — so the content
+# hash never moves and nothing else would ever re-read the page.
+#
+# Before this, the queue was "rows with no detail_text", which meant each page
+# was fetched exactly ONCE, ever. A deadline we read in August would still be
+# on the board in December after the firm had moved it, stated with a
+# countdown and a fuse. A confidently wrong date is worse than no date, and it
+# is the one failure this product cannot afford.
+STALE_DAYS = 21
+# Tighter for anything closing soon. The closer a deadline, the more a stale
+# reading costs and the more often it is worth spending a request to confirm.
+URGENT_STALE_DAYS = 7
+URGENT_WINDOW_DAYS = 30
+
+
+def _fetched_at(o):
+    raw = (o.raw or {}).get("detail_fetched")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _queue(rows, *, refetch: bool, stale_days: int, today) -> tuple[list, int]:
+    """What to fetch, in the order it earns a request.
+
+    Never-read pages first: they are the only rows that can add a deadline the
+    board does not have. Then re-reads, urgent ones ahead of the rest, because
+    a run is capped and the cap should fall on the least valuable work.
+    """
+    now = timezone.now()
+    fresh, urgent_stale, stale = [], [], []
+    for o in rows:
+        if not o.url:
+            continue
+        if refetch:
+            stale.append(o)
+            continue
+        if "detail_text" not in (o.raw or {}):
+            fresh.append(o)
+            continue
+        if not stale_days:
+            continue
+        at = _fetched_at(o)
+        if at is None:
+            stale.append(o)          # read before we recorded when
+            continue
+        age = (now - at).days
+        closing_soon = (o.deadline is not None
+                        and 0 <= (o.deadline - today).days <= URGENT_WINDOW_DAYS)
+        if closing_soon and age >= min(URGENT_STALE_DAYS, stale_days):
+            urgent_stale.append(o)
+        elif age >= stale_days:
+            stale.append(o)
+    todo = fresh + urgent_stale + stale
+    return todo, len(urgent_stale) + len(stale)
+
+
+# Some boards hand over the whole description in the LIST payload and never
+# needed a second request at all. McKinsey is the clearest case: 38 open
+# campus roles whose detail pages reset the connection on any non-browser
+# client (their bot protection, which is theirs to run and not ours to defeat)
+# while `whatYouWillDo`, `yourQualifications` and their siblings sit in the
+# JSON the board already served us.
+#
+# So the payload is asked first, every time. It costs nothing, it cannot be
+# blocked, and where it answers we spend no request at all.
+_PROSE_MIN = 120        # a field shorter than this is a label, not prose
+_PAYLOAD_MIN = 300      # below this the payload has not really described the job
+# Keys that hold long strings which are never a description.
+_NOT_PROSE = ("url", "link", "id", "code", "date", "image", "logo", "slug")
+
+
+def payload_text(raw: dict | None) -> str | None:
+    """The description a board already gave us, or None.
+
+    Prose-like values only, unlike `classify.posting_text` which flattens
+    every string for the regex extractors. This one's output is READ BY A
+    PERSON in the drawer, so a wall of job IDs and city codes would be worse
+    than an empty panel.
+    """
+    found: list[str] = []
+
+    def walk(node, key="", depth=0):
+        if depth > 6 or sum(len(f) for f in found) > MAX_TEXT:
+            return
+        if isinstance(node, str):
+            k = key.lower()
+            if any(bad in k for bad in _NOT_PROSE):
+                return
+            looks_prose = ("<" in node and ">" in node) or (
+                len(node) >= _PROSE_MIN and node.count(" ") >= 15)
+            if looks_prose:
+                found.append(node)
+        elif isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, k, depth + 1)
+        elif isinstance(node, (list, tuple)):
+            for v in node:
+                walk(v, key, depth + 1)
+
+    walk(raw or {})
+    if not found:
+        return None
+    text = page_text("\n\n".join(found))
+    return text[:MAX_TEXT] if len(text) >= _PAYLOAD_MIN else None
+
+
 class Command(BaseCommand):
     help = "Fetch posting detail pages; fill deadline + sponsorship from prose."
 
@@ -120,6 +233,9 @@ class Command(BaseCommand):
                             help="Stop after N fetches (0 = all).")
         parser.add_argument("--refetch", action="store_true",
                             help="Fetch even rows that already carry detail_text.")
+        parser.add_argument("--stale-days", type=int, default=STALE_DAYS,
+                            help=f"Re-read a page this many days after the last "
+                                 f"read (default {STALE_DAYS}; 0 disables).")
         parser.add_argument("--dry-run", action="store_true")
 
     def handle(self, *args, **opts):
@@ -131,13 +247,17 @@ class Command(BaseCommand):
             .select_related("firm")
             .order_by("firm__name", "id")
         )
-        todo = [
-            o for o in rows
-            if o.url
-            and (opts["refetch"] or "detail_text" not in (o.raw or {}))
-        ]
+        today = timezone.localdate()
+        todo, refreshed = _queue(rows, refetch=opts["refetch"],
+                                 stale_days=opts["stale_days"], today=today)
         if opts["limit"]:
             todo = todo[: opts["limit"]]
+            refreshed = sum(1 for o in todo if (o.raw or {}).get("detail_text"))
+
+        run = None
+        if not dry:
+            run = ScrapeRun.objects.create(
+                connector="enrich", started=timezone.now(), status="running")
 
         # Round-robin across hosts so the per-host delay overlaps instead of
         # serializing: ~50 hosts at 0.8s spacing is minutes, not hours.
@@ -147,6 +267,10 @@ class Command(BaseCommand):
         last_hit: dict[str, float] = {}
 
         fetched = failed = dated = sponsored = answered_blank = 0
+        # Split, because they mean different things to a reader of the log: a
+        # new deadline is coverage, a corrected one is a date that would have
+        # been WRONG on the board tomorrow.
+        dated_new = corrected = from_payload = 0
         hosts = deque(sorted(by_host))
         while hosts:
             host = hosts.popleft()
@@ -165,21 +289,33 @@ class Command(BaseCommand):
                 hosts.append(host)
             last_hit[host] = time.monotonic()
 
-            text = fetch_posting_text(o.url)
-            if text is None:
-                failed += 1
-                continue
+            # The board's own payload first: free, unblockable, and on some
+            # boards the only copy we are allowed to have.
+            text = payload_text(o.raw)
+            if text:
+                from_payload += 1
+            else:
+                text = fetch_posting_text(o.url)
+                if text is None:
+                    failed += 1
+                    continue
             fetched += 1
 
             deadline, ok = _parse_deadline(extract_deadline_from_text(text))
             sponsorship = extract_sponsorship(text)
 
             changes = []
-            if o.deadline is None and ok and deadline:
+            if ok and deadline and o.deadline is None:
                 changes.append(f"deadline {deadline}")
                 dated += 1
-            if (o.sponsorship or "unknown") == "unknown" and sponsorship != "unknown":
-                changes.append(f"sponsorship {sponsorship}")
+            elif ok and deadline and deadline != o.deadline and (o.confidence or 0.0) < 1.0:
+                changes.append(f"deadline {o.deadline} -> {deadline}")
+                dated += 1
+            if sponsorship != "unknown" and sponsorship != (o.sponsorship or "unknown"):
+                was = (o.sponsorship or "unknown")
+                changes.append(f"sponsorship {sponsorship}"
+                               if was == "unknown" else
+                               f"sponsorship {was} -> {sponsorship}")
                 sponsored += 1
             if not changes:
                 answered_blank += 1
@@ -193,16 +329,40 @@ class Command(BaseCommand):
             raw = dict(o.raw or {})
             raw["detail_text"] = text
             raw["detail_fetched"] = timezone.now().isoformat()
+            # Where it came from, because the two age differently: a payload
+            # copy is refreshed by every scrape, a fetched one only here.
+            raw["detail_source"] = "payload" if payload_text(o.raw) else "fetch"
             o.raw = raw
             update = ["raw"]
-            if o.deadline is None and ok and deadline:
-                o.deadline = deadline
-                o.deadline_precision = "day"
-                # "reported": the posting said it, via our regex — the same
-                # 0.6 band ingest gives prose finds, never provider-level 1.0.
-                o.confidence = max(o.confidence or 0.0, 0.6)
-                update += ["deadline", "deadline_precision", "confidence"]
-            if (o.sponsorship or "unknown") == "unknown" and sponsorship != "unknown":
+
+            # FILL, and on a re-read also CORRECT. Fill-only was right while a
+            # page was read once and never again; with a staleness queue it
+            # would make the re-read pointless — the firm moves the date, we
+            # fetch the page that says so, and then decline to write it down.
+            #
+            # The bound: a re-read may only overwrite a date WE read out of
+            # prose (confidence < 1.0). A provider's own field stays the
+            # provider's. And silence still never erases: a page that has
+            # stopped stating a deadline is a page that stopped saying,
+            # which is not the same as a firm withdrawing one.
+            if ok and deadline:
+                ours = (o.confidence or 0.0) < 1.0
+                if o.deadline is None or (ours and deadline != o.deadline):
+                    if o.deadline is not None and deadline != o.deadline:
+                        corrected += 1
+                    else:
+                        dated_new += 1
+                    o.deadline = deadline
+                    o.deadline_precision = "day"
+                    # "reported": the posting said it, via our regex — the same
+                    # 0.6 band ingest gives prose finds, never provider-level 1.0.
+                    o.confidence = max(o.confidence or 0.0, 0.6) if not ours else 0.6
+                    update += ["deadline", "deadline_precision", "confidence"]
+
+            # The detail page outranks the list payload on sponsorship: it is
+            # where the sentence actually lives. So a re-read adopts a changed
+            # answer, and "unknown" (the page not saying) still never wins.
+            if sponsorship != "unknown" and sponsorship != (o.sponsorship or "unknown"):
                 o.sponsorship = sponsorship
                 update.append("sponsorship")
             o.save(update_fields=update)
@@ -210,9 +370,29 @@ class Command(BaseCommand):
         campus = Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
         with_dl = campus.exclude(deadline=None).count()
         total = campus.count()
+
+        if run is not None:
+            # Recorded like every other stage of the pipeline. Without this a
+            # week of failing enrichment looked exactly like a week of
+            # nothing-new-to-read: same silence, same green board. `health.py`
+            # reads these rows, and the feed's "checked N ago" line can only
+            # ever be as honest as the runs it can see.
+            run.finished = timezone.now()
+            run.status = "ok" if fetched or not todo else "partial"
+            run.stats = {
+                "queued": len(todo), "fetched": fetched, "unreachable": failed,
+                "refreshed": refreshed, "from_payload": from_payload,
+                "deadlines": dated_new,
+                "corrected": corrected,
+                "sponsorship": sponsored, "silent": answered_blank,
+                "coverage": f"{with_dl}/{total}",
+            }
+            run.save(update_fields=["finished", "status", "stats"])
         self.stdout.write(self.style.SUCCESS(
             f"{tag}{fetched} pages read, {failed} unreachable · "
-            f"+{dated} deadlines, +{sponsored} sponsorship answers, "
+            f"({from_payload} from board payloads) · "
+            f"+{dated_new} deadlines, {corrected} corrected, "
+            f"+{sponsored} sponsorship answers, "
             f"{answered_blank} pages state neither · "
             f"deadline coverage now {with_dl}/{total} "
             f"({100 * with_dl // max(1, total)}%)"))

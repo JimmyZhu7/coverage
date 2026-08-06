@@ -92,9 +92,57 @@ def boards_that_never_yield() -> dict[str, list[str]]:
     return {"broken": sorted(broken), "empty": sorted(silent - broken)}
 
 
+# How long the detail-page pass may be silent before that silence is itself
+# the finding. It runs inside `refresh`, so on a healthy cadence there is a
+# run every night.
+ENRICH_SILENT_DAYS = 3
+
+
+def enrichment_health() -> list[str]:
+    """Warnings about the pass that reads postings' own pages.
+
+    It earns its own checks because its failure is invisible in every other
+    signal on the board: the scrape still succeeds, the counts still look
+    right, and the roles still list. What quietly stops is the deadlines. The
+    first version of this pipeline lost a full enrichment run to an overnight
+    scrape and nothing anywhere went red.
+    """
+    from django.utils import timezone
+
+    from .models import ScrapeRun
+
+    lines: list[str] = []
+    latest = ScrapeRun.objects.filter(connector="enrich").order_by("-started").first()
+    if latest is None:
+        return ["· the detail-page pass has never run — deadlines come only "
+                "from list endpoints, which mostly do not carry one"]
+
+    age = (timezone.now() - latest.started).days
+    if age >= ENRICH_SILENT_DAYS:
+        lines.append(
+            f"⚠ the detail-page pass has not run in {age} days — deadlines and "
+            "sponsorship answers are going stale silently")
+
+    stats = latest.stats or {}
+    queued, fetched = stats.get("queued", 0), stats.get("fetched", 0)
+    unreachable = stats.get("unreachable", 0)
+    # A run that reached nothing it queued is a broken run wearing a green
+    # status: it exits 0, writes no rows, and reports "0 pages read".
+    if queued and not fetched:
+        lines.append(
+            f"⚠ the last detail-page pass queued {queued} pages and read none "
+            "(host blocking, or every URL shape unrecognised)")
+    elif fetched and unreachable > fetched:
+        lines.append(
+            f"⚠ the last detail-page pass failed on more pages than it read "
+            f"({unreachable} unreachable vs {fetched} read)")
+    return lines
+
+
 def health_report() -> list[str]:
     """Human-readable warning lines; empty when everything is healthy."""
     lines: list[str] = []
+    lines += enrichment_health()
     failing = repeat_failures()
     if failing:
         lines.append(
