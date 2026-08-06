@@ -57,7 +57,13 @@
       <h2 class="strip-title">Contacts Needing Action <span class="scrub-count">{{ action_total }}</span></h2>
       <div class="net-panel">
       {% for group in action_groups %}
-        <div class="net-group">
+        {% comment %}`is-empty` releases the lane's flex share. The panel used
+        to split into equal quarters regardless, so a lane holding nothing
+        reserved ~200px of italic silence while "Follow up" squeezed 83
+        people into the same slice — dead space presented as symmetry.
+        Empty lanes collapse to their header + one line; the full lanes
+        divide what's left.{% endcomment %}
+        <div class="net-group{% if not group.items %} is-empty{% endif %}">
           <div class="net-group-head">
             <span>{{ group.label }}</span>
             <span class="scrub-count">{{ group.items|length }}</span>

@@ -412,7 +412,12 @@ main { min-height: 60vh; }
    whitespace does the separating now. */
 .page-head { text-align: center; padding-bottom: var(--s5); margin-bottom: var(--s5); }
 .page-head h1 { margin-bottom: var(--s2); }
-.lede { color: var(--ink-2); margin: 0 auto var(--s3); font-size: var(--fs-m); max-width: 56ch; }
+/* Left-aligned, not `margin: 0 auto`: every live use of this class sits
+   under a left-aligned heading (Cycle Dates, the confirm pages, the hidden
+   list), and the centring made each one read as a caption that had drifted
+   off its section. The 56ch cap stays — it is about line length, not
+   position. */
+.lede { color: var(--ink-2); margin: 0 0 var(--s3); font-size: var(--fs-m); max-width: 56ch; }
 .page-head .subnav, .page-head .stats { justify-content: center; }
 
 /* ---- Chip set — multi-select taxonomy as toggle pills --------------------

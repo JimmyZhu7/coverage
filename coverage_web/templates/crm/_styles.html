@@ -235,8 +235,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .activity-row { display: flex; align-items: baseline; gap: var(--s2);
     padding: var(--s2) 0; border-top: 1px solid var(--line); font-size: var(--fs-s); }
   .activity-row:first-child { border-top: 0; }
+  /* Anchored to the FIRST line, not the row's centre: on a two-line entry
+     ("Goldman Sachs insight programme opens") a centred dot floated between
+     the lines, attached to neither. First-line height at fs-s is ~21px; the
+     7px dot plus 7px offset optically centres it against that line whether
+     or not the text wraps. */
   .activity-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
-    flex: none; align-self: center; }
+    flex: none; align-self: flex-start; margin-top: 7px; }
   .activity-dot.in { background: var(--ok); }
   .activity-dot.is-urgent { background: var(--danger); }
   .activity-text { flex: 1; min-width: 0; }
@@ -519,6 +524,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border-radius: 999px; }
   .net-actions .net-none { flex: 1 1 0; display: flex; align-items: center;
     justify-content: center; margin: 0; }
+  /* An empty lane gives up its quarter: header plus one quiet line, and the
+     populated lanes share the released height. */
+  .net-actions .net-group.is-empty { flex: 0 0 auto; }
+  .net-actions .net-group.is-empty .net-none { flex: none; padding: var(--s2) 0; }
 
   .net-legend { display: flex; gap: var(--s4); flex-wrap: wrap; font-size: var(--fs-s);
     color: var(--ink-2); margin-bottom: var(--s3); }
