@@ -315,6 +315,18 @@
         </div>
       </section>
 
+      {% if cycle_months %}
+        {% comment %}What the target cycle above actually looks like: real
+        deadline density for the next twelve months, same band the feed
+        shows. A cycle picker over an invisible cycle was a label without a
+        referent.{% endcomment %}
+        <div class="set-card kin-reveal" style="--i:1" aria-label="The cycle ahead">
+          <div class="set-head"><h2>The Cycle Ahead</h2>
+            <p>Real Deadlines By Month, From The Live Board</p></div>
+          <div class="set-body">{% include "directory/_cycle_band.html" %}</div>
+        </div>
+      {% endif %}
+
       {# ---- Work Authorization ---- #}
       <section class="set-card kin-reveal" id="work-auth" style="--i:1"
                aria-labelledby="work-auth-h">

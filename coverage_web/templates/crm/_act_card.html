@@ -41,7 +41,7 @@ buttons whose visible text is identical, which is unusable read aloud.
   {% endcomment %}
   {% if a.reason %}<p class="act-reason">{{ a.reason }}</p>{% endif %}
   <p class="act-last">
-    {% if a.last_kind %}Last: {{ a.last_kind }} · {{ a.last_business_days }} business day{{ a.last_business_days|pluralize }} ago
+    {% if a.moved %}<span class="act-moved" title="They replied or a chat happened within the last week"><i></i>Moving</span> · {% endif %}{% if a.last_kind %}Last: {{ a.last_kind }} · {{ a.last_business_days }} business day{{ a.last_business_days|pluralize }} ago
     {% else %}No touches on record{% endif %}
   </p>
   {% if a.pairs_with_debrief %}

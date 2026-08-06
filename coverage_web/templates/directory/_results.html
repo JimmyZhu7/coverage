@@ -65,6 +65,10 @@ hidden rather than shown as a weak "0".{% endcomment %}
   {% if checked_ago %}<span class="ss-item ss-checked">checked {{ checked_ago }} ago</span>{% endif %}
 </div>
 
+{% comment %}When this cycle actually closes, month by month — the aggregate
+truth behind every fuse below. See _cycle_band.html.{% endcomment %}
+{% include "directory/_cycle_band.html" %}
+
 {% comment %}
 The "Sorted for you" chip used to sit here. It said one thing, once, and the
 hero's subtitle already says it — so it was a second label for a fact the page

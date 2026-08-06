@@ -216,6 +216,11 @@ def import_template(request):
 # ---------------------------------------------------------------------------
 # Settings  (/welcome/settings/)
 # ---------------------------------------------------------------------------
+def _cycle_months():
+    from directory.views import cycle_months
+    return cycle_months()
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def settings_view(request):
@@ -290,6 +295,10 @@ def settings_view(request):
             "saved": saved,
             "cycle_suggestions": CYCLE_SUGGESTIONS,
             "capture_address": services.capture_address(request.user),
+            # The cycle band under the target-cycle picker — the directory's
+            # own deadline density, so the subject of the picker is visible
+            # while you pick.
+            "cycle_months": _cycle_months(),
             # `capture_health` is two aggregates over the user's own events —
             # cheap enough to run on every settings render, and the whole point
             # is that a student whose BCC has silently stopped working finds

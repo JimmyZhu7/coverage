@@ -257,7 +257,26 @@ def _in_scope(c, scope: str) -> bool:
     return bool(c.firm and scope in (c.firm.regions or []))
 
 
-def _contact_card(c, *, tier, today, capture_addr):
+# The keep-warm clock each warmth class runs on, in days — the same windows
+# the cadence engine acts on (weeks * 7 for the two check-in clocks; cold
+# contacts run on the follow-up window). The staleness ring divides elapsed
+# silence by this, so a full ring means "the engine is about to nag you
+# about this person", not an arbitrary redness.
+def _stale_window_days(c, params) -> int:
+    from coverage_domain.cadence import CADENCE_DEFAULTS
+
+    merged = {**CADENCE_DEFAULTS, **params}
+    warmth = (c.warmth or "").lower()
+    if warmth == "advocate":
+        return merged["advocate_touch_min_weeks"] * 7
+    if warmth == "chatted":
+        return merged["chatted_touch_min_weeks"] * 7
+    # Cold and replied both run on the follow-up window; business days are
+    # roughly seven-fifths of calendar days.
+    return max(round(merged["followup_after_business_days"] * 7 / 5), 1)
+
+
+def _contact_card(c, *, tier, today, capture_addr, cadence=None):
     """One full contact card (radar style): initials, pills, firm · role,
     note bullets in plain grammar, and days since the last touch."""
     parts = [p for p in (c.name or "").split() if p]
@@ -270,6 +289,10 @@ def _contact_card(c, *, tier, today, capture_addr):
                 bullets.append(frag[0].upper() + frag[1:])
     last = c.last_touch_ts
     days_since = (timezone.now() - last).days if last else None
+    window = _stale_window_days(c, cadence or {})
+    # 0.0 = touched today, 1.0 = the engine's clock has run out. Never-touched
+    # contacts show a full ring: silence since forever is the stalest state.
+    stale = (min(days_since / window, 1.0) if days_since is not None else 1.0)
     return {
         "c": c,
         "initials": initials or "?",
@@ -281,6 +304,11 @@ def _contact_card(c, *, tier, today, capture_addr):
         "region": (c.region or "").upper(),
         "bullets": bullets[:3],
         "days_since": days_since,
+        "stale_pct": round(stale * 100),
+        # The tint threshold decided here, where the arithmetic lives, not by
+        # a CSS substring hack that cannot tell 8% from 80%.
+        "stale_tint": ("due" if stale >= 1.0 else
+                       "warming" if stale >= 0.7 else "fresh"),
         # Compose surface: same rule as every other mailto: on the site (§5)
         # — BCC'd to the capture address, body from `opener` ONLY, never
         # `angle` (that's the user's private note ABOUT the person, not a
@@ -298,6 +326,11 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     Coverage grouped by the user's own tiers (draggable — tier drives the
     cadence engine's priorities), then full contact cards sectioned by
     warmth."""
+    from .today import _cadence_params
+
+    # One read of the user's cadence overrides for every card's staleness
+    # ring, rather than one per contact.
+    cadence_overrides = _cadence_params(request.user)
     user = request.user
     today = timezone.localdate()
     actions, _, capture_addr = _build_actions(user)
@@ -401,6 +434,10 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "advocates": advocates,
             "adv_target": adv_target,
             "adv_met": advocates >= adv_target,
+            # Socket booleans for the template: [True, False] is "one of two
+            # filled". Capped at the target — a third advocate at a
+            # two-target firm overfills nothing, it just keeps the ✓.
+            "adv_slots": [i < advocates for i in range(adv_target)],
         }
 
     tier_sections = []
@@ -485,7 +522,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 "key": "school",
                 "label": name,
                 "cards": [
-                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today, capture_addr=capture_addr)
+                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today,
+                                  capture_addr=capture_addr, cadence=cadence_overrides)
                     for c in by_school[name]
                 ],
             })
@@ -499,7 +537,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 "key": key,
                 "label": label,
                 "cards": [
-                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today, capture_addr=capture_addr)
+                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today,
+                                  capture_addr=capture_addr, cadence=cadence_overrides)
                     for c in members
                 ],
             })

@@ -1,0 +1,25 @@
+{% comment %}
+THE CYCLE, AS A SHAPE — twelve months of real deadline density with a "now"
+cursor. Takes `cycle_months`: a list of {label, count, pct, is_now}, built by
+directory.views.cycle_months() from confirmed and reported deadlines actually
+in the database — never from folklore about when recruiting season is. A month
+with nothing stays a baseline tick; the shape IS the information.
+
+Rendered on the Opportunities feed (where the question is "when does this
+cycle actually close?") and under Settings' target-cycle picker (where the
+question is "what am I signing up for?"). One partial so the two can't drift.
+
+Same anatomy as the calendar's month rail on purpose — height as count,
+column per month — so a user who has learned one has learned the other.
+{% endcomment %}
+{% if cycle_months %}
+<div class="cycband" role="img"
+     aria-label="Application deadlines by month: {% for m in cycle_months %}{{ m.label }} {{ m.count }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+  {% for m in cycle_months %}
+    <span class="cycband-m{% if m.is_now %} is-now{% endif %}" title="{{ m.label }}: {{ m.count }} deadline{{ m.count|pluralize }}">
+      <i class="cycband-bar" style="--h: {{ m.pct }}%; --i: {{ forloop.counter0 }}"></i>
+      <b>{{ m.label }}</b>
+    </span>
+  {% endfor %}
+</div>
+{% endif %}

@@ -129,9 +129,16 @@
                   <div class="firm-bar" title="{{ fc.contact_count }} contact{{ fc.contact_count|pluralize }}">
                     {% for seg in fc.segments %}{% if seg.pct %}<i class="seg seg-{{ seg.warmth }}" style="width: {{ seg.pct }}%"></i>{% endif %}{% endfor %}
                   </div>
+                  {% comment %}Advocate SOCKETS, not a fraction: the target
+                  is 2 or 3 slots, and dots that visibly fill say "one more to
+                  go" faster than 1/2 does. The number stays in the title and
+                  in the accessible name; filled sockets pop with the same
+                  chip-check spring the rest of the product uses.{% endcomment %}
                   <span class="fc-adv{% if fc.adv_met %} is-met{% endif %}"
+                        role="img"
+                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm"
                         title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm">
-                    {{ fc.advocates }}/{{ fc.adv_target }}{% if fc.adv_met %} ✓{% endif %}
+                    {% for slot in fc.adv_slots %}<i class="adv-socket{% if slot %} is-filled{% endif %}"></i>{% endfor %}{% if fc.adv_met %} ✓{% endif %}
                   </span>
                 </div>
               </div>
@@ -164,7 +171,14 @@
             {% for card in section.cards %}
               <div class="contact-card kin-reveal" style="--i:{{ forloop.counter0 }}">
                 <div class="cc-head">
-                  <span class="cc-avatar">{{ card.initials }}</span>
+                  {% comment %}The staleness ring: silence made visible. The
+                  ring drains as the cadence clock this contact runs on is
+                  consumed — full ring means the engine is about to nag. The
+                  title carries the number for anyone the colour doesn't
+                  reach; the card's own "Nd since last touch" line remains
+                  the stated fact.{% endcomment %}
+                  <span class="cc-avatar stale-{{ card.stale_tint }}" style="--stale: {{ card.stale_pct }}"
+                        title="{% if card.days_since is not None %}{{ card.days_since }}d of this contact's keep-warm window used{% else %}Never contacted{% endif %}">{{ card.initials }}</span>
                   <div class="cc-id">
                     <span class="cc-name">{{ card.c.name|smart_title }}
                       {% if card.gender %}<span class="pill cc-pill">{{ card.gender }}</span>{% endif %}

@@ -21,6 +21,8 @@ user's targeted firms in the feed.
 
 from __future__ import annotations
 
+from datetime import date
+
 from collections import Counter
 
 from django.contrib.auth.decorators import login_required
@@ -983,6 +985,43 @@ def _urgency_feed(qs, *, now, today, my_firm_ids):
     }
 
 
+def cycle_months(months: int = 12) -> list[dict]:
+    """Deadline density for the next N months, template-ready.
+
+    Reads role deadlines AND confirmed firm dates, so the shape reflects
+    everything the product would put a countdown on. Height is relative to
+    the busiest month (the calendar rail's convention); an empty month is a
+    baseline tick, because "nothing closes in July" is the insight that tells
+    a student when to breathe.
+    """
+    from collections import Counter
+
+    from .models import FirmDate
+
+    today = timezone.localdate()
+    counts: Counter = Counter()
+    for d in Opportunity.objects.filter(
+            status="open", bucket__in=TARGET_BUCKETS,
+            deadline__gte=today).values_list("deadline", flat=True):
+        counts[(d.year, d.month)] += 1
+    for d in FirmDate.objects.filter(
+            confidence=1.0, date__gte=today,
+            event_kind__in=("app_close", "insight_deadline")).values_list("date", flat=True):
+        counts[(d.year, d.month)] += 1
+
+    out = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        n = counts.get((y, m), 0)
+        out.append({"label": date(y, m, 1).strftime("%b"), "count": n,
+                    "is_now": (y, m) == (today.year, today.month)})
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    busiest = max((r["count"] for r in out), default=0)
+    for r in out:
+        r["pct"] = round(100 * r["count"] / busiest) if busiest else 0
+    return out
+
+
 def _last_checked() -> str:
     """"3 hours" / "2 days" since the newest scrape run, or ""."""
     from .models import ScrapeRun
@@ -1432,6 +1471,7 @@ def opportunities(request):
         # while the data is radar-cadence; naming the age is what makes the
         # pulse honest.
         "checked_ago": _last_checked(),
+        "cycle_months": cycle_months(),
         "total": total,
         # Recommendation bar. `picks` empty + `has_profile` true is the honest
         # "nothing clears the bar" state; `has_profile` false is the

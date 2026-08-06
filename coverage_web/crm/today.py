@@ -250,6 +250,16 @@ def _build_actions(user):
             cadence.business_days_since(timezone.localtime(last.ts).date(), today)
             if last else None
         )
+        # Inbound movement this week: THEY did something recently (a reply, a
+        # chat happening or landing on the calendar). The queue's cards
+        # otherwise read as static state; this is the one fact that makes a
+        # card urgent in the good direction, so it gets its own pulse.
+        a["moved"] = bool(
+            last
+            and last.kind in ("reply_received", "chat", "chat_scheduled")
+            and a["last_business_days"] is not None
+            and a["last_business_days"] <= 5
+        )
         # Drives the "longest silent first" term of the Today sort key. No
         # dateable touch sorts as maximally silent, which is what it is.
         a["idle_business_days"] = (

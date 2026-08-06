@@ -190,7 +190,12 @@ def test_network_page_shows_gaps_advocate_fractions_and_tier_cost(client):
     gap_block = _gap_strip(body)
     assert "Exposed Co" in gap_block and "Covered Co" not in gap_block
     # Advocate fractions on the cards, both sides of the target.
-    assert "2/2" in body and "0/2" in body
+    # The fraction became advocate SOCKETS — dots that fill — with the words
+    # kept in the accessible name. Assert both halves of that contract: the
+    # spoken fraction, and a filled and an empty socket actually drawn.
+    assert "2 of 2 advocates" in body and "0 of 2 advocates" in body
+    assert 'adv-socket is-filled' in body
+    assert '<i class="adv-socket"></i>' in body
     # And the tier's cost: 2 firms × 2 = 4 advocates, 2 in place.
     assert "2 firms × 2" in body
     assert "= 4 advocates" in body

@@ -1021,6 +1021,26 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.06em; font-weight: var(--w-med); }
 
 
+/* ---- The cycle band: deadline density as a shape ---------------------------
+   Rendered by directory/_cycle_band.html on the feed and under Settings'
+   cycle picker. Same anatomy as the calendar's month rail: height is the
+   count, a column per month, the current month marked by more than colour. */
+.cycband { display: flex; align-items: flex-end; gap: 2px; margin: 2px 0 var(--s4);
+  padding-bottom: 3px; border-bottom: 1px solid var(--line); }
+.cycband-m { flex: 1 1 0; display: grid; justify-items: center; gap: 3px; min-width: 0; }
+.cycband-bar { height: 26px; width: 58%; display: block; position: relative; }
+.cycband-bar::after { content: ""; position: absolute; bottom: 0; left: 0; right: 0;
+  height: max(var(--h), 7%); border-radius: 3px 3px 0 0; background: var(--accent-line);
+  transform-origin: bottom; animation: mrail-grow 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 24ms); }
+.cycband-m.is-now .cycband-bar::after { background: var(--accent); }
+.cycband-m b { font-family: var(--font-mono); font-size: 9px; font-weight: var(--w-med);
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); }
+.cycband-m.is-now b { color: var(--accent-ink); }
+.cycband-m.is-now b::after { content: " •"; color: var(--accent); }
+@keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .cycband-bar::after { animation: none; } }
+
 /* ---- 15. htmx niceties ----------------------------------------------------- */
 #cov-results { transition: opacity var(--t-fast); }
 .filters.htmx-request ~ #cov-results { opacity: 0.55; }
