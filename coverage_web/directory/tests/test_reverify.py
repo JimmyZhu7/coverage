@@ -111,11 +111,50 @@ def test_refresh_chains_and_survives_a_failing_stage(monkeypatch):
         calls.append(name)
         if name == "scrape":
             raise RuntimeError("boards unreachable")
-        if name == "reverify":
-            return  # nothing stale in the test DB anyway
+        if name in ("reverify", "enrich_postings"):
+            # reverify: nothing stale in the test DB anyway.
+            # enrich_postings: one HTTP request per posting — never from a test.
+            return
         return real_call(name, *a, **kw)
 
     monkeypatch.setattr(refresh_mod, "call_command", fake_call)
     with pytest.raises(SystemExit):
         call_command("refresh")
-    assert calls == ["scrape", "reclassify", "reverify"]
+    assert calls == ["scrape", "reclassify", "enrich_postings",
+                     "extract_facts", "reverify"]
+
+
+@pytest.mark.django_db
+def test_refresh_extracts_after_it_enriches(monkeypatch):
+    """Order is load-bearing between exactly these two stages: extraction reads
+    the text enrichment just fetched, so a run that swapped them would derive
+    every fact from yesterday's copy of the page.
+
+    The stages were absent from this chain entirely for one release, and the
+    gap showed within a day — the newest posting on the board carried no
+    description, no deadline and no facts, because the only enrichment run had
+    been a manual one."""
+    import directory.management.commands.refresh as refresh_mod
+
+    _opp(Firm.objects.create(slug="acme", name="Acme"), "https://x/live")
+    calls = []
+    monkeypatch.setattr(refresh_mod, "call_command",
+                        lambda name, *a, **kw: calls.append(name))
+    call_command("refresh")
+    assert calls.index("enrich_postings") < calls.index("extract_facts")
+
+
+@pytest.mark.django_db
+def test_refresh_can_skip_the_network_stage_but_still_extracts(monkeypatch):
+    """`--no-enrich` is for a fast local pass. Extraction still runs: it is
+    pure CPU over text already stored, and the patterns change far more often
+    than the pages do."""
+    import directory.management.commands.refresh as refresh_mod
+
+    _opp(Firm.objects.create(slug="acme", name="Acme"), "https://x/live")
+    calls = []
+    monkeypatch.setattr(refresh_mod, "call_command",
+                        lambda name, *a, **kw: calls.append(name))
+    call_command("refresh", no_enrich=True)
+    assert "enrich_postings" not in calls
+    assert "extract_facts" in calls
