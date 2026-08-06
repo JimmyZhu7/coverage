@@ -38,7 +38,7 @@ from django.utils.dateparse import parse_date
 from directory.boards import BOARDS
 from directory.classify import (
     board_is_campus, classify_role, clean_title, extract_class_year, extract_cohort,
-    extract_deadline_from_text, extract_sponsorship, normalize_region,
+    extract_deadline_from_text, extract_sponsorship, normalize_region, region_from_prose,
     posting_text,
 )
 from directory.models import Opportunity
@@ -85,6 +85,17 @@ class Command(BaseCommand):
                 # told us the title is not where it is.
                 if not region and not (opp.location or "").strip():
                     region = normalize_region(title)
+                # Still nothing: the posting's own cached prose, through the
+                # location-anchored extractor. Fill-only like everything else
+                # in this loop, and honest about its limits — on live data 18
+                # of 240 unregioned roles state a market this way, 43 state a
+                # location OUTSIDE the four markets (correctly left blank),
+                # and the rest never say where they are at all.
+                if not region:
+                    from directory.facts import _clean
+
+                    region = region_from_prose(
+                        _clean((opp.raw or {}).get("detail_text") or ""))
                 counts[bucket] = counts.get(bucket, 0) + 1
 
                 # Prose re-extraction over the STORED raw payload — the whole

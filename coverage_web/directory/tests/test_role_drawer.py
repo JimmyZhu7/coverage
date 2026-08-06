@@ -207,3 +207,28 @@ def test_a_card_names_itself_so_a_deep_link_can_find_it(client):
         url="https://citi.com/dl", raw={"detail_text": "Ten weeks. " * 40})
     body = client.get("/opportunities/").content.decode()
     assert f'data-role-id="{o.id}"' in body
+
+
+@pytest.mark.django_db
+def test_my_applications_can_read_the_postings_it_tracks(client, django_user_model):
+    """The one role-listing surface that could not open the posting behind
+    the decision — chips shipped to it, the drawer did not."""
+    from analytics.models import UserOpportunity
+
+    user = django_user_model.objects.create_user(email="ma@x.com", password="x")
+    client.force_login(user)
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    held = Opportunity.objects.create(
+        firm=firm, title="Held Analyst", bucket="internship", status="open",
+        url="https://gs.com/held", raw={"detail_text": "Ten weeks. " * 40})
+    unread = Opportunity.objects.create(
+        firm=firm, title="Unread Analyst", bucket="internship", status="open",
+        url="https://gs.com/unread")
+    UserOpportunity.all_objects.create(user=user, opportunity=held)
+    UserOpportunity.all_objects.create(user=user, opportunity=unread)
+
+    body = client.get("/opportunities/mine/").content.decode()
+    assert 'id="role-drawer"' in body
+    assert f'data-role-id="{held.id}"' in body
+    assert f'data-role-id="{unread.id}"' not in body, \
+        "never offer to open what we do not hold"

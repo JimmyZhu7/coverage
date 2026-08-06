@@ -1,0 +1,13 @@
+{
+  "name": "Coverage",
+  "short_name": "Coverage",
+  "description": "Recruiting deadlines and the people behind them.",
+  "start_url": "/app/",
+  "display": "standalone",
+  "background_color": "#faf8f5",
+  "theme_color": "#1d3a5f",
+  "icons": [
+    {"src": "/static/img/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

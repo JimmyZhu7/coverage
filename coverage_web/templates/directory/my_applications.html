@@ -138,6 +138,8 @@
      shared component in coverage.css. */
   .lens-facts { display: inline-flex; flex-wrap: wrap; gap: 4px;
     margin-left: var(--s2); vertical-align: middle; }
+  .lens-read { margin-left: var(--s2); }
+  .apps-read { align-self: flex-start; }
   /* The funnel cards' own countdown and chips. Compact, because these cards
      are a grid and a stage section can hold a dozen of them. */
   .apps-when { display: inline-flex; align-items: center; align-self: flex-start;
@@ -297,6 +299,9 @@
                     student decides what to do this week, and it knew none of
                     it.{% endcomment %}
                     {% if r.facts %}<span class="lens-facts">{% for f in r.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}</span>{% endif %}
+                    {% if r.has_text %}<button type="button" class="meta-read lens-read" data-role-read data-role-id="{{ r.id }}"
+                            hx-get="{% url 'role_description' r.id %}"
+                            hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>{% endif %}
                   </span>
                   <a class="lens-stage" href="#stage-{{ r.stage }}"
                      title="Counted once, under {{ r.stage_label }} below. This row is that same role.">
@@ -347,6 +352,16 @@
                   <div class="apps-facts">
                     {% for f in uo.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
                   </div>
+                {% endif %}
+                {% comment %}Read the posting here, from the copy we hold —
+                the same drawer as the feed and the firm page. This is the
+                page where a student decides what to do this week, and it
+                was the one role-listing surface that could not open the
+                posting behind the decision.{% endcomment %}
+                {% if uo.has_text %}
+                  <button type="button" class="meta-read apps-read" data-role-read data-role-id="{{ uo.id }}"
+                          hx-get="{% url 'role_description' uo.id %}"
+                          hx-target="#role-drawer-body" hx-swap="innerHTML">Read the posting</button>
                 {% endif %}
                 <div class="apps-foot">
                   <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}">
@@ -412,4 +427,6 @@
     </section>
   {% endif %}
 </div>
+
+{% include "directory/_drawer.html" %}
 {% endblock %}

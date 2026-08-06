@@ -846,74 +846,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      an inner scroll so a 4,000-character description never pushes the page,
      and a fixed close button that stays reachable while the body scrolls.
      ====================================================================== */
-  .meta-read { flex: none; margin-left: auto; border: 1px solid var(--line);
-    border-radius: 999px; background: var(--surface); color: var(--ink-3);
-    padding: 1px 8px; font-size: 10px; font-family: var(--font-mono);
-    cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
-  .meta-read:hover { border-color: var(--accent-line); color: var(--accent-ink); }
+  /* The posting drawer's styles now live in static/css/coverage.css: the
+     drawer is included by the feed, the firm page AND My Applications, and
+     component CSS defined in one page's inline styles is a component the
+     other pages silently lose — the exact bug that left My Applications
+     with chips but no way to read the posting behind them. */
 
-  .drawer { border: 0; padding: 0; border-radius: var(--r-panel);
-    width: min(680px, 92vw); max-height: 84vh; overflow: hidden;
-    background: var(--surface); color: var(--ink);
-    box-shadow: 0 24px 60px rgba(23, 23, 23, 0.22); }
-  .drawer::backdrop { background: rgba(23, 23, 23, 0.42); }
-  /* The dialog scrolls its own body, not the page behind it. */
-  /* The scroller. Bottom padding clears the sticky apply bar so the last
-     paragraph is readable rather than sitting under it. */
-  .drawer > div { max-height: calc(84vh - 60px); overflow-y: auto;
-    padding: var(--s5) var(--s5) 0; }
-  .drawer-x { position: absolute; top: 10px; right: 12px; z-index: 2;
-    width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
-    border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
-    font-size: 13px; line-height: 1; }
-  .drawer-x:hover { border-color: var(--accent-line); color: var(--accent-ink); }
-  .drawer-loading { color: var(--ink-3); font-size: var(--fs-s); margin: 0; }
-
-  .drawer-head { margin-bottom: var(--s3); padding-right: var(--s5); }
-  .drawer-firm { margin: 0 0 2px; font-family: var(--font-mono);
-    font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--ink-3); }
-  .drawer-title { margin: 0 0 6px; font: var(--w-black) clamp(18px, 2vw, 23px)/1.2 var(--font-display);
-    letter-spacing: -0.01em; }
-  .drawer-meta { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0;
-    font-size: var(--fs-xs); color: var(--ink-3); }
-  .drawer-deadline { color: var(--danger); font-weight: var(--w-med); }
-  /* Where the date came from, said in a word. The drawer has room to name it
-     outright, so it does — the card's dotted rule is the compressed version
-     of this label, not a different claim. */
-  .drawer-reported { font-family: var(--font-mono); font-size: var(--fs-micro);
-    font-weight: var(--w-reg); color: var(--ink-3); text-transform: uppercase;
-    letter-spacing: 0.05em; }
-
-  /* What the posting states, each line beside the sentence that produced it.
-     The evidence is the point of the panel, so it is set as a quotation
-     rather than hidden in a tooltip the way the card's chips must. */
-  .drawer-facts { display: grid; gap: 6px; margin: var(--s3) 0 var(--s4);
-    padding: var(--s3); border: 1px solid var(--line); border-radius: 10px;
-    background: var(--paper); }
-  .drawer-fact { display: grid; grid-template-columns: 88px minmax(0, 1fr);
-    gap: 2px var(--s2); align-items: baseline; }
-  .df-k { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
-    letter-spacing: 0.05em; color: var(--ink-3); }
-  .df-v { font-size: var(--fs-s); font-weight: var(--w-bold); color: var(--ink); }
-  .df-why { grid-column: 2; font-size: var(--fs-xs); color: var(--ink-3);
-    font-style: italic; overflow-wrap: anywhere; }
-
-  /* 68ch, because a 680px drawer of unbroken 3,800-character prose is
-     unreadable at full width and this text arrives with its paragraphs
-     already stripped (see directory/facts.py). */
-  .drawer-body { max-width: 68ch; font-size: var(--fs-s); line-height: 1.7;
-    color: var(--ink-2); }
-  .drawer-body p { margin: 0 0 var(--s3); }
-  .drawer-note, .drawer-empty p { color: var(--ink-3); font-size: var(--fs-xs); }
-  /* Sticky, so the way out is always on screen in a 4,000-character read.
-     The negative side margins pull it to the scroller's edges (the scroller
-     has horizontal padding) and the shadow separates it from the text it
-     scrolls over — without that it read as a button dropped mid-sentence. */
-  .drawer-apply { position: sticky; bottom: 0; display: block;
-    margin: var(--s4) calc(-1 * var(--s5)) 0;
-    padding: var(--s3) var(--s5); text-align: center;
-    background: var(--accent); color: #fff; font-weight: var(--w-med);
-    font-size: var(--fs-s); box-shadow: 0 -8px 16px -8px rgba(23, 23, 23, 0.35); }
-  .drawer-apply:hover { text-decoration: none; background: var(--accent-ink); }
 </style>

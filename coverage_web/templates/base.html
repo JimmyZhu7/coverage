@@ -21,6 +21,11 @@
   survives that re-resolution, and /favicon.ico redirects here so the
   fallback path lands on the same mark.{% endcomment %}
   <link rel="icon" type="image/svg+xml" href="{% static 'img/favicon.svg' %}">
+  {% comment %}Installable: students live on phones, and without a manifest
+  "Add to Home Screen" produces a bare bookmark. start_url is /app/ — an
+  installed Coverage opens on Today, not the marketing page.{% endcomment %}
+  <link rel="manifest" href="{% static 'manifest.webmanifest' %}">
+  <meta name="theme-color" content="#1d3a5f">
   <link rel="stylesheet" href="{% static 'css/coverage.css' %}">
   {# Vendored static asset, not a CDN or Node build — see coverage_web/static/vendor/. #}
   <script src="{% static 'vendor/htmx.min.js' %}" defer></script>

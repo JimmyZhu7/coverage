@@ -1739,6 +1739,7 @@ def _lens_item(uo, *, today):
         # student reads when deciding what to do THIS WEEK, and it was the one
         # surface that knew nothing about sponsorship, pay or a language wall.
         "facts": _fact_chips(o),
+        "has_text": bool((o.raw or {}).get("detail_text")),
     }
 
 

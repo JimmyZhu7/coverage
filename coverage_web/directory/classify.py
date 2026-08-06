@@ -157,6 +157,46 @@ def normalize_region(location: str | None, *, fallback: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Region from prose — the fill-only rescue for postings whose LIST payload
+# carried no location at all. 240 open campus roles were invisible to every
+# concrete region filter while their own cached descriptions said "Program
+# Locations: New York, NY" in as many words.
+#
+# Two gates, both load-bearing:
+#
+# 1. LOCATION-ANCHORED WINDOWS, never the whole text. A bank's boilerplate
+#    name-drops half its offices ("our London, Hong Kong and New York teams"),
+#    and running normalize_region over full prose would hand first-match-wins
+#    to whichever market sorts first in _REGION_KEYS. Only the ~90 characters
+#    after an anchor phrase ("location:", "based in", "office in"...) are
+#    read, because that is where postings state where THIS role sits.
+# 2. AGREEMENT, or silence. Windows that resolve to different markets mean
+#    the posting is multi-market or the anchors caught noise; either way the
+#    honest region is "unstated", not a coin flip. Same contract as every
+#    extractor in facts.py: silence is an answer.
+# ---------------------------------------------------------------------------
+# The window stops at a sentence boundary: with a bare `.{0,90}` the first
+# anchor's window ran into the NEXT sentence, so "Location: New York. This
+# role is based in Hong Kong." read both cities through one anchor and the
+# agreement gate never saw a conflict.
+_REGION_ANCHOR = re.compile(
+    r"(?:locations?\s*:|based in|located in|office in|position is in|"
+    r"role is (?:based |located )?in|work location|this internship is in)"
+    r"\s*([^.\n]{0,90})", re.IGNORECASE)
+
+
+def region_from_prose(text: str | None) -> str:
+    if not text:
+        return ""
+    found = set()
+    for m in _REGION_ANCHOR.finditer(text):
+        code = normalize_region(m.group(1))
+        if code:
+            found.add(code)
+    return found.pop() if len(found) == 1 else ""
+
+
+# ---------------------------------------------------------------------------
 # Title cleanup — boards prepend location/region routing to titles ("EMEA |
 # Frankfurt | Women in Banking Dinner") and append requisition codes
 # ("Project Intern (J19302)"). Strip both so the displayed title is the role.

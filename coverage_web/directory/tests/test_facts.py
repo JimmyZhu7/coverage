@@ -243,3 +243,34 @@ def test_ordinary_prose_has_no_region():
     from directory.classify import normalize_region
 
     assert normalize_region("ensuring timely, complete and accurate reporting") == ""
+
+
+# --- Region from prose -----------------------------------------------------
+
+def test_a_stated_location_fills_the_region():
+    from directory.classify import region_from_prose
+
+    assert region_from_prose("Program Locations: New York, NY and Charlotte") == "us"
+    assert region_from_prose("This role is based in Hong Kong.") == "hk"
+
+
+def test_boilerplate_name_drops_are_not_a_location():
+    """A bank's About section lists half its offices; only text after a
+    location anchor counts."""
+    from directory.classify import region_from_prose
+
+    assert region_from_prose(
+        "Our London, Hong Kong and New York teams work as one firm.") == ""
+
+
+def test_a_location_outside_the_four_markets_stays_silent():
+    from directory.classify import region_from_prose
+
+    assert region_from_prose("Location: Bangalore, India") == ""
+
+
+def test_two_markets_in_anchored_windows_mean_no_answer():
+    from directory.classify import region_from_prose
+
+    assert region_from_prose(
+        "Location: New York. This role is based in Hong Kong.") == ""

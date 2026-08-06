@@ -86,6 +86,12 @@ AUTH_USER_MODEL = "accounts.User"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # First in the list = last to touch the response = compresses everything
+    # below it. The feed serves ~2MB of HTML uncompressed — seconds on
+    # cellular for the page most likely to be opened on a phone. (Django's
+    # docs note gzip's BREACH caveat; its own CSRF masking is the standing
+    # mitigation, and no other secret is reflected into responses here.)
+    "django.middleware.gzip.GZipMiddleware",
     # Serves collected static files in production (harmless in dev, where
     # runserver's staticfiles app handles them). Must sit right after
     # SecurityMiddleware per WhiteNoise's docs.
