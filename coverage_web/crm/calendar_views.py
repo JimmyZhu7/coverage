@@ -467,7 +467,7 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
         for trigger, when in (("-P7D", "in a week"), ("-P1D", "tomorrow")):
             out += ["BEGIN:VALARM", "ACTION:DISPLAY",
                     f"TRIGGER;RELATED=START:{trigger}",
-                    f"DESCRIPTION:{esc(f'{summary} — {when}')}",
+                    f"DESCRIPTION:{esc(f'{summary} · {when}')}",
                     "END:VALARM"]
         return out
 
