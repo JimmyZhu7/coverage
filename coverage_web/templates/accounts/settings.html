@@ -156,6 +156,88 @@
     .set-copy { flex-direction: column; }
   }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  /* ======================================================================
+     THE CADENCE RAILS — the chase, drawn.
+     Markers are absolutely positioned by --x (a percentage the JS computes
+     from the inputs) and TRANSITION there, so editing a number makes the
+     mechanism visibly move. Motion is on `left` of three small elements at
+     most once per keystroke: cheap, and off under reduced-motion.
+     ====================================================================== */
+  .cad-viz { display: grid; gap: var(--s4); margin-bottom: var(--s5);
+    padding: var(--s4); border: 1px solid var(--line); border-radius: 12px;
+    background: var(--paper); }
+  .cad-rail-title { margin: 0 0 26px; font-family: var(--font-mono);
+    font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-3); }
+  .cad-rail { position: relative; height: 4px; border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-line), var(--line)); margin: 0 34px 30px 10px; }
+  .cad-rail-deadline { background: linear-gradient(90deg, var(--line), var(--danger)); }
+  .cad-mark { position: absolute; left: var(--x, 0%); top: 50%;
+    transform: translate(-50%, -50%); display: grid; justify-items: center;
+    transition: left 420ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .cad-mark i { font-style: normal; font-size: 13px; line-height: 1;
+    width: 26px; height: 26px; display: grid; place-items: center;
+    background: var(--surface); border: 1.5px solid var(--accent-line);
+    border-radius: 50%; color: var(--accent-ink); box-shadow: var(--shadow-1); }
+  .cad-mark-park i { border-color: var(--line-strong); color: var(--ink-3); }
+  .cad-mark-advocate i { border-color: var(--ok-line); color: var(--ok); }
+  .cad-mark-close i { border-color: var(--danger); color: var(--danger); }
+  .cad-mark b { position: absolute; top: -18px; font-size: 10px;
+    font-weight: var(--w-med); color: var(--ink-2); white-space: nowrap; }
+  .cad-mark u { position: absolute; top: 28px; text-decoration: none;
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
+    white-space: nowrap; }
+  /* When the only follow-up is turned off (max cold touches = 1) its marker
+     dims rather than vanishes: the rail should show what you gave up. */
+  .cad-mark.is-off { opacity: 0.35; filter: grayscale(1); }
+  .cad-sentence { margin: 0; font-size: var(--fs-xs); color: var(--ink-2); }
+  @media (prefers-reduced-motion: reduce) { .cad-mark { transition: none; } }
+
+  /* ---- The pace ring: setting and readout as the same shape -------------
+     The SVG is a control (drag or click the ring), but the number input
+     remains the accessible one — the ring writes to it and it writes to the
+     ring, so either hand works. --p is the fill fraction. */
+  .pace-set { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap;
+    margin-bottom: var(--s3); }
+  .pace-ring-widget { position: relative; width: 132px; height: 132px;
+    cursor: pointer; touch-action: none; flex: none; }
+  .pace-ring-widget svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .pace-ring-widget .pr-track { fill: none; stroke: var(--line); stroke-width: 9; }
+  .pace-ring-widget .pr-fill { fill: none; stroke: var(--accent); stroke-width: 9;
+    stroke-linecap: round; stroke-dasharray: 339.3;
+    stroke-dashoffset: calc(339.3 * (1 - var(--p, 0)));
+    transition: stroke-dashoffset 320ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .pace-ring-widget .pr-val { position: absolute; inset: 0; display: grid;
+    place-content: center; text-align: center; }
+  .pace-ring-widget .pr-val b { font-family: var(--font-mono); font-size: 30px;
+    font-weight: var(--w-med); color: var(--accent-ink); line-height: 1; }
+  .pace-ring-widget .pr-val span { font-size: 9px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--ink-3); }
+  .pace-read { font-size: var(--fs-s); color: var(--ink-2); max-width: 26rem; }
+  .pace-read b { color: var(--accent-ink); }
+  @media (prefers-reduced-motion: reduce) { .pace-ring-widget .pr-fill { transition: none; } }
+
+  /* ---- Capture flow: the mechanism nobody trusts, shown moving ----------
+     Three stations, two channels, a dot that travels them on a loop. The
+     dot is ornament over an already-stated fact (the hint sentence), so it
+     pauses under reduced-motion with nothing lost. */
+  .cap-flow { display: flex; align-items: center; gap: var(--s2);
+    margin: var(--s3) 0 var(--s2); flex-wrap: wrap; }
+  .cap-node { padding: 6px 12px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--surface); font-size: var(--fs-xs);
+    color: var(--ink-2); white-space: nowrap; }
+  .cap-node-you { border-color: var(--accent-line); color: var(--accent-ink); }
+  .cap-pipe { position: relative; flex: 1 1 40px; min-width: 40px; height: 2px;
+    background: var(--line); border-radius: 999px; overflow: visible; }
+  .cap-pipe::after { content: ""; position: absolute; top: 50%; left: 0;
+    width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+    transform: translate(-50%, -50%);
+    animation: cap-travel 2.6s linear infinite; }
+  .cap-pipe + .cap-node + .cap-pipe::after { animation-delay: 1.3s; }
+  @keyframes cap-travel { from { left: 0; opacity: 0; } 12% { opacity: 1; }
+    88% { opacity: 1; } to { left: 100%; opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cap-pipe::after { animation: none; opacity: 0; } }
 </style>
 {% endblock %}
 
@@ -268,6 +350,45 @@
           <p>How Hard Coverage Chases</p>
         </div>
         <div class="set-body">
+          {% comment %}
+          THE CHASE, DRAWN. The six numbers below are one mechanism — when the
+          engine follows up, when it gives up, when it circles back — and as a
+          column of spinners the mechanism was invisible: you could set
+          "park after 10" without ever seeing that it means day 16 of a cold
+          contact's life. Three rails tell the three stories, markers slide as
+          the numbers change (CSS transitions on custom properties — the JS
+          only writes values), and each rail speaks a live sentence for screen
+          readers and skimmers alike. The number inputs stay the controls:
+          keyboard, validation, and the POST contract are all theirs.
+          {% endcomment %}
+          <div class="cad-viz" id="cad-viz" data-defaults='{"followup_after_business_days": 6, "park_after_business_days": 10, "max_cold_touches": 2, "advocate_touch_min_weeks": 6, "chatted_touch_min_weeks": 8, "pre_deadline_reping_days": 10}'>
+            <div class="cad-rail-wrap">
+              <p class="cad-rail-title">A cold contact's life</p>
+              <div class="cad-rail" aria-hidden="true">
+                <span class="cad-mark cad-mark-note" style="--x: 0%"><i>✉</i><b>Note</b><u>day 0</u></span>
+                <span class="cad-mark cad-mark-followup"><i>✉</i><b>Follow-up</b><u></u></span>
+                <span class="cad-mark cad-mark-park"><i>◦</i><b>Park</b><u></u></span>
+              </div>
+              <p class="cad-sentence" id="cad-cold-sentence" aria-live="off"></p>
+            </div>
+            <div class="cad-rail-wrap">
+              <p class="cad-rail-title">Keeping warm people warm</p>
+              <div class="cad-rail cad-rail-weeks" aria-hidden="true">
+                <span class="cad-mark cad-mark-chatted"><i>☕</i><b>Chatted</b><u></u></span>
+                <span class="cad-mark cad-mark-advocate"><i>★</i><b>Advocate</b><u></u></span>
+              </div>
+              <p class="cad-sentence" id="cad-warm-sentence" aria-live="off"></p>
+            </div>
+            <div class="cad-rail-wrap">
+              <p class="cad-rail-title">Before a deadline closes</p>
+              <div class="cad-rail cad-rail-deadline" aria-hidden="true">
+                <span class="cad-mark cad-mark-reping"><i>✉</i><b>Re-ping</b><u></u></span>
+                <span class="cad-mark cad-mark-close" style="--x: 100%"><i>▮</i><b>Closes</b><u>day 0</u></span>
+              </div>
+              <p class="cad-sentence" id="cad-deadline-sentence" aria-live="off"></p>
+            </div>
+          </div>
+
           <form method="post" action="{% url 'accounts:settings' %}">
             {% csrf_token %}
             <input type="hidden" name="section" value="cadence">
@@ -299,6 +420,25 @@
           <p>Your Touches-Per-Week Target</p>
         </div>
         <div class="set-body">
+          {% comment %}
+          The same ring Today measures you with, as the control that sets the
+          target: drag or click the arc and the number moves, type the number
+          and the arc moves. The visual maxes out at 30 — past that a weekly
+          goal is aspiration, not pacing — while the input still accepts the
+          form's real ceiling. aria-hidden: the input beside it is the
+          accessible control, and two controls announcing one value is noise.
+          {% endcomment %}
+          <div class="pace-set">
+            <div class="pace-ring-widget" id="pace-ring" aria-hidden="true">
+              <svg viewBox="0 0 120 120">
+                <circle class="pr-track" cx="60" cy="60" r="54"/>
+                <circle class="pr-fill" cx="60" cy="60" r="54"/>
+              </svg>
+              <div class="pr-val"><b id="pace-ring-n">–</b><span>a week</span></div>
+            </div>
+            <p class="pace-read" id="pace-read"></p>
+          </div>
+
           <form method="post" action="{% url 'accounts:settings' %}">
             {% csrf_token %}
             <input type="hidden" name="section" value="pace">
@@ -336,6 +476,17 @@
                 <code class="capture-addr" id="capture-addr">{{ capture_address }}</code>
                 <button type="button" class="btn" id="copy-addr" data-copy="{{ capture_address }}"
                         aria-label="Copy your capture address">Copy</button>
+              </div>
+              {% comment %}The loop, drawn: the reason students distrust BCC
+              capture is that nothing ever shows the path their mail takes.
+              Two hops, one travelling dot, and the words underneath still
+              say it for anyone the dot can't reach.{% endcomment %}
+              <div class="cap-flow" aria-hidden="true">
+                <span class="cap-node cap-node-you">Your outreach email</span>
+                <span class="cap-pipe"></span>
+                <span class="cap-node">BCC → your capture address</span>
+                <span class="cap-pipe"></span>
+                <span class="cap-node">The contact's timeline</span>
               </div>
               <p class="set-hint">BCC this on outreach, or forward replies to it. Treat it
                 like a private key: anyone who has it can log mail into your CRM.</p>
@@ -585,6 +736,120 @@
 
 <script>
   (function () {
+    // ---- The cadence rails: positions computed from the live inputs. ----
+    // The JS writes CSS custom properties and sentences; CSS owns all the
+    // motion. Scales stretch to fit the values, so a park window of 120
+    // days never pushes a marker off the rail.
+    var viz = document.getElementById("cad-viz");
+    function num(name, fallback) {
+      var el = document.querySelector('[name="' + name + '"]');
+      var v = el ? parseInt(el.value, 10) : NaN;
+      return isNaN(v) ? fallback : v;
+    }
+    function setMark(sel, pct, label) {
+      var m = viz.querySelector(sel);
+      m.style.setProperty("--x", pct + "%");
+      m.querySelector("u").textContent = label;
+    }
+    function drawCadence() {
+      var d = JSON.parse(viz.dataset.defaults);
+      var f = num("followup_after_business_days", d.followup_after_business_days);
+      var park = num("park_after_business_days", d.park_after_business_days);
+      var touches = num("max_cold_touches", d.max_cold_touches);
+      var chat = num("chatted_touch_min_weeks", d.chatted_touch_min_weeks);
+      var adv = num("advocate_touch_min_weeks", d.advocate_touch_min_weeks);
+      var reping = num("pre_deadline_reping_days", d.pre_deadline_reping_days);
+
+      // Cold rail: note at 0, follow-up at f, park at f+park (or just park
+      // when the follow-up is off). Scale = end of story + 15% air.
+      var end = (touches > 1 ? f + park : park);
+      var scale = end * 1.15 || 1;
+      var fu = viz.querySelector(".cad-mark-followup");
+      fu.classList.toggle("is-off", touches <= 1);
+      setMark(".cad-mark-followup", Math.round(100 * f / scale), "day " + f);
+      setMark(".cad-mark-park", Math.round(100 * end / scale), "day " + end);
+      document.getElementById("cad-cold-sentence").textContent =
+        touches > 1
+          ? "Send the note. No reply after " + f + " business days: one follow-up. " +
+            "Still nothing " + park + " later: parked, day " + end + "."
+          : "Send the note. No follow-up at all. No reply after " + park +
+            " business days: parked.";
+
+      // Warm rail: two clocks on a shared weeks scale.
+      var wScale = Math.max(chat, adv) * 1.25 || 1;
+      setMark(".cad-mark-chatted", Math.round(100 * chat / wScale), chat + "w");
+      setMark(".cad-mark-advocate", Math.round(100 * adv / wScale), adv + "w");
+      document.getElementById("cad-warm-sentence").textContent =
+        "Someone you've chatted with goes quiet for " + chat +
+        " weeks: circle back. An advocate: every " + adv + " weeks.";
+
+      // Deadline rail: right edge is the close; re-ping sits reping days out.
+      var dScale = Math.max(reping * 1.4, 30);
+      setMark(".cad-mark-reping", Math.round(100 * (1 - reping / dScale)), "−" + reping + "d");
+      document.getElementById("cad-deadline-sentence").textContent =
+        "Warm contacts at a firm get re-pinged " + reping +
+        " days before its confirmed deadline.";
+    }
+    if (viz) {
+      drawCadence();
+      ["followup_after_business_days", "park_after_business_days",
+       "max_cold_touches", "chatted_touch_min_weeks",
+       "advocate_touch_min_weeks", "pre_deadline_reping_days"
+      ].forEach(function (name) {
+        var el = document.querySelector('[name="' + name + '"]');
+        if (el) el.addEventListener("input", drawCadence);
+      });
+    }
+
+    // ---- The pace ring: two-way bound to the weekly-goal input. ----------
+    var ring = document.getElementById("pace-ring");
+    var goalInput = document.querySelector('[name="weekly_touch_goal"]');
+    if (ring && goalInput) {
+      var RING_MAX = 30;
+      var fallback = parseInt(goalInput.placeholder, 10) || 10;
+      function goal() {
+        var v = parseInt(goalInput.value, 10);
+        return isNaN(v) ? fallback : v;
+      }
+      function drawRing() {
+        var g = goal();
+        ring.style.setProperty("--p", Math.min(g / RING_MAX, 1));
+        document.getElementById("pace-ring-n").textContent = g;
+        document.getElementById("pace-read").innerHTML =
+          "That's about <b>" + Math.round(g / 5 * 10) / 10 +
+          " a weekday</b>." + (goalInput.value ? "" :
+          " Using the default — drag the ring or type a number to set your own.");
+      }
+      function setFromPointer(e) {
+        var r = ring.getBoundingClientRect();
+        var dx = e.clientX - (r.left + r.width / 2);
+        var dy = e.clientY - (r.top + r.height / 2);
+        // atan2 with the ring's -90° rotation undone: 12 o'clock is 0.
+        var frac = (Math.atan2(dy, dx) + Math.PI / 2 + 2 * Math.PI) %
+                   (2 * Math.PI) / (2 * Math.PI);
+        var v = Math.max(1, Math.round(frac * RING_MAX));
+        goalInput.value = v;
+        // The form and any other listener should see a real input event.
+        goalInput.dispatchEvent(new Event("input", { bubbles: true }));
+        drawRing();
+      }
+      ring.addEventListener("pointerdown", function (e) {
+        setFromPointer(e);
+        // Capture AFTER the first set, and tolerantly: a pointer that cannot
+        // be captured (synthetic events, some pens) should still click.
+        try { ring.setPointerCapture(e.pointerId); } catch (err) {}
+        function move(ev) { setFromPointer(ev); }
+        function up() {
+          ring.removeEventListener("pointermove", move);
+          ring.removeEventListener("pointerup", up);
+        }
+        ring.addEventListener("pointermove", move);
+        ring.addEventListener("pointerup", up);
+      });
+      goalInput.addEventListener("input", drawRing);
+      drawRing();
+    }
+
     // Copy the capture address, with a quick "Copied" confirmation. The visual
     // label swap is invisible to a screen reader, so the same fact also goes
     // into an aria-live region.
