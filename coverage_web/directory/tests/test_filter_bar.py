@@ -326,3 +326,67 @@ def test_the_open_roles_figure_is_a_live_region(client, bar):
     body = _get(client).content.decode()
     assert body.count('role="status"') == 1
     assert '<span class="ss-item" role="status">' in body
+
+
+# ---------------------------------------------------------------------------
+# Sponsorship (?sponsorship=). The first question an international student
+# asks about a US posting. It became answerable only when `enrich_postings`
+# started reading the postings' own pages, and the bar had no control for it.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_sponsorship_filters_to_the_answer_the_posting_gave(client):
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    for title, answer in (("Sponsored Analyst", "yes"),
+                          ("Unsponsored Analyst", "no"),
+                          ("Silent Analyst", "unknown")):
+        Opportunity.objects.create(
+            firm=firm, title=title, bucket="internship", status="open",
+            sponsorship=answer, url=f"https://gs.com/{answer}")
+
+    body = client.get("/opportunities/?sponsorship=yes").content.decode()
+    assert "Sponsored Analyst" in body
+    assert "Unsponsored Analyst" not in body
+    assert "Silent Analyst" not in body
+
+    body = client.get("/opportunities/?sponsorship=no").content.decode()
+    assert "Unsponsored Analyst" in body
+    assert "Sponsored Analyst" not in body
+
+
+@pytest.mark.django_db
+def test_not_stated_gathers_both_ways_of_saying_nothing(client):
+    """The column defaults to "unknown" and older rows carry "". They are one
+    fact stored two ways, so one option must return both — otherwise the
+    counts cannot sum to the total and a bucket of rows is unreachable."""
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    Opportunity.objects.create(firm=firm, title="Default Silent", bucket="internship",
+                               status="open", sponsorship="unknown",
+                               url="https://ms.com/a")
+    Opportunity.objects.create(firm=firm, title="Legacy Silent", bucket="internship",
+                               status="open", sponsorship="",
+                               url="https://ms.com/b")
+
+    body = client.get("/opportunities/?sponsorship=unknown").content.decode()
+    assert "Default Silent" in body
+    assert "Legacy Silent" in body
+
+
+@pytest.mark.django_db
+def test_the_sponsorship_counts_sum_to_the_whole_set(client):
+    """The bar's consistency rule: a counted facet's options partition the
+    set. Silence is an option here rather than a fourth invisible state —
+    the mistake Region made when a filter deleted 297 unstated rows without
+    saying so."""
+    firm = Firm.objects.create(slug="jpm", name="J.P. Morgan")
+    for i, answer in enumerate(("yes", "no", "unknown", "", "no")):
+        Opportunity.objects.create(
+            firm=firm, title=f"Role {i}", bucket="internship", status="open",
+            sponsorship=answer, url=f"https://jpm.com/{i}")
+
+    resp = client.get("/opportunities/")
+    facet = {o["value"]: o["count"] for o in resp.context["facets"]["sponsorship"]}
+    assert facet[""] == 5
+    assert facet["yes"] + facet["no"] + facet["unknown"] == facet[""]
+    assert facet["no"] == 2
+    assert facet["unknown"] == 2, "blank and 'unknown' are one bucket"
