@@ -384,3 +384,115 @@ def test_an_api_deadline_sets_full_confidence(monkeypatch):
 
     assert Opportunity.objects.get(url=U1).confidence == 1.0
     assert Opportunity.objects.get(url=U2).confidence == 0.0
+
+
+# ---------------------------------------------------------------------------
+# WHAT A RE-SCRAPE MUST NOT DESTROY.
+#
+# These pin the most expensive bug this app has shipped. `enrich_postings`
+# visits each posting's own page — one HTTP request apiece, ~20 minutes for a
+# full pass — and banks the description, the deadline read out of it, and the
+# facts derived from that text. Ingest then overwrote `raw` wholesale on every
+# scrape, so the next nightly run erased all of it: 854 descriptions to 0, 854
+# fact sets to 0, 121 deadlines to 29, silently, six hours after the first
+# enrichment run finished.
+#
+# The rule under test: a scrape may add and may correct, but silence in a list
+# payload may never erase an answer. Those endpoints have never carried a
+# deadline, so "no deadline in the payload" is not evidence of anything.
+# ---------------------------------------------------------------------------
+
+def _enriched(url, **extra):
+    """A row as `enrich_postings` + `extract_facts` leave it."""
+    o = Opportunity.objects.get(url=url)
+    o.raw = {**(o.raw or {}),
+             "detail_text": "Applications close on 30 September 2026.",
+             "detail_fetched": True,
+             "facts": {"gpa": {"value": "3.5", "phrase": "minimum GPA of 3.5"}},
+             "facts_at": "2026-08-05T12:00:00+00:00"}
+    for k, v in extra.items():
+        setattr(o, k, v)
+    o.save()
+    return o
+
+
+@pytest.mark.django_db
+def test_a_rescrape_keeps_the_description_it_did_not_fetch(monkeypatch):
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    _enriched(U1)
+
+    # The identical posting comes back tomorrow: same title, same everything,
+    # and a payload that has never carried a description.
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    raw = Opportunity.objects.get(url=U1).raw
+    assert raw["detail_text"].startswith("Applications close")
+    assert raw["facts"]["gpa"]["value"] == "3.5"
+    assert raw["detail_fetched"] is True
+
+
+@pytest.mark.django_db
+def test_a_rescrape_keeps_a_deadline_the_payload_never_carried(monkeypatch):
+    from datetime import date
+
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    _enriched(U1, deadline=date(2026, 9, 30), deadline_precision="day", confidence=0.6)
+
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    assert o.deadline == date(2026, 9, 30), "silence is not a withdrawal"
+    assert o.confidence == 0.6
+
+
+@pytest.mark.django_db
+def test_a_rescrape_keeps_a_sponsorship_answer_read_from_the_posting(monkeypatch):
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    _enriched(U1, sponsorship="no")
+
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    assert Opportunity.objects.get(url=U1).sponsorship == "no"
+
+
+@pytest.mark.django_db
+def test_a_changed_posting_drops_our_reading_of_the_old_one(monkeypatch):
+    """The other half of the contract. When the posting's own content moves,
+    a description we cached describes something else and a deadline we read
+    out of it is unverified — so both go, and the row returns to the
+    enrichment queue (whose queue is exactly "rows with no detail_text")."""
+    from datetime import date
+
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    _enriched(U1, deadline=date(2026, 9, 30), deadline_precision="day", confidence=0.6)
+
+    _patch(monkeypatch, [_result([_opp(U1, title="Off-Cycle Analyst")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    assert "detail_text" not in o.raw
+    assert o.deadline is None
+    assert o.confidence == 0.0
+
+
+@pytest.mark.django_db
+def test_a_changed_posting_keeps_a_deadline_the_provider_states(monkeypatch):
+    """A provider's own field is not our reading of anything, so a change to
+    the posting is no reason to drop it — it is restated by this very fetch."""
+    from datetime import date
+
+    _patch(monkeypatch, [_result([_opp(U1, deadline="2026-09-15")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    _patch(monkeypatch, [_result([_opp(U1, title="Renamed", deadline="2026-09-15")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    assert o.deadline == date(2026, 9, 15)
+    assert o.confidence == 1.0

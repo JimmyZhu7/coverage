@@ -61,6 +61,47 @@ from .models import Firm, Opportunity, ScrapeRun
 _HASH_FIELDS = ("title", "location", "deadline", "region", "cohort", "sponsorship", "source")
 
 
+# ---------------------------------------------------------------------------
+# WHAT SURVIVES A RE-SCRAPE.
+#
+# A board's list endpoint carries ~250 characters and no closing date. Every
+# richer thing this product knows about a posting — the description
+# `enrich_postings` fetched from the posting's OWN page, the deadline read out
+# of it, the facts derived from that text — is ours, derived, and lives
+# nowhere in the payload that arrives tomorrow.
+#
+# So `existing.raw = opp.raw` destroyed all of it, once per night, silently.
+# Measured on live data the morning after the first enrichment run: 854
+# descriptions to 0, 854 fact sets to 0, and 121 deadlines to 29. The feature
+# had a working day of life. Nothing errored, no count went red — the board
+# simply forgot what it had read, and the next enrichment run would have paid
+# to fetch all 854 pages again.
+#
+# The rule now: a scrape may add what it knows and may correct what it stated
+# before, but it may never DOWNGRADE a real answer to silence. Absence in a
+# list payload is absence of information, not evidence that a deadline was
+# withdrawn — those endpoints have never carried one.
+_DERIVED_RAW_KEYS = ("detail_text", "detail_fetched", "facts", "facts_at")
+
+
+def _merge_raw(incoming: dict | None, previous: dict | None, *, changed: bool) -> dict:
+    """The provider's fresh payload, carrying our derived keys through.
+
+    `changed` drops them on purpose: the content hash moving means the posting
+    itself moved, so a description we cached before is a description of
+    something else. Dropping it puts the row back in `enrich_postings`' queue
+    (its queue IS "rows with no detail_text"), which is how a re-titled or
+    re-dated posting gets re-read instead of quietly keeping a stale copy.
+    """
+    merged = dict(incoming or {})
+    if changed:
+        return merged
+    for key in _DERIVED_RAW_KEYS:
+        if key in (previous or {}):
+            merged[key] = previous[key]
+    return merged
+
+
 def content_hash_for(opp: ConnOpportunity) -> str:
     """Stable sha256 over the posting's content-bearing fields. Drives
     change-detection (did this row's substance move since last run?) — it
@@ -273,13 +314,36 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     existing.location = location
     existing.source = opp.source or ""
     existing.region = region
-    existing.deadline = final_deadline
-    existing.deadline_precision = "day" if final_deadline else ""
     existing.cohort = cohort
     existing.class_year = class_year
-    existing.sponsorship = final_sponsorship
-    existing.confidence = max(existing.confidence, final_confidence)
-    existing.raw = opp.raw or {}
+
+    # ---- The no-downgrade rules. See _merge_raw above for the whole story.
+    #
+    # A deadline: take the incoming one when there is one. When there is not,
+    # KEEP what we hold — the list endpoints carry no deadlines at all, so
+    # "the payload said nothing" is the normal case and has never meant "the
+    # firm withdrew the date". The single exception is a posting whose own
+    # content moved while our date was only a reading of its prose
+    # (confidence < 1.0): that reading is now unverified, so it is dropped and
+    # the row goes back in the enrichment queue rather than showing a
+    # countdown to a date the new version may not state.
+    if final_deadline is not None:
+        existing.deadline = final_deadline
+        existing.deadline_precision = "day"
+        existing.confidence = max(existing.confidence, final_confidence)
+    elif changed and (existing.confidence or 0) < 1.0 and existing.deadline:
+        existing.deadline = None
+        existing.deadline_precision = ""
+        existing.confidence = 0.0
+
+    # Sponsorship: same shape. "unknown" is the payload's silence, and
+    # silence must not erase an answer read from the posting's own page.
+    if final_sponsorship != "unknown":
+        existing.sponsorship = final_sponsorship
+    elif changed:
+        existing.sponsorship = "unknown"
+
+    existing.raw = _merge_raw(opp.raw, existing.raw, changed=changed)
     existing.posted_at = (opp.posted_at or "")[:64]
     existing.content_hash = h
     existing.status = "open"
