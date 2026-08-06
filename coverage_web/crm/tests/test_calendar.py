@@ -624,3 +624,30 @@ def test_a_date_that_opens_something_gets_no_alarm(client, user):
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
     assert "applications open" in body
     assert "BEGIN:VALARM" not in body, "nothing is lost by reading an opening late"
+
+
+def test_a_prose_read_deadline_is_marked_on_the_calendar(logged_in, client):
+    """Layer 4 does not copy layer 3's confidence bar — a posting's own stated
+    date is worth showing even when we read it out of prose rather than a
+    published field (92 of 121 dated open roles). It is MARKED instead of
+    withheld, on the grid and in the feed a phone subscribes to."""
+    opp = _tracked_role(logged_in, days=7, title="Reported Analyst")
+    opp.confidence = 0.6
+    opp.save(update_fields=["confidence"])
+
+    body = client.get("/app/calendar/").content.decode()
+    assert "Reported Analyst" in body
+    assert "reported date" in body, "the caveat must be spoken, not only hovered"
+
+    ics = client.get(f"/app/calendar/feed/{logged_in.calendar_token}.ics").content.decode()
+    assert "(reported)" in ics
+
+
+def test_a_provider_stated_deadline_is_not_marked(logged_in, client):
+    opp = _tracked_role(logged_in, days=7, title="Stated Analyst")
+    opp.confidence = 1.0
+    opp.save(update_fields=["confidence"])
+
+    ics = client.get(f"/app/calendar/feed/{logged_in.calendar_token}.ics").content.decode()
+    assert "Stated Analyst closes" in ics
+    assert "(reported)" not in ics

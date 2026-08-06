@@ -81,6 +81,14 @@
 }
 
 /* ---- 1. Tokens ---------------------------------------------------------- */
+/* Visually hidden, still spoken. The clip-rect pattern was inlined in three
+   places before this; it is a utility now because a caveat that only reaches
+   sighted users through `title` is not a caveat the product has stated. Never
+   `display: none` — that removes the text from the accessibility tree too. */
+.vh { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+  white-space: nowrap; border: 0; }
+
 :root {
   /* Ground + ink */
   --paper:        #f7f6f3;   /* page background */
@@ -937,6 +945,46 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .deadline.past .count { color: var(--danger); }
 .deadline.none { color: var(--ink-3); font-style: italic; }
 .markers { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
+/* A second markers row for fact chips, tighter than the pill row above it. */
+.markers-facts { gap: 4px; margin-top: -2px; }
+
+/* A deadline read out of the posting's own prose rather than published as a
+   field by the board (Opportunity.confidence < 1.0 — 92 of 121 dated open
+   roles). Dotted rule, never a colour change: the date is what the posting
+   says, so it keeps its urgency; the mark is about provenance. */
+.deadline.is-reported .date { text-decoration: underline dotted currentColor;
+  text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+/* ---- Fact chips: what a posting states about applying --------------------
+   Sponsorship, pay, a language wall, the graduation years accepted, a GPA
+   bar, a cover letter, a named assessment. Shared by the feed's role cards
+   and the firm page's opportunity cards — one component, one definition, so
+   the two surfaces cannot drift into describing the same row differently.
+   Every chip's `title` is the sentence it was extracted from; see
+   directory/facts.py for why a chip that cannot show its evidence does not
+   ship. -------------------------------------------------------------- */
+.fact-chip { display: inline-flex; align-items: center; flex: none;
+  border-radius: 4px; padding: 1px 6px; font-family: var(--font-mono);
+  font-size: 10px; line-height: 15px; letter-spacing: -0.01em;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  /* 18ch, not 15: "No sponsorship" and "Grad 2027-2028" both measure ~16
+     characters in the mono face, so 235 of 483 chips rendered clipped at
+     15ch (95px of label in 88px of box) — the same "fixed the box, not the
+     content" mistake this file's card comment is about, one slot down. The
+     cap still exists because a
+     language chip can carry two names; it just sits above the longest
+     label the extractors actually produce. */
+  max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+  /* A wall — sponsorship refused, a language you may not have. Bordered in
+   the danger tint rather than filled: it is a fact about the posting, not
+   an alarm about the student, and eight filled red chips down a column
+   would read as breakage. */
+.fact-wall { border-color: var(--danger); color: var(--danger); }
+.fact-ok { border-color: var(--ok-line); color: var(--ok); }
+  /* Pay is the one chip nobody else on a campus board shows. */
+.fact-pay { border-color: var(--accent-line); color: var(--accent-ink);
+  background: var(--accent-soft); font-weight: var(--w-med); }
+
 
 /* ---- 13. Onboarding steps -------------------------------------------------- */
 .steps { display: flex; gap: var(--s4); list-style: none; padding: 0;

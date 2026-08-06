@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import re
+
 import pytest
 from django.urls import reverse
 from django.utils import timezone
@@ -272,3 +274,117 @@ def test_facets_do_not_offer_options_that_only_exist_in_hidden_roles(client):
     # Selecting role=all brings the hidden role's facets back.
     resp_all = client.get(reverse("opportunities"), {"role": "all"})
     assert _concrete(resp_all.context["facets"]["regions"]) == {"us", "jp"}
+
+
+# ---------------------------------------------------------------------------
+# PROVENANCE. `Opportunity.confidence` is 1.0 when the board published the
+# date in a structured field and 0.6 when `enrich_postings` read it out of the
+# posting's prose — 92 of the 121 dated open roles are the second kind. Both
+# are shown; only one is a quotation of a field, and rendering them
+# identically claims a precision the data does not have.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_a_prose_read_deadline_is_marked_on_the_feed(client):
+    from datetime import timedelta
+
+    from django.utils import timezone as tz
+
+    firm = Firm.objects.create(slug="bofa", name="Bank of America")
+    Opportunity.objects.create(
+        firm=firm, title="Reported Analyst", bucket="internship", status="open",
+        deadline=tz.localdate() + timedelta(days=20), deadline_precision="day",
+        confidence=0.6, url="https://bofa.com/reported")
+
+    body = client.get("/opportunities/").content.decode()
+    assert "is-reported" in body
+    # The caveat must reach a screen reader, not only a hovering mouse.
+    assert "(reported)" in body
+
+
+@pytest.mark.django_db
+def test_a_provider_stated_deadline_carries_no_mark(client):
+    from datetime import timedelta
+
+    from django.utils import timezone as tz
+
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    Opportunity.objects.create(
+        firm=firm, title="Stated Analyst", bucket="internship", status="open",
+        deadline=tz.localdate() + timedelta(days=20), deadline_precision="day",
+        confidence=1.0, url="https://ms.com/stated")
+
+    # Strip <style>: the mark's own CSS rule ships inline in this page, so a
+    # bare substring test would pass whether or not a card wore the class.
+    # Same trap the grid-column comment in calendar.html documents.
+    body = re.sub(r"<style.*?</style>", "",
+                  client.get("/opportunities/").content.decode(), flags=re.S)
+    assert "Stated Analyst" in body
+    assert "is-reported" not in body
+
+
+# ---------------------------------------------------------------------------
+# FACT CHIPS. Same component on the feed, the firm page and My Applications:
+# what the posting states about applying. The firm page spent a release
+# showing strictly less about a role than the feed showed about the same row.
+# ---------------------------------------------------------------------------
+
+def _stated(firm, **extra):
+    return Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        url="https://gs.com/sa", sponsorship="no",
+        raw={"facts": {"pay": {"value": "$85k–$100k", "phrase": "Pay Range $85,000-$100,000"},
+                       "gpa": {"value": "3.5", "phrase": "minimum GPA of 3.5"}}},
+        **extra)
+
+
+@pytest.mark.django_db
+def test_the_feed_card_shows_what_the_posting_states(client):
+    _stated(Firm.objects.create(slug="gs", name="Goldman Sachs"))
+    body = client.get("/opportunities/").content.decode()
+    assert "No sponsorship" in body
+    assert "$85k–$100k" in body
+    # Evidence travels with the value, per directory/facts.py's contract.
+    assert "Pay Range $85,000-$100,000" in body
+
+
+@pytest.mark.django_db
+def test_the_firm_page_shows_the_same_facts_as_the_feed(client):
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    _stated(firm)
+    body = client.get(f"/firms/{firm.slug}/").content.decode()
+    assert "No sponsorship" in body
+    assert "$85k–$100k" in body
+
+
+@pytest.mark.django_db
+def test_an_unfetched_posting_states_nothing_rather_than_guessing(client):
+    """Silence is an answer and its answer is "we don't know". A posting we
+    never read must not acquire chips from its firm or its title."""
+    firm = Firm.objects.create(slug="ubs", name="UBS")
+    Opportunity.objects.create(
+        firm=firm, title="Unread Analyst", bucket="internship", status="open",
+        url="https://ubs.com/unread")
+    body = re.sub(r"<style.*?</style>", "",
+                  client.get("/opportunities/").content.decode(), flags=re.S)
+    assert "Unread Analyst" in body
+    assert "fact-chip" not in body
+
+
+@pytest.mark.django_db
+def test_an_undated_role_says_no_date_unless_it_claimed_rolling(client):
+    """"Rolling" is a claim the posting has to make. ~600 open roles simply
+    never state how they close, and calling that rolling review invented a
+    fact about every one of them."""
+    firm = Firm.objects.create(slug="citi", name="Citi")
+    Opportunity.objects.create(firm=firm, title="Silent Role", bucket="internship",
+                               status="open", url="https://citi.com/silent")
+    Opportunity.objects.create(
+        firm=firm, title="Rolling Role", bucket="internship", status="open",
+        url="https://citi.com/rolling",
+        raw={"facts": {"rolling": {"value": "Rolling",
+                                   "phrase": "reviewed on a rolling basis"}}})
+
+    body = client.get("/opportunities/").content.decode()
+    assert "No date posted" in body
+    assert "reviewed on a rolling basis" in body

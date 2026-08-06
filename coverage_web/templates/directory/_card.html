@@ -19,12 +19,33 @@ lays it out. Pass `mine=True` to flag it as one of the user's targeted firms.
   </p>
 
   {% if card.deadline.posted %}
-    <p class="deadline{% if card.deadline.past %} past{% endif %}">
+    {% comment %}Same provenance mark the feed cards carry: a dotted rule when
+    the date was read out of the posting's prose rather than published as a
+    field by the board. This page and the feed describe the same rows, and
+    them disagreeing about what is known is the bug this closes.{% endcomment %}
+    <p class="deadline{% if card.deadline.past %} past{% endif %}{% if card.reported %} is-reported{% endif %}"
+       {% if card.reported %}title="{{ card.reported.why }}"{% endif %}>
       <span class="date">{{ card.deadline.label }}</span>
       <span class="count">· {{ card.deadline.countdown }}</span>
+      {% if card.reported %}<span class="vh">({{ card.reported.label }})</span>{% endif %}
     </p>
   {% else %}
     <p class="deadline none">{{ card.deadline.label }}</p>
+  {% endif %}
+
+  {% comment %}
+  What the posting states about applying — sponsorship, pay, a language wall,
+  eligibility. Identical chips to the feed's cards (views.py `_fact_chips`
+  builds both), because this page spent a release showing strictly less about
+  a role than the feed showed about the same row, and a student who arrives
+  here from search has no way to know they are seeing the poorer view.
+  {% endcomment %}
+  {% if card.facts %}
+    <div class="markers markers-facts">
+      {% for f in card.facts %}
+        <span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>
+      {% endfor %}
+    </div>
   {% endif %}
 
   {% if card.tags %}

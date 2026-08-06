@@ -18,6 +18,15 @@ whole firm's cycle ("Goldman Sachs, applications close"); what a student
 needs on the day is the posting they actually starred. Those dates were
 extracted, stored, and shown on the feed, and were invisible here and in the
 subscribed feed — the two surfaces meant to tell you before it is too late.
+
+Layer 4 does NOT copy layer 3's `confidence=1.0` bar, and that is a decision
+rather than an oversight. A FirmDate below 1.0 is a date nobody has confirmed
+the firm holds; an Opportunity below 1.0 is a date the posting itself states,
+which `enrich_postings` read out of its prose instead of a published field —
+92 of the 121 dated open roles. Excluding those would empty the layer to make
+a point. They are shown and MARKED instead: "reported" travels with them onto
+the grid, into the feed, and into the notification a phone raises, because the
+honest move is to say where a date came from, not to withhold a real one.
 """
 
 from __future__ import annotations
@@ -134,6 +143,7 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             # the posting itself, on the day it closes.
             "url": opp.url,
             "stage": uo.applied_status or "saved",
+            "reported": _is_reported(opp),
         })
 
     for day in buckets:
@@ -141,6 +151,15 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
         # fact about the whole day and belongs above the 3pm coffee.
         buckets[day].sort(key=lambda e: (not e["all_day"], e["at"] or timezone.now()))
     return buckets
+
+
+# See the module docstring: 1.0 means the board published the date as a field,
+# anything less means we read it out of the posting's own words.
+_CONFIRMED = 1.0
+
+
+def _is_reported(opp) -> bool:
+    return (opp.confidence or 0) < _CONFIRMED
 
 
 def _role_label(opp) -> str:
@@ -473,15 +492,23 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
     # intention, and this feed is what turns it into a reminder.
     for uo in _tracked_deadlines(user, window_start.date(), window_end.date()):
         opp = uo.opportunity
-        summary = f"{_role_label(opp)} closes"
+        # The marker rides in the SUMMARY, not the description: a phone
+        # notification shows the summary and nothing else, and that
+        # notification is the whole reason this feed exists.
+        reported = _is_reported(opp)
+        summary = f"{_role_label(opp)} closes" + (" (reported)" if reported else "")
         lines += ["BEGIN:VEVENT",
                   f"UID:coverage-uo-{uo.id}@coverage.app",
                   f"DTSTAMP:{stamp}",
                   f"SUMMARY:{esc(summary)}",
                   f"DTSTART;VALUE=DATE:{opp.deadline:%Y%m%d}"]
+        note = ("Read from the posting's own text, not a field the board "
+                "published.\n" if reported else "")
         if opp.url:
             lines += [f"URL:{esc(opp.url)}",
-                      f"DESCRIPTION:{esc(opp.url)}"]
+                      f"DESCRIPTION:{esc(note + opp.url)}"]
+        elif note:
+            lines.append(f"DESCRIPTION:{esc(note)}")
         lines += alarms(summary)
         lines.append("END:VEVENT")
 

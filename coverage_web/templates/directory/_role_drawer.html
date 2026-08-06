@@ -14,7 +14,8 @@ last and unmissable — this drawer is for deciding, not for applying.
   <p class="drawer-firm">{{ firm.name|smart_title }}{% if o.location %} · {{ o.location|smart_title }}{% endif %}</p>
   <h2 class="drawer-title">{{ o.title|smart_title }}</h2>
   <p class="drawer-meta">
-    {% if deadline %}<span class="drawer-deadline">{{ deadline.label }}</span>{% endif %}
+    {% if deadline %}<span class="drawer-deadline{% if reported %} is-reported{% endif %}"
+      {% if reported %}title="{{ reported.why }}"{% endif %}>{{ deadline.label }}{% if reported %} <span class="drawer-reported">{{ reported.label }}</span>{% endif %}</span>{% endif %}
     {% if o.cohort %}<span>{{ o.cohort }} intake</span>{% endif %}
     {% if o.bucket %}<span>{{ o.bucket_label|default:o.bucket }}</span>{% endif %}
   </p>
@@ -37,7 +38,7 @@ last and unmissable — this drawer is for deciding, not for applying.
 {% if fetched %}
   <div class="drawer-body">
     {% for block in blocks %}<p>{{ block|linebreaksbr }}</p>{% endfor %}
-    <p class="drawer-note">Read from the posting as it stood when we last checked it. The firm's page is the record.</p>
+    <p class="drawer-note">Read from the posting{% if checked_ago %} {{ checked_ago }} ago{% endif %}. The firm's page is the record.</p>
   </div>
 {% else %}
   {% comment %}Never an empty drawer. Not every posting has been fetched (854

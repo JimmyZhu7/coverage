@@ -233,6 +233,11 @@
   .cal-ev-tracked::after { content: "↗"; flex: none; color: var(--ink-3);
     font-size: 10px; }
   .cal-ev-tracked:hover { background: var(--surface); box-shadow: var(--shadow-1); }
+  /* Read out of the posting's prose rather than published as a field. Same
+     dotted rule the feed cards use for the same fact, so the two surfaces
+     mark it identically. */
+  .cal-ev-tracked.is-reported .cal-ev-title {
+    text-decoration: underline dotted currentColor; text-underline-offset: 2px; }
   .cal-ev-time { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
     flex: none; letter-spacing: -0.02em; }
   .cal-ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;

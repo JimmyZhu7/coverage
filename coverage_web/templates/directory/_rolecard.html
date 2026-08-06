@@ -77,7 +77,17 @@ without cutting text off.
 
   <div class="rolecard-meta">
     {% if r.dated %}
-      <span class="meta-status meta-{{ r.level }}">{{ r.countdown }}</span>
+      {% comment %}
+      A deadline we READ out of the posting's prose is marked; one the board
+      published as a field is not. 92 of 121 dated open roles are the first
+      kind, and rendering both identically claimed a precision only 29 of them
+      have. The dotted underline is the visual mark, the title says why, and
+      the visually-hidden word is what a screen reader gets — `title` alone is
+      not an accessible carrier, and this is exactly the sort of caveat that
+      must not be sighted-only.
+      {% endcomment %}
+      <span class="meta-status meta-{{ r.level }}{% if r.reported %} is-reported{% endif %}"
+            {% if r.reported %}title="{{ r.reported.why }}"{% endif %}>{{ r.countdown }}{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
     {% elif r.rolling_stated %}
       {% comment %}The posting's own words say rolling review, so the word is
       earned and its evidence hangs on the title.{% endcomment %}

@@ -28,6 +28,7 @@ from django.db.models import Case, Count, F, IntegerField, Max, Q, Value, When
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
+from django.utils.timesince import timesince
 from django.views.decorators.http import require_POST
 
 from analytics.events import record_event
@@ -124,6 +125,26 @@ def confidence_marker(value):
     else:
         level = "low"
     return {"level": level, "label": level, "value": round(value, 2), "pct": round(value * 100)}
+
+
+# Where a deadline came from. `Opportunity.confidence` is 1.0 when the
+# provider handed us the date in a structured field and 0.6 when
+# `enrich_postings` read it out of the posting's own prose — and 92 of the 121
+# dated open roles are the second kind. Both are worth showing; only one of
+# them is a quotation of a field, and a page that renders them identically is
+# claiming a certainty it does not have.
+#
+# "Reported" rather than "unconfirmed": the date IS what the posting says. The
+# word is about the reading being ours, not about doubting the firm.
+_CONFIRMED_AT = 1.0
+
+
+def deadline_provenance(opp) -> dict | None:
+    """"Reported" for a prose-read deadline, None for a stated one."""
+    if opp.deadline is None or (opp.confidence or 0) >= _CONFIRMED_AT:
+        return None
+    return {"label": "reported",
+            "why": "Read from the posting's own text, not a field the board published"}
 
 
 def deadline_marker(deadline, precision, *, today=None):
@@ -233,7 +254,12 @@ def _card(opp, *, now, today):
         "cohort": opp.cohort,
         "class_year": opp.class_year,
         "deadline": deadline_marker(opp.deadline, opp.deadline_precision, today=today),
+        "reported": deadline_provenance(opp),
         "tags": tags,
+        # The same chips the feed cards carry. This page renders its own card
+        # markup, which is how it spent a release showing strictly less about
+        # a role than the feed did about the same row.
+        "facts": _fact_chips(opp),
     }
 
 
@@ -626,6 +652,8 @@ def _apply_filters(qs, sel, *, skip=()):
         qs = qs.filter(firm__tracks__contains=[sel["track"]])
     if "provider" not in skip and sel["provider"]:
         qs = qs.filter(source__iexact=sel["provider"])
+    if "sponsorship" not in skip and sel.get("sponsorship"):
+        qs = _apply_sponsorship_filter(qs, sel["sponsorship"])
     if "firm" not in skip and sel["firm"]:
         qs = qs.filter(firm__slug__in=sel["firm"])
     if "q" not in skip and sel["q"]:
@@ -639,6 +667,45 @@ def _apply_filters(qs, sel, *, skip=()):
     if "role" not in skip:
         qs = _apply_role_filter(qs, sel["role"])
     return qs
+
+
+# ---------------------------------------------------------------------------
+# Sponsorship filter (?sponsorship=). Three real answers, and the third one is
+# the honest majority: `unknown` means the posting did not say, which on this
+# data is most of them. It is offered as a choice rather than hidden, because
+# "show me the ones nobody has answered" is a real question when the answered
+# set is small — and because a filter that silently dropped 4,000 unanswered
+# rows into a fourth invisible state would be the region bug again.
+SPONSORSHIP_CHOICES = (
+    ("", "Any Sponsorship"),
+    ("yes", "Sponsors visas"),
+    ("no", "No sponsorship"),
+    ("unknown", "Not stated"),
+)
+# Blank and "unknown" are the same fact stored two ways (the column defaults
+# to "unknown"; older rows carry ""), so the filter and the facet must both
+# treat them as one bucket or the counts will not sum to the total.
+_SPONSOR_SILENT = ("", "unknown")
+
+
+def _apply_sponsorship_filter(qs, value: str):
+    if value == "unknown":
+        return qs.filter(sponsorship__in=_SPONSOR_SILENT)
+    if value in ("yes", "no"):
+        return qs.filter(sponsorship=value)
+    return qs
+
+
+def _sponsorship_facet(qs, current: str) -> list[dict]:
+    """Options with live counts, same contract as the other counted facets."""
+    counts = Counter(qs.values_list("sponsorship", flat=True))
+    silent = sum(counts.get(k, 0) for k in _SPONSOR_SILENT)
+    total = sum(counts.values())
+    per = {"": total, "yes": counts.get("yes", 0),
+           "no": counts.get("no", 0), "unknown": silent}
+    return [{"value": v, "label": label, "count": per.get(v, 0),
+             "selected": v == current}
+            for v, label in SPONSORSHIP_CHOICES]
 
 
 # ---------------------------------------------------------------------------
@@ -825,6 +892,7 @@ def _urgency_item(o, *, now, today, my_firm_ids):
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
         "fresh_label": _fresh_label(seen_days),
         "facts": _fact_chips(o),
+        "reported": deadline_provenance(o),
         # Whether the Read control has anything to open. Checked here, not in
         # the template, so the card never offers a drawer that would come back
         # empty.
@@ -909,8 +977,6 @@ def _urgency_feed(qs, *, now, today, my_firm_ids):
 
 def _last_checked() -> str:
     """"3 hours" / "2 days" since the newest scrape run, or ""."""
-    from django.utils.timesince import timesince
-
     from .models import ScrapeRun
 
     latest = ScrapeRun.objects.exclude(connector="reverify").order_by("-started").first()
@@ -959,6 +1025,10 @@ def opportunities(request):
     region = request.GET.get("region", "").strip()
     track = request.GET.get("track", "").strip()
     provider = request.GET.get("provider", "").strip()
+    # Sponsorship (?sponsorship=yes|no|unknown). The first question an
+    # international student asks about any US posting, answerable on the rows
+    # `enrich_postings` has read, and until now not askable at all.
+    sponsorship = request.GET.get("sponsorship", "").strip()
     # Multi-select firm filter: any number of ?firm=<slug> params.
     firm_slugs = [s.strip() for s in request.GET.getlist("firm") if s.strip()]
     query = request.GET.get("q", "").strip()
@@ -969,6 +1039,7 @@ def opportunities(request):
         "region": region,
         "track": track,
         "provider": provider,
+        "sponsorship": sponsorship,
         "firm": firm_slugs,
         "q": query,
     }
@@ -995,6 +1066,9 @@ def opportunities(request):
         ),
         "tracks": _track_facet(
             _apply_filters(open_qs, selected, skip=("track",)), track
+        ),
+        "sponsorship": _sponsorship_facet(
+            _apply_filters(open_qs, selected, skip=("sponsorship",)), sponsorship
         ),
         # URL-only filter (?provider=): no student thinks in ATS providers, so
         # it earns no control in the bar and therefore no counts. The option
@@ -1385,16 +1459,20 @@ def opportunities(request):
         "show_all_qs": show_all_qs,
         "hidden_region": hidden_region,
         "show_unregioned_qs": show_unregioned_qs,
-        # How many of the four row-2 controls are engaged. Drives the mobile
+        # How many of the row-2 controls are engaged. Drives the mobile
         # disclosure's "Filters · 2" summary AND the decision to server-render
         # it open, so a deep-linked filter is never invisible at 375px.
+        # Sponsorship counts here like any other: a filter this badge omits is
+        # a filter a phone user can have active and never see.
         "filters_more_active": (
-            sum(1 for v in (year, region, track) if v) + (1 if firm_slugs else 0)
+            sum(1 for v in (year, region, track, sponsorship) if v)
+            + (1 if firm_slugs else 0)
         ),
         "dash": dash,
         "all_firms": all_firms,
         "selected": selected,
-        "has_filters": any([role, year, region, track, provider, query]) or bool(firm_slugs),
+        "has_filters": (any([role, year, region, track, provider, sponsorship, query])
+                        or bool(firm_slugs)),
         # `_results.html` is included on a full render and returned bare on an
         # htmx swap. The out-of-band count fragment must only ship on the
         # second: on a full page load the counts are already correct in the
@@ -1494,6 +1572,11 @@ def role_description(request, pk):
         "blocks": paragraphs(raw.get("detail_text")),
         "fetched": bool(raw.get("detail_text")),
         "deadline": deadline_marker(opp.deadline, opp.deadline_precision, today=today),
+        "reported": deadline_provenance(opp),
+        # The drawer's closing line claimed the text was current "when we last
+        # checked it" and then declined to say when that was — the one honesty
+        # sentence on the panel with no number in it.
+        "checked_ago": timesince(opp.last_checked, depth=1) if opp.last_checked else "",
         "facts": [{"label": label, **facts[kind]}
                   for kind, label in _FACT_LABELS if kind in facts],
     })
@@ -1598,8 +1681,13 @@ def _lens_item(uo, *, today):
         "stage": stage,
         "stage_label": _STAGE_LABELS.get(stage, stage.title()),
         "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
+        "reported": deadline_provenance(o),
         "days_left": days_left,
         "urgency": _urgency_band(days_left),
+        # The same chips the feed and the firm page carry. This is the page a
+        # student reads when deciding what to do THIS WEEK, and it was the one
+        # surface that knew nothing about sponsorship, pay or a language wall.
+        "facts": _fact_chips(o),
     }
 
 

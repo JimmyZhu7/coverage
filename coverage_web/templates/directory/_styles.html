@@ -645,27 +645,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rolecard-facts { display: flex; align-items: center; gap: 4px;
     height: 17px; flex: none; min-width: 0; overflow: hidden;
     white-space: nowrap; }
-  .fact-chip { display: inline-flex; align-items: center; flex: none;
-    border-radius: 4px; padding: 1px 6px; font-family: var(--font-mono);
-    font-size: 10px; line-height: 15px; letter-spacing: -0.01em;
-    border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
-    /* 18ch, not 15: "No sponsorship" and "Grad 2027-2028" both measure ~16
-       characters in the mono face, so 235 of 483 chips rendered clipped at
-       15ch (95px of label in 88px of box) — the same "fixed the box, not the
-       content" mistake this file's card comment is about, one slot down. The
-       cap still exists because a
-       language chip can carry two names; it just sits above the longest
-       label the extractors actually produce. */
-    max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
-  /* A wall — sponsorship refused, a language you may not have. Bordered in
-     the danger tint rather than filled: it is a fact about the posting, not
-     an alarm about the student, and eight filled red chips down a column
-     would read as breakage. */
-  .fact-wall { border-color: var(--danger); color: var(--danger); }
-  .fact-ok { border-color: var(--ok-line); color: var(--ok); }
-  /* Pay is the one chip nobody else on a campus board shows. */
-  .fact-pay { border-color: var(--accent-line); color: var(--accent-ink);
-    background: var(--accent-soft); font-weight: var(--w-med); }
+  /* The chips themselves now live in static/css/coverage.css: the firm page
+     renders the same ones, and a shared component defined in one page's
+     inline <style> is a component the other page silently loses. Only the
+     feed-specific SLOT stays here. */
 
   /* Reserved slot 5 — the meta row: status, then provenance. `margin-top:auto`
      pins it to the bottom edge, which also absorbs any sub-pixel rounding in
@@ -680,6 +663,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      rolling label it replaced on ~600 cards. Grey because it is an absence of
      information, not a status. */
   .meta-undated { color: var(--ink-3); }
+  /* A deadline read out of the posting's prose rather than published as a
+     field. A dotted rule under the countdown, in its own colour: the date is
+     what the posting says, so it keeps its urgency tint and its fuse — the
+     mark is about where we got it, not about doubting it. */
+  .meta-status.is-reported { text-decoration: underline dotted currentColor;
+    text-underline-offset: 3px; text-decoration-thickness: 1px; }
   .meta-today { color: var(--danger); }
   .meta-soon { color: #a8501f; }
   .meta-upcoming { color: var(--accent-ink); }
@@ -864,6 +853,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .drawer-meta { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0;
     font-size: var(--fs-xs); color: var(--ink-3); }
   .drawer-deadline { color: var(--danger); font-weight: var(--w-med); }
+  /* Where the date came from, said in a word. The drawer has room to name it
+     outright, so it does — the card's dotted rule is the compressed version
+     of this label, not a different claim. */
+  .drawer-reported { font-family: var(--font-mono); font-size: var(--fs-micro);
+    font-weight: var(--w-reg); color: var(--ink-3); text-transform: uppercase;
+    letter-spacing: 0.05em; }
 
   /* What the posting states, each line beside the sentence that produced it.
      The evidence is the point of the panel, so it is set as a quotation

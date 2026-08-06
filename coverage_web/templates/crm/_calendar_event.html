@@ -40,10 +40,13 @@ Two shapes, decided by `ev.editable`:
     </div>
   </details>
 {% elif ev.url %}
-  <a class="cal-ev cal-ev-{{ ev.kind }} cal-ev-tracked" href="{{ ev.url }}"
-     target="_blank" rel="nofollow noopener"
-     title="{{ ev.title }} closes this day · {{ ev.stage }}">
+  <a class="cal-ev cal-ev-{{ ev.kind }} cal-ev-tracked{% if ev.reported %} is-reported{% endif %}"
+     href="{{ ev.url }}" target="_blank" rel="nofollow noopener"
+     title="{{ ev.title }} closes this day · {{ ev.stage }}{% if ev.reported %} · date read from the posting's own text, not a field the board published{% endif %}">
     <span class="cal-ev-title">{{ ev.title }}</span>
+    {% comment %}Spoken, not just hovered: a caveat carried by `title` alone
+    reaches a mouse and nothing else.{% endcomment %}
+    {% if ev.reported %}<span class="vh">(reported date)</span>{% endif %}
   </a>
 {% else %}
   <span class="cal-ev cal-ev-{{ ev.kind }} is-static"
