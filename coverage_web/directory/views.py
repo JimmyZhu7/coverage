@@ -255,6 +255,9 @@ def _card(opp, *, now, today):
         "class_year": opp.class_year,
         "deadline": deadline_marker(opp.deadline, opp.deadline_precision, today=today),
         "reported": deadline_provenance(opp),
+        # Whether the drawer has anything to show for this role. Same gate the
+        # feed cards use: never offer to open what we do not hold.
+        "has_text": bool((opp.raw or {}).get("detail_text")),
         "tags": tags,
         # The same chips the feed cards carry. This page renders its own card
         # markup, which is how it spent a release showing strictly less about
@@ -823,8 +826,8 @@ def _fresh_label(seen_days: int | None) -> str:
 # mono chip measures ~97px: two fit with room (198px), three do not (299px).
 # The rest of what a posting says is on the posting, one click away, and a
 # chip cut in half is worse than a chip that isn't there.
-_FACT_CHIP_ORDER = ("sponsorship", "pay", "language", "grad", "gpa",
-                    "cover_letter", "assessment")
+_FACT_CHIP_ORDER = ("sponsorship", "study", "language", "pay", "grad", "gpa",
+                    "duration", "cover_letter", "transcript", "assessment")
 _FACT_CHIPS_MAX = 2
 
 
@@ -849,13 +852,18 @@ def _fact_chips(o) -> list[dict]:
 
     labels = {
         "pay": lambda f: f["value"],
+        "study": lambda f: f["value"],
         "language": lambda f: f"{f['value']} needed",
         "grad": lambda f: f"Grad {f['value']}",
         "gpa": lambda f: f"GPA {f['value']}",
+        "duration": lambda f: f["value"],
         "cover_letter": lambda f: "Cover letter",
+        "transcript": lambda f: "Transcript",
         "assessment": lambda f: f["value"],
     }
-    css = {"language": "fact-wall", "pay": "fact-pay"}
+    # Walls are the facts that can END the decision: a visa answer, a language
+    # you do not speak, a year of study you are not in.
+    css = {"language": "fact-wall", "study": "fact-wall", "pay": "fact-pay"}
     for kind, label in labels.items():
         fact = facts.get(kind)
         if fact:
@@ -1543,10 +1551,13 @@ def _track_control(request, opp):
 # claim and a quotation.
 _FACT_LABELS = (
     ("pay", "Pay"),
+    ("study", "Year of study"),
     ("language", "Language"),
     ("grad", "Graduating"),
     ("gpa", "GPA"),
+    ("duration", "Length"),
     ("cover_letter", "Cover letter"),
+    ("transcript", "Transcript"),
     ("assessment", "Assessment"),
     ("rolling", "Closing"),
 )
@@ -1691,6 +1702,22 @@ def _lens_item(uo, *, today):
     }
 
 
+def _stage_card(uo, *, today) -> dict:
+    """One tracked role as the funnel sections render it."""
+    o = uo.opportunity
+    return {
+        "id": o.id,
+        "opportunity_id": o.id,
+        "firm_name": o.firm.name,
+        "title": o.title,
+        "url": o.url,
+        "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
+        "reported": deadline_provenance(o),
+        "facts": _fact_chips(o),
+        "has_text": bool((o.raw or {}).get("detail_text")),
+    }
+
+
 @login_required
 def my_applications(request):
     """The user's tracked roles: one funnel partition, plus two deadline
@@ -1738,7 +1765,12 @@ def my_applications(request):
         {
             "key": key,
             "label": label,
-            "items": groups[key],
+            # Prepared rows, not raw UserOpportunity objects. The template used
+            # to reach through `uo.opportunity` for a firm and a title and
+            # could reach nothing else, so the five funnel sections showed
+            # strictly less about a role than the two deadline lenses on the
+            # same page did about the same row.
+            "items": [_stage_card(uo, today=today) for uo in groups[key]],
             "count": len(groups[key]),
             "pct": round(100 * len(groups[key]) / biggest) if biggest else 0,
         }

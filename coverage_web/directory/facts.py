@@ -350,12 +350,94 @@ def extract_rolling(text: str) -> dict | None:
     return {"value": "Rolling", "phrase": _sentence(text, m.start(), m.end())}
 
 
+# --- Year of study ---------------------------------------------------------
+# The market's own eligibility vocabulary, and the most common way a posting
+# says who it is for outside the US. "Penultimate year" appears in 65 of 908
+# open campus descriptions and was read by nothing: a student in their second
+# of three years could not tell from the board whether a role was open to them.
+#
+# The stage names are quoted, never converted into a graduation year: a
+# penultimate year means different things on a three-year UK degree and a
+# four-year US one, and translating would be this module inferring a fact the
+# posting did not state.
+_STUDY_STAGE = (
+    (r"penultimate[- ]year", "Penultimate year"),
+    # "entering your final year of study" is as common as "final-year
+    # student" and was falling through to the looser stage below it.
+    (r"final[- ]year (?:student|of study)", "Final year"),
+    (r"recent graduate", "Recent graduate"),
+    (r"first[- ]year student", "First year"),
+)
+_STUDY_RX = [(re.compile(p, re.IGNORECASE), label) for p, label in _STUDY_STAGE]
+
+
+def extract_study_stage(text: str) -> dict | None:
+    for rx, label in _STUDY_RX:
+        m = rx.search(text)
+        if m:
+            return {"value": label, "phrase": _sentence(text, m.start(), m.end())}
+    return None
+
+
+# --- Programme length ------------------------------------------------------
+# "10 weeks" is a fact about whether a summer is spoken for, and postings
+# state it far more often than they state a deadline. Gated on the programme
+# words either side, so a "10 week" mention of something else in the body
+# cannot become the programme's length.
+_WEEKS = re.compile(
+    r"\b(\d{1,2})[- ]week[s]? (?:summer )?(?:internship|programme|program|placement|analyst)|"
+    r"(?:internship|programme|program|placement) (?:is |runs |lasts )?"
+    r"(?:for )?(?:approximately )?(\d{1,2}) weeks",
+    re.IGNORECASE)
+
+
+def extract_duration(text: str) -> dict | None:
+    for m in _WEEKS.finditer(text):
+        raw = m.group(1) or m.group(2)
+        try:
+            weeks = int(raw)
+        except (TypeError, ValueError):
+            continue
+        # A campus programme is a summer or a placement year, never one week
+        # or sixty. Outside that band the number belongs to something else.
+        if 2 <= weeks <= 52:
+            return {"value": f"{weeks} weeks", "weeks": weeks,
+                    "phrase": _sentence(text, m.start(), m.end())}
+    return None
+
+
+# --- Transcript ------------------------------------------------------------
+# Unlike a CV, a transcript has a LEAD TIME — some registrars take days — so
+# knowing before you open the form is worth its own chip. Same two-gate shape
+# as the cover letter: the word alone appears in "transcripts are not required
+# at this stage" just as readily as in the sentence that demands one.
+_TRANSCRIPT_YES = re.compile(
+    r"(?:submit|upload|provide|attach|include|require[ds]?|send)[^.\n]{0,%d}?"
+    r"transcript|transcript[s]?[^.\n]{0,40}?(?:required|must be|are needed)"
+    % _NEAR, re.IGNORECASE)
+_TRANSCRIPT_NO = re.compile(
+    r"transcript[s]?[^.\n]{0,40}?(?:not required|optional|not needed)",
+    re.IGNORECASE)
+
+
+def extract_transcript(text: str) -> dict | None:
+    if _TRANSCRIPT_NO.search(text):
+        return None
+    m = _TRANSCRIPT_YES.search(text)
+    if not m:
+        return None
+    return {"value": "Transcript", "phrase": _sentence(text, m.start(), m.end())}
+
+
 EXTRACTORS = {
     "pay": extract_pay,
-    "grad": extract_grad_years,
+    "study": extract_study_stage,
     "language": extract_languages,
+    "grad": extract_grad_years,
     "gpa": extract_gpa,
+    "duration": extract_duration,
     "cover_letter": extract_cover_letter,
+    "transcript": extract_transcript,
     "assessment": extract_assessment,
     "rolling": extract_rolling,
 }
