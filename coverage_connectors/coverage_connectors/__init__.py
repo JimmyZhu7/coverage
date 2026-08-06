@@ -49,7 +49,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
-from . import avature, beisen, eightfold, goldmansachs, greenhouse, lever, mckinsey, oracle, phenom, sitemap, talentgateway, talnet, workday
+from . import avature, beisen, eightfold, goldmansachs, greenhouse, lever, lumesse, mckinsey, oracle, phenom, sitemap, talentgateway, talnet, workday
 from .models import (
     BoardConfig,
     AvatureBoard,
@@ -59,7 +59,7 @@ from .models import (
     FetchResult,
     GoldmanSachsBoard,
     GreenhouseBoard,
-    LeverBoard,
+    LeverBoard, LumesseBoard,
     McKinseyBoard,
     Opportunity,
     OracleBoard,
@@ -113,6 +113,7 @@ CONNECTORS: dict[str, Connector] = {
     eightfold.name: eightfold,
     beisen.name: beisen,
     avature.name: avature,
+    lumesse.name: lumesse,
 }
 
 

@@ -40,12 +40,20 @@ from __future__ import annotations
 
 from coverage_connectors import (
     AvatureBoard, BeisenBoard, BoardConfig, EightfoldBoard, GoldmanSachsBoard,
-    GreenhouseBoard, McKinseyBoard, OracleBoard, PhenomBoard,
+    GreenhouseBoard, LumesseBoard, McKinseyBoard, OracleBoard, PhenomBoard,
     SitemapBoard, TalentGatewayBoard, TalnetBoard, WorkdayBoard,
 )
 
 # (firm_slug, BoardConfig). board.firm carries the display name.
 BOARDS: list[tuple[str, BoardConfig]] = [
+    # ---- Lumesse TalentLink FO-REST (recruitmentplatform.com widget API) ----
+    # Deferred July as "needs live URL verification"; cracked 2026-08-07 —
+    # guest auth is two literal headers (see the connector's docstring), and
+    # every posting carries applicationUrl AND a structured DPOSTINGEND
+    # deadline. tech_id read from boci.recruitmentplatform.com's own markup.
+    ("boci", LumesseBoard(firm="BOCI", host="au01-foc.lumessetalentlink.com",
+                          tech_id="Q7WFK026203F3VBQBLOV7F624")),  # live-verified 2026-08-07
+
     # ---- Greenhouse (boards-api.greenhouse.io) ----
     ("williamblair", GreenhouseBoard(firm="William Blair", token="williamblair")),   # live-verified
     ("tpg", GreenhouseBoard(firm="TPG", token="tpgcareers")),                          # live-verified

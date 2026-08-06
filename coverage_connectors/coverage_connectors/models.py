@@ -86,6 +86,18 @@ class WorkdayBoard:
 
 
 @dataclass(frozen=True, slots=True)
+class LumesseBoard:
+    """One Lumesse TalentLink FO-REST board. `host` is the datacenter FO
+    host ("au01-foc.lumessetalentlink.com"); `tech_id` is the site's
+    `lumesse-site-tech-id` from its careers page markup."""
+
+    firm: str
+    host: str
+    tech_id: str
+    provider: str = field(default="lumesse", init=False)
+
+
+@dataclass(frozen=True, slots=True)
 class OracleBoard:
     """One Oracle Recruiting Cloud career site (public, unauthenticated
     REST). `host` is the tenant host (e.g. "jpmc.fa.oraclecloud.com"),
