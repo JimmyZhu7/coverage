@@ -863,7 +863,13 @@ def week(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "crm/week.html",
-        {**_cockpit_context(request.user), **_dashboard_context(request.user)},
+        {**_cockpit_context(request.user), **_dashboard_context(request.user),
+         # Signup lands on the /welcome/ wizard, but nothing ever looked at
+         # whether it was FINISHED: close the tab at step one and every later
+         # login lands here, on an empty queue over an unpersonalized feed,
+         # with no path back. A banner, never a redirect — the app must stay
+         # usable mid-setup, it just shouldn't be silent about what's missing.
+         "needs_onboarding": request.user.onboarded_at is None},
     )
 
 

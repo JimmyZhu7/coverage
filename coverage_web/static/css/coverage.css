@@ -1009,10 +1009,14 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    What survives of the old dashboard stat cards. The card grid itself
    (.dash-stats/.dash-card and the funnel) died with the dashboard — no
    template has rendered them since Today became the cockpit — but these two
-   live on: the marketing hero's stat band uses them, and base.html
-   count-animates every .dash-num on load. */
+   live on: the marketing hero's stat band uses them. The JS count-up that
+   used to animate every .dash-num is gone (it froze mid-count on throttled
+   tabs and presented the frozen frame as data); the rise-in below moves the
+   CONTAINER, so the number inside is correct on every frame. */
 .dash-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 32px; font-weight: var(--w-med); line-height: 1.1; color: var(--accent-ink); }
+  font-size: 32px; font-weight: var(--w-med); line-height: 1.1; color: var(--accent-ink);
+  display: inline-block; animation: rise-in 480ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) { .dash-num { animation: none; } }
 .dash-lbl { font-size: var(--fs-micro); color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.06em; font-weight: var(--w-med); }
 

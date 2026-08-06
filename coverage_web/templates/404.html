@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% comment %}
+Django serves this automatically when DEBUG is off. It extends base.html on
+purpose: a lost visitor keeps the nav, so every recovery path is one click
+away rather than a browser-back guess. No search box — the palette (Cmd-K)
+already exists for signed-in users, and a signed-out visitor's best move is
+the feed, which is linked.
+{% endcomment %}
+
+{% block title %}Not found · Coverage{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div class="empty" style="margin-top: 8vh;">
+    <h2>That page doesn't exist.</h2>
+    <p>The address may be mistyped, or the page may have moved.</p>
+    <p><a href="/opportunities/">See open roles</a> · <a href="/">Go home</a></p>
+  </div>
+</div>
+{% endblock %}

@@ -4,6 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Coverage{% endblock %}</title>
+  {% comment %}
+  One description and one OG card, overridable per page. A launch link pasted
+  into WhatsApp or LinkedIn used to unfurl as a bare URL — for a product whose
+  first users arrive through exactly those links.
+  {% endcomment %}
+  <meta name="description" content="{% block meta_description %}Live campus recruiting roles across four markets, with the deadlines firms publish and the relationships that get you in.{% endblock %}">
+  <meta property="og:site_name" content="Coverage">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{% block og_title %}Coverage — recruiting deadlines and the people behind them{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}Everyone tracks deadlines. Nobody tracks the relationship.{% endblock %}">
+  {% comment %}The logo mark as its own favicon: an inline SVG data URI, so
+  there is no extra request and no binary asset to keep in sync.{% endcomment %}
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 16a9 9 0 0 1 18 0' fill='none' stroke='%231d3a5f' stroke-width='3.4' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='16.6' r='2.6' fill='%23b3592e'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="{% static 'css/coverage.css' %}">
   {# Vendored static asset, not a CDN or Node build — see coverage_web/static/vendor/. #}
   <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
@@ -71,27 +84,14 @@
   </footer>
 
   {% comment %}
-    Site-wide kinetic ledger numbers: any `.dash-num` counts up from 0 on
-    first paint. Purely presentational, skipped under reduced-motion, and
-    tolerant of non-numeric values ("—" passes straight through).
+    .dash-num used to count up from 0 in JS. Removed, not tuned: on any
+    rAF-throttled tab (backgrounded, screenshotted, a phone coming back from
+    sleep) the animation froze mid-count and the page presented 235 or 334 as
+    the real value of 908 — observed live, twice, on the feed's headline stat.
+    week.html had already documented this exact failure and dropped the class;
+    now the mechanism itself is gone. The numbers get a CSS rise-in instead:
+    motion on the container, never on the value.
   {% endcomment %}
-  <script>
-    (function () {
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-      document.querySelectorAll(".dash-num").forEach(function (el) {
-        var target = parseInt(el.textContent.trim(), 10);
-        if (isNaN(target) || target === 0) return;
-        var t0 = null;
-        function tick(ts) {
-          if (!t0) t0 = ts;
-          var p = Math.min((ts - t0) / 700, 1);
-          el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3)));
-          if (p < 1) requestAnimationFrame(tick);
-        }
-        requestAnimationFrame(tick);
-      });
-    })();
-  </script>
 
   {% comment %}
     On-brand dropdowns: a native <select>'s open menu is OS-rendered and

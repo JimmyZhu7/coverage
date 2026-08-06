@@ -1,0 +1,32 @@
+<!doctype html>
+{% comment %}
+Deliberately NOT extending base.html, and deliberately free of template tags
+that need context: Django renders 500.html with an EMPTY context after
+something has already broken, so this page must not depend on context
+processors, static-file resolution, or anything else that might be the thing
+that just failed. Inline styles, absolute links, nothing clever — the one
+page that must never itself 500.
+{% endcomment %}
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Something broke · Coverage</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #faf8f5; color: #171717; display: grid; place-items: center;
+      min-height: 100vh; }
+    main { text-align: center; padding: 24px; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    p { color: #555; margin: 0 0 16px; }
+    a { color: #1d3a5f; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Something broke on our side.</h1>
+    <p>Your data is fine. The error is recorded, and a refresh usually clears it.</p>
+    <p><a href="/">Back to Coverage</a></p>
+  </main>
+</body>
+</html>

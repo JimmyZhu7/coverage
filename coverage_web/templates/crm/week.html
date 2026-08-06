@@ -51,6 +51,20 @@
     </div>
   </header>
 
+  {% if needs_onboarding %}
+    {% comment %}The unfinished-setup banner. It names what setup buys (the
+    queue and the personalized feed run on target firms), links straight back
+    into the wizard, and disappears forever once onboarding completes.
+    {% endcomment %}
+    <div class="setup-nudge kin-reveal">
+      <div class="setup-nudge-text">
+        <b>Finish setting up.</b> Pick your target firms and Coverage fills
+        this queue and sorts the feed to them.
+      </div>
+      <a class="btn btn-primary" href="{% url 'accounts:onboarding' %}?step=profile">Set up Coverage</a>
+    </div>
+  {% endif %}
+
   {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}
   <div id="today-cockpit"
        aria-describedby="today-summary"

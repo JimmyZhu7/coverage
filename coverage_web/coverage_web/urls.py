@@ -5,6 +5,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from django.views.generic import RedirectView
 
 from directory import views as directory_views
 
@@ -26,6 +27,11 @@ urlpatterns = [
     path("firms/", include("directory.urls")),
     path("app/", include("crm.urls")),               # authed hub: today, network
     path("welcome/", include("accounts.urls")),      # onboarding, import, settings, delete/export
+    # The legal pages live under /welcome/, but /privacy/ and /terms/ are what
+    # people type and what link scanners probe. Permanent redirects, not
+    # duplicate routes: one canonical URL per document.
+    path("privacy/", RedirectView.as_view(pattern_name="accounts:privacy", permanent=True)),
+    path("terms/", RedirectView.as_view(pattern_name="accounts:terms", permanent=True)),
     path("capture/", include("capture.urls")),       # inbound-email webhook + capture settings
     path("", include("core.urls")),
 ]

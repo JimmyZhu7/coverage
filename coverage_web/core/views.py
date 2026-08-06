@@ -1,6 +1,7 @@
 from urllib.parse import quote
 
-from django.http import JsonResponse
+from django.core.cache import cache
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
@@ -68,6 +69,31 @@ def healthz(request):
     return JsonResponse({"status": "ok"})
 
 
+# The palette debounces at 140ms, so a human peaks around 7 requests a second
+# in a burst and stops. The window is sized for that shape — bursts are free,
+# sustained hammering is not — because this endpoint runs three ILIKE queries
+# per call and is reachable signed-out. Cache-based and per-IP: no new
+# dependency, no table, resets by itself.
+_SEARCH_WINDOW_SECONDS = 10
+_SEARCH_WINDOW_LIMIT = 40
+
+
+def _search_throttled(request) -> bool:
+    ip = (request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
+          or request.META.get("REMOTE_ADDR", "unknown"))
+    key = f"search-rate:{ip}"
+    burst = cache.get_or_set(key, 0, _SEARCH_WINDOW_SECONDS)
+    if burst >= _SEARCH_WINDOW_LIMIT:
+        return True
+    try:
+        cache.incr(key)
+    except ValueError:
+        # The key expired between read and increment: the window reset, so
+        # this request starts the next one rather than being counted at all.
+        cache.set(key, 1, _SEARCH_WINDOW_SECONDS)
+    return False
+
+
 @require_GET
 def search(request):
     """The Cmd-K palette's data: contacts, firms, and open roles in one query.
@@ -78,6 +104,8 @@ def search(request):
     shared-zone. Everything is capped, `icontains`, newest-effort-first — a
     palette is navigation, not a report.
     """
+    if _search_throttled(request):
+        return HttpResponse("rate limited", status=429)
     from django.http import JsonResponse
 
     q = (request.GET.get("q") or "").strip()

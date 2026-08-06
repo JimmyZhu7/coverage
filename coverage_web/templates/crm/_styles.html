@@ -712,4 +712,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .pace-spark-bar.is-hit { background: var(--ok-line); }
   .pace-spark-bar.is-now { background: var(--accent); }
   @keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+
+  /* The unfinished-setup banner on Today. Accent-soft, not warning-tinted:
+     it is an invitation, and the one thing it must not do is read as an
+     error on a user's first morning. */
+  .setup-nudge { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4);
+    padding: var(--s3) var(--s4); border: 1px solid var(--accent-line);
+    border-radius: var(--r-panel); background: var(--accent-soft); }
+  .setup-nudge-text { color: var(--accent-ink); font-size: var(--fs-s); }
 </style>
