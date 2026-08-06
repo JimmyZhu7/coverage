@@ -552,13 +552,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     color: var(--ink-3); font-weight: var(--w-reg); }
   .tier-cost b { color: var(--ink-2); font-weight: var(--w-med); }
   .tier-empty { margin: var(--s2) 0; text-align: left; }
-  /* Standardized geometry: every firm card is exactly one 92px grid row (the
-     same height as a contact card), with the warmth bar pinned to the bottom
-     edge. Smaller than before so the cards no longer strand empty space. */
+  /* Standardized geometry: every firm card is one grid row, 92px as the
+     FLOOR — `minmax(92px, auto)`, not a fixed 92px. The fixed version
+     shipped this board's third clipping bug: a firm carrying three badges
+     (Morgan Stanley: open + soon + act-now) wrapped its badge row, the row
+     could not grow, and `overflow: hidden` plus default flex-shrink squeezed
+     the card until the TITLE's glyphs clipped mid-letter. Grid rows stretch
+     row-mates together, so cards in one row still match each other; a row
+     with a wrapped badge line is simply taller than its neighbours, which is
+     the truthful shape of holding more. Same doctrine as the feed's role
+     card: the box gives way, not the text. */
   /* Each tier is bounded (~2 rows) and scrolls its own firms, so a tier with
      many firms doesn't stretch the whole coverage panel. */
   .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    grid-auto-rows: 92px; gap: var(--s3); max-height: 200px; overflow-y: auto;
+    grid-auto-rows: minmax(92px, auto); gap: var(--s3); max-height: 200px; overflow-y: auto;
     padding-right: 4px; scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent; }
   .tier-grid::-webkit-scrollbar { width: 8px; }
@@ -571,7 +578,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     transition: box-shadow var(--t-med), transform var(--t-med), opacity var(--t-fast); }
   .firm-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
   .firm-card.dragging { opacity: 0.5; cursor: grabbing; }
-  .firm-card-name { font-weight: var(--w-bold); font-size: var(--fs-s);
+  /* flex: none on the name and foot — the two rows that must never absorb a
+     squeeze. If anything gives inside a card it is the badge area, and with
+     minmax rows nothing should need to give at all. */
+  .firm-card-name { flex: none; font-weight: var(--w-bold); font-size: var(--fs-s);
     /* One line, ellipsised. A long firm name used to wrap to two lines and
        push the badges past the fixed 92px card, which is what made the row
        heights look ragged. */
@@ -601,7 +611,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      the tightened gap below. */
   .firm-card { gap: 6px; }
   .firm-card-foot { display: flex; align-items: center; gap: var(--s2);
-    margin-top: auto; }
+    margin-top: auto; flex: none; }
   /* 10px/1 matches the compact firm-card pills and keeps the foot row a
      flat 10px. Measured: card content 63.8px inside 66px of inner box, so
      the card has MORE slack than it did before this row existed (1.2px) —
