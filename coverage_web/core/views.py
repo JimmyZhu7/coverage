@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
@@ -104,12 +106,19 @@ def search(request):
         for f in Firm.objects.filter(name__icontains=q).order_by("name")[:6]
     ]
 
+    # A role we hold the description for opens on OUR page, at that role's
+    # card, with the drawer already open. Sending a search result out to a
+    # Workday shell that paints in four seconds — for text sitting in our own
+    # database — was the palette undoing the drawer's entire reason to exist.
+    # Roles we have not read still link out, because for those the firm's page
+    # genuinely is the only copy.
     out["roles"] = [
         {
             "title": o.title,
             "firm": o.firm.name,
-            "url": o.url,
-            "external": True,
+            "url": (f"/opportunities/?q={quote(o.title[:60])}&read={o.id}"
+                    if (o.raw or {}).get("detail_text") else o.url),
+            "external": not (o.raw or {}).get("detail_text"),
         }
         for o in Opportunity.objects.filter(
             status="open", bucket__in=TARGET_BUCKETS, title__icontains=q

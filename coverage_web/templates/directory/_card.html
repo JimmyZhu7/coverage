@@ -55,4 +55,16 @@ lays it out. Pass `mine=True` to flag it as one of the user's targeted firms.
       {% endfor %}
     </div>
   {% endif %}
+
+  {% comment %}
+  Read the posting here, from the copy we hold. Only rendered when we HAVE it
+  (`card.has_text`), because a button that opens an empty panel is the same
+  lie as an empty panel, one step earlier. This page used to send every
+  student out to a client-rendered board for text sitting in our database.
+  {% endcomment %}
+  {% if card.has_text %}
+    <button type="button" class="meta-read" data-role-read data-role-id="{{ card.id }}"
+            hx-get="{% url 'role_description' card.id %}"
+            hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>
+  {% endif %}
 </article>

@@ -1,0 +1,60 @@
+{% comment %}
+THE POSTING DRAWER — dialog, close button, and the script that opens it.
+
+Extracted from opportunities.html so every page that lists roles can offer
+it. It was the feed's alone, which meant the firm page linked out to a
+four-second Workday shell for text this database already holds, and a student
+arriving from search got the poorer product without ever knowing there was a
+better one.
+
+Native <dialog>: the browser owns the focus trap, Escape, and the top layer.
+{% endcomment %}
+<dialog class="drawer" id="role-drawer" aria-label="Posting">
+  <button type="button" class="drawer-x" data-drawer-close aria-label="Close">✕</button>
+  <div id="role-drawer-body"></div>
+</dialog>
+
+<script>
+  // ---- The posting drawer ------------------------------------------------
+  // Open on click, not on htmx's response: the fetch is fast but not
+  // instant, and a button that does nothing for 200ms reads as broken. The
+  // placeholder is replaced by the swap when it lands.
+  (function () {
+    var dlg = document.getElementById("role-drawer");
+    var body = document.getElementById("role-drawer-body");
+    if (!dlg) return;
+    document.body.addEventListener("click", function (e) {
+      if (e.target.closest("[data-role-read]")) {
+        body.innerHTML = '<p class="drawer-loading">Opening…</p>';
+        dlg.showModal();
+      } else if (e.target.closest("[data-drawer-close]")) {
+        dlg.close();
+      }
+    });
+    // Backdrop click closes; native <dialog> only closes on Escape.
+    dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+    // Emptied on close so the next open cannot flash the previous posting.
+    dlg.addEventListener("close", function () { body.innerHTML = ""; });
+
+    // ?read=<id> — the Cmd-K palette landing here with a role in mind. The
+    // search result narrows the page to that title AND names the role, so the
+    // drawer opens on arrival instead of leaving the student to find the card
+    // they just picked. Falls back silently when the card is not on the page
+    // (a filter in the URL, a role since closed): a missing card is not worth
+    // an error, the page behind it is still the right answer.
+    // Deferred to `htmx:load` on purpose. htmx ships with `defer`, so at the
+    // moment this inline script runs it has not yet bound anything: clicking
+    // the button here opened the dialog (our own listener above is live) and
+    // fired no request, leaving the drawer stuck on "Opening…" forever. The
+    // event fires once htmx has processed the document, which is the earliest
+    // point at which the button actually does something.
+    var wanted = new URLSearchParams(location.search).get("read");
+    if (wanted) {
+      document.body.addEventListener("htmx:load", function once() {
+        document.body.removeEventListener("htmx:load", once);
+        var btn = document.querySelector('[data-role-read][data-role-id="' + wanted + '"]');
+        if (btn) btn.click();
+      });
+    }
+  })();
+</script>

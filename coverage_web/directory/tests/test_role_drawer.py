@@ -8,6 +8,8 @@ there is something behind it.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from django.urls import reverse
 
@@ -137,3 +139,71 @@ def test_a_long_description_is_cut_with_a_mark_not_silently():
     joined = " ".join(paragraphs(body))
     assert len(joined) < 4200
     assert joined.endswith("…"), "a silent truncation reads as the whole posting"
+
+
+# ---------------------------------------------------------------------------
+# THE DRAWER IS NOT THE FEED'S ALONE. The firm page and the palette both used
+# to send a student out to a client-rendered board for text this database
+# already holds — the poorer product, reachable without ever knowing a better
+# one existed.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_the_firm_page_offers_the_posting_it_holds(client):
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        url="https://gs.com/sa",
+        raw={"detail_text": "A ten-week programme in New York." * 12})
+    body = client.get(f"/firms/{firm.slug}/").content.decode()
+    assert "data-role-read" in body
+    assert 'id="role-drawer"' in body
+
+
+@pytest.mark.django_db
+def test_the_firm_page_offers_nothing_for_a_posting_it_never_read(client):
+    firm = Firm.objects.create(slug="ubs", name="UBS")
+    Opportunity.objects.create(
+        firm=firm, title="Unread Analyst", bucket="internship", status="open",
+        url="https://ubs.com/unread")
+    # <script> stripped: the drawer's own opener listens on this selector, so
+    # a bare substring test passes whether or not a card rendered a button.
+    # Same reason `_markup` above strips it for the feed.
+    body = re.sub(r"<script.*?</script>", "",
+                  client.get(f"/firms/{firm.slug}/").content.decode(), flags=re.S)
+    assert "Unread Analyst" in body
+    assert "data-role-read" not in body
+
+
+@pytest.mark.django_db
+def test_search_sends_a_read_role_to_our_own_page(client, django_user_model):
+    user = django_user_model.objects.create_user(email="s@x.com", password="x")
+    client.force_login(user)
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    held = Opportunity.objects.create(
+        firm=firm, title="Held Analyst", bucket="internship", status="open",
+        url="https://gs.com/held", raw={"detail_text": "Ten weeks. " * 40})
+    Opportunity.objects.create(
+        firm=firm, title="Held Elsewhere Analyst", bucket="internship",
+        status="open", url="https://gs.com/elsewhere")
+
+    roles = client.get("/search/?q=Held").json()["roles"]
+    ours = next(r for r in roles if r["title"] == "Held Analyst")
+    theirs = next(r for r in roles if r["title"] == "Held Elsewhere Analyst")
+
+    assert ours["external"] is False
+    assert f"read={held.id}" in ours["url"]
+    # A role we never read still links out: for that one the firm's page
+    # genuinely is the only copy.
+    assert theirs["external"] is True
+    assert theirs["url"] == "https://gs.com/elsewhere"
+
+
+@pytest.mark.django_db
+def test_a_card_names_itself_so_a_deep_link_can_find_it(client):
+    firm = Firm.objects.create(slug="citi", name="Citi")
+    o = Opportunity.objects.create(
+        firm=firm, title="Deep Link Analyst", bucket="internship", status="open",
+        url="https://citi.com/dl", raw={"detail_text": "Ten weeks. " * 40})
+    body = client.get("/opportunities/").content.decode()
+    assert f'data-role-id="{o.id}"' in body

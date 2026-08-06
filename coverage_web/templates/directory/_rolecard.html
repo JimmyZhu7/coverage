@@ -110,7 +110,7 @@ without cutting text off.
     same lie as an empty drawer, one step earlier.
     {% endcomment %}
     {% if r.has_text %}
-      <button type="button" class="meta-read" data-role-read
+      <button type="button" class="meta-read" data-role-read data-role-id="{{ r.id }}"
               hx-get="{% url 'role_description' r.id %}"
               hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>
     {% endif %}

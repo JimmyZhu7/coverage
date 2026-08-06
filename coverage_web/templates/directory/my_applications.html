@@ -127,6 +127,14 @@
      shared component in coverage.css. */
   .lens-facts { display: inline-flex; flex-wrap: wrap; gap: 4px;
     margin-left: var(--s2); vertical-align: middle; }
+  /* The funnel cards' own countdown and chips. Compact, because these cards
+     are a grid and a stage section can hold a dozen of them. */
+  .apps-when { display: inline-flex; align-items: center; align-self: flex-start;
+    font-size: var(--fs-xs); font-weight: var(--w-med); color: var(--accent-ink); }
+  .apps-when.is-past { color: var(--ink-3); }
+  .apps-when.is-reported { text-decoration: underline dotted currentColor;
+    text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  .apps-facts { display: flex; flex-wrap: wrap; gap: 4px; }
   /* Provenance, same dotted rule the feed and firm pages use. */
   .lens-when .is-reported { text-decoration: underline dotted currentColor;
     text-underline-offset: 3px; text-decoration-thickness: 1px; }
@@ -310,9 +318,25 @@
           <div class="apps-grid">
             {% for uo in stage.items %}
               <article class="apps-card">
-                <span class="apps-firm">{{ uo.opportunity.firm.name|smart_title }}</span>
-                <h3 class="apps-title"><a href="{{ uo.opportunity.url }}" target="_blank" rel="nofollow noopener">{{ uo.opportunity.title|smart_title }}</a></h3>
+                <span class="apps-firm">{{ uo.firm_name|smart_title }}</span>
+                <h3 class="apps-title"><a href="{{ uo.url }}" target="_blank" rel="nofollow noopener">{{ uo.title|smart_title }}</a></h3>
                 {% if stage.key == 'closed' %}<span class="apps-done-mark">Done, no longer live</span>{% endif %}
+
+                {% comment %}
+                When it closes, and what the posting states about applying.
+                These sections knew neither: a role could be sitting in Saved
+                with a deadline nine days out and say nothing about it, while
+                the lens band above showed exactly that for the same row.
+                {% endcomment %}
+                {% if uo.deadline.posted %}
+                  <span class="apps-when{% if uo.deadline.past %} is-past{% endif %}{% if uo.reported %} is-reported{% endif %}"
+                        {% if uo.reported %}title="{{ uo.reported.why }}"{% endif %}>{{ uo.deadline.countdown|capfirst }}{% if uo.reported %}<span class="vh"> ({{ uo.reported.label }})</span>{% endif %}</span>
+                {% endif %}
+                {% if uo.facts %}
+                  <div class="apps-facts">
+                    {% for f in uo.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
+                  </div>
+                {% endif %}
                 <div class="apps-foot">
                   <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}">
                     {% csrf_token %}
