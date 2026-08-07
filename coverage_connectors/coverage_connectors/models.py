@@ -86,6 +86,16 @@ class WorkdayBoard:
 
 
 @dataclass(frozen=True, slots=True)
+class TalentsoftBoard:
+    """A Talentsoft tenant's server-rendered all-offers list page."""
+
+    firm: str
+    origin: str          # e.g. "https://jobs.ca-cib.com"
+    list_url: str        # the ?all=1 English list page
+    provider: str = field(default="talentsoft", init=False)
+
+
+@dataclass(frozen=True, slots=True)
 class SocGenBoard:
     """Société Générale's Quantum search behind careers.societegenerale.com.
     One firm-wide board; everything else is fixed in the connector."""

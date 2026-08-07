@@ -41,6 +41,7 @@ from __future__ import annotations
 from coverage_connectors import (
     AvatureBoard, BeisenBoard, BoardConfig, EightfoldBoard, GoldmanSachsBoard,
     GreenhouseBoard, LumesseBoard, McKinseyBoard, OracleBoard, PhenomBoard, SocGenBoard,
+    TalentsoftBoard,
     SitemapBoard, TalentGatewayBoard, TalnetBoard, WorkdayBoard,
 )
 
@@ -52,6 +53,13 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # INTERNSHIP / VIE contract types. See the connector's docstring for the
     # three steps and why the language filter exists.
     ("socgen", SocGenBoard(firm="Société Générale")),  # live-verified 2026-08-07
+
+    # ---- Talentsoft (server-rendered all-offers list) ----
+    # The `?all=1` page skips ASP.NET ViewState paging entirely — the reason
+    # this board was deferred in July. ~100 offers, one request.
+    ("creditagricole", TalentsoftBoard(firm="Crédit Agricole CIB",
+                              origin="https://jobs.ca-cib.com",
+                              list_url="https://jobs.ca-cib.com/job/list-of-all-jobs.aspx?LCID=2057&all=1")),  # live-verified 2026-08-07
 
     # ---- Lumesse TalentLink FO-REST (recruitmentplatform.com widget API) ----
     # Deferred July as "needs live URL verification"; cracked 2026-08-07 —

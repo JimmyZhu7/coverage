@@ -45,7 +45,7 @@ from django.utils.text import slugify
 from coverage_connectors import BoardConfig, FetchResult, Opportunity as ConnOpportunity, fetch_many
 
 from .classify import (
-    board_is_campus, classify_role, clean_title, extract_class_year, extract_cohort,
+    board_is_campus, classify_role, clean_title, contract_is_campus, extract_class_year, extract_cohort,
     extract_deadline_from_text, extract_sponsorship, normalize_region, posting_text,
 )
 from .models import Firm, Opportunity, ScrapeRun
@@ -246,7 +246,12 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
                      f"— stored as no-deadline-posted",
         })
     h = content_hash_for(opp)
-    bucket = classify_role(opp.title or "", campus_hint=campus_hint)
+    # The board-level hint OR the row's own provider-stated contract type.
+    # The second matters on mixed boards with non-English titles: CA-CIB
+    # files "Chargé de communication interne H/F" under Apprenticeship, and
+    # no title rule reads French — the firm's own filing does.
+    row_hint = contract_is_campus((opp.raw or {}).get("contract_type"))
+    bucket = classify_role(opp.title or "", campus_hint=campus_hint or row_hint)
     cohort = opp.cohort or extract_cohort(opp.title or "")
     # Two different years (see classify.py's section comment): `cohort` is the
     # programme/intake year, `class_year` is a graduation year the posting

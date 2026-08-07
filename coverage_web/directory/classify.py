@@ -432,6 +432,25 @@ def extract_class_year(title: str) -> str:
     return m.group(1) if m else ""
 
 
+# The provider's own contract-type vocabulary, where a board states one as a
+# structured field (Talentsoft's card list, SocGen's sourcestr8). This is a
+# STRONGER signal than any title heuristic — it is the firm's own filing of
+# the role — and it is what classifies the French-titled internship the title
+# rules cannot read ("Chargé de communication interne H/F" filed under
+# Apprenticeship). Matched as substrings of the lowered value so
+# "Internship / Trainee (with agreement)" and "VIE Programme" both land.
+_CAMPUS_CONTRACT_KEYS = (
+    "internship", "trainee", "graduate", "apprentice", "vie", "stage",
+    "alternance", "placement", "working student", "cooperative", "co-op",
+)
+
+
+def contract_is_campus(contract_type: str | None) -> bool:
+    """True when a provider-stated contract type names a campus programme."""
+    t = (contract_type or "").lower()
+    return bool(t) and any(k in t for k in _CAMPUS_CONTRACT_KEYS)
+
+
 def board_is_campus(board) -> bool:
     """True when a board is campus-scoped. Some connectors are campus-only
     by construction (a fixed campus query, no identifier to sniff); the
