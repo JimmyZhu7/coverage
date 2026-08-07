@@ -156,8 +156,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   /* Inline quick actions — two standardized rows: primary (Sent / Reply /
      Compose) then ghosts (Snooze / Skip). Identical on every card. */
-  .act-quick { margin-top: auto; padding-top: var(--s3);
-    display: flex; flex-direction: column; gap: var(--s2); }
+  /* The actions zone: primary row over the quiet row, right-aligned so the
+     buttons rag against a common edge down the ledger. */
+  .act-quick { display: flex; flex-direction: column; gap: var(--s2);
+    align-items: flex-end; }
   /* `flex: 1 1 0` split the row into equal columns regardless of what the
      labels needed, so on the four-button card (Log the chat / Reschedule /
      They replied / Compose) each got ~78px and two of them broke mid-phrase
@@ -167,7 +169,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      words, and when the row runs out of width the BUTTONS wrap, not the
      text. They still stretch to fill whatever row they land on, so three
      buttons look exactly as they did before. */
-  .act-primary { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; }
+  .act-primary { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch;
+    justify-content: flex-end; }
+  @container queue (max-width: 640px) { .act-primary { justify-content: flex-start; } }
+  @media (max-width: 700px) { .act-primary { justify-content: flex-start; } }
   .act-primary .btn { flex: 1 1 auto; padding: 6px 10px; font-size: var(--fs-xs);
     text-align: center; white-space: nowrap; }
   .act-ghosts { display: flex; gap: var(--s4); }
@@ -321,19 +326,57 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* Act card grid. Three per row at the widest, not four: the cards now carry
      a reason line and an evidence line, and a fourth column drops each card
      below the measure at which a sentence stays readable. */
-  .act-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
-  @media (max-width: 1180px) { .act-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 560px) { .act-grid { grid-template-columns: 1fr; } }
-  /* NOTE: no `height` here, and none may be added — the card's content is
-     variable now (reason wraps, the pairing line is conditional) and this
-     codebase has shipped clipping twice from a fixed card height. Grid row
-     stretch already keeps a row's cards level. */
+  /* ======================================================================
+     THE QUEUE AS A LEDGER — v2 of this block.
+
+     v1 was a 3-across card gallery, and the screenshot that killed it shows
+     why: one lane's people mostly share a label and a reason, so the page
+     said "They replied. Propose a 15-min chat." three times at poster size
+     (~260px per card, two people per screen) while the only per-person
+     facts — the name, the elapsed time — drowned in repeated chrome. The
+     "Waiting on reply" chip strip below it was the page's own counter-
+     argument: density works here.
+
+     One row per person now: identity | context | actions, on a 12-column-
+     free three-zone grid. Priority still owns the left edge. ~76px a row
+     puts eight or nine people on the first screen where two cards stood.
+     NOTE: still no fixed height — the reason wraps and the pairing line is
+     conditional, and this codebase has shipped clipping twice from fixed
+     heights. The row grows; the zones align at their top line.
+     ====================================================================== */
+  /* Queried on the QUEUE's width, not the window's. A viewport rule read the
+     wrong number: at 1024px the rail is still 320px, so the queue column is
+     ~660px and the three zones squeezed the reason down to one word per
+     line while the media query, watching the window, said "plenty of room".
+     The container is what the row actually lives in. */
+  .act-grid { display: flex; flex-direction: column; gap: var(--s2);
+    container-type: inline-size; container-name: queue; }
   .act-card { background: var(--surface); border: 1px solid var(--line);
-    border-left: 3px solid var(--accent); border-radius: var(--r-panel);
-    padding: var(--s4); display: flex; flex-direction: column; gap: 6px;
+    border-left: 3px solid var(--accent); border-radius: 12px;
+    padding: var(--s3) var(--s4);
+    /* The actions track is `auto`, so it claims its max-content width before
+       the middle gets a share — with the four-control confirm-a-chat row
+       that starved the reason to 138px. A floor under the middle makes the
+       buttons wrap to a second line instead, which is the cheaper loss. */
+    display: grid; grid-template-columns: minmax(180px, 15rem) minmax(15rem, 1fr) auto;
+    gap: var(--s2) var(--s5); align-items: center;
     box-shadow: var(--shadow-1);
     transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
-  .act-card:hover { box-shadow: var(--shadow-2); transform: translateY(-2px); }
+  .act-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
+  .act-ident { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .act-context { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  /* Under ~640px of queue the three zones stack and the row becomes a compact
+     card — a phone never had room for a ledger line. The media rule is the
+     fallback for browsers without container queries; at that window width the
+     queue is narrow either way, so the two never disagree. */
+  @container queue (max-width: 640px) {
+    .act-card { grid-template-columns: minmax(0, 1fr); align-items: start; }
+    .act-quick { align-items: flex-start; padding-top: var(--s2); }
+  }
+  @media (max-width: 700px) {
+    .act-card { grid-template-columns: minmax(0, 1fr); align-items: start; }
+    .act-quick { align-items: flex-start; padding-top: var(--s2); }
+  }
   .act-top { display: flex; justify-content: space-between; gap: var(--s2);
     align-items: center; }
   .opp-firm { font-size: var(--fs-xs); color: var(--ink-2); font-weight: var(--w-med);

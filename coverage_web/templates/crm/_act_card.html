@@ -10,7 +10,17 @@ activity stay in sync). `idx` drives the staggered entrance.
 Every button carries an aria-label naming the contact: this page renders 30+
 buttons whose visible text is identical, which is unusable read aloud.
 {% endcomment %}
+{% comment %}
+LEDGER ROW, not poster. The queue used to render each action as a ~260px
+card, three abreast — and since one lane's people mostly share a label and a
+reason, the page said the same sentence three times at poster size while the
+only per-person facts (the name, the elapsed time) drowned in chrome. The
+"Waiting on reply" chip strip right below was already proof that density
+works here. One row per person now: identity | context | actions, priority
+as the row's left edge, every control and hx contract byte-identical.
+{% endcomment %}
 <article class="act-card kin-reveal act-{{ a.priority }}" style="--i:{{ idx }}">
+  <div class="act-ident">
   <div class="act-top">
     {% comment %}
     When the firm slot holds a university rather than an employer, say so —
@@ -24,6 +34,9 @@ buttons whose visible text is identical, which is unusable read aloud.
   </div>
   <h3 class="act-name"><a href="{% url 'crm:contact_detail' a.contact.id %}">{{ a.contact.name|smart_title }}</a></h3>
   {% if a.contact.role %}<p class="act-role">{{ a.contact.role|smart_title }}</p>{% endif %}
+  </div>
+
+  <div class="act-context">
   <div class="act-badges">
     <span class="prio prio-{{ a.priority }}">{{ a.label }}</span>
     {% comment %}
@@ -47,6 +60,7 @@ buttons whose visible text is identical, which is unusable read aloud.
   {% if a.pairs_with_debrief %}
     <p class="act-pair">Debrief first. It writes your thank-you for you.</p>
   {% endif %}
+  </div>
 
   <div class="act-quick">
     <div class="act-primary">

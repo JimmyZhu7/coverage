@@ -335,6 +335,23 @@ def test_the_card_renders_the_reason_and_the_last_touch(client):
     assert "business day" in body
 
 
+def test_a_queue_row_keeps_its_three_zones(client):
+    """The queue is a ledger: identity, context, actions, in that order on one
+    row. The zones are what make the row readable at a glance and what the
+    stylesheet lays out — a card that loses one of them silently reverts to
+    the poster layout this replaced."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    _touch(user, c, "outreach", days_ago=20)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    row = body.split('class="act-card', 1)[1]
+    for zone in ("act-ident", "act-context", "act-quick"):
+        assert zone in row, zone
+    assert row.index("act-ident") < row.index("act-context") < row.index("act-quick")
+
+
 def test_a_contact_with_no_touches_says_so_rather_than_guessing(client):
     user = _user(weekly_touch_goal=14)
     Contact.all_objects.create(user=user, name="Brand New")
