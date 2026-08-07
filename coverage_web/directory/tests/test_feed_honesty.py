@@ -462,7 +462,11 @@ def test_the_fit_filter_hides_only_blocking_verdicts_and_says_so(client, student
     assert "Keep Me Intern" in body
     assert "Silent Keeps Intern" in body, "silence never hides"
     assert "Hide Me Intern" not in body
-    assert "1 role states a requirement you don" in body, "the scope line owns honesty"
+    # The wording moved into the merged hidden-counts line (four stacked
+    # paragraphs became one sentence with a link per reason); the guarantee
+    # is unchanged — the count is stated and its undo is reachable.
+    assert "1 you don't qualify for" in body, "the scope line owns honesty"
+    assert "show_unfit" in body or "fit=0" in body or "Also hidden" in body or "Hidden:" in body
 
 
 @pytest.mark.django_db

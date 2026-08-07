@@ -20,51 +20,58 @@ It has to live INSIDE #cov-results so its number refreshes with the filters;
 that is also why the bottom copy is gone rather than duplicated — said once,
 where it is read before scrolling.
 {% endcomment %}
-{% if hidden_other %}
-  <p class="scope-line">Showing campus roles only · {{ hidden_other }} experienced role{{ hidden_other|pluralize }} hidden ·
-    <a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a></p>
-{% endif %}
-
-{% comment %}Roles the user dismissed. Stated for the same reason the line
-above is: a board that quietly holds things back is a board you cannot trust
-the counts on. Reversible from My Applications.{% endcomment %}
-{% if hidden_count %}
-  <p class="scope-line">{{ hidden_count }} role{{ hidden_count|pluralize }} you marked "not for me" ·
-    <a href="{% url 'my_applications' %}#hidden">Show them</a></p>
-{% endif %}
-
 {% comment %}
-Region honesty. A concrete market excludes every row whose location resolved to
-nothing — 297 of 886 on the live set — and the page used to say nothing at all
-about it. The link's querystring is built from the LIVE request in views.py
-(`show_unregioned_qs`), not hardcoded: the bare-`?` version of this bug shipped
-once already on the "Show everything" link and sent people to the very page
-that hid what it promised to reveal.
+THE SUBSET SENTENCE, at the top. It used to render at the BOTTOM of this file,
+below 56 firm cards — so the single most important fact about the default view
+("this is not everything") was stated only to people who had already finished
+reading.
+
+ONE line now, not four. Each hide used to own a paragraph, and since they are
+all conditional they stacked exactly when the board was narrowed hardest: the
+live account reads two lines by default, four under `?fit=1&region=us`, and a
+fifth once the Year hint is counted. The more precisely you filtered, the more
+grey you read before the first role — backwards, and it buried the one line on
+this page that wants a click.
+
+What is NOT collapsed is the undo. Each hide has a different reversal (role
+scope, the eligibility lens, the region filter, your own dismissals) and no
+single "show everything" can honestly stand for all four — dropping someone's
+region filter because they wanted to see unregioned rows would be a different
+promise than the one the link makes. So: one sentence, one link per reason,
+each link naming the count it reveals so it is unambiguous read aloud.
+
+Every querystring is built from the LIVE request in views.py, never hardcoded:
+the bare-`?` version of this bug shipped once already on "Show everything" and
+sent people to the very page that hid what it promised to reveal.
 {% endcomment %}
-{% comment %}The fit filter's honesty line — same contract as its siblings
-above: a board that quietly holds things back is a board you cannot trust
-the counts on.{% endcomment %}
-{% comment %}The lens→pipeline bridge. The eligibility verdicts found the
-roles that name your year; this is the click that turns them into pipeline
-instead of leaving you to star them one by one. A POST button styled as the
-scope-line family — it changes your data, so it must never be a GET.
-{% endcomment %}
+{% if hidden_other or hidden_fit or hidden_region or hidden_count %}
+  <p class="scope-line scope-hidden">
+    {% if hidden_other %}Showing campus roles only · {{ hidden_other }} experienced role{{ hidden_other|pluralize }} hidden ·
+      <a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a>{% endif %}
+    {% if hidden_fit or hidden_region or hidden_count %}
+      {% if hidden_other %}<span class="scope-sep">·</span> Also hidden:{% else %}Hidden:{% endif %}
+      {% if hidden_fit %}<a href="{% url 'opportunities' %}?{{ show_unfit_qs }}"
+        >{{ hidden_fit }} you don't qualify for</a>{% if hidden_region or hidden_count %},{% endif %}{% endif %}
+      {% if hidden_region %}<a href="{% url 'opportunities' %}?{{ show_unregioned_qs }}"
+        >{{ hidden_region }} with no tracked region</a>{% if hidden_count %},{% endif %}{% endif %}
+      {% if hidden_count %}<a href="{% url 'my_applications' %}#hidden"
+        >{{ hidden_count }} you marked "not for me"</a>{% endif %}
+    {% endif %}
+  </p>
+{% endif %}
+
+{% comment %}The lens→pipeline bridge, and the only line in this block that
+wants a click. It was styled as one of the disclosures above and sat between
+two of them, so the eye filed the whole stack as fine print and skipped the
+button with it. Its own treatment now: an accent-tinted band, the sentence
+and the action on one line. A POST — it changes your data, so it must never
+be a GET.{% endcomment %}
 {% if eligible_unsaved %}
   <form class="scope-line scope-line--act" method="post" action="{% url 'track_eligible' %}">
     {% csrf_token %}
     <span>{{ eligible_unsaved }} open role{{ eligible_unsaved|pluralize }} name{{ eligible_unsaved|pluralize:"s," }} your class year and {{ eligible_unsaved|pluralize:"isn't,aren't" }} saved yet.</span>
     <button type="submit" class="scope-act">Save {{ eligible_unsaved|pluralize:"it,them all" }}</button>
   </form>
-{% endif %}
-
-{% if hidden_fit %}
-  <p class="scope-line">{{ hidden_fit }} role{{ hidden_fit|pluralize }} state{{ hidden_fit|pluralize:"s," }} a requirement you don't meet and {{ hidden_fit|pluralize:"is,are" }} hidden.
-    <a href="{% url 'opportunities' %}?{{ show_unfit_qs }}">Show them</a>.</p>
-{% endif %}
-
-{% if hidden_region %}
-  <p class="scope-line">{{ hidden_region }} role{{ hidden_region|pluralize }} here {{ hidden_region|pluralize:"has,have" }} no tracked region and {{ hidden_region|pluralize:"is,are" }} hidden by this filter.
-    <a href="{% url 'opportunities' %}?{{ show_unregioned_qs }}">Show them</a>.</p>
 {% endif %}
 
 {% comment %}Slim inline stat strip — one line under the hero instead of four

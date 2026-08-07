@@ -227,15 +227,21 @@
       </label>
 
       {% comment %}
-      The Programme Year hint, relocated from under its select to the bar's
-      single footnote. The sentence is a tested honesty contract and ships
-      verbatim; `aria-describedby` on #f-year keeps it attached for screen
-      readers now that it is no longer inside the label. It stays INSIDE the
-      details so it collapses with the controls it explains on mobile —
-      "travels with its control" was the original placement's whole point,
-      and this keeps that true.
+      The Programme Year hint. The sentence is a tested honesty contract and
+      ships verbatim: `cohort` is the intake year printed in the posting, not
+      the year the student graduates, and without this the Year control tells
+      ~4,000 roles' worth of lies.
+
+      ALWAYS in the DOM, not always on screen. It is a definition, not a
+      status — it teaches once and then costs a permanent line at the head of
+      the results, where it was stacking with the hidden-count disclosures
+      into a wall of grey the eye writes off wholesale. It reveals itself when
+      the control it explains is in play: focused, or already carrying a
+      choice. `aria-describedby` on #f-year is unaffected either way, so a
+      screen reader hears it whenever the select is reached, and browsers
+      without `:has()` simply always show it (fail-open: the honest state).
       {% endcomment %}
-      <small class="filter-hint" id="year-hint">Intake year in the posting. Not a graduation year.</small>
+      <small class="filter-hint{% if selected.year %} is-live{% endif %}" id="year-hint">Intake year in the posting. Not a graduation year.</small>
     </details>
 
     <noscript><button type="submit">Apply</button></noscript>

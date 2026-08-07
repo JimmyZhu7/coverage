@@ -183,7 +183,7 @@ def test_a_concrete_region_says_what_it_is_hiding(client, bar):
     resp = _get(client, region="hk")
     assert resp.context["hidden_region"] == 1
     body = resp.content.decode()
-    assert "no tracked region and" in body
+    assert "with no tracked region" in body
     # The escape hatch is built from the LIVE querystring, not a bare "?" —
     # it must preserve the other filters while flipping region to `none`.
     qs = resp.context["show_unregioned_qs"]
@@ -195,7 +195,7 @@ def test_a_concrete_region_says_what_it_is_hiding(client, bar):
 def test_any_region_hides_nothing_and_says_nothing(client, bar):
     resp = _get(client)
     assert resp.context["hidden_region"] == 0
-    assert "no tracked region and" not in resp.content.decode()
+    assert "with no tracked region" not in resp.content.decode()
 
 
 def test_an_unrecognised_region_is_a_no_op_not_an_empty_page(client, bar):
