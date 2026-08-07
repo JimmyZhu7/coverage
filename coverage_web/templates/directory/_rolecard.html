@@ -72,6 +72,12 @@ without cutting text off.
   extracted from — a chip that cannot show its own evidence does not ship.
   {% endcomment %}
   <div class="rolecard-facts">
+    {% comment %}The verdict leads: it is the one chip about YOU rather than
+    about the posting, computed only where both sides stated (see
+    _eligibility in views.py). Green names your year; a blocking verdict
+    (wrong stated year, refuses your visa) is the quiet grey of a door that
+    is closed rather than the red of an alarm.{% endcomment %}
+    {% if r.verdict %}<span class="fact-chip verdict-{{ r.verdict.kind }}" title="{{ r.verdict.why }}">{{ r.verdict.label }}</span>{% endif %}
     {% for f in r.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
   </div>
 

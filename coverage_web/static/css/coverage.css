@@ -973,6 +973,17 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 /* A second markers row for fact chips, tighter than the pill row above it. */
 .markers-facts { gap: 4px; margin-top: -2px; }
 
+/* Eligibility verdicts — the one chip about the READER. Green names their
+   year. A blocking verdict is grey-on-quiet, not red: a closed door is a
+   fact to route around, and eight red chips down a column would read as the
+   board shouting at its user. */
+.fact-chip.verdict-year_ok { border-color: var(--ok); color: var(--ok);
+  background: var(--ok-soft); font-weight: var(--w-med); }
+.fact-chip.verdict-year_out, .fact-chip.verdict-visa_out {
+  border-color: var(--line-strong); color: var(--ink-3);
+  background: var(--paper); text-decoration: line-through;
+  text-decoration-thickness: 1px; }
+
 /* A deadline read out of the posting's own prose rather than published as a
    field by the board (Opportunity.confidence < 1.0 — 92 of 121 dated open
    roles). Dotted rule, never a colour change: the date is what the posting

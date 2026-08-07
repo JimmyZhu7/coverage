@@ -191,6 +191,22 @@
       </label>
 
       {% comment %}
+      The fit toggle. Signed-in only, and only when Settings has stated
+      enough for a verdict to exist. It hides roles whose own text BLOCKS
+      this user — a stated graduation window without their year, or a
+      refused visa in a market where they need one. Silence never hides:
+      a role that states nothing always shows. Deliberately uncounted (it
+      is per-user, and the facet counts are shared); the scope line inside
+      the results owns its honesty instead.
+      {% endcomment %}
+      {% if fit_available %}
+        <label class="fit-toggle" title="Hide roles whose own text states a requirement you don't meet. Roles that state nothing always show.">
+          <input type="checkbox" name="fit" value="1"{% if fit %} checked{% endif %}>
+          <span>Fits me</span>
+        </label>
+      {% endif %}
+
+      {% comment %}
       Companies shows an ACTIVE-SELECTION count ("3 selected"), not a result
       count — it is an identity control over 100+ firms, and a per-option
       result count would be a promise made about a list nobody reads

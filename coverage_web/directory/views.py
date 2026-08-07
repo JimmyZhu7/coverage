@@ -875,7 +875,62 @@ def _fact_chips(o) -> list[dict]:
     return [made[k] for k in _FACT_CHIP_ORDER if k in made][:_FACT_CHIPS_MAX]
 
 
-def _urgency_item(o, *, now, today, my_firm_ids):
+def _eligibility_profile(user):
+    """What the signed-in user has stated about themselves, for verdicts.
+    None for anonymous visitors and users who have stated nothing — a
+    verdict requires BOTH sides to have spoken."""
+    if not getattr(user, "is_authenticated", False):
+        return None
+    class_year = getattr(user, "class_year", None)
+    work_auth = getattr(user, "work_authorization", None) or {}
+    if not class_year and not work_auth:
+        return None
+    return {"class_year": class_year, "work_auth": work_auth}
+
+
+def _eligibility(o, profile):
+    """A PERSONAL verdict on one posting, or None.
+
+    The whole facts pipeline led here: postings state their graduation
+    windows and sponsorship stance, Settings knows the user's class year and
+    visa status per region, and until now nothing cross-referenced them — a
+    feed where 232 of the 240 eligibility-stating roles excluded this user's
+    year ranked them identically to the 8 that named it.
+
+    The contract is the extractors' own, applied pairwise: a verdict exists
+    ONLY where both sides stated. No stated window means no verdict (never
+    "you are probably fine"); no class year in Settings means no verdict.
+    Blocking verdicts (wrong stated year, refuses-your-visa) carry
+    `blocking: True`, which the fit filter and Picked-for-you read; the
+    positive year match earns a chip but blocks nothing.
+    """
+    if not profile:
+        return None
+    # Visa first: it is the harder wall. Only when the posting NAMES a
+    # market, the user has answered for that market, the answer is "needs
+    # sponsorship", and the posting says no.
+    region = (o.region or "").lower()
+    if (region and o.sponsorship == "no"
+            and profile["work_auth"].get(region) == "sponsorship"):
+        return {"kind": "visa_out", "blocking": True,
+                "label": "Won't sponsor you here",
+                "why": ("This posting says it cannot sponsor a visa, and your "
+                        "Settings say you need sponsorship in this market")}
+    cy = profile["class_year"]
+    grad = ((o.raw or {}).get("facts") or {}).get("grad")
+    if cy and grad and grad.get("years"):
+        years = [int(y) for y in grad["years"]]
+        if min(years) <= cy <= max(years):
+            return {"kind": "year_ok", "blocking": False,
+                    "label": f"Your year ({cy})",
+                    "why": grad.get("phrase", "")}
+        return {"kind": "year_out", "blocking": True,
+                "label": f"For {grad['value']} grads",
+                "why": grad.get("phrase", "")}
+    return None
+
+
+def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
     """One feed card: firm identity + the honest urgency signal for this
     role (a real countdown when dated, freshness when rolling, or an
     explicit "deadline passed" state — see the three-way split below)."""
@@ -903,6 +958,7 @@ def _urgency_item(o, *, now, today, my_firm_ids):
         "fresh_label": _fresh_label(seen_days),
         "facts": _fact_chips(o),
         "reported": deadline_provenance(o),
+        "verdict": _eligibility(o, profile),
         # Whether the Read control has anything to open. Checked here, not in
         # the template, so the card never offers a drawer that would come back
         # empty.
@@ -954,13 +1010,14 @@ def _urgency_item(o, *, now, today, my_firm_ids):
     return item
 
 
-def _urgency_feed(qs, *, now, today, my_firm_ids):
+def _urgency_feed(qs, *, now, today, my_firm_ids, profile=None):
     """Rank the filtered set into the Closing-Soon and Fresh-&-Rolling bands.
     Dated roles sort by nearest deadline; rolling roles sort by your-firm
     first, then freshest-seen, then this-cycle cohort."""
     closing, rolling = [], []
     for o in qs:
-        item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids)
+        item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
+                             profile=profile)
         (closing if item["dated"] else rolling).append(item)
 
     # Passed-deadline rows are "dated" (see `_urgency_item`) but are neither
@@ -1020,6 +1077,16 @@ def cycle_months(months: int = 12) -> list[dict]:
     for r in out:
         r["pct"] = round(100 * r["count"] / busiest) if busiest else 0
     return out
+
+
+def _qs_without(request, param: str) -> str:
+    """The live querystring minus one parameter — the scope-line link's
+    contract: built from the REAL request, never hardcoded, because the
+    bare-`?` version of this shipped once and sent people to the very page
+    that hid what it promised to reveal."""
+    q = request.GET.copy()
+    q.pop(param, None)
+    return q.urlencode()
 
 
 def _last_checked() -> str:
@@ -1251,7 +1318,28 @@ def opportunities(request):
     # cluster loop's ordering is applied here; `_urgency_feed` sorts its
     # bands in Python and never cared about SQL order.
     rows = list(qs.order_by("firm__name", F("deadline").asc(nulls_last=True), "title"))
-    feed = _urgency_feed(rows, now=now, today=today, my_firm_ids=my_firm_ids)
+
+    # ---- The fit filter (?fit=1), applied to the MATERIALISED rows. It is
+    # deliberately not in _apply_filters: it depends on who is asking, so it
+    # must never shape the shared facet counts, and it hides only roles whose
+    # own text BLOCKS this user (wrong stated year, refuses their visa) —
+    # silence never hides. The scope line below owns the honesty: the count
+    # of hidden rows is stated, with one click to bring them back.
+    elig_profile = _eligibility_profile(request.user)
+    fit = request.GET.get("fit", "").strip() == "1" and elig_profile is not None
+    hidden_fit = 0
+    if fit:
+        keep = []
+        for o in rows:
+            v = _eligibility(o, elig_profile)
+            if v and v["blocking"]:
+                hidden_fit += 1
+            else:
+                keep.append(o)
+        rows = keep
+
+    feed = _urgency_feed(rows, now=now, today=today, my_firm_ids=my_firm_ids,
+                         profile=elig_profile)
 
     # Firm clusters are the page: one firm, all its open roles listed below it
     # in its own scroll window. Each role keeps its honest urgency signal (a
@@ -1283,6 +1371,13 @@ def opportunities(request):
                     [
                         Candidate.from_opportunity(o)
                         for o in open_qs.filter(bucket__in=TARGET_BUCKETS)
+                        # A pick is a RECOMMENDATION, held to a higher bar
+                        # than a listing: a role whose own text blocks this
+                        # user (wrong stated year, refuses their visa) may
+                        # still be worth seeing on the board, but the product
+                        # must not point at it and say "for you".
+                        if not (lambda v: v and v["blocking"])(
+                            _eligibility(o, elig_profile))
                     ],
                 )
             ]
@@ -1319,7 +1414,8 @@ def opportunities(request):
                 "next_days": None,
                 "roles": [],
             }
-        item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids)
+        item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
+                             profile=elig_profile)
         cl["roles"].append(item)
         # Kept by reference here; the Picked column takes its COPY further
         # down, after the track-status annotation has run over these dicts.
@@ -1520,7 +1616,14 @@ def opportunities(request):
         "all_firms": all_firms,
         "selected": selected,
         "has_filters": (any([role, year, region, track, provider, sponsorship, query])
-                        or bool(firm_slugs)),
+                        or bool(firm_slugs) or fit),
+        # The fit filter's own honesty trio: whether it is on, whether the
+        # user CAN use it (a verdict needs their Settings to have spoken),
+        # and how many rows it hid this request.
+        "fit": fit,
+        "fit_available": elig_profile is not None,
+        "hidden_fit": hidden_fit,
+        "show_unfit_qs": _qs_without(request, "fit"),
         # `_results.html` is included on a full render and returned bare on an
         # htmx swap. The out-of-band count fragment must only ship on the
         # second: on a full page load the counts are already correct in the

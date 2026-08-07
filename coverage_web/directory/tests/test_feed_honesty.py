@@ -388,3 +388,92 @@ def test_an_undated_role_says_no_date_unless_it_claimed_rolling(client):
     body = client.get("/opportunities/").content.decode()
     assert "No date posted" in body
     assert "reviewed on a rolling basis" in body
+
+
+# ---------------------------------------------------------------------------
+# ELIGIBILITY VERDICTS. The one chip about the READER: computed only where
+# both sides stated — the posting's own text AND the user's Settings. On live
+# data 232 of 240 eligibility-stating roles excluded this user's class year
+# and ranked identically to the 8 that named it.
+# ---------------------------------------------------------------------------
+
+def _grad_role(firm, years, label, title="Analyst Intern", sponsorship="unknown",
+               region=""):
+    return Opportunity.objects.create(
+        firm=firm, title=title, bucket="internship", status="open",
+        sponsorship=sponsorship, region=region,
+        url=f"https://x.com/{title.replace(' ', '')}-{label}",
+        raw={"facts": {"grad": {"value": label, "years": years,
+                                "phrase": f"graduating {label}"}}})
+
+
+@pytest.fixture
+def student(django_user_model):
+    u = django_user_model.objects.create_user(email="s2029@x.com", password="x")
+    u.class_year = 2029
+    u.work_authorization = {"us": "sponsorship", "hk": "sponsorship"}
+    u.save(update_fields=["class_year", "work_authorization"])
+    return u
+
+
+@pytest.mark.django_db
+def test_a_stated_window_gets_a_personal_verdict(client, student):
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    _grad_role(firm, ["2029"], "2029", title="Your Year Intern")
+    _grad_role(firm, ["2027", "2028"], "2027–2028", title="Other Year Intern")
+    client.force_login(student)
+    body = client.get("/opportunities/").content.decode()
+    assert "Your year (2029)" in body
+    assert "For 2027–2028 grads" in body
+
+
+@pytest.mark.django_db
+def test_silence_earns_no_verdict_in_either_direction(client, student):
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    Opportunity.objects.create(firm=firm, title="Silent Intern", bucket="internship",
+                               status="open", url="https://ms.com/silent")
+    client.force_login(student)
+    body = client.get("/opportunities/").content.decode()
+    assert "Silent Intern" in body
+    assert "verdict-" not in re.sub(r"<style.*?</style>", "", body, flags=re.S)
+
+
+@pytest.mark.django_db
+def test_a_refused_visa_in_a_market_they_need_one_is_a_verdict(client, student):
+    firm = Firm.objects.create(slug="jpm", name="J.P. Morgan")
+    Opportunity.objects.create(
+        firm=firm, title="No Visa Intern", bucket="internship", status="open",
+        sponsorship="no", region="us", url="https://jpm.com/novisa")
+    client.force_login(student)
+    body = client.get("/opportunities/").content.decode()
+    assert "Won&#x27;t sponsor you here" in body or "Won't sponsor you here" in body
+
+
+@pytest.mark.django_db
+def test_the_fit_filter_hides_only_blocking_verdicts_and_says_so(client, student):
+    firm = Firm.objects.create(slug="citi", name="Citi")
+    _grad_role(firm, ["2029"], "2029", title="Keep Me Intern")
+    _grad_role(firm, ["2027"], "2027", title="Hide Me Intern")
+    Opportunity.objects.create(firm=firm, title="Silent Keeps Intern",
+                               bucket="internship", status="open",
+                               url="https://citi.com/silent2")
+    client.force_login(student)
+    body = client.get("/opportunities/?fit=1").content.decode()
+    assert "Keep Me Intern" in body
+    assert "Silent Keeps Intern" in body, "silence never hides"
+    assert "Hide Me Intern" not in body
+    assert "1 role states a requirement you don" in body, "the scope line owns honesty"
+
+
+@pytest.mark.django_db
+def test_the_fit_toggle_needs_a_profile_to_exist(client, django_user_model):
+    blank = django_user_model.objects.create_user(email="blank@x.com", password="x")
+    blank.class_year = None
+    blank.work_authorization = {}
+    blank.save(update_fields=["class_year", "work_authorization"])
+    firm = Firm.objects.create(slug="ubs", name="UBS")
+    _grad_role(firm, ["2027"], "2027", title="Would Hide Intern")
+    client.force_login(blank)
+    body = client.get("/opportunities/?fit=1").content.decode()
+    assert "Would Hide Intern" in body, "no Settings, no verdicts, no hiding"
+    assert 'name="fit"' not in body, "no toggle offered either"

@@ -37,7 +37,7 @@ from django.utils.dateparse import parse_date
 
 from directory.boards import BOARDS
 from directory.classify import (
-    board_is_campus, classify_role, clean_title, contract_is_campus, extract_class_year, extract_cohort,
+    board_is_campus, bucket_from_contract, classify_role, clean_title, extract_class_year, extract_cohort,
     extract_deadline_from_text, extract_sponsorship, normalize_region, region_from_prose,
     posting_text,
 )
@@ -64,13 +64,11 @@ class Command(BaseCommand):
             for opp in qs.iterator():
                 hint = (opp.firm.slug, opp.source) in campus_pairs
                 title = clean_title(opp.title)[:255]
-                # Board-level hint OR the row's own provider-stated contract
-                # type — same pair as ingest, and reclassify must mirror
-                # ingest exactly or a nightly re-run silently undoes what
-                # ingest classified (the drift this command's docstring warns
-                # about, in the other direction).
-                row_hint = contract_is_campus((opp.raw or {}).get("contract_type"))
-                bucket = classify_role(title, campus_hint=hint or row_hint)
+                # Mirrors ingest exactly (a nightly re-run must not undo what
+                # ingest classified): the provider's own filing decides
+                # outright where it speaks, the title rules where it is silent.
+                bucket = (bucket_from_contract((opp.raw or {}).get("contract_type"))
+                          or classify_role(title, campus_hint=hint))
                 cohort = opp.cohort or extract_cohort(title)
                 class_year = extract_class_year(title)
                 region = normalize_region(opp.location)

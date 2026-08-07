@@ -215,6 +215,21 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      so it reads as the primary control without becoming a runway. */
   .filters-search { flex: 1 1 15rem; max-width: 24rem; }
   .filters-search input[type="search"] { width: 100%; min-width: 0; }
+  /* The fit toggle: a labelled checkbox styled as its row-mates' pill, the
+     checked state carrying the same accent the segmented control uses. */
+  .fit-toggle { display: inline-flex; align-items: center; gap: 7px;
+    height: 40px; box-sizing: border-box; padding: 8px 15px;
+    border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+    background: var(--surface); box-shadow: var(--shadow-1);
+    font-size: var(--fs-s); color: var(--ink-2);
+    text-transform: none; letter-spacing: 0; font-weight: var(--w-med);
+    flex-direction: row; transition: border-color var(--t-fast),
+      background var(--t-fast), color var(--t-fast); }
+  .fit-toggle:hover { border-color: var(--accent-line); }
+  .fit-toggle input { accent-color: var(--accent); margin: 0; }
+  .fit-toggle:has(input:checked) { background: var(--accent-soft);
+    color: var(--accent-ink); border-color: var(--accent); }
+
   /* The bar's single footnote — the Programme Year honesty sentence, tied to
      #f-year via aria-describedby. Full row, so it never rags the controls;
      lowercase and quiet, because it is a caveat, not a control. */

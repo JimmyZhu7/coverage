@@ -41,6 +41,14 @@ about it. The link's querystring is built from the LIVE request in views.py
 once already on the "Show everything" link and sent people to the very page
 that hid what it promised to reveal.
 {% endcomment %}
+{% comment %}The fit filter's honesty line — same contract as its siblings
+above: a board that quietly holds things back is a board you cannot trust
+the counts on.{% endcomment %}
+{% if hidden_fit %}
+  <p class="scope-line">{{ hidden_fit }} role{{ hidden_fit|pluralize }} state{{ hidden_fit|pluralize:"s," }} a requirement you don't meet and {{ hidden_fit|pluralize:"is,are" }} hidden.
+    <a href="{% url 'opportunities' %}?{{ show_unfit_qs }}">Show them</a>.</p>
+{% endif %}
+
 {% if hidden_region %}
   <p class="scope-line">{{ hidden_region }} role{{ hidden_region|pluralize }} here {{ hidden_region|pluralize:"has,have" }} no tracked region and {{ hidden_region|pluralize:"is,are" }} hidden by this filter.
     <a href="{% url 'opportunities' %}?{{ show_unregioned_qs }}">Show them</a>.</p>

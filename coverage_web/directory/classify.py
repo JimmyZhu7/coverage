@@ -451,6 +451,28 @@ def contract_is_campus(contract_type: str | None) -> bool:
     return bool(t) and any(k in t for k in _CAMPUS_CONTRACT_KEYS)
 
 
+def bucket_from_contract(contract_type: str | None) -> str:
+    """The bucket a provider's own filing decides, or "" when it decides
+    nothing.
+
+    A hint was not enough. 51 open roles sat in `other` carrying explicit
+    Internship/Trainee, Apprenticeship, VIE or COOPERATIVE filings, because
+    the hint only breaks ties on NEUTRAL titles — and "Gestionnaire des
+    processus H/F" is not neutral to a classifier that reads no French, it
+    is opaque. When the firm has already answered the exact question the
+    title rules exist to guess at, the answer outranks the guess: graduate
+    programmes are entry-level hires, every other campus filing is an
+    internship-family programme. Blank or unrecognised filings decide
+    nothing and fall through to the title rules unchanged.
+    """
+    t = (contract_type or "").lower()
+    if not t or not any(k in t for k in _CAMPUS_CONTRACT_KEYS):
+        return ""
+    if "graduate" in t:
+        return "entry_level"
+    return "internship"
+
+
 def board_is_campus(board) -> bool:
     """True when a board is campus-scoped. Some connectors are campus-only
     by construction (a fixed campus query, no identifier to sniff); the
