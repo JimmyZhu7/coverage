@@ -38,14 +38,25 @@
     white-space: nowrap; }
   .strip-chip .mono { width: 26px; height: 26px; border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: var(--w-bold);
+    font-size: 11px; font-weight: var(--w-bold); overflow: hidden;
     background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 31%); }
   /* The real mark when we have one. The landing page is where these earn
      the most — it is the page making the claim that Coverage checks these
      firms directly — and it was still showing two-letter monograms after the
-     app had 78 logos. White tile, `contain` so wordmarks are not cropped. */
+     app had 78 logos. White tile, `contain` so wordmarks are not cropped.
+
+     The padding used to leave a 20px inner box inside a 26px circle. A
+     circle only fully contains a square up to its INSCRIBED square, which
+     at 26px is ~18.4px on a side — 20px is bigger than that, so a squarish
+     mark (McKinsey's, and any other firm whose logo is closer to a square
+     than a wide wordmark) filled the whole inner box and its corners landed
+     outside the circle. `overflow: hidden` above is the backstop; the real
+     fix is sizing the inner box to the inscribed square so a square logo
+     never reaches the edge in the first place, and a wide wordmark — the
+     shape this was built for — still renders uncropped at its natural
+     narrower height. */
   .strip-chip .mono.has-logo { background: #fff;
-    box-shadow: inset 0 0 0 1px var(--line); padding: 3px; }
+    box-shadow: inset 0 0 0 1px var(--line); padding: 4px; }
   .strip-chip .mono.has-logo img { width: 100%; height: 100%;
     object-fit: contain; display: block; }
   @media (prefers-reduced-motion: reduce) {
