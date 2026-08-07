@@ -514,3 +514,51 @@ def test_desk_variants_are_different_jobs_and_never_fold(client):
             url=f"https://ms.com/{desk.replace(' ', '')}")
     body = client.get("/opportunities/").content.decode()
     assert "more location" not in body
+
+
+# ---------------------------------------------------------------------------
+# COLUMN LAZY-LOADING. The page shipped every firm column at once (~18,000
+# DOM nodes for 55 firms) though four fit a screen.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_the_first_page_of_columns_ships_with_a_sentinel(client):
+    for i in range(20):
+        f = Firm.objects.create(slug=f"firm{i}", name=f"Firm {i:02d}")
+        Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
+                                   status="open", url=f"https://f{i}.com/a")
+    # <style> stripped: the class names appear in the page's own inline CSS
+    # rules as well as its markup, the same trap the style-block tests
+    # document.
+    body = re.sub(r"<style.*?</style>", "",
+                  client.get("/opportunities/").content.decode(), flags=re.S)
+    assert body.count("firmcol-name") == 12, "one page of columns, not all 20"
+    assert "cols-sentinel" in body
+    assert "cols=12" in body
+
+
+@pytest.mark.django_db
+def test_the_counts_describe_the_board_not_the_loaded_slice(client):
+    for i in range(20):
+        f = Firm.objects.create(slug=f"firm{i}", name=f"Firm {i:02d}")
+        Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
+                                   status="open", url=f"https://f{i}.com/a")
+    resp = client.get("/opportunities/")
+    assert resp.context["total"] == 20, "the strip counts the board"
+    assert len(resp.context["clusters"]) == 12, "the page renders a slice"
+
+
+@pytest.mark.django_db
+def test_a_later_slice_keeps_the_live_filters(client):
+    keep = Firm.objects.create(slug="keepme", name="Zebra Keep Co")
+    for i in range(14):
+        f = Firm.objects.create(slug=f"firm{i}", name=f"Firm {i:02d}")
+        Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
+                                   status="open", url=f"https://f{i}.com/a")
+    Opportunity.objects.create(firm=keep, title="Zebra Analyst", bucket="internship",
+                               status="open", url="https://keep.com/a")
+    resp = client.get("/opportunities/?q=Zebra&cols=0",
+                      headers={"HX-Request": "true"})
+    body = resp.content.decode()
+    assert "Zebra Keep Co" in body
+    assert "Firm 00" not in body, "the filter still applies to a paged request"

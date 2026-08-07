@@ -230,6 +230,20 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .fit-toggle:has(input:checked) { background: var(--accent-soft);
     color: var(--accent-ink); border-color: var(--accent); }
 
+  /* The lazy-load sentinel: a full-width strip at the end of the loaded
+     columns. It occupies real height so `revealed` fires before the user
+     hits the bottom, and its text is the honest state ("loading", not a
+     spinner pretending to be instant). */
+  .cols-sentinel { grid-column: 1 / -1; display: flex; align-items: center;
+    justify-content: center; min-height: 90px; padding: var(--s4);
+    font-family: var(--font-mono); font-size: var(--fs-micro);
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+  .cols-loading::after { content: ""; display: inline-block; width: 6px;
+    height: 6px; margin-left: 8px; border-radius: 50%; background: var(--accent);
+    animation: cols-pulse 1.1s ease-in-out infinite; }
+  @keyframes cols-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .cols-loading::after { animation: none; } }
+
   /* The city-variant fold: one programme's other cities, tucked but named.
      The summary is a quiet full-width strip between cards; open, the sibling
      cards render at full size with a left rule marking them as one family. */

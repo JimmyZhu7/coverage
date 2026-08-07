@@ -1514,6 +1514,20 @@ def opportunities(request):
         )
 
     cluster_list = sorted(clusters.values(), key=_cluster_key)
+
+    # ---- Column lazy-loading (?cols=N). The page used to render every firm
+    # column at once — ~18,000 DOM nodes for 55 firms — and a mid-range phone
+    # pays for all of it before first paint even though four columns fit a
+    # screen. The first COLS_PAGE columns render now; a sentinel at the end
+    # of the grid fetches the next slice when it scrolls into view (htmx
+    # `revealed`), carrying the LIVE querystring so filters keep applying.
+    # Counts are computed over the FULL list before slicing — the stat strip
+    # must describe the board, not the fraction of it that has loaded.
+    COLS_PAGE = 12
+    try:
+        cols_from = max(int(request.GET.get("cols", 0)), 0)
+    except ValueError:
+        cols_from = 0
     # City-variant families fold within each firm's column (display-only —
     # see _group_city_variants). Done after sorting because it mutates the
     # items in place, and the transient _opps list is dropped here so it can
@@ -1521,6 +1535,8 @@ def opportunities(request):
     for cl in cluster_list:
         _group_city_variants(cl["roles"], cl.pop("_opps", []))
     total = sum(c["open_count"] for c in cluster_list)
+    cols_next = cols_from + COLS_PAGE if len(cluster_list) > cols_from + COLS_PAGE else None
+    cluster_page = cluster_list[cols_from:cols_from + COLS_PAGE]
     personalized = bool(tier_by_firm or user_regions or user_tracks)
 
     # Annotate each role with the user's own track status (saved / applied /
@@ -1618,7 +1634,12 @@ def opportunities(request):
     ]
 
     context = {
-        "clusters": cluster_list,
+        # The paged slice renders; the full list still backs every count
+        # above, so the strip describes the board, not the loaded fraction.
+        "clusters": cluster_page,
+        "all_cluster_count": len(cluster_list),
+        "cols_next": cols_next,
+        "cols_qs": _qs_without(request, "cols"),
         "hidden_count": len(hidden_ids),
         # When the scrape last ran. The strip's pulsing dot said "live"
         # while the data is radar-cadence; naming the age is what makes the
@@ -1690,6 +1711,11 @@ def opportunities(request):
     }
 
     if context["is_htmx"]:
+        # A cols= request is the lazy-load sentinel asking for the NEXT slice
+        # of columns, not a filter change asking for the whole results body —
+        # it swaps just the columns fragment in place of itself.
+        if cols_from:
+            return render(request, "directory/_columns.html", context)
         return render(request, "directory/_results.html", context)
     return render(request, "directory/opportunities.html", context)
 

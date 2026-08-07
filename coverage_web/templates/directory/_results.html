@@ -144,61 +144,7 @@ exactly the moment it had something to say.
         {% endif %}
       </article>
     {% endif %}
-    {% for cl in clusters %}
-      {% comment %}`forloop.counter` (1-based), not `counter0`: the pinned
-      Picked column is index 0, and a 0-based firm loop made the first firm
-      animate in lockstep with it instead of after it.{% endcomment %}
-      <article class="firmcol{% if cl.is_mine %} is-mine{% endif %} kin-reveal" style="--i:{{ forloop.counter }}">
-        <header class="firmcol-head">
-          {% comment %}The firm's real mark when we have one, its monogram
-          otherwise — never a broken-image icon, because the URL is only
-          emitted when the file exists. `loading="lazy"` because a filtered
-          board can carry 13 of these below the fold.{% endcomment %}
-          {% if cl.logo_url %}
-            <span class="firmcol-logo has-logo">
-              <img src="{{ cl.logo_url }}" alt="" loading="lazy" decoding="async" width="128" height="128">
-            </span>
-          {% else %}
-            <span class="firmcol-logo" style="--hue: {{ cl.firm_slug|firm_hue }}">{{ cl.monogram }}</span>
-          {% endif %}
-          <div class="firmcol-id">
-            <a class="firmcol-name" href="{% url 'directory:firm_detail' cl.firm_slug %}">{{ cl.firm_name|smart_title }}</a>
-            <span class="firmcol-meta">{% if cl.category %}{{ cl.category }} · {% endif %}{{ cl.open_count }} open</span>
-            <div class="firmcol-stats">
-              <span class="firmcol-tier{% if cl.is_mine %} is-mine{% endif %}">{% if cl.tier %}Tier {{ cl.tier }}{% else %}Untiered{% endif %}</span>
-              {% if cl.closing_count %}<span class="fc-stat fc-closing">{{ cl.closing_count }} closing</span>{% endif %}
-            </div>
-          </div>
-        </header>
-        <div class="firmcol-scroll">
-          {% for r in cl.roles %}
-            {% comment %}A city-variant sibling renders inside its family
-            head's disclosure below, not at top level — skipping it here is
-            the entire collapse.{% endcomment %}
-            {% if not r.in_group %}
-              {% include "directory/_rolecard.html" %}
-              {% if r.variants %}
-                {% comment %}One programme, several cities. The siblings are
-                COMPLETE cards — their own Save, Read, deadline — behind a
-                disclosure, so grouping changes what the column spends, never
-                what any row means. The summary names the cities, because
-                "+2 more locations" that doesn't say which is a tease, not
-                information.{% endcomment %}
-                <details class="variant-fold">
-                  {% comment %}One template line on purpose: a break after the
-                  colon puts a newline into the summary's accessible name and
-                  into every substring test that quotes it.{% endcomment %}
-                  <summary>+{{ r.variants|length }} more location{{ r.variants|length|pluralize }}: {% for v in r.variants %}{{ v.location|smart_title }}{% if not forloop.last %}, {% endif %}{% endfor %}</summary>
-                  {% for r in r.variants %}
-                    {% include "directory/_rolecard.html" %}
-                  {% endfor %}
-                </details>
-              {% endif %}
-            {% endif %}
-          {% endfor %}
-        </div>
-      </article>
-    {% endfor %}
+    {% include "directory/_columns.html" %}
   </div>
   {% if not clusters %}
     {% comment %}The firms came back empty but the grid still rendered (the
