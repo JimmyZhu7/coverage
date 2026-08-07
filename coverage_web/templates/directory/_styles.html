@@ -216,19 +216,34 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .filters-search { flex: 1 1 15rem; max-width: 24rem; }
   .filters-search input[type="search"] { width: 100%; min-width: 0; }
   /* The fit toggle: a labelled checkbox styled as its row-mates' pill, the
-     checked state carrying the same accent the segmented control uses. */
-  .fit-toggle { display: inline-flex; align-items: center; gap: 7px;
-    height: 40px; box-sizing: border-box; padding: 8px 15px;
+     checked state carrying the same accent the segmented control uses.
+
+     Written as `.filters .fit-toggle` (0,2,0) and not `.fit-toggle` (0,1,0)
+     for the same reason the segment pills are — it IS a <label> in this bar,
+     so `.filters label` (0,1,1) out-specifies the bare class and imposed its
+     column direction on it: the box stacked a 13px checkbox over the word
+     inside a pill only 40px tall, and clipped both. Anything styling a label
+     in this bar has to clear that rule. */
+  .filters .fit-toggle { display: inline-flex; flex-direction: row;
+    /* flex-start, not center: on desktop the pill is content-width so it
+       reads the same either way, but the mobile drawer stretches every
+       control full width and a centred label there was the only one not
+       starting at the same left edge as its neighbours. */
+    align-items: center; justify-content: flex-start; gap: 8px;
+    height: 40px; box-sizing: border-box; padding: 0 16px; flex: 0 0 auto;
     border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
     background: var(--surface); box-shadow: var(--shadow-1);
     font-size: var(--fs-s); color: var(--ink-2);
     text-transform: none; letter-spacing: 0; font-weight: var(--w-med);
-    flex-direction: row; transition: border-color var(--t-fast),
+    white-space: nowrap; transition: border-color var(--t-fast),
       background var(--t-fast), color var(--t-fast); }
-  .fit-toggle:hover { border-color: var(--accent-line); }
-  .fit-toggle input { accent-color: var(--accent); margin: 0; }
-  .fit-toggle:has(input:checked) { background: var(--accent-soft);
+  .filters .fit-toggle:hover { border-color: var(--accent-line); }
+  .filters .fit-toggle input { accent-color: var(--accent); margin: 0;
+    width: 15px; height: 15px; flex: none; cursor: pointer; }
+  .filters .fit-toggle:has(input:checked) { background: var(--accent-soft);
     color: var(--accent-ink); border-color: var(--accent); }
+  .filters .fit-toggle:focus-within { outline: 2px solid var(--accent);
+    outline-offset: 2px; }
 
   /* The save-your-year line: scope-line family, plus the one button. The
      button is quiet — a text-weight action, not a primary CTA — because the
