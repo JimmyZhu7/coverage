@@ -100,6 +100,10 @@
   --line-strong:  #b8b3a8;   /* emphasized borders (inputs, table heads) */
 
   /* Accent — one, navy */
+  /* Text that sits ON an accent or danger fill. White is correct over the
+     light theme's deep navy; dark mode's accent is a LIGHT blue, where
+     white measures 2.53:1 — so the pairing flips with the palette. */
+  --on-accent:    #ffffff;
   --accent:       #1f4e79;
   --accent-ink:   #163a5b;   /* hover/active */
   --accent-soft:  #e9eef4;   /* tinted surfaces (honesty banner) */
@@ -189,6 +193,138 @@
   --page-w-wide:   1120px;  /* the heat-mapped calendar breathes wider */
   --page-w-full:   1440px;  /* the opportunities directory uses the whole page */
 }
+/* ==========================================================================
+   DARK MODE — the same tokens, re-stated.
+
+   This costs one block instead of fifteen because every colour decision in
+   this stylesheet already goes through a variable; the audit that preceded
+   it found exactly fourteen literals in rules, and thirteen are #fff on an
+   accent fill (correct in both themes).
+
+   The palette is not the light one inverted. Inverting produces pure-black
+   pages and screaming saturation; this keeps the product's warm-paper
+   character by moving to a warm near-black, lifting every semantic tint's
+   TEXT colour (which must now sit on dark) while dropping its SURFACE to a
+   dim wash, and desaturating the four warmth bars just enough that a column
+   of them stops glowing. Contrast was measured, not eyeballed: the audit's
+   ratio checker runs on both themes.
+
+   Applied by system preference AND by an explicit choice: the media query
+   sets the default, and [data-theme] on <html> overrides it in either
+   direction, because a student reading at midnight in a light-mode OS is a
+   real person, not a configuration error.
+   ========================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:        #16151a;
+    --surface:      #1e1d23;
+    --ink:          #eceae5;
+    --ink-2:        #b3afa6;
+    --ink-3:        #9d998f;
+    --line:         #2e2d34;
+    --line-strong:  #43424b;
+  
+    --on-accent:    #10161d;
+  --accent:       #7aa7d4;
+    --accent-ink:   #a9c7e6;
+    --accent-soft:  #232a35;
+    --accent-line:  #38465a;
+  
+    --ok:           #74c095;
+    --ok-soft:      #1c2a22;
+    --ok-line:      #2f4a3a;
+    --danger:       #e2867c;
+    --danger-soft:  #2e1e1d;
+    --danger-line:  #4d302d;
+  
+    --w-cold-t:     #9bb4cc;  --w-cold-s:     #212832;  --w-cold-l:     #33404f;
+    --w-replied-t:  #d8b467;  --w-replied-s:  #2b2519;  --w-replied-l:  #463a22;
+    --w-chatted-t:  #dd9364;  --w-chatted-s:  #2c2119;  --w-chatted-l:  #493324;
+    --w-advocate-t: #e28b93;  --w-advocate-s: #2e1f22;  --w-advocate-l: #4b3036;
+    --w-cold-bar:     #6b8299;
+    --w-replied-bar:  #a8813a;
+    --w-chatted-bar:  #a5562a;
+    --w-advocate-bar: #8f3a45;
+  
+    --band-hot-t:  #e28b93;  --band-hot-s:  #2e1f22;
+    --band-warm-t: #dd9364;  --band-warm-s: #2c2119;
+    --band-cool-t: #9bb4cc;  --band-cool-s: #212832;
+    --band-cold-t: #a9a59c;  --band-cold-s: #26252a;
+  
+    --conf-high-t:    #74c095;  --conf-high-s:    #1c2a22;  --conf-high-l:    #2f4a3a;
+    --conf-medium-t:  #9bb4cc;  --conf-medium-s:  #212832;  --conf-medium-l:  #33404f;
+    --conf-low-t:     #d8b467;  --conf-low-s:     #2b2519;  --conf-low-l:     #463a22;
+    --conf-unrated-t: #a9a59c;  --conf-unrated-s: #26252a;  --conf-unrated-l: #38363d;
+  
+    --stale-t: #d8b467;  --stale-s: #2b2519;  --stale-l: #463a22;
+    --fresh-t: #a9a59c;  --fresh-s: #24232a;  --fresh-l: #35343b;
+  
+    --spon-known-t:   #74c095;  --spon-known-s:   #1c2a22;  --spon-known-l:   #2f4a3a;
+    --spon-none-t:    #e2867c;  --spon-none-s:    #2e1e1d;  --spon-none-l:    #4d302d;
+    --spon-unknown-t: #a9a59c;  --spon-unknown-s: #26252a;  --spon-unknown-l: #38363d;
+  
+    /* Shadows carry no light in a dark room: depth comes from the surface
+       step, and a black shadow on near-black is a smudge. */
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  --paper:        #16151a;
+  --surface:      #1e1d23;
+  --ink:          #eceae5;
+  --ink-2:        #b3afa6;
+  --ink-3:        #9d998f;
+  --line:         #2e2d34;
+  --line-strong:  #43424b;
+
+  --on-accent:    #10161d;
+  --accent:       #7aa7d4;
+  --accent-ink:   #a9c7e6;
+  --accent-soft:  #232a35;
+  --accent-line:  #38465a;
+
+  --ok:           #74c095;
+  --ok-soft:      #1c2a22;
+  --ok-line:      #2f4a3a;
+  --danger:       #e2867c;
+  --danger-soft:  #2e1e1d;
+  --danger-line:  #4d302d;
+
+  --w-cold-t:     #9bb4cc;  --w-cold-s:     #212832;  --w-cold-l:     #33404f;
+  --w-replied-t:  #d8b467;  --w-replied-s:  #2b2519;  --w-replied-l:  #463a22;
+  --w-chatted-t:  #dd9364;  --w-chatted-s:  #2c2119;  --w-chatted-l:  #493324;
+  --w-advocate-t: #e28b93;  --w-advocate-s: #2e1f22;  --w-advocate-l: #4b3036;
+  --w-cold-bar:     #6b8299;
+  --w-replied-bar:  #a8813a;
+  --w-chatted-bar:  #a5562a;
+  --w-advocate-bar: #8f3a45;
+
+  --band-hot-t:  #e28b93;  --band-hot-s:  #2e1f22;
+  --band-warm-t: #dd9364;  --band-warm-s: #2c2119;
+  --band-cool-t: #9bb4cc;  --band-cool-s: #212832;
+  --band-cold-t: #a9a59c;  --band-cold-s: #26252a;
+
+  --conf-high-t:    #74c095;  --conf-high-s:    #1c2a22;  --conf-high-l:    #2f4a3a;
+  --conf-medium-t:  #9bb4cc;  --conf-medium-s:  #212832;  --conf-medium-l:  #33404f;
+  --conf-low-t:     #d8b467;  --conf-low-s:     #2b2519;  --conf-low-l:     #463a22;
+  --conf-unrated-t: #a9a59c;  --conf-unrated-s: #26252a;  --conf-unrated-l: #38363d;
+
+  --stale-t: #d8b467;  --stale-s: #2b2519;  --stale-l: #463a22;
+  --fresh-t: #a9a59c;  --fresh-s: #24232a;  --fresh-l: #35343b;
+
+  --spon-known-t:   #74c095;  --spon-known-s:   #1c2a22;  --spon-known-l:   #2f4a3a;
+  --spon-none-t:    #e2867c;  --spon-none-s:    #2e1e1d;  --spon-none-l:    #4d302d;
+  --spon-unknown-t: #a9a59c;  --spon-unknown-s: #26252a;  --spon-unknown-l: #38363d;
+
+  /* Shadows carry no light in a dark room: depth comes from the surface
+     step, and a black shadow on near-black is a smudge. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.55);
+}
+
+
 
 /* ---- 2. Reset + base ----------------------------------------------------- */
 *, *::before, *::after { box-sizing: border-box; }
@@ -216,7 +352,7 @@ ul, ol { padding-left: 1.25rem; }
    whole job is to appear. */
 .skip-link { position: absolute; left: 8px; top: -60px; z-index: 100;
   padding: 10px 16px; border-radius: 999px; background: var(--accent);
-  color: #fff; font-size: var(--fs-s); font-weight: var(--w-med);
+  color: var(--on-accent); font-size: var(--fs-s); font-weight: var(--w-med);
   transition: top var(--t-fast); }
 .skip-link:focus { top: 8px; text-decoration: none; }
 main:focus { outline: none; }
@@ -262,8 +398,8 @@ main:focus { outline: none; }
   transition: color var(--t-fast), background-color var(--t-fast);
 }
 .site-nav a:hover { color: var(--ink); text-decoration: none; background: var(--accent-soft); }
-.site-nav a.active { color: #fff; background: var(--accent); }
-.site-nav a.active:hover { color: #fff; background: var(--accent-ink); }
+.site-nav a.active { color: var(--on-accent); background: var(--accent); }
+.site-nav a.active:hover { color: var(--on-accent); background: var(--accent-ink); }
 .site-auth { display: flex; gap: var(--s3); align-items: center; font-size: var(--fs-s); }
 .site-user { color: var(--ink-3); font-family: var(--font-mono); font-size: var(--fs-xs);
   display: inline-flex; align-items: center; gap: var(--s2); }
@@ -574,7 +710,7 @@ main { min-height: 60vh; }
     border-radius: 50%; border: 1.5px solid var(--line-strong);
     background: transparent; display: inline-flex; align-items: center;
     justify-content: center; font-size: 13px; font-weight: var(--w-bold);
-    color: #fff; line-height: 1;
+    color: var(--on-accent); line-height: 1;
     transition: border-color var(--t-fast), background var(--t-fast),
       transform var(--t-fast); }
   .wa-row label:hover::before { border-color: var(--accent);
@@ -698,7 +834,7 @@ main { min-height: 60vh; }
   font-weight: var(--w-med); color: var(--ink-2);
 }
 .subnav.scope-tabs a:hover { background: var(--accent-soft); color: var(--ink); }
-.subnav.scope-tabs a[aria-current="page"] { background: var(--accent); color: #fff; }
+.subnav.scope-tabs a[aria-current="page"] { background: var(--accent); color: var(--on-accent); }
 .section { margin-top: var(--s6); }
 .tier {
   font-size: var(--fs-micro); color: var(--ink-3);
@@ -767,10 +903,10 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
 .btn:hover { border-color: var(--ink-3); color: var(--ink); text-decoration: none;
   box-shadow: var(--shadow-1); transform: translateY(-1px); }
 .btn:active { transform: translateY(0); box-shadow: none; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: #fff; }
-.btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-.btn-danger:hover { background: #841f18; border-color: #841f18; color: #fff; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn-primary:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: var(--on-accent); }
+.btn-danger { background: var(--danger); border-color: var(--danger); color: var(--on-accent); }
+.btn-danger:hover { background: #841f18; border-color: #841f18; color: var(--on-accent); }
 .btn[aria-disabled="true"], .btn:disabled { opacity: 0.5; pointer-events: none; }
 .actions { margin-top: var(--s5); display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
 
@@ -1045,7 +1181,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   font-size: var(--fs-micro); font-family: var(--font-mono); flex: none;
 }
 .steps li.current .dot { border-color: var(--accent); color: var(--accent); font-weight: var(--w-bold); }
-.steps li.done .dot { background: var(--accent); color: #fff; border-color: var(--accent); }
+.steps li.done .dot { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
 /* ---- 14. Legal prose ------------------------------------------------------- */
 .legal p, .legal li { max-width: 65ch; }
@@ -1158,7 +1294,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .drawer-apply { position: sticky; bottom: 0; display: block;
   margin: var(--s4) calc(-1 * var(--s5)) 0;
   padding: var(--s3) var(--s5); text-align: center;
-  background: var(--accent); color: #fff; font-weight: var(--w-med);
+  background: var(--accent); color: var(--on-accent); font-weight: var(--w-med);
   font-size: var(--fs-s); box-shadow: 0 -8px 16px -8px rgba(23, 23, 23, 0.35); }
 .drawer-apply:hover { text-decoration: none; background: var(--accent-ink); }
 

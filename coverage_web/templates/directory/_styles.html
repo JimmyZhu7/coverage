@@ -656,7 +656,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     content-visibility: auto; contain-intrinsic-size: auto 168px; }
   .rolecard:hover { box-shadow: var(--shadow-1); transform: translateX(2px); }
   .rolecard.urg-today { border-left-color: var(--danger); }
-  .rolecard.urg-soon { border-left-color: #c1652f; }
+  .rolecard.urg-soon { border-left-color: var(--w-chatted-bar); }
   .rolecard.urg-upcoming { border-left-color: var(--accent); }
   .rolecard.urg-rolling { border-left-color: var(--ok-line); }
   /* Reserved slot 1 — the top row. The fixed height is what makes the title
@@ -747,7 +747,9 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .meta-status.is-reported { text-decoration: underline dotted currentColor;
     text-underline-offset: 3px; text-decoration-thickness: 1px; }
   .meta-today { color: var(--danger); }
-  .meta-soon { color: #a8501f; }
+  /* Was a literal #a8501f — 3.31:1 on dark paper. --stale-t carries the
+     same 'closing' warmth and is re-stated per theme. */
+  .meta-soon { color: var(--stale-t); }
   .meta-upcoming { color: var(--accent-ink); }
   .meta-passed { color: var(--ink-3); }
   /* Truncates before the status does — a clipped "Closes in 6 d" would be

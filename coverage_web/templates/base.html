@@ -26,6 +26,22 @@
   installed Coverage opens on Today, not the marketing page.{% endcomment %}
   <link rel="manifest" href="{% static 'manifest.webmanifest' %}">
   <meta name="theme-color" content="#1d3a5f">
+  {% comment %}
+  Theme, applied BEFORE the stylesheet so a stored choice never flashes the
+  other palette. Inline and tiny on purpose: any deferred script runs after
+  first paint, which is exactly the frame this exists to fix. No stored
+  choice means no attribute, and the media query decides.
+  {% endcomment %}
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("coverage-theme");
+        if (t === "dark" || t === "light") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="{% static 'css/coverage.css' %}">
   {# Vendored static asset, not a CDN or Node build — see coverage_web/static/vendor/. #}
   <script src="{% static 'vendor/htmx.min.js' %}" defer></script>

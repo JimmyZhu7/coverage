@@ -238,6 +238,20 @@
   @keyframes cap-travel { from { left: 0; opacity: 0; } 12% { opacity: 1; }
     88% { opacity: 1; } to { left: 100%; opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .cap-pipe::after { animation: none; opacity: 0; } }
+
+  /* The theme picker: three segments, the chosen one filled. Buttons rather
+     than radios because the state lives in localStorage, not in the form
+     that posts to the server — role="radiogroup" carries the semantics the
+     markup no longer implies. */
+  .theme-pick { display: inline-flex; border: 1px solid var(--line);
+    border-radius: 999px; overflow: hidden; background: var(--surface); }
+  .theme-opt { border: 0; background: none; cursor: pointer;
+    padding: 8px 16px; min-height: 40px; font-size: var(--fs-s);
+    font-weight: var(--w-med); color: var(--ink-2);
+    transition: background var(--t-fast), color var(--t-fast); }
+  .theme-opt + .theme-opt { border-left: 1px solid var(--line); }
+  .theme-opt:hover { background: var(--accent-soft); color: var(--accent-ink); }
+  .theme-opt.is-on { background: var(--accent); color: #fff; }
 </style>
 {% endblock %}
 
@@ -274,6 +288,7 @@
       <p class="settings-nav-group">You</p>
       <a href="#profile" class="is-active" aria-current="true">Profile</a>
       <a href="#work-auth">Work Authorization</a>
+      <a href="#appearance">Appearance</a>
       <p class="settings-nav-group">How Coverage Paces You</p>
       <a href="#cadence">Cadence</a>
       <a href="#pace">Weekly Pace</a>
@@ -326,6 +341,38 @@
           <div class="set-body">{% include "directory/_cycle_band.html" %}</div>
         </div>
       {% endif %}
+
+      {% comment %}
+      Appearance. Three states, not a switch: System is the honest default
+      (a phone that flips at sunset should take the app with it), and the two
+      explicit choices exist because a student reading at midnight in a
+      light-mode OS is a real person, not a misconfiguration. Stored in
+      localStorage rather than on the user row: it is a property of the
+      DEVICE you are reading on, and syncing it would drag your laptop's
+      choice onto your phone.
+      {% endcomment %}
+      <section class="set-card kin-reveal" id="appearance" style="--i:1"
+               aria-labelledby="appearance-h">
+        <div class="set-head">
+          <h2 id="appearance-h">Appearance</h2>
+          <p>Light, Dark, or Whatever This Device Says</p>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Theme</span>
+              <div class="set-row-desc">Saved on this device, not your account.</div>
+            </div>
+            <div class="set-row-control">
+              <div class="theme-pick" role="radiogroup" aria-label="Theme">
+                <button type="button" class="theme-opt" data-theme-set="light" role="radio" aria-checked="false">Light</button>
+                <button type="button" class="theme-opt" data-theme-set="dark" role="radio" aria-checked="false">Dark</button>
+                <button type="button" class="theme-opt" data-theme-set="system" role="radio" aria-checked="false">System</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {# ---- Work Authorization ---- #}
       <section class="set-card kin-reveal" id="work-auth" style="--i:1"
@@ -747,6 +794,40 @@
 </div>
 
 <script>
+  // The theme picker. Writes localStorage and flips the attribute the head
+  // script reads on the next load; "system" REMOVES the attribute so the
+  // media query takes over again rather than freezing today's system value.
+  (function () {
+    var group = document.querySelector(".theme-pick");
+    if (!group) return;
+    function current() {
+      var t = null;
+      try { t = localStorage.getItem("coverage-theme"); } catch (e) {}
+      return t === "dark" || t === "light" ? t : "system";
+    }
+    function paint() {
+      var now = current();
+      group.querySelectorAll("[data-theme-set]").forEach(function (b) {
+        var on = b.dataset.themeSet === now;
+        b.classList.toggle("is-on", on);
+        b.setAttribute("aria-checked", on ? "true" : "false");
+      });
+    }
+    group.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-theme-set]");
+      if (!b) return;
+      var choice = b.dataset.themeSet;
+      try {
+        if (choice === "system") localStorage.removeItem("coverage-theme");
+        else localStorage.setItem("coverage-theme", choice);
+      } catch (err) {}
+      if (choice === "system") document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", choice);
+      paint();
+    });
+    paint();
+  })();
+
   (function () {
     // ---- The cadence rails: positions computed from the live inputs. ----
     // The JS writes CSS custom properties and sentences; CSS owns all the

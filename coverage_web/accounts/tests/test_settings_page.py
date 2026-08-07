@@ -58,7 +58,9 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
     sections = set(re.findall(r'<section class="set-card[^"]*" id="([a-z-]+)"', body))
     assert anchors == sections
     assert sections == {
-        "profile", "work-auth", "cadence", "pace", "capture",
+        # Appearance sits under "You" because a theme is a fact about how
+        # this person reads, not about how the engine behaves.
+        "profile", "work-auth", "appearance", "cadence", "pace", "capture",
         "security", "data", "legal", "danger",
     }
 
