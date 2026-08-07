@@ -164,35 +164,73 @@
      mechanism visibly move. Motion is on `left` of three small elements at
      most once per keystroke: cheap, and off under reduced-motion.
      ====================================================================== */
-  .cad-viz { display: grid; gap: var(--s4); margin-bottom: var(--s5);
-    padding: var(--s4); border: 1px solid var(--line); border-radius: 12px;
-    background: var(--paper); }
-  .cad-rail-title { margin: 0 0 26px; font-family: var(--font-mono);
+  .cad-viz { display: grid; gap: var(--s5); margin-bottom: var(--s5);
+    padding: var(--s5) var(--s5) var(--s4);
+    border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+  .cad-rail-title { margin: 0 0 30px; font-family: var(--font-mono);
     font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--ink-3); }
-  .cad-rail { position: relative; height: 4px; border-radius: 999px;
-    background: linear-gradient(90deg, var(--accent-line), var(--line)); margin: 0 34px 30px 10px; }
-  .cad-rail-deadline { background: linear-gradient(90deg, var(--line), var(--danger)); }
+  /* The track is flat and quiet; the SPAN is what carries colour. A gradient
+     across the whole rail said the clock was running everywhere, when the
+     thing worth seeing is the one stretch Coverage is counting: nothing
+     until the follow-up, nothing until the circle-back, everything after the
+     re-ping. Symmetric margins so a marker at 0% and one at 100% get equal
+     room for their labels. */
+  .cad-rail { position: relative; height: 5px; border-radius: 999px;
+    background: var(--line); margin: 0 30px 34px; }
+  /* `left` + `width`, set directly by the JS on every draw — NOT `right:
+     calc(100% - var(--to))`. That version looked identical on first paint
+     and then froze: mutating the custom property later left `right`'s
+     computed value stuck at its first value, correct-looking until the
+     moment it needed to move. Two plain percentages the JS writes straight
+     to .style are unambiguous to invalidate; nothing routes through calc()
+     or a custom property that a browser might not re-derive. */
+  .cad-fill { position: absolute; top: 0; bottom: 0; border-radius: 999px;
+    left: 0%; width: 0%;
+    background: var(--accent); opacity: 0.55; overflow: hidden;
+    transition: left 520ms cubic-bezier(0.22, 1, 0.36, 1),
+      width 520ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .cad-rail-deadline .cad-fill { background: var(--danger); opacity: 0.7; }
+  /* The sheen: one pass down the span whenever a number changes, so the edit
+     you just typed is visibly the thing that moved. It runs on a class the
+     JS adds and drops — never on a loop, because a permanent shimmer in a
+     settings form is a distraction with no information in it. */
+  .cad-fill::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent);
+    transform: translateX(-100%); }
+  .cad-rail.is-live .cad-fill::after { animation: cad-sheen 620ms ease-out; }
+  @keyframes cad-sheen { to { transform: translateX(100%); } }
   .cad-mark { position: absolute; left: var(--x, 0%); top: 50%;
     transform: translate(-50%, -50%); display: grid; justify-items: center;
-    transition: left 420ms cubic-bezier(0.22, 1, 0.36, 1); }
-  .cad-mark i { font-style: normal; font-size: 13px; line-height: 1;
-    width: 26px; height: 26px; display: grid; place-items: center;
+    transition: left 520ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .cad-mark i { font-style: normal; font-size: 12px; line-height: 1;
+    width: 24px; height: 24px; display: grid; place-items: center;
     background: var(--surface); border: 1.5px solid var(--accent-line);
-    border-radius: 50%; color: var(--accent-ink); box-shadow: var(--shadow-1); }
+    border-radius: 50%; color: var(--accent-ink); box-shadow: var(--shadow-1);
+    transition: transform 200ms var(--t-ease, ease-out); }
+  .cad-rail.is-live .cad-mark i { animation: cad-pop 420ms cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes cad-pop { 40% { transform: scale(1.16); } }
   .cad-mark-park i { border-color: var(--line-strong); color: var(--ink-3); }
   .cad-mark-advocate i { border-color: var(--ok-line); color: var(--ok); }
   .cad-mark-close i { border-color: var(--danger); color: var(--danger); }
-  .cad-mark b { position: absolute; top: -18px; font-size: 10px;
-    font-weight: var(--w-med); color: var(--ink-2); white-space: nowrap; }
-  .cad-mark u { position: absolute; top: 28px; text-decoration: none;
-    font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
+  /* Name above, number below, both on one line each and both quiet — the
+     old pair sat 18px and 28px out in two different type families and read
+     as four rows of text per rail. */
+  .cad-mark b { position: absolute; top: -20px; font-size: 10px;
+    font-weight: var(--w-med); letter-spacing: 0.02em; color: var(--ink-2);
     white-space: nowrap; }
+  .cad-mark u { position: absolute; top: 26px; text-decoration: none;
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: 10px; color: var(--ink-3); white-space: nowrap; }
   /* When the only follow-up is turned off (max cold touches = 1) its marker
      dims rather than vanishes: the rail should show what you gave up. */
   .cad-mark.is-off { opacity: 0.35; filter: grayscale(1); }
-  .cad-sentence { margin: 0; font-size: var(--fs-xs); color: var(--ink-2); }
-  @media (prefers-reduced-motion: reduce) { .cad-mark { transition: none; } }
+  .cad-sentence { margin: 0; font-size: var(--fs-xs); color: var(--ink-2);
+    line-height: 1.55; }
+  @media (prefers-reduced-motion: reduce) {
+    .cad-mark, .cad-fill { transition: none; }
+    .cad-rail.is-live .cad-fill::after, .cad-rail.is-live .cad-mark i { animation: none; }
+  }
 
   /* ---- The pace ring: setting and readout as the same shape -------------
      The SVG is a control (drag or click the ring), but the number input
@@ -424,6 +462,7 @@
             <div class="cad-rail-wrap">
               <p class="cad-rail-title">A cold contact's life</p>
               <div class="cad-rail" aria-hidden="true">
+                <span class="cad-fill"></span>
                 <span class="cad-mark cad-mark-note" style="--x: 0%"><i>✉</i><b>Note</b><u>day 0</u></span>
                 <span class="cad-mark cad-mark-followup"><i>✉</i><b>Follow-up</b><u></u></span>
                 <span class="cad-mark cad-mark-park"><i>◦</i><b>Park</b><u></u></span>
@@ -433,6 +472,7 @@
             <div class="cad-rail-wrap">
               <p class="cad-rail-title">Keeping warm people warm</p>
               <div class="cad-rail cad-rail-weeks" aria-hidden="true">
+                <span class="cad-fill"></span>
                 <span class="cad-mark cad-mark-chatted"><i>☕</i><b>Chatted</b><u></u></span>
                 <span class="cad-mark cad-mark-advocate"><i>★</i><b>Advocate</b><u></u></span>
               </div>
@@ -441,6 +481,7 @@
             <div class="cad-rail-wrap">
               <p class="cad-rail-title">Before a deadline closes</p>
               <div class="cad-rail cad-rail-deadline" aria-hidden="true">
+                <span class="cad-fill"></span>
                 <span class="cad-mark cad-mark-reping"><i>✉</i><b>Re-ping</b><u></u></span>
                 <span class="cad-mark cad-mark-close" style="--x: 100%"><i>▮</i><b>Closes</b><u>day 0</u></span>
               </div>
@@ -844,6 +885,28 @@
       m.style.setProperty("--x", pct + "%");
       m.querySelector("u").textContent = label;
     }
+    // The coloured span on a rail: the one stretch the engine is counting.
+    // Plain `left`/`width`, written straight to .style — see the CSS
+    // comment on `.cad-fill` for why not a custom property behind calc().
+    function setFill(railSel, fromPct, toPct) {
+      var rail = viz.querySelector(railSel), f = rail.querySelector(".cad-fill");
+      f.style.left = fromPct + "%";
+      f.style.width = Math.max(0, toPct - fromPct) + "%";
+    }
+    // One sheen + one dot-pop per edit, then the class comes off so the next
+    // keystroke can retrigger it. Restarting a CSS animation needs the class
+    // gone for a frame, hence the rAF rather than a bare toggle.
+    var bumpPending = false;
+    function bump() {
+      if (bumpPending) return;
+      bumpPending = true;
+      var rails = viz.querySelectorAll(".cad-rail");
+      rails.forEach(function (r) { r.classList.remove("is-live"); });
+      requestAnimationFrame(function () {
+        rails.forEach(function (r) { r.classList.add("is-live"); });
+        bumpPending = false;
+      });
+    }
     function drawCadence() {
       var d = JSON.parse(viz.dataset.defaults);
       var f = num("followup_after_business_days", d.followup_after_business_days);
@@ -861,6 +924,7 @@
       fu.classList.toggle("is-off", touches <= 1);
       setMark(".cad-mark-followup", Math.round(100 * f / scale), "day " + f);
       setMark(".cad-mark-park", Math.round(100 * end / scale), "day " + end);
+      setFill(".cad-rail", 0, Math.round(100 * (touches > 1 ? f : end) / scale));
       document.getElementById("cad-cold-sentence").textContent =
         touches > 1
           ? "Send the note. No reply after " + f + " business days: one follow-up. " +
@@ -872,6 +936,7 @@
       var wScale = Math.max(chat, adv) * 1.25 || 1;
       setMark(".cad-mark-chatted", Math.round(100 * chat / wScale), chat + "w");
       setMark(".cad-mark-advocate", Math.round(100 * adv / wScale), adv + "w");
+      setFill(".cad-rail-weeks", 0, Math.round(100 * Math.min(chat, adv) / wScale));
       document.getElementById("cad-warm-sentence").textContent =
         "Someone you've chatted with goes quiet for " + chat +
         " weeks: circle back. An advocate: every " + adv + " weeks.";
@@ -879,18 +944,22 @@
       // Deadline rail: right edge is the close; re-ping sits reping days out.
       var dScale = Math.max(reping * 1.4, 30);
       setMark(".cad-mark-reping", Math.round(100 * (1 - reping / dScale)), "−" + reping + "d");
+      setFill(".cad-rail-deadline", Math.round(100 * (1 - reping / dScale)), 100);
       document.getElementById("cad-deadline-sentence").textContent =
         "Warm contacts at a firm get re-pinged " + reping +
         " days before its confirmed deadline.";
     }
     if (viz) {
+      // Correct on the very first paint, unconditionally — a settings
+      // number that briefly shows the wrong day count is worse than a
+      // widget that skips its own entrance animation.
       drawCadence();
       ["followup_after_business_days", "park_after_business_days",
        "max_cold_touches", "chatted_touch_min_weeks",
        "advocate_touch_min_weeks", "pre_deadline_reping_days"
       ].forEach(function (name) {
         var el = document.querySelector('[name="' + name + '"]');
-        if (el) el.addEventListener("input", drawCadence);
+        if (el) el.addEventListener("input", function () { drawCadence(); bump(); });
       });
     }
 

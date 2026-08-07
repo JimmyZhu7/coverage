@@ -770,13 +770,23 @@ def test_a_scheduled_chat_drops_off_the_schedule_once_it_goes_stale():
 # ---------------------------------------------------------------------------
 # A / E7. The page's shape: queue above the commodity stats, no count-up.
 # ---------------------------------------------------------------------------
-def test_the_queue_sits_above_the_directory_stats(client):
+def test_the_stats_lead_the_page_and_the_queue_follows_immediately(client):
+    """The stats sat at the foot for a while, because a hero plus four stat
+    cards had spent the whole fold on the commodity layer. They lead again
+    now that they are one hairline strip instead — but nothing may grow
+    between them and the queue, which is the rule that stretch actually
+    bought."""
     user = _user(weekly_touch_goal=14)
     c = Contact.all_objects.create(user=user, name="Ethan Gao")
     _touch(user, c, "outreach", days_ago=20)
 
     body = _login_and_get(client, user)
-    assert body.index("today-cockpit") < body.index('class="ribbon"')
+    # `id="today-cockpit"`, not the bare id — the page inlines its stylesheet,
+    # which names #today-cockpit in a rule long before the markup appears.
+    ribbon, cockpit = body.index('class="ribbon"'), body.index('id="today-cockpit"')
+    assert ribbon < cockpit
+    between = body[body.index("</section>", ribbon):cockpit]
+    assert "<section" not in between and "<article" not in between
 
 
 def test_the_today_stats_are_not_count_animated(client):

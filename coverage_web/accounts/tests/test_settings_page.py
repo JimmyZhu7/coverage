@@ -65,6 +65,19 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
     }
 
 
+def test_the_cadence_rails_carry_a_fill_span(body):
+    """Each rail draws a coloured span for the one stretch its clock is
+    actually counting (see settings.html's note on why that span is set via
+    plain left/width rather than a custom property behind calc() — the
+    calc(var()) version rendered correctly once and then never moved again
+    on a later edit). One `.cad-fill` per `.cad-rail`, no more, no less."""
+    rails = re.findall(r'<div class="cad-rail[^"]*"[^>]*>(.*?)</div>\s*<p class="cad-sentence"',
+                        body, re.S)
+    assert len(rails) == 3
+    for rail_html in rails:
+        assert rail_html.count('class="cad-fill"') == 1
+
+
 def test_the_rail_is_grouped(body):
     """Ten flat links was at the limit of scannable. The groups mirror what
     LinkedIn, Notion and Linear all converged on: who you are / how the

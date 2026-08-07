@@ -209,6 +209,38 @@ on every quick action so all of it stays in sync.
         </div>
       </section>
     {% endif %}
+
+    {% comment %}
+    What appeared at YOUR firms this week, from first_seen (Coverage's own
+    clock; the wording matches the feed's cards). Board debuts are excluded
+    in the view: a firm that just joined Coverage makes every posting "new to
+    us", which is a changelog about Coverage, not about the firm. No targets
+    or nothing new -> no strip, not an empty one.
+
+    Down here at full width rather than in the rail, where it was the card
+    that made the rail 1108px against a 581px queue — the ledger rows gave
+    the queue back its vertical, and the rail spent it on a scrollbar that
+    cut a posting in half. Two columns of one-line rows read faster than a
+    narrow stack, and the columns now end within a hundred pixels of each
+    other.
+    {% endcomment %}
+    {% if new_at_firms.count %}
+      <section class="newat">
+        <h2 class="waiting-title">
+          New at your firms <span class="lane-count">{{ new_at_firms.count }}</span>
+          <a class="waiting-note newat-all" href="{% url 'opportunities' %}">this week · see all</a>
+        </h2>
+        <ul class="newat-list">
+          {% for r in new_at_firms.roles %}
+            <li class="newat-row">
+              <span class="activity-dot in"></span>
+              <a class="newat-firm" href="{% url 'directory:firm_detail' r.slug %}">{{ r.firm|smart_title }}</a>
+              <span class="newat-role">{{ r.title|smart_title|truncatechars:52 }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
   </div>
 
   <aside class="cockpit-rail">
@@ -321,30 +353,6 @@ on every quick action so all of it stays in sync.
       </div>
     {% endif %}
 
-    {% comment %}What appeared at YOUR firms this week — the "what changed"
-    card, from first_seen (Coverage's own clock; the wording matches the
-    feed's cards). Board debuts are excluded in the view: a firm that just
-    joined Coverage makes every posting "new to us", which is a changelog
-    about Coverage, not about the firm. No targets or nothing new -> no
-    card, not an empty one.{% endcomment %}
-    {% if new_at_firms.count %}
-      <div class="rail-card">
-        <h3 class="rail-title">New At Your Firms
-          <a class="rail-more" href="{% url 'opportunities' %}">{{ new_at_firms.count }} this week</a>
-        </h3>
-        <ul class="activity">
-          {% for r in new_at_firms.roles %}
-            <li class="activity-row">
-              <span class="activity-dot in"></span>
-              <span class="activity-text">
-                <a href="{% url 'directory:firm_detail' r.slug %}">{{ r.firm|smart_title }}</a>
-                <span class="activity-kind">{{ r.title|smart_title|truncatechars:44 }}</span>
-              </span>
-            </li>
-          {% endfor %}
-        </ul>
-      </div>
-    {% endif %}
 
     <div class="rail-card activity-card">
       <h3 class="rail-title">Recent Activity</h3>

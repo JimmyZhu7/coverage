@@ -65,34 +65,30 @@
     </div>
   {% endif %}
 
-  {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}
-  <div id="today-cockpit"
-       aria-describedby="today-summary"
-       hx-target="#today-cockpit" hx-swap="innerHTML"
-       hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
-    {% include "crm/_cockpit.html" %}
-  </div>
-
   {% comment %}
-  The directory stats, below the queue and compressed to one slim row. They
-  belong on the page — they're just not what it's for, and they were sitting
-  on top of it. Deliberately NOT `.dash-num`: base.html count-animates that
-  class from 0 on first paint, and the intermediate frames are wrong numbers
-  that screenshot as data (80, 152 and 886 were all captured for the same
-  "Open Now" figure). A number nobody can misread is worth more than the
-  flourish.
+  The directory stats. They led the page once, then spent a stretch at its
+  foot after a hero plus four stat cards ate the whole fold — the queue is
+  the moat, the board is the commodity, and the commodity had the pixels.
+  Back on top now because the shape changed: one 56px strip of hairline-
+  separated cells, not a card row, so it costs the queue nothing and the
+  three numbers you check on arrival are the first thing on the page.
+
+  Deliberately NOT `.dash-num`: base.html count-animates that class from 0
+  on first paint, and the intermediate frames are wrong numbers that
+  screenshot as data (80, 152 and 886 were all captured for the same "Open
+  now" figure). The entrance here moves the CELL, never the digits.
   {% endcomment %}
   <section class="ribbon" aria-label="Deadlines and applications">
     <div class="ribbon-row">
-      <a class="ribbon-stat" href="{% url 'opportunities' %}">
+      <a class="ribbon-stat kin-reveal" style="--i: 0" href="{% url 'opportunities' %}">
         <span class="ribbon-num">{{ dash.open_now }}</span>
         <span class="ribbon-lbl"><span class="live-dot"></span> Open now</span>
       </a>
-      <a class="ribbon-stat" href="{% url 'opportunities' %}">
+      <a class="ribbon-stat kin-reveal{% if dash.closing_10 %} is-urgent{% endif %}" style="--i: 1" href="{% url 'opportunities' %}">
         <span class="ribbon-num">{{ dash.closing_10 }}</span>
         <span class="ribbon-lbl">Closing in 10 days</span>
       </a>
-      <a class="ribbon-stat" href="{% url 'crm:contact_list' %}">
+      <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'crm:contact_list' %}">
         <span class="ribbon-num">{{ dash.tracked_live }}</span>
         <span class="ribbon-lbl">Tracked live · {{ dash.hk }} HK / {{ dash.us }} US</span>
       </a>
@@ -101,16 +97,25 @@
       genuinely nothing in it, say so in words instead.
       {% endcomment %}
       {% if dash.funnel.submitted or dash.funnel.interview or dash.funnel.offer %}
-        <span class="ribbon-stat ribbon-funnel">
+        <span class="ribbon-stat ribbon-funnel kin-reveal" style="--i: 3">
           <span class="ribbon-num">{{ dash.funnel.submitted }} › {{ dash.funnel.interview }} › {{ dash.funnel.offer }}</span>
           <span class="ribbon-lbl">Submitted › Interview › Offer</span>
         </span>
       {% else %}
-        <span class="ribbon-stat ribbon-funnel">
+        <span class="ribbon-stat ribbon-funnel kin-reveal" style="--i: 3">
           <span class="ribbon-lbl">Nothing submitted yet.</span>
         </span>
       {% endif %}
     </div>
   </section>
+
+  {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}
+  <div id="today-cockpit"
+       aria-describedby="today-summary"
+       hx-target="#today-cockpit" hx-swap="innerHTML"
+       hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+    {% include "crm/_cockpit.html" %}
+  </div>
+
 </div>
 {% endblock %}

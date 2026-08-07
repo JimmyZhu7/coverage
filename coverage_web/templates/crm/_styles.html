@@ -285,33 +285,50 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      pagehead's own bottom margin included). It carried --s6 + the border's
      padding, which put a 31px seam on a page whose every other seam is 24 —
      the one break in the vertical rhythm the geometry audit found. */
-  .ribbon { margin-top: var(--s5); border-top: 1px solid var(--line);
-    padding-top: var(--s4); }
-  /* The ribbon scrolls itself if it has to. The PAGE never does — a
-     horizontal scrollbar on <body> is the bug this container exists to
-     prevent. */
-  .ribbon-row { display: flex; gap: var(--s5); align-items: baseline;
-    overflow-x: auto; padding-bottom: var(--s2); scrollbar-width: thin; }
-  .ribbon-stat { display: flex; flex-direction: column; gap: 2px;
-    text-decoration: none; color: inherit; flex: 0 0 auto; min-width: 0; }
-  a.ribbon-stat:hover { text-decoration: none; }
+  /* ---- The stat strip, above the queue -----------------------------------
+     Four cells in one panel, divided by the GAP: the row is painted with the
+     hairline colour and each cell repaints itself with the surface, so the
+     1px gutters are the dividers. That is what lets it wrap on a phone with
+     the rules intact — a border-left would leave an orphan line at the head
+     of every wrapped row, and the old fix for that was a horizontal
+     scroller nobody scrolled. */
+  .ribbon { margin: var(--s4) 0 var(--s5); }
+  .ribbon-row { display: flex; flex-wrap: wrap; gap: 1px;
+    background: var(--line); border: 1px solid var(--line);
+    border-radius: var(--r-panel); overflow: hidden; box-shadow: var(--shadow-1); }
+  .ribbon-stat { flex: 1 1 11rem; min-width: 0; background: var(--surface);
+    padding: 11px var(--s4) 12px; display: flex; flex-direction: column; gap: 3px;
+    text-decoration: none; color: inherit; position: relative;
+    transition: background var(--t-fast); }
+  /* The kinetic part, and all of it: the cell arrives, an accent hairline
+     wipes in under whichever one you point at, and the live dot keeps its
+     pulse. The DIGITS never move — see week.html on why counting up lies. */
+  .ribbon-stat::after { content: ""; position: absolute; left: 0; right: 0;
+    bottom: 0; height: 2px; background: var(--accent); transform: scaleX(0);
+    transform-origin: left; transition: transform var(--t-med); }
+  a.ribbon-stat:hover { text-decoration: none; background: var(--accent-soft); }
+  a.ribbon-stat:hover::after, a.ribbon-stat:focus-visible::after { transform: scaleX(1); }
   a.ribbon-stat:hover .ribbon-num { color: var(--accent-ink); }
+  a.ribbon-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   /* NOT `.dash-num` — see week.html. That class is count-animated site-wide
      from base.html, which renders wrong numbers for the first ~700ms. */
   .ribbon-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-size: var(--fs-l); font-weight: var(--w-bold); color: var(--ink);
-    line-height: 1.1; transition: color var(--t-fast); }
+    font-size: var(--fs-xl); font-weight: var(--w-bold); color: var(--ink);
+    line-height: 1; letter-spacing: -0.01em; transition: color var(--t-fast); }
   .ribbon-lbl { font-size: var(--fs-micro); color: var(--ink-2);
-    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-  .ribbon-funnel { margin-left: auto; }
+    display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+  /* A live deadline count earns the warning colour; a zero is just a zero. */
+  .ribbon-stat.is-urgent .ribbon-num { color: var(--stale-t); }
+  .ribbon-stat.is-urgent::after { background: var(--stale-t); }
+  /* The funnel is a sentence, not a measurement — it sits at the quiet end. */
+  .ribbon-funnel { flex: 1 1 13rem; justify-content: center; }
+  .ribbon-funnel .ribbon-num { font-size: var(--fs-l); }
 
   @media (max-width: 700px) {
-    /* 2x2 at phone widths rather than a scroll-only row: four stats fit
-       comfortably stacked, and a wrapped grid needs no horizontal gesture. */
-    .ribbon-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: var(--s4); overflow-x: visible; }
-    .ribbon-funnel { margin-left: 0; }
-    .ribbon-lbl { white-space: normal; }
+    /* Two up, wrapping — the gap keeps drawing the dividers, so there is
+       nothing to undo here beyond the label's one-line assumption. */
+    .ribbon-stat { flex: 1 1 45%; padding: 10px var(--s3) 11px; }
+    .ribbon-num { font-size: var(--fs-l); }
   }
 
   /* Tap targets stay >= 44px at phone widths; the quick actions wrap to a
@@ -473,6 +490,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font-size: var(--fs-micro); }
   .waiting-more { align-self: center; font-family: var(--font-mono);
     font-size: var(--fs-micro); color: var(--ink-3); }
+
+  /* ---- New at your firms: the board's changelog, at the page's foot -----
+     Two columns of one-line rows. It shares the waiting strip's header so
+     the two quiet sections at the bottom of the page read as a pair. */
+  .newat { margin-bottom: var(--s5); padding-top: var(--s4);
+    border-top: 1px solid var(--line); }
+  .newat-all { text-decoration: none; }
+  .newat-all:hover { color: var(--accent-ink); text-decoration: none; }
+  .newat-list { list-style: none; margin: 0; padding: 0;
+    columns: 2; column-gap: var(--s6); }
+  .newat-row { display: flex; align-items: baseline; gap: 8px;
+    padding: 5px 0; break-inside: avoid; font-size: var(--fs-xs);
+    border-bottom: 1px solid var(--line); }
+  .newat-row:last-child { border-bottom: 0; }
+  .newat-firm { font-weight: var(--w-med); color: var(--ink);
+    text-decoration: none; white-space: nowrap; }
+  .newat-firm:hover { color: var(--accent-ink); }
+  .newat-role { color: var(--ink-2); min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 700px) { .newat-list { columns: 1; } }
 
   /* ---- Coverage Gaps strip: where you are least covered, worst first ---- */
   .gap-strip { margin-bottom: var(--s5); }
