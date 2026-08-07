@@ -21,6 +21,9 @@ urlpatterns = [
     # The user's saved / applied roles, and the track toggle behind each card.
     path("opportunities/mine/", directory_views.my_applications, name="my_applications"),
     path("opportunities/<int:pk>/track/", directory_views.track_opportunity, name="track_opportunity"),
+    # One click saves every open role whose own text names the user's class
+    # year — the eligibility lens reaching the pipeline.
+    path("opportunities/track-eligible/", directory_views.track_eligible, name="track_eligible"),
     # The description we already fetched, read inline instead of behind a
     # four-second Workday shell. Public: the posting itself is public.
     path("opportunities/<int:pk>/read/", directory_views.role_description, name="role_description"),

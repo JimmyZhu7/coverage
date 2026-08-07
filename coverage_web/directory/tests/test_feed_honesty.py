@@ -592,3 +592,52 @@ def test_the_noscript_cols_link_renders_the_full_page(client):
     resp = client.get("/opportunities/?cols=12")
     assert resp.status_code == 200
     assert b"stat-strip" in resp.content
+
+
+# ---------------------------------------------------------------------------
+# THE LENS→PIPELINE BRIDGE: one click saves the roles that name your year.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_save_your_year_saves_exactly_the_year_ok_roles(client, student):
+    from analytics.models import UserOpportunity
+
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    mine = _grad_role(firm, ["2029"], "2029", title="Mine Intern")
+    _grad_role(firm, ["2027"], "2027", title="Not Mine Intern")
+    Opportunity.objects.create(firm=firm, title="Silent Intern", bucket="internship",
+                               status="open", url="https://gs.com/silent-b")
+
+    client.force_login(student)
+    body = client.get("/opportunities/").content.decode()
+    assert "1 open role names your class year" in body
+
+    resp = client.post("/opportunities/track-eligible/")
+    assert resp.status_code == 302
+    tracked = set(UserOpportunity.all_objects.filter(user=student)
+                  .values_list("opportunity_id", flat=True))
+    assert tracked == {mine.id}, "year_ok only — silence saves nothing"
+
+
+@pytest.mark.django_db
+def test_not_for_me_outranks_your_year(client, student):
+    from analytics.models import UserOpportunity
+
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    dismissed = _grad_role(firm, ["2029"], "2029", title="Dismissed Intern")
+    UserOpportunity.all_objects.create(user=student, opportunity=dismissed,
+                                       dismissed=True)
+    client.force_login(student)
+    client.post("/opportunities/track-eligible/")
+    uo = UserOpportunity.all_objects.get(user=student, opportunity=dismissed)
+    assert uo.dismissed is True, "the user said no; a bulk save must not unsay it"
+
+
+@pytest.mark.django_db
+def test_the_offer_disappears_once_everything_is_saved(client, student):
+    firm = Firm.objects.create(slug="citi", name="Citi")
+    _grad_role(firm, ["2029"], "2029", title="Only Intern")
+    client.force_login(student)
+    client.post("/opportunities/track-eligible/")
+    body = client.get("/opportunities/").content.decode()
+    assert "names your class year" not in body, "a satisfied offer stops offering"

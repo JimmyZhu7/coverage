@@ -16,7 +16,11 @@
 
   {% if step == "profile" %}
     <h1>Tell Us About Your Search</h1>
-    <p class="lede">This tailors your firm directory and the weekly list. You can change all of it later in Settings.</p>
+    {% comment %}Names the surfaces that exist NOW. This line said "the
+    weekly list" months after that page was retired for Today — the first
+    sentence a new user reads was describing a product that no longer
+    ships.{% endcomment %}
+    <p class="lede">This tailors your feed and your Today queue, and your class year is what the eligibility checks run on. You can change all of it later in Settings.</p>
     <form method="post" action="{% url 'accounts:onboarding' %}?step=profile" enctype="multipart/form-data">
       {% csrf_token %}
       <input type="hidden" name="step" value="profile">
@@ -44,7 +48,7 @@
 
   {% elif step == "firms" %}
     <h1>Pick Your Target Firms</h1>
-    <p class="lede">Choose the firms you're recruiting for. These become your directory overlay and drive your firm-fit view. Add or remove any time.</p>
+    <p class="lede">Choose the firms you're recruiting for. They float to the top of your feed and fill the Picked column. Add or remove any time.</p>
     <form method="post" action="{% url 'accounts:onboarding' %}?step=firms">
       {% csrf_token %}
       <input type="hidden" name="step" value="firms">

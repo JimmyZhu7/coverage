@@ -230,6 +230,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .fit-toggle:has(input:checked) { background: var(--accent-soft);
     color: var(--accent-ink); border-color: var(--accent); }
 
+  /* The save-your-year line: scope-line family, plus the one button. The
+     button is quiet — a text-weight action, not a primary CTA — because the
+     sentence is an offer, not a nag. */
+  .scope-line--act { display: flex; align-items: center; gap: var(--s3);
+    flex-wrap: wrap; }
+  .scope-act { border: 1px solid var(--accent-line); background: var(--accent-soft);
+    color: var(--accent-ink); border-radius: 999px; padding: 4px 14px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .scope-act:hover { border-color: var(--accent); }
+
   /* The lazy-load sentinel: a full-width strip at the end of the loaded
      columns. It occupies real height so `revealed` fires before the user
      hits the bottom, and its text is the honest state ("loading", not a

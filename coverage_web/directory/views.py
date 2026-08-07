@@ -1723,6 +1723,12 @@ def opportunities(request):
         # and how many rows it hid this request.
         "fit": fit,
         "fit_available": elig_profile is not None,
+        # The lens→pipeline bridge's trigger: open roles whose text names the
+        # user's year and which they have never touched (tracked or
+        # dismissed both count as touched — "not for me" outranks "your
+        # year"). Computed over the FULL row set, not the paged slice.
+        "eligible_unsaved": (_eligible_unsaved_count(request.user, rows, elig_profile)
+                             if elig_profile and elig_profile.get("class_year") else 0),
         "hidden_fit": hidden_fit,
         "show_unfit_qs": _qs_without(request, "fit"),
         # `_results.html` is included on a full render and returned bare on an
@@ -1835,6 +1841,65 @@ def role_description(request, pk):
         "facts": [{"label": label, **facts[kind]}
                   for kind, label in _FACT_LABELS if kind in facts],
     })
+
+
+def _eligible_unsaved_count(user, rows, profile) -> int:
+    from analytics.models import UserOpportunity
+
+    touched = set(
+        UserOpportunity.all_objects.filter(user=user)
+        .values_list("opportunity_id", flat=True)
+    )
+    return sum(
+        1 for o in rows
+        if o.id not in touched
+        and (lambda v: v and v["kind"] == "year_ok")(_eligibility(o, profile))
+    )
+
+
+@login_required
+@require_POST
+def track_eligible(request):
+    """Save every open role whose own text names the user's class year.
+
+    The lens→pipeline bridge: the eligibility work produced "Your year"
+    verdicts, and then left the user to find and star those roles one by
+    one. This saves them in a click — and ONLY them: year_ok verdicts,
+    which by the verdict contract exist only where the posting stated its
+    window AND Settings stated a class year. A role already tracked keeps
+    its stage untouched, and a dismissed role stays dismissed — "not for
+    me" outranks "your year", because the user said so.
+    """
+    from analytics.models import UserOpportunity
+
+    profile = _eligibility_profile(request.user)
+    if not profile or not profile.get("class_year"):
+        return HttpResponseBadRequest("no class year in Settings")
+
+    touched = dict(
+        UserOpportunity.all_objects.filter(user=request.user)
+        .values_list("opportunity_id", "dismissed")
+    )
+    saved = 0
+    for o in Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS):
+        v = _eligibility(o, profile)
+        if not (v and v["kind"] == "year_ok"):
+            continue
+        if o.id in touched:
+            continue
+        UserOpportunity.all_objects.create(user=request.user, opportunity=o)
+        saved += 1
+    if saved:
+        record_event("eligible_bulk_saved", user=request.user, count=saved)
+    from django.contrib import messages
+
+    messages.success(
+        request,
+        f"Saved {saved} role{'' if saved == 1 else 's'} that name your year."
+        if saved else "Nothing new to save: every role naming your year is already tracked.")
+    from django.shortcuts import redirect
+
+    return redirect("my_applications" if saved else "opportunities")
 
 
 @login_required

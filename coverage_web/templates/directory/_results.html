@@ -44,6 +44,19 @@ that hid what it promised to reveal.
 {% comment %}The fit filter's honesty line — same contract as its siblings
 above: a board that quietly holds things back is a board you cannot trust
 the counts on.{% endcomment %}
+{% comment %}The lens→pipeline bridge. The eligibility verdicts found the
+roles that name your year; this is the click that turns them into pipeline
+instead of leaving you to star them one by one. A POST button styled as the
+scope-line family — it changes your data, so it must never be a GET.
+{% endcomment %}
+{% if eligible_unsaved %}
+  <form class="scope-line scope-line--act" method="post" action="{% url 'track_eligible' %}">
+    {% csrf_token %}
+    <span>{{ eligible_unsaved }} open role{{ eligible_unsaved|pluralize }} name{{ eligible_unsaved|pluralize:"s," }} your class year and {{ eligible_unsaved|pluralize:"isn't,aren't" }} saved yet.</span>
+    <button type="submit" class="scope-act">Save {{ eligible_unsaved|pluralize:"it,them all" }}</button>
+  </form>
+{% endif %}
+
 {% if hidden_fit %}
   <p class="scope-line">{{ hidden_fit }} role{{ hidden_fit|pluralize }} state{{ hidden_fit|pluralize:"s," }} a requirement you don't meet and {{ hidden_fit|pluralize:"is,are" }} hidden.
     <a href="{% url 'opportunities' %}?{{ show_unfit_qs }}">Show them</a>.</p>

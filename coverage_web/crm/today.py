@@ -640,6 +640,53 @@ def _daybar(schedule, now) -> dict:
     }
 
 
+def _new_at_your_firms(user, limit=5) -> dict:
+    """Open campus roles that appeared at the user's TARGET firms this week.
+
+    The "what changed" question, answered from data the product already
+    records: `first_seen` is Coverage's own clock (when the row entered our
+    database — the honest wording the feed's cards already use), and the
+    target list is the survey's UserFirm rows. No targets means no card, not
+    an empty card: a rail slot with nothing to say should not spend the
+    pixels saying it.
+    """
+    from crm.models import UserFirm
+    from directory.classify import TARGET_BUCKETS
+    from directory.models import Opportunity
+
+    firm_ids = list(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
+    if not firm_ids:
+        return {"count": 0, "roles": []}
+    since = timezone.now() - timedelta(days=7)
+
+    # Exclude board DEBUTS: when a firm's oldest row is itself inside the
+    # window, the firm just joined Coverage — every posting it has is "new
+    # to us" and none of it is news about the FIRM. Measured the day this
+    # card was built: two connectors wired that week made the count 242,
+    # which is a changelog about Coverage wearing the clothes of a changelog
+    # about the market. Same trap as the feed's bulk-import "New" badge, and
+    # the same cure: first_seen is our clock, so say things it can honestly
+    # support.
+    from django.db.models import Min
+
+    debut = {
+        row["firm_id"]
+        for row in Opportunity.objects.filter(firm_id__in=firm_ids)
+        .values("firm_id").annotate(oldest=Min("first_seen"))
+        if row["oldest"] and row["oldest"] >= since
+    }
+    qs = (Opportunity.objects
+          .filter(status="open", bucket__in=TARGET_BUCKETS,
+                  firm_id__in=[f for f in firm_ids if f not in debut],
+                  first_seen__gte=since)
+          .select_related("firm").order_by("-first_seen"))
+    return {
+        "count": qs.count(),
+        "roles": [{"title": o.title, "firm": o.firm.name, "id": o.id,
+                   "url": o.url, "slug": o.firm.slug} for o in qs[:limit]],
+    }
+
+
 def _next_deadlines(user, today, limit=4) -> list[dict]:
     """The next confirmed firm dates, NAMED.
 
@@ -872,6 +919,7 @@ def _cockpit_context(user) -> dict:
         "daybar": _daybar(schedule, timezone.localtime(timezone.now())),
         "chat_prep": _chat_prep(user, today, schedule),
         "deadlines": _next_deadlines(user, today),
+        "new_at_firms": _new_at_your_firms(user),
         "waiting": _waiting_on_reply(user, busy_ids),
         "activity": activity,
         "contact_count": len(contacts),
