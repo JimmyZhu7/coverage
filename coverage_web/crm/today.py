@@ -1039,18 +1039,39 @@ def _sentenceize(reason: str) -> str:
 
 def _dashboard_context(user) -> dict:
     """The Today dashboard's ledger stat cards. Stats read the SHARED zone
-    (campus openings, deadlines) plus the user's own application funnel."""
+    (campus openings, deadlines) plus the user's own application funnel.
+
+    `open_now`/`tracked_live`/`hk`/`us` used to sit here: three of four cells
+    describing the BOARD (1,053 open, 5,291 tracked including 4,238 roles the
+    Opportunities feed itself hides as not-yours) on a page whose only job is
+    "what does Jimmy do today". The HK/US split never moved day to day and
+    the corpus size is inventory, not a task. Meanwhile the pipeline count
+    below was 0 — the fact this page never said.
+
+    Replaced with two personal numbers already computed for Opportunities:
+    open roles at the firms this user actually targets, and how many of
+    those name their own class year and are still unsaved. The board-wide
+    figures still exist for the founder view at /instrument/.
+    """
     today = timezone.localdate()
 
     campus = Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
-    all_open = Opportunity.objects.filter(status="open")
-    open_now = campus.count()
     closing_10 = campus.filter(deadline__range=(today, today + timedelta(days=9))).count()
-    # HK/US split shares the all-open denominator with tracked_live below, so
-    # neither regional figure can exceed the headline (they were computed over
-    # the smaller campus set before, which read as an inconsistency).
-    hk = all_open.filter(Q(region__iexact="hk") | Q(firm__regions__contains=["hk"])).count()
-    us = all_open.filter(Q(region__iexact="us") | Q(firm__regions__contains=["us"])).count()
+
+    firm_ids = set(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
+    at_your_firms = campus.filter(firm_id__in=firm_ids).count() if firm_ids else 0
+
+    # Local import: directory.views owns the eligibility verdict and the
+    # Opportunities-page count it feeds; crm.today borrows the same function
+    # rather than re-deriving the contract, so the two pages can never
+    # disagree about what "names your year" means.
+    from directory.views import _eligibility_profile, _eligible_unsaved_count
+
+    elig_profile = _eligibility_profile(user)
+    eligible_unsaved = (
+        _eligible_unsaved_count(user, campus, elig_profile)
+        if elig_profile and elig_profile.get("class_year") else 0
+    )
 
     uo = UserOpportunity.objects.for_user(user)
     funnel = {
@@ -1061,11 +1082,9 @@ def _dashboard_context(user) -> dict:
 
     return {
         "dash": {
-            "open_now": open_now,
+            "at_your_firms": at_your_firms,
             "closing_10": closing_10,
-            "tracked_live": all_open.count(),
-            "hk": hk,
-            "us": us,
+            "eligible_unsaved": eligible_unsaved,
             "funnel": funnel,
         },
     }

@@ -71,27 +71,50 @@
   the moat, the board is the commodity, and the commodity had the pixels.
   Back on top now because the shape changed: one 56px strip of hairline-
   separated cells, not a card row, so it costs the queue nothing and the
-  three numbers you check on arrival are the first thing on the page.
+  numbers you check on arrival are the first thing on the page.
+
+  The first and third cells used to be "Open now" (every open campus role,
+  board-wide) and "Tracked live" (every open role including the 4,238 the
+  Opportunities feed itself hides as not-yours, plus an HK/US split that
+  never moved day to day). Three of four cells on a personal daily page were
+  describing the BOARD, and the one number this page never said — that the
+  pipeline below sat at zero — went unsaid. Replaced with the two personal
+  counts Opportunities already computes: open roles at the firms this user
+  actually targets, and how many of those name the user's own class year
+  and are still unsaved — the most actionable number on the page, now on
+  the page opened every morning instead of stranded on a different one.
+  Board-wide totals still exist for the founder view at /instrument/.
 
   Deliberately NOT `.dash-num`: base.html count-animates that class from 0
   on first paint, and the intermediate frames are wrong numbers that
   screenshot as data (80, 152 and 886 were all captured for the same "Open
   now" figure). The entrance here moves the CELL, never the digits.
   {% endcomment %}
-  <section class="ribbon" aria-label="Deadlines and applications">
+  <section class="ribbon" aria-label="Your firms and deadlines">
     <div class="ribbon-row">
       <a class="ribbon-stat kin-reveal" style="--i: 0" href="{% url 'opportunities' %}">
-        <span class="ribbon-num">{{ dash.open_now }}</span>
-        <span class="ribbon-lbl"><span class="live-dot"></span> Open now</span>
+        <span class="ribbon-num">{{ dash.at_your_firms }}</span>
+        <span class="ribbon-lbl"><span class="live-dot"></span> At your firms</span>
       </a>
       <a class="ribbon-stat kin-reveal{% if dash.closing_10 %} is-urgent{% endif %}" style="--i: 1" href="{% url 'opportunities' %}">
         <span class="ribbon-num">{{ dash.closing_10 }}</span>
         <span class="ribbon-lbl">Closing in 10 days</span>
       </a>
-      <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'crm:contact_list' %}">
-        <span class="ribbon-num">{{ dash.tracked_live }}</span>
-        <span class="ribbon-lbl">Tracked live · {{ dash.hk }} HK / {{ dash.us }} US</span>
-      </a>
+      {% comment %}
+      The most actionable number on the page, honest at zero too: nothing
+      unsaved is a real state worth naming, not a bare "0" that reads like
+      the feature is broken.
+      {% endcomment %}
+      {% if dash.eligible_unsaved %}
+        <a class="ribbon-stat kin-reveal is-urgent" style="--i: 2" href="{% url 'opportunities' %}">
+          <span class="ribbon-num">{{ dash.eligible_unsaved }}</span>
+          <span class="ribbon-lbl">Name your year, unsaved</span>
+        </a>
+      {% else %}
+        <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'opportunities' %}">
+          <span class="ribbon-lbl">All caught up on your year</span>
+        </a>
+      {% endif %}
       {% comment %}
       A funnel reading 0 › 0 › 0 is a diagram of nothing. While there is
       genuinely nothing in it, say so in words instead.
