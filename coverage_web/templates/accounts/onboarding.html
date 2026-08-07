@@ -32,7 +32,7 @@
 
   {% elif step == "work_auth" %}
     <h1>Where Can You Work?</h1>
-    <p class="lede">This is the one structural fact that moves your firm-fit score. Leave a region blank if you're not sure; unknown is a real answer here, and Coverage scores it neutral rather than guessing.</p>
+    <p class="lede">This is the one structural fact that moves your firm-fit score. Leave a region blank if you're not sure. Coverage scores unknown as neutral, never as a guess.</p>
     <form method="post" action="{% url 'accounts:onboarding' %}?step=work_auth">
       {% csrf_token %}
       <input type="hidden" name="step" value="work_auth">

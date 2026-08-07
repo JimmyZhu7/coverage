@@ -20,7 +20,7 @@ so a stray feed click can't un-apply someone.
     <button type="button" class="track-hide"
             hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "dismiss"}'
             hx-target="closest .rolecard" hx-swap="outerHTML swap:120ms"
-            title="Hide this role — not for me">Not for me</button>
+            title="Won't suggest this role again">Not for me</button>
   {% elif r.track_status == "saved" %}
     <button type="button" class="track-btn is-saved"
             hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "clear"}'

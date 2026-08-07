@@ -219,7 +219,7 @@ def test_debrief_post_saves_and_offers_the_promotion(client, user, contact):
     )
     assert resp.status_code == 200
     body = resp.content.decode()
-    assert "Promote to advocate" in body
+    assert "Promote to Advocate" in body
     assert Contact.objects.for_user(user).filter(name="Sam Referral").exists()
     # Still not promoted — the page offers, the user decides.
     contact.refresh_from_db()

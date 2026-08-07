@@ -31,7 +31,7 @@
   <div class="panel">
     <p><strong>Everything, as one ZIP.</strong> One CSV per table, plus a README
       listing what's in each. You have {{ contact_count }} contact{{ contact_count|pluralize }}{% if archived_count %},
-      {{ archived_count }} of them archived — flagged in the file, not dropped{% endif %}.</p>
+      {{ archived_count }} archived (flagged in the file, not dropped){% endif %}.</p>
     <ul class="exp-files">
       {% for name, description in export_manifest %}
         <li class="exp-file"><code>{{ name }}</code><span>{{ description }}</span></li>
