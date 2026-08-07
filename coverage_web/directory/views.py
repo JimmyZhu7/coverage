@@ -21,6 +21,7 @@ user's targeted firms in the feed.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from collections import Counter
@@ -1010,6 +1011,55 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
     return item
 
 
+# A trailing title segment that restates the row's own location — the shape
+# firms use to post one programme per city ("GCB Summer Analyst - 2027 -
+# Hong Kong"). The location check is the whole rule: a first attempt grouped
+# on any stripped tail and promptly merged "Internship - Financial Engineer"
+# with "Internship - Cyber Security" — different JOBS, not one job in two
+# cities. A tail only counts as a city when every word of it (4+ chars)
+# appears in the row's own location field, so desk names can never match.
+_TITLE_TAIL = re.compile(r"\s*[-–—(]\s*([^-–—()]+?)\s*\)?\s*$")
+
+
+def _family_key(o):
+    """(base title, tail) when the title ends in its own location, else None."""
+    m = _TITLE_TAIL.search(o.title or "")
+    if not m:
+        return None
+    tail = m.group(1).strip()
+    loc = (o.location or "").lower()
+    words = [w for w in re.split(r"[ ,]+", tail.lower()) if len(w) >= 4]
+    if tail and loc and words and all(w in loc for w in words):
+        return (o.title[:m.start()].strip().lower(), tail)
+    return None
+
+
+def _group_city_variants(items, opps):
+    """Fold one-programme-many-cities rows into their first sibling.
+
+    DISPLAY-ONLY, and deliberately so: the save-semantics question ("does
+    starring a grouped card star all six cities?") is dissolved rather than
+    answered. Siblings keep their whole card — their own Save, their own
+    Read, their own deadline — tucked behind a "+N more locations" disclosure
+    on the first family member. Nothing about any row's meaning changes;
+    only how much column the family spends when collapsed.
+    """
+    fams: dict = {}
+    for item, o in zip(items, opps):
+        fk = _family_key(o)
+        item["variants"] = []
+        item["in_group"] = False
+        if fk is None:
+            continue
+        key = (o.bucket, o.cohort, fk[0])
+        head = fams.get(key)
+        if head is None:
+            fams[key] = item
+        else:
+            item["in_group"] = True
+            head["variants"].append(item)
+
+
 def _urgency_feed(qs, *, now, today, my_firm_ids, profile=None):
     """Rank the filtered set into the Closing-Soon and Fresh-&-Rolling bands.
     Dated roles sort by nearest deadline; rolling roles sort by your-firm
@@ -1416,6 +1466,7 @@ def opportunities(request):
             }
         item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
                              profile=elig_profile)
+        cl.setdefault("_opps", []).append(o)
         cl["roles"].append(item)
         # Kept by reference here; the Picked column takes its COPY further
         # down, after the track-status annotation has run over these dicts.
@@ -1463,6 +1514,12 @@ def opportunities(request):
         )
 
     cluster_list = sorted(clusters.values(), key=_cluster_key)
+    # City-variant families fold within each firm's column (display-only —
+    # see _group_city_variants). Done after sorting because it mutates the
+    # items in place, and the transient _opps list is dropped here so it can
+    # never leak into a template context.
+    for cl in cluster_list:
+        _group_city_variants(cl["roles"], cl.pop("_opps", []))
     total = sum(c["open_count"] for c in cluster_list)
     personalized = bool(tier_by_firm or user_regions or user_tracks)
 

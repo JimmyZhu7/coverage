@@ -172,7 +172,29 @@ exactly the moment it had something to say.
         </header>
         <div class="firmcol-scroll">
           {% for r in cl.roles %}
-            {% include "directory/_rolecard.html" %}
+            {% comment %}A city-variant sibling renders inside its family
+            head's disclosure below, not at top level — skipping it here is
+            the entire collapse.{% endcomment %}
+            {% if not r.in_group %}
+              {% include "directory/_rolecard.html" %}
+              {% if r.variants %}
+                {% comment %}One programme, several cities. The siblings are
+                COMPLETE cards — their own Save, Read, deadline — behind a
+                disclosure, so grouping changes what the column spends, never
+                what any row means. The summary names the cities, because
+                "+2 more locations" that doesn't say which is a tease, not
+                information.{% endcomment %}
+                <details class="variant-fold">
+                  {% comment %}One template line on purpose: a break after the
+                  colon puts a newline into the summary's accessible name and
+                  into every substring test that quotes it.{% endcomment %}
+                  <summary>+{{ r.variants|length }} more location{{ r.variants|length|pluralize }}: {% for v in r.variants %}{{ v.location|smart_title }}{% if not forloop.last %}, {% endif %}{% endfor %}</summary>
+                  {% for r in r.variants %}
+                    {% include "directory/_rolecard.html" %}
+                  {% endfor %}
+                </details>
+              {% endif %}
+            {% endif %}
           {% endfor %}
         </div>
       </article>

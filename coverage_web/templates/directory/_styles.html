@@ -230,6 +230,23 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .fit-toggle:has(input:checked) { background: var(--accent-soft);
     color: var(--accent-ink); border-color: var(--accent); }
 
+  /* The city-variant fold: one programme's other cities, tucked but named.
+     The summary is a quiet full-width strip between cards; open, the sibling
+     cards render at full size with a left rule marking them as one family. */
+  .variant-fold { margin: -2px 0 6px; }
+  .variant-fold > summary { cursor: pointer; list-style: none;
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-3);
+    padding: 4px 8px; border-radius: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: color var(--t-fast), background-color var(--t-fast); }
+  .variant-fold > summary::-webkit-details-marker { display: none; }
+  .variant-fold > summary:hover { color: var(--accent-ink);
+    background: var(--accent-soft); }
+  .variant-fold[open] > summary { color: var(--accent-ink); }
+  .variant-fold[open] { border-left: 2px solid var(--accent-line);
+    padding-left: 6px; }
+  .variant-fold .rolecard { margin-top: 6px; }
+
   /* The bar's single footnote — the Programme Year honesty sentence, tied to
      #f-year via aria-describedby. Full row, so it never rags the controls;
      lowercase and quiet, because it is a caveat, not a control. */

@@ -477,3 +477,40 @@ def test_the_fit_toggle_needs_a_profile_to_exist(client, django_user_model):
     body = client.get("/opportunities/?fit=1").content.decode()
     assert "Would Hide Intern" in body, "no Settings, no verdicts, no hiding"
     assert 'name="fit"' not in body, "no toggle offered either"
+
+
+# ---------------------------------------------------------------------------
+# CITY-VARIANT FOLDING — display-only, semantics untouched.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_one_programme_many_cities_folds_but_keeps_every_card(client):
+    firm = Firm.objects.create(slug="bofa", name="Bank of America")
+    for city in ("Hong Kong", "Singapore", "London"):
+        Opportunity.objects.create(
+            firm=firm, title=f"GCB Summer Analyst - 2027 - {city}",
+            bucket="internship", status="open", location=city,
+            url=f"https://bofa.com/gcb-{city.replace(' ', '')}")
+    body = client.get("/opportunities/").content.decode()
+    # Title sort puts London before Singapore; the fold preserves the
+    # column's own ordering rather than imposing one.
+    assert "+2 more locations: London, Singapore" in body
+    # Every sibling's own card still renders (inside the fold), with its own
+    # save-target identity intact — grouping spends less column, changes
+    # nothing about any row.
+    assert body.count("GCB Summer Analyst") >= 3
+
+
+@pytest.mark.django_db
+def test_desk_variants_are_different_jobs_and_never_fold(client):
+    """The first draft of the family rule merged 'Internship - Financial
+    Engineer' with 'Internship - Cyber Security'. The tail only counts as a
+    city when its words appear in the row's own location field."""
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    for desk in ("Financial Engineer", "Cyber Security"):
+        Opportunity.objects.create(
+            firm=firm, title=f"Internship - {desk}",
+            bucket="internship", status="open", location="Paris, France",
+            url=f"https://ms.com/{desk.replace(' ', '')}")
+    body = client.get("/opportunities/").content.decode()
+    assert "more location" not in body
