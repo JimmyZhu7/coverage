@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Instrument · Coverage{% endblock %}
+
+{% block head %}<style>
+  /* Deliberately plain. This page is an instrument for one person; every
+     minute spent styling it is a minute not spent on the product students
+     see. It borrows the shared tokens and adds nothing but a grid. */
+  .inst-grid { display: grid; gap: var(--s4);
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-bottom: var(--s5); }
+  .inst-card { border: 1px solid var(--line); border-radius: 12px;
+    background: var(--surface); padding: var(--s4); }
+  .inst-card h2 { margin: 0 0 var(--s2); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3);
+    font-family: var(--font-mono); }
+  .inst-n { font-family: var(--font-mono); font-size: 28px; color: var(--accent-ink);
+    line-height: 1.1; }
+  .inst-sub { font-size: var(--fs-xs); color: var(--ink-3); }
+  .inst-spark { display: flex; align-items: flex-end; gap: 2px; height: 46px;
+    margin-top: var(--s2); }
+  .inst-spark i { flex: 1; min-height: 2px; border-radius: 2px 2px 0 0;
+    background: var(--accent-line); height: var(--h); }
+  .inst-rows { list-style: none; margin: 0; padding: 0; font-size: var(--fs-s); }
+  .inst-rows li { display: flex; justify-content: space-between; gap: var(--s3);
+    padding: 5px 0; border-top: 1px solid var(--line); }
+  .inst-rows li:first-child { border-top: 0; }
+  .inst-rows b { font-family: var(--font-mono); font-weight: var(--w-med); }
+  .stage-ok { color: var(--ok); }
+  .stage-bad { color: var(--danger); }
+</style>{% endblock %}
+
+{% block content %}
+<div class="page">
+  {% include "_pagehead.html" with eyebrow="Staff only" title="Instrument" sub="What the product wrote down about itself." %}
+
+  <div class="inst-grid">
+    <div class="inst-card">
+      <h2>Open campus roles</h2>
+      <div class="inst-n">{{ board.open_campus }}</div>
+      <p class="inst-sub">{{ board.dated }} dated · {{ board.with_text }} read · {{ board.firms }} firms</p>
+    </div>
+    <div class="inst-card">
+      <h2>Network</h2>
+      <div class="inst-n">{{ crm.contacts }}</div>
+      <p class="inst-sub">{{ crm.touches_30d }} touches in {{ window_days }}d · {{ crm.with_opener }} with a draft</p>
+    </div>
+    <div class="inst-card">
+      <h2>Product events · {{ window_days }}d</h2>
+      <div class="inst-n">{{ event_total }}</div>
+      <div class="inst-spark" role="img" aria-label="Daily product events over the last {{ window_days }} days">
+        {% for a in activity %}<i style="--h: {{ a.pct }}%" title="{{ a.label }}: {{ a.n }}"></i>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="inst-grid">
+    <div class="inst-card">
+      <h2>Pipeline</h2>
+      <ul class="inst-rows">
+        {% for s in stages %}
+          <li><span>{{ s.label }}</span>
+            <span class="{% if s.status == 'ok' %}stage-ok{% elif s.when %}stage-bad{% endif %}">
+              {% if s.when %}{{ s.when|timesince }} ago · {{ s.status }}{% else %}never run{% endif %}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="inst-card">
+      <h2>What gets used</h2>
+      <ul class="inst-rows">
+        {% for name, n in top_events %}<li><span>{{ name }}</span><b>{{ n }}</b></li>
+        {% empty %}<li><span>Nothing recorded in this window.</span></li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

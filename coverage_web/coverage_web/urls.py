@@ -7,6 +7,7 @@ from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import RedirectView
 
+from analytics import views as analytics_views
 from directory import views as directory_views
 
 urlpatterns = [
@@ -36,6 +37,9 @@ urlpatterns = [
     path("privacy/", RedirectView.as_view(pattern_name="accounts:privacy", permanent=True)),
     path("terms/", RedirectView.as_view(pattern_name="accounts:terms", permanent=True)),
     path("capture/", include("capture.urls")),       # inbound-email webhook + capture settings
+    # The founder dashboard: staff-only reader over the ProductEvent rows
+    # every action has been writing since the cutover.
+    path("instrument/", analytics_views.dashboard, name="instrument"),
     path("", include("core.urls")),
 ]
 

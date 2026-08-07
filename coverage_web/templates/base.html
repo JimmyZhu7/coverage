@@ -272,6 +272,26 @@
       var list = document.getElementById("cmdk-results");
       var items = [], active = -1, timer = null;
 
+      // Quick actions — what the palette offers before you type. Opening a
+      // search box to the words "Type to search." wastes the one moment the
+      // user has already committed to a keystroke; these are the four places
+      // the product can send someone, and they filter as you type until real
+      // results arrive.
+      var ACTIONS = [
+        {name: "Today", hint: "Your queue", url: "/app/"},
+        {name: "Add a contact", hint: "Ten seconds", url: "/app/contacts/new/?quick=1"},
+        {name: "Browse openings", hint: "The feed", url: "/opportunities/"},
+        {name: "My applications", hint: "What you're tracking", url: "/opportunities/mine/"},
+        {name: "Calendar", hint: "Chats and deadlines", url: "/app/calendar/"},
+        {name: "Settings", hint: "Profile and cadence", url: "/welcome/settings/"}
+      ];
+      function actionsFor(q) {
+        q = q.trim().toLowerCase();
+        return ACTIONS.filter(function (a) {
+          return !q || (a.name + " " + a.hint).toLowerCase().indexOf(q) !== -1;
+        });
+      }
+
       function open() { dlg.showModal(); input.value = ""; render({contacts:[],firms:[],roles:[]}); input.focus(); }
       function esc(s) { var d = document.createElement("span"); d.textContent = s || ""; return d.innerHTML; }
 
@@ -287,6 +307,11 @@
             html += '<li class="palette-item" data-i="' + i + '" role="option">' + fmt(r) + "</li>";
           });
         }
+        // Actions lead: they are the shortest path and never make the user
+        // wait on a fetch.
+        section("Go to", actionsFor(input.value), function (r) {
+          return "<b>" + esc(r.name) + "</b><span>" + esc(r.hint) + "</span>";
+        });
         section("People", data.contacts, function (r) {
           return "<b>" + esc(r.name) + "</b><span>" + esc(r.firm) + " · " + esc(r.warmth) + "</span>";
         });
@@ -296,6 +321,15 @@
         });
         list.innerHTML = html || '<li class="palette-none">' +
           (input.value.trim().length > 1 ? "Nothing matches." : "Type to search.") + "</li>";
+        // The hint line changes with the state, because "↑↓ move · Enter
+        // open" over an empty list is instructions for a thing that is not
+        // there yet.
+        var hint = dlg.querySelector(".palette-hint");
+        if (hint) {
+          hint.textContent = input.value.trim().length > 1
+            ? "↑↓ move · Enter open · Esc close"
+            : "Type to search people, firms and roles · Esc close";
+        }
         active = items.length ? 0 : -1;
         highlight();
       }
