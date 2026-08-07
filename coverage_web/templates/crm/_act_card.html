@@ -103,6 +103,14 @@ buttons whose visible text is identical, which is unusable read aloud.
            aria-label="Add an email address for {{ a.contact.name }}">Email</a>
       {% endif %}
     </div>
+    {% comment %}
+    Only where dismissal actually works. A pre-deadline re-ping is exempt
+    from the snooze filter (a snooze is not consent to miss a deadline), and
+    drawing Skip on an exempt card produced a button that wrote snoozed_until
+    and then re-rendered the same card — a control that visibly did nothing.
+    No buttons is honest; broken buttons are not.
+    {% endcomment %}
+    {% if a.snoozable %}
     <div class="act-ghosts">
       <button type="button" class="btn act-ghost"
               aria-label="Snooze {{ a.contact.name }} for 3 days"
@@ -113,5 +121,6 @@ buttons whose visible text is identical, which is unusable read aloud.
               hx-post="{% url 'crm:today_act' a.contact.id 'skip' %}"
               title="Dismiss for today">Skip</button>
     </div>
+    {% endif %}
   </div>
 </article>

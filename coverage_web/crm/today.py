@@ -111,8 +111,17 @@ def _cadence_params(user) -> dict[str, int]:
 # window — including a priority-0 pre-deadline re-ping that fires two weeks
 # before a confirmed close, the highest-value nudge the engine has. Snoozing
 # one nagging follow-up card is not consent to miss a deadline. The filter now
-# runs over the OUTPUT (below), and these two kinds are exempt from it.
-_SNOOZE_EXEMPT_ACTIONS = frozenset({"reping", "confirm_chat"})
+# runs over the OUTPUT (below), and this kind is exempt from it.
+#
+# `confirm_chat` used to be in this set too, and that bundling was a bug worn
+# as a principle. A re-ping guards an EXTERNAL deadline the user never agreed
+# to miss; confirm-chat is a QUESTION ("did it happen?") that the user is
+# entitled to answer "ask me tomorrow" — and the card offered Skip and Snooze
+# buttons whose click wrote snoozed_until and then re-rendered the exact same
+# card, a control that visibly did nothing (reported 2026-08-07, the Cindy So
+# card). The buttons now work where dismissal is legitimate, and the one kind
+# where it isn't renders no such buttons at all — see `snoozable` below.
+_SNOOZE_EXEMPT_ACTIONS = frozenset({"reping"})
 
 
 def _build_actions(user):
@@ -752,6 +761,11 @@ def _cockpit_context(user) -> dict:
 
     for a in actions:
         a["touch_kind"] = _ACTION_TOUCH.get(a["action"])
+        # Whether the card may offer Snooze/Skip. A card whose action is
+        # snooze-exempt must not draw the buttons: writing snoozed_until on
+        # an exempt card is worse than a no-op, it silently snoozes the
+        # contact's OTHER actions while the visible card stays put.
+        a["snoozable"] = a["action"] not in _SNOOZE_EXEMPT_ACTIONS
 
     ordered = sorted(actions, key=_today_sort_key)
     park = [a for a in ordered if _today_class(a) == 4]

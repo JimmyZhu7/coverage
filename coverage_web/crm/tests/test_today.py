@@ -488,6 +488,54 @@ def test_snooze_cannot_swallow_a_pre_deadline_reping():
     assert [a["action"] for a in actions] == ["reping"]
 
 
+def test_skip_dismisses_a_confirm_chat_card_for_the_day():
+    """confirm_chat used to sit in the snooze-exempt set alongside reping, so
+    the card's own Skip button wrote snoozed_until and then re-rendered the
+    exact same card — a control that visibly did nothing (reported
+    2026-08-07). A re-ping guards an external deadline; confirm-chat is a
+    question, and "ask me tomorrow" is a legitimate answer to a question."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Cindy So", warmth="replied", thread_state="chat_scheduled",
+    )
+    _touch(user, c, "chat_scheduled", days_ago=12)
+    ctx = _cockpit_context(user)
+    actions = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert "confirm_chat" in [a["action"] for a in actions], "card present before skip"
+
+    Contact.all_objects.filter(pk=c.pk).update(
+        snoozed_until=timezone.now() + timedelta(days=1)
+    )
+    ctx = _cockpit_context(user)
+    actions = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert "confirm_chat" not in [a["action"] for a in actions], "skip now works"
+
+
+def test_a_reping_card_offers_no_skip_because_skip_would_lie(client):
+    """The exempt kind draws no Snooze/Skip at all: clicking them wrote
+    snoozed_until (silently snoozing the contact's OTHER actions) while the
+    visible card stayed put. No buttons is honest; broken buttons are not."""
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(name="Moelis", slug="moelis")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    from directory.models import FirmDate
+    FirmDate.objects.create(
+        firm=firm, event_kind="app_close", region="us",
+        date=timezone.localdate() + timedelta(days=5), confidence=1.0, precision="day",
+    )
+    c = Contact.all_objects.create(
+        user=user, name="Reping Target", firm=firm, region="us",
+        warmth="chatted", thread_state="replied",
+    )
+    _touch(user, c, "chat", days_ago=40)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    import re
+    card = re.search(r"Reping Target.*?</article>", body, re.S).group(0)
+    assert "Skip" not in card and "Snooze" not in card
+
+
 # ---------------------------------------------------------------------------
 # E5 / E6. What the page must not write.
 # ---------------------------------------------------------------------------
