@@ -33,6 +33,14 @@
 </head>
 <body>
   {% comment %}
+  Skip link, first in the tab order. The feed carries ~3,000 focusable
+  elements; without this a keyboard user reaching the roles has to traverse
+  the masthead and the whole filter bar on every single page load. Hidden
+  until focused, which is the one case where visually-hidden must NOT use
+  the .vh clip pattern — the link has to become visible when it matters.
+  {% endcomment %}
+  <a class="skip-link" href="#main">Skip to content</a>
+  {% comment %}
     Shared shell. Plain hrefs, not reverse-url tags, so the shell renders
     before any app route is defined. Sub-navs live inside each app's pages.
   {% endcomment %}
@@ -91,7 +99,8 @@
       </div>
     </div>
   </header>
-  <main>
+  {# tabindex="-1" so the skip link's target can actually take focus. #}
+  <main id="main" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer">

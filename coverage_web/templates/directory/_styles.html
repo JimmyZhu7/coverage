@@ -541,7 +541,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* Per-firm tint: --hue comes from the firm_hue filter; saturation and
      lightness are fixed here so every chip shares one muted color family. */
   .firmcol-logo { width: 38px; height: 38px; flex: none; border-radius: 10px;
-    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 31%);
+    /* 31% lightness measured 4.11:1 against the 90% tile on some hues —
+       under the 4.5 the monogram's text needs. 24% clears it on every hue
+       in the wheel; the tile stays put, so nothing else shifts. */
+    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 24%);
     box-shadow: inset 0 0 0 1px hsl(var(--hue, 210) 40% 82%);
     font-weight: var(--w-bold); font-size: var(--fs-s); letter-spacing: 0.02em;
     display: inline-flex; align-items: center; justify-content: center;
@@ -690,6 +693,9 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      A scraped job title is unbounded, so the clamp is doing real work here —
      "2027 Blackstone Strategic Partners Private Equity Secondaries Summer
      Analyst, London" is a real row. */
+  /* The h2 exists for the heading outline only — the anchor inside it keeps
+     every visual property, so the wrapper must add nothing. */
+  .firmcol-h { margin: 0; font: inherit; display: contents; }
   .rolecard-title { margin: 0; height: 40px; flex: none;
     font-size: var(--fs-m); line-height: 1.3; font-weight: var(--w-med); }
   .rolecard-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;

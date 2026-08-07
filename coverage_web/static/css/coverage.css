@@ -211,6 +211,16 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 ul, ol { padding-left: 1.25rem; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 1px; }
 
+/* The skip link: off-screen until focused, then a real, visible control at
+   the top-left. Not .vh — that pattern clips permanently, and this element's
+   whole job is to appear. */
+.skip-link { position: absolute; left: 8px; top: -60px; z-index: 100;
+  padding: 10px 16px; border-radius: 999px; background: var(--accent);
+  color: #fff; font-size: var(--fs-s); font-weight: var(--w-med);
+  transition: top var(--t-fast); }
+.skip-link:focus { top: 8px; text-decoration: none; }
+main:focus { outline: none; }
+
 .muted { color: var(--ink-2); }
 .small { font-size: var(--fs-s); }
 .num, .tabular { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }

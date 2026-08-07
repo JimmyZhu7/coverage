@@ -31,7 +31,11 @@ walks the same URL as a plain page load.
             <span class="firmcol-logo" style="--hue: {{ cl.firm_slug|firm_hue }}">{{ cl.monogram }}</span>
           {% endif %}
           <div class="firmcol-id">
-            <a class="firmcol-name" href="{% url 'directory:firm_detail' cl.firm_slug %}">{{ cl.firm_name|smart_title }}</a>
+            {% comment %}An h2 wrapping the link, not a bare link: each firm
+            column is a section of the page, and the heading outline a screen
+            reader navigates by went 1 → (nothing) → role card. The class
+            stays on the anchor so the visual design is untouched.{% endcomment %}
+            <h2 class="firmcol-h"><a class="firmcol-name" href="{% url 'directory:firm_detail' cl.firm_slug %}">{{ cl.firm_name|smart_title }}</a></h2>
             <span class="firmcol-meta">{% if cl.category %}{{ cl.category }} · {% endif %}{{ cl.open_count }} open</span>
             <div class="firmcol-stats">
               <span class="firmcol-tier{% if cl.is_mine %} is-mine{% endif %}">{% if cl.tier %}Tier {{ cl.tier }}{% else %}Untiered{% endif %}</span>

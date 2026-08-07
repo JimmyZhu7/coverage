@@ -26,7 +26,10 @@ without cutting text off.
     </span>
   </div>
 
-  <h4 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a></h4>
+  {% comment %}h3, not h4: the page's only h1 is its title and the firm
+  column headers are h2-level, so h4 skipped a level — the heading outline a
+  screen-reader user navigates by should read 1→2→3, not 1→4.{% endcomment %}
+  <h3 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a></h3>
 
   {% comment %}
   Always rendered, even when empty, so the meta row below sits at

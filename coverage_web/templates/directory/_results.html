@@ -115,7 +115,11 @@ exactly the moment it had something to say.
         <header class="firmcol-head">
           <span class="firmcol-logo firmcol-logo--picked" aria-hidden="true">★</span>
           <div class="firmcol-id">
-            <span class="firmcol-name" id="pickcol-h">Picked for you</span>
+            {% comment %}h2 like the firm columns beside it: this column is a
+            section too, and leaving it a span put its role cards (h3)
+            straight under the page's h1 — the 1→3 jump a screen-reader user
+            hears as a missing level.{% endcomment %}
+            <h2 class="firmcol-h"><span class="firmcol-name" id="pickcol-h">Picked for you</span></h2>
             <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% else %}None match this filter{% endif %}</span>
             <div class="firmcol-stats">
               {% for r in pick_cluster.reasons %}<span class="why-chip why-{{ r.kind }}" title="{{ r.detail }}">{{ r.text }}</span>{% endfor %}
