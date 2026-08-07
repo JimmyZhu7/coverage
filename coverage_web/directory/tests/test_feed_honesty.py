@@ -562,3 +562,33 @@ def test_a_later_slice_keeps_the_live_filters(client):
     body = resp.content.decode()
     assert "Zebra Keep Co" in body
     assert "Firm 00" not in body, "the filter still applies to a paged request"
+
+
+@pytest.mark.django_db
+def test_a_continuation_slice_skips_the_page_weight(client):
+    """A cols= fragment consumes the slice, the cursor and the querystring —
+    the first lazy loader ran recommendations, the feed bands and four facets
+    on every scroll anyway, so each sentinel fetch cost as much as the page
+    it was meant to lighten."""
+    for i in range(15):
+        f = Firm.objects.create(slug=f"firm{i}", name=f"Firm {i:02d}")
+        Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
+                                   status="open", url=f"https://f{i}.com/a")
+    resp = client.get("/opportunities/?cols=12", headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "picks" not in resp.context, "the recommender must not run for a slice"
+    assert b"stat-strip" not in resp.content, "a slice is columns, not the page"
+
+
+@pytest.mark.django_db
+def test_the_noscript_cols_link_renders_the_full_page(client):
+    """The sentinel's own no-JS fallback arrives WITHOUT the htmx header. The
+    first cut keyed the skip on the cursor alone, so exactly the honest
+    fallback was the request that crashed on feed=None."""
+    for i in range(15):
+        f = Firm.objects.create(slug=f"firm{i}", name=f"Firm {i:02d}")
+        Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
+                                   status="open", url=f"https://f{i}.com/a")
+    resp = client.get("/opportunities/?cols=12")
+    assert resp.status_code == 200
+    assert b"stat-strip" in resp.content

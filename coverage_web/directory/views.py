@@ -1375,6 +1375,24 @@ def opportunities(request):
     # own text BLOCKS this user (wrong stated year, refuses their visa) —
     # silence never hides. The scope line below owns the honesty: the count
     # of hidden rows is stated, with one click to bring them back.
+    # ---- Column lazy-loading (?cols=N). Parsed HERE, before the feed and
+    # the recommender run, because a non-zero cursor is what lets both be
+    # skipped: a cols= request is the sentinel asking for more columns, and
+    # the first version of this parsed the cursor after the work it was
+    # supposed to avoid. Counts are still computed over the FULL list before
+    # slicing — the strip describes the board, not the loaded fraction.
+    COLS_PAGE = 12
+    try:
+        cols_from = max(int(request.GET.get("cols", 0)), 0)
+    except ValueError:
+        cols_from = 0
+    # Heavy work is skipped only when BOTH halves hold: a cursor AND the htmx
+    # header. The sentinel's own noscript link (and any bookmarked ?cols= URL)
+    # arrives without the header and renders the FULL page — the first cut
+    # keyed the skip on the cursor alone, so exactly the no-JS fallback the
+    # sentinel carries for honesty was the request that crashed on feed=None.
+    cols_fragment = bool(cols_from) and bool(request.headers.get("HX-Request"))
+
     elig_profile = _eligibility_profile(request.user)
     fit = request.GET.get("fit", "").strip() == "1" and elig_profile is not None
     hidden_fit = 0
@@ -1388,8 +1406,9 @@ def opportunities(request):
                 keep.append(o)
         rows = keep
 
-    feed = _urgency_feed(rows, now=now, today=today, my_firm_ids=my_firm_ids,
-                         profile=elig_profile)
+    feed = (None if cols_fragment else
+            _urgency_feed(rows, now=now, today=today, my_firm_ids=my_firm_ids,
+                          profile=elig_profile))
 
     # Firm clusters are the page: one firm, all its open roles listed below it
     # in its own scroll window. Each role keeps its honest urgency signal (a
@@ -1411,7 +1430,7 @@ def opportunities(request):
     # for the scoring itself.
     picks: list = []
     profile = None
-    if request.user.is_authenticated:
+    if request.user.is_authenticated and not cols_fragment:
         profile = Profile.from_user(request.user, tier_by_firm)
         if not profile.is_empty:
             picks = [
@@ -1515,19 +1534,6 @@ def opportunities(request):
 
     cluster_list = sorted(clusters.values(), key=_cluster_key)
 
-    # ---- Column lazy-loading (?cols=N). The page used to render every firm
-    # column at once — ~18,000 DOM nodes for 55 firms — and a mid-range phone
-    # pays for all of it before first paint even though four columns fit a
-    # screen. The first COLS_PAGE columns render now; a sentinel at the end
-    # of the grid fetches the next slice when it scrolls into view (htmx
-    # `revealed`), carrying the LIVE querystring so filters keep applying.
-    # Counts are computed over the FULL list before slicing — the stat strip
-    # must describe the board, not the fraction of it that has loaded.
-    COLS_PAGE = 12
-    try:
-        cols_from = max(int(request.GET.get("cols", 0)), 0)
-    except ValueError:
-        cols_from = 0
     # City-variant families fold within each firm's column (display-only —
     # see _group_city_variants). Done after sorting because it mutates the
     # items in place, and the transient _opps list is dropped here so it can
@@ -1553,6 +1559,23 @@ def opportunities(request):
             for r in cl["roles"]:
                 if r["id"] in tracked:
                     r["track_status"] = tracked[r["id"]] or "saved"
+
+    # ---- Continuation slices stop here. ------------------------------------
+    # A cols= request is the lazy-load sentinel asking for MORE COLUMNS, and
+    # the fragment consumes exactly three things: the slice, the next cursor,
+    # and the live querystring. The first version of the lazy loader ran the
+    # whole page anyway — recommendations scored over every candidate, the
+    # feed bands dressed a second time, four cross-filtered facets, the cycle
+    # aggregation — so each scroll of the sentinel cost as much as the page
+    # it was meant to lighten. Everything a fragment needs is already true
+    # here: filters applied, fit applied, verdicts and save-stars annotated,
+    # variants folded.
+    if cols_fragment:
+        return render(request, "directory/_columns.html", {
+            "clusters": cluster_page,
+            "cols_next": cols_next,
+            "cols_qs": _qs_without(request, "cols"),
+        })
 
     # ---- The Picked column ------------------------------------------------
     # The picks render as the pinned FIRST column of the feed, styled apart
@@ -1711,11 +1734,6 @@ def opportunities(request):
     }
 
     if context["is_htmx"]:
-        # A cols= request is the lazy-load sentinel asking for the NEXT slice
-        # of columns, not a filter change asking for the whole results body —
-        # it swaps just the columns fragment in place of itself.
-        if cols_from:
-            return render(request, "directory/_columns.html", context)
         return render(request, "directory/_results.html", context)
     return render(request, "directory/opportunities.html", context)
 
