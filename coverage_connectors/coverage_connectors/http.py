@@ -84,7 +84,10 @@ def fetch_bytes(
         try:
             return _do_request(url, data=data, headers=headers, timeout=timeout)
         except urllib.error.HTTPError as e:
-            if e.code == 404:
+            # 410 joins 404 as retried-uselessly-by-definition: iCIMS answers
+            # Gone for filled/expired reqs, and the verify layer reads both as
+            # a definitive "this posting no longer exists".
+            if e.code in (404, 410):
                 raise
             last_exc = e
         except Exception as e:  # noqa: BLE001 — network/timeout/etc, retry-eligible

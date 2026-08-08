@@ -40,7 +40,8 @@ from __future__ import annotations
 
 from coverage_connectors import (
     AvatureBoard, BeisenBoard, BoardConfig, EightfoldBoard, GoldmanSachsBoard,
-    GreenhouseBoard, LumesseBoard, McKinseyBoard, OracleBoard, PhenomBoard, SocGenBoard,
+    GreenhouseBoard, IcimsBoard, LeverBoard, LumesseBoard, McKinseyBoard, OracleBoard,
+    PhenomBoard, SocGenBoard,
     TalentsoftBoard,
     SitemapBoard, TalentGatewayBoard, TalnetBoard, WorkdayBoard,
 )
@@ -239,8 +240,9 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # Prop trading / market-makers + multi-strat funds (agent-identified +
     # live-verified 2026-07-24). Greenhouse dominates — note the non-obvious
     # tokens (HRT=wehrtyou, Five Rings=fiveringsllc, DRW=drweng, Optiver=
-    # optiverus). Citadel/Citadel Securities (in-house + Turnstile), SIG
-    # (iCIMS), and Balyasny (Salesforce) are JS-gated — backlog.
+    # optiverus). SIG cracked 2026-08-08 (icims connector, entry below);
+    # Citadel/Citadel Securities (in-house + Turnstile) and Balyasny
+    # (Salesforce) remain JS-gated — backlog.
     ("janestreet", GreenhouseBoard(firm="Jane Street", token="janestreet")),
     ("optiver", GreenhouseBoard(firm="Optiver", token="optiverus")),
     ("imc", GreenhouseBoard(firm="IMC Trading", token="imc")),
@@ -268,6 +270,58 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("generalatlantic", GreenhouseBoard(firm="General Atlantic", token="generalatlantic")),
     # PE backlog (no public HTTP board): Warburg Pincus, Advent, Vista Equity
     # (Getro portfolio board only), Silver Lake, Thoma Bravo — all JS/gated.
+
+    # ---- Hedge funds / quant expansion (probed + live-verified 2026-08-08).
+    # Greenhouse again dominates; note XTX's token is xtxmarketsTECHNOLOGIES
+    # and Verition's is veritiongroupllc (read from its site's Greenhouse
+    # embed `for=` param). Marshall Wace / ExodusPoint / Permira are thin or
+    # empty today — kept, HPS-style, so reqs land the day they open. Still
+    # out of reach: Citadel + Citadel Securities and Cantor (403 this
+    # package's honest UA — a block, not a puzzle), D.E. Shaw (in-house, no
+    # feed in 1.8MB of markup), Two Sigma (Avature, but the RSS feed is
+    # disabled and SearchJobs 404s), Balyasny (no ATS host in markup),
+    # Wolverine/CTC (JS shells). ----
+    ("bridgewater", GreenhouseBoard(firm="Bridgewater", token="bridgewater89")),
+    ("aqr", GreenhouseBoard(firm="AQR", token="aqr")),
+    ("squarepoint", GreenhouseBoard(firm="Squarepoint", token="squarepointcapital")),
+    ("towerresearch", GreenhouseBoard(firm="Tower Research", token="towerresearchcapital")),
+    ("schonfeld", GreenhouseBoard(firm="Schonfeld", token="schonfeld")),
+    ("gsacapital", GreenhouseBoard(firm="GSA Capital", token="gsacapital")),
+    ("qube", GreenhouseBoard(firm="Qube Research & Technologies", token="quberesearchandtechnologies")),
+    ("xtx", GreenhouseBoard(firm="XTX Markets", token="xtxmarketstechnologies")),
+    ("marshallwace", GreenhouseBoard(firm="Marshall Wace", token="marshallwace")),
+    ("exoduspoint", GreenhouseBoard(firm="ExodusPoint", token="exoduspoint")),
+    ("verition", GreenhouseBoard(firm="Verition", token="veritiongroupllc")),
+    # First finance firm on Lever since Palantir left with the tech cut.
+    ("belvedere", LeverBoard(firm="Belvedere Trading", org="belvederetrading")),
+    # SIG + Stifel (incl. KBW reqs) — the new icims connector's first boards.
+    # SIG's tenant is careers-sig: bare sig.icims.com 302-loops plain clients.
+    ("sig", IcimsBoard(firm="SIG", tenant="careers-sig")),
+    ("stifel", IcimsBoard(firm="Stifel", tenant="careers-stifel")),
+
+    # ---- Banks expansion (probed + live-verified 2026-08-08). Workday
+    # tenants read from each bank's own careers page markup; totals at
+    # verification: TD 1433 (searchText "intern" matches loosely — the
+    # classifier buckets the noise), MUFG 502 incl. the 2027 CIBM Summer
+    # Intern Program, CIBC 221, DBS 718, Santander 420. BMO's Phenom board
+    # needs keywords="" — "intern" matches zero because its campus reqs say
+    # Co-op/Summer; broad fetch + classifier is the established posture.
+    # Misses this round: Scotiabank/SMBC/Northern Trust (Workday roots 406
+    # plain clients; site names undiscoverable without a browser), BNY
+    # (Oracle host not exposed in markup), Natixis/Daiwa (no ATS in markup),
+    # GIC (SuccessFactors — no connector). ----
+    ("td", WorkdayBoard(firm="TD Securities", tenant_host="td.wd3", site="TD_Bank_Careers", search_text="intern")),
+    ("mufg", WorkdayBoard(firm="MUFG", tenant_host="mufgub.wd3", site="MUFG-Careers", search_text="intern")),
+    ("cibc", WorkdayBoard(firm="CIBC", tenant_host="cibc.wd3", site="search", search_text="intern")),
+    ("dbs", WorkdayBoard(firm="DBS", tenant_host="dbs.wd3", site="DBS_Careers", search_text="intern")),
+    ("santander", WorkdayBoard(firm="Santander", tenant_host="santander.wd3", site="SantanderCareers", search_text="intern")),
+    ("bmo", PhenomBoard(firm="BMO", host="jobs.bmo.com", keywords="")),
+    ("truist", PhenomBoard(firm="Truist", host="careers.truist.com", keywords="intern")),
+
+    # PE retry 2026-08-08: Permira's Greenhouse resolves (0 jobs — valid,
+    # HPS-style). Warburg/Silver Lake/Thoma Bravo/Advent/Vista/CVC still
+    # answer 404 on every plausible token — unchanged from 2026-07-24.
+    ("permira", GreenhouseBoard(firm="Permira", token="permira")),
 
     # ---- Browser tier (headless Chromium via Playwright) ----
     # CICC runs Beisen (北森); its job list only loads after JS bootstraps a
@@ -362,6 +416,30 @@ DEFAULT_TRACKS: dict[str, list[str]] = {
     "hps": ["pe"],
     "golub": ["pe"],
     "generalatlantic": ["pe"],
+    # Hedge-fund / quant expansion (2026-08-08).
+    "bridgewater": ["am"],
+    "aqr": ["am", "st"],
+    "squarepoint": ["st", "am"],
+    "towerresearch": ["st"],
+    "schonfeld": ["am", "st"],
+    "gsacapital": ["st"],
+    "qube": ["st", "am"],
+    "xtx": ["st"],
+    "marshallwace": ["am"],
+    "exoduspoint": ["am"],
+    "verition": ["am"],
+    "belvedere": ["st"],
+    "sig": ["st"],
+    # Banks expansion (2026-08-08).
+    "stifel": ["ib"],
+    "td": ["ib"],
+    "mufg": ["ib"],
+    "cibc": ["ib"],
+    "dbs": ["ib"],
+    "santander": ["ib"],
+    "bmo": ["ib"],
+    "truist": ["ib"],
+    "permira": ["pe"],
 }
 
 

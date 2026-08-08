@@ -29,7 +29,11 @@ from directory import ingest
 from directory.boards import DEFAULT_TRACKS, select_boards
 from directory.models import Firm
 
-_PROVIDERS = ("greenhouse", "lever", "workday", "oracle", "talnet", "sitemap", "mckinsey", "phenom", "goldmansachs", "talentgateway")
+# Keep in lockstep with coverage_connectors.CONNECTORS — a provider missing
+# here still scrapes in the full pass but cannot be selected with --provider.
+_PROVIDERS = ("greenhouse", "lever", "workday", "oracle", "talnet", "sitemap",
+              "mckinsey", "phenom", "goldmansachs", "talentgateway", "eightfold",
+              "beisen", "avature", "lumesse", "socgen", "talentsoft", "icims")
 
 
 class Command(BaseCommand):

@@ -220,6 +220,20 @@ class EightfoldBoard:
 
 
 @dataclass(frozen=True, slots=True)
+class IcimsBoard:
+    """An iCIMS career portal's server-rendered search page. `tenant` is the
+    icims.com subdomain ("careers-sig", "careers-stifel") — note some firms
+    front it with a marketing site whose own domain 302-loops for plain
+    clients (sig.icims.com does; careers-sig.icims.com serves fine), so the
+    tenant that goes here is the one verified to serve the `in_iframe=1`
+    page directly."""
+
+    firm: str
+    tenant: str
+    provider: str = field(default="icims", init=False)
+
+
+@dataclass(frozen=True, slots=True)
 class BeisenBoard:
     """A Beisen (北森) recruiting SPA (e.g. CICC at cicc.zhiye.com) — the
     browser tier. Its job list 403s on raw HTTP because it only loads after
