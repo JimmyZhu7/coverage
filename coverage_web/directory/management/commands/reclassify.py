@@ -40,8 +40,8 @@ import re
 from directory.boards import BOARDS
 from directory.classify import (
     board_is_campus, bucket_from_contract, classify_role, clean_title, extract_class_year, extract_cohort,
-    extract_deadline_from_text, extract_sponsorship, normalize_region, region_from_prose,
-    posting_text,
+    extract_deadline_from_text, extract_sponsorship, normalize_region, region_from_fields,
+    region_from_prose, region_from_title_segments, posting_text,
 )
 from directory.models import Opportunity
 
@@ -96,6 +96,15 @@ class Command(BaseCommand):
                 # told us the title is not where it is.
                 if not region and not (opp.location or "").strip():
                     region = normalize_region(title)
+                # Same gate, on the provider's ORIGINAL title: boards route
+                # location into leading pipe-segments ("APAC | Singapore |
+                # Global Markets Recruitment Event") which clean_title strips
+                # — correctly for display, but the stored title has therefore
+                # already lost the one place the row ever stated. The raw
+                # payload still carries the uncleaned title.
+                if not region and not (opp.location or "").strip():
+                    region = region_from_title_segments(
+                        (opp.raw or {}).get("title") or "")
                 # Workday's list payload writes "2 Locations" into the
                 # location field and hides the cities — but its own
                 # externalPath starts with the PRIMARY posting city:
@@ -110,6 +119,17 @@ class Command(BaseCommand):
 
                         region = normalize_region(
                             unquote(m.group(1)).replace("-", " "))
+                # The provider's own location STRUCTURES, stored in raw and
+                # never read until now: Goldman's city/state/country dicts
+                # (the only honest way to place a bare "Birmingham" — its
+                # country field says United Kingdom), McKinsey's parallel
+                # cities/countries arrays ("San Jose" + "Costa Rica"),
+                # Greenhouse's location.name, and the `detail_location` a
+                # posting page's structured data states (enrich_postings).
+                # Not gated on an empty location field: these ARE the
+                # location field, stated with more words.
+                if not region:
+                    region = region_from_fields(opp.raw)
                 # Still nothing: the posting's own cached prose, through the
                 # location-anchored extractor. Fill-only like everything else
                 # in this loop, and honest about its limits — on live data 18

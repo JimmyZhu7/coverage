@@ -91,7 +91,11 @@ REGION_ORDER = TRACKED_REGIONS + ("other",)
 # Checked in order; the first matching market wins. Keys are lowercase
 # substrings (city / country / region tokens).
 _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("hk", ("hong kong", "hongkong", "香港", "hksar")),
+    # ", hkg" / ", jpn" / ", rou": ISO-3166 alpha-3 codes, which SocGen's
+    # board emits as the ENTIRE location field (", HKG"). Comma-prefixed so a
+    # word containing the trigram can't fire; ", rou" also sits inside a
+    # hypothetical ", Rouen" — France, so the same eu answer either way.
+    ("hk", ("hong kong", "hongkong", "香港", "hksar", ", hkg")),
     ("sg", ("singapore", "新加坡")),
     ("eu", (
         "london", "united kingdom", "u.k.", " uk", "england", "scotland",
@@ -111,6 +115,13 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # 2026-08-08 census tail: Intesa's Turin, ING's Hague, SoftServe's
         # Lviv. Ukraine files under Europe the geography, not any union.
         "torino", "turin", "the hague", "lviv", "kyiv", "kiev", "ukraine",
+        # 2026-08-08 unregioned census, second pass — every key below had a
+        # live row stuck at region="": HSBC's Sheffield insight programmes,
+        # PwC's Global_Campus board (Vilnius, Warszawa — the Polish spelling
+        # Warsaw's key can't see — and Skopje: Europe the geography again),
+        # Santander's "Grande Lisboa" StartX rows, SocGen's ", ROU".
+        "sheffield", "vilnius", "lithuania", "warszawa", "skopje",
+        "lisboa", ", rou",
     )),
     ("us", (
         "united states", "u.s.", "usa", "new york", ", ny", "jersey city",
@@ -131,6 +142,11 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # Indianapolis, and plain "mexico" of New Mexico. Without these, a
         # Midwestern posting would emigrate.
         "indianapolis", "indiana", "new mexico", "albuquerque",
+        # 2026-08-08 second-pass census: Morgan Stanley's tal.net rows state
+        # their city bare ("South Jordan" Utah, "Alpharetta" Georgia). Both
+        # are unambiguous as substrings; "south jordan" cannot reach the
+        # country Jordan, which has no key.
+        "south jordan", "alpharetta",
     )),
     # After hk so "香港" never falls through to the mainland bucket.
     ("cn", (
@@ -142,7 +158,7 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # the US tier first, which runs before this one.
         "china",
     )),
-    ("jp", ("tokyo", "japan", "日本", "東京")),
+    ("jp", ("tokyo", "japan", "日本", "東京", ", jpn")),
 )
 
 # Markets Coverage does not track, recognised so they can be FILED rather than
@@ -178,6 +194,15 @@ _OTHER_MARKET_KEYS: tuple[str, ...] = (
     "nigeria", "lagos", "kenya", "nairobi", "egypt", "cairo",
     "turkey", "türkiye", "istanbul",
     "new zealand", "auckland",
+    # 2026-08-08 second-pass census — each with live rows at region="":
+    # McKinsey's Costa Rica hub (its payload states countries=["Costa Rica"]
+    # while the city is the deliberately-excluded bare "San Jose"), the
+    # Almaty/Astana fellowships, PwC's Quito office, and PwC's New Zealand
+    # rows, which render as "Wellington - NZL"/"Christchurch - NZL". The
+    # alpha-3 " nzl" key (space-prefixed) reads that suffix without adding
+    # "wellington" — Wellington, FL is a real place — or "christchurch",
+    # which is also a town in Dorset.
+    "costa rica", "kazakhstan", "ecuador", "quito", " nzl",
 )
 
 
@@ -192,7 +217,10 @@ _OTHER_MARKET_KEYS: tuple[str, ...] = (
 # end of the string or by a non-letter. The ", de"/", denmark" note in the key
 # table above is the same hazard, caught once by hand and left to recur.
 _STATE_SUFFIX = re.compile(
-    r",\s*(?:ny|il|ma|ca|wa|tx|ga|nc|fl|tn|pa|co|md|ct|nj)(?![a-z])",
+    # "va": SIG's iCIMS filings write "Richmond, VA, US". "usa?" is the
+    # country tail of the same shape (", US" / ", USA") — boundary-checked
+    # like the states, so ", Ust-Kamenogorsk" can never become American.
+    r",\s*(?:ny|il|ma|ca|wa|tx|ga|nc|fl|tn|pa|co|md|ct|nj|va|usa?)(?![a-z])",
     re.IGNORECASE)
 _US_STATE_KEYS = frozenset({", ny", ", il", ", ma", ", ca", ", wa", ", tx",
                             ", ga", ", nc", ", fl", ", tn", ", pa", ", co",
@@ -247,8 +275,24 @@ def normalize_region(location: str | None, *, fallback: str = "") -> str:
 # role is based in Hong Kong." read both cities through one anchor and the
 # agreement gate never saw a conflict.
 _REGION_ANCHOR = re.compile(
-    r"(?:locations?\s*:|based in|located in|office in|position is in|"
-    r"role is (?:based |located )?in|work location|this internship is in)"
+    # `\*?\s*` before the colon: Wells Fargo writes "Program Locations * :
+    # Charlotte, NC" — the asterisk is a footnote marker, not a boundary.
+    r"(?:locations?\s*\*?\s*:|based in|located in|office in|position is in|"
+    r"role is (?:based |located )?in|work location|this internship is in|"
+    # tal.net detail pages render a label table with no colons: "Region
+    # Europe, Middle East, Africa Event - Location United Kingdom" (Morgan
+    # Stanley), "Region U.S. and Canada Location United States of America"
+    # (Bank of America). The label SEQUENCE is the anchor — a bare "location"
+    # is everyday prose ("based on your location, experience, and skills")
+    # and must never anchor on its own. The gap between the labels refuses a
+    # sentence end, but a dot closing a single-letter token is an
+    # abbreviation ("U.S. and Canada"), not a boundary — without that
+    # allowance the BofA shape above never matches its own Region value.
+    r"\bregion\b(?:[^.\n|]|(?<=(?<![a-z])[a-z])\.){0,50}?\blocation\b|"
+    # tal.net's venue field, same boards: "Event address / venue details
+    # London City Centre - …". A "To be confirmed" value names no place and
+    # resolves to nothing, which is the right answer.
+    r"event address\s*/\s*venue details)"
     r"\s*([^.\n]{0,90})", re.IGNORECASE)
 
 
@@ -260,6 +304,53 @@ def region_from_prose(text: str | None) -> str:
         code = normalize_region(m.group(1))
         if code:
             found.add(code)
+    return found.pop() if len(found) == 1 else ""
+
+
+# ---------------------------------------------------------------------------
+# Region from the provider's own location structures — fields that were
+# ALREADY IN the stored payload and never read. Goldman's list API files every
+# posting with city/state/country ({"city": "Birmingham", "state": "West
+# Midlands, England", "country": "United Kingdom"} — which is also the only
+# honest way to place a bare "Birmingham"); McKinsey's carries parallel
+# `cities`/`countries` arrays ("San Jose" + "Costa Rica"); Greenhouse's a
+# `location.name`; and `enrich_postings` stores what a posting page's own
+# structured data states under `detail_location`. Same agreement contract as
+# region_from_prose: all stated locations must resolve to ONE market, or the
+# answer is silence — a two-market posting has no single region.
+# ---------------------------------------------------------------------------
+def _stated_locations(raw: dict | None) -> list[str]:
+    """Every location string the provider's payload states for THIS posting."""
+    raw = raw or {}
+    out: list[str] = []
+    for loc in raw.get("locations") or ():          # Goldman list API shape
+        if isinstance(loc, dict):
+            parts = (loc.get("city"), loc.get("state"), loc.get("country"))
+            joined = ", ".join(str(p) for p in parts if p)
+            if joined:
+                out.append(joined)
+    cities = raw.get("cities") or ()                # McKinsey parallel arrays
+    countries = raw.get("countries") or ()
+    if isinstance(cities, (list, tuple)) and isinstance(countries, (list, tuple)):
+        for i in range(max(len(cities), len(countries))):
+            parts = (cities[i] if i < len(cities) else "",
+                     countries[i] if i < len(countries) else "")
+            joined = ", ".join(str(p) for p in parts if p)
+            if joined:
+                out.append(joined)
+    loc = raw.get("location")                       # Greenhouse object shape
+    if isinstance(loc, dict) and loc.get("name"):
+        out.append(str(loc["name"]))
+    detail = raw.get("detail_location") or ""       # enrich_postings' read of
+    if isinstance(detail, str) and detail:          # the page's structured data
+        out.extend(p.strip() for p in detail.split(";") if p.strip())
+    return out
+
+
+def region_from_fields(raw: dict | None) -> str:
+    """The one market the provider's own location fields agree on, else ""."""
+    found = {code for code in
+             (normalize_region(s) for s in _stated_locations(raw)) if code}
     return found.pop() if len(found) == 1 else ""
 
 
@@ -302,6 +393,31 @@ def clean_title(title: str | None) -> str:
     t = _REQ_CODE.sub("", t)
     t = _WS.sub(" ", t)
     return t.strip(" |·-–—")
+
+
+def region_from_title_segments(title: str | None) -> str:
+    """The one market a title's leading routing segments state, else "".
+
+    The segments clean_title STRIPS are location data the board itself put
+    there ("APAC | Singapore | Global Markets Recruitment Event" — Bank of
+    America's tal.net routing), and stripping them was throwing away the only
+    place those rows ever stated. This reads the same segments, through the
+    same `_is_location_segment` gate, before they are lost. Only the leading
+    routing segments are read — never the title body, whose market words are
+    desks, not offices ("Equity Research, China Industrials" sits in Hong
+    Kong). Region-tag segments that name no single market ("APAC", "Global")
+    resolve to nothing and drop out; conflicting segments mean no answer,
+    same agreement contract as region_from_prose. Callers should pass the
+    provider's ORIGINAL title (raw payload), since a stored title has already
+    been cleaned.
+    """
+    parts = [p.strip() for p in (title or "").split("|")]
+    found = set()
+    while len(parts) > 1 and _is_location_segment(parts[0]):
+        code = normalize_region(parts.pop(0))
+        if code:
+            found.add(code)
+    return found.pop() if len(found) == 1 else ""
 
 
 # Insight events. "insight" alone is NOT enough — "Market Insights Analyst"

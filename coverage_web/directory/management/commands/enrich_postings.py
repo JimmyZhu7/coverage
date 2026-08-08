@@ -35,6 +35,8 @@ WHAT IT REFUSES
 
 from __future__ import annotations
 
+import html as html_mod
+import json
 import re
 import time
 from datetime import datetime
@@ -45,6 +47,7 @@ import requests
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from directory.boards import BOARDS
 from directory.classify import TARGET_BUCKETS, extract_deadline_from_text, extract_sponsorship
 from directory.ingest import _parse_deadline
 from directory.models import Opportunity, ScrapeRun
@@ -78,11 +81,69 @@ def workday_api_url(url: str) -> str | None:
             f"/wday/cxs/{tenant}/{site}/job/x/{job_path}")
 
 
-def fetch_posting_text(url: str) -> str | None:
-    """The posting's own words, or None when the page could not be read.
+# iCIMS detail pages are ALSO JS shells — a plain GET of careers-sig.icims.com
+# returns 351 characters of page chrome and none of the posting (which is how
+# 70 SIG rows were recorded as "answered" by a page that answered nothing).
+# The same URL with `in_iframe=1` is the content frame the shell itself loads:
+# the posting body plus a schema.org JobPosting block whose `jobLocation` is
+# the board's own structured filing of where the role sits.
+_ICIMS_URL = re.compile(r"https://[\w.-]+\.icims\.com/jobs/", re.IGNORECASE)
 
-    None vs "" matters: an unreachable page is retried next run; a reachable
-    page that says nothing is recorded as answered.
+# A careers-site URL that embeds a Greenhouse posting by id
+# (jumptrading.com/hr/job?gh_jid=…, kkr.com/careers/…?gh_jid=…). The page is a
+# JS shell, but Greenhouse's public board API serves the same posting —
+# content plus the board's own office/location filing — keyed by the board
+# token the catalog already knows.
+_GH_JID = re.compile(r"[?&]gh_jid=(\d+)")
+
+_LD_JSON = re.compile(
+    r"<script[^>]*application/ld\+json[^>]*>(.*?)</script>", re.I | re.S)
+
+
+def jobposting_jsonld(page_html: str) -> tuple[str | None, str]:
+    """(description_html, "city, region, country; …") from a page's
+    schema.org JobPosting block, or (None, "") when the page carries none.
+
+    Only what the posting's own structured data states — placeholder values
+    ("UNAVAILABLE") are dropped, multiple jobLocation entries are kept
+    separately so a multi-market posting can honestly fail the region
+    agreement gate downstream instead of first-match-winning."""
+    for m in _LD_JSON.finditer(page_html or ""):
+        try:
+            data = json.loads(m.group(1).strip())
+        except ValueError:
+            continue
+        for node in (data if isinstance(data, list) else [data]):
+            if not isinstance(node, dict) or node.get("@type") != "JobPosting":
+                continue
+            locs = node.get("jobLocation") or []
+            if isinstance(locs, dict):
+                locs = [locs]
+            parts: list[str] = []
+            for place in locs:
+                addr = (place or {}).get("address") or {}
+                keep = [str(v) for v in (addr.get("addressLocality"),
+                                         addr.get("addressRegion"),
+                                         addr.get("addressCountry"))
+                        if v and str(v).strip().lower() != "unavailable"]
+                if keep:
+                    parts.append(", ".join(keep))
+            return (node.get("description") or None,
+                    "; ".join(dict.fromkeys(parts)))
+    return None, ""
+
+
+def fetch_posting(url: str, *, greenhouse_token: str | None = None
+                  ) -> tuple[str | None, str]:
+    """(text, stated_location) — the posting's own words plus whatever
+    location its page's structured data states, or (None, "") when the page
+    could not be read.
+
+    None vs "" on the text matters: an unreachable page is retried next run;
+    a reachable page that says nothing is recorded as answered. The location
+    is never derived — it is the provider's own field (Workday's location +
+    country, iCIMS/JSON-LD jobLocation, Greenhouse's location and offices) or
+    it is empty.
     """
     api = workday_api_url(url)
     if api:
@@ -92,18 +153,52 @@ def fetch_posting_text(url: str) -> str | None:
             if resp.status_code == 200:
                 info = (resp.json() or {}).get("jobPostingInfo") or {}
                 body = info.get("jobDescription") or ""
+                country = info.get("country")
+                country = (country.get("descriptor") or ""
+                           if isinstance(country, dict) else "")
+                locs = [", ".join(p for p in (info.get("location"), country) if p)]
+                locs += [", ".join(p for p in (extra, country) if p)
+                         for extra in info.get("additionalLocations") or ()
+                         if isinstance(extra, str)]
+                location = "; ".join(loc for loc in dict.fromkeys(locs) if loc)
                 if body:
-                    return page_text(body)
+                    return page_text(body), location
         except (requests.RequestException, ValueError):
-            return None
-        return None
+            return None, ""
+        return None, ""
+
+    jid = _GH_JID.search(url or "")
+    if jid and greenhouse_token:
+        gh = (f"https://boards-api.greenhouse.io/v1/boards/"
+              f"{greenhouse_token}/jobs/{jid.group(1)}")
+        try:
+            resp = requests.get(gh, headers={**UA, "Accept": "application/json"},
+                                timeout=TIMEOUT)
+            if resp.status_code == 200:
+                job = resp.json() or {}
+                body = html_mod.unescape(job.get("content") or "")
+                locs = [(job.get("location") or {}).get("name") or ""]
+                locs += [o.get("location") or "" for o in job.get("offices") or ()
+                         if isinstance(o, dict)]
+                location = "; ".join(loc for loc in dict.fromkeys(locs) if loc)
+                if body:
+                    return page_text(body), location
+        except (requests.RequestException, ValueError):
+            return None, ""
+        return None, ""
+
+    if _ICIMS_URL.match(url or ""):
+        url = f"{url}{'&' if '?' in url else '?'}in_iframe=1"
     try:
         resp = requests.get(url, headers=UA, timeout=TIMEOUT)
     except requests.RequestException:
-        return None
+        return None, ""
     if resp.status_code != 200 or not resp.text:
-        return None
-    return page_text(resp.text)
+        return None, ""
+    description, location = jobposting_jsonld(resp.text)
+    if description:
+        return page_text(description), location
+    return page_text(resp.text), location
 
 
 def page_text(html: str) -> str:
@@ -259,6 +354,13 @@ class Command(BaseCommand):
             run = ScrapeRun.objects.create(
                 connector="enrich", started=timezone.now(), status="running")
 
+        # Board tokens for the Greenhouse API path: a careers-site shell URL
+        # (?gh_jid=…) only carries the job id; the catalog knows whose board
+        # it is.
+        gh_tokens = {slug: board.token for slug, board in BOARDS
+                     if board.__class__.__name__ == "GreenhouseBoard"
+                     and getattr(board, "token", "")}
+
         # Round-robin across hosts so the per-host delay overlaps instead of
         # serializing: ~50 hosts at 0.8s spacing is minutes, not hours.
         by_host: dict[str, deque] = defaultdict(deque)
@@ -291,11 +393,13 @@ class Command(BaseCommand):
 
             # The board's own payload first: free, unblockable, and on some
             # boards the only copy we are allowed to have.
+            location = ""
             text = payload_text(o.raw)
             if text:
                 from_payload += 1
             else:
-                text = fetch_posting_text(o.url)
+                text, location = fetch_posting(
+                    o.url, greenhouse_token=gh_tokens.get(o.firm.slug))
                 if text is None:
                     failed += 1
                     continue
@@ -329,6 +433,12 @@ class Command(BaseCommand):
             raw = dict(o.raw or {})
             raw["detail_text"] = text
             raw["detail_fetched"] = timezone.now().isoformat()
+            # The location the page's own structured data states, for
+            # `reclassify`'s region_from_fields. Fill-or-refresh, never
+            # erase: a page that stopped stating one is a page that stopped
+            # saying, not a posting that moved nowhere.
+            if location:
+                raw["detail_location"] = location
             # Where it came from, because the two age differently: a payload
             # copy is refreshed by every scrape, a fetched one only here.
             raw["detail_source"] = "payload" if payload_text(o.raw) else "fetch"

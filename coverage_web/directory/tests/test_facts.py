@@ -241,9 +241,13 @@ def test_a_country_that_starts_with_a_state_code_is_not_the_us():
     assert normalize_region("Toronto, Canada") == "other"
     # Cambodia and bare "San Jose" are deliberately absent from the untracked
     # key list — San Jose is California or Costa Rica and guessing is worse
-    # than silence — so these stay blank.
+    # than silence — so Cambodia stays blank and bare "San Jose" stays blank.
+    # "Costa Rica" itself became a recognised untracked market in the
+    # 2026-08-08 census (McKinsey's hub states it as the country), so the
+    # stated pair now files under "other": the COUNTRY resolves the city.
     assert normalize_region("Phnom Penh, Cambodia") == ""
-    assert normalize_region("San Jose, Costa Rica") == ""
+    assert normalize_region("San Jose") == ""
+    assert normalize_region("San Jose, Costa Rica") == "other"
 
 
 def test_ordinary_prose_has_no_region():

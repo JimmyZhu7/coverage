@@ -215,3 +215,155 @@ def test_board_is_campus(board, expected):
 ])
 def test_other_markets_file_under_other_and_tracked_markets_win_first(location, expected):
     assert normalize_region(location) == expected
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-08 second-pass census keys — every positive case below is a real
+# location string that sat at region="" on live data, and every guard is an
+# ambiguity the key list deliberately refuses: bare "San Jose" (California or
+# Costa Rica), "Santiago" (Chile or Spain), "Bristol" (England or
+# Connecticut), "Lima" (Peru or Ohio), and "Chester", which as a substring
+# also sits inside Rochester and Manchester. Those rows resolve — if at all —
+# through the provider's own structured fields, never through a guess.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("location,expected", [
+    # ISO-3166 alpha-3 codes as SocGen and PwC boards render them.
+    (", HKG", "hk"),
+    (", JPN", "jp"),
+    (", ROU", "eu"),                      # Romania
+    ("Wellington - NZL", "other"),        # the " nzl" suffix, not the city
+    ("Christchurch - NZL", "other"),
+    ("Rouen, France", "eu"),              # ", rou" inside ", rouen": same eu
+    # European cities the first census missed.
+    ("Vilnius", "eu"),
+    ("Warszawa", "eu"),                   # Polish spelling of Warsaw
+    ("Skopje", "eu"),
+    ("Sheffield, GB, S1 4NB", "eu"),      # HSBC's label shape
+    ("Commercial StartX - Grande Lisboa", "eu"),
+    # Bare US cities Morgan Stanley's tal.net rows state.
+    ("South Jordan", "us"),
+    ("Alpharetta", "us"),
+    # The ", VA" state and ", US" country tails SIG's iCIMS filings use.
+    ("Richmond, VA, US", "us"),
+    ("Philadelphia, PA, USA", "us"),
+    # Untracked markets from the same census.
+    ("Quito", "other"),
+    ("San Jose, Costa Rica", "other"),    # the country disambiguates
+    ("Almaty, Kazakhstan", "other"),
+    # ---- the guards: ambiguous alone, so silence ----
+    ("San Jose", ""),
+    ("Santiago", ""),
+    ("Bristol", ""),
+    ("Lima", ""),
+    ("Chester", ""),
+    ("Rochester, NY", "us"),              # ", ny", never a "chester" key
+    ("Global", ""),                       # a statement, but not of a place
+    # Boundary guards on the new suffixes: a word continuing past the code
+    # never matches.
+    ("Almaty, Ust-Kamenogorsk", ""),      # ", us" must not fire inside "Ust"
+    ("Valletta, Valencia District", ""),  # ", va" must not fire inside "Valencia"
+])
+def test_second_pass_census_keys_and_guards(location, expected):
+    assert normalize_region(location) == expected
+
+
+# ---------------------------------------------------------------------------
+# region_from_fields — the provider's own location structures, already stored
+# in `raw`. The agreement gate is the contract: every stated location must
+# resolve to ONE market or the answer is silence.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # Goldman's list-API shape: the country field is the only honest way to
+    # place a bare "Birmingham" or "Lima".
+    ({"locations": [{"city": "Birmingham", "state": "West Midlands, England",
+                     "country": "United Kingdom", "primary": True}]}, "eu"),
+    ({"locations": [{"city": None, "state": "Lima", "country": "Peru",
+                     "primary": True}]}, "other"),
+    ({"locations": [{"city": "Albany", "state": "New York",
+                     "country": "United States", "primary": True}]}, "us"),
+    # McKinsey's parallel cities/countries arrays.
+    ({"cities": ["San Jose"], "countries": ["Costa Rica"]}, "other"),
+    ({"cities": ["Almaty", "Astana"],
+      "countries": ["Kazakhstan", "Kazakhstan"]}, "other"),
+    # Greenhouse's location object; "Global" states no market.
+    ({"location": {"name": "Bristol, City Of Bristol, England, United Kingdom"}}, "eu"),
+    ({"location": {"name": "Global"}}, ""),
+    # enrich_postings' detail_location — schema.org jobLocation reads.
+    ({"detail_location": "Hong Kong, HK"}, "hk"),
+    ({"detail_location": "Bala Cynwyd (Philadelphia Area), PA, US"}, "us"),
+    # Two stated markets is not one answer — the agreement gate holds.
+    ({"detail_location": "London, United Kingdom; New York, NY"}, ""),
+    ({"locations": [
+        {"city": "London", "state": "", "country": "United Kingdom"},
+        {"city": "Tokyo", "state": "", "country": "Japan"}]}, ""),
+    # Silence in, silence out.
+    ({}, ""),
+    (None, ""),
+])
+def test_region_from_fields(raw, expected):
+    from directory.classify import region_from_fields
+    assert region_from_fields(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# region_from_title_segments — the leading routing segments clean_title
+# strips ("APAC | Singapore | …") are the only place some tal.net rows ever
+# state a location. Read before they are lost, never from the title body.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("title,expected", [
+    ("APAC | Singapore | Global Markets Recruitment Event", "sg"),   # real row
+    ("EMEA | London | Quantitative Strategies & Data Group | "
+     "Recruitment Event", "eu"),                                     # real row
+    ("Paris | Bank of America | Insight Day - Step into Finance", "eu"),
+    # "EMEA" alone files as Europe — the same answer a location field
+    # saying "EMEA" already gets from normalize_region.
+    ("EMEA | Chief Financial Officer | Virtual Insight Event", "eu"),
+    # A leading segment that is a sentence, not a routing tag, is not read…
+    ("APAC Virtual Recruitment Event | A Career with Bank of America "
+     "in Southeast Asia", ""),
+    # …and the title BODY is never read: a market word there is a desk.
+    ("Equity Research, China Industrials — Summer Analyst", ""),
+    ("Global Markets Summer Programme", ""),
+    ("", ""),
+    (None, ""),
+])
+def test_region_from_title_segments(title, expected):
+    from directory.classify import region_from_title_segments
+    assert region_from_title_segments(title) == expected
+
+
+# ---------------------------------------------------------------------------
+# The prose anchors added by the same census: Wells Fargo's footnoted label
+# ("Program Locations * :"), tal.net's colon-less Region…Location label table,
+# and tal.net's venue field. A bare "location" in ordinary prose must still
+# never anchor.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Program Locations * : Charlotte, NC (CM, RAPA) *Locations subject "
+     "to change", "us"),                                             # real WF row
+    ("Region Europe, Middle East, Africa Event - Location United Kingdom "
+     "Business Unit Internal Audit", "eu"),                          # real MS row
+    # The abbreviation dots in "U.S." must not read as a sentence end.
+    ("Program ID 14594 Region U.S. and Canada Location United States of "
+     "America States New York City New York, NY", "us"),             # real BofA row
+    ("Event address / venue details London City Centre - Venue details "
+     "to be shared upon invitation.", "eu"),                         # real BofA row
+    # A venue that names no place resolves to nothing.
+    ("Event address / venue details To be confirmed on invite acceptance.", ""),
+    # Everyday prose "location" never anchors on its own…
+    ("a competitive salary (based on your location, experience, and "
+     "skills) in London", ""),
+    # …and a real sentence boundary between the labels still blocks.
+    ("we serve every region. Location data shows Hong Kong usage grew", ""),
+])
+def test_region_from_prose_census_anchors(text, expected):
+    from directory.classify import region_from_prose
+    assert region_from_prose(text) == expected
