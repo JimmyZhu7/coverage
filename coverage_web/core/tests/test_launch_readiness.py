@@ -112,3 +112,28 @@ def test_the_favicon_survives_the_pushstate_fallback(client):
         assert (settings.BASE_DIR / "static" / rel).is_file(), f"fallback missing: {target}"
     else:
         assert resp.status_code == 200
+
+
+def test_the_svg_icon_declares_its_own_size():
+    """The third and actual cause of the blank tab on Opportunities: the SVG
+    carried a viewBox but no width/height, so it had NO intrinsic size.
+    Chrome fetched it 200, loaded it fine as an <img> (falling back to the
+    150x150 default), and still refused to rasterize it into a tab icon —
+    which is why the earlier fixes, both aimed at the /favicon.ico fallback,
+    changed nothing: the fallback was never reached, because Chrome had
+    already committed to an SVG it could not draw.
+
+    Asserted on the ROOT element's attributes, not the file text: a naive
+    /width=/ search matches `stroke-width` and passes on the broken file.
+    That false positive is exactly how this was nearly missed."""
+    import re
+    from django.conf import settings
+
+    svg = (settings.BASE_DIR / "static" / "img" / "favicon.svg").read_text()
+    root = re.match(r"<svg\b([^>]*)>", svg.strip())
+    assert root, "favicon.svg has no root <svg> element"
+    attrs = dict(re.findall(r'([\w:-]+)="([^"]*)"', root.group(1)))
+    for dim in ("width", "height"):
+        assert dim in attrs, f"root <svg> is missing {dim}: no intrinsic size"
+        assert attrs[dim].strip().rstrip("px").isdigit(), f"{dim}={attrs[dim]!r}"
+    assert "viewBox" in attrs, "keep the viewBox so it still scales"
