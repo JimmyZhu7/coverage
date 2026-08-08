@@ -19,10 +19,18 @@
   still deadline-first with nulls last; the sentence just stops implying
   every card has one.
   {% endcomment %}
+  {% comment %}
+  No eyebrow here, unlike every other page. It read "Insight · internships ·
+  entry-level" — the exact labels of the bucket tabs rendered ~80px below it,
+  minus the counts those tabs carry. An eyebrow is supposed to encode
+  something the title cannot; this one restated the next control down. The
+  pagehead keeps its accent stroke, so the header still looks like the rest
+  of the app's.
+  {% endcomment %}
   {% if personalized %}
-    {% include "_pagehead.html" with eyebrow="Insight · internships · entry-level" title="Opportunities" sub="Every open role, sorted to your firms. Deadlines where firms publish them." %}
+    {% include "_pagehead.html" with title="Opportunities" sub="Every open role, sorted to your firms. Deadlines where firms publish them." %}
   {% else %}
-    {% include "_pagehead.html" with eyebrow="Insight · internships · entry-level" title="Opportunities" sub="Every open role. Deadlines where firms publish them." %}
+    {% include "_pagehead.html" with title="Opportunities" sub="Every open role. Deadlines where firms publish them." %}
   {% endif %}
 
   {% if user.is_authenticated %}

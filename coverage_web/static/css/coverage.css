@@ -179,10 +179,20 @@
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
   --s6: 32px; --s7: 48px; --s8: 64px;
 
-  /* Shape — v3 "bubbly": full-round badges, soft controls, generous panels. */
+  /* Shape. The pill stays: full-round badges are the one soft thing here and
+     they are genuinely ours — a ledger in pale green under an editorial serif
+     with pill chips is nobody's default. Going square instead would just
+     trade one stock look (warm cream + serif) for another (hairline rules,
+     zero radius, broadsheet columns).
+
+     The panel is 12px, not the 16px this token used to claim. Eleven surfaces
+     written since — every act card, contact card, apps card, rail and inst
+     card — reached for 12px by hand, so the product was already shipping two
+     panel radii and the token was the stale one. Codified, and the hardcodes
+     now point back here. */
   --r-badge: 999px;
   --r-ctl:   10px;  /* buttons, inputs */
-  --r-panel: 16px;
+  --r-panel: 12px;
 
   /* Motion */
   --t-fast: 120ms ease;

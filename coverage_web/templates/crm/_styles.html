@@ -382,7 +382,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .act-grid { display: flex; flex-direction: column; gap: var(--s2);
     container-type: inline-size; container-name: queue; }
   .act-card { background: var(--surface); border: 1px solid var(--line);
-    border-left: 3px solid var(--accent); border-radius: 12px;
+    border-left: 3px solid var(--accent); border-radius: var(--r-panel);
     padding: var(--s3) var(--s4);
     /* The actions track is `auto`, so it claims its max-content width before
        the middle gets a share — with the four-control confirm-a-chat row
@@ -531,7 +531,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   @media (max-width: 1180px) { .gap-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 700px) { .gap-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .gap-card { background: var(--surface); border: 1px solid var(--line);
-    border-left: 3px solid var(--line-strong); border-radius: 12px;
+    border-left: 3px solid var(--line-strong); border-radius: var(--r-panel);
     padding: var(--s3) var(--s4); display: flex; flex-direction: column;
     gap: var(--s2); box-shadow: var(--shadow-1);
     transition: box-shadow var(--t-med), transform var(--t-med); }
@@ -638,7 +638,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* Tier rows (radar layout): the TIER label sits above a full-width row of
      firm cards that packs as many columns as the panel allows. */
   .tier-section { margin-bottom: var(--s4); padding: var(--s2);
-    border-radius: 12px; transition: background-color var(--t-fast); }
+    border-radius: var(--r-panel); transition: background-color var(--t-fast); }
   .tier-section.drop-hot { background: var(--accent-soft); outline: 2px dashed var(--accent-line); }
   .tier-label { font-size: var(--fs-micro); font-weight: var(--w-med); color: var(--ink-3);
     text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s3);
@@ -669,7 +669,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .tier-grid::-webkit-scrollbar-thumb { background: var(--line-strong);
     border-radius: 999px; }
   .firm-card { background: var(--paper); border: 1px solid var(--line);
-    border-radius: 12px; padding: var(--s3) var(--s4); cursor: grab;
+    border-radius: var(--r-panel); padding: var(--s3) var(--s4); cursor: grab;
     height: 100%; overflow: hidden;
     display: flex; flex-direction: column; gap: var(--s2); box-shadow: var(--shadow-1);
     transition: box-shadow var(--t-med), transform var(--t-med), opacity var(--t-fast); }
@@ -760,7 +760,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      the action row, still exceeded 212px: `overflow: hidden` then guillotined
      the second bullet line mid-glyph and the email collided with it. The clamp
      bounds one field; it can't bound the sum of all of them. */
-  .contact-card { border: 1px solid var(--line); border-radius: 12px; min-height: 212px;
+  .contact-card { border: 1px solid var(--line); border-radius: var(--r-panel); min-height: 212px;
     padding: var(--s4); display: flex; flex-direction: column; gap: var(--s2);
     overflow: hidden;
     transition: border-color var(--t-fast), box-shadow var(--t-med);
