@@ -390,3 +390,38 @@ def test_the_sponsorship_counts_sum_to_the_whole_set(client):
     assert facet["yes"] + facet["no"] + facet["unknown"] == facet[""]
     assert facet["no"] == 2
     assert facet["unknown"] == 2, "blank and 'unknown' are one bucket"
+
+
+def test_the_scope_toggle_lives_in_the_page_header(client, bar, django_user_model):
+    """Browse/My-Applications is a page-level scope switch — which of two
+    views of this page you are on — so it sits beside the title in the slot
+    every other page uses for its page action. As a standalone band below
+    the header it cost 42px plus a 24px gap for two links, on the page with
+    the most chrome before its first result.
+
+    Signed in, because My Applications needs an account: a signed-out
+    visitor correctly gets no toggle at all."""
+    user = django_user_model.objects.create_user(email="tabs@x.com", password="x")
+    client.force_login(user)
+    body = _get(client).content.decode()
+    head = body[body.index("<header class=\"pagehead\""):]
+    head = head[:head.index("</header>")]
+    assert "Browse Openings" in head and "My Applications" in head
+    assert 'aria-current="page"' in head, "the active view still says so"
+
+
+@pytest.mark.django_db
+def test_the_board_state_binds_the_totals_to_the_cycle(client, bar):
+    """The stat strip and the cycle band answer one question between them and
+    are the only two bands here that always render. They were two floating
+    strips; they are one unit on a hairline now, marking the boundary between
+    what you asked for and what the board answers. Both must stay INSIDE the
+    htmx swap target so their numbers refresh with the filters."""
+    body = _get(client).content.decode()
+    assert 'class="board-state"' in body
+    results = body[body.index('id="cov-results"'):]
+    assert 'class="board-state"' in results, "must refresh with the filters"
+    strip = results.index("stat-strip")
+    band = results.index("cycband") if "cycband" in results else None
+    if band is not None:
+        assert strip < band, "totals lead, shape follows"

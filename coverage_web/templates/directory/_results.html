@@ -12,18 +12,6 @@ float to the top.
 THE SUBSET SENTENCE, at the top. It used to render at the BOTTOM of this file,
 below 56 firm cards — so the single most important fact about the default view
 ("this is not everything") was stated only to people who had already finished
-reading. It says what it excludes, in plain words: no "premium", no lock icon,
-no "unlock". The everything mode is free, it is one click away, and it is just
-noisier data.
-
-It has to live INSIDE #cov-results so its number refreshes with the filters;
-that is also why the bottom copy is gone rather than duplicated — said once,
-where it is read before scrolling.
-{% endcomment %}
-{% comment %}
-THE SUBSET SENTENCE, at the top. It used to render at the BOTTOM of this file,
-below 56 firm cards — so the single most important fact about the default view
-("this is not everything") was stated only to people who had already finished
 reading.
 
 ONE line now, not four. Each hide used to own a paragraph, and since they are
@@ -43,6 +31,10 @@ each link naming the count it reveals so it is unambiguous read aloud.
 Every querystring is built from the LIVE request in views.py, never hardcoded:
 the bare-`?` version of this bug shipped once already on "Show everything" and
 sent people to the very page that hid what it promised to reveal.
+
+It says what it excludes in plain words: no "premium", no lock icon, no
+"unlock" — the everything mode is free, one click away, and just noisier
+data. It lives INSIDE #cov-results so its numbers refresh with the filters.
 {% endcomment %}
 {% if hidden_other or hidden_fit or hidden_region or hidden_count %}
   <p class="scope-line scope-hidden">
@@ -74,9 +66,22 @@ be a GET.{% endcomment %}
   </form>
 {% endif %}
 
-{% comment %}Slim inline stat strip — one line under the hero instead of four
-oversized cards, so the roles start a screen sooner. Zero-value stats are
-hidden rather than shown as a weak "0".{% endcomment %}
+{% comment %}
+THE BOARD STATE — the totals and the shape of the cycle, bound into one unit.
+
+They were two free-floating strips with a 12px gap, which made them read as
+two unrelated bands in a stack of seven. They answer one question between
+them ("what does the board look like right now": how many, and when they
+close), they are the only two bands here that are always present, and they
+sit on the boundary between what you ASKED for (the controls above) and what
+the board ANSWERS (the roles below). A hairline marks that boundary — the
+same rule the section labels wear.
+
+Grouped here rather than inside _cycle_band.html because that partial is
+shared with Settings' target-cycle picker, where there is no stat strip to
+bind to.
+{% endcomment %}
+<div class="board-state">
 <div class="stat-strip">
   {% comment %}`role="status"` on this ONE figure, not the whole strip. The
   results below swap silently for a screen-reader user, so the headline count
@@ -96,6 +101,7 @@ hidden rather than shown as a weak "0".{% endcomment %}
 {% comment %}When this cycle actually closes, month by month — the aggregate
 truth behind every fuse below. See _cycle_band.html.{% endcomment %}
 {% include "directory/_cycle_band.html" %}
+</div>
 
 {% comment %}
 The "Sorted for you" chip used to sit here. It said one thing, once, and the

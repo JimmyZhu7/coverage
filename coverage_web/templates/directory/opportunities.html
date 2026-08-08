@@ -27,18 +27,31 @@
   pagehead keeps its accent stroke, so the header still looks like the rest
   of the app's.
   {% endcomment %}
-  {% if personalized %}
-    {% include "_pagehead.html" with title="Opportunities" sub="Every open role, sorted to your firms. Deadlines where firms publish them." %}
-  {% else %}
-    {% include "_pagehead.html" with title="Opportunities" sub="Every open role. Deadlines where firms publish them." %}
-  {% endif %}
+  {% comment %}
+  Written out rather than {% include %}d, per _pagehead.html's own note: a
+  page needing richer content on one side writes the same three classes
+  instead of growing the include a parameter per case.
 
-  {% if user.is_authenticated %}
-  <nav class="subnav scope-tabs standalone">
-    <a href="{% url 'opportunities' %}" aria-current="page">Browse Openings</a>
-    <a href="{% url 'my_applications' %}">My Applications</a>
-  </nav>
-  {% endif %}
+  The Browse/My-Applications toggle used to sit BELOW the header as a
+  standalone band, costing 42px plus a 24px gap for two links. It is a
+  page-level scope switch — which of two views of this page you are on —
+  so it belongs beside the title, in the slot every other page uses for its
+  page-level action. Same nav, same aria-current, same links.
+  {% endcomment %}
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <h1 class="pagehead-title">Opportunities</h1>
+      <p class="pagehead-sub">{% if personalized %}Every open role, sorted to your firms. Deadlines where firms publish them.{% else %}Every open role. Deadlines where firms publish them.{% endif %}</p>
+    </div>
+    {% if user.is_authenticated %}
+      <div class="pagehead-actions">
+        <nav class="subnav scope-tabs" aria-label="Opportunities views">
+          <a href="{% url 'opportunities' %}" aria-current="page">Browse Openings</a>
+          <a href="{% url 'my_applications' %}">My Applications</a>
+        </nav>
+      </div>
+    {% endif %}
+  </header>
 
   {% comment %}
   The recommendation bar sits below the hero and above the stat line / firm

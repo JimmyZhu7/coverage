@@ -407,6 +407,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      numbers in the display family, a hairline divider between items. */
   /* Left-aligned and a size quieter than v4: the strip is orientation, not a
      dashboard, and the fs-l numbers were competing with the firm names below. */
+  /* The board state: totals + cycle shape as one unit. The hairline is the
+     boundary between the controls above and the answer below; the children
+     lose their own bottom margins so the group spaces itself. */
+  .board-state { border-top: 1px solid var(--line); padding-top: var(--s2);
+    margin: 0 0 var(--s3); }
+  .board-state .stat-strip { margin-bottom: 6px; }
+  .board-state .cycband { margin-bottom: 0; }
+
   .stat-strip { display: flex; flex-wrap: wrap; align-items: center;
     justify-content: flex-start; gap: var(--s2) var(--s3); margin: 0 0 var(--s3);
     padding: 0; font-size: var(--fs-xs); color: var(--ink-2); }
