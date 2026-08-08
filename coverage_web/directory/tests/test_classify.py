@@ -532,3 +532,56 @@ def test_a_derived_year_is_never_a_stated_one():
     title = "2027 Investment Banking Summer Analyst Program"
     assert extract_class_year(title) == ""
     assert derive_class_year("internship", title, "2027")[0] == "2028"
+
+
+# ---------------------------------------------------------------------------
+# The 2026-08-09 census, run after lifting the Workday page cap grew the
+# campus set from 1,183 to 1,459 rows and re-opened a region gap.
+#
+# The interesting half is the exact-match tier. The European keys are checked
+# BEFORE the American ones, so a European city name that is also an American
+# one cannot be added as a substring: "rome" would have sent Romeoville,
+# Illinois to Italy, and "trento" is a substring of "trenton".
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("location,expected", [
+    # Whole-field only, and the American collisions they would have caused.
+    ("Rome", "eu"),
+    ("Romeoville, IL", "us"),
+    ("Trento", "eu"),
+    ("Trenton, NJ", "us"),
+    ("Verona", "eu"),
+    ("Belgrade", "eu"),
+    ("Belgrade, MT", ""),          # Montana: stated, but not whole-field Serbia
+    ("Bern", "eu"),
+    # "bern" as a substring would have made a European of a fund manager.
+    ("AllianceBernstein Summer Analyst", ""),
+    ("Lucerne", "eu"),
+    # Safe as substrings — the ASCII "zurich" key cannot see the umlaut.
+    ("Zürich", "eu"),
+    ("Treviso - Viale Felissent 90", "eu"),
+    ("Neuilly-sur-Seine", "eu"),
+    ("Rubano", "eu"),
+    ("Saint Peter Port", "eu"),
+    # Stated, untracked.
+    ("Makati", "other"),
+    ("Ipoh", "other"),
+    ("Bandar Seri Begawan", "other"),
+    ("Bermuda", "other"),
+    ("Ulaanbaatar", "other"),
+    ("Guadalajara", "other"),
+    # Spelled-out state, and three state codes the suffix rule gained.
+    ("Vineland, New Jersey", "us"),
+    ("ANCHORAGE, AK", "us"),
+    ("SUMMERVILLE, SC", "us"),
+    ("Olathe, KS", "us"),
+    # The boundary still holds for the new codes.
+    ("Almaty, Akmola Region", ""),   # ", ak" must not fire inside "Akmola"
+    (", Scotland", "eu"),            # ", sc" must not fire inside "Scotland"
+    # Deliberately still unresolved: Bristol is a real city in England and in
+    # Tennessee, Virginia and Connecticut, and the field says only "Bristol".
+    ("Bristol", ""),
+])
+def test_region_census_20260809(location, expected):
+    assert normalize_region(location) == expected

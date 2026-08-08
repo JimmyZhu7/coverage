@@ -125,8 +125,22 @@ class Command(BaseCommand):
                     if m:
                         from urllib.parse import unquote
 
-                        region = normalize_region(
-                            unquote(m.group(1)).replace("-", " "))
+                        # A Workday slug's hyphen carries two different
+                        # meanings and only the reader can tell them apart:
+                        # it joins the words of one name
+                        # ("United-States", "New-York") and it separates a
+                        # city from its state ("OLATHE-KS", where the
+                        # state-suffix rule needs a comma). Try both
+                        # readings, space first — "Lafayette-Louisiana---
+                        # United-States" resolves on the space reading and
+                        # "OLATHE-KS" only on the comma one. Applied to this
+                        # captured segment alone, whose shape we know; the
+                        # same substitution against free text would make an
+                        # American address of any hyphenated word ending in
+                        # a state code.
+                        seg = unquote(m.group(1))
+                        region = (normalize_region(seg.replace("-", " "))
+                                  or normalize_region(seg.replace("-", ", ")))
                 # The provider's own location STRUCTURES, stored in raw and
                 # never read until now: Goldman's city/state/country dicts
                 # (the only honest way to place a bare "Birmingham" — its

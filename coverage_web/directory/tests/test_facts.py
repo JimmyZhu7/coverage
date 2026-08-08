@@ -286,8 +286,11 @@ def test_a_location_outside_the_tracked_markets_files_under_other():
     from directory.classify import region_from_prose
 
     assert region_from_prose("Location: Bangalore, India") == "other"
-    # A place nothing recognises is still silence, not a guess.
-    assert region_from_prose("Location: Ulaanbaatar") == ""
+    # A place nothing recognises is still silence, not a guess. The example
+    # used to be Ulaanbaatar, which stopped being unrecognised the day two
+    # live rows stated it — an untracked-markets key list grows as the board
+    # does, so this assertion needs a placeholder no employer here posts in.
+    assert region_from_prose("Location: Nuuk") == ""
 
 
 def test_two_markets_in_anchored_windows_mean_no_answer():

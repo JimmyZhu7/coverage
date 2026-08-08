@@ -130,6 +130,13 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # Santander's "Grande Lisboa" StartX rows, SocGen's ", ROU".
         "sheffield", "vilnius", "lithuania", "warszawa", "skopje",
         "lisboa", ", rou",
+        # 2026-08-09, from the census after the page cap lifted and the
+        # campus set grew by 276 rows. Safe as substrings — none of these
+        # sits inside a US place name, which is the hazard the exact-match
+        # table below exists for. "zürich" is spelled with the umlaut
+        # because the ASCII "zurich" key above cannot see it.
+        "zürich", "treviso", "neuilly", "sarajevo", "bratislava",
+        "ruggell", "saint helier", "saint peter port", "rubano", "lublin",
     )),
     ("us", (
         "united states", "u.s.", "usa", "new york", ", ny", "jersey city",
@@ -162,6 +169,9 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # both the state and the District; the Tyne and Wear town of the same
         # name has no finance board behind it.
         "texas", "florida", "minnesota", "washington", "- us",
+        # 2026-08-09: "Vineland, New Jersey" spells the state out, which the
+        # ", NJ" suffix pass cannot see; Anchorage arrives bare.
+        "new jersey", "anchorage",
     )),
     # After hk so "香港" never falls through to the mainland bucket.
     ("cn", (
@@ -221,6 +231,11 @@ _OTHER_MARKET_KEYS: tuple[str, ...] = (
     # DRW's crypto operations rows: "Remote - Cayman Islands". Remote from
     # somewhere named is still somewhere named.
     "cayman",
+    # 2026-08-09 census: Southeast and Central Asian offices that arrived
+    # with the wider fetch. Each is unambiguous as a substring.
+    "makati", "jaipur", "ipoh", "penang", "johor bahru", "kuching",
+    "bermuda", "ulaanbaatar", "tashkent", "bandar seri begawan",
+    "yogyakarta", "guadalajara",
 )
 
 # Placeless by design. Checked LAST, after every real market: "Virtual —
@@ -275,11 +290,29 @@ _STATE_SUFFIX = re.compile(
     # "va": SIG's iCIMS filings write "Richmond, VA, US". "usa?" is the
     # country tail of the same shape (", US" / ", USA") — boundary-checked
     # like the states, so ", Ust-Kamenogorsk" can never become American.
-    r",\s*(?:ny|il|ma|ca|wa|tx|ga|nc|fl|tn|pa|co|md|ct|nj|va|usa?)(?![a-z])",
+    # ak/sc/ks joined 2026-08-09 (Anchorage AK, Summerville SC, Olathe KS).
+    # The boundary keeps them honest: ", Akron" and ", Scotland" cannot fire
+    # because a letter follows the code.
+    r",\s*(?:ny|il|ma|ca|wa|tx|ga|nc|fl|tn|pa|co|md|ct|nj|va|ak|sc|ks|usa?)"
+    r"(?![a-z])",
     re.IGNORECASE)
 _US_STATE_KEYS = frozenset({", ny", ", il", ", ma", ", ca", ", wa", ", tx",
                             ", ga", ", nc", ", fl", ", tn", ", pa", ", co",
                             ", md", ", ct", ", nj"})
+
+
+# Cities whose names are REAL PLACES IN AMERICA when read as substrings, and
+# which this table therefore matches only as the entire location field. The
+# European tier runs before the American one, so adding "rome" or "trento" to
+# the key list above would have sent Romeoville, Illinois to Italy and
+# Trenton, New Jersey to the Alps — "trento" is a substring of "trenton".
+#
+# An exact test is honest here because these arrive as the whole field: the
+# board's location really is the single word "Rome".
+_EXACT_CITY: dict[str, str] = {
+    "rome": "eu", "verona": "eu", "trento": "eu", "palermo": "eu",
+    "bern": "eu", "lucerne": "eu", "belgrade": "eu",
+}
 
 
 def normalize_region(location: str | None, *, fallback: str = "") -> str:
@@ -289,6 +322,11 @@ def normalize_region(location: str | None, *, fallback: str = "") -> str:
     text = (location or "").lower()
     if not text:
         return fallback
+    # Whole-field city names first — see _EXACT_CITY for why these cannot be
+    # substrings.
+    exact = _EXACT_CITY.get(text.strip())
+    if exact:
+        return exact
     for code, keys in _REGION_KEYS:
         for k in keys:
             # State codes are skipped here and checked below as one
