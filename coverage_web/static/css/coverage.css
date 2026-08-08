@@ -91,13 +91,18 @@
 
 :root {
   /* Ground + ink */
-  --paper:        #f7f6f3;   /* page background */
-  --surface:      #fffefc;   /* panels, cards, inputs */
-  --ink:          #1a1915;   /* primary text */
-  --ink-2:        #52504a;   /* secondary text */
-  --ink-3:        #6e6a62;   /* faint text — 4.5:1+ on paper, small labels */
-  --line:         #dedad1;   /* hairline borders */
-  --line-strong:  #b8b3a8;   /* emphasized borders (inputs, table heads) */
+  --paper:        #f2f4ee;   /* page background — ledger paper. Green-tinted
+                              the way banker's ledger stock actually was, and
+                              a deliberate exit from the warm-cream default
+                              every AI-styled page ships with. The product
+                              already speaks ledger (the Today queue IS one);
+                              now the ground it sits on does too. */
+  --surface:      #fcfdf9;   /* panels, cards, inputs */
+  --ink:          #191b16;   /* primary text — green-black ledger ink */
+  --ink-2:        #4e5248;   /* secondary text */
+  --ink-3:        #666a5e;   /* faint text — 5.0:1 on paper, small labels */
+  --line:         #d7dccd;   /* hairline borders */
+  --line-strong:  #adb4a1;   /* emphasized borders (inputs, table heads) */
 
   /* Accent — one, navy */
   /* Text that sits ON an accent or danger fill. White is correct over the
@@ -132,22 +137,22 @@
   --band-hot-t:  #8c222d;  --band-hot-s:  #f6dfe0;
   --band-warm-t: #8f4319;  --band-warm-s: #f7e4d6;
   --band-cool-t: #435d76;  --band-cool-s: #e8edf2;
-  --band-cold-t: #57544d;  --band-cold-s: #edebe5;
+  --band-cold-t: #54584b;  --band-cold-s: #e9ece2;
 
   /* Confidence */
   --conf-high-t:    #2f6a45;  --conf-high-s:    #e6f0e9;  --conf-high-l:    #cbdfd2;
   --conf-medium-t:  #3f5d7d;  --conf-medium-s:  #e8edf2;  --conf-medium-l:  #d3dce6;
   --conf-low-t:     #7d5410;  --conf-low-s:     #f6ecd6;  --conf-low-l:     #e8d7ad;
-  --conf-unrated-t: #57544d;  --conf-unrated-s: #edebe5;  --conf-unrated-l: #dedad1;
+  --conf-unrated-t: #54584b;  --conf-unrated-s: #e9ece2;  --conf-unrated-l: #d7dccd;
 
   /* Staleness */
   --stale-t: #7d5410;  --stale-s: #f9efdb;  --stale-l: #ead9b0;
-  --fresh-t: #57544d;  --fresh-s: #f1efe9;  --fresh-l: #e2ded4;
+  --fresh-t: #54584b;  --fresh-s: #eef0e8;  --fresh-l: #dde1d3;
 
   /* Sponsorship */
   --spon-known-t:   #2f6a45;  --spon-known-s:   #e6f0e9;  --spon-known-l:   #cbdfd2;
   --spon-none-t:    #8c3a31;  --spon-none-s:    #f5e6e3;  --spon-none-l:    #e7cdc8;
-  --spon-unknown-t: #57544d;  --spon-unknown-s: #edebe5;  --spon-unknown-l: #dedad1;
+  --spon-unknown-t: #54584b;  --spon-unknown-s: #e9ece2;  --spon-unknown-l: #d7dccd;
 
   /* Type — the research-desk set (v4): editorial serif masthead, quiet
      grotesque body, deliberate mono ledger. */
@@ -184,8 +189,8 @@
   --t-med:  180ms cubic-bezier(0.2, 0.6, 0.2, 1);
 
   /* Depth — one soft, warm shadow pair; lift stays subtle (ledger, not app). */
-  --shadow-1: 0 1px 2px rgba(26, 25, 21, 0.05), 0 4px 14px rgba(26, 25, 21, 0.06);
-  --shadow-2: 0 2px 4px rgba(26, 25, 21, 0.06), 0 10px 28px rgba(26, 25, 21, 0.09);
+  --shadow-1: 0 1px 2px rgba(23, 27, 19, 0.05), 0 4px 14px rgba(23, 27, 19, 0.06);
+  --shadow-2: 0 2px 4px rgba(23, 27, 19, 0.06), 0 10px 28px rgba(23, 27, 19, 0.09);
 
   /* Layout */
   --page-w:        960px;
@@ -216,13 +221,13 @@
    ========================================================================== */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper:        #16151a;
-    --surface:      #1e1d23;
-    --ink:          #eceae5;
-    --ink-2:        #b3afa6;
-    --ink-3:        #9d998f;
-    --line:         #2e2d34;
-    --line-strong:  #43424b;
+    --paper:        #141712;
+    --surface:      #1c201a;
+    --ink:          #eaece5;
+    --ink-2:        #b2b5a8;
+    --ink-3:        #9c9f92;
+    --line:         #2c3028;
+    --line-strong:  #42473c;
   
     --on-accent:    #10161d;
   --accent:       #7aa7d4;
@@ -249,19 +254,19 @@
     --band-hot-t:  #e28b93;  --band-hot-s:  #2e1f22;
     --band-warm-t: #dd9364;  --band-warm-s: #2c2119;
     --band-cool-t: #9bb4cc;  --band-cool-s: #212832;
-    --band-cold-t: #a9a59c;  --band-cold-s: #26252a;
+    --band-cold-t: #a7a99c;  --band-cold-s: #242820;
   
     --conf-high-t:    #74c095;  --conf-high-s:    #1c2a22;  --conf-high-l:    #2f4a3a;
     --conf-medium-t:  #9bb4cc;  --conf-medium-s:  #212832;  --conf-medium-l:  #33404f;
     --conf-low-t:     #d8b467;  --conf-low-s:     #2b2519;  --conf-low-l:     #463a22;
-    --conf-unrated-t: #a9a59c;  --conf-unrated-s: #26252a;  --conf-unrated-l: #38363d;
+    --conf-unrated-t: #a7a99c;  --conf-unrated-s: #242820;  --conf-unrated-l: #383c34;
   
     --stale-t: #d8b467;  --stale-s: #2b2519;  --stale-l: #463a22;
-    --fresh-t: #a9a59c;  --fresh-s: #24232a;  --fresh-l: #35343b;
+    --fresh-t: #a7a99c;  --fresh-s: #22261e;  --fresh-l: #343830;
   
     --spon-known-t:   #74c095;  --spon-known-s:   #1c2a22;  --spon-known-l:   #2f4a3a;
     --spon-none-t:    #e2867c;  --spon-none-s:    #2e1e1d;  --spon-none-l:    #4d302d;
-    --spon-unknown-t: #a9a59c;  --spon-unknown-s: #26252a;  --spon-unknown-l: #38363d;
+    --spon-unknown-t: #a7a99c;  --spon-unknown-s: #242820;  --spon-unknown-l: #383c34;
   
     /* Shadows carry no light in a dark room: depth comes from the surface
        step, and a black shadow on near-black is a smudge. */
@@ -271,13 +276,13 @@
 }
 
 :root[data-theme="dark"] {
-  --paper:        #16151a;
-  --surface:      #1e1d23;
-  --ink:          #eceae5;
-  --ink-2:        #b3afa6;
-  --ink-3:        #9d998f;
-  --line:         #2e2d34;
-  --line-strong:  #43424b;
+  --paper:        #141712;
+  --surface:      #1c201a;
+  --ink:          #eaece5;
+  --ink-2:        #b2b5a8;
+  --ink-3:        #9c9f92;
+  --line:         #2c3028;
+  --line-strong:  #42473c;
 
   --on-accent:    #10161d;
   --accent:       #7aa7d4;
@@ -304,19 +309,19 @@
   --band-hot-t:  #e28b93;  --band-hot-s:  #2e1f22;
   --band-warm-t: #dd9364;  --band-warm-s: #2c2119;
   --band-cool-t: #9bb4cc;  --band-cool-s: #212832;
-  --band-cold-t: #a9a59c;  --band-cold-s: #26252a;
+  --band-cold-t: #a7a99c;  --band-cold-s: #242820;
 
   --conf-high-t:    #74c095;  --conf-high-s:    #1c2a22;  --conf-high-l:    #2f4a3a;
   --conf-medium-t:  #9bb4cc;  --conf-medium-s:  #212832;  --conf-medium-l:  #33404f;
   --conf-low-t:     #d8b467;  --conf-low-s:     #2b2519;  --conf-low-l:     #463a22;
-  --conf-unrated-t: #a9a59c;  --conf-unrated-s: #26252a;  --conf-unrated-l: #38363d;
+  --conf-unrated-t: #a7a99c;  --conf-unrated-s: #242820;  --conf-unrated-l: #383c34;
 
   --stale-t: #d8b467;  --stale-s: #2b2519;  --stale-l: #463a22;
-  --fresh-t: #a9a59c;  --fresh-s: #24232a;  --fresh-l: #35343b;
+  --fresh-t: #a7a99c;  --fresh-s: #22261e;  --fresh-l: #343830;
 
   --spon-known-t:   #74c095;  --spon-known-s:   #1c2a22;  --spon-known-l:   #2f4a3a;
   --spon-none-t:    #e2867c;  --spon-none-s:    #2e1e1d;  --spon-none-l:    #4d302d;
-  --spon-unknown-t: #a9a59c;  --spon-unknown-s: #26252a;  --spon-unknown-l: #38363d;
+  --spon-unknown-t: #a7a99c;  --spon-unknown-s: #242820;  --spon-unknown-l: #383c34;
 
   /* Shadows carry no light in a dark room: depth comes from the surface
      step, and a black shadow on near-black is a smudge. */

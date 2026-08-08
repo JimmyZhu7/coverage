@@ -10,6 +10,7 @@ rule that covers every control.
 
 from __future__ import annotations
 
+import pathlib
 import re
 
 import pytest
@@ -98,3 +99,81 @@ def test_the_theme_is_applied_before_the_stylesheet_loads(client):
     head = body[: body.index("</head>")]
     assert "coverage-theme" in head
     assert head.index("coverage-theme") < head.index("coverage.css")
+
+
+# ---------------------------------------------------------------------------
+# The token contract. Every colour in the product routes through the variables
+# in coverage.css, which means one bad token edit can fail contrast on every
+# page at once — and a palette change (the ledger-paper identity shift did
+# exactly this to every base token) is precisely when it happens. So the
+# tokens themselves are measured, in both themes, from the shipped file.
+
+
+def _css_tokens():
+    """Both themes' token maps, parsed from coverage.css itself."""
+    css = (pathlib.Path(__file__).resolve().parents[2]
+           / "static" / "css" / "coverage.css").read_text()
+    # Light: the first :root block. Dark: the explicit [data-theme="dark"]
+    # block (identical to the media-query one by construction; asserted below).
+    blocks = re.findall(r'(:root(?:\[data-theme="dark"\])?)\s*{(.*?)\n}', css, re.S)
+    themes = {}
+    for sel, body in blocks:
+        name = "dark" if "dark" in sel else "light"
+        if name in themes:
+            continue  # first :root wins; media-query dark parsed separately below
+        themes[name] = dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})", body))
+    # The media-query dark block nests inside @media, so its :root closes on
+    # an INDENTED brace — match the selector it actually uses.
+    media = re.search(r':root:not\(\[data-theme="light"\]\)\s*{(.*?)\n  }', css, re.S)
+    themes["media_dark"] = dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})", media.group(1)))
+    return themes
+
+
+def _ratio(fg, bg):
+    def lum(h):
+        r, g, b = (int(h.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        f = lambda c: c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        r, g, b = f(r), f(g), f(b)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    la, lb = lum(fg), lum(bg)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+# The pairs that carry text. ink-3 is held to 4.5 because the token's own
+# comment promises it for small labels; everything else is body-or-larger
+# but held to 4.5 anyway — nothing in this product needs the 3:1 discount.
+_TEXT_PAIRS = [
+    ("ink", "paper"), ("ink", "surface"),
+    ("ink-2", "paper"), ("ink-2", "surface"),
+    ("ink-3", "paper"), ("ink-3", "surface"),
+    ("accent", "paper"), ("accent", "surface"),
+    ("on-accent", "accent"),
+    ("band-cold-t", "band-cold-s"),
+    ("conf-unrated-t", "conf-unrated-s"),
+    ("fresh-t", "fresh-s"),
+    ("spon-unknown-t", "spon-unknown-s"),
+]
+
+
+def test_every_text_bearing_token_pair_clears_wcag_in_both_themes():
+    themes = _css_tokens()
+    failures = []
+    for theme in ("light", "dark"):
+        t = themes[theme]
+        for fg, bg in _TEXT_PAIRS:
+            r = _ratio(t[fg], t[bg])
+            if r < 4.5:
+                failures.append(f"{theme}: --{fg} on --{bg} = {r:.2f}")
+    assert failures == [], failures
+
+
+def test_the_two_dark_blocks_never_drift_apart():
+    """Dark mode is stated twice — the system-preference media query and the
+    explicit [data-theme] override. They are the same palette by intent; an
+    edit that touches one and not the other ships a theme that changes when
+    the user flips the toggle. Compare every token both blocks state."""
+    themes = _css_tokens()
+    explicit, media = themes["dark"], themes["media_dark"]
+    drift = {k: (media[k], explicit[k]) for k in media
+             if k in explicit and media[k] != explicit[k]}
+    assert drift == {}, drift
