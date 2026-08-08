@@ -57,14 +57,23 @@
      -------------------------------------------------------------------- */
   .mrail-wrap { margin-bottom: var(--s4); }
   .mrail { display: flex; align-items: flex-end; gap: 1px;
-    padding: 0 0 2px; overflow-x: auto; overscroll-behavior-x: contain;
-    border-bottom: 1px solid var(--line);
-    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-  .mrail::-webkit-scrollbar { height: 5px; }
-  .mrail::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
-  .mrail::-webkit-scrollbar-track { background: transparent; }
-  /* 24 x ~46px fits 1120px, so at desktop the whole two years are visible and
-     the scroller never engages. It stays a scroller for narrow screens. */
+    padding: 0 0 2px;
+    border-bottom: 1px solid var(--line); }
+  /* 24 x ~46px fits 1120px, so at desktop the whole two years sit on one
+     line and nothing is hidden.
+
+     Below that it WRAPS — it used to be an overflow-x scroller, which on a
+     phone cut DEC in half and put the next fourteen months, and every one
+     of their event counts, off-screen behind a gesture. This file's own
+     argument for the strip is that "a busy month stands up and is found
+     without reading a digit"; a month you cannot see cannot stand up. The
+     Role Type control in the directory made the same call for the same
+     reason: wrapping, never a horizontal scroller, because a scrolled-away
+     segment hides the count that is the whole point.
+
+     Three rows of eight at a phone width. The plot shortens so the block
+     costs ~115px rather than ~150px, and the bars stay comparable because
+     every row shares the one --h scale. */
   .mrail-m { flex: 1 0 46px; min-width: 40px;
     display: flex; flex-direction: column; align-items: center; gap: 3px;
     padding: 4px 0 5px; border-radius: 8px 8px 0 0;
@@ -103,6 +112,22 @@
      the label rather than a colour, so "today lives here" and "you are
      reading this" never have to be told apart by hue. */
   .mrail-m.is-now:not(.is-active) .mrail-lab::after { content: " •"; color: var(--accent); }
+
+  /* Wrapping rules live BELOW every .mrail-* base rule on purpose: they carry
+     the same specificity, so placed above they lose and silently do nothing —
+     which is exactly what happened on the first pass here (the phone kept the
+     46px basis and the 30px plot). */
+  @media (max-width: 1120px) {
+    .mrail { flex-wrap: wrap; row-gap: 2px; }
+  }
+  /* Three rows of eight on a phone, and a shorter plot so the block costs
+     ~165px instead of ~315px. The bars stay comparable across rows because
+     every one of them is a percentage of the same --h scale. */
+  @media (max-width: 560px) {
+    .mrail-m { flex: 1 0 11.5%; min-width: 0; padding: 2px 0 3px; gap: 2px; }
+    .mrail-plot { height: 16px; }
+    .mrail-lab { font-size: 9px; }
+  }
 
   .cal-grid { border: 1px solid var(--line); border-radius: var(--r-panel);
     overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
