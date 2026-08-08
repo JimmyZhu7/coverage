@@ -78,6 +78,14 @@ REGION_LABELS = {
     # bucket, which made 230 stated-but-untracked locations indistinguishable
     # from 103 genuinely silent ones.
     "other": "Other Markets",
+    # Placeless BY DESIGN, and that is itself a stated fact. KKR's "Early
+    # Careers Talent Community" gives its location as "Global"; Bank of
+    # America's "APAC Virtual Recruitment Event" rows are virtual with no
+    # venue, one covering four countries at once. These are not postings
+    # that forgot to say where they are — they are postings whose honest
+    # answer is "nowhere in particular", which deserves a name rather than
+    # the same blank as a page we simply failed to read.
+    "global": "Global / Virtual",
 }
 # The markets Coverage actually tracks, in display order. This is the set a
 # STUDENT can express a preference for (accounts.forms.REGION_CHOICES) and
@@ -86,7 +94,7 @@ TRACKED_REGIONS = ("hk", "us", "sg", "eu", "cn", "jp")
 # The facet's order adds "other" — a place a role can BE, never a place a
 # student chooses to target. Keeping the two vocabularies separate is what
 # stops "Other Markets" appearing in Settings as somewhere to want to work.
-REGION_ORDER = TRACKED_REGIONS + ("other",)
+REGION_ORDER = TRACKED_REGIONS + ("other", "global")
 
 # Checked in order; the first matching market wins. Keys are lowercase
 # substrings (city / country / region tokens).
@@ -147,6 +155,13 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # are unambiguous as substrings; "south jordan" cannot reach the
         # country Jordan, which has no key.
         "south jordan", "alpharetta",
+        # 2026-08-09, from the placeless-tier audit: KKR's regional VP rows
+        # give their location as "Florida Remote" / "Minnesota Remote" and
+        # Neuberger's as "Remote / Home Office - Texas". The state is spelled
+        # out, which the ", TX" suffix pass cannot see. "washington" covers
+        # both the state and the District; the Tyne and Wear town of the same
+        # name has no finance board behind it.
+        "texas", "florida", "minnesota", "washington", "- us",
     )),
     # After hk so "香港" never falls through to the mainland bucket.
     ("cn", (
@@ -203,7 +218,47 @@ _OTHER_MARKET_KEYS: tuple[str, ...] = (
     # "wellington" — Wellington, FL is a real place — or "christchurch",
     # which is also a town in Dorset.
     "costa rica", "kazakhstan", "ecuador", "quito", " nzl",
+    # DRW's crypto operations rows: "Remote - Cayman Islands". Remote from
+    # somewhere named is still somewhere named.
+    "cayman",
 )
+
+# Placeless by design. Checked LAST, after every real market: "Virtual —
+# Sydney" is an Australian role delivered remotely and "Remote, New York" is
+# American, so both must resolve to their market before this tier is
+# consulted. Only a posting that names no place at all, and says so, lands
+# here.
+#
+# Regional acronyms are deliberately NOT keys. "EMEA" already resolves to
+# Europe, and a bare coverage area is not a statement of placelessness — the
+# two BofA rows reach this tier on the word "virtual" in their own titles,
+# which is the thing that is actually true about them.
+_GLOBAL_KEYS: tuple[str, ...] = (
+    "remote", "worldwide", "anywhere",
+    "multiple locations", "all locations", "location agnostic",
+)
+
+# "virtual", with the one collision this vocabulary has: a "virtual asset" is
+# a cryptocurrency, not a way of attending. BOCI's "AVP, Virtual Asset Trade
+# Settlement" is a desk job in Hong Kong and was filed as placeless on the
+# strength of the word. Word-bounded as well, so "virtually" cannot fire it.
+_VIRTUAL_RE = re.compile(r"\bvirtual\b(?!\s+assets?\b)")
+
+# "global" is NOT in the list above, and the first draft of this tier proved
+# why. In this industry the word names a DIVISION far more often than a
+# place: Global Markets, Global Technology, Global Operations, Global
+# Commodities, Global Coverage Centre, Global Investment Research, SIG's
+# Global Routing. Scanning for it as a substring filed sixteen rows as
+# placeless, and the URLs of three of them said EMEA, Singapore and
+# Singapore. A division name is not a location.
+#
+# It counts only when it is the WHOLE of the location field and therefore
+# cannot be modifying anything — KKR's talent community, whose location
+# really does read "Global". Compared against the stripped field, never
+# against a title.
+_PLACELESS_EXACT: frozenset[str] = frozenset({
+    "global", "worldwide", "various", "various locations",
+})
 
 
 # A two-letter US state suffix (", NY", ", CO") cannot be tested as a bare
@@ -248,6 +303,16 @@ def normalize_region(location: str | None, *, fallback: str = "") -> str:
     for k in _OTHER_MARKET_KEYS:
         if k in text:
             return "other"
+    # Last: the posting states that it has no single place. The exact test
+    # first, because its vocabulary ("global") is only safe when it stands
+    # alone as the entire field.
+    if text.strip() in _PLACELESS_EXACT:
+        return "global"
+    if _VIRTUAL_RE.search(text):
+        return "global"
+    for k in _GLOBAL_KEYS:
+        if k in text:
+            return "global"
     return fallback
 
 

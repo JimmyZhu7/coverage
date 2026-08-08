@@ -211,7 +211,11 @@ def test_board_is_campus(board, expected):
     ("China", "cn"),                  # bare country as the whole string
     # Silence is still silence:
     ("", ""),
-    ("Remote", ""),
+    # "Remote" is NOT silence. It used to answer "" here, next to the empty
+    # string, which is what made a posting that told us it has no fixed place
+    # indistinguishable from a posting we failed to read. See the placeless
+    # tier at the foot of this file.
+    ("Remote", "global"),
 ])
 def test_other_markets_file_under_other_and_tracked_markets_win_first(location, expected):
     assert normalize_region(location) == expected
@@ -259,7 +263,9 @@ def test_other_markets_file_under_other_and_tracked_markets_win_first(location, 
     ("Lima", ""),
     ("Chester", ""),
     ("Rochester, NY", "us"),              # ", ny", never a "chester" key
-    ("Global", ""),                       # a statement, but not of a place
+    # A statement, and the tier below reads it as one — but only because it
+    # is the WHOLE field. "Global Markets Recruitment Event" is a division.
+    ("Global", "global"),
     # Boundary guards on the new suffixes: a word continuing past the code
     # never matches.
     ("Almaty, Ust-Kamenogorsk", ""),      # ", us" must not fire inside "Ust"
@@ -289,9 +295,10 @@ def test_second_pass_census_keys_and_guards(location, expected):
     ({"cities": ["San Jose"], "countries": ["Costa Rica"]}, "other"),
     ({"cities": ["Almaty", "Astana"],
       "countries": ["Kazakhstan", "Kazakhstan"]}, "other"),
-    # Greenhouse's location object; "Global" states no market.
+    # Greenhouse's location object. "Global" states no market, and says so on
+    # purpose — KKR's and EQT's talent communities both file this way.
     ({"location": {"name": "Bristol, City Of Bristol, England, United Kingdom"}}, "eu"),
-    ({"location": {"name": "Global"}}, ""),
+    ({"location": {"name": "Global"}}, "global"),
     # enrich_postings' detail_location — schema.org jobLocation reads.
     ({"detail_location": "Hong Kong, HK"}, "hk"),
     ({"detail_location": "Bala Cynwyd (Philadelphia Area), PA, US"}, "us"),
@@ -367,3 +374,63 @@ def test_region_from_title_segments(title, expected):
 def test_region_from_prose_census_anchors(text, expected):
     from directory.classify import region_from_prose
     assert region_from_prose(text) == expected
+
+
+# ---------------------------------------------------------------------------
+# The placeless tier. A posting whose honest answer is "nowhere in particular"
+# used to share the blank bucket with a posting we simply failed to read, so
+# "Global"/"Anywhere"/"Multiple Locations" — all stated facts — looked like
+# missing data. They file under "global" now.
+#
+# The negative half of this table is the important half. The first draft
+# scanned for "global" as a substring and filed sixteen rows as placeless; the
+# URLs of three of them said Singapore, Singapore and EMEA. In this industry
+# the word names a division far more often than a place.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text,expected", [
+    # Stated placelessness.
+    ("Global", "global"),                            # real KKR / EQT row
+    ("Anywhere", "global"),                          # real ExodusPoint row
+    ("Anywhere (subject to approval)", "global"),    # real Qube row
+    ("Multiple Locations", "global"),                # real Tower row
+    ("Virtual", "global"),                           # real Akuna row
+    ("APAC Virtual Recruitment Event | Welcome to Bank of America",
+     "global"),                                      # real BofA row
+    # Division names, every one a real live row that this tier wrongly took.
+    ("Global Markets Recruitment Event", ""),        # the posting says Singapore
+    ("Global Technology Recruitment Event", ""),     # Singapore too
+    ("Global Operations Summer Analyst Program - 2027", ""),
+    ("Software Developer - Global Routing | Experienced Hire", ""),
+    ("VP/ED/MD, Relationship Manager, Global Coverage Centre", ""),
+    ("Central Global Investment Research Internship Hong", ""),
+    # A virtual asset is a cryptocurrency, not a way of attending.
+    ("AVP, Virtual Asset Trade Settlement, Operations", ""),
+    ("Virtual Assets Analyst", ""),
+    # A real market always wins: this tier runs last, after every other.
+    ("Virtual - Sydney", "other"),
+    ("Remote - Cayman Islands", "other"),
+    ("Remote, New York", "us"),
+    ("Florida Remote", "us"),                        # real KKR row
+    ("Minnesota Remote", "us"),                      # real KKR row
+    ("Remote / Home Office - Texas", "us"),          # real Neuberger row
+    ("CPG - Remote Sales - US", "us"),               # real KKR row
+    ("Hong Kong", "hk"),
+])
+def test_placeless_tier(text, expected):
+    from directory.classify import normalize_region
+    assert normalize_region(text) == expected
+
+
+def test_placeless_is_a_facet_row_but_never_a_target_a_student_can_pick():
+    """"Global / Virtual" is somewhere a role can BE, not somewhere a student
+    can want to work. It belongs in REGION_ORDER, which drives the feed's
+    region facet, and must stay out of TRACKED_REGIONS, which drives the
+    Settings picker and the market count on the pricing page."""
+    from directory.classify import REGION_LABELS, REGION_ORDER, TRACKED_REGIONS
+    assert "global" in REGION_ORDER
+    assert "global" not in TRACKED_REGIONS
+    assert REGION_LABELS["global"] == "Global / Virtual"
+    # Last in the facet: it is the residual, and it reads as one.
+    assert REGION_ORDER[-1] == "global"
