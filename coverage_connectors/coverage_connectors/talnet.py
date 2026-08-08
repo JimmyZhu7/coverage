@@ -31,7 +31,7 @@ import re
 import urllib.error
 import urllib.parse
 
-from .http import bot_challenge_reason, fetch_text
+from .http import BOT_BLOCK_PREFIX, bot_challenge_reason, fetch_text
 from .models import FetchResult, Opportunity, TalnetBoard, VerificationResult
 
 name = "talnet"
@@ -145,7 +145,7 @@ def fetch(board: TalnetBoard) -> FetchResult:
         if challenge:
             return FetchResult(
                 board=board, ok=False, opportunities=[], raw_count=0,
-                error=f"blocked by bot protection ({challenge}) — board unreadable, not empty",
+                error=f"{BOT_BLOCK_PREFIX} ({challenge}) — board unreadable, not empty",
             )
         rows = _parse(html)
         # Kept inside this try — see greenhouse.py's fetch() for why a
@@ -193,7 +193,7 @@ def verify(url: str) -> VerificationResult:
     challenge = bot_challenge_reason(html)
     if challenge:
         return VerificationResult("talnet", url, "unreachable",
-                                   f"blocked by bot protection ({challenge})", [])
+                                   f"{BOT_BLOCK_PREFIX} ({challenge})", [])
 
     title_m = _TITLE_RE.search(html)
     title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else ""

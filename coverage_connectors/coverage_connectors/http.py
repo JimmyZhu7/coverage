@@ -105,6 +105,12 @@ def fetch_text(url: str, **kwargs: Any) -> str:
 # success — which downstream reads as "the board's markup changed" and sends
 # someone to fix a parser that is fine. Detection only: nothing in this
 # package attempts to solve a challenge.
+#
+# Connectors that hit a challenge build their error message on this prefix,
+# and health reporting matches on it to tell "the operator walled the board"
+# (a standing condition, nothing to fix) apart from "the fetch is failing"
+# (a config or network bug). Keep the two in lockstep via the constant.
+BOT_BLOCK_PREFIX = "blocked by bot protection"
 _CHALLENGE_MARKERS = (
     ("oleeoprotect", "Oleeo Protect"),
     ("altcha-widget", "Altcha widget"),
