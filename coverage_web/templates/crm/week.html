@@ -110,9 +110,19 @@
           <span class="ribbon-num">{{ dash.eligible_unsaved }}</span>
           <span class="ribbon-lbl">Name your year, unsaved</span>
         </a>
-      {% else %}
+      {% elif dash.has_year %}
         <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'opportunities' %}">
           <span class="ribbon-lbl">All caught up on your year</span>
+        </a>
+      {% else %}
+        {% comment %}
+        Zero with NO class year stated is not "caught up" — the check never
+        ran. Day-zero walkthrough caught this cell congratulating a
+        ten-minute-old account on clearing a check it had never taken. Say
+        what is actually missing, and link to where it gets fixed.
+        {% endcomment %}
+        <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'accounts:settings' %}#profile">
+          <span class="ribbon-lbl">Add your class year to check eligibility</span>
         </a>
       {% endif %}
       {% comment %}

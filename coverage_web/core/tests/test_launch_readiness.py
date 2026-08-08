@@ -141,3 +141,20 @@ def test_the_svg_icon_declares_its_own_size():
         assert dim in attrs, f"root <svg> is missing {dim}: no intrinsic size"
         assert attrs[dim].strip().rstrip("px").isdigit(), f"{dim}={attrs[dim]!r}"
     assert "viewBox" in attrs, "keep the viewBox so it still scales"
+
+
+def test_signing_in_lands_in_the_product_not_the_pitch(client, django_user_model):
+    """LOGIN_REDIRECT_URL was "/": signing in dropped the user back on the
+    marketing homepage — the pitch they had just accepted, with the product a
+    further unlabeled click away. Sign-in goes to Today now, which serves
+    both populations (queue for the onboarded, setup nudge for the fresh).
+    Signup keeps its own redirect into the wizard."""
+    from django.conf import settings as dj
+
+    assert dj.LOGIN_REDIRECT_URL == "/app/"
+    assert dj.ACCOUNT_SIGNUP_REDIRECT_URL == "/welcome/"
+
+    user = django_user_model.objects.create_user(email="land@x.com", password="pw-here-123")
+    resp = client.post("/accounts/login/", {"login": "land@x.com", "password": "pw-here-123"})
+    assert resp.status_code == 302
+    assert resp["Location"] == "/app/"

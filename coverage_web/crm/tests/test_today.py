@@ -1069,3 +1069,26 @@ def test_a_seventh_event_today_still_gets_its_dot_and_its_prep():
     assert len(ctx["schedule"]) == 6, "the rail stays capped"
     assert len(ctx["daybar"]["dots"]) == 7, "the track shows the whole day"
     assert len(ctx["chat_prep"]) == 7, "every chat gets its prep"
+
+
+def test_the_eligibility_cell_never_congratulates_an_unchecked_user(client):
+    """Zero eligible-unsaved means two different things: "you saved them all"
+    and "you never stated a year, so nothing was checked". The day-zero
+    walkthrough caught the ribbon telling a ten-minute-old account it was
+    "all caught up on your year" when the check had never run. Three states:
+    a count, a genuine all-clear, and an honest pointer to Settings."""
+    user = _user(weekly_touch_goal=10)
+    client.force_login(user)
+
+    user.class_year = None
+    user.save(update_fields=["class_year"])
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Add your class year" in body
+    assert "All caught up on your year" not in body
+
+    user.class_year = 2029
+    user.save(update_fields=["class_year"])
+    body = client.get(reverse("crm:week")).content.decode()
+    # No open roles name 2029 in this fixture, so the all-clear is EARNED.
+    assert "All caught up on your year" in body
+    assert "Add your class year" not in body

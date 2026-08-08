@@ -1085,6 +1085,12 @@ def _dashboard_context(user) -> dict:
             "at_your_firms": at_your_firms,
             "closing_10": closing_10,
             "eligible_unsaved": eligible_unsaved,
+            # Whether the eligibility check RAN. Zero eligible-unsaved means
+            # two very different things — "you saved them all" versus "you
+            # never told us your year, so nothing was checked" — and the
+            # ribbon cell must not say "caught up" about a check that never
+            # happened.
+            "has_year": bool(elig_profile and elig_profile.get("class_year")),
             "funnel": funnel,
         },
     }

@@ -206,7 +206,12 @@ AUTHENTICATION_BACKENDS = [
     "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
-LOGIN_REDIRECT_URL = "/"
+# /app/, not "/". Signing in used to land on the marketing homepage — the
+# pitch the person just accepted, with the product a further unlabeled click
+# away. Signup already goes to /welcome/ (the wizard); sign-IN goes to Today,
+# which handles both populations: onboarded users get their queue, fresh ones
+# get the setup nudge that links back into the wizard.
+LOGIN_REDIRECT_URL = "/app/"
 ACCOUNT_LOGOUT_REDIRECT_URL = "/"
 # Suppresses allauth's own "signed in as x" / "you have signed out" flashes
 # (pure noise on every session) while leaving its other messages (password
