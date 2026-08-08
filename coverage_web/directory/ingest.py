@@ -45,7 +45,8 @@ from django.utils.text import slugify
 from coverage_connectors import BoardConfig, FetchResult, Opportunity as ConnOpportunity, fetch_many
 
 from .classify import (
-    board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title, extract_class_year, extract_cohort,
+    board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title,
+    derive_class_year, extract_class_year, extract_cohort,
     extract_deadline_from_text, extract_sponsorship, normalize_region, posting_text,
 )
 from .models import Firm, Opportunity, ScrapeRun
@@ -259,6 +260,11 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     # states outright. No `opp.class_year or …` fallback because no connector
     # has the field — the title is the only source, and it is usually silent.
     class_year = extract_class_year(opp.title or "")
+    # The convention-derived graduation year, only where the posting states
+    # none of its own. It is written to its own column and never to
+    # `class_year` — see classify.derive_class_year.
+    class_year_derived = "" if class_year else derive_class_year(
+        bucket, opp.title or "", cohort)[0]
     # Clip to the storage columns' width (CharField(255)). A few boards carry
     # multi-city locations or very long titles that overrun the column and
     # would 500 the whole scrape (EQT posts roles listing 3+ office cities).
@@ -301,6 +307,7 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
             deadline_precision="day" if final_deadline else "",
             cohort=cohort,
             class_year=class_year,
+            class_year_derived=class_year_derived,
             sponsorship=final_sponsorship,
             confidence=final_confidence,
             raw=opp.raw or {},
@@ -322,6 +329,7 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     existing.region = region
     existing.cohort = cohort
     existing.class_year = class_year
+    existing.class_year_derived = class_year_derived
 
     # ---- The no-downgrade rules. See _merge_raw above for the whole story.
     #

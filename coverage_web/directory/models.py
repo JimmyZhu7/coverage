@@ -64,6 +64,15 @@ class Opportunity(models.Model):
     # the common and honest case (~3 rows in 4,000 state one). Never derived —
     # see classify.extract_class_year.
     class_year = models.CharField(max_length=32, blank=True, default="")
+    # The graduation year the programme's SHAPE implies, where the convention
+    # has exactly one answer (a summer N internship graduates N+1; a graduate
+    # programme starting N hires that year's finishing class). A separate
+    # column from `class_year` on purpose, and the separation is load-bearing:
+    # `class_year` means "the posting said so" and is trusted as such, this
+    # means "Coverage worked it out". Rendered with its reasoning attached and
+    # never permitted to produce a BLOCKING eligibility verdict — an inference
+    # may surface a role, it may not hide one. See classify.derive_class_year.
+    class_year_derived = models.CharField(max_length=32, blank=True, default="")
     status = models.CharField(max_length=32, blank=True, default="")
     deadline = models.DateField(null=True, blank=True)
     deadline_precision = models.CharField(max_length=32, blank=True, default="")

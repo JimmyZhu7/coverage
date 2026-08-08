@@ -41,7 +41,7 @@ from analytics.events import record_event
 from crm.models import Contact, UserFirm
 from directory.classify import (
     BUCKET_LABELS, ENTRY_LEVEL, INSIGHT, INTERNSHIP, OTHER, REGION_LABELS,
-    REGION_ORDER, TARGET_BUCKETS,
+    REGION_ORDER, TARGET_BUCKETS, derive_class_year,
 )
 # The one definition of "closing soon" — see deadlines.py for why it isn't
 # spelled out at each call site (and for the crm/views.py follow-up).
@@ -745,15 +745,17 @@ def _apply_year_filter(qs, year):
     Anything unrecognised (a hand-typed querystring) is a no-op rather than an
     empty page — same posture as the role filter's fallthrough."""
     if year == YEAR_NONE:
-        # No year anywhere: title-derived columns AND both prose facts (the
-        # graduation window and the programme start year). The facet counts
-        # prose-stated years as stated, so this option must exclude them or
-        # its count breaks the per-option promise.
-        return qs.filter(cohort="", class_year="",
+        # No year anywhere: title-derived columns, both prose facts (the
+        # graduation window and the programme start year), and the
+        # convention-derived class year. The facet counts every one of those
+        # as a year this posting carries, so this option must exclude all of
+        # them or its count breaks the per-option promise.
+        return qs.filter(cohort="", class_year="", class_year_derived="",
                          raw__facts__grad__years__isnull=True,
                          raw__facts__start__years__isnull=True)
     if year.isdigit():
         return qs.filter(Q(cohort=year) | Q(class_year=year)
+                         | Q(class_year_derived=year)
                          | Q(raw__facts__grad__years__contains=[year])
                          | Q(raw__facts__start__years__contains=[year]))
     return qs
@@ -785,11 +787,18 @@ def _year_facet(qs, selected=""):
     # de prise de fonction 01/06/2026" rows and HSBC's "Start Date: Tue Jun
     # 01, 2027" labels state their intake ONLY there, and all of them sat
     # under "No Year Stated".
-    for cohort, class_year, grad_years, start_years in qs.values_list(
-            "cohort", "class_year", "raw__facts__grad__years",
-            "raw__facts__start__years"):
+    #
+    # The fifth is the convention-derived class year (see
+    # classify.derive_class_year), which is an inference and is labelled as
+    # one everywhere it is shown — but it is still a year this posting is
+    # about, and a student filtering to their own graduating class wants the
+    # summer internships that hire it. It only ever exists on rows that state
+    # no year of their own, so it cannot displace a stated one.
+    for cohort, class_year, derived, grad_years, start_years in qs.values_list(
+            "cohort", "class_year", "class_year_derived",
+            "raw__facts__grad__years", "raw__facts__start__years"):
         total += 1
-        years = {y for y in (cohort or "", class_year or "") if y}
+        years = {y for y in (cohort or "", class_year or "", derived or "") if y}
         for y in (*(grad_years or ()), *(start_years or ())):
             if isinstance(y, str) and y.isdigit():
                 years.add(y)
@@ -968,6 +977,18 @@ def _eligibility(o, profile):
         return {"kind": "year_out", "blocking": True,
                 "label": f"For {grad['value']} grads",
                 "why": grad.get("phrase", "")}
+    # The convention-derived year, and only ever as a POSITIVE, non-blocking
+    # signal. A summer 2027 internship conventionally hires the 2028 class,
+    # which is worth surfacing to a 2028 student — but the posting never said
+    # it, so the same inference must not be turned around to tell a 2029
+    # student this role is not for them. A mismatch returns no verdict at
+    # all, exactly as if we had never worked anything out. The label says
+    # "Likely", not "Your year", and carries its reasoning in the tooltip.
+    if cy and o.class_year_derived and int(o.class_year_derived) == cy:
+        return {"kind": "year_likely", "blocking": False,
+                "label": f"Likely your year ({cy})",
+                "why": derive_class_year(o.bucket or "", o.title or "",
+                                         o.cohort or "")[1]}
     return None
 
 

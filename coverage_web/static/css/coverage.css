@@ -1228,6 +1228,13 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    board shouting at its user. */
 .fact-chip.verdict-year_ok { border-color: var(--ok); color: var(--ok);
   background: var(--ok-soft); font-weight: var(--w-med); }
+/* The same fact WORKED OUT rather than read: a summer 2027 internship
+   conventionally hires the 2028 class, but no posting said so. It earns the
+   green family because it is good news, and a dashed border because the
+   product must never dress an inference as a quotation — the two chips have
+   to be tellable apart at a glance, not only in the tooltip. */
+.fact-chip.verdict-year_likely { border: 1px dashed var(--ok); color: var(--ok);
+  background: transparent; font-weight: var(--w-med); }
 /* No strikethrough. It read as NEGATION — a struck-out "Won't sponsor you"
    says the opposite of what it means, and the reader has to fight the
    typography to get the fact. Quiet grey on the paper ground already says

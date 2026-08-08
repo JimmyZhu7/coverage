@@ -709,6 +709,102 @@ def extract_class_year(title: str) -> str:
     return m.group(1) if m else ""
 
 
+# ---------------------------------------------------------------------------
+# THE DERIVED graduation year — a convention, not a quotation.
+#
+# `class_year` above refuses to infer, and stays that way: it is the column
+# that means "the posting said so", and code and UI both trust it as such.
+# This is the separate, clearly-labelled answer to a different question —
+# "who is this programme conventionally for?" — and it lives in its own
+# column, is rendered as an inference with its reasoning attached, and is
+# never allowed to tell a student they are INELIGIBLE. A guess may open a
+# door; it may not close one.
+#
+# The original objection to deriving at all was that the mapping "varies by
+# firm, region, and degree length". Checked against the shapes actually on
+# the board, that is true of some programmes and not others, and the split is
+# clean enough to act on:
+#
+#   Summer internship, year N  ->  graduates N+1.  A summer internship is the
+#     penultimate-year placement everywhere this product covers: a US rising
+#     senior and a UK second-year of three both graduate the following year.
+#     Degree length changes which year of study you are in, not the distance
+#     from a penultimate-year summer to graduation.
+#
+#   Graduate programme / new analyst starting N  ->  graduates N.  Full-time
+#     campus intakes hire out of the finishing class.
+#
+# Everything else is refused, because for those the objection stands:
+#
+#   Off-cycle and seasonal internships are 3-6 month placements taken on a
+#     gap year, a sandwich-course placement year, or after graduating. Lazard
+#     and Goldman post them for every quarter; there is no single answer.
+#   Insight days and spring weeks target first-years, and a first-year in
+#     year N graduates N+2 or N+3 depending on the degree — the exact
+#     variance the objection named.
+#   An internship whose title names no season could be any of the above:
+#     "Fall 2026", "November 2026 Intake", "Winter 2027 Co-op".
+#   Sophomore and freshman programmes are two or three years out, not one.
+_SUMMER = re.compile(r"\bsummer\b", re.IGNORECASE)
+_OFF_CYCLE = re.compile(r"off[-\s]?cycle|seasonal|\bco[-\s]?op\b", re.IGNORECASE)
+# Early-year programmes, whose distance to graduation is the thing that
+# varies. "Penultimate" is deliberately NOT here: that is the ordinary summer
+# intern this derivation is about.
+_EARLY_YEAR = re.compile(
+    r"\bsophomore\b|\bfreshman\b|first[-\s]year|1st[-\s]year|"
+    r"\bspring week\b|\binsight\b|\bdiscovery\b|\bopen day\b",
+    re.IGNORECASE)
+# Shapes with no single graduating class behind them at all, each caught in
+# the first audit of what this function accepted:
+#   - Apprenticeships and French alternance contracts run one to three years
+#     with the person enrolled throughout, so the intake year is nowhere near
+#     a graduation year (19 live rows, all "Apprentice hiring for 2026-2027").
+#   - A talent community is a pipeline pool, not a programme; nobody
+#     graduates out of one.
+#   - A PhD summer internship is not a penultimate-year placement. Doctoral
+#     candidates intern mid-programme and finish on a four-to-six-year clock,
+#     so the +1 convention — which is an undergraduate and master's one —
+#     simply does not apply.
+_NO_CLASS = re.compile(
+    r"apprentic|apprenti|alternan|talent community|talent pool|"
+    r"register your interest|expression of interest|\bph\.?\s?d\b",
+    re.IGNORECASE)
+
+DERIVED_SUMMER = ("A summer {cohort} internship is the penultimate-year "
+                  "placement, so its interns graduate in {year}. The posting "
+                  "does not say this; Coverage inferred it.")
+DERIVED_GRAD = ("A graduate programme starting in {cohort} hires from that "
+                "year's finishing class. The posting does not say this; "
+                "Coverage inferred it.")
+
+
+def derive_class_year(bucket: str, title: str, cohort: str) -> tuple[str, str]:
+    """The graduation year a programme's SHAPE implies, with the sentence
+    that justifies it. `("", "")` whenever the shape does not imply one.
+
+    Never consulted where the posting states a year itself — the caller
+    checks `class_year` and the extracted graduation window first. See the
+    block comment above for why only two shapes qualify.
+    """
+    if not cohort or not cohort.isdigit():
+        return "", ""
+    text = title or ""
+    # Any of these and the convention has more than one answer.
+    if (_OFF_CYCLE.search(text) or _EARLY_YEAR.search(text)
+            or _NO_CLASS.search(text)):
+        return "", ""
+    if bucket == INSIGHT:
+        return "", ""
+    year = int(cohort)
+    if bucket == INTERNSHIP:
+        if not _SUMMER.search(text):
+            return "", ""
+        return str(year + 1), DERIVED_SUMMER.format(cohort=cohort, year=year + 1)
+    if bucket == ENTRY_LEVEL:
+        return cohort, DERIVED_GRAD.format(cohort=cohort)
+    return "", ""
+
+
 # The provider's own contract-type vocabulary, where a board states one as a
 # structured field (Talentsoft's card list, SocGen's sourcestr8). This is a
 # STRONGER signal than any title heuristic — it is the firm's own filing of

@@ -461,3 +461,74 @@ def test_placeless_is_a_facet_row_but_never_a_target_a_student_can_pick():
 def test_cohort_from_provider_title(raw, expected):
     from directory.classify import cohort_from_provider_title
     assert cohort_from_provider_title(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# The DERIVED graduation year. `extract_class_year` above still refuses to
+# infer — that column means "the posting said so". This is the separate,
+# labelled answer to "who is this programme conventionally for", and the
+# tests below are mostly about where it declines to answer.
+#
+# The rule it acts on: a summer internship is the penultimate-year placement
+# everywhere this product covers, so its interns graduate the following year;
+# a graduate programme hires that year's finishing class. Where the shape
+# makes the distance to graduation vary — off-cycle placements, spring weeks,
+# sophomore programmes, apprenticeships — there is no single answer and the
+# function returns nothing at all.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bucket,title,cohort,expected", [
+    # Summer internships: cohort N, graduating N+1.
+    ("internship", "2027 Investment Banking Summer Analyst", "2027", "2028"),
+    ("internship", "Asset Management — Summer Analyst", "2027", "2028"),
+    # A summer ASSOCIATE is the MBA-level equivalent; same one-year distance.
+    ("internship", "Investment Banking — Summer Associate", "2027", "2028"),
+    # Graduate programmes hire the finishing class.
+    ("entry_level", "2027 Guggenheim Investment Banking Analyst", "2027", "2027"),
+    ("entry_level", "Global Operations Full Time Analyst - Tokyo - 2028",
+     "2028", "2028"),
+    # --- Refusals. Each shape below has more than one honest answer. ---
+    # Off-cycle and seasonal placements: gap year, placement year, or after
+    # graduating, posted for every quarter.
+    ("internship", "Investment Banking — Seasonal/Off Cycle Internship",
+     "2027", ""),
+    ("internship", "Off-Cycle Intern - Debt Advisory (Q1, 2027)", "2027", ""),
+    ("internship", "First Nations Students - Winter 2027 Co-op", "2027", ""),
+    # Early-year programmes are two or three years out, and which one depends
+    # on degree length — the exact variance that blocks a single answer.
+    ("insight", "2027 Nomura Early Career Insight Evening", "2027", ""),
+    ("internship", "2026 Sophomore Summer Analyst, Engineering", "2026", ""),
+    ("internship", "Spring Week 2027", "2027", ""),
+    # An internship naming no season could be any of the above.
+    ("internship", "2027 Internship - Quantitative Trading", "2027", ""),
+    ("internship", "Analytics Internship: Fall 2026", "2026", ""),
+    # Shapes with no graduating class behind them at all.
+    ("entry_level", "Apprentice hiring for 2026 – 2027", "2026", ""),
+    ("entry_level", "Alternance 2026 - Analyste Crédit", "2026", ""),
+    ("entry_level", "2027 EU Campus Programme Talent Community", "2027", ""),
+    ("internship", "Quantitative Research Internship - PhD: Summer 2027",
+     "2027", ""),
+    # No programme year to reason from, and nothing to reason about.
+    ("internship", "Summer Analyst Programme", "", ""),
+    ("other", "Vice President, Fund Finance", "2027", ""),
+])
+def test_derive_class_year(bucket, title, cohort, expected):
+    from directory.classify import derive_class_year
+    year, why = derive_class_year(bucket, title, cohort)
+    assert year == expected
+    # An inference that cannot show its reasoning does not ship, and one that
+    # declines must not leave a dangling explanation behind.
+    assert bool(why) == bool(year)
+    if year:
+        assert "inferred" in why
+
+
+def test_a_derived_year_is_never_a_stated_one():
+    """The column separation is the whole safety property: `class_year` means
+    the posting said so, and code and UI both trust it as such. A derivable
+    shape must leave it empty."""
+    from directory.classify import derive_class_year, extract_class_year
+    title = "2027 Investment Banking Summer Analyst Program"
+    assert extract_class_year(title) == ""
+    assert derive_class_year("internship", title, "2027")[0] == "2028"

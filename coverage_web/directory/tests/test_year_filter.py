@@ -166,3 +166,66 @@ def test_year_filter_does_not_imply_a_class_year(client, feed):
     html = _get(client).content.decode()
     assert "Programme Year" in html
     assert "Not a graduation year." in html
+
+
+# ---------------------------------------------------------------------------
+# The convention-derived class year in the facet, and the one thing it is
+# never allowed to do.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_derived_class_year_is_filterable_and_counted(client, db):
+    f = _firm(slug="jpm", name="JPMorgan")
+    o = Opportunity.objects.create(
+        firm=f, url="https://x/1", title="2027 Markets Summer Analyst",
+        bucket="internship", status="open", cohort="2027",
+        class_year_derived="2028", region="us")
+    # It answers to its own graduation year AND to its programme year: both
+    # are years this posting is about.
+    for year in ("2027", "2028"):
+        r = client.get(reverse("opportunities"), {"year": year})
+        assert o.title in r.content.decode(), year
+    # And it is no longer part of the silent set.
+    r = client.get(reverse("opportunities"), {"year": "none"})
+    assert o.title not in r.content.decode()
+
+
+@pytest.mark.django_db
+def test_a_derived_year_never_blocks_a_student():
+    """A guess may open a door; it may not close one. A summer 2027
+    internship conventionally hires the 2028 class — worth surfacing to a
+    2028 student, and NOT grounds for telling a 2029 student it isn't
+    theirs, because the posting never said so."""
+    from directory.views import _eligibility
+    f = _firm(slug="ms", name="Morgan Stanley")
+    o = Opportunity.objects.create(
+        firm=f, url="https://x/2", title="2027 Summer Analyst",
+        bucket="internship", status="open", cohort="2027",
+        class_year_derived="2028", region="us")
+
+    match = _eligibility(o, {"class_year": 2028, "work_auth": {}})
+    assert match["kind"] == "year_likely"
+    assert match["blocking"] is False
+    assert "Likely" in match["label"]
+    assert "inferred" in match["why"]
+
+    # The mismatch is silence, not a blocking verdict.
+    assert _eligibility(o, {"class_year": 2029, "work_auth": {}}) is None
+
+
+@pytest.mark.django_db
+def test_a_stated_year_always_outranks_a_derived_one():
+    """Where the posting states a window, that window decides — including
+    when it disagrees with the convention."""
+    from directory.views import _eligibility
+    f = _firm(slug="gs", name="Goldman Sachs")
+    o = Opportunity.objects.create(
+        firm=f, url="https://x/3", title="2027 Summer Analyst",
+        bucket="internship", status="open", cohort="2027",
+        class_year_derived="2028", region="us",
+        raw={"facts": {"grad": {"value": "2029", "years": ["2029"],
+                                "phrase": "graduating in 2029"}}})
+    v = _eligibility(o, {"class_year": 2029, "work_auth": {}})
+    assert v["kind"] == "year_ok"
+    assert v["why"] == "graduating in 2029"

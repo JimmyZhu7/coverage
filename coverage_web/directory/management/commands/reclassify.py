@@ -39,7 +39,8 @@ import re
 
 from directory.boards import BOARDS
 from directory.classify import (
-    board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title, extract_class_year, extract_cohort,
+    board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title,
+    derive_class_year, extract_class_year, extract_cohort,
     extract_deadline_from_text, extract_sponsorship, normalize_region, region_from_fields,
     region_from_prose, region_from_title_segments, posting_text,
 )
@@ -79,6 +80,12 @@ class Command(BaseCommand):
                 cohort = (opp.cohort or extract_cohort(title)
                           or cohort_from_provider_title(opp.raw))
                 class_year = extract_class_year(title)
+                # The convention-derived graduation year, only where the
+                # posting states none of its own — neither in the title nor
+                # in the graduation window read from its description.
+                stated_grad = ((opp.raw or {}).get("facts") or {}).get("grad")
+                class_year_derived = "" if (class_year or stated_grad) else \
+                    derive_class_year(bucket, title, cohort)[0]
                 region = normalize_region(opp.location)
                 # Title fallback, and ONLY when the row carries no location at
                 # all (327 open campus rows on live data — boards that route
@@ -171,6 +178,7 @@ class Command(BaseCommand):
 
                 if (bucket != opp.bucket or cohort != opp.cohort
                         or class_year != opp.class_year
+                        or class_year_derived != opp.class_year_derived
                         or region != opp.region or title != opp.title
                         or sponsorship != opp.sponsorship
                         or deadline != opp.deadline
@@ -181,13 +189,15 @@ class Command(BaseCommand):
                         opp.bucket = bucket
                         opp.cohort = cohort
                         opp.class_year = class_year
+                        opp.class_year_derived = class_year_derived
                         opp.region = region
                         opp.sponsorship = sponsorship
                         opp.deadline = deadline
                         opp.deadline_precision = precision
                         opp.confidence = confidence
                         opp.save(update_fields=[
-                            "title", "bucket", "cohort", "class_year", "region",
+                            "title", "bucket", "cohort", "class_year",
+                            "class_year_derived", "region",
                             "sponsorship", "deadline", "deadline_precision",
                             "confidence",
                         ])
