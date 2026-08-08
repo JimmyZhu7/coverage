@@ -38,10 +38,17 @@ data. It lives INSIDE #cov-results so its numbers refresh with the filters.
 {% endcomment %}
 {% if hidden_other or hidden_fit or hidden_region or hidden_count %}
   <p class="scope-line scope-hidden">
-    {% if hidden_other %}Showing campus roles only · {{ hidden_other }} experienced role{{ hidden_other|pluralize }} hidden ·
-      <a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a>{% endif %}
+    {% comment %}
+    Separators are SPANS with their own padding, not "·" characters leaning on
+    template whitespace. The newline before the link collapsed to nothing
+    rather than to a space, so the line rendered "hidden ·Show everything" —
+    measured at 2.41px narrower than the same markup with a real space. A
+    separator whose spacing depends on where the template happens to wrap is
+    a separator that will lose its space again the next time this is edited.
+    {% endcomment %}
+    {% if hidden_other %}Showing campus roles only<span class="scope-sep">·</span>{{ hidden_other }} experienced role{{ hidden_other|pluralize }} hidden<span class="scope-sep">·</span><a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a>{% endif %}
     {% if hidden_fit or hidden_region or hidden_count %}
-      {% if hidden_other %}<span class="scope-sep">·</span> Also hidden:{% else %}Hidden:{% endif %}
+      {% if hidden_other %}<span class="scope-sep">·</span>Also hidden:{% else %}Hidden:{% endif %}
       {% if hidden_fit %}<a href="{% url 'opportunities' %}?{{ show_unfit_qs }}"
         >{{ hidden_fit }} you don't qualify for</a>{% if hidden_region or hidden_count %},{% endif %}{% endif %}
       {% if hidden_region %}<a href="{% url 'opportunities' %}?{{ show_unregioned_qs }}"

@@ -1196,10 +1196,13 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    board shouting at its user. */
 .fact-chip.verdict-year_ok { border-color: var(--ok); color: var(--ok);
   background: var(--ok-soft); font-weight: var(--w-med); }
+/* No strikethrough. It read as NEGATION — a struck-out "Won't sponsor you"
+   says the opposite of what it means, and the reader has to fight the
+   typography to get the fact. Quiet grey on the paper ground already says
+   "closed door" without arguing with itself, and it stays legible. */
 .fact-chip.verdict-year_out, .fact-chip.verdict-visa_out {
-  border-color: var(--line-strong); color: var(--ink-3);
-  background: var(--paper); text-decoration: line-through;
-  text-decoration-thickness: 1px; }
+  border-color: var(--line-strong); color: var(--ink-2);
+  background: var(--paper); font-style: italic; }
 
 /* A deadline read out of the posting's own prose rather than published as a
    field by the board (Opportunity.confidence < 1.0 — 92 of 121 dated open

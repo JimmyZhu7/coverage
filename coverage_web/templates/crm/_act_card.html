@@ -21,7 +21,7 @@ as the row's left edge, every control and hx contract byte-identical.
 {% endcomment %}
 <article class="act-card kin-reveal act-{{ a.priority }}" style="--i:{{ idx }}">
   <div class="act-ident">
-  <div class="act-top">
+  <div class="act-idtext">
     {% comment %}
     When the firm slot holds a university rather than an employer, say so —
     an alum and a banker are different asks. Keyed on `school_affiliation`,
@@ -30,10 +30,15 @@ as the row's left edge, every control and hx contract byte-identical.
     "HSBC", and keying on that labelled eight HSBC bankers alumni.
     {% endcomment %}
     <span class="opp-firm{% if a.contact.school_affiliation %} is-school{% endif %}">{{ a.firm_name|smart_title }}{% if a.contact.school_affiliation %} · alum{% endif %}</span>
-    <span class="chip warmth-{{ a.contact.warmth }}">{{ a.contact.warmth }}</span>
+    <h3 class="act-name"><a href="{% url 'crm:contact_detail' a.contact.id %}">{{ a.contact.name|smart_title }}</a></h3>
+    {% if a.contact.role %}<p class="act-role">{{ a.contact.role|smart_title }}</p>{% endif %}
   </div>
-  <h3 class="act-name"><a href="{% url 'crm:contact_detail' a.contact.id %}">{{ a.contact.name|smart_title }}</a></h3>
-  {% if a.contact.role %}<p class="act-role">{{ a.contact.role|smart_title }}</p>{% endif %}
+  {% comment %}
+  The warmth chip is a sibling of the whole text block, not a passenger on
+  the firm line. Inside .act-top it centred against that one line, which put
+  it 10px above the middle of a two-line identity.
+  {% endcomment %}
+  <span class="chip warmth-{{ a.contact.warmth }}">{{ a.contact.warmth }}</span>
   </div>
 
   <div class="act-context">

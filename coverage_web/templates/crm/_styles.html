@@ -331,8 +331,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      Empty, that made the one cell with no number the WIDEST on the strip,
      which read as a broken cell rather than a quiet one. The empty variant
      takes the same basis as its numbered neighbours. */
-  .ribbon-funnel { flex: 1 1 13rem; justify-content: center; }
+  .ribbon-funnel { flex: 1 1 13rem; }
   .ribbon-funnel.is-empty { flex: 1 1 11rem; }
+  /* A cell with no figure still has to put its LABEL where the other labels
+     are. The four cells sat on three different baselines — 37px for the
+     numbered ones, 12px for a label-only cell (top-aligned by default) and
+     24.5px for the funnel (justify-content: center) — so the bottom row of
+     the strip read as three separate lines. Pushing the lone label to the
+     bottom lands it on the numbered cells' label line. */
+  .ribbon-stat:not(:has(.ribbon-num)) { justify-content: flex-end; }
   .ribbon-funnel .ribbon-num { font-size: var(--fs-l); }
 
   @media (max-width: 700px) {
@@ -391,7 +398,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     box-shadow: var(--shadow-1);
     transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
   .act-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
-  .act-ident { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  /* A ROW, not a column: the warmth chip belongs to the person, not to the
+     firm line it happened to share. Stacked, it sat 10px above the identity
+     block's centre because it rode .act-top with the firm name. */
+  .act-ident { min-width: 0; display: flex; align-items: center; gap: var(--s3); }
+  .act-idtext { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .act-ident > .chip { flex: none; }
   .act-context { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   /* Under ~640px of queue the three zones stack and the row becomes a compact
      card — a phone never had room for a ledger line. The media rule is the

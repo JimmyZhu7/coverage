@@ -337,7 +337,9 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      dotted underline rather than the solid one a navigational link carries:
      they reveal rows in place, they do not take you somewhere else. */
   .scope-hidden a { text-decoration-style: dotted; text-underline-offset: 2px; }
-  .scope-sep { color: var(--line-strong); padding: 0 2px; }
+  /* Real horizontal space, so the separator never depends on whether the
+     template's newline survived collapsing. */
+  .scope-sep { color: var(--line-strong); padding: 0 6px; }
 
 
   /* ======================================================================

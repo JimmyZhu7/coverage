@@ -645,3 +645,33 @@ def test_the_offer_disappears_once_everything_is_saved(client, student):
     client.post("/opportunities/track-eligible/")
     body = client.get("/opportunities/").content.decode()
     assert "names your class year" not in body, "a satisfied offer stops offering"
+
+
+@pytest.mark.django_db
+def test_a_verdict_does_not_repeat_the_fact_that_produced_it(client, student):
+    """A visa_out verdict IS `sponsorship == "no"` read against the user, so
+    rendering both put "Won't sponsor you" and "No sponsorship" side by side
+    saying one thing twice — and the duplicate crowded a real fact (a stated
+    grad year) off the end of a three-chip row."""
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    Opportunity.objects.create(
+        firm=firm, title="Ops Summer Analyst", bucket="internship", status="open",
+        url="https://ms.com/ops", region="us", sponsorship="no",
+        raw={"facts": {"grad": {"value": "2027-2028", "years": ["2027", "2028"],
+                                "phrase": "graduating 2027-2028"}}})
+    client.force_login(student)
+    body = client.get("/opportunities/").content.decode()
+    card = body[body.index("Ops Summer Analyst"):]
+    card = card[:card.index("</article>")] if "</article>" in card else card[:2000]
+    assert "sponsor you" in card, "the personalised verdict is the one that stays"
+    assert "No sponsorship" not in card, "the fact that produced it must not repeat"
+    assert "Grad 2027-2028" in card or "Grad 2027" in card, "the freed slot shows a real fact"
+
+
+def test_no_verdict_is_rendered_as_struck_through_text():
+    """Strikethrough reads as NEGATION: struck-out "Won't sponsor you" says
+    the opposite of what it means. A closed door is stated, not crossed out."""
+    import pathlib as _pl
+    css = (_pl.Path(__file__).resolve().parents[2] / "static" / "css" / "coverage.css").read_text()
+    for m in re.finditer(r"([^{}]*)\{([^}]*text-decoration:[^;}]*line-through[^;}]*)[;}]", css):
+        assert False, f"line-through on {m.group(1).strip()!r}"

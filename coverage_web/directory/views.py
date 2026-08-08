@@ -834,18 +834,28 @@ _FACT_CHIP_ORDER = ("sponsorship", "study", "language", "pay", "grad", "gpa",
 _FACT_CHIPS_MAX = 2
 
 
-def _fact_chips(o) -> list[dict]:
+def _fact_chips(o, *, verdict=None) -> list[dict]:
     """What this posting states about applying, as at most three chips.
 
     Every chip carries `why` — the sentence it was extracted from — which the
     template hangs on `title`. That is the honesty contract from
     directory/facts.py reaching the page: a chip that cannot show the words
     that produced it should not be on the card.
+
+    `verdict` suppresses the fact that PRODUCED it. A visa_out verdict is
+    computed from `o.sponsorship == "no"`, so rendering both put "Won't
+    sponsor you" and "No sponsorship" side by side on the same card — the
+    same fact twice, the second one crowding a real one (a stated grad year)
+    off the end of a three-chip row. The verdict is the better of the two:
+    it is the personalised reading, and it only exists where both sides
+    stated.
     """
     facts = (o.raw or {}).get("facts") or {}
     made = {}
 
     spon = (o.sponsorship or "unknown").lower()
+    if verdict and verdict.get("kind") == "visa_out":
+        spon = "unknown"   # the verdict beside it already says this
     if spon == "no":
         made["sponsorship"] = {"label": "No sponsorship", "css": "fact-wall",
                                "why": "The posting says it cannot sponsor a visa"}
@@ -957,7 +967,7 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
         "seen_days": seen_days,
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
         "fresh_label": _fresh_label(seen_days),
-        "facts": _fact_chips(o),
+        "facts": _fact_chips(o, verdict=_eligibility(o, profile)),
         "reported": deadline_provenance(o),
         "verdict": _eligibility(o, profile),
         # Whether the Read control has anything to open. Checked here, not in
