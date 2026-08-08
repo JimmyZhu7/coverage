@@ -606,3 +606,77 @@ def test_only_the_picked_column_names_the_firm_on_its_cards(client, live_board):
 
     body = _markup(resp)
     assert body.count("rolecard-firm") == resp.context["pick_cluster"]["open_count"]
+
+
+# ---------------------------------------------------------------------------
+# Role-level track matching. Track used to be read purely off `Firm.tracks`,
+# making it a property of the EMPLOYER: every opening at a bank covering IB
+# scored as an IB match, so "2027 Internal Audit Analyst Program" and an M&A
+# programme were indistinguishable and the audit role reached the live bar.
+# ---------------------------------------------------------------------------
+
+def _c(title, **kw):
+    from directory.recommend import Candidate
+    base = dict(id=1, firm_id=1, firm_name="Morgan Stanley", firm_slug="ms",
+                title=title, url="https://ms.com/x", bucket="internship",
+                region="us", firm_tracks=("ib", "st", "pe"))
+    base.update(kw)
+    return Candidate(**base)
+
+
+def _p(**kw):
+    from directory.recommend import Profile
+    base = dict(class_year=2029, school="USC Marshall", regions=("hk", "us"),
+                tracks=("ib", "st", "pe"), firm_tiers={1: 1})
+    base.update(kw)
+    return Profile(**base)
+
+
+@pytest.mark.parametrize("title,expected", [
+    ("Investment Banking, Classic — Summer Analyst", "ib"),
+    ("Global Markets Sales & Trading Rotational Summer Analyst", "st"),
+    ("Private Equity Summer Analyst", "pe"),
+    # The function beats the division: this sits in the investment bank and
+    # is a risk job, and reading the division first made it an IB match.
+    ("2027 Commercial & Investment Bank Risk Management Summer Analyst", "none"),
+    ("2027 Internal Audit Analyst Program", "none"),
+    ("2027 Operations Summer Analyst Program (New York)", "none"),
+    # Nothing stated: the firm's coverage is allowed to speak.
+    ("Intern", ""),
+    ("Summer Analyst Program", ""),
+])
+def test_role_function_reads_the_job_not_the_employer(title, expected):
+    from directory.recommend import role_function
+    assert role_function(title) == expected
+
+
+def test_a_stated_track_outranks_one_inferred_from_the_firm():
+    """Evidence over inference. Without the gap, a generic "Intern" at a firm
+    covering three of the student's tracks (18 + 3 + 3) outscored a posting
+    that named their track outright — the scorer preferring what it guessed
+    to what it was told."""
+    from directory.recommend import score_candidate
+    p = _p()
+    named, _ = score_candidate(p, _c("Sales & Trading Summer Analyst"))
+    generic, _ = score_candidate(p, _c("Intern"))
+    assert named > generic, (named, generic)
+
+
+def test_a_non_track_function_claims_no_track_match():
+    """The card must not say "matches IB" about an audit job."""
+    from directory.recommend import score_candidate
+    score, reasons = score_candidate(_p(), _c("2027 Internal Audit Analyst Program"))
+    assert not any(r.kind == "track" for r in reasons), [r.text for r in reasons]
+
+
+def test_a_blocked_role_can_never_be_picked():
+    """The feed's "Fits me" filter hides roles whose own text excludes this
+    student; the bar recommending what the filter hides would be the product
+    contradicting itself. Hard exclusion, not a penalty — no amount of tier,
+    track and region may outweigh the posting saying who it is not for."""
+    from directory.recommend import recommend
+    p = _p()
+    strong = _c("Investment Banking, Classic — Summer Analyst", id=1)
+    blocked = _c("Investment Banking, Classic — Summer Analyst", id=2, blocked=True)
+    assert [r.candidate.id for r in recommend(p, [strong, blocked], max_per_firm=5)] == [1]
+    assert recommend(p, [blocked]) == []

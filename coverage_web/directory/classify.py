@@ -355,6 +355,20 @@ _INTERNSHIP = _rx(
 # instead of masquerading as campus roles.
 _SENIOR = _rx(
     r"\bsenior\b",
+    # Abbreviated seniority, which the spelled-out list missed entirely. Live
+    # consequence: "FP & A Sr. Lead Analyst S.V.P. - C14 - NEW YORK" contains
+    # the neutral word "Analyst", so a campus-scoped board's hint promoted it
+    # to entry_level and the recommender served a Senior Vice President job to
+    # a sophomore as one of six picks. Dots optional because boards write both
+    # "SVP" and "S.V.P.".
+    r"\bsr\.?\b",
+    r"\bs\.?v\.?p\.?\b",
+    r"\be\.?v\.?p\.?\b",
+    r"\bm\.?d\.?\b",
+    r"\bexec(?:utive)?\s+director\b",
+    # Citi grade codes. C10-C19 span senior analyst to managing director; a
+    # campus posting never carries one, and the token is unambiguous.
+    r"\bc1[0-9]\b",
     r"\bvp\b",
     r"\bvice\s+president\b",
     r"\bdirector\b",

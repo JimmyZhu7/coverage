@@ -77,7 +77,15 @@ W_TRACK_FIRST = 18
 #: Each further overlap, capped — a firm covering all six tracks is not three
 #: times the match of one that covers the student's exact two.
 W_TRACK_EXTRA = 3
-W_TRACK_CAP = 24
+#: Ceiling for a match INFERRED from the firm's coverage.
+W_TRACK_CAP = 20
+#: A match the ROLE ITSELF states ("Sales & Trading Summer Analyst"). Above
+#: the inferred ceiling on purpose: evidence must outrank inference, and
+#: without the gap a generic "Intern" at a firm covering three of the
+#: student's tracks (18 + 3 + 3 = 24) outscored a posting that named their
+#: track outright (21) — the scorer preferring the role it had guessed about
+#: to the one that had told it.
+W_TRACK_STATED = 26
 
 # 4. Firm tier (the student's own `crm.UserFirm.tier`).
 #: Tier 1 must outrank tier 3. It does, by construction, and by enough that
@@ -393,9 +401,21 @@ class Candidate:
     location: str = ""
     firm_tracks: tuple[str, ...] = ()
     deadline: date | None = None
+    #: The eligibility lens' blocking verdict for THIS student — the posting
+    #: states a graduation window that excludes them, or refuses the visa they
+    #: need in the market it names. Set by the caller, which owns the profile
+    #: pairing (directory.views._eligibility); this module stays pure.
+    #:
+    #: A blocked role can never be a pick. The feed's "Fits me" filter already
+    #: hides these, and the bar recommending what the filter hides is the
+    #: product contradicting itself: the first live audit of Jimmy's picks had
+    #: FIVE of six carrying a blocking verdict — three wrong-year, two
+    #: won't-sponsor — every one of them a role he cannot get, ranked top of
+    #: the page as the best thing on the board for him.
+    blocked: bool = False
 
     @classmethod
-    def from_opportunity(cls, o) -> "Candidate":
+    def from_opportunity(cls, o, *, blocked: bool = False) -> "Candidate":
         return cls(
             id=o.id, firm_id=o.firm_id, firm_name=o.firm.name,
             firm_slug=o.firm.slug, title=o.title, url=o.url,
@@ -404,6 +424,7 @@ class Candidate:
             location=o.location or "",
             firm_tracks=tuple(o.firm.tracks or []),
             deadline=o.deadline,
+            blocked=bool(blocked),
         )
 
 
@@ -537,10 +558,92 @@ def _region_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     return 0, []
 
 
+#: A role whose TITLE names its own function, mapped to the track vocabulary.
+#: Checked before the firm's tracks, because a bank that covers IB also runs
+#: an audit department, a technology division and a compliance team, and
+#: scoring every one of its roles as an IB match is how "2027 Internal Audit
+#: Analyst Program" arrived as the top pick for a student recruiting for IB,
+#: S&T and PE. Longest patterns first so "investment banking" wins over
+#: "banking" and "quantitative research" over "research".
+_ROLE_FUNCTION: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(rx, re.I), track) for rx, track in (
+        (r"\binvestment bank(ing)?\b|\bm&a\b|\bmergers? (and|&) acquisitions?\b"
+         r"|\bleveraged finance\b|\bcapital markets?\b|\bcoverage bank(er|ing)\b", "ib"),
+        (r"\bsales (and|&) trading\b|\btrading\b|\btrader\b|\bmarkets? division\b"
+         r"|\bequities?\b|\bfixed income\b|\bfx\b|\bcommodities\b|\bstructuring\b"
+         r"|\bquantitative (analysis|research|trading|strateg)", "st"),
+        (r"\bprivate equity\b|\bbuyout\b|\bgrowth equity\b|\bprivate capital\b"
+         r"|\bprivate markets?\b|\binfrastructure investing\b", "pe"),
+        (r"\basset management\b|\bwealth management\b|\bportfolio management\b"
+         r"|\binvestment management\b|\bmulti-?asset\b", "am"),
+        (r"\bconsult(ing|ant)\b|\bstrategy (and|&) operations\b|\badvisory\b", "consulting"),
+        (r"\bcorporate strateg(y|ic)\b|\bbusiness development\b", "corp-strat"),
+    )
+)
+
+#: Functions that are NOT any of the tracks Coverage lets a student pick.
+#: A role naming one of these is a support or control function: real work,
+#: and not what someone recruiting for IB/S&T/PE is looking at. Detecting it
+#: is what lets the scorer decline to claim a track match rather than
+#: inheriting one from the firm.
+_NON_TRACK_FUNCTION = re.compile(
+    r"\b(internal )?audit(or|ing)?\b|\bcompliance\b|\btax\b|\blegal\b"
+    r"|\bhuman resources\b|\bpeople (team|operations)\b|\brecruit(ing|ment)\b"
+    r"|\bmarketing\b|\bcommunications?\b|\bfacilit(y|ies)\b"
+    r"|\bsoftware engineer(ing)?\b|\bdeveloper\b|\bcyber ?security\b"
+    r"|\bnetwork engineer\b|\bhelp ?desk\b|\bit support\b"
+    r"|\boperations?\b|\bback ?office\b|\bmiddle ?office\b"
+    r"|\brisk management\b|\bcredit risk\b|\bmodel validation\b"
+    r"|\baccounting\b|\bfinancial report(ing)?\b|\bprocurement\b",
+    re.I)
+
+
+def role_function(title: str) -> str:
+    """The track this role's own title names, "" if it names none, or "none"
+    if it names a function outside the track vocabulary entirely.
+
+    The FUNCTION is checked before the DIVISION, because a title routinely
+    carries both and the function is the job: "2027 Commercial & Investment
+    Bank Risk Management Summer Analyst" sits in the investment bank and is a
+    risk role, and reading the division first ranked it as an IB match for a
+    student recruiting IB. Where you sit is not what you do."""
+    if _NON_TRACK_FUNCTION.search(title or ""):
+        return "none"
+    for rx, track in _ROLE_FUNCTION:
+        if rx.search(title or ""):
+            return track
+    return ""
+
+
 def _track_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
-    """Industry preference: the student's tracks against the firm's. Sorted by
-    the student's own stated order so the chip text is stable and reflects
-    their priority, not the firm's field order."""
+    """Industry preference — the ROLE's function first, the firm's coverage
+    only where the role is silent.
+
+    Track used to be read purely off `Firm.tracks`, which made it a property
+    of the employer rather than the job: every opening at a bank that covers
+    IB scored as an IB match, so an Internal Audit programme and an M&A
+    programme were indistinguishable on this axis. Three cases now:
+
+      the title names one of the student's tracks  -> full points, named
+      the title names a function outside the       -> nothing, and no claim
+        track vocabulary (audit, ops, tech, HR)
+      the title names nothing                      -> the firm's coverage,
+        ("Summer Analyst Program")                    as before
+    """
+    fn = role_function(c.title)
+    if fn == "none":
+        # The role said what it is and it is not one of these tracks. Claiming
+        # "matches IB" here would be the card lying about the job.
+        return 0, []
+    if fn:
+        if fn not in profile.tracks:
+            return 0, []
+        name = TRACK_SHORT.get(fn, fn.upper())
+        return W_TRACK_STATED, [Reason(
+            f"{name} role",
+            f"The posting itself is a {name} role, which you're recruiting for.",
+            "track",
+        )]
     firm = set(c.firm_tracks)
     overlap = [t for t in profile.tracks if t in firm]
     if not overlap:
@@ -628,6 +731,12 @@ def recommend(
         return []
     out = []
     for c in candidates:
+        # Never rank what the student cannot have. This is a hard exclusion,
+        # not a penalty: no combination of tier, track and region should be
+        # able to outweigh the posting saying out loud that this person is
+        # not who it is for.
+        if c.blocked:
+            continue
         score, reasons = score_candidate(profile, c)
         if score >= min_score:
             out.append(Recommendation(candidate=c, score=score, reasons=reasons))
