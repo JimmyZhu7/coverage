@@ -100,18 +100,22 @@ def test_the_favicon_survives_the_pushstate_fallback(client):
         assert (settings.BASE_DIR / "static" / rel).is_file(), f"missing icon file: {href}"
     assert any(h.endswith(".png") for h in hrefs), "no raster icon declared"
 
-    # The fallback path itself: must land on a real raster, following at most
-    # one hop, and must not be a permanent redirect (browsers cache those hard,
-    # so a wrong target here is expensive to take back).
+    # A raster must be declared BEFORE the SVG. Safari — the browser that
+    # actually showed the blank tab — has the patchier SVG-favicon support of
+    # the two, so whichever icon a browser reaches for first has to be one
+    # that cannot fail to rasterise.
+    first_icon = re.search(r'<link[^>]*rel="icon"[^>]*>', head).group(0)
+    assert ".png" in first_icon or ".ico" in first_icon, \
+        f"a raster must lead the icon list, got: {first_icon}"
+
+    # The fallback path itself: served DIRECTLY, no redirect. Safari checks
+    # /favicon.ico as a matter of course and is unreliable about following a
+    # redirect for an icon; both earlier fixes left one here.
     resp = client.get("/favicon.ico")
-    if resp.status_code in (301, 302):
-        assert resp.status_code == 302, "301 is cached too hard for an icon path"
-        target = resp["Location"]
-        assert target.endswith((".ico", ".png")), f"fallback must be a raster, got {target}"
-        rel = target.split("/static/", 1)[-1]
-        assert (settings.BASE_DIR / "static" / rel).is_file(), f"fallback missing: {target}"
-    else:
-        assert resp.status_code == 200
+    assert resp.status_code == 200, f"must be served directly, got {resp.status_code}"
+    assert "icon" in resp["Content-Type"], resp["Content-Type"]
+    body = b"".join(resp.streaming_content) if resp.streaming else resp.content
+    assert body[:4] == b"\x00\x00\x01\x00", "not a real .ico file"
 
 
 def test_the_svg_icon_declares_its_own_size():

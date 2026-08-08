@@ -1,7 +1,9 @@
 from urllib.parse import quote
 
+from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.core.cache import cache
-from django.http import HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
@@ -155,3 +157,27 @@ def search(request):
         .order_by("firm__name", "title")[:8]
     ]
     return JsonResponse(out)
+
+
+@require_GET
+def favicon(request):
+    """Serve the real .ico AT /favicon.ico, with no redirect in the way.
+
+    Safari is the reason this is a view instead of a RedirectView. It checks
+    /favicon.ico by default and is unreliable about following a redirect to
+    get there — and a redirect is what the previous two attempts at this bug
+    left in place. Serving the bytes directly removes the hop entirely, which
+    also costs nothing: it is one small file behind the same static finders
+    every other asset uses, so it keeps working after collectstatic.
+    """
+    path = finders.find("img/favicon.ico")
+    if path is None and settings.STATIC_ROOT:
+        candidate = settings.STATIC_ROOT / "img" / "favicon.ico"
+        path = str(candidate) if candidate.is_file() else None
+    if path is None:
+        raise Http404("favicon.ico is missing from static files")
+    resp = FileResponse(open(path, "rb"), content_type="image/x-icon")
+    # A week, not "permanent": the last cache decision here was a 301 that
+    # would have been expensive to take back.
+    resp["Cache-Control"] = "public, max-age=604800"
+    return resp

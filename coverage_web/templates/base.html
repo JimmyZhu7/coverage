@@ -29,13 +29,25 @@
   for it, so the tab blanked again on exactly the same page. An SVG alone
   is not a fallback; it is the same asset wearing a different URL.
 
-  So: SVG first for sharpness where it is honoured, a real 32px PNG behind
-  it for everything else, and /favicon.ico now serves an actual multi-size
-  .ico file rather than redirecting anywhere. All three are generated from
-  the same geometry (see the generator note in static/img/), so the mark
-  cannot drift between them.{% endcomment %}
-  <link rel="icon" type="image/svg+xml" href="{% static 'img/favicon.svg' %}">
+  Round three: the SVG carried a viewBox but no width/height, so it had no
+  intrinsic size — Chrome fetched it 200, never asked for the PNG, and could
+  not rasterise what it had committed to. Fixed on the asset (width="24"
+  height="24"); it measured 150x150 before and 24x24 after.
+
+  RASTER FIRST in this list, and that ordering is deliberate. Rounds one
+  through three were all diagnosed against Chrome; the browser actually
+  showing the blank tab is Safari, whose SVG-favicon support is the patchier
+  of the two and which checks /favicon.ico as a matter of course rather than
+  only after a history change. A browser that takes the first usable icon now
+  gets a raster that cannot fail to rasterise; one that prefers the vector
+  still finds it on the next line. /favicon.ico is served directly by a view
+  with no redirect in the way, because Safari is unreliable about following
+  one for an icon.
+
+  All three assets come from the same geometry, so the mark cannot drift
+  between them.{% endcomment %}
   <link rel="icon" type="image/png" sizes="32x32" href="{% static 'img/favicon-32.png' %}">
+  <link rel="icon" type="image/svg+xml" href="{% static 'img/favicon.svg' %}">
   <link rel="apple-touch-icon" href="{% static 'img/icon-192.png' %}">
   {% comment %}Installable: students live on phones, and without a manifest
   "Add to Home Screen" produces a bare bookmark. start_url is /app/ — an

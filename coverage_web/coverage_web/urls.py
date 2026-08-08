@@ -8,6 +8,7 @@ from django.urls import include, path
 from django.views.generic import RedirectView
 
 from analytics import views as analytics_views
+from core import views as core_views
 from directory import views as directory_views
 
 urlpatterns = [
@@ -34,16 +35,12 @@ urlpatterns = [
     # The legal pages live under /welcome/, but /privacy/ and /terms/ are what
     # people type and what link scanners probe. Permanent redirects, not
     # duplicate routes: one canonical URL per document.
-    # Chrome falls back to /favicon.ico after pushState history changes;
-    # without this route that fallback 404s and blanks the tab icon.
-    #
-    # It serves the REAL .ico rather than redirecting. The redirect-to-SVG
-    # version of this line let the tab blank a second time on Opportunities:
-    # the fallback exists precisely because the SVG path did not resolve, so
-    # answering it with the SVG under a 301 is not a fallback at all. A 301
-    # is also cached hard by the browser, which makes a wrong target here
-    # expensive to take back.
-    path("favicon.ico", RedirectView.as_view(url="/static/img/favicon.ico", permanent=False)),
+    # Browsers fall back to /favicon.ico: Chrome after a pushState history
+    # change, Safari as a matter of course. It serves the file DIRECTLY —
+    # no redirect. Both earlier attempts at the blank-tab bug left a redirect
+    # here, and Safari is unreliable about following one for an icon, so the
+    # hop is removed rather than merely repointed.
+    path("favicon.ico", core_views.favicon, name="favicon"),
     path("privacy/", RedirectView.as_view(pattern_name="accounts:privacy", permanent=True)),
     path("terms/", RedirectView.as_view(pattern_name="accounts:terms", permanent=True)),
     path("capture/", include("capture.urls")),       # inbound-email webhook + capture settings
