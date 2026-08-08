@@ -1052,7 +1052,15 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
 .avatar-field-controls { display: flex; flex-direction: column; align-items: flex-start;
   gap: var(--s2); min-width: 0; }
 .avatar-actions { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
-.avatar-hint { margin: 0; max-width: 46ch; }
+/* The upload control is a <label> so it can drive the hidden file input, which
+   means it inherited the FORM-FIELD label margin — 16px above, 4px below. On a
+   button in a flex row that is 20px of dead height, unevenly split, and it was
+   the whole reason this row stood 133px tall for a 64px avatar. Buttons that
+   happen to be labels are buttons. */
+.avatar-actions .btn { margin: 0; }
+/* 46ch broke this into three ragged lines beside a 64px avatar; the sentence
+   is one thought and reads better as one or two full-width lines. */
+.avatar-hint { margin: 0; max-width: 68ch; }
 .avatar-hint.is-bad { color: var(--danger); }
 .avatar-remove { display: inline-flex; align-items: center; gap: var(--s1);
   font-weight: var(--w-reg); margin: 0; width: auto; color: var(--ink-2); font-size: var(--fs-s); }

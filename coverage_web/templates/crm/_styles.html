@@ -333,13 +333,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      takes the same basis as its numbered neighbours. */
   .ribbon-funnel { flex: 1 1 13rem; }
   .ribbon-funnel.is-empty { flex: 1 1 11rem; }
-  /* A cell with no figure still has to put its LABEL where the other labels
-     are. The four cells sat on three different baselines — 37px for the
-     numbered ones, 12px for a label-only cell (top-aligned by default) and
-     24.5px for the funnel (justify-content: center) — so the bottom row of
-     the strip read as three separate lines. Pushing the lone label to the
-     bottom lands it on the numbered cells' label line. */
-  .ribbon-stat:not(:has(.ribbon-num)) { justify-content: flex-end; }
+  /* A cell with no figure centres its label in the cell (owner's call). The
+     four cells sat on three different baselines — 37px for the numbered ones,
+     12px top-aligned, 24.5px centred — and the fix went to the label BASELINE
+     first, pushing lone labels down to 37px to share the numbered cells'
+     line. Seen side by side, that left the label-only cells looking bottom-
+     heavy with a void above; centring fills the cell and still lands both
+     label-only cells on one line as each other, which is the alignment that
+     actually reads. */
+  .ribbon-stat:not(:has(.ribbon-num)) { justify-content: center; }
   .ribbon-funnel .ribbon-num { font-size: var(--fs-l); }
 
   @media (max-width: 700px) {
