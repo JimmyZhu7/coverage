@@ -238,6 +238,11 @@
      ring, so either hand works. --p is the fill fraction. */
   .pace-set { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap;
     margin-bottom: var(--s3); }
+  .pace-main { flex: 1 1 240px; min-width: 0; display: flex;
+    flex-direction: column; gap: var(--s2); }
+  .pace-inline { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap;
+    margin-top: var(--s1); }
+  .pace-inline .pace-read { margin: 0; }
   .pace-ring-widget { position: relative; width: 132px; height: 132px;
     cursor: pointer; touch-action: none; flex: none; }
   .pace-ring-widget svg { width: 100%; height: 100%; transform: rotate(-90deg); }
@@ -528,22 +533,28 @@
           form's real ceiling. aria-hidden: the input beside it is the
           accessible control, and two controls announcing one value is noise.
           {% endcomment %}
-          <div class="pace-set">
-            <div class="pace-ring-widget" id="pace-ring" aria-hidden="true">
-              <svg viewBox="0 0 120 120">
-                <circle class="pr-track" cx="60" cy="60" r="54"/>
-                <circle class="pr-fill" cx="60" cy="60" r="54"/>
-              </svg>
-              <div class="pr-val"><b id="pace-ring-n">–</b><span>a week</span></div>
-            </div>
-            <p class="pace-read" id="pace-read"></p>
-          </div>
-
+          {% comment %}
+          ONE row, ring and input together. The ring, its readout sentence and
+          the goal input are three views of the same number, and they were laid
+          out as three bands — ring + lone sentence floating over a wide void,
+          a rule, then the input on its own row — so the card read sparse and
+          the ring's connection to the input it drives was invisible. Ring on
+          the left; label, description, input and the derived per-weekday
+          sentence stacked beside it. Same ids throughout: the two-way binding
+          looks elements up by id/name, not by position.
+          {% endcomment %}
           <form method="post" action="{% url 'accounts:settings' %}">
             {% csrf_token %}
             <input type="hidden" name="section" value="pace">
-            <div class="set-row">
-              <div class="set-row-main">
+            <div class="pace-set">
+              <div class="pace-ring-widget" id="pace-ring" aria-hidden="true">
+                <svg viewBox="0 0 120 120">
+                  <circle class="pr-track" cx="60" cy="60" r="54"/>
+                  <circle class="pr-fill" cx="60" cy="60" r="54"/>
+                </svg>
+                <div class="pr-val"><b id="pace-ring-n">–</b><span>a week</span></div>
+              </div>
+              <div class="pace-main">
                 <label class="set-row-label" for="{{ pace_form.weekly_touch_goal.id_for_label }}">Weekly Touch Goal</label>
                 <div class="set-row-desc" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">The target the pace ring on Today measures you
                   against. <span class="set-default">Leave blank to use the default of
@@ -551,9 +562,10 @@
                 {% if pace_form.weekly_touch_goal.errors %}
                   <div class="set-row-err" id="{{ pace_form.weekly_touch_goal.auto_id }}-err">{{ pace_form.weekly_touch_goal.errors }}</div>
                 {% endif %}
-              </div>
-              <div class="set-row-control set-num">
-                {{ pace_form.weekly_touch_goal }}<span class="set-unit">a week</span>
+                <div class="pace-inline">
+                  <span class="set-num">{{ pace_form.weekly_touch_goal }}<span class="set-unit">a week</span></span>
+                  <p class="pace-read" id="pace-read"></p>
+                </div>
               </div>
             </div>
             <div class="set-save"><button type="submit" class="btn btn-primary">Save Weekly Pace</button></div>
