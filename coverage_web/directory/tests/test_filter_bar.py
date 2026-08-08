@@ -25,7 +25,7 @@ import pytest
 from django.urls import reverse
 
 from directory.models import Firm, Opportunity
-from directory.views import REGION_NONE
+from directory.views import REGION_NONE, YEAR_NONE
 
 pytestmark = pytest.mark.django_db
 
@@ -156,10 +156,13 @@ def test_an_unrecognised_role_checks_all_campus(client, bar):
 # Region: counts, the unstated option, and the honesty line.
 # ---------------------------------------------------------------------------
 
-def test_region_offers_other_unstated_with_a_live_count(client, bar):
+def test_region_offers_unstated_with_a_live_count(client, bar):
+    """The label was "Other / Unstated" until stated-but-untracked locations
+    got their own real "Other Markets" region; this option now means only
+    what it says."""
     resp = _get(client)
     opts = {o["value"]: (o["label"], o["count"]) for o in resp.context["facets"]["regions"]}
-    assert opts[REGION_NONE] == ("Other / Unstated", 1)
+    assert opts[REGION_NONE] == ("Unstated", 1)
     assert opts["hk"][1] == 2 and opts["us"][1] == 1
     # "Any Region" still means everything, unstated included.
     assert opts[""][1] == 4
@@ -425,3 +428,61 @@ def test_the_board_state_binds_the_totals_to_the_cycle(client, bar):
     band = results.index("cycband") if "cycband" in results else None
     if band is not None:
         assert strip < band, "totals lead, shape follows"
+
+
+@pytest.mark.django_db
+def test_other_markets_are_a_real_facet_option_distinct_from_unstated(client):
+    """A Sydney posting STATED where it is; a silent posting did not. The two
+    used to share one "Other / Unstated" bucket. Now "Other Markets" is a
+    market (filterable, counted) and "Unstated" means only what it says."""
+    firm = Firm.objects.create(slug="mq", name="Macquarie")
+    Opportunity.objects.create(firm=firm, title="Graduate Analyst", bucket="internship",
+                               status="open", url="https://mq.com/1", location="Sydney",
+                               region="other")
+    Opportunity.objects.create(firm=firm, title="Mystery Analyst", bucket="internship",
+                               status="open", url="https://mq.com/2")
+
+    resp = client.get(reverse("opportunities"), {"region": "other"})
+    assert resp.context["total"] == 1
+    body = resp.content.decode()
+    assert "Graduate Analyst" in body and "Mystery Analyst" not in body
+
+    labels = [o["label"] for o in resp.context["facets"]["regions"]]
+    assert "Other Markets" in labels
+    assert "Unstated" in labels
+    assert "Other / Unstated" not in labels
+
+    unstated = client.get(reverse("opportunities"), {"region": REGION_NONE})
+    assert unstated.context["total"] == 1
+    assert "Mystery Analyst" in unstated.content.decode()
+
+
+@pytest.mark.django_db
+def test_a_year_stated_only_in_prose_counts_and_filters(client):
+    """69 live roles state their year only in the description ("graduating
+    student of 2028"), where the facts extractor holds it with its evidence
+    phrase. The facet filed them under No Year Stated while the eligibility
+    lens issued verdicts from the same fact — two features disagreeing about
+    whether the posting spoke. Facet, filter and YEAR_NONE all read the
+    prose fact now, so the counts keep their promise."""
+    firm = Firm.objects.create(slug="iv", name="Invesco")
+    Opportunity.objects.create(
+        firm=firm, title="Early Career Intern", bucket="internship",
+        status="open", url="https://iv.com/1",
+        raw={"facts": {"grad": {"value": "2028", "years": ["2028"],
+                                "phrase": "be a graduating student of 2028"}}})
+    Opportunity.objects.create(firm=firm, title="Quiet Intern", bucket="internship",
+                               status="open", url="https://iv.com/2")
+
+    resp = client.get(reverse("opportunities"))
+    years = {o["value"]: o["count"] for o in resp.context["year_facet"]}
+    assert years.get("2028") == 1, years
+    assert years.get(YEAR_NONE) == 1, "the quiet role is the only unstated one"
+
+    picked = client.get(reverse("opportunities"), {"year": "2028"})
+    assert picked.context["total"] == 1
+    assert "Early Career Intern" in picked.content.decode()
+
+    none = client.get(reverse("opportunities"), {"year": YEAR_NONE})
+    assert none.context["total"] == 1
+    assert "Quiet Intern" in none.content.decode()

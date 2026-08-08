@@ -35,6 +35,8 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils.dateparse import parse_date
 
+import re
+
 from directory.boards import BOARDS
 from directory.classify import (
     board_is_campus, bucket_from_contract, classify_role, clean_title, extract_class_year, extract_cohort,
@@ -42,6 +44,11 @@ from directory.classify import (
     posting_text,
 )
 from directory.models import Opportunity
+
+# "/job/Copenhagen/..." -> "Copenhagen"; "/job/2-Locations/..." exists too,
+# which is why the captured city still goes through normalize_region rather
+# than being trusted as a place.
+_EXTERNAL_PATH_CITY = re.compile(r"^/job/([^/]+)/")
 
 
 class Command(BaseCommand):
@@ -89,6 +96,20 @@ class Command(BaseCommand):
                 # told us the title is not where it is.
                 if not region and not (opp.location or "").strip():
                     region = normalize_region(title)
+                # Workday's list payload writes "2 Locations" into the
+                # location field and hides the cities — but its own
+                # externalPath starts with the PRIMARY posting city:
+                # "/job/Copenhagen/Key-Account-Manager...". The provider's
+                # routing, not a guess. Read only when the location field
+                # said nothing usable.
+                if not region:
+                    path = (opp.raw or {}).get("externalPath") or ""
+                    m = _EXTERNAL_PATH_CITY.match(path)
+                    if m:
+                        from urllib.parse import unquote
+
+                        region = normalize_region(
+                            unquote(m.group(1)).replace("-", " "))
                 # Still nothing: the posting's own cached prose, through the
                 # location-anchored extractor. Fill-only like everything else
                 # in this loop, and honest about its limits — on live data 18

@@ -9,6 +9,7 @@ faces, not toy strings.
 import pytest
 
 from directory.classify import (
+    normalize_region,
     ENTRY_LEVEL,
     INSIGHT,
     INTERNSHIP,
@@ -183,3 +184,34 @@ class _FakeBoard:
 )
 def test_board_is_campus(board, expected):
     assert board_is_campus(board) is expected
+
+
+# ---------------------------------------------------------------------------
+# The "other markets" tier — stated-but-untracked locations file under
+# "other" instead of vanishing into the same blank as genuinely silent rows.
+# 230 live campus roles (Sydney, Bangalore, Seoul, São Paulo...) were
+# indistinguishable from the 103 that never said where they are.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("location,expected", [
+    ("Sydney", "other"),
+    ("Bangalore, Velankani Tech Park", "other"),
+    ("Seoul", "other"),
+    ("Sao Paulo Edificio Pedro Mariz", "other"),
+    ("Kuala Lumpur", "other"),
+    ("Dubai United Arab Emirates", "other"),
+    ("Casablanca, Morocco", "other"),
+    ("Toronto, Canada", "other"),
+    # Tracked markets must win first — the guards that keep cities at home:
+    ("Melbourne, FL", "us"),          # Florida, not Victoria
+    ("Indianapolis", "us"),           # contains the substring "india"
+    ("Albuquerque, New Mexico", "us"),  # contains "mexico"
+    ("Perth, Scotland", "eu"),        # Scotland, not Western Australia
+    ("China", "cn"),                  # bare country as the whole string
+    # Silence is still silence:
+    ("", ""),
+    ("Remote", ""),
+])
+def test_other_markets_file_under_other_and_tracked_markets_win_first(location, expected):
+    assert normalize_region(location) == expected

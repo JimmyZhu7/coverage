@@ -26,7 +26,7 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 from PIL import Image, ImageOps
 
 from coverage_domain.cadence import CADENCE_DEFAULTS
-from directory.classify import REGION_LABELS, REGION_ORDER
+from directory.classify import REGION_LABELS, TRACKED_REGIONS
 from directory.recommend import cycle_choices
 
 # Same rule for both of these as for the ranges below: import the value from
@@ -46,7 +46,7 @@ from crm.views import TUNABLE_CADENCE_PARAMS
 from .models import WORK_AUTH
 
 # Human labels for the region tokens a student can state a preference for.
-# Sourced from `classify.REGION_ORDER`/`REGION_LABELS` — the SAME six-market
+# Sourced from `classify.TRACKED_REGIONS`/`REGION_LABELS` — the SAME six-market
 # vocabulary the Opportunities feed's own Region filter uses — rather than a
 # second, narrower hk/us-only list. That narrower list used to be sourced
 # from `Firm.regions`, which really is hk/us-only in the seed data, but
@@ -55,7 +55,7 @@ from .models import WORK_AUTH
 # student could not state a preference — or a work-authorization answer,
 # since `WorkAuthorizationForm` below also iterates this list — for.
 REGION_CHOICES: list[tuple[str, str]] = [
-    (code, REGION_LABELS[code]) for code in REGION_ORDER
+    (code, REGION_LABELS[code]) for code in TRACKED_REGIONS
 ]
 
 TRACK_CHOICES: list[tuple[str, str]] = [

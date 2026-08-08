@@ -232,9 +232,18 @@ def test_a_country_that_starts_with_a_state_code_is_not_the_us():
     States. A two-letter state code needs a boundary after it."""
     from directory.classify import normalize_region
 
+    # The guard is "not the US", which is what the ", ca"/", co" bug broke.
+    # Where the country is one Coverage recognises as an untracked market it
+    # now files under "other" instead of blank; either way it is not the US.
     for place in ("Toronto, Canada", "Vancouver, Canada", "Bogota, Colombia",
                   "San Jose, Costa Rica", "Phnom Penh, Cambodia"):
-        assert normalize_region(place) == "", place
+        assert normalize_region(place) != "us", place
+    assert normalize_region("Toronto, Canada") == "other"
+    # Cambodia and bare "San Jose" are deliberately absent from the untracked
+    # key list — San Jose is California or Costa Rica and guessing is worse
+    # than silence — so these stay blank.
+    assert normalize_region("Phnom Penh, Cambodia") == ""
+    assert normalize_region("San Jose, Costa Rica") == ""
 
 
 def test_ordinary_prose_has_no_region():
@@ -263,10 +272,16 @@ def test_boilerplate_name_drops_are_not_a_location():
         "Our London, Hong Kong and New York teams work as one firm.") == ""
 
 
-def test_a_location_outside_the_four_markets_stays_silent():
+def test_a_location_outside_the_tracked_markets_files_under_other():
+    """Prose has to agree with the location field: if "Bangalore" in the
+    location column resolves to "other", the same word read out of the
+    description cannot resolve to blank. One fact, one answer, whichever
+    field carried it."""
     from directory.classify import region_from_prose
 
-    assert region_from_prose("Location: Bangalore, India") == ""
+    assert region_from_prose("Location: Bangalore, India") == "other"
+    # A place nothing recognises is still silence, not a guess.
+    assert region_from_prose("Location: Ulaanbaatar") == ""
 
 
 def test_two_markets_in_anchored_windows_mean_no_answer():

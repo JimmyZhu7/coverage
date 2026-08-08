@@ -10,7 +10,7 @@ import pytest
 from django.contrib.auth import get_user_model
 
 from accounts.forms import REGION_CHOICES, ProfileForm
-from directory.classify import REGION_LABELS, REGION_ORDER
+from directory.classify import REGION_LABELS, TRACKED_REGIONS
 from directory.recommend import cycle_choices
 
 User = get_user_model()
@@ -27,8 +27,14 @@ def user(db):
 # ---------------------------------------------------------------------------
 
 def test_region_choices_matches_the_feeds_six_market_vocabulary():
-    assert [code for code, _ in REGION_CHOICES] == list(REGION_ORDER)
+    """TRACKED_REGIONS, not REGION_ORDER. The facet's order gained "other"
+    when stated-but-untracked locations got their own bucket, and "Other
+    Markets" is a place a ROLE can be, never a place a student chooses to
+    target — offering it here would ask someone to declare a preference for
+    everywhere Coverage does not cover."""
+    assert [code for code, _ in REGION_CHOICES] == list(TRACKED_REGIONS)
     assert len(REGION_CHOICES) == 6
+    assert "other" not in {code for code, _ in REGION_CHOICES}
     for code, label in REGION_CHOICES:
         assert label == REGION_LABELS[code]
 

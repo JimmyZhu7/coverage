@@ -71,8 +71,22 @@ REGION_LABELS = {
     # Point72 Tokyo). Mapped so the roles are filterable instead of sitting
     # region-less and invisible to the Region filter.
     "cn": "Mainland China", "jp": "Japan",
+    # A real market Coverage does not track (Sydney, Mumbai, Seoul, São
+    # Paulo...). Distinct from "" on purpose: blank means the posting never
+    # said where it is, "other" means it said and the answer is outside the
+    # six tracked markets. The two used to share one "Other / Unstated"
+    # bucket, which made 230 stated-but-untracked locations indistinguishable
+    # from 103 genuinely silent ones.
+    "other": "Other Markets",
 }
-REGION_ORDER = ("hk", "us", "sg", "eu", "cn", "jp")
+# The markets Coverage actually tracks, in display order. This is the set a
+# STUDENT can express a preference for (accounts.forms.REGION_CHOICES) and
+# the set the firm-fit score reasons over.
+TRACKED_REGIONS = ("hk", "us", "sg", "eu", "cn", "jp")
+# The facet's order adds "other" — a place a role can BE, never a place a
+# student chooses to target. Keeping the two vocabularies separate is what
+# stops "Other Markets" appearing in Settings as somewhere to want to work.
+REGION_ORDER = TRACKED_REGIONS + ("other",)
 
 # Checked in order; the first matching market wins. Keys are lowercase
 # substrings (city / country / region tokens).
@@ -94,6 +108,9 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # "Canary Wharf, 1 Churchill Place" with no city; Glasgow and
         # Henley-on-Thames (Invesco) are UK sites the country list missed.
         "canary wharf", "glasgow", "henley-on-thames",
+        # 2026-08-08 census tail: Intesa's Turin, ING's Hague, SoftServe's
+        # Lviv. Ukraine files under Europe the geography, not any union.
+        "torino", "turin", "the hague", "lviv", "kyiv", "kiev", "ukraine",
     )),
     ("us", (
         "united states", "u.s.", "usa", "new york", ", ny", "jersey city",
@@ -109,14 +126,58 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # ", denmark", and a Copenhagen row must not become American.
         ", md", ", ct", ", nj", "baltimore", "milwaukee", "nyc",
         "wilmington", "stamford",
+        # Guards for the "other markets" tier below, present here so the
+        # TRACKED pass wins them first: "india" is a substring of Indiana and
+        # Indianapolis, and plain "mexico" of New Mexico. Without these, a
+        # Midwestern posting would emigrate.
+        "indianapolis", "indiana", "new mexico", "albuquerque",
     )),
     # After hk so "香港" never falls through to the mainland bucket.
     ("cn", (
         "beijing", "shanghai", "shenzhen", "guangzhou", "hangzhou", "chengdu",
         "北京", "上海", "深圳", "广东", "广州", "杭州", "成都", "中国",
         "mainland china", ", china",
+        # Bare "China" as the whole location string (two live rows). Safe at
+        # this position: any US-city-plus-"China Basin"-style address hits
+        # the US tier first, which runs before this one.
+        "china",
     )),
     ("jp", ("tokyo", "japan", "日本", "東京")),
+)
+
+# Markets Coverage does not track, recognised so they can be FILED rather than
+# left blank. Checked only after every tracked market has declined (order in
+# normalize_region), so "Melbourne, FL" is American before Melbourne is
+# Australian and "Perth, Scotland" is European before Perth is Australian.
+# Country names lead; cities are the ones the live census actually produced
+# (Sydney 12, Bangalore 11, Mumbai 10, Seoul 9, São Paulo 14, KL 6, Dubai 7,
+# Casablanca 4...). Ambiguous city names are deliberately absent: bare
+# "San Jose" is California or Costa Rica, bare "Santiago" is Chile or Spain,
+# and a wrong market is worse than "other" never matching.
+_OTHER_MARKET_KEYS: tuple[str, ...] = (
+    "australia", "sydney", "melbourne", "brisbane", "perth",
+    "india", "gift city", "bangalore", "bengaluru", "mumbai", "pune", "chennai",
+    "hyderabad", "gurgaon", "gurugram", "noida", "new delhi", "kolkata",
+    "korea", "seoul",
+    "brazil", "brasil", "sao paulo", "são paulo", "rio de janeiro",
+    "canada", "toronto", "montreal", "montréal", "vancouver", "calgary",
+    "ottawa", "mississauga",
+    "united arab emirates", "dubai", "abu dhabi",
+    "saudi", "riyadh", "qatar", "doha", "bahrain", "kuwait",
+    "israel", "tel aviv",
+    "malaysia", "kuala lumpur", "putrajaya",
+    "indonesia", "jakarta",
+    "thailand", "bangkok",
+    "vietnam", "ho chi minh", "hanoi",
+    "philippines", "manila", "taguig",
+    "taiwan", "taipei",
+    "morocco", "casablanca",
+    "mexico", "argentina", "buenos aires", "colombia", "bogota", "bogotá",
+    "chile", "peru",
+    "south africa", "johannesburg", "cape town",
+    "nigeria", "lagos", "kenya", "nairobi", "egypt", "cairo",
+    "turkey", "türkiye", "istanbul",
+    "new zealand", "auckland",
 )
 
 
@@ -139,8 +200,9 @@ _US_STATE_KEYS = frozenset({", ny", ", il", ", ma", ", ca", ", wa", ", tx",
 
 
 def normalize_region(location: str | None, *, fallback: str = "") -> str:
-    """Map a free-text location to "hk" / "us" / "sg" / "eu", or `fallback`
-    (default "") when it isn't one of the four target markets."""
+    """Map a free-text location to a tracked market code, to "other" for a
+    stated location outside the tracked markets, or to `fallback` (default
+    "") when the text names no recognisable place at all."""
     text = (location or "").lower()
     if not text:
         return fallback
@@ -153,6 +215,11 @@ def normalize_region(location: str | None, *, fallback: str = "") -> str:
                 return code
         if code == "us" and _STATE_SUFFIX.search(text):
             return code
+    # Only after every tracked market has declined: a stated location in a
+    # market Coverage does not track files under "other" instead of blank.
+    for k in _OTHER_MARKET_KEYS:
+        if k in text:
+            return "other"
     return fallback
 
 

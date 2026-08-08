@@ -470,7 +470,10 @@ def _timeline(firm, *, today):
 # not pretend it can.
 # ---------------------------------------------------------------------------
 REGION_NONE = "none"
-REGION_NONE_LABEL = "Other / Unstated"
+# "Unstated", no longer "Other / Unstated": stated-but-untracked locations
+# have their own real region now (classify.REGION_LABELS["other"]), so this
+# option is left meaning exactly what it says — the posting never said.
+REGION_NONE_LABEL = "Unstated"
 
 
 def _apply_region_filter(qs, region):
@@ -742,9 +745,14 @@ def _apply_year_filter(qs, year):
     Anything unrecognised (a hand-typed querystring) is a no-op rather than an
     empty page — same posture as the role filter's fallthrough."""
     if year == YEAR_NONE:
-        return qs.filter(cohort="", class_year="")
+        # No year anywhere: title-derived columns AND the prose fact. The
+        # facet counts prose-stated years as stated, so this option must
+        # exclude them or its count breaks the per-option promise.
+        return qs.filter(cohort="", class_year="",
+                         raw__facts__grad__years__isnull=True)
     if year.isdigit():
-        return qs.filter(Q(cohort=year) | Q(class_year=year))
+        return qs.filter(Q(cohort=year) | Q(class_year=year)
+                         | Q(raw__facts__grad__years__contains=[year]))
     return qs
 
 
@@ -760,9 +768,21 @@ def _year_facet(qs, selected=""):
     counts: Counter[str] = Counter()
     stated = 0
     total = 0
-    for cohort, class_year in qs.values_list("cohort", "class_year"):
+    # The third source is the posting's own prose: the facts extractor's grad
+    # window (raw.facts.grad.years, evidence-phrase and all). 69 open campus
+    # roles stated their year ONLY there — "be a graduating student of 2028"
+    # in the description, nothing in the title — and the facet filed every
+    # one under "No Year Stated" while the eligibility lens, reading the same
+    # fact, was issuing verdicts on it. Two features disagreeing about
+    # whether a posting stated its year is the kind of inconsistency this
+    # facet exists to prevent.
+    for cohort, class_year, grad_years in qs.values_list(
+            "cohort", "class_year", "raw__facts__grad__years"):
         total += 1
         years = {y for y in (cohort or "", class_year or "") if y}
+        for y in grad_years or ():
+            if isinstance(y, str) and y.isdigit():
+                years.add(y)
         for y in years:
             counts[y] += 1
         if years:
