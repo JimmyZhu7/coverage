@@ -404,7 +404,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      firm line it happened to share. Stacked, it sat 10px above the identity
      block's centre because it rode .act-top with the firm name. */
   .act-ident { min-width: 0; display: flex; align-items: center; gap: var(--s3); }
-  .act-idtext { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  /* The text block takes the slack so the chip lands on the identity column's
+     right edge instead of wherever the firm name happens to end. Trailing the
+     name, the chips started anywhere across a 40.9px spread — "Morgan Stanley"
+     pushed one to 172.9 while "CLSA" left another at 132 — so a column of
+     warmth chips read as scattered rather than as a status column. */
+  .act-idtext { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .act-ident > .chip { flex: none; }
   .act-context { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   /* Under ~640px of queue the three zones stack and the row becomes a compact
