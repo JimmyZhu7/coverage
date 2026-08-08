@@ -170,22 +170,102 @@ def extract_gpa(text: str) -> dict | None:
 # the same question asked of the body, where firms state ranges ("graduating
 # between December 2027 and June 2028") that a single year cannot express.
 _GRAD = re.compile(
-    r"graduat\w*[^.\n]{0,%d}?((?:19|20)\d{2})(?:\s*(?:-|–|—|to|and|through)\s*"
-    r"(?:\w+\s+)?((?:19|20)\d{2}))?" % _NEAR, re.IGNORECASE)
+    # "or" joins ranges as often as "to" does — SIG writes "graduate in the
+    # winter of 2028 or the spring of 2029" — and the second year can sit a
+    # few words past its connector ("or the spring of 2029"), not just one.
+    # "degree completion" is the same statement without the word: Deutsche
+    # Bank writes "Bachelor's degree completion: 2026 or later".
+    r"(?:graduat\w*|degree completion)[^.\n]{0,%d}?((?:19|20)\d{2})"
+    r"(?:\s*(?:-|–|—|to|and|through|or)\s*"
+    r"(?:[\w']+\s+){0,3}?((?:19|20)\d{2}))?" % _NEAR, re.IGNORECASE)
 
 
 def extract_grad_years(text: str) -> dict | None:
-    m = _GRAD.search(text)
-    if not m:
-        return None
-    years = [y for y in (m.group(1), m.group(2)) if y]
-    # A posting talking about graduation in 2019 is describing its own history.
-    years = [y for y in years if 2024 <= int(y) <= 2035]
-    if not years:
-        return None
-    label = years[0] if len(years) == 1 else f"{years[0]}–{years[-1]}"
-    return {"value": label, "years": years,
-            "phrase": _sentence(text, m.start(), m.end())}
+    # Every match, not just the first: when a description mentions a year
+    # outside the plausible window early ("our graduate scheme, running since
+    # 2019...") the REAL statement is usually still ahead, and returning None
+    # on the first miss threw it away.
+    for m in _GRAD.finditer(text):
+        years = [y for y in (m.group(1), m.group(2)) if y]
+        # A posting talking about graduation in 2019 is describing its own
+        # history.
+        years = [y for y in years if 2024 <= int(y) <= 2035]
+        if not years:
+            continue
+        label = years[0] if len(years) == 1 else f"{years[0]}–{years[-1]}"
+        return {"value": label, "years": years,
+                "phrase": _sentence(text, m.start(), m.end())}
+    return None
+
+
+# --- Programme start year ---------------------------------------------------
+# The intake year, when the posting states it in the body rather than the
+# title. `cohort` already reads "Summer Analyst Program - 2027" from titles;
+# this is the same fact stated as prose or as a start-date label — HSBC's
+# "Start Date and Duration: Tue Jun 01, 2027", Crédit Agricole's "Date prévue
+# de prise de fonction 01/06/2026" (44 live rows say their year ONLY there),
+# SocGen's "starting in July 2026", Deutsche Bank Italy's "Inizio Internship:
+# Settembre 2026".
+#
+_MONTH = (r"january|february|march|april|may|june|july|august|september|"
+          r"october|november|december")
+# Anchors only, never a bare year: the same descriptions carry "© 2026",
+# requisition numbers ("Référence 2026-110866"), page-update dates and event
+# RSVP dates, none of which say when the job starts. Two near-misses are
+# excluded by name: "begins" is NOT an anchor because IMC's rejection
+# boilerplate says "reapply when the next recruitment season begins in
+# September 2027" — the next season's start, not this posting's — and
+# "commenc\w+" must not swallow "commencement", which is a graduation
+# ceremony.
+_START_RXS = (
+    # Label forms: the value is the posting's own structured field. The
+    # tempered window on "start date" refuses to cross a second "date" label:
+    # SocGen writes "Start date Immediately Publication date 2026/05/20", and
+    # an untempered window read the publication date as the start.
+    re.compile(r"start date(?:(?!date)[^.\n]){0,40}?((?:19|20)\d{2})",
+               re.IGNORECASE),
+    re.compile(r"prise de fonction[^.\n]{0,20}?\d{2}/\d{2}/((?:19|20)\d{2})",
+               re.IGNORECASE),
+    re.compile(r"inizio[^.\n]{0,40}?((?:19|20)\d{2})", re.IGNORECASE),
+    # Prose forms, anchored on a verb that can only describe this role.
+    re.compile(r"starting(?: in| from)?(?:\s+[\w/]+){0,2}?\s+((?:19|20)\d{2})",
+               re.IGNORECASE),
+    re.compile(r"commenc(?!ement)\w*(?:\s+[\w/]+){0,4}?\s+((?:19|20)\d{2})",
+               re.IGNORECASE),
+    # A month-to-month range, months named on both sides. No verb needed:
+    # "from January 2027 - August 2027" (MUFG) and "during June and July
+    # 2027" (McKinsey) are programme periods, and no boilerplate — copyright
+    # lines, requisition numbers, page dates — takes this shape.
+    re.compile(r"from\s+(?:%s)\s+((?:19|20)\d{2})\s*(?:-|–|—|to|until)\s*(?:%s)"
+               % (_MONTH, _MONTH), re.IGNORECASE),
+    re.compile(r"during\s+(?:%s)\s+(?:and|or|to|-|–)\s*(?:%s)\s+((?:19|20)\d{2})"
+               % (_MONTH, _MONTH), re.IGNORECASE),
+)
+
+# What a start year must NOT be. "offer": BofA's 2027 Summer Analyst
+# postings all say strong interns "may be offered full time employment to
+# commence in July 2028" — the year a DIFFERENT job would begin, one summer
+# after this one. "academic year": Morgan Stanley Japan's eligibility clause
+# ("studying abroad outside of Japan during the academic year from June
+# 2026...") dates the applicant's studies, not the programme. Either phrase
+# shortly before the match disqualifies it.
+_START_OFFER_GUARD = re.compile(
+    r"(?:offer\w*|academic year)[^.\n]{0,60}$", re.IGNORECASE)
+
+
+def extract_start_year(text: str) -> dict | None:
+    for rx in _START_RXS:
+        for m in rx.finditer(text):
+            year = m.group(1)
+            # Same plausibility window as the graduation fact: a start date
+            # in the past is the page's history, not an intake.
+            if not 2024 <= int(year) <= 2035:
+                continue
+            if _START_OFFER_GUARD.search(text[max(0, m.start() - 80):m.start()]):
+                continue
+            return {"value": year, "years": [year],
+                    "phrase": _sentence(text, m.start(), m.end())}
+    return None
 
 
 # --- Language --------------------------------------------------------------
@@ -434,6 +514,7 @@ EXTRACTORS = {
     "study": extract_study_stage,
     "language": extract_languages,
     "grad": extract_grad_years,
+    "start": extract_start_year,
     "gpa": extract_gpa,
     "duration": extract_duration,
     "cover_letter": extract_cover_letter,

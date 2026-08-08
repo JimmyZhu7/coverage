@@ -745,14 +745,17 @@ def _apply_year_filter(qs, year):
     Anything unrecognised (a hand-typed querystring) is a no-op rather than an
     empty page — same posture as the role filter's fallthrough."""
     if year == YEAR_NONE:
-        # No year anywhere: title-derived columns AND the prose fact. The
-        # facet counts prose-stated years as stated, so this option must
-        # exclude them or its count breaks the per-option promise.
+        # No year anywhere: title-derived columns AND both prose facts (the
+        # graduation window and the programme start year). The facet counts
+        # prose-stated years as stated, so this option must exclude them or
+        # its count breaks the per-option promise.
         return qs.filter(cohort="", class_year="",
-                         raw__facts__grad__years__isnull=True)
+                         raw__facts__grad__years__isnull=True,
+                         raw__facts__start__years__isnull=True)
     if year.isdigit():
         return qs.filter(Q(cohort=year) | Q(class_year=year)
-                         | Q(raw__facts__grad__years__contains=[year]))
+                         | Q(raw__facts__grad__years__contains=[year])
+                         | Q(raw__facts__start__years__contains=[year]))
     return qs
 
 
@@ -776,11 +779,18 @@ def _year_facet(qs, selected=""):
     # fact, was issuing verdicts on it. Two features disagreeing about
     # whether a posting stated its year is the kind of inconsistency this
     # facet exists to prevent.
-    for cohort, class_year, grad_years in qs.values_list(
-            "cohort", "class_year", "raw__facts__grad__years"):
+    #
+    # The fourth is the programme start year (raw.facts.start.years), the
+    # body-stated twin of the title cohort: Crédit Agricole's 44 "Date prévue
+    # de prise de fonction 01/06/2026" rows and HSBC's "Start Date: Tue Jun
+    # 01, 2027" labels state their intake ONLY there, and all of them sat
+    # under "No Year Stated".
+    for cohort, class_year, grad_years, start_years in qs.values_list(
+            "cohort", "class_year", "raw__facts__grad__years",
+            "raw__facts__start__years"):
         total += 1
         years = {y for y in (cohort or "", class_year or "") if y}
-        for y in grad_years or ():
+        for y in (*(grad_years or ()), *(start_years or ())):
             if isinstance(y, str) and y.isdigit():
                 years.add(y)
         for y in years:

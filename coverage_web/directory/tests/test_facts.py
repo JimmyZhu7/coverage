@@ -10,6 +10,8 @@ patterns exist to refuse, so they are the cases the tests are mostly about.
 
 from __future__ import annotations
 
+import pytest
+
 from directory.facts import (extract_assessment, extract_cover_letter,
                              extract_facts, extract_gpa, extract_grad_years,
                              extract_languages, extract_pay, extract_rolling)
@@ -293,3 +295,84 @@ def test_two_markets_in_anchored_windows_mean_no_answer():
 
     assert region_from_prose(
         "Location: New York. This role is based in Hong Kong.") == ""
+
+
+# ---------------------------------------------------------------------------
+# The programme start year — the body-stated twin of the title cohort. Every
+# positive case below is a real live phrase; so is every negative, and the
+# negatives are the point: the same descriptions carry publication dates,
+# conversion-offer years, eligibility study windows and next-season
+# boilerplate, each of which this extractor once read or nearly read.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text,year", [
+    # Label forms.
+    ("Programme Start Date and Duration: Tue Jun 01, 2027; 10 weeks", "2027"),
+    ("Type de contrat Stage Date prévue de prise de fonction 01/06/2026", "2026"),
+    ("Inizio Internship: agosto/settembre 2026 Durata: 6 mesi", "2026"),
+    # Prose forms.
+    ("We are looking for an intern (m/f/d) starting in July 2026 for a "
+     "period of ideally 6 months", "2026"),
+    ("accepting applications from candidates who are available starting "
+     "from January 2027", "2027"),
+    ("The Summer Internship program will commence in June 2027 and run for "
+     "nine weeks in our Hong Kong office", "2027"),
+    ("commencing in February 2027. Our team helps public sector", "2027"),
+    # Month-to-month ranges need no verb: nothing but a programme period
+    # takes this shape.
+    ("seeking a Corporate Banking Marketing Officer from January 2027 - "
+     "August 2027 who will be primarily", "2027"),
+    ("join a consulting team for a six-to-eight-week period during June "
+     "and July 2027, where you will contribute", "2027"),
+])
+def test_start_year_reads_stated_intakes(text, year):
+    from directory.facts import extract_start_year
+    got = extract_start_year(text)
+    assert got and got["value"] == year
+    assert year in got["phrase"]
+
+
+@pytest.mark.parametrize("text", [
+    # SocGen: the start is "Immediately"; the year is the PUBLICATION date.
+    "Reference 26000FL3 Start date Immediately Publication date 2026/06/26 "
+    "Responsibilities",
+    # BofA: the year a DIFFERENT job would begin — the conversion offer, one
+    # summer after this internship.
+    "interns who perform well during the internship may be offered full "
+    "time employment to commence in July 2028",
+    # Morgan Stanley Japan: an eligibility clause dating the applicant's
+    # studies, not the programme.
+    "or studying abroad outside of Japan during the academic year from "
+    "June 2026 to September 2027",
+    # IMC: the NEXT season's start, in rejection boilerplate.
+    "You may reapply when the next recruitment season begins in September "
+    "2027. We encourage you to",
+    # Page furniture: copyright, requisition number, graduation ceremony.
+    "© 2026 Squarepoint. All Rights Reserved.",
+    "Rejoignez nos équipes ! Référence 2026-110866 Date de mise à jour",
+    "must be available prior to commencement in May 2019",
+])
+def test_start_year_refuses_years_that_are_not_starts(text):
+    from directory.facts import extract_start_year
+    assert extract_start_year(text) is None
+
+
+def test_grad_reads_or_ranges_and_recovers_past_a_stale_first_match():
+    from directory.facts import extract_grad_years
+    # SIG's range connector is "or", with words between it and the year.
+    got = extract_grad_years(
+        "open to students who are planning to graduate in the winter of "
+        "2028 or the spring of 2029")
+    assert got and got["years"] == ["2028", "2029"]
+    # A history year earlier in the text must not end the search: the real
+    # statement is still ahead.
+    got = extract_grad_years(
+        "our graduate scheme has run since 2019. Applicants should "
+        "graduate in 2027")
+    assert got and got["years"] == ["2027"]
+    # Deutsche Bank states the same fact without the word "graduate".
+    got = extract_grad_years(
+        "Studying Technology related subjects; Bachelor's degree "
+        "completion: 2026 or later")
+    assert got and got["years"] == ["2026"]
