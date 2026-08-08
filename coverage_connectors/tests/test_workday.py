@@ -71,10 +71,16 @@ def test_pagination_stitches_pages_using_reported_total(monkeypatch):
 
 def test_pagination_caps_at_max_jobs(monkeypatch):
     """A board reporting a much larger total than _MAX_JOBS must still stop
-    after 3 pages (60 jobs) -- one saturated tenant can't become an
-    unbounded fetch."""
-    page = {"total": 500, "jobPostings": [{"title": "x", "externalPath": "/job/x",
-                                            "locationsText": "NYC", "postedOn": ""}] * 20}
+    at the cap -- one saturated tenant can't become an unbounded fetch.
+
+    The expected page count is derived from `_MAX_JOBS`, not written out.
+    This test hardcoded "3 pages, 60 jobs" and went red the day the cap was
+    raised, which is a test asserting a constant's VALUE rather than the
+    behaviour that depends on it."""
+    monkeypatch.setattr(workday, "_MAX_JOBS", 60)
+    total = workday._MAX_JOBS * 10
+    page = {"total": total, "jobPostings": [{"title": "x", "externalPath": "/job/x",
+                                             "locationsText": "NYC", "postedOn": ""}] * 20}
     calls = []
 
     def fake_post_json(url, payload, **kw):
@@ -86,9 +92,22 @@ def test_pagination_caps_at_max_jobs(monkeypatch):
     board = WorkdayBoard(firm="Huge Co", tenant_host="huge.wd1", site="Careers")
     result = workday.fetch(board)
 
-    assert calls == [0, 20, 40]  # capped at _MAX_JOBS=60 -> 3 pages, not 25
-    assert result.raw_count == 500  # raw_count reports the provider's own total
-    assert len(result.opportunities) == 60  # but only what was actually fetched
+    expected_pages = workday._MAX_JOBS // 20
+    assert calls == [i * 20 for i in range(expected_pages)]
+    assert result.raw_count == total  # raw_count reports the provider's own total
+    assert len(result.opportunities) == workday._MAX_JOBS  # only what was fetched
+    # And the board must SAY it was cut short, or ingest will read the
+    # missing rows as closed.
+    assert result.truncated is True
+
+
+def test_a_board_read_to_the_end_is_not_truncated(monkeypatch):
+    """The flag means "there is more than I returned", not "I paginated"."""
+    page = {"total": 2, "jobPostings": [{"title": "x", "externalPath": "/job/x",
+                                         "locationsText": "NYC", "postedOn": ""}] * 2}
+    monkeypatch.setattr(workday, "post_json", lambda url, payload, **kw: page)
+    board = WorkdayBoard(firm="Small Co", tenant_host="small.wd1", site="Careers")
+    assert workday.fetch(board).truncated is False
 
 
 def test_search_text_is_forwarded(monkeypatch):

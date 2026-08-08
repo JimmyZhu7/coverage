@@ -96,3 +96,32 @@ class TestPostingText:
         raw = {"description": "Candidates must be authorized to work without "
                               "the need for sponsorship now or in the future."}
         assert extract_sponsorship(posting_text("SA 2027", raw)) == "no"
+
+
+# ---------------------------------------------------------------------------
+# Deadline shapes found by auditing WHY coverage sat at 8% (123 of 1,459
+# campus rows). Most of that 8% is genuine — postings mostly do not publish a
+# closing date — but two readable shapes were being dropped.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text,expected", [
+    # An auxiliary between the noun and the verb defeated the keyword gate.
+    ("Applications will close November 16, 2026", "2026-11-16"),   # real SIG row
+    ("Applications must be received by 5 December 2026", "2026-12-05"),
+    # Slash dates, read only when the two numbers cannot swap roles.
+    ("Application Deadline: 08/27/2026", "2026-08-27"),            # real BMO row
+    ("Application deadline 27/08/2026", "2026-08-27"),             # same day, UK order
+    # 9 April or September 4? Both boards exist, nothing in the text settles
+    # it, and a five-month error on a deadline is worse than no deadline.
+    ("Application Deadline: 9/4/2026", None),
+    ("Application Closes: 9/4/26", None),                          # real MUFG row
+    ("Application Deadline: 02/30/2026", None),                    # not a date
+    # The keyword still has to mean a deadline.
+    ("Ability to work in a fast-paced, deadline-driven environment", None),
+    ("we encourage you to apply by end of March", None),           # real GSA row
+    # A date with no year is a guess, whatever the keyword says.
+    ("Please apply by Sunday, 8 November (11:59pm Hong Kong time)", None),
+])
+def test_deadline_shapes_from_the_coverage_audit(text, expected):
+    assert extract_deadline_from_text(text) == expected

@@ -104,6 +104,7 @@ def fetch(board: GoldmanSachsBoard) -> FetchResult:
     seen: set[str] = set()
     items: list[dict] = []
     page = 0
+    truncated = False
     while True:
         try:
             rs = _post(page)
@@ -119,6 +120,10 @@ def fetch(board: GoldmanSachsBoard) -> FetchResult:
         total = int(rs.get("totalCount") or 0)
         page += 1
         if not batch or page * _PAGE_SIZE >= min(total, _MAX_ROLES):
+            # `min(total, _MAX_ROLES)` hides which of the two ended the walk.
+            # If the cap did, the board still has roles we did not read, and
+            # ingest must not conclude anything from their absence.
+            truncated = bool(batch) and total > _MAX_ROLES
             break
     try:
         # Its own try, separate from the per-page network try above — see
@@ -127,7 +132,8 @@ def fetch(board: GoldmanSachsBoard) -> FetchResult:
         opportunities = [o for o in (_normalize(i, board) for i in items) if o.url]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(items))
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(items), truncated=truncated)
 
 
 def classify_url(url: str) -> dict | None:

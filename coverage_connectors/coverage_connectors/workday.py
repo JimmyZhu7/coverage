@@ -58,7 +58,7 @@ from .models import FetchResult, Opportunity, VerificationResult, WorkdayBoard
 name = "workday"
 
 _PAGE_SIZE = 20   # Workday's CxS API 400s above this — verified live, no silent clamp.
-_MAX_JOBS = 500   # 25 pages/board. Was 60 (three pages), which was not a
+_MAX_JOBS = 1500  # 75 pages/board. Was 60 (three pages), which was not a
                   # coverage compromise but a correctness one: ingest closes
                   # any open row a successful fetch didn't return, so on
                   # boards reporting 186-1,371 results the cap was marking
@@ -68,11 +68,17 @@ _MAX_JOBS = 500   # 25 pages/board. Was 60 (three pages), which was not a
                   # verified-open from the firms' own sites while sitting in
                   # the database as closed.
                   #
-                  # The cap still exists (an unbounded fetch against a
-                  # 10,000-posting tenant is nobody's friend), so a board can
-                  # still be truncated — PwC's campus site alone reports
-                  # 1,371. What changed is that truncation now SAYS so, via
-                  # FetchResult.truncated, and ingest declines to close
+                  # 500 came first and still left eight boards partial.
+                  # Measured against every live Workday board: reading all
+                  # 50 to the end costs 558 requests against 400 at a cap of
+                  # 500 — 158 more, once a night, for 10,595 postings
+                  # instead of a truncated view of them. The largest board
+                  # (TD Securities, 1,421) fits under 1,500 with headroom.
+                  #
+                  # The cap stays because an unbounded fetch against a
+                  # 10,000-posting tenant is nobody's friend, and truncation
+                  # remains safe regardless: it is reported via
+                  # FetchResult.truncated and ingest declines to close
                   # anything on a list it knows is partial.
 
 _WORKDAY_URL_RE = re.compile(

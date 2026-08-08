@@ -958,7 +958,12 @@ _MONTHS = {m: i + 1 for i, m in enumerate((
 # start date or a posted date, and treating those as deadlines would put
 # false countdowns on the feed.
 _DEADLINE_KEY = re.compile(
-    r"(?:apply by|application deadline|applications?\s+(?:close[sd]?|due|must be "
+    # "applications WILL close" / "applications MUST be received": an
+    # auxiliary between the noun and the verb is ordinary English and used to
+    # defeat the whole gate — SIG's "Applications will close November 16,
+    # 2026" was read as no deadline at all.
+    r"(?:apply by|application deadline|applications?\s+(?:will\s+|must\s+|"
+    r"shall\s+)?(?:close[sd]?|due|be\s+(?:received|submitted)|must be "
     r"(?:received|submitted))|closing date|deadline)", re.IGNORECASE)
 _DATE_ISO = re.compile(r"(20\d{2})-(\d{2})-(\d{2})")
 _DATE_MDY = re.compile(
@@ -967,6 +972,15 @@ _DATE_MDY = re.compile(
 _DATE_DMY = re.compile(
     r"(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|"
     r"august|september|october|november|december),?\s+(20\d{2})", re.IGNORECASE)
+# A slash date, which boards write in both conventions and never label.
+# BMO posts "Application Deadline: 08/27/2026"; a UK board writing the same
+# day says 27/08/2026. Read ONLY when the two numbers cannot swap roles —
+# one of them above 12 forces which is the month. "9/4/26" is September 4 to
+# an American board and 9 April to a British one, a five-month difference
+# with nothing in the text to settle it, so it is refused rather than
+# guessed. A 4-digit year is required here for the same reason it is
+# everywhere else in this function.
+_DATE_SLASH = re.compile(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b")
 
 
 def extract_deadline_from_text(text: str | None) -> str | None:
@@ -984,10 +998,19 @@ def extract_deadline_from_text(text: str | None) -> str | None:
         else:
             mdy = _DATE_MDY.search(window)
             dmy = _DATE_DMY.search(window)
+            sl = _DATE_SLASH.search(window)
             if mdy:
                 y, m, d = int(mdy.group(3)), _MONTHS[mdy.group(1).lower()], int(mdy.group(2))
             elif dmy:
                 y, m, d = int(dmy.group(3)), _MONTHS[dmy.group(2).lower()], int(dmy.group(1))
+            elif sl:
+                a, b, y = int(sl.group(1)), int(sl.group(2)), int(sl.group(3))
+                if a > 12 and b <= 12:
+                    d, m = a, b          # 27/08/2026 — day first
+                elif b > 12 and a <= 12:
+                    m, d = a, b          # 08/27/2026 — month first
+                else:
+                    continue             # both plausible as a month: no answer
             else:
                 continue
         try:

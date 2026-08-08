@@ -71,6 +71,9 @@ def _parse(html: str) -> list[dict]:
 def fetch(board: IcimsBoard) -> FetchResult:
     seen: set[str] = set()
     rows: list[dict] = []
+    # True when we run out of allowed pages while pages were still yielding
+    # new rows — the board has more than we read.
+    truncated = False
     try:
         for page in range(_MAX_PAGES):
             html = fetch_text(_list_url(board, page))
@@ -85,6 +88,9 @@ def fetch(board: IcimsBoard) -> FetchResult:
                 break
             seen.update(r["id"] for r in fresh)
             rows.extend(fresh)
+        else:
+            # Every allowed page returned new rows and none was the last.
+            truncated = True
         opportunities = [
             Opportunity(firm=board.firm, title=r["title"], location="",
                         url=r["url"], source="icims", raw=r)
@@ -92,7 +98,8 @@ def fetch(board: IcimsBoard) -> FetchResult:
         ]
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(rows))
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(rows), truncated=truncated)
 
 
 def classify_url(url: str) -> dict | None:

@@ -116,3 +116,37 @@ def test_verify(monkeypatch):
     monkeypatch.setattr(eightfold, "fetch_text", boom)
     v3 = eightfold.verify("https://mlp.eightfold.ai/careers/job/1")
     assert v3.result == "unreachable"
+
+
+# ---------------------------------------------------------------------------
+# Truncation. Every capped connector has to distinguish "the source said it
+# was done" from "I hit my own limit", because ingest closes any stored row a
+# successful fetch did not return. Workday's cap silently marked hundreds of
+# live roles closed before this contract existed; these tests keep the same
+# bug from reaching the other capped connectors.
+# ---------------------------------------------------------------------------
+
+
+def test_a_complete_walk_is_not_truncated(monkeypatch):
+    """The API's own `count` is reached, so the board was read whole."""
+    resp = {"count": 2, "positions": [_pos(0), _pos(1)]}
+    monkeypatch.setattr(eightfold, "fetch_json", lambda url, **kw: resp)
+    assert eightfold.fetch(BOARD).truncated is False
+
+
+def test_hitting_the_cap_reports_truncated(monkeypatch):
+    """A board that never runs out inside `_MAX` positions must say so."""
+    monkeypatch.setattr(eightfold, "_MAX", 40)
+    monkeypatch.setattr(eightfold, "_PAGE", 20)
+
+    def _page(url, **kw):
+        # Always a full page and a count far beyond the cap: the feed never
+        # ends, so only the cap can stop the walk.
+        start = int(parse_qs(urlparse(url).query).get("start", ["0"])[0])
+        return {"count": 10_000, "positions": [_pos(start + i) for i in range(20)]}
+
+    monkeypatch.setattr(eightfold, "fetch_json", _page)
+    result = eightfold.fetch(BOARD)
+    assert result.ok is True
+    assert result.truncated is True
+    assert len(result.opportunities) == 40

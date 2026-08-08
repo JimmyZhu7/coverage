@@ -63,6 +63,9 @@ def fetch(board: EightfoldBoard) -> FetchResult:
     `start`/`num`, so unlike Lever this needs a real loop."""
     positions: list[dict] = []
     start = 0
+    # Set only when the CAP ends the walk. Both natural exits below (an empty
+    # page, reaching the API's own `count`) mean we read the whole board.
+    truncated = False
     try:
         while start < _MAX:
             data = fetch_json(_page_url(board, start, _PAGE))
@@ -77,13 +80,19 @@ def fetch(board: EightfoldBoard) -> FetchResult:
             # caps a page below the requested `num`, so a fixed stride would
             # skip rows.
             start += len(batch)
+        else:
+            # `while` fell through its condition rather than breaking: we
+            # stopped at _MAX with the board still going. Absence from this
+            # list is not absence from the board — see ingest's close guard.
+            truncated = True
         # Kept inside the same try as the paging loop above — see
         # greenhouse.py's fetch() for why a normalization failure must not
         # propagate uncaught out of `fetch()`.
         opportunities = [_normalize(p, board) for p in positions]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(positions))
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(positions), truncated=truncated)
 
 
 def classify_url(url: str) -> dict | None:

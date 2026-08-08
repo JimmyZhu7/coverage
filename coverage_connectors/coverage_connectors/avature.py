@@ -62,6 +62,9 @@ def fetch(board: AvatureBoard) -> FetchResult:
     seen: set[str] = set()
     opps: list[Opportunity] = []
     offset = 0
+    # As in the other connectors: true only when the cap, not the feed, ended
+    # the walk. Both breaks below are the feed saying it has no more.
+    truncated = False
     try:
         while offset < _MAX_ITEMS:
             xml = fetch_text(_feed_url(board.feed_url, offset))
@@ -78,9 +81,12 @@ def fetch(board: AvatureBoard) -> FetchResult:
             if len(items) < _PAGE_SIZE:
                 break
             offset += _PAGE_SIZE
+        else:
+            truncated = True
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to a multi-board run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opps, raw_count=len(opps))
+    return FetchResult(board=board, ok=True, opportunities=opps,
+                       raw_count=len(opps), truncated=truncated)
 
 
 def classify_url(url: str) -> dict | None:
