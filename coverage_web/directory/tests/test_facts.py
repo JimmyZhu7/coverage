@@ -376,3 +376,15 @@ def test_grad_reads_or_ranges_and_recovers_past_a_stale_first_match():
         "Studying Technology related subjects; Bachelor's degree "
         "completion: 2026 or later")
     assert got and got["years"] == ["2026"]
+
+
+def test_event_date_is_a_start():
+    """An insight event's stated date is when the thing takes place — the
+    same fact Citi labels "Event Start Date" and BofA plain "Event Date"."""
+    from directory.facts import extract_start_year
+    got = extract_start_year(
+        "Event Date September 14, 2026 5:00 PM BST View Cookie Notice")
+    assert got and got["value"] == "2026"
+    got = extract_start_year(
+        "Event Start Date: 28/08/2026 Event Start Time: 11:00 AM SGT")
+    assert got and got["value"] == "2026"

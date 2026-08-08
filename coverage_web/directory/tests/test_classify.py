@@ -434,3 +434,30 @@ def test_placeless_is_a_facet_row_but_never_a_target_a_student_can_pick():
     assert REGION_LABELS["global"] == "Global / Virtual"
     # Last in the facet: it is the residual, and it reads as one.
     assert REGION_ORDER[-1] == "global"
+
+
+# ---------------------------------------------------------------------------
+# The provider's original title as a cohort source. Goldman's board was the
+# whole caseload: its jobTitle leads with the year and the connector keeps
+# only the human tail, so all 142 live GS campus rows sat under "No Year
+# Stated" while every one stated its year in the payload we already store.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ({"jobTitle": "2027 | APAC | Japan | Tokyo | Operations | New Analyst"},
+     "2027"),
+    ({"jobTitle": "2026 | EMEA | Paris | FICC & Equities (Sales & Trading) | "
+                  "Seasonal/Off Cycle Internship, July - December"}, "2026"),
+    # Other boards park the year in parentheses the display cleaner strips.
+    ({"title": "Graduate Software Engineer (2027)"}, "2027"),
+    # No year in the provider's title either: silence stays silence.
+    ({"title": "APAC | Singapore | Global Markets Recruitment Event"}, ""),
+    # The plausible window holds: a founding year is not a cohort.
+    ({"title": "Analyst at Firm est. 1999"}, ""),
+    ({}, ""),
+    (None, ""),
+])
+def test_cohort_from_provider_title(raw, expected):
+    from directory.classify import cohort_from_provider_title
+    assert cohort_from_provider_title(raw) == expected

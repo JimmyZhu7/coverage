@@ -39,7 +39,7 @@ import re
 
 from directory.boards import BOARDS
 from directory.classify import (
-    board_is_campus, bucket_from_contract, classify_role, clean_title, extract_class_year, extract_cohort,
+    board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title, extract_class_year, extract_cohort,
     extract_deadline_from_text, extract_sponsorship, normalize_region, region_from_fields,
     region_from_prose, region_from_title_segments, posting_text,
 )
@@ -76,7 +76,8 @@ class Command(BaseCommand):
                 # outright where it speaks, the title rules where it is silent.
                 bucket = (bucket_from_contract((opp.raw or {}).get("contract_type"))
                           or classify_role(title, campus_hint=hint))
-                cohort = opp.cohort or extract_cohort(title)
+                cohort = (opp.cohort or extract_cohort(title)
+                          or cohort_from_provider_title(opp.raw))
                 class_year = extract_class_year(title)
                 region = normalize_region(opp.location)
                 # Title fallback, and ONLY when the row carries no location at

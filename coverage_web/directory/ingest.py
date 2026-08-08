@@ -45,7 +45,7 @@ from django.utils.text import slugify
 from coverage_connectors import BoardConfig, FetchResult, Opportunity as ConnOpportunity, fetch_many
 
 from .classify import (
-    board_is_campus, bucket_from_contract, classify_role, clean_title, extract_class_year, extract_cohort,
+    board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title, extract_class_year, extract_cohort,
     extract_deadline_from_text, extract_sponsorship, normalize_region, posting_text,
 )
 from .models import Firm, Opportunity, ScrapeRun
@@ -252,7 +252,8 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     # where it is silent.
     bucket = (bucket_from_contract((opp.raw or {}).get("contract_type"))
               or classify_role(opp.title or "", campus_hint=campus_hint))
-    cohort = opp.cohort or extract_cohort(opp.title or "")
+    cohort = (opp.cohort or extract_cohort(opp.title or "")
+              or cohort_from_provider_title(opp.raw))
     # Two different years (see classify.py's section comment): `cohort` is the
     # programme/intake year, `class_year` is a graduation year the posting
     # states outright. No `opp.class_year or …` fallback because no connector

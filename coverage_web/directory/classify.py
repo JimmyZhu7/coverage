@@ -676,6 +676,21 @@ def extract_cohort(title: str) -> str:
     return m.group(0) if m else ""
 
 
+def cohort_from_provider_title(raw: dict | None) -> str:
+    """The programme year read from the provider's ORIGINAL title, for rows
+    whose display title lost it in cleaning.
+
+    Goldman's board is the whole caseload: its `jobTitle` leads with the year
+    ("2027 | APAC | Japan | Tokyo | Operations | New Analyst") and the
+    connector keeps only the human tail — correctly for display, but all 142
+    live GS campus rows were filed under "No Year Stated" while every one of
+    them stated its year in the payload we already store. Same posture as the
+    raw-title region fallback in reclassify: the provider's own routing, not
+    a guess, and the plausible-year window keeps requisition codes out."""
+    r = raw or {}
+    return extract_cohort(r.get("jobTitle") or r.get("title") or "")
+
+
 def extract_class_year(title: str) -> str:
     """The graduation year a posting EXPLICITLY states, else "".
 

@@ -224,6 +224,11 @@ _START_RXS = (
     # an untempered window read the publication date as the start.
     re.compile(r"start date(?:(?!date)[^.\n]){0,40}?((?:19|20)\d{2})",
                re.IGNORECASE),
+    # An insight event's stated date is when the thing takes place — the same
+    # fact Citi labels "Event Start Date" (already read by the anchor above);
+    # BofA writes "Event Date September 14, 2026" without the word.
+    re.compile(r"event date(?:(?!date)[^.\n]){0,40}?((?:19|20)\d{2})",
+               re.IGNORECASE),
     re.compile(r"prise de fonction[^.\n]{0,20}?\d{2}/\d{2}/((?:19|20)\d{2})",
                re.IGNORECASE),
     re.compile(r"inizio[^.\n]{0,40}?((?:19|20)\d{2})", re.IGNORECASE),
