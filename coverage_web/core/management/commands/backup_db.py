@@ -11,6 +11,28 @@ This command is the free half of the backup story; wiring it to a schedule is
 a deploy-time decision (cron, launchd, or the host's own snapshots). It exists
 now because the first real user's data deserves a restore path from day one —
 "the database is local" is an availability statement, not a durability one.
+
+RESTORE, verified 2026-08-08 against a live 3.0 MB dump. A backup that has
+never been restored is hope, not a backup, so the exact commands are here
+rather than left to be improvised during the emergency:
+
+    createdb coverage_restore_drill
+    pg_restore -d coverage_restore_drill --no-owner ~/Backups/coverage/<dump>
+    psql -d coverage_restore_drill -c "SELECT count(*) FROM contacts"
+    dropdb coverage_restore_drill        # when only drilling
+
+`--no-owner` matters: the dump records the role that made it, and without
+this pg_restore fails on any machine where that role does not exist — which
+is exactly the machine you are restoring onto after losing the first one.
+
+To restore FOR REAL, target a fresh database and repoint DATABASE_URL at it.
+Never pg_restore over the live database: the dump has no DROP statements
+without --clean, so it merges into whatever is already there and leaves a
+silent half-old, half-new mixture. Restore beside, verify counts, then swap.
+
+The drill compared all seven tables live-versus-restored (users 4, contacts
+170, touches 195, firms 119, opportunities 9,012, user_opportunities 16,
+product_events 116) — every one matched, and row contents survived intact.
 """
 
 from __future__ import annotations
