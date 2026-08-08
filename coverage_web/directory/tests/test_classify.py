@@ -268,7 +268,12 @@ def test_other_markets_file_under_other_and_tracked_markets_win_first(location, 
     ("Global", "global"),
     # Boundary guards on the new suffixes: a word continuing past the code
     # never matches.
-    ("Almaty, Ust-Kamenogorsk", ""),      # ", us" must not fire inside "Ust"
+    # Almaty became a real key on 2026-08-09, so this row now resolves to
+    # Kazakhstan for an honest reason. The ", us" boundary it was written to
+    # guard is asserted on the line below, on a string with no keyed city in
+    # it — a guard case has to be able to fail.
+    ("Almaty, Ust-Kamenogorsk", "other"),
+    ("Ust-Kamenogorsk", ""),              # ", us" must not fire inside "Ust"
     ("Valletta, Valencia District", ""),  # ", va" must not fire inside "Valencia"
 ])
 def test_second_pass_census_keys_and_guards(location, expected):
@@ -577,11 +582,66 @@ def test_a_derived_year_is_never_a_stated_one():
     ("SUMMERVILLE, SC", "us"),
     ("Olathe, KS", "us"),
     # The boundary still holds for the new codes.
-    ("Almaty, Akmola Region", ""),   # ", ak" must not fire inside "Akmola"
+    ("Tbilisi, Akmola Region", ""),  # ", ak" must not fire inside "Akmola"
     (", Scotland", "eu"),            # ", sc" must not fire inside "Scotland"
     # Deliberately still unresolved: Bristol is a real city in England and in
     # Tennessee, Virginia and Connecticut, and the field says only "Bristol".
     ("Bristol", ""),
 ])
 def test_region_census_20260809(location, expected):
+    assert normalize_region(location) == expected
+
+
+# ---------------------------------------------------------------------------
+# The non-campus census (2026-08-09). Lifting the Workday cap to 1,500 grew
+# the whole open set to 15,234 rows and brought a long tail of geography with
+# it — banks file by BUILDING, and Workday's job slugs strip accents.
+#
+# As with the campus census, the collisions are the point: Europe is tested
+# before America, so a European city that is also an American one has to go
+# in the exact-match table. "Florence" was caught here — as a substring it
+# sent Florence, South Carolina to Italy.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("location,expected", [
+    # Filed by building, never by city.
+    ("One Island East", "hk"),                   # Taikoo Place tower, 110 rows
+    ("Kwun Tong", "hk"),
+    ("The Center", "hk"),                        # whole-field only
+    ("the center of excellence team", ""),       # ...because of this
+    ("Building 400-Whippany Campus, Jefferson Park", "us"),
+    ("Madison Ave Corp", "us"),
+    ("Northampton, Barclays Campus, Pavilion Drive", "eu"),
+    ("Cannon Street Office", "eu"),
+    ("Manchester Spinningfields", "eu"),         # not Manchester, New Hampshire
+    ("Dalian Office", "cn"),
+    # Accent-stripped Workday slugs: the accented keys cannot see these.
+    ("Montral Qubec", "other"),
+    ("Saint Lonard Qubec", "other"),
+    ("Zrich", "eu"),
+    ("Genève", "eu"),
+    # Canada, comma-prefixed so Ontario, California stays American.
+    ("Brampton, Ontario", "other"),
+    ("Ontario, CA", "us"),
+    ("Surrey, British Columbia", "other"),
+    ("Surrey, England", "eu"),
+    ("Whitehorse, Yukon", "other"),
+    # Latin America, South and Southeast Asia.
+    ("Panamá City", "other"), ("CDMX", "other"), ("Caracas", "other"),
+    ("Vikhroli", "other"), ("Cebu City", "other"), ("Melaka", "other"),
+    ("Astana", "other"),
+    # More spelled-out states, from slugs with no comma to key on.
+    ("Southfield Michigan", "us"), ("Portland, Oregon", "us"),
+    ("Bear, Delaware", "us"), ("MINNEAPOLIS, MN", "us"),
+    # ", or" is deliberately NOT a state code: the boundary cannot save it,
+    # because a space follows the "or" either way.
+    ("London, or Paris", "eu"),
+    # Whole-field only, each with a real American twin.
+    ("Florence", "eu"), ("Florence, SC", "us"),
+    ("Nassau", "other"),
+    # Still refused outright: both readings are common in this industry.
+    ("Naples", ""), ("Douglas", ""),
+])
+def test_non_campus_region_census_20260809(location, expected):
     assert normalize_region(location) == expected

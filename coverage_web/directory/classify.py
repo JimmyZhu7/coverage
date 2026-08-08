@@ -103,7 +103,13 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # board emits as the ENTIRE location field (", HKG"). Comma-prefixed so a
     # word containing the trigram can't fire; ", rou" also sits inside a
     # hypothetical ", Rouen" — France, so the same eu answer either way.
-    ("hk", ("hong kong", "hongkong", "香港", "hksar", ", hkg")),
+    ("hk", ("hong kong", "hongkong", "香港", "hksar", ", hkg",
+            # 2026-08-09 non-campus census: banks file HK roles by BUILDING,
+            # never by city. One Island East is the Taikoo Place tower (110
+            # rows), Kwun Tong is a district. "The Center" is also a Hong
+            # Kong tower but far too generic as a substring, so it lives in
+            # the exact-match table instead.
+            "one island east", "kwun tong")),
     ("sg", ("singapore", "新加坡")),
     ("eu", (
         "london", "united kingdom", "u.k.", " uk", "england", "scotland",
@@ -137,6 +143,28 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # because the ASCII "zurich" key above cannot see it.
         "zürich", "treviso", "neuilly", "sarajevo", "bratislava",
         "ruggell", "saint helier", "saint peter port", "rubano", "lublin",
+        # 2026-08-09 non-campus census. "wrocław" is the Polish spelling the
+        # ASCII "wroclaw" key cannot see; "pavilion drive" is Barclays'
+        # Northampton campus, keyed on the street because Northampton,
+        # Massachusetts is also real.
+        "barcelona", "boadilla del monte", "nicosia", "katowice", "wrocław",
+        "marseille", "bologna", "knutsford", "radbroke", "edinburgh",
+        "mönchengladbach", "pavilion drive",
+        # Workday's job slugs strip accents, so the accented keys above
+        # cannot see their own cities: "Zürich" arrives as "Zrich". Keyed on
+        # the mangled spelling as well — it collides with nothing.
+        "zrich", "mnchengladbach",
+        # Offices named without their city, each unique to one: Barclays'
+        # Cannon Street (London) and Kingswood (Surrey), Deutsche's
+        # Kronberg, and Spinningfields, which is Manchester's financial
+        # district and unlike "Manchester" cannot be New Hampshire.
+        "cannon street", "kingswood", "kronberg", "spinningfields", "ghent",
+        # The campus tail, 2026-08-09. "genève" is the accented spelling the
+        # ASCII "geneva" key misses. Dnipro and Kishinev are named where
+        # only their countries were keyed.
+        "genève", "basel", "padua", "padova", "firenze",
+        "palma de mallorca", "zagreb", "croatia", "kishinev", "chisinau",
+        "dnipro",
     )),
     ("us", (
         "united states", "u.s.", "usa", "new york", ", ny", "jersey city",
@@ -172,6 +200,18 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # 2026-08-09: "Vineland, New Jersey" spells the state out, which the
         # ", NJ" suffix pass cannot see; Anchorage arrives bare.
         "new jersey", "anchorage",
+        # 2026-08-09 non-campus census: American sites filed by campus or
+        # street. Whippany is Barclays' New Jersey campus, "Madison Ave" the
+        # Manhattan address. Every Jacksonville and Saint Louis in the set
+        # is American whichever state it is in.
+        "whippany", "madison ave", "jacksonville", "saint louis",
+        "south carolina",
+        # Spelled-out states from Workday slugs, which write "MINNEAPOLIS MN"
+        # with no comma for the suffix rule to key on. "oregon" is spelled
+        # out deliberately: ", or" as a code would fire inside the ordinary
+        # phrase "London, or Paris", which the boundary cannot catch because
+        # a space follows either way.
+        "michigan", "nevada", "utah", "idaho", "oregon", "iowa", "delaware",
     )),
     # After hk so "香港" never falls through to the mainland bucket.
     ("cn", (
@@ -181,7 +221,7 @@ _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
         # Bare "China" as the whole location string (two live rows). Safe at
         # this position: any US-city-plus-"China Basin"-style address hits
         # the US tier first, which runs before this one.
-        "china",
+        "china", "dalian",
     )),
     ("jp", ("tokyo", "japan", "日本", "東京", ", jpn")),
 )
@@ -236,6 +276,23 @@ _OTHER_MARKET_KEYS: tuple[str, ...] = (
     "makati", "jaipur", "ipoh", "penang", "johor bahru", "kuching",
     "bermuda", "ulaanbaatar", "tashkent", "bandar seri begawan",
     "yogyakarta", "guadalajara",
+    # 2026-08-09 non-campus census. Canada is comma-prefixed on purpose:
+    # bare "ontario" would take Ontario, California, and the tracked
+    # American tier runs BEFORE this one only when the row says ", CA".
+    ", ontario", ", alberta", ", british columbia", ", manitoba",
+    ", québec", ", quebec", ", canada",
+    # Latin America.
+    "panamá", "cdmx", "managua", "asunción", "caracas", "santo domingo",
+    "monterrey",
+    # India and the Philippines, filed by office park as HK is by tower.
+    "oberoi garden city", "vikhroli", "indira nagar", "pasig", "iloilo",
+    # Accent-stripped Workday slugs again: "Montral Qubec", "Saint Lonard
+    # Qubec". "qubec" and "montral" are misspellings that collide with
+    # nothing, which is exactly what makes them safe keys.
+    "qubec", "montral", ", yukon", "montevideo",
+    # Campus tail: cities in markets already keyed only by country name
+    # (Kazakhstan, Ecuador) plus two more Southeast Asian offices.
+    "astana", "almaty", "atyrau", "guayaquil", "cebu", "melaka", "surabaya",
 )
 
 # Placeless by design. Checked LAST, after every real market: "Virtual —
@@ -293,8 +350,8 @@ _STATE_SUFFIX = re.compile(
     # ak/sc/ks joined 2026-08-09 (Anchorage AK, Summerville SC, Olathe KS).
     # The boundary keeps them honest: ", Akron" and ", Scotland" cannot fire
     # because a letter follows the code.
-    r",\s*(?:ny|il|ma|ca|wa|tx|ga|nc|fl|tn|pa|co|md|ct|nj|va|ak|sc|ks|usa?)"
-    r"(?![a-z])",
+    r",\s*(?:ny|il|ma|ca|wa|tx|ga|nc|fl|tn|pa|co|md|ct|nj|va|ak|sc|ks|az|mo"
+    r"|mn|ia|nv|ut|id|mi|usa?)(?![a-z])",
     re.IGNORECASE)
 _US_STATE_KEYS = frozenset({", ny", ", il", ", ma", ", ca", ", wa", ", tx",
                             ", ga", ", nc", ", fl", ", tn", ", pa", ", co",
@@ -312,6 +369,22 @@ _US_STATE_KEYS = frozenset({", ny", ", il", ", ma", ", ca", ", wa", ", tx",
 _EXACT_CITY: dict[str, str] = {
     "rome": "eu", "verona": "eu", "trento": "eu", "palermo": "eu",
     "bern": "eu", "lucerne": "eu", "belgrade": "eu",
+    # Valencia is a Spanish city and a Californian one; "the center" is a
+    # Hong Kong tower and an ordinary English phrase. Both are answerable
+    # only when they are the whole field.
+    "valencia": "eu", "the center": "hk",
+    # Nassau in the Bahamas, and Nassau County, New York. Whole-field only.
+    # ("Naples", bare "San Jose" and "Lima" stay out entirely — Naples,
+    # Florida, San Jose, California and Lima, Ohio are all common enough in
+    # this industry that even the whole field is not decisive. Lima was an
+    # existing deliberate refusal; five live rows are not a reason to
+    # overturn it.)
+    "nassau": "other",
+    # Florence, South Carolina is a real posting location for American
+    # banks, and Europe is tested before America, so the Italian city can
+    # only be read from the whole field. ("firenze" stays a substring — no
+    # American city answers to it.)
+    "florence": "eu",
 }
 
 
