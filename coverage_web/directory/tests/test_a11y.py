@@ -177,3 +177,42 @@ def test_the_two_dark_blocks_never_drift_apart():
     drift = {k: (media[k], explicit[k]) for k in media
              if k in explicit and media[k] != explicit[k]}
     assert drift == {}, drift
+
+
+def test_every_text_entry_input_type_is_styled():
+    """A widget type absent from the forms selector renders as raw browser
+    chrome — grey square border, Arial — between two designed fields. That
+    shipped for input[type=url] (Contact.linkedin) and the calendar's date
+    and time pickers. The selector must name every type the product renders,
+    so this reads the form templates for the types actually in use and
+    asserts the stylesheet covers each one."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    css = (root / "static" / "css" / "coverage.css").read_text()
+    styled = set(re.findall(r'input\[type="([a-z-]+)"\]', css))
+
+    used = set()
+    for tpl in (root / "templates").rglob("*.html"):
+        used |= set(re.findall(r'<input[^>]*type="([a-z-]+)"', tpl.read_text()))
+    # Widget types set explicitly on a form widget.
+    for form in root.rglob("forms.py"):
+        used |= set(re.findall(r'"type":\s*"([a-z-]+)"', form.read_text()))
+    # Types Django derives from the MODEL field with no mention anywhere in
+    # templates or forms. This is the branch that matters: the url input that
+    # shipped unstyled came from `linkedin = models.URLField(...)`, so a scan
+    # of markup alone reports "url is never used" and the guard passes over
+    # the very bug it exists to catch. Verified by deleting the url selector
+    # and confirming this test goes red.
+    _FIELD_TO_TYPE = {"URLField": "url", "EmailField": "email",
+                      "DateField": "date", "TimeField": "time",
+                      "DateTimeField": "datetime-local"}
+    for mod in root.rglob("models.py"):
+        src = mod.read_text()
+        for field, itype in _FIELD_TO_TYPE.items():
+            # DateTimeField on a model is usually auto_now/auto_now_add and
+            # never rendered; only count fields a user could edit.
+            if re.search(rf"models\.{field}\((?![^)]*auto_now)", src):
+                used.add(itype)
+
+    ignore = {"hidden", "submit", "button", "image", "reset", "checkbox", "radio"}
+    missing = sorted((used - ignore) - styled)
+    assert missing == [], f"input types rendered but never styled: {missing}"

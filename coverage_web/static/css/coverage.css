@@ -927,8 +927,19 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
 
 /* ---- 7. Forms ------------------------------------------------------------- */
 label { display: block; font-weight: var(--w-med); font-size: var(--fs-s); margin: var(--s4) 0 var(--s1); }
+/* Every text-entry type, not a subset. The list used to stop at `file`, so
+   input[type=url] (Contact.linkedin), [type=date] (the calendar's `day`,
+   My Applications' tracked_date) and [type=time] (the calendar's `at`)
+   inherited nothing — grey square browser chrome in Arial, sitting between
+   two properly styled fields. Adding a widget type to a form should not
+   require remembering to come back here, so this now names the whole family
+   including the ones nothing renders yet (tel, the datetime pair, month,
+   week): the cost of an unused selector is zero, the cost of a missing one
+   is a raw control in the middle of a designed form. */
 input[type="text"], input[type="email"], input[type="password"], input[type="number"],
-input[type="search"], input[type="file"], select, textarea {
+input[type="search"], input[type="file"], input[type="url"], input[type="tel"],
+input[type="date"], input[type="time"], input[type="datetime-local"],
+input[type="month"], input[type="week"], select, textarea {
   width: 100%; max-width: 100%;
   font: var(--w-reg) var(--fs-m)/1.4 var(--font-ui);
   color: var(--ink); background: var(--surface);
