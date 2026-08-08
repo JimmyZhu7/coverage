@@ -2020,6 +2020,12 @@ def _stage_card(uo, *, today) -> dict:
         "opportunity_id": o.id,
         "firm_name": o.firm.name,
         "title": o.title,
+        # The disambiguator. Firms post the same title per city with the city
+        # only in `location` — the first populated-funnel walkthrough had two
+        # "Quantitative Intern (Summer 2027)" cards reading as a duplicate
+        # save, and the same-titled BofA forum sitting in Applied AND
+        # Interviewing reading as one application in two stages at once.
+        "location": o.location,
         "url": o.url,
         "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
         "reported": deadline_provenance(o),
