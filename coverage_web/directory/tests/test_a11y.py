@@ -216,3 +216,48 @@ def test_every_text_entry_input_type_is_styled():
     ignore = {"hidden", "submit", "button", "image", "reset", "checkbox", "radio"}
     missing = sorted((used - ignore) - styled)
     assert missing == [], f"input types rendered but never styled: {missing}"
+
+
+_SECTION_LABELS = ("strip-title", "rail-title", "apps-lenses-eyebrow",
+                   "settings-nav-title", "cad-rail-title")
+
+
+def test_the_section_label_has_exactly_one_definition():
+    """Five classes name the same quiet uppercase micro-label. They were
+    written independently in four files and drifted — letter-spacing across
+    0.06/0.07/0.08em, colour between ink-2 and ink-3 — so the same label
+    looked subtly different on every page and there was nowhere to fix it
+    once. coverage.css §6b owns the type now; a page may still add what is
+    genuinely local (a flex row, an indent, a mono face) but must not
+    restate the shared properties."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    shared = {"font-size", "letter-spacing", "text-transform", "font-weight", "color"}
+
+    offenders = []
+    for tpl in (root / "templates").rglob("*.html"):
+        text = tpl.read_text()
+        for cls in _SECTION_LABELS:
+            # Each declaration block for the class in this template.
+            for m in re.finditer(rf"\.{re.escape(cls)}\s*{{([^}}]*)}}", text):
+                props = {d.split(":")[0].strip()
+                         for d in m.group(1).split(";") if ":" in d}
+                clash = props & shared
+                if clash:
+                    offenders.append(f"{tpl.name}: .{cls} restates {sorted(clash)}")
+    assert offenders == [], offenders
+
+
+def test_only_section_headers_wear_the_rule():
+    """The ruled underline is the identity's signature and is deliberately
+    NOT universal: it marks labels that head a section. Settings' nav group
+    label names a menu and the cadence caption names a diagram, so both take
+    the type and skip the rule. A signature worn everywhere stops being one."""
+    css = (pathlib.Path(__file__).resolve().parents[2]
+           / "static" / "css" / "coverage.css").read_text()
+    ruled = re.search(r"\n([^\n]*)\s*{\s*\n?\s*position: relative; padding-bottom: 7px;", css)
+    assert ruled, "the ruled-label selector list is gone"
+    selector = ruled.group(1)
+    for cls in ("strip-title", "rail-title", "apps-lenses-eyebrow"):
+        assert cls in selector, f".{cls} should head a section and carry the rule"
+    for cls in ("settings-nav-title", "cad-rail-title"):
+        assert cls not in selector, f".{cls} labels a menu/diagram and must skip the rule"

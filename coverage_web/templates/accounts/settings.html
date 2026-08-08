@@ -28,9 +28,9 @@
      column, which the reader works out instantly; the group headers below
      are what they actually navigate by, so the hierarchy now runs
      title < link < group rather than title == group as before. */
-  .settings-nav-title { font-size: var(--fs-micro); text-transform: uppercase;
-    letter-spacing: 0.07em; color: var(--ink-3); font-weight: var(--w-med);
-    margin: 0 0 var(--s3); padding-left: var(--s3); }
+  /* Shared section label (coverage.css §6b), minus the rule — it names a nav
+     group, not a section. Only the indent is local. */
+  .settings-nav-title { padding-left: var(--s3); }
 
   /* Group headers. Were byte-identical to the title above — same size,
      colour and weight — so four section breaks read as four more grey
@@ -167,9 +167,9 @@
   .cad-viz { display: grid; gap: var(--s5); margin-bottom: var(--s5);
     padding: var(--s5) var(--s5) var(--s4);
     border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--paper); }
-  .cad-rail-title { margin: 0 0 30px; font-family: var(--font-mono);
-    font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--ink-3); }
+  /* Shared section label (coverage.css §6b), minus the rule — it captions a
+     diagram. The mono face and the 30px drop to clear the track are local. */
+  .cad-rail-title { margin: 0 0 30px; font-family: var(--font-mono); }
   /* The track is flat and quiet; the SPAN is what carries colour. A gradient
      across the whole rail said the clock was running everywhere, when the
      thing worth seeing is the one stretch Coverage is counting: nothing

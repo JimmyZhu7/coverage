@@ -72,11 +72,8 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      the pagehead's drawn dash continued into the page body, which is why the
      segment is the same 18px. Static on purpose — the rail cards already
      rise in, and a signature that animates everywhere stops being one. */
-  .strip-title { font-size: var(--fs-micro); color: var(--ink-3); margin: 0 0 var(--s3);
-    text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--w-med);
-    position: relative; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
-  .strip-title::after { content: ""; position: absolute; left: 0; bottom: -1px;
-    width: 18px; height: 2px; border-radius: 999px; background: var(--accent); }
+  /* .strip-title: the shared section label (coverage.css §6b). Nothing to
+     add here — it needs no page-specific behaviour. */
 
   /* Sits under a region tab's Contacts header: quiet, but it has to be read
      before the list below is trusted, so it keeps the title's top margin. */
@@ -240,12 +237,8 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   .rail-card { background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s5); box-shadow: var(--shadow-1); }
-  /* Same ruled treatment as .strip-title above — one signature, one form. */
-  .rail-title { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--ink-3); margin: 0 0 var(--s3); font-weight: var(--w-med);
-    position: relative; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
-  .rail-title::after { content: ""; position: absolute; left: 0; bottom: -1px;
-    width: 18px; height: 2px; border-radius: 999px; background: var(--accent); }
+  /* .rail-title: the shared section label (coverage.css §6b), plus the flex
+     row below that lets a "see all" link share its line. */
   .rail-empty { color: var(--ink-3); font-size: var(--fs-s); margin: 0; }
 
   /* Activity feed. */

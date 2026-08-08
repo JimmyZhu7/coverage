@@ -925,6 +925,43 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
 .btn[aria-disabled="true"], .btn:disabled { opacity: 0.5; pointer-events: none; }
 .actions { margin-top: var(--s5); display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
 
+/* ---- 6b. The section label -------------------------------------------------
+   One quiet uppercase micro-label, used wherever a block of content needs
+   naming. It had been written five separate times across four files —
+   .strip-title, .rail-title, .apps-lenses-eyebrow, .settings-nav-title,
+   .cad-rail-title — with the letter-spacing drifting across 0.06/0.07/0.08em
+   and the colour between ink-2 and ink-3. Same label, subtly different on
+   every page, and no single place to change it.
+
+   THE RULE underneath is the identity's signature: a ledger's column headings
+   sit on a rule, so ours do too, with the pagehead's drawn dash continued at
+   the same 18px. It belongs only to labels that HEAD A SECTION. Settings' nav
+   group labels and the cadence diagram's caption take the type and skip the
+   rule — they name a menu and a drawing, not a section, and a signature worn
+   everywhere stops being one.
+
+   Declared here rather than per-template so the page-level <style> blocks
+   (which load after this file) only have to state what genuinely differs:
+   the rail title's flex row for its "All" link, the nav label's indent, the
+   cadence caption's mono face and 30px drop.
+   -------------------------------------------------------------------------- */
+.sec-label, .strip-title, .rail-title, .apps-lenses-eyebrow,
+.settings-nav-title, .cad-rail-title {
+  margin: 0 0 var(--s3);
+  font-size: var(--fs-micro); font-weight: var(--w-med);
+  text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--ink-3);
+}
+.sec-label, .strip-title, .rail-title, .apps-lenses-eyebrow {
+  position: relative; padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+}
+.sec-label::after, .strip-title::after, .rail-title::after,
+.apps-lenses-eyebrow::after {
+  content: ""; position: absolute; left: 0; bottom: -1px;
+  width: 18px; height: 2px; border-radius: 999px; background: var(--accent);
+}
+
 /* ---- 7. Forms ------------------------------------------------------------- */
 label { display: block; font-weight: var(--w-med); font-size: var(--fs-s); margin: var(--s4) 0 var(--s1); }
 /* Every text-entry type, not a subset. The list used to stop at `file`, so
