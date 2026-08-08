@@ -333,8 +333,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* A live deadline count earns the warning colour; a zero is just a zero. */
   .ribbon-stat.is-urgent .ribbon-num { color: var(--stale-t); }
   .ribbon-stat.is-urgent::after { background: var(--stale-t); }
-  /* The funnel is a sentence, not a measurement — it sits at the quiet end. */
+  /* The funnel is a sentence, not a measurement — it sits at the quiet end.
+     13rem is sized for the populated label ("Submitted › Interview › Offer").
+     Empty, that made the one cell with no number the WIDEST on the strip,
+     which read as a broken cell rather than a quiet one. The empty variant
+     takes the same basis as its numbered neighbours. */
   .ribbon-funnel { flex: 1 1 13rem; justify-content: center; }
+  .ribbon-funnel.is-empty { flex: 1 1 11rem; }
   .ribbon-funnel .ribbon-num { font-size: var(--fs-l); }
 
   @media (max-width: 700px) {
