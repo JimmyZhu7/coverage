@@ -590,12 +590,24 @@ main { min-height: 60vh; }
   .pagehead-title, .pagehead-sub, .pagehead-actions { animation: none; }
 }
 
-/* Scope tabs sit on the page's left rail, not centred. `.standalone` gets
-   `margin: auto` from the shared rule so it can centre under a centred
-   .page-head; under the left-aligned .pagehead that auto-centring was the
-   one element on each page that broke the rail. */
-.pagehead + .subnav.scope-tabs.standalone,
-.page .subnav.scope-tabs.standalone { margin-left: 0; margin-right: 0; }
+/* Scope tabs are CENTRED on the page (owner's call, 2026-08-08), which
+   reverses the left-rail rule that used to live here.
+
+   The reasoning it replaces was real and is worth keeping visible: every
+   other element on these pages — the pagehead, the section labels, the cards
+   — starts at the same left edge, and this bar is the one thing that now
+   does not. That was the argument for pinning it left. Weighed against it:
+   the bar is a short pill floating in a wide column, and left-pinned it read
+   as unfinished rather than aligned.
+
+   Both `.standalone` bars move together — Network's region tabs and My
+   Applications' Browse/My-Applications toggle are the same component, and
+   centring one while its twin stayed left would read as a bug. The
+   Opportunities toggle is unaffected: it lives inside the pagehead now and
+   carries no `.standalone`.
+
+   Centring is the DEFAULT from the `margin: auto` further down; this block
+   only has to stop overriding it. */
 
 /* v3: page heads are centered and breathe — the rule below them is gone,
    whitespace does the separating now. */

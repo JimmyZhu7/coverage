@@ -56,9 +56,8 @@ def test_the_monogram_keeps_its_contrast_headroom(client):
     the pair measured 4.11:1 on some hues, under the 4.5 that text needs;
     24% clears it across the wheel. A future tweak that raises L again should
     fail here rather than on a user's screen."""
-    from pathlib import Path
-
-    css = Path("coverage_web/templates/directory/_styles.html").read_text()
+    root = pathlib.Path(__file__).resolve().parents[2]
+    css = (root / "templates" / "directory" / "_styles.html").read_text()
     m = re.search(r"\.firmcol-logo \{.*?color: hsl\(var\(--hue, 210\) 55% (\d+)%\)", css, re.S)
     assert m, "the monogram rule moved — re-measure before changing it"
     assert int(m.group(1)) <= 24, "lightness above 24% drops the glyph under 4.5:1"
@@ -69,9 +68,8 @@ def test_the_monogram_keeps_its_contrast_headroom(client):
 # ---------------------------------------------------------------------------
 
 def test_both_themes_are_defined_and_system_preference_leads():
-    from pathlib import Path
-
-    css = Path("coverage_web/static/css/coverage.css").read_text()
+    css = (pathlib.Path(__file__).resolve().parents[2]
+           / "static" / "css" / "coverage.css").read_text()
     assert "@media (prefers-color-scheme: dark)" in css, "the OS decides by default"
     assert ':root:not([data-theme="light"])' in css, "an explicit light choice wins"
     assert ':root[data-theme="dark"]' in css, "an explicit dark choice wins"
@@ -82,9 +80,8 @@ def test_text_on_an_accent_fill_flips_with_the_palette():
     over dark mode's light blue. Every such pairing goes through
     --on-accent, so a future `color: #fff` on an accent fill is a
     regression this catches."""
-    from pathlib import Path
-
-    css = Path("coverage_web/static/css/coverage.css").read_text()
+    css = (pathlib.Path(__file__).resolve().parents[2]
+           / "static" / "css" / "coverage.css").read_text()
     for rule in (".btn-primary {", ".site-nav a.active {"):
         i = css.index(rule)
         block = css[i:css.index("}", i)]
