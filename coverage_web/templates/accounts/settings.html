@@ -196,7 +196,11 @@
      JS adds and drops — never on a loop, because a permanent shimmer in a
      settings form is a distraction with no information in it. */
   .cad-fill::after { content: ""; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent);
+    /* --ink, not white: a 75%-white sheen is invisible on a light rail and
+       a glaring streak on a dark one. Derived from the ink so it reads as a
+       highlight in both themes. */
+    background: linear-gradient(90deg, transparent,
+      color-mix(in srgb, var(--ink) 45%, transparent), transparent);
     transform: translateX(-100%); }
   .cad-rail.is-live .cad-fill::after { animation: cad-sheen 620ms ease-out; }
   @keyframes cad-sheen { to { transform: translateX(100%); } }
@@ -294,7 +298,7 @@
     transition: background var(--t-fast), color var(--t-fast); }
   .theme-opt + .theme-opt { border-left: 1px solid var(--line); }
   .theme-opt:hover { background: var(--accent-soft); color: var(--accent-ink); }
-  .theme-opt.is-on { background: var(--accent); color: #fff; }
+  .theme-opt.is-on { background: var(--accent); color: var(--on-accent); }
 </style>
 {% endblock %}
 

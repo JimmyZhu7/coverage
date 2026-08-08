@@ -7,7 +7,7 @@ from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
-from directory.classify import TARGET_BUCKETS
+from directory.classify import TARGET_BUCKETS, TRACKED_REGIONS
 from directory.models import Firm, Opportunity
 
 
@@ -44,17 +44,28 @@ def home(request):
 
 
 def pricing(request):
-    """Pricing page. One real tier (free) and one honest preview (Pro), with
-    the same live counts the landing uses so the free column states exactly
-    what it holds."""
+    """Pricing page. One real tier (free) and one honest preview (Pro).
+
+    Every number in the Free column is measured here rather than written into
+    the template, because a pricing page's claims are the ones most likely to
+    go stale and least likely to be re-read: the page spent this cycle
+    advertising "four markets" while the board had tracked six for weeks.
+
+    `firm_count` is firms WITH AN OPEN ROLE, not every firm on file. 119 firms
+    are configured; 72 are actually hiring today, and the free plan should
+    promise what a visitor will find rather than the size of the catalogue.
+    """
+    campus = Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
     return render(
         request,
         "core/pricing.html",
         {
-            "open_count": Opportunity.objects.filter(
-                status="open", bucket__in=TARGET_BUCKETS
-            ).count(),
-            "firm_count": Firm.objects.count(),
+            "open_count": campus.count(),
+            "firm_count": campus.values("firm_id").distinct().count(),
+            "market_count": len(TRACKED_REGIONS),
+            "read_count": campus.exclude(raw__detail_text=None).count(),
+            "sponsorship_count": campus.exclude(
+                sponsorship__in=["", "unknown"]).count(),
         },
     )
 

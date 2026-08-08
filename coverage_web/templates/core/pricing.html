@@ -24,7 +24,7 @@
   .seg label:hover { color: var(--ink); background: var(--accent-soft); }
   #aud-ind:checked ~ .seg label[for="aud-ind"],
   #aud-team:checked ~ .seg label[for="aud-team"] {
-    background: var(--accent); color: #fff; }
+    background: var(--accent); color: var(--on-accent); }
   .aud-panel { display: none; }
   #aud-ind:checked ~ .panel-ind { display: block; }
   #aud-team:checked ~ .panel-team { display: block; }
@@ -39,7 +39,8 @@
     box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-2); }
   .price-card.featured::before { content: ""; position: absolute; inset: 0;
     pointer-events: none;
-    background: radial-gradient(120% 130% at 100% 0%, rgba(31, 78, 121, 0.06), transparent 60%); }
+    background: radial-gradient(120% 130% at 100% 0%,
+      color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%); }
   .plan-badge { position: absolute; top: var(--s4); right: var(--s4);
     font-family: var(--font-mono); font-size: var(--fs-micro);
     text-transform: uppercase; letter-spacing: 0.08em;
@@ -60,10 +61,19 @@
     margin: 0 0 var(--s2); }
   .plan-features { list-style: none; margin: 0 0 var(--s5); padding: 0;
     display: flex; flex-direction: column; gap: var(--s2); flex: 1; }
-  .plan-features li { display: flex; gap: var(--s2); align-items: baseline;
-    font-size: var(--fs-s); color: var(--ink-2); }
-  .plan-features li::before { content: ""; flex: none; width: 14px; height: 14px;
-    border-radius: 50%; transform: translateY(2px);
+  /* The bullet is positioned, not a flex sibling. As `display: flex` the row
+     had a gap between EVERY child, so the moment a feature line contained a
+     <b> — which the live counts now do — an 8px hole opened on each side of
+     the number: "1183   live campus roles across   72   firms". Absolute
+     positioning lets the text be ordinary inline content again, which is
+     what it always was. */
+  .plan-features li { position: relative; padding-left: 22px;
+    font-size: var(--fs-s); color: var(--ink-2); line-height: 1.5; }
+  .plan-features li b { color: var(--ink); font-weight: var(--w-med);
+    font-variant-numeric: tabular-nums; }
+  .plan-features li::before { content: ""; position: absolute; left: 0; top: 4px;
+    width: 14px; height: 14px;
+    border-radius: 50%;
     background:
       no-repeat center / 8px url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M1.5 5.5l2.2 2.2L8.5 2.5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'),
       var(--accent); }
@@ -117,10 +127,21 @@
           <h2 class="plan-name">Free</h2>
           <p class="plan-tagline">The full product. No card, no trial clock.</p>
           <p class="plan-price"><span class="amount">$0</span><span class="per">forever, for what's listed here</span></p>
+          {% comment %}
+          Every figure here is measured in core.views.pricing, never typed.
+          This list spent a cycle advertising "four markets" while the board
+          had tracked six for weeks — a pricing page's claims are the ones
+          most likely to go stale and least likely to be re-read.
+          {% endcomment %}
           <ul class="plan-features">
-            <li>{{ open_count }} live campus roles across {{ firm_count }} firms</li>
-            <li>Deadline fuses, rolling markers, confidence labels</li>
-            <li>Filters across four markets and six verticals</li>
+            <li><b>{{ open_count }}</b> live campus roles across <b>{{ firm_count }}</b> firms hiring today</li>
+            <li>Filters across <b>{{ market_count }}</b> markets and six verticals</li>
+            <li><b>{{ read_count }}</b> postings read in full, so deadlines and
+              requirements come from the posting rather than the board's summary</li>
+            <li>Eligibility checked against your class year and visa, with
+              <b>{{ sponsorship_count }}</b> roles answering sponsorship outright</li>
+            <li>Deadline fuses, rolling markers, and a label on every date we
+              inferred rather than were told</li>
             <li>The Today queue with one-click logging</li>
             <li>The Network board: warmth lanes and firm tiers</li>
             <li>Email capture by BCC</li>

@@ -89,7 +89,8 @@
     background: var(--surface); box-shadow: var(--shadow-2);
     padding: var(--s5); overflow: hidden; position: relative; }
   .vig::before { content: ""; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(120% 130% at 100% 0%, rgba(31, 78, 121, 0.05), transparent 60%); }
+    background: radial-gradient(120% 130% at 100% 0%,
+      color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%); }
   .vig-label { font-family: var(--font-mono); font-size: var(--fs-micro);
     text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3);
     margin: 0 0 var(--s3); }
@@ -125,7 +126,7 @@
   .v-act .why { color: var(--ink-3); font-size: 11px; }
   .v-act .go { flex: none; font-size: 11px; font-weight: var(--w-med);
     border-radius: 999px; padding: 3px 10px; background: var(--accent);
-    color: #fff; }
+    color: var(--on-accent); }
   .v-ring { flex: none; width: 92px; height: 92px; border-radius: 50%;
     background: conic-gradient(var(--accent) 0deg 252deg, var(--line) 252deg 360deg);
     display: flex; align-items: center; justify-content: center; }
@@ -178,7 +179,8 @@
   .cta-band { text-align: center; margin: var(--s8) 0 var(--s5);
     padding: var(--s7) var(--s5);
     background:
-      radial-gradient(110% 160% at 50% -40%, rgba(31, 78, 121, 0.10), transparent 60%),
+      radial-gradient(110% 160% at 50% -40%,
+        color-mix(in srgb, var(--accent) 11%, transparent), transparent 60%),
       var(--surface);
     border: 1px solid var(--line); border-radius: var(--r-panel);
     box-shadow: var(--shadow-1); }
@@ -220,7 +222,7 @@
     <span class="kin-hero-icon">{% include "_icon.html" with name="home" %}</span>
     <p class="kin-hero-eyebrow">Campus recruiting · finance &amp; consulting</p>
     <h1 class="kin-hero-title">Everyone tracks deadlines. Nobody tracks the relationship.</h1>
-    <p class="kin-hero-sub">Live roles across four markets, plus a private CRM for the people behind them.</p>
+    <p class="kin-hero-sub">Live roles across six markets, plus a private CRM for the people behind them.</p>
     <div class="kin-hero-stats">
       <div class="kin-hero-stat"><span class="dash-num">{{ open_count|default:"0" }}</span><span class="dash-lbl">Live Campus Roles</span></div>
       <div class="kin-hero-stat"><span class="dash-num">{{ firm_count|default:"0" }}</span><span class="dash-lbl">Firms Tracked</span></div>

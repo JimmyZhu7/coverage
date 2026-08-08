@@ -7,7 +7,8 @@ labelled rule between social and email sign-in. Shared by login and signup.{% en
     padding: var(--s6) var(--s6) var(--s5); position: relative; overflow: hidden;
     animation: rise-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both; }
   .auth-card::before { content: ""; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(120% 130% at 100% 0%, rgba(31, 78, 121, 0.06), transparent 60%); }
+    background: radial-gradient(120% 130% at 100% 0%,
+      color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%); }
   .auth-title { font: var(--w-black) 30px/1.1 var(--font-display);
     letter-spacing: -0.01em; margin: 0 0 var(--s2); }
   .auth-sub { color: var(--ink-2); font-size: var(--fs-s); margin: 0 0 var(--s5); }

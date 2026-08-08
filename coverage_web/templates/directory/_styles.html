@@ -251,7 +251,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      Its own tinted band now: still quiet (an offer, not a nag), but visibly
      a different KIND of line from the ones reporting what is hidden. */
   .scope-line--act { display: flex; align-items: center; gap: var(--s3);
-    flex-wrap: wrap; margin: var(--s3) 0 var(--s2);
+    flex-wrap: wrap; margin: 0 0 var(--s3);
     padding: 8px var(--s4) 8px var(--s3);
     background: var(--accent-soft); border: 1px solid var(--accent-line);
     border-left: 3px solid var(--accent); border-radius: 10px;
@@ -330,7 +330,13 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      "premium", no lock, no "unlock". The everything mode is free; it is just
      noisier data. They live inside the swap target so their numbers refresh
      with the filters. */
-  .scope-line { margin: 0 0 var(--s2); text-align: left;
+  /* One rhythm down the console. The bands between the filter bar and the
+     results ran 16 / 8 / 8 / 12 apart — four different gaps in four
+     transitions, which reads as drift rather than grouping. Every gap
+     BETWEEN status bands is --s3 now, and the two boundaries that matter
+     (leaving the filters, entering the results) are --s4, so the block has
+     an inside and an outside instead of five arbitrary distances. */
+  .scope-line { margin: 0 0 var(--s3); text-align: left;
     font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.5; }
   .scope-line a { color: var(--accent-ink); }
   /* The merged hidden-counts sentence. Its links are counts, so they get a
@@ -416,8 +422,8 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* The board state: totals + cycle shape as one unit. The hairline is the
      boundary between the controls above and the answer below; the children
      lose their own bottom margins so the group spaces itself. */
-  .board-state { border-top: 1px solid var(--line); padding-top: var(--s2);
-    margin: 0 0 var(--s3); }
+  .board-state { border-top: 1px solid var(--line); padding-top: var(--s3);
+    margin: 0 0 var(--s4); }
   .board-state .stat-strip { margin-bottom: 6px; }
   .board-state .cycband { margin-bottom: 0; }
 
@@ -602,7 +608,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* Not a link — it names a view, not a firm — so it must not offer a link's
      hover affordance. */
   .firmcol--picked .firmcol-name:hover { color: var(--accent-ink); cursor: default; }
-  .firmcol-logo--picked { background: var(--accent); color: #fff;
+  .firmcol-logo--picked { background: var(--accent); color: var(--on-accent);
     box-shadow: none; font-size: var(--fs-m); }
   /* The cards keep the neutral surface: tinting them too would drop the
      contrast the standardised card relies on, and the column's own tint

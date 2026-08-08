@@ -1476,9 +1476,18 @@ select:focus-visible, input:focus-visible {
    type (not a heavy color block) does the work. Navy is reserved for accents. */
 .kin-hero {
   position: relative; overflow: hidden; isolation: isolate;
+  /* Tokens, not literals. This was `linear-gradient(135deg, #ffffff, #f1f4f8)`
+     — a hard white card that stayed white in dark mode while every piece of
+     text on it switched to near-white ink. The landing hero, the pricing
+     hero and both auth pages all render through this rule, so one pair of
+     hex values made the first screen of the product unreadable at night.
+     color-mix keeps the original's faint cool tint by deriving it from the
+     accent rather than naming a colour. */
   background:
-    radial-gradient(120% 150% at 92% -30%, rgba(31, 78, 121, 0.10), transparent 55%),
-    linear-gradient(135deg, #ffffff 0%, #f1f4f8 100%);
+    radial-gradient(120% 150% at 92% -30%,
+      color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%),
+    linear-gradient(135deg, var(--surface) 0%,
+      color-mix(in srgb, var(--accent) 7%, var(--surface)) 100%);
   color: var(--ink); border-radius: var(--r-panel);
   border: 1px solid var(--line);
   padding: var(--s6) var(--s6) var(--s5);
@@ -1490,7 +1499,7 @@ select:focus-visible, input:focus-visible {
 .kin-hero::after {
   content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background: linear-gradient(115deg, transparent 34%,
-    rgba(31, 78, 121, 0.05) 50%, transparent 66%);
+    color-mix(in srgb, var(--accent) 7%, transparent) 50%, transparent 66%);
   background-size: 250% 100%; background-repeat: no-repeat;
   animation: kin-sheen 7.5s ease-in-out infinite;
 }
@@ -1516,7 +1525,8 @@ select:focus-visible, input:focus-visible {
    this rule is stale-cached). */
 .kin-hero-icon {
   position: absolute; top: var(--s5); right: var(--s5); z-index: 0;
-  width: 40px; height: 40px; color: rgba(31, 78, 121, 0.16);
+  width: 40px; height: 40px;
+  color: color-mix(in srgb, var(--accent) 24%, transparent);
   pointer-events: none;
 }
 .kin-hero-icon svg { width: 40px; height: 40px; display: block; }
