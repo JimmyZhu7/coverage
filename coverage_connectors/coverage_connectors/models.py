@@ -310,6 +310,15 @@ class FetchResult:
     opportunities: list[Opportunity]
     raw_count: int
     error: str | None = None
+    #: The board reported MORE results than this fetch returned — a
+    #: successful read of an incomplete list. Load-bearing for
+    #: closed-detection, which infers "gone from the board" from "absent
+    #: from the fetch": that inference is only valid when the fetch was the
+    #: whole board. Workday caps at three pages, so on a board reporting
+    #: 1,371 results every one of the other 1,311 looked closed, and rows
+    #: verified live on the firm's own site were sitting in the database as
+    #: closed. A truncated list is not evidence of absence.
+    truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)

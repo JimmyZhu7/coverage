@@ -58,8 +58,22 @@ from .models import FetchResult, Opportunity, VerificationResult, WorkdayBoard
 name = "workday"
 
 _PAGE_SIZE = 20   # Workday's CxS API 400s above this — verified live, no silent clamp.
-_MAX_JOBS = 60    # 3 pages/board cap — clears a saturated-at-20 board without
-                  # turning one busy tenant into an unbounded fetch.
+_MAX_JOBS = 500   # 25 pages/board. Was 60 (three pages), which was not a
+                  # coverage compromise but a correctness one: ingest closes
+                  # any open row a successful fetch didn't return, so on
+                  # boards reporting 186-1,371 results the cap was marking
+                  # hundreds of LIVE postings closed every night. Two rows
+                  # sampled from that population — a Barclays 2027 summer
+                  # internship and a PwC FY27 intern role — came back
+                  # verified-open from the firms' own sites while sitting in
+                  # the database as closed.
+                  #
+                  # The cap still exists (an unbounded fetch against a
+                  # 10,000-posting tenant is nobody's friend), so a board can
+                  # still be truncated — PwC's campus site alone reports
+                  # 1,371. What changed is that truncation now SAYS so, via
+                  # FetchResult.truncated, and ingest declines to close
+                  # anything on a list it knows is partial.
 
 _WORKDAY_URL_RE = re.compile(
     # job_path is `[^?#]+`, not `[^/?#]+` -- a real Workday job path is two
@@ -127,8 +141,13 @@ def fetch(board: WorkdayBoard) -> FetchResult:
         opportunities = [_normalize(j, board) for j in jobs]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
+    total = data.get("total", len(jobs))
     return FetchResult(board=board, ok=True, opportunities=opportunities,
-                        raw_count=data.get("total", len(jobs)))
+                        raw_count=total,
+                        # The board says there are more than we read. Told to
+                        # ingest rather than logged, because it changes what
+                        # may be concluded from a row's absence.
+                        truncated=isinstance(total, int) and total > len(jobs))
 
 
 def classify_url(url: str) -> dict | None:

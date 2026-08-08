@@ -496,3 +496,61 @@ def test_a_changed_posting_keeps_a_deadline_the_provider_states(monkeypatch):
     o = Opportunity.objects.get(url=U1)
     assert o.deadline == date(2026, 9, 15)
     assert o.confidence == 1.0
+
+
+# ---------------------------------------------------------------------------
+# A TRUNCATED fetch must not close anything.
+#
+# Closed-detection infers "gone from the board" from "absent from the fetch",
+# which is only valid when the fetch WAS the board. Workday caps its paging,
+# so on boards reporting 186-1,371 results every row past the cap looked
+# closed — and two sampled from that population came back verified-open from
+# the firms' own sites while the database called them closed.
+# ---------------------------------------------------------------------------
+
+
+def _truncated(opps, *, board=BOARD):
+    """A successful fetch that knows it did not read the whole board."""
+    return FetchResult(board=board, ok=True, opportunities=list(opps),
+                       raw_count=999, truncated=True)
+
+
+@pytest.mark.django_db
+def test_a_truncated_fetch_never_closes_the_rows_it_could_not_see(monkeypatch):
+    _patch(monkeypatch, [_result([_opp(U1), _opp(U2)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    assert Opportunity.objects.filter(status="open").count() == 2
+
+    # Next run reads only the first page. U2 is still live on the board; the
+    # fetch simply never got that far.
+    _patch(monkeypatch, [_truncated([_opp(U1)])])
+    run = ingest.ingest_boards([BOARD], label="greenhouse")
+
+    assert Opportunity.objects.get(url=U2).status == "open"
+    assert run.stats["closed"] == 0
+    # And it is recorded rather than silently skipped: a board that stops
+    # being fully readable is an operational fact worth seeing.
+    assert any("partial list" in e.get("error", "") for e in run.stats["errors"])
+
+
+@pytest.mark.django_db
+def test_a_truncated_fetch_still_upserts_the_rows_it_did_see(monkeypatch):
+    """The fetch succeeded. Its rows are good — only the inference from
+    absence is off-limits."""
+    _patch(monkeypatch, [_truncated([_opp(U1, title="Summer Analyst 2028")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    assert Opportunity.objects.get(url=U1).title == "Summer Analyst 2028"
+
+
+@pytest.mark.django_db
+def test_a_complete_fetch_still_closes_what_it_dropped(monkeypatch):
+    """The guard must not disarm ordinary closed-detection — a board that
+    read to the end and no longer lists a posting has genuinely dropped it."""
+    _patch(monkeypatch, [_result([_opp(U1), _opp(U2)])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    _patch(monkeypatch, [_result([_opp(U1)])])
+    run = ingest.ingest_boards([BOARD], label="greenhouse")
+
+    assert Opportunity.objects.get(url=U2).status == "closed"
+    assert run.stats["closed"] == 1

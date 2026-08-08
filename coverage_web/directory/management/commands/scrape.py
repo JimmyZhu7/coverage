@@ -91,8 +91,18 @@ class Command(BaseCommand):
         if s["created_firms"]:
             self.stdout.write(f"  auto-created firms (not in seed set): {', '.join(s['created_firms'])}")
         if s["errors"]:
+            # Not everything in `errors` is a failed board. Two entries are
+            # notes about a board that fetched FINE but whose result was not
+            # a whole board (the partial-list and suspected-shape-change
+            # auto-close guards), and labelling those "board failed" reports
+            # a healthy fetch as a broken one — the exact misreading the
+            # guards exist to prevent. Same list, honest labels.
             for e in s["errors"]:
-                self.stderr.write(self.style.WARNING(f"  board failed — {e['firm']} ({e['provider']}): {e['error']}"))
+                note = "skipped auto-close" in e["error"]
+                label = "note" if note else "board failed"
+                style = self.style.NOTICE if note else self.style.WARNING
+                self.stderr.write(style(
+                    f"  {label} — {e['firm']} ({e['provider']}): {e['error']}"))
 
 
 def _with_firm_name(board, name: str):

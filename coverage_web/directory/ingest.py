@@ -398,6 +398,11 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
 
     seen_by_pair: dict[tuple[int, str], set[str]] = {}
     pair_all_ok: dict[tuple[int, str], bool] = {}
+    # Any board for this pair returned a list it knew was incomplete. Tracked
+    # separately from `pair_all_ok` because it is a different fact: the fetch
+    # SUCCEEDED, so its rows are good and get upserted — we simply may not
+    # reason from what is missing.
+    pair_truncated: dict[tuple[int, str], bool] = {}
 
     for result in results:
         stats["boards_total"] += 1
@@ -408,6 +413,7 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
         stats["firms_touched"].add(firm.slug)
         pair = (firm.id, source)
         pair_all_ok.setdefault(pair, True)
+        pair_truncated.setdefault(pair, False)
         seen_by_pair.setdefault(pair, set())
 
         if not result.ok:
@@ -417,6 +423,8 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
             continue
 
         stats["boards_ok"] += 1
+        if getattr(result, "truncated", False):
+            pair_truncated[pair] = True
         campus = board_is_campus(board)
         for opp in result.opportunities:
             stats["fetched"] += 1
@@ -452,6 +460,19 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
             if not all_ok:
                 continue  # a board for this (firm, source) failed -> never close on partial data
             firm_id, source = pair
+            if pair_truncated.get(pair):
+                # The board told us its list was partial. Absence from a
+                # partial list is not absence from the board, and acting on
+                # it here is what put verified-live roles into the database
+                # as closed. Same remedy as the wipe guard below: leave them
+                # open and let `reverify` close real deaths one URL at a
+                # time, which it does from evidence rather than inference.
+                stats["errors"].append({
+                    "firm": Firm.objects.get(pk=firm_id).name, "provider": source,
+                    "error": "board reported more results than one fetch "
+                             "returns; skipped auto-close (partial list)",
+                })
+                continue
             seen = seen_by_pair.get(pair, set())
             open_qs = Opportunity.objects.filter(firm_id=firm_id, source=source).exclude(
                 status="closed"
