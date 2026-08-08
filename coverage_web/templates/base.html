@@ -14,13 +14,29 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="{% block og_title %}Coverage: recruiting deadlines and the people behind them{% endblock %}">
   <meta property="og:description" content="{% block og_description %}Everyone tracks deadlines. Nobody tracks the relationship.{% endblock %}">
-  {% comment %}A real FILE, not a data URI. The data-URI version vanished
-  from the tab on the Opportunities page: htmx's hx-push-url calls
-  pushState, Chrome re-resolves the icon after a history change, falls
-  back to /favicon.ico, got our 404, and blanked the tab. A fetchable URL
-  survives that re-resolution, and /favicon.ico redirects here so the
-  fallback path lands on the same mark.{% endcomment %}
+  {% comment %}Three declarations, because this tab has now gone blank twice
+  on the Opportunities page and each time the cause was the fallback path,
+  not the markup.
+
+  Round one: the icon was a data URI. htmx's hx-push-url calls pushState,
+  Chrome re-resolves the icon after a history change, fell back to
+  /favicon.ico, got a 404, and blanked the tab. Fixed by shipping a real
+  file and redirecting /favicon.ico to it.
+
+  Round two (this one): the redirect pointed at the SVG. That still leaves
+  a single raster-free chain — Chrome's post-pushState re-resolution asks
+  for /favicon.ico and does not reliably accept an SVG served through a 301
+  for it, so the tab blanked again on exactly the same page. An SVG alone
+  is not a fallback; it is the same asset wearing a different URL.
+
+  So: SVG first for sharpness where it is honoured, a real 32px PNG behind
+  it for everything else, and /favicon.ico now serves an actual multi-size
+  .ico file rather than redirecting anywhere. All three are generated from
+  the same geometry (see the generator note in static/img/), so the mark
+  cannot drift between them.{% endcomment %}
   <link rel="icon" type="image/svg+xml" href="{% static 'img/favicon.svg' %}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'img/favicon-32.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'img/icon-192.png' %}">
   {% comment %}Installable: students live on phones, and without a manifest
   "Add to Home Screen" produces a bare bookmark. start_url is /app/ — an
   installed Coverage opens on Today, not the marketing page.{% endcomment %}

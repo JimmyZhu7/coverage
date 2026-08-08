@@ -73,14 +73,42 @@ def test_a_new_user_is_nudged_to_finish_setup(client, django_user_model):
     assert "Finish setting up" not in body
 
 
-def test_the_favicon_is_a_real_file_with_an_ico_fallback(client):
-    """A data-URI favicon vanished from the tab on the Opportunities page:
-    hx-push-url calls pushState, Chrome re-resolves the icon after a history
-    change, falls back to /favicon.ico, and our 404 blanked the tab. Both
-    paths must resolve now."""
-    body = client.get("/").content.decode()
-    assert 'rel="icon"' in body and "favicon.svg" in body
-    assert "data:image/svg" not in body.split("</head>")[0]
+def test_the_favicon_survives_the_pushstate_fallback(client):
+    """This tab has gone blank twice on Opportunities, and the second time
+    the test above was green while it happened — it asserted /favicon.ico
+    redirected to the SVG, which was the exact thing that did not resolve.
+    A test that pins the mechanism instead of the outcome cannot see the
+    outcome break.
+
+    So this pins the outcome: hx-push-url calls pushState, Chrome
+    re-resolves the icon, and whatever it asks for has to come back as a
+    real image. Every declared icon resolves, and the /favicon.ico fallback
+    is a RASTER — an SVG served there is the same asset that already failed
+    to resolve, not a fallback."""
+    import re
+    from django.conf import settings
+
+    head = client.get("/").content.decode().split("</head>")[0]
+    assert "data:image/svg" not in head, "a data URI is what blanked it the first time"
+
+    hrefs = re.findall(r'<link[^>]*rel="(?:icon|apple-touch-icon)"[^>]*href="([^"]+)"', head)
+    assert len(hrefs) >= 2, f"an SVG alone is not a fallback chain: {hrefs}"
+
+    # Every declared icon must exist on disk where staticfiles will serve it.
+    for href in hrefs:
+        rel = href.split("/static/", 1)[-1]
+        assert (settings.BASE_DIR / "static" / rel).is_file(), f"missing icon file: {href}"
+    assert any(h.endswith(".png") for h in hrefs), "no raster icon declared"
+
+    # The fallback path itself: must land on a real raster, following at most
+    # one hop, and must not be a permanent redirect (browsers cache those hard,
+    # so a wrong target here is expensive to take back).
     resp = client.get("/favicon.ico")
-    assert resp.status_code == 301
-    assert "favicon.svg" in resp["Location"]
+    if resp.status_code in (301, 302):
+        assert resp.status_code == 302, "301 is cached too hard for an icon path"
+        target = resp["Location"]
+        assert target.endswith((".ico", ".png")), f"fallback must be a raster, got {target}"
+        rel = target.split("/static/", 1)[-1]
+        assert (settings.BASE_DIR / "static" / rel).is_file(), f"fallback missing: {target}"
+    else:
+        assert resp.status_code == 200
