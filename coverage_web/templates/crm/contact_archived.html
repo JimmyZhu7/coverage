@@ -31,28 +31,33 @@
       <p><a href="{% url 'crm:contact_list' %}">Back to Network</a></p>
     </div>
   {% else %}
+    {% comment %}
+    One row per person, hairline-separated. It was a two-line entry inside a
+    bare flex `.row` with no separator and no rhythm, so each person's
+    last-touch line sat as close to the NEXT person's name as to their own —
+    25 of them with the Unarchive buttons stranded at the far right, joined
+    to nothing. Same ledger row the queue, the firm page and My Applications
+    use: identity, then the date as a mono column, then the one action.
+    {% endcomment %}
     <div class="panel">
-      <p class="small muted">{{ contact_total }} archived</p>
-      {% for c in contacts %}
-        <div class="row archived-row">
-          <div>
-            <a href="{% url 'crm:contact_detail' c.pk %}"><strong>{{ c.name|smart_title }}</strong></a>
-            <span class="muted small">
-              {% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}
-              {% if c.email %} · {{ c.email }}{% endif %}
+      <p class="sec-label">{{ contact_total }} archived</p>
+      <div class="arch-list">
+        {% for c in contacts %}
+          <div class="arch-row">
+            <div class="arch-id">
+              <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
+              <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}</span>
+            </div>
+            <span class="arch-when">
+              {% if c.last_touch_ts %}{{ c.last_touch_ts|date:"M j, Y" }}{% else %}No touches{% endif %}
             </span>
-            {% if c.last_touch_ts %}
-              <p class="small muted">Last touch {{ c.last_touch_ts|date:"M j, Y" }}</p>
-            {% else %}
-              <p class="small muted">No touches on record</p>
-            {% endif %}
+            <form method="post" action="{% url 'crm:contact_unarchive' c.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn">Unarchive</button>
+            </form>
           </div>
-          <form method="post" action="{% url 'crm:contact_unarchive' c.pk %}">
-            {% csrf_token %}
-            <button type="submit" class="btn">Unarchive</button>
-          </form>
-        </div>
-      {% endfor %}
+        {% endfor %}
+      </div>
     </div>
   {% endif %}
 </div>

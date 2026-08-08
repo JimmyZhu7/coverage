@@ -81,8 +81,8 @@
     transition: background-color var(--t-fast), color var(--t-fast); }
   .mrail-m:hover { background: var(--accent-soft); color: var(--accent-ink);
     text-decoration: none; }
-  .mrail-n { font-family: var(--font-mono); font-size: 9px; line-height: 1;
-    font-variant-numeric: tabular-nums; height: 10px; font-weight: var(--w-bold);
+  .mrail-n { font-family: var(--font-mono); font-size: var(--fs-nano); line-height: 1;
+    font-variant-numeric: tabular-nums; height: 11px; font-weight: var(--w-bold);
     color: var(--ink-2); }
   .mrail-plot { height: 30px; width: 100%; display: flex; align-items: flex-end;
     justify-content: center; }
@@ -98,8 +98,12 @@
     text-transform: uppercase; letter-spacing: 0.05em; font-weight: var(--w-med); }
   /* Reserved whether or not a year prints, so a January column is not taller
      than its eleven neighbours and the labels stay on one baseline. */
-  .mrail-yr { font-family: var(--font-mono); font-size: 8px; line-height: 1;
-    height: 8px; opacity: 0.55; }
+  /* The year tag was 8px at opacity .55 — 2.18:1 against a 4.5 requirement,
+     the least readable text in the product, and the ONLY thing telling this
+     August from next August across a 24-month rail. The opacity was doing
+     the de-emphasis; --ink-3 already does that at a legible 5:1. */
+  .mrail-yr { font-family: var(--font-mono); font-size: var(--fs-nano); line-height: 1;
+    height: 11px; color: var(--ink-3); }
 
   /* The month you are reading: filled bar, inked label, and a rule under the
      column. Three signals, so it survives being the only navy thing here. */
@@ -126,7 +130,7 @@
   @media (max-width: 560px) {
     .mrail-m { flex: 1 0 11.5%; min-width: 0; padding: 2px 0 3px; gap: 2px; }
     .mrail-plot { height: 16px; }
-    .mrail-lab { font-size: 9px; }
+    .mrail-lab { font-size: var(--fs-nano); }
   }
 
   .cal-grid { border: 1px solid var(--line); border-radius: var(--r-panel);
@@ -169,7 +173,11 @@
      them would leave ragged weeks, and greying them keeps the grid honest
      about which month you are reading. */
   .cal-day.is-out { background: color-mix(in srgb, var(--paper) 60%, transparent); }
-  .cal-day.is-out .cal-num { color: var(--ink-3); opacity: 0.55; }
+  /* No opacity: --ink-3 is already the de-emphasis, and .55 on top of it cut
+     these day numbers to 2.18:1 — the same hidden contrast loss the year tag
+     on the month rail had. The is-out CELL is tinted, which is what carries
+     "not this month"; the number just has to stay readable. */
+  .cal-day.is-out .cal-num { color: var(--ink-3); }
   .cal-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: var(--fs-xs); color: var(--ink-2); align-self: flex-start;
     width: 24px; height: 24px; display: inline-flex; align-items: center;
@@ -263,7 +271,7 @@
      mark it identically. */
   .cal-ev-tracked.is-reported .cal-ev-title {
     text-decoration: underline dotted currentColor; text-underline-offset: 2px; }
-  .cal-ev-time { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
+  .cal-ev-time { font-family: var(--font-mono); font-size: var(--fs-nano); color: var(--ink-3);
     flex: none; letter-spacing: -0.02em; }
   .cal-ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; font-weight: var(--w-med); }

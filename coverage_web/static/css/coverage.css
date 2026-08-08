@@ -169,6 +169,14 @@
   --fs-xxl: 29px;   /* page titles on top-level pages */
   --fs-hero: 34px;  /* landing headline only */
   --fs-micro: 11px; /* uppercase badge labels only */
+  /* THE FLOOR. Nothing in the product may set a smaller size than this, and
+     it exists because seven rules had quietly gone under --fs-micro with
+     hardcoded pixels — 9px month labels, 9px event times, and an 8px year
+     tag at opacity .55, which measured 2.18:1 against a 4.5 requirement and
+     was the least readable text in the product while carrying the only thing
+     distinguishing one year's August from the next. Sizes are a system; a
+     rule that reaches past the smallest token is opting out of it. */
+  --fs-nano:  10px;
   --lh-body: 1.6;
   --lh-tight: 1.25;
   /* --w-black is only ever paired with --font-display; 720 is Fraunces's
@@ -946,18 +954,18 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
    cadence caption's mono face and 30px drop.
    -------------------------------------------------------------------------- */
 .sec-label, .strip-title, .rail-title, .apps-lenses-eyebrow,
-.settings-nav-title, .cad-rail-title {
+.settings-nav-title, .cad-rail-title, .inst-card h2 {
   margin: 0 0 var(--s3);
   font-size: var(--fs-micro); font-weight: var(--w-med);
   text-transform: uppercase; letter-spacing: 0.07em;
   color: var(--ink-3);
 }
-.sec-label, .strip-title, .rail-title, .apps-lenses-eyebrow {
+.sec-label, .strip-title, .rail-title, .apps-lenses-eyebrow, .inst-card h2 {
   position: relative; padding-bottom: 7px;
   border-bottom: 1px solid var(--line);
 }
 .sec-label::after, .strip-title::after, .rail-title::after,
-.apps-lenses-eyebrow::after {
+.apps-lenses-eyebrow::after, .inst-card h2::after {
   content: ""; position: absolute; left: 0; bottom: -1px;
   width: 18px; height: 2px; border-radius: 999px; background: var(--accent);
 }
@@ -1279,8 +1287,8 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   transform-origin: bottom; animation: mrail-grow 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: calc(var(--i, 0) * 24ms); }
 .cycband-m.is-now .cycband-bar::after { background: var(--accent); }
-.cycband-m b { font-family: var(--font-mono); font-size: 9px; font-weight: var(--w-med);
-  text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); }
+.cycband-m b { font-family: var(--font-mono); font-size: var(--fs-nano); font-weight: var(--w-med);
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3); }
 .cycband-m.is-now b { color: var(--accent-ink); }
 .cycband-m.is-now b::after { content: " •"; color: var(--accent); }
 @keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }

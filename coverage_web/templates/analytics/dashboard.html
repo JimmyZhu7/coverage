@@ -9,9 +9,9 @@
     grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-bottom: var(--s5); }
   .inst-card { border: 1px solid var(--line); border-radius: var(--r-panel);
     background: var(--surface); padding: var(--s4); }
-  .inst-card h2 { margin: 0 0 var(--s2); font-size: var(--fs-micro);
-    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3);
-    font-family: var(--font-mono); }
+  /* Shared section label (coverage.css §6b) — a card header, so it takes the
+     rule like the Today rail's. Only the mono face is local. */
+  .inst-card h2 { font-family: var(--font-mono); }
   .inst-n { font-family: var(--font-mono); font-size: 28px; color: var(--accent-ink);
     line-height: 1.1; }
   .inst-sub { font-size: var(--fs-xs); color: var(--ink-3); }

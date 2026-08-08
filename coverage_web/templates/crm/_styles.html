@@ -230,7 +230,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .daybar-now { position: absolute; top: -3px; bottom: -3px; width: 2px;
     border-radius: 1px; background: var(--ink-3); opacity: 0.75; }
   .daybar-scale { display: flex; justify-content: space-between; margin-top: 5px;
-    font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
+    font-family: var(--font-mono); font-size: var(--fs-nano); color: var(--ink-3);
     letter-spacing: 0.04em; }
   @keyframes daybar-pop { from { transform: translate(-50%, -50%) scale(0); opacity: 0; }
     to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
@@ -747,6 +747,25 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     top: 2px; color: var(--ink-3); transition: transform var(--t-fast); }
   .warmth-section:not([open]) > summary::after { transform: rotate(-90deg); }
   .warmth-section:not([open]) { padding-bottom: var(--s3); opacity: 0.85; }
+  /* ---- Archived list: ledger rows, hairline-separated ---- */
+  .arch-list { display: flex; flex-direction: column; }
+  .arch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center; gap: var(--s3) var(--s4);
+    padding: 10px 0; border-top: 1px solid var(--line); }
+  .arch-row:first-child { border-top: 0; }
+  .arch-id { min-width: 0; display: flex; align-items: baseline;
+    gap: var(--s2); flex-wrap: wrap; }
+  .arch-id a { font-weight: var(--w-med); color: var(--ink); }
+  .arch-meta { font-size: var(--fs-s); color: var(--ink-3); min-width: 0;
+    overflow-wrap: anywhere; }
+  .arch-when { font-family: var(--font-mono); font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums; color: var(--ink-3); white-space: nowrap; }
+  .arch-row .btn { padding: 6px 14px; font-size: var(--fs-xs); }
+  @media (max-width: 640px) {
+    .arch-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .arch-when { grid-column: 1 / -1; }
+  }
+
   .contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: var(--s4); }
   /* Fixed height so every contact card is identical; the footer pins to the

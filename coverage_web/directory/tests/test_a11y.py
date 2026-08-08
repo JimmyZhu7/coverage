@@ -219,7 +219,7 @@ def test_every_text_entry_input_type_is_styled():
 
 
 _SECTION_LABELS = ("strip-title", "rail-title", "apps-lenses-eyebrow",
-                   "settings-nav-title", "cad-rail-title")
+                   "settings-nav-title", "cad-rail-title", "inst-card h2")
 
 
 def test_the_section_label_has_exactly_one_definition():
@@ -261,3 +261,46 @@ def test_only_section_headers_wear_the_rule():
         assert cls in selector, f".{cls} should head a section and carry the rule"
     for cls in ("settings-nav-title", "cad-rail-title"):
         assert cls not in selector, f".{cls} labels a menu/diagram and must skip the rule"
+
+
+def test_nothing_sets_type_below_the_floor():
+    """--fs-nano (10px) is the smallest size the product may use. Seven rules
+    had gone under it with hardcoded pixels — 9px month labels and event
+    times, and an 8px year tag at opacity .55 that measured 2.18:1 and was
+    both the least readable text in the product and the only thing telling
+    one year's August from the next on a 24-month rail.
+
+    Scoped to sizes UNDER the floor, not to hardcoded px generally: the
+    product legitimately sets one-off large display sizes (a 44px landing
+    hero, a 28px instrument figure) that no shared token should own. The
+    defect is going below the smallest token, not declining to use one."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    files = list((root / "templates").rglob("*.html")) + [root / "static" / "css" / "coverage.css"]
+    floor = 10.0
+    offenders = []
+    for f in files:
+        for m in re.finditer(r"font-size:\s*(\d+(?:\.\d+)?)px", f.read_text()):
+            if float(m.group(1)) < floor:
+                offenders.append(f"{f.name}: {m.group(0)}")
+    assert offenders == [], (
+        f"type below the {floor:.0f}px floor; use --fs-nano or larger: {offenders}")
+
+
+def test_no_rule_dims_text_with_opacity():
+    """Opacity on a text element silently multiplies its contrast against a
+    ratio that was measured without it. .mrail-yr did exactly this: --ink-3
+    is a legible 5:1, and `opacity: .55` turned it into 2.18:1 while the
+    token audit above still reported the pair as passing. De-emphasis is a
+    COLOUR decision, so it has to happen in a token the audit can see."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    files = list((root / "templates").rglob("*.html")) + [root / "static" / "css" / "coverage.css"]
+    offenders = []
+    for f in files:
+        for m in re.finditer(r"^\s*([.#][\w.\- >:()\[\]=\"]+)\s*\{([^}]*)\}", f.read_text(), re.M):
+            body = m.group(2)
+            om = re.search(r"(?<!-)opacity:\s*(0?\.\d+)", body)
+            # Only flag rules that also set a text property — a faded ICON or
+            # decorative bar is legitimate; faded TEXT is a hidden contrast cut.
+            if om and re.search(r"font-size|font-family|color:", body):
+                offenders.append(f"{f.name}: {m.group(1).strip()} opacity {om.group(1)}")
+    assert offenders == [], offenders
