@@ -154,6 +154,49 @@ def test_talnet_verify_reads_closed_language(monkeypatch):
     assert v.result == "verified-open"
 
 
+# A tal.net tenant can switch on Oleeo Protect at any time (Evercore did,
+# observed 2026-08-08). The challenge page is served with HTTP 200, so both
+# entry points have to name it rather than treat it as content.
+
+_CHALLENGE_PAGE = (
+    '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+    '<title>Quick Check Needed</title>'
+    '<script async defer src="/vx/oleeoProtect/main.js" type="module"></script>'
+    "</head><body><div class=\"container\"><h1>Quick Check Needed</h1>"
+    "<p>We just need to confirm you're a real person.</p>"
+    "<altcha-widget></altcha-widget></body></html>"
+)
+
+
+def test_talnet_fetch_names_bot_protection_instead_of_reporting_an_empty_board(monkeypatch):
+    monkeypatch.setattr(talnet_mod, "fetch_text", lambda url, **kw: _CHALLENGE_PAGE)
+    result = fetch(BOFA_JOBS)
+    # ok=False is the load-bearing half: an ok=True/0-row result reads
+    # downstream as a shape change and sends someone to fix a fine parser,
+    # and it is the ingest layer's ok flag that protects the firm's open
+    # postings from a false mass auto-close.
+    assert result.ok is False
+    assert result.opportunities == [] and result.raw_count == 0
+    assert "bot protection" in result.error and "Oleeo Protect" in result.error
+
+
+def test_talnet_verify_does_not_rubber_stamp_a_challenge_page_as_open(monkeypatch):
+    monkeypatch.setattr(talnet_mod, "fetch_text", lambda url, **kw: _CHALLENGE_PAGE)
+    v = verify("https://evercore.tal.net/vx/candidate/so/pm/1/pl/1/opp/1234-Analyst/en-GB")
+    # A challenge page carries no closed-language, so the pre-check is the
+    # only thing standing between it and a permanent "verified-open".
+    assert v.result == "unreachable"
+    assert "bot protection" in v.evidence
+
+
+def test_bot_challenge_detector_leaves_real_boards_alone():
+    from coverage_connectors.http import bot_challenge_reason
+
+    assert bot_challenge_reason(_CHALLENGE_PAGE) == "Oleeo Protect"
+    assert bot_challenge_reason((FIXTURES / "talnet_jobs_sample.html").read_text()) is None
+    assert bot_challenge_reason("") is None
+
+
 # -------------------------------------------------------------------- sitemap
 
 _SITEMAP_XML = """<?xml version="1.0"?>

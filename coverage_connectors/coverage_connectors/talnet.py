@@ -31,7 +31,7 @@ import re
 import urllib.error
 import urllib.parse
 
-from .http import fetch_text
+from .http import bot_challenge_reason, fetch_text
 from .models import FetchResult, Opportunity, TalnetBoard, VerificationResult
 
 name = "talnet"
@@ -138,6 +138,15 @@ def _normalize(row: dict, board: TalnetBoard) -> Opportunity:
 def fetch(board: TalnetBoard) -> FetchResult:
     try:
         html = fetch_text(board.board_url)
+        # A tenant behind a bot check serves 200 + a challenge page. Parsing
+        # it yields zero rows, which is indistinguishable from a shape change
+        # unless we say so here.
+        challenge = bot_challenge_reason(html)
+        if challenge:
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=f"blocked by bot protection ({challenge}) — board unreadable, not empty",
+            )
         rows = _parse(html)
         # Kept inside this try — see greenhouse.py's fetch() for why a
         # normalization failure must not propagate uncaught out of
@@ -177,6 +186,14 @@ def verify(url: str) -> VerificationResult:
         return VerificationResult("talnet", url, "unreachable", f"HTTP {e.code}", [])
     except Exception as e:  # noqa: BLE001
         return VerificationResult("talnet", url, "unreachable", str(e)[:200], [])
+
+    # Must precede the closed-language check: a challenge page carries no
+    # closed language, so without this it reads as "verified-open" and every
+    # posting on a bot-walled tenant gets rubber-stamped live forever.
+    challenge = bot_challenge_reason(html)
+    if challenge:
+        return VerificationResult("talnet", url, "unreachable",
+                                   f"blocked by bot protection ({challenge})", [])
 
     title_m = _TITLE_RE.search(html)
     title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else ""

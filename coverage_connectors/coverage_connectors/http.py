@@ -28,6 +28,7 @@ this module raises cleanly and lets the caller decide what to log where.
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -96,6 +97,46 @@ def fetch_bytes(
 
 def fetch_text(url: str, **kwargs: Any) -> str:
     return fetch_bytes(url, **kwargs).decode("utf-8", errors="replace")
+
+
+# An ATS tenant can switch on an interactive bot check (Oleeo Protect/Altcha,
+# Cloudflare) at any time. Those serve HTTP 200 with a challenge page, so a
+# connector that only trusts the status code parses zero rows and reports
+# success — which downstream reads as "the board's markup changed" and sends
+# someone to fix a parser that is fine. Detection only: nothing in this
+# package attempts to solve a challenge.
+_CHALLENGE_MARKERS = (
+    ("oleeoprotect", "Oleeo Protect"),
+    ("altcha-widget", "Altcha widget"),
+    ("cf-browser-verification", "Cloudflare browser check"),
+    ("cf_chl_opt", "Cloudflare challenge"),
+    ("checking your browser before accessing", "browser check interstitial"),
+    ("enable javascript and cookies to continue", "JS/cookie interstitial"),
+)
+_CHALLENGE_TITLES = {
+    "quick check needed": "Oleeo Protect",
+    "just a moment...": "Cloudflare browser check",
+    "attention required!": "Cloudflare block page",
+}
+_TITLE_TAG_RE = re.compile(r"<title[^>]*>([^<]*)</title>", re.IGNORECASE)
+
+
+def bot_challenge_reason(html: str) -> str | None:
+    """Name the vendor when `html` is a bot-check interstitial rather than
+    real content, else None. Callers should turn a hit into an explicit
+    board-level failure — a challenge page is unreadable, not empty."""
+    if not html:
+        return None
+    lowered = html.lower()
+    title_m = _TITLE_TAG_RE.search(lowered)
+    if title_m:
+        vendor = _CHALLENGE_TITLES.get(title_m.group(1).strip())
+        if vendor:
+            return vendor
+    for marker, vendor in _CHALLENGE_MARKERS:
+        if marker in lowered:
+            return vendor
+    return None
 
 
 def fetch_json(url: str, **kwargs: Any) -> Any:
