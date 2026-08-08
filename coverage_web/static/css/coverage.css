@@ -927,7 +927,19 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
 
 /* ---- 6. Buttons ----------------------------------------------------------- */
 .btn {
-  display: inline-block; cursor: pointer;
+  /* inline-FLEX, centred. As inline-block the text sat at the top of any
+     button given a min-height, which is every tap-target rule in the app —
+     11 of the 23 controls on Settings were 44px tall around 35.6px of
+     content, text 10.5px from the top and 17.5px from the bottom.
+     min-height only centres what it contains if the box knows how to.
+
+     `gap` replaces the whitespace flex removes between children: the only
+     multi-child button in the app is Compose + its "draft ready" tag (12 of
+     them), whose separating space would otherwise vanish exactly the way the
+     scope line's did. 0.2em is that space measured at this font (2.56px on
+     13px). */
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 0.2em; cursor: pointer;
   font: var(--w-med) var(--fs-s)/1.2 var(--font-ui);
   padding: 10px 20px; border-radius: 999px;
   border: 1px solid var(--line-strong);
