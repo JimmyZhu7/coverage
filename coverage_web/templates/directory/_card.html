@@ -1,70 +1,46 @@
 {% load textstyle %}
 {% comment %}
-One opportunity card. Every honesty marker (deadline, staleness, confidence,
-sponsorship) is pre-computed in directory/views.py `_card`; this template only
-lays it out. Pass `mine=True` to flag it as one of the user's targeted firms.
+One opportunity ROW on the firm page — its only consumer since the feed grew
+its own column cards.
+
+This was a full poster card, and on a firm page that shape is wrong twice
+over: every card restated the firm's name and its category chip on the page
+whose title already says both, and 75 of them stacked one-per-line built a
+19,000px wall out of a fact stated once at the top. Same disease the Today
+queue had, same cure: a ledger row. The per-card firm link, the firm-category
+tag, and the kind pill are gone — the page header owns the first two and the
+regrouped section label (see firm_detail.html) owns the third. Everything
+ROLE-level survives: cohort, location, deadline with its provenance mark,
+the fact chips, the class/sponsorship pills, and the Read button still gated
+on actually holding the text.
 {% endcomment %}
-<article class="opp-card{% if mine %} is-mine{% endif %}">
-  <div class="opp-top">
-    <span class="opp-firm"><a href="{% url 'directory:firm_detail' card.firm_slug %}">{{ card.firm_name|smart_title }}</a></span>
-    {% comment %}The year on this pill is the PROGRAMME year (a 2027 summer
-    intake), not a graduation year. A "Class of YYYY" pill appears in the
-    markers row below ONLY when the posting stated one — see views._class_tag.
-    {% endcomment %}
-    <span class="pill role role-{{ card.role.value }}"{% if card.cohort %} title="{{ card.cohort }} programme year"{% endif %}>{{ card.role.label }}{% if card.cohort %} · {{ card.cohort }}{% endif %}</span>
-  </div>
-  <h3><a href="{{ card.url }}" rel="nofollow noopener" target="_blank">{{ card.title|smart_title }}</a></h3>
-  <p class="opp-meta">
-    {% if card.location %}{{ card.location|smart_title }}{% else %}Location not listed{% endif %}
-  </p>
-
-  {% if card.deadline.posted %}
-    {% comment %}Same provenance mark the feed cards carry: a dotted rule when
-    the date was read out of the posting's prose rather than published as a
-    field by the board. This page and the feed describe the same rows, and
-    them disagreeing about what is known is the bug this closes.{% endcomment %}
-    <p class="deadline{% if card.deadline.past %} past{% endif %}{% if card.reported %} is-reported{% endif %}"
-       {% if card.reported %}title="{{ card.reported.why }}"{% endif %}>
-      <span class="date">{{ card.deadline.label }}</span>
-      <span class="count">· {{ card.deadline.countdown }}</span>
-      {% if card.reported %}<span class="vh">({{ card.reported.label }})</span>{% endif %}
+<article class="frow">
+  <div class="frow-main">
+    <p class="frow-title">
+      <a href="{{ card.url }}" rel="nofollow noopener" target="_blank">{{ card.title|smart_title }}</a>
+      {% if card.cohort %}<span class="frow-cohort" title="{{ card.cohort }} programme year">{{ card.cohort }}</span>{% endif %}
     </p>
-  {% else %}
-    <p class="deadline none">{{ card.deadline.label }}</p>
-  {% endif %}
-
-  {% comment %}
-  What the posting states about applying — sponsorship, pay, a language wall,
-  eligibility. Identical chips to the feed's cards (views.py `_fact_chips`
-  builds both), because this page spent a release showing strictly less about
-  a role than the feed showed about the same row, and a student who arrives
-  here from search has no way to know they are seeing the poorer view.
-  {% endcomment %}
-  {% if card.facts %}
-    <div class="markers markers-facts">
-      {% for f in card.facts %}
-        <span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>
-      {% endfor %}
-    </div>
-  {% endif %}
-
-  {% if card.tags %}
-    <div class="markers">
-      {% for tag in card.tags %}
-        <span class="pill {{ tag.css }}">{{ tag.label }}</span>
-      {% endfor %}
-    </div>
-  {% endif %}
-
-  {% comment %}
-  Read the posting here, from the copy we hold. Only rendered when we HAVE it
-  (`card.has_text`), because a button that opens an empty panel is the same
-  lie as an empty panel, one step earlier. This page used to send every
-  student out to a client-rendered board for text sitting in our database.
-  {% endcomment %}
-  {% if card.has_text %}
-    <button type="button" class="meta-read" data-role-read data-role-id="{{ card.id }}"
-            hx-get="{% url 'role_description' card.id %}"
-            hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>
-  {% endif %}
+    <p class="frow-meta">
+      {% if card.location %}{{ card.location|smart_title }}{% else %}Location not listed{% endif %}
+    </p>
+    {% if card.facts or card.tags %}
+      <div class="frow-chips">
+        {% for f in card.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
+        {% for tag in card.tags %}{% if tag.css != "tag-cat" %}<span class="pill {{ tag.css }}">{{ tag.label }}</span>{% endif %}{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+  <div class="frow-side">
+    {% if card.deadline.posted %}
+      <span class="frow-deadline{% if card.deadline.past %} past{% endif %}{% if card.reported %} is-reported{% endif %}"
+            {% if card.reported %}title="{{ card.reported.why }}"{% endif %}>{{ card.deadline.countdown|capfirst }}{% if card.reported %}<span class="vh"> ({{ card.reported.label }})</span>{% endif %}</span>
+    {% else %}
+      <span class="frow-deadline none">{{ card.deadline.label }}</span>
+    {% endif %}
+    {% if card.has_text %}
+      <button type="button" class="meta-read" data-role-read data-role-id="{{ card.id }}"
+              hx-get="{% url 'role_description' card.id %}"
+              hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>
+    {% endif %}
+  </div>
 </article>

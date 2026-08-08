@@ -532,6 +532,36 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 
   @keyframes cluster-rise { from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); } }
+  /* ---- Firm-page role rows: the ledger form again. One row per role,
+     role-level facts only — the page header owns the firm-level ones. ---- */
+  .frow-group { margin-top: var(--s5); }
+  .frows { display: flex; flex-direction: column; gap: var(--s2); }
+  .frow { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s2) var(--s5); align-items: center;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-ctl); padding: 10px var(--s4);
+    box-shadow: var(--shadow-1); }
+  .frow-main { min-width: 0; }
+  .frow-title { margin: 0; font-size: var(--fs-m); font-weight: var(--w-med);
+    line-height: 1.3; }
+  .frow-title a { color: var(--ink); }
+  .frow-title a:hover { color: var(--accent-ink); }
+  .frow-cohort { font-family: var(--font-mono); font-size: var(--fs-micro);
+    color: var(--ink-3); margin-left: 6px; }
+  .frow-meta { margin: 2px 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+  .frow-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
+  .frow-side { display: flex; align-items: center; gap: var(--s3); flex: none; }
+  .frow-deadline { font-family: var(--font-mono); font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+  .frow-deadline.past { color: var(--danger); }
+  .frow-deadline.none { color: var(--ink-3); }
+  /* Prose-read dates keep the dotted provenance mark the feed uses. */
+  .frow-deadline.is-reported { border-bottom: 1px dotted var(--line-strong); cursor: help; }
+  @media (max-width: 640px) {
+    .frow { grid-template-columns: minmax(0, 1fr); }
+    .frow-side { justify-content: flex-start; }
+  }
+
   .firmcol { background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--r-panel); box-shadow: var(--shadow-1);
     display: flex; flex-direction: column; height: 468px; overflow: hidden;

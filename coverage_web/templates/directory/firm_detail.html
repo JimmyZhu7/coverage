@@ -71,12 +71,23 @@
 
   <section class="section">
     <h2>Open Roles <span class="scrub-count">{{ total }}</span></h2>
+    {% comment %}
+    Grouped by kind under the ruled section label, in the order the view
+    already sorts (campus buckets first, deadline inside each). The kind used
+    to ride every card as a pill — 75 restatements of five values; one label
+    per group says it once and gives this page the same signature the app's
+    other section boundaries wear. Rows, not cards: see _card.html for why.
+    {% endcomment %}
     {% if cards %}
-      <div class="cards">
-        {% for card in cards %}
-          {% include "directory/_card.html" %}
-        {% endfor %}
-      </div>
+      {% regroup cards by role.label as kind_groups %}
+      {% for group in kind_groups %}
+        <p class="sec-label frow-group">{{ group.grouper }} <span class="scrub-count">{{ group.list|length }}</span></p>
+        <div class="frows">
+          {% for card in group.list %}
+            {% include "directory/_card.html" %}
+          {% endfor %}
+        </div>
+      {% endfor %}
     {% else %}
       <div class="empty">
         <h2>Nothing open right now.</h2>
