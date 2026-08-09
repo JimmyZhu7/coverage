@@ -680,3 +680,100 @@ def test_a_blocked_role_can_never_be_picked():
     blocked = _c("Investment Banking, Classic — Summer Analyst", id=2, blocked=True)
     assert [r.candidate.id for r in recommend(p, [strong, blocked], max_per_firm=5)] == [1]
     assert recommend(p, [blocked]) == []
+
+
+# ---------------------------------------------------------------------------
+# The prose-stated graduation window (2026-08-09). The eligibility lens read
+# `raw.facts.grad` and issued verdicts on it while ranking saw only the
+# title-derived column — so SIG's Discovery Program, whose text states
+# "graduate in the winter of 2028 or the spring of 2029" and which carried a
+# real November deadline, scored 26 for the 2029 student it names and ranked
+# below fifteen prior-cycle internships that merely failed to exclude him.
+# ---------------------------------------------------------------------------
+
+
+def test_a_body_stated_window_containing_the_student_scores_as_stated():
+    hit = _score(JIMMY, bucket="insight", grad_years=("2028", "2029"))
+    # The same posting with no window at all — everything else equal.
+    silent = _score(JIMMY, bucket="insight")
+    assert hit - silent == 30  # W_CLASS_STATED, the strongest signal
+    texts = _reasons(JIMMY, bucket="insight", grad_years=("2028", "2029"))
+    assert any("2028–2029" in t and "you" in t for t in texts)
+
+
+def test_a_body_stated_window_excluding_the_student_is_a_veto():
+    out = _score(JIMMY, bucket="internship", cohort="2027",
+                 grad_years=("2027", "2028"))
+    assert out < 0  # W_CLASS_STATED_MISMATCH, and nothing else may argue
+
+
+def test_the_title_column_still_outranks_nothing_and_ties_the_window():
+    """A single stated year and a window containing the student are the same
+    kind of evidence and score identically."""
+    via_column = _score(JIMMY, class_year="2029")
+    via_window = _score(JIMMY, grad_years=("2029",))
+    assert via_column == via_window
+
+
+def test_the_stated_window_beats_a_prior_cycle_near_miss():
+    """The audit's exact failure: a 2027 summer internship (derived-near, one
+    year off) must not outrank an insight programme whose own text names the
+    student's class."""
+    near = _cand(1, bucket="internship", cohort="2027")
+    stated = _cand(2, firm_id=98, bucket="insight", grad_years=("2028", "2029"))
+    ranked = recommend(JIMMY, [near, stated], min_score=0)
+    assert ranked[0].candidate.id == 2
+
+
+def test_from_opportunity_reads_the_grad_fact(db):
+    from directory.models import Firm, Opportunity
+    f = Firm.objects.create(slug="sig", name="SIG")
+    o = Opportunity.objects.create(
+        firm=f, url="https://x/d", title="Discovery Program", bucket="insight",
+        status="open",
+        raw={"facts": {"grad": {"value": "2028–2029",
+                                "years": ["2028", "2029"],
+                                "phrase": "planning to graduate in the winter "
+                                          "of 2028 or the spring of 2029"}}})
+    c = Candidate.from_opportunity(o)
+    assert c.grad_years == ("2028", "2029")
+
+
+# ---------------------------------------------------------------------------
+# The network axis (2026-08-09). 129 contacts, 23 chatted, 2 advocates — and
+# ranking ignored every one of them, on the product whose stated moat is the
+# networking CRM. A warm relationship changes what a listing is worth.
+# ---------------------------------------------------------------------------
+
+
+def test_a_warm_contact_at_the_firm_moves_the_ranking():
+    warm_profile = Profile(
+        class_year=2029, school="USC Marshall", tracks=("ib",),
+        warm_firms={99: "warm"},
+    )
+    cold = Profile(class_year=2029, school="USC Marshall", tracks=("ib",))
+    assert _score(warm_profile) - _score(cold) == 14  # W_NETWORK_WARM
+    texts = _reasons(warm_profile)
+    assert "You know someone here" in texts
+
+
+def test_a_reply_counts_for_less_than_a_conversation():
+    replied = Profile(class_year=2029, warm_firms={99: "replied"})
+    warm = Profile(class_year=2029, warm_firms={99: "warm"})
+    assert _score(warm) > _score(replied) > _score(Profile(class_year=2029))
+
+
+def test_warmth_never_outruns_the_class_axis():
+    """Who a programme is FOR still beats who you know there: a warm firm's
+    wrong-class posting must rank below a cold firm's right-class one."""
+    wrong_class = _cand(1, class_year="2028")             # stated, not Jimmy's
+    right_class = _cand(2, firm_id=98, class_year="2029")
+    prof = Profile(class_year=2029, warm_firms={99: "warm"})
+    ranked = recommend(prof, [wrong_class, right_class], min_score=-100)
+    assert ranked[0].candidate.id == 2
+
+
+def test_a_network_only_profile_is_not_empty():
+    """A student who has filled in nothing but has live relationships still
+    gets picks — the relationships ARE personalisation signal."""
+    assert not Profile(warm_firms={7: "warm"}).is_empty

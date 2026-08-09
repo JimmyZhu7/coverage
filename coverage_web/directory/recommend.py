@@ -87,7 +87,20 @@ W_TRACK_CAP = 20
 #: to the one that had told it.
 W_TRACK_STATED = 26
 
-# 4. Firm tier (the student's own `crm.UserFirm.tier`).
+# 4. The student's own NETWORK at the firm — the CRM data this product calls
+#    its moat, which until 2026-08-09 contributed nothing to ranking. A warm
+#    relationship changes what a listing is worth: the same posting with an
+#    advocate behind it is a referral conversation, not a cold application.
+#: Someone at this firm has actually talked with the student (warmth
+#: `chatted` or `advocate`). Sits between tier-2 and tier-1 on purpose:
+#: a real conversation at an untargeted firm should be able to outrank a
+#: targeted-but-cold tier-2, while never outrunning the class axis — who a
+#: programme is FOR still beats who you know there.
+W_NETWORK_WARM = 14
+#: Someone there has replied but not yet talked. Real, weaker.
+W_NETWORK_REPLIED = 7
+
+# 4b. Firm tier (the student's own `crm.UserFirm.tier`).
 #: Tier 1 must outrank tier 3. It does, by construction, and by enough that
 #: tier alone clears `MIN_SCORE` while tier 3 alone does not.
 TIER_POINTS: Mapping[int, int] = {1: 26, 2: 16, 3: 8}
@@ -354,6 +367,10 @@ class Profile:
     #: `crm.UserFirm.objects.for_user(user)` — the caller does the tenant
     #: scoping; this module never queries.
     firm_tiers: Mapping[int, int | None] = field(default_factory=dict)
+    #: firm_id -> the WARMEST live relationship the student has there:
+    #: "warm" (chatted/advocate) or "replied". Unarchived contacts only —
+    #: the caller queries and collapses; this module never touches the ORM.
+    warm_firms: Mapping[int, str] = field(default_factory=dict)
 
     @property
     def school_region(self) -> str:
@@ -368,11 +385,12 @@ class Profile:
         "we don't know you yet" state as a signed-out one."""
         return not any((
             self.class_year, self.target_cycle.strip(), self.school.strip(),
-            self.regions, self.tracks, self.firm_tiers,
+            self.regions, self.tracks, self.firm_tiers, self.warm_firms,
         ))
 
     @classmethod
-    def from_user(cls, user, firm_tiers: Mapping[int, int | None] | None = None) -> "Profile":
+    def from_user(cls, user, firm_tiers: Mapping[int, int | None] | None = None,
+                  warm_firms: Mapping[int, str] | None = None) -> "Profile":
         return cls(
             class_year=_int_or_none(getattr(user, "class_year", None)),
             target_cycle=getattr(user, "target_cycle", "") or "",
@@ -380,6 +398,7 @@ class Profile:
             regions=tuple(r.lower() for r in (getattr(user, "regions", None) or [])),
             tracks=tuple(getattr(user, "tracks", None) or []),
             firm_tiers=dict(firm_tiers or {}),
+            warm_firms=dict(warm_firms or {}),
         )
 
 
@@ -413,6 +432,19 @@ class Candidate:
     #: won't-sponsor — every one of them a role he cannot get, ranked top of
     #: the page as the best thing on the board for him.
     blocked: bool = False
+    #: The graduation window the posting states in its own BODY — the facts
+    #: extractor's `grad.years` (evidence-phrase-backed), flattened to year
+    #: strings. The second live audit found the scorer blind to this: the
+    #: eligibility lens read it and issued verdicts on it, while ranking saw
+    #: only the title-derived `class_year` column — so SIG's Discovery
+    #: Program, whose text states "graduate in the winter of 2028 or the
+    #: spring of 2029" and which carried a real November deadline, scored 26
+    #: for the 2029 student it names and ranked below fifteen prior-cycle
+    #: internships that merely failed to exclude him. Two features reading
+    #: the same fact and disagreeing about it is the exact inconsistency the
+    #: year facet was rebuilt to prevent; this field closes the same gap for
+    #: ranking.
+    grad_years: tuple[str, ...] = ()
 
     @classmethod
     def from_opportunity(cls, o, *, blocked: bool = False) -> "Candidate":
@@ -425,6 +457,11 @@ class Candidate:
             firm_tracks=tuple(o.firm.tracks or []),
             deadline=o.deadline,
             blocked=bool(blocked),
+            grad_years=tuple(
+                y for y in (((o.raw or {}).get("facts") or {})
+                            .get("grad", {}).get("years") or ())
+                if isinstance(y, str) and y.isdigit()
+            ),
         )
 
 
@@ -459,9 +496,24 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     points, reasons = 0, []
     cohort = _int_or_none(c.cohort)
 
+    # The posting's own words about who it is for, from either place it can
+    # say them: the title ("Class of 2028" -> the `class_year` column) or the
+    # body ("graduating between December 2027 and June 2028" -> the grad
+    # fact). Both are statements; both bind. A window is checked by
+    # containment, a single year by equality — one code path below serves
+    # both by treating the single year as a [y, y] window.
+    window = None
     stated = _int_or_none(c.class_year)
-    if stated is not None and profile.class_year:
-        if stated != profile.class_year:
+    if stated is not None:
+        window = (stated, stated)
+    elif c.grad_years and profile.class_year:
+        ys = sorted(int(y) for y in c.grad_years)
+        window = (ys[0], ys[-1])
+
+    if window is not None and profile.class_year:
+        lo, hi = window
+        label = str(lo) if lo == hi else f"{lo}–{hi}"
+        if not (lo <= profile.class_year <= hi):
             # The posting named a different class. This is a veto, not a
             # subtraction: no other class/cycle evidence gets to argue with the
             # firm's own words, so nothing below runs.
@@ -471,14 +523,16 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
             # AGAINST the role as if it were a reason FOR it. Only the
             # tooltip differed before this fix.
             return W_CLASS_STATED_MISMATCH, [Reason(
-                f"Not Class of {stated}",
-                f"The posting states Class of {stated}, not your {profile.class_year}.",
+                f"Not Class of {label}",
+                f"The posting states it is for {label} graduates, "
+                f"not your {profile.class_year}.",
                 "class",
             )]
         points += W_CLASS_STATED
         reasons.append(Reason(
-            f"Class of {stated}",
-            f"The posting states Class of {stated}, which is your class year.",
+            f"Class of {label}" if lo == hi else f"For {label} grads — you",
+            f"The posting itself states it is for {label} graduates, "
+            f"which includes your {profile.class_year}.",
             "class",
         ))
         # Deliberately falls through to the cycle bonus below but NOT to the
@@ -676,7 +730,34 @@ def _tier_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
 #: Fixed axis order — this is what fixes the order of the reason chips, so
 #: "Tier 1 · matches IB · HK" reads the same way on every card and in every
 #: test run.
-_AXES = (_tier_fit, _track_fit, _region_fit, _class_fit)
+def _network_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
+    """The student's own relationships at the firm — the CRM half of the
+    product, finally allowed to argue with the listings half.
+
+    Chip text says what the relationship IS, never who it is with: the
+    reasons render on a shared board surface, and a contact's name does not
+    belong in a scoring chip. The tooltip points at the firm page, where
+    "Your Network Here" already names names behind the login."""
+    warmth = profile.warm_firms.get(c.firm_id)
+    if warmth == "warm":
+        return W_NETWORK_WARM, [Reason(
+            "You know someone here",
+            "You've already talked with someone at this firm — see Your "
+            "Network Here on the firm page. A warm intro beats a cold "
+            "application.",
+            "network",
+        )]
+    if warmth == "replied":
+        return W_NETWORK_REPLIED, [Reason(
+            "Warm-ish contact here",
+            "Someone at this firm has replied to you. Worth building on "
+            "before the deadline gets close.",
+            "network",
+        )]
+    return 0, []
+
+
+_AXES = (_tier_fit, _track_fit, _region_fit, _class_fit, _network_fit)
 
 
 def score_candidate(profile: Profile, candidate: Candidate) -> tuple[int, tuple[Reason, ...]]:

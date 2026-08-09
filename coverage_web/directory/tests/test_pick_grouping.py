@@ -159,3 +159,52 @@ def test_a_single_pick_still_produces_one_block():
     # and with one block there is nowhere for the bar and the block to disagree.
     assert [r.text for r in shared] == ["Tier 1", "US"]
     assert len(blocks) == 1 and blocks[0]["roles"][0]["reasons"] == []
+
+
+# ---------------------------------------------------------------------------
+# The cycle-not-open note (2026-08-09). A 2029 student targeting the 2028
+# Summer Internship cycle sees a picked column full of 2027-summer roles,
+# because cohort-2028 internships do not exist yet — that recruiting has not
+# opened. Without the note, the column presents prior-cycle near-misses as
+# if they were the thing the student asked for.
+# ---------------------------------------------------------------------------
+
+
+import pytest
+
+from directory.models import Firm, Opportunity
+from directory.views import _cycle_not_open_note
+
+
+class _P:
+    def __init__(self, cycle):
+        self.target_cycle = cycle
+
+
+@pytest.mark.django_db
+def test_the_note_fires_only_when_the_board_lacks_the_cycle():
+    f = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    Opportunity.objects.create(firm=f, url="https://x/1", status="open",
+                               bucket="internship", cohort="2027",
+                               title="2027 Summer Analyst")
+    qs = Opportunity.objects.filter(status="open")
+
+    note = _cycle_not_open_note(_P("2028 Summer Internship"), qs)
+    assert "2028 Summer Internship" in note
+    assert "haven't opened" in note
+    # House copy: no em dash in product prose.
+    assert "—" not in note
+
+    # The moment ONE cohort-2028 internship exists, the note must vanish —
+    # "not open yet" may only ever mean the BOARD lacks it.
+    Opportunity.objects.create(firm=f, url="https://x/2", status="open",
+                               bucket="internship", cohort="2028",
+                               title="2028 Summer Analyst")
+    assert _cycle_not_open_note(_P("2028 Summer Internship"), qs) == ""
+
+
+@pytest.mark.django_db
+def test_an_unparseable_cycle_yields_no_note():
+    qs = Opportunity.objects.filter(status="open")
+    assert _cycle_not_open_note(_P(""), qs) == ""
+    assert _cycle_not_open_note(_P("whenever works"), qs) == ""

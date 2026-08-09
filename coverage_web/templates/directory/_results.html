@@ -157,6 +157,15 @@ exactly the moment it had something to say.
             <div class="firmcol-stats">
               {% for r in pick_cluster.reasons %}<span class="why-chip why-{{ r.kind }}" title="{{ r.detail }}">{{ r.text }}</span>{% endfor %}
             </div>
+            {% comment %}The early-cycle student's reframe: their stored
+            target cycle has ZERO live postings (that recruiting has not
+            opened), so without this line the column presents prior-cycle
+            near-misses as if they were the thing the student asked for.
+            Computed against the whole open board, never the picks — see
+            _cycle_not_open_note in views.py.{% endcomment %}
+            {% if pick_cluster.cycle_note %}
+              <span class="firmcol-cycle-note">{{ pick_cluster.cycle_note }}</span>
+            {% endif %}
             {% comment %}
             Never a silent truncation. This column obeys the filters like its
             neighbours, so it owns up to what they removed — and it stays on

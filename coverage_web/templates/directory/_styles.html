@@ -411,6 +411,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* --ok #2f6a45 on --ok-soft #e6f0e9 = 5.6:1 */
   .why-chip.why-track { border-color: var(--ok-line); background: var(--ok-soft);
     color: var(--ok); }
+  /* The network reason — the one chip about the reader's own relationships.
+     Same green family as track (it is good news) but dashed, matching the
+     product's standing rule that anything derived from the user's own data
+     rather than the posting's text is tellable apart at a glance. */
+  .why-chip.why-network { border: 1px dashed var(--ok-line); background: transparent;
+    color: var(--ok); }
 
   /* Rolling is green AND wears a different glyph AND says the word — never
      colour alone (ux: color-not-only, High). */
@@ -618,6 +624,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      owns up to what they removed. */
   .firmcol-hidden { display: block; font-size: var(--fs-micro); color: var(--ink-3);
     letter-spacing: 0; text-transform: none; margin-top: 2px; line-height: 1.35; }
+  /* "Your cycle hasn't opened yet" — the header sentence that reframes the
+     whole column for an early-cycle student. Same quiet voice as the
+     hidden-count line: it is context, not an alert. */
+  .firmcol-cycle-note { display: block; font-size: var(--fs-micro); color: var(--ink-3);
+    letter-spacing: 0; text-transform: none; margin-top: 2px; line-height: 1.35;
+    font-style: italic; }
   /* Filtered down to nothing, the column stays (vanishing reads as breakage)
      but shrinks to its header — a 468px empty box would be worse than either.
      `align-items: start` on the grid already lets one column be shorter. */

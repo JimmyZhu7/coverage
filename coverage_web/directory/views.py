@@ -48,7 +48,7 @@ from directory.classify import (
 from directory.deadlines import CLOSING_SOON_DAYS, is_closing_soon
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
-from directory.recommend import Candidate, Profile, recommend
+from directory.recommend import Candidate, Profile, parse_target_cycle, recommend
 from directory.timeline import EVENT_LABELS
 
 # Firm category labels — the insider taxonomy students actually sort firms
@@ -314,6 +314,24 @@ def _reason_key(r):
     firm's justification over another's role. Only a byte-identical
     justification may be stated once."""
     return (r.kind, r.text, r.detail)
+
+
+def _cycle_not_open_note(profile, open_qs) -> str:
+    """One honest sentence when the student's own target cycle has no live
+    postings at all, else "". Checked against the whole open campus board,
+    not the picks: "your cycle is not open yet" must mean the BOARD lacks
+    it, never that six other roles merely outscored it."""
+    cycle = parse_target_cycle(getattr(profile, "target_cycle", "") or "")
+    if cycle is None:
+        return ""
+    bucket, year = cycle
+    if open_qs.filter(bucket=bucket, cohort=str(year)).exists():
+        return ""
+    label = (profile.target_cycle or "").strip()
+    # No em dash: house copy style. Two short sentences read cleaner here
+    # anyway.
+    return (f"{label} postings haven't opened yet. "
+            f"These are today's closest fits.")
 
 
 def _group_picks(cards):
@@ -1492,7 +1510,21 @@ def opportunities(request):
     picks: list = []
     profile = None
     if request.user.is_authenticated and not cols_fragment:
-        profile = Profile.from_user(request.user, tier_by_firm)
+        # The student's live relationships, collapsed to the warmest per
+        # firm. "warm" = a conversation actually happened (chatted or
+        # advocate); "replied" = they answered but no chat yet. Cold and
+        # archived rows stay out — a contact you added and never reached is
+        # not a relationship, and an archived one is a closed door.
+        warm_by_firm: dict[int, str] = {}
+        for fid, warmth in (Contact.objects.for_user(request.user)
+                            .filter(archived=False, firm__isnull=False,
+                                    warmth__in=("replied", "chatted", "advocate"))
+                            .values_list("firm_id", "warmth")):
+            rank = "warm" if warmth in ("chatted", "advocate") else "replied"
+            if warm_by_firm.get(fid) != "warm":
+                warm_by_firm[fid] = rank
+        profile = Profile.from_user(request.user, tier_by_firm,
+                                    warm_firms=warm_by_firm)
         if not profile.is_empty:
             picks = [
                 _pick_card(r)
@@ -1688,6 +1720,15 @@ def opportunities(request):
             # different role. Everything below the shared level keeps its full
             # sentence in the disclosure.
             "reasons": pick_shared,
+            # The one sentence that reframes the whole column for an
+            # early-cycle student. Jimmy's stored cycle is "2028 Summer
+            # Internship"; in August 2026 the board holds ZERO cohort-2028
+            # internships because that recruiting has not opened — so every
+            # pick is at best adjacent, and the column was presenting
+            # prior-cycle near-misses as if they were the thing he asked
+            # for. Say it, once, in the header: what he is waiting for is
+            # not listed YET, and what is shown is the closest fit today.
+            "cycle_note": _cycle_not_open_note(profile, open_qs),
         }
 
     # The two figures the stat strip actually renders. (The old hero widget's
