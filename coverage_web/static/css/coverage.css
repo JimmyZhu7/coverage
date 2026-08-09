@@ -1653,7 +1653,11 @@ select:focus-visible, input:focus-visible {
 /* Wide, multi-column panel: auto-fits 2–3 columns so many firms are visible
    at once without a long single-column scroll. */
 .cmulti-menu { position: absolute; top: calc(100% + 6px); left: 0;
-  width: 520px; max-width: 92vw; max-height: 360px; overflow-y: auto;
+  /* Never wider than the screen minus the same 12px gutter
+     covKeepInViewport clamps to, or the JS is asked to fit something that
+     cannot fit and gives up on one edge. `100dvw` rather than `100vw` so a
+     mobile browser's collapsing toolbars do not briefly overstate it. */
+  width: 520px; max-width: calc(100dvw - 24px); max-height: 360px; overflow-y: auto;
   z-index: 60; margin: 0; list-style: none;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel);
   box-shadow: var(--shadow-2); padding: var(--s2);

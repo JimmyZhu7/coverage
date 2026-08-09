@@ -180,6 +180,44 @@
     fallback. New selects arriving via htmx swaps are re-enhanced.
   {% endcomment %}
   <script>
+    // Keep an absolutely-positioned dropdown panel inside the viewport.
+    //
+    // Both dropdowns anchor their panel to the button's LEFT edge, so any
+    // panel wider than the distance from that edge to the right of the screen
+    // runs off it. The Companies panel does exactly that at most widths: it is
+    // a fixed 520px on a control that sits at the END of the filter bar, so
+    // the space to its right is usually a third of what it needs.
+    //
+    // Adjusts `left`, never `transform`: the open animation's keyframes end on
+    // `transform: none` with fill `both`, so a transform written here would be
+    // wiped the instant the animation lands — a fix that works for 140ms and
+    // then silently undoes itself.
+    window.covKeepInViewport = function (menu) {
+      var GUTTER = 12;
+      menu.style.left = "";                 // measure the natural position
+      // LAYOUT metrics (offsetLeft/offsetWidth), not getBoundingClientRect:
+      // the open animation starts at `scale(0.98)`, and this runs on the same
+      // frame the panel is unhidden, so a client rect here is the panel 2%
+      // small — about 10px on a 520px menu, which is exactly enough to
+      // conclude it fits when it does not. offsetLeft and offsetWidth ignore
+      // transforms, so they describe where the panel will actually settle.
+      var op = menu.offsetParent;
+      var base = op ? op.getBoundingClientRect().left : 0;
+      var left = base + menu.offsetLeft;
+      // `documentElement.clientWidth`, NOT `window.innerWidth`: innerWidth
+      // includes the vertical scrollbar, so clamping to it parks the panel's
+      // last ~15px underneath the scrollbar on every desktop browser that
+      // still renders one. clientWidth is the width the page is actually laid
+      // out in, which is the width the panel has to fit inside.
+      var vw = document.documentElement.clientWidth;
+      var over = left + menu.offsetWidth - (vw - GUTTER);
+      if (over <= 0) return;
+      // Shift left by the overflow, but never past the left gutter. On a
+      // narrow screen the panel is already as wide as the viewport allows, and
+      // pulling it further would just clip the other edge instead — trading a
+      // visible problem for the same problem mirrored.
+      menu.style.left = "-" + Math.min(over, Math.max(0, left - GUTTER)) + "px";
+    };
     (function () {
       var uid = 0;
       function enhance(sel) {
@@ -248,6 +286,8 @@
           menu.hidden = false;
           wrap.dataset.open = "true";
           btn.setAttribute("aria-expanded", "true");
+          window.covKeepInViewport(menu);
+          window.addEventListener("resize", onResize);
           active = sel.selectedIndex < 0 ? 0 : sel.selectedIndex;
           highlight();
           document.addEventListener("click", onDoc, true);
@@ -258,7 +298,9 @@
           btn.setAttribute("aria-expanded", "false");
           btn.removeAttribute("aria-activedescendant");
           document.removeEventListener("click", onDoc, true);
+          window.removeEventListener("resize", onResize);
         }
+        function onResize() { window.covKeepInViewport(menu); }
         function onDoc(e) { if (!wrap.contains(e.target)) close(); }
         function choose(i) {
           if (sel.selectedIndex !== i) {

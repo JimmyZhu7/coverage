@@ -209,3 +209,75 @@ def test_the_card_carries_every_fact_the_feed_promises(client, two_roles):
     assert "No date posted" in html, "the undated role says what is known"
     # The countdown hairline belongs to the dated role only.
     assert html.count("rolecard-fuse") == 1
+
+
+# ---------------------------------------------------------------------------
+# The Companies panel must stay inside the viewport.
+#
+# It is a fixed 520px anchored to its button's LEFT edge, and that button is
+# the last control in the filter bar — so at every width that does not happen
+# to leave 520px to its right, the panel ran off the screen. Reported from a
+# real window; reproduced at 820px, where it overflowed by 43px.
+#
+# The clamp is JS (no CSS can know how far a button sits from the right edge),
+# so these are static guards: they cannot prove the arithmetic, but they do
+# stop the mechanism being removed or quietly disconnected.
+# ---------------------------------------------------------------------------
+
+import pathlib
+
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_BASE = _ROOT / "templates" / "base.html"
+_OPPS = _ROOT / "templates" / "directory" / "opportunities.html"
+_CSS = _ROOT / "static" / "css" / "coverage.css"
+
+
+def test_the_viewport_clamp_helper_exists_and_both_dropdowns_call_it():
+    base = _BASE.read_text()
+    assert "window.covKeepInViewport = function" in base
+    # The single-select dropdowns (Year / Region / Track / Sponsorship) share
+    # the helper — they are narrower and overflow less often, not never.
+    assert base.count("covKeepInViewport(menu)") >= 2, "csel must call the clamp"
+    assert "covKeepInViewport(menu)" in _OPPS.read_text(), "Companies must call it"
+
+
+def _clamp_code() -> str:
+    """The clamp's body with `//` comments stripped.
+
+    Stripping matters: the comments deliberately NAME the wrong APIs to
+    explain why they are wrong, so a naive substring check on the raw text
+    fails against correct code. An assertion that reads prose is testing the
+    documentation, not the behaviour."""
+    body = _BASE.read_text()
+    fn = body[body.index("window.covKeepInViewport"):]
+    fn = fn[:fn.index("};")]
+    return "\n".join(line.split("//")[0] for line in fn.splitlines())
+
+
+def test_the_clamp_measures_layout_metrics_not_client_rects():
+    """The open animation starts at `scale(0.98)` and the clamp runs on the
+    frame the panel is unhidden, so a client rect reads the panel ~2% small —
+    about 10px on a 520px menu, exactly enough to conclude it fits when it
+    does not. offsetLeft/offsetWidth ignore transforms."""
+    code = _clamp_code()
+    assert "offsetWidth" in code and "offsetLeft" in code
+    assert "getBoundingClientRect().left" in code  # only to locate the anchor
+    # The failure this replaced: measuring the panel's own transformed box.
+    assert "menu.getBoundingClientRect()" not in code
+
+
+def test_the_clamp_uses_the_layout_viewport_not_innerwidth():
+    """`window.innerWidth` includes the vertical scrollbar, so clamping to it
+    parks the panel's last ~15px underneath the scrollbar."""
+    code = _clamp_code()
+    assert "document.documentElement.clientWidth" in code
+    assert "innerWidth" not in code
+
+
+def test_the_panel_can_never_be_wider_than_the_screen():
+    css = _CSS.read_text()
+    block = css[css.index(".cmulti-menu {"):]
+    block = block[:block.index("}")]
+    # Viewport-relative, and matching the clamp's 12px gutter on both sides.
+    assert "max-width: calc(100dvw - 24px)" in block
+    assert "92vw" not in block

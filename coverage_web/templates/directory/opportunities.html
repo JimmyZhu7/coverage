@@ -300,15 +300,23 @@ else is htmx and the platform.
         label.textContent = n === 0 ? "All Companies" : n + " selected";
       }
       function onDoc(e) { if (!wrap.contains(e.target)) close(); }
+      function onResize() { window.covKeepInViewport(menu); }
       function open() {
         menu.hidden = false; wrap.dataset.open = "true";
         btn.setAttribute("aria-expanded", "true");
+        // This panel is a fixed 520px anchored to the button's left edge, and
+        // the button is the last control in the bar — so without this it runs
+        // off the right of the screen at every width that does not happen to
+        // leave 520px to its right. See covKeepInViewport in base.html.
+        window.covKeepInViewport(menu);
+        window.addEventListener("resize", onResize);
         document.addEventListener("click", onDoc, true);
       }
       function close() {
         menu.hidden = true; wrap.dataset.open = "false";
         btn.setAttribute("aria-expanded", "false");
         document.removeEventListener("click", onDoc, true);
+        window.removeEventListener("resize", onResize);
       }
       btn.addEventListener("click", function () { menu.hidden ? open() : close(); });
       menu.addEventListener("change", sync);
