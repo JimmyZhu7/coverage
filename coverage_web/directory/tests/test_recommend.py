@@ -777,3 +777,42 @@ def test_a_network_only_profile_is_not_empty():
     """A student who has filled in nothing but has live relationships still
     gets picks — the relationships ARE personalisation signal."""
     assert not Profile(warm_firms={7: "warm"}).is_empty
+
+
+# ---------------------------------------------------------------------------
+# Expired roles (2026-08-10). A listing may honestly stay on the board past
+# its date — the firm still lists it, and Coverage does not close what the
+# source has not. A PICK is different: it is the product pointing at a role
+# and saying "do this one", and there is nothing to do about a closed
+# application. Two HSBC roles reached ranks 3 and 4 this way.
+# ---------------------------------------------------------------------------
+
+from datetime import date as _date, timedelta as _td
+
+_TODAY = _date(2026, 8, 10)
+
+
+def test_a_passed_deadline_is_never_a_pick():
+    live = _cand(1, deadline=_TODAY + _td(days=30))
+    dead = _cand(2, firm_id=98, deadline=_TODAY - _td(days=2))
+    ranked = recommend(JIMMY, [live, dead], min_score=0, today=_TODAY)
+    assert [r.candidate.id for r in ranked] == [1]
+
+
+def test_todays_deadline_still_counts_as_open():
+    """Closing TODAY is the most urgent thing on the board, not the least."""
+    ranked = recommend(JIMMY, [_cand(1, deadline=_TODAY)], min_score=0,
+                       today=_TODAY)
+    assert len(ranked) == 1
+
+
+def test_an_expired_role_sorts_last_among_equal_scores():
+    """Defence in depth for any caller that scores without the exclusion:
+    `d or date.max` alone is ascending by date, so an expired role — holding
+    the earliest date of all — sorted FIRST at equal score."""
+    from directory.recommend import Recommendation, _sort_key
+    dead = Recommendation(_cand(1, deadline=_TODAY - _td(days=2)), 50, ())
+    soon = Recommendation(_cand(2, deadline=_TODAY + _td(days=3)), 50, ())
+    rolling = Recommendation(_cand(3, deadline=None), 50, ())
+    order = sorted([dead, soon, rolling], key=lambda r: _sort_key(r, _TODAY))
+    assert [r.candidate.id for r in order] == [2, 3, 1]

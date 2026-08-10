@@ -771,15 +771,24 @@ def score_candidate(profile: Profile, candidate: Candidate) -> tuple[int, tuple[
     return total, tuple(reasons)
 
 
-def _sort_key(rec: Recommendation):
+def _sort_key(rec: Recommendation, today: date | None = None):
     """Total order, with no ties left to chance.
 
-    Score first; then the soonest real deadline (rolling roles last, because a
-    dated role at the same score is the one that can actually be missed); then
-    firm name and id, which are stable and unique."""
+    Score first; then a PASSED deadline last of all, then the soonest real
+    deadline (rolling roles after dated ones, because a dated role at the same
+    score is the one that can actually be missed); then firm name and id,
+    which are stable and unique.
+
+    The passed-deadline term is not decoration. Sorting on `d or date.max`
+    alone is ascending by date, so an expired role — having the earliest date
+    of all — sorted FIRST among equal scores. `recommend` excludes expired
+    candidates outright, and this keeps the order right anyway for any caller
+    that scores without that exclusion."""
     d = rec.candidate.deadline
+    today = today or date.today()
     return (
         -rec.score,
+        bool(d and d < today),
         d or date.max,
         rec.candidate.firm_name.lower(),
         rec.candidate.id,
@@ -793,6 +802,7 @@ def recommend(
     limit: int = DEFAULT_LIMIT,
     min_score: int = MIN_SCORE,
     max_per_firm: int = MAX_PER_FIRM,
+    today: date | None = None,
 ) -> list[Recommendation]:
     """Rank `candidates` for `profile` and return the ones worth showing.
 
@@ -810,6 +820,7 @@ def recommend(
     the roles that survive are still the highest-scoring ones, just spread."""
     if profile.is_empty:
         return []
+    today = today or date.today()
     out = []
     for c in candidates:
         # Never rank what the student cannot have. This is a hard exclusion,
@@ -818,10 +829,20 @@ def recommend(
         # not who it is for.
         if c.blocked:
             continue
+        # Nor anything whose deadline has already passed. A listing may
+        # honestly stay on the board after its date — the firm still lists it,
+        # and Coverage does not close what the source has not — but a PICK is
+        # the product pointing at something and saying "do this one", and
+        # there is nothing to do about a closed application. Two HSBC roles
+        # reached ranks 3 and 4 this way, boosted by the network axis, on
+        # dates that turned out to be wrong; the fix for the dates does not
+        # make it right to recommend a real one.
+        if c.deadline and c.deadline < today:
+            continue
         score, reasons = score_candidate(profile, c)
         if score >= min_score:
             out.append(Recommendation(candidate=c, score=score, reasons=reasons))
-    out.sort(key=_sort_key)
+    out.sort(key=lambda r: _sort_key(r, today))
 
     picked: list[Recommendation] = []
     seen: dict[int, int] = {}
