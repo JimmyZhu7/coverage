@@ -66,6 +66,18 @@
     {# ---- Left: Contacts Needing Action ---- #}
     <section class="net-actions">
       <h2 class="strip-title">Contacts Needing Action <span class="scrub-count">{{ action_total }}</span></h2>
+      {% comment %}
+      The whole panel is one form so a selection can span lanes — you can
+      park four people from Follow Up and one from Others in a single
+      submit. Plain checkboxes and submit buttons: the bar below works with
+      no JavaScript at all, and the script that follows only adds the
+      niceties (live count, shift-click ranges, per-lane select-all).
+      {% endcomment %}
+      <form id="bulk-form" method="post" action="{% url 'crm:contacts_bulk' %}">
+        {% csrf_token %}
+        {# Round-trips the region tab so a bulk action returns you to the #}
+        {# board you were looking at, not to "All". #}
+        <input type="hidden" name="scope" value="{{ scope }}">
       <div class="net-panel">
       {% for group in action_groups %}
         {% comment %}`is-empty` releases the lane's flex share. The panel used
@@ -77,6 +89,12 @@
         <div class="net-group{% if not group.items %} is-empty{% endif %}">
           <div class="net-group-head">
             <span>{{ group.label }}</span>
+            {% if group.items %}
+              {# Selects this lane and nothing else — "a whole block" in one #}
+              {# click, which is the case the multi-select exists for. JS #}
+              {# only; with no JS the per-card checkboxes still work. #}
+              <button type="button" class="lane-all" data-lane-all hidden>Select all</button>
+            {% endif %}
             <span class="scrub-count">{{ group.items|length }}</span>
           </div>
           {% if group.items %}
@@ -91,11 +109,34 @@
             {% endcomment %}
             <div class="net-minis">
               {% for a in group.items %}
-                <a class="net-mini" href="{% url 'crm:contact_detail' a.contact.id %}"
-                   title="{{ a.reason|capfirst }}">
-                  <span class="net-mini-name">{{ a.contact.name|smart_title }}</span>
-                  <span class="net-mini-firm">{{ a.firm_name|smart_title }}</span>
-                </a>
+                {% comment %}
+                A <label> for the checkbox, not a div — clicking a label
+                toggles its control natively, so the whole card becomes a
+                selection target for free, no JS required for that part
+                (shift-range and the live count still need the script
+                below). Reported directly: most of the card used to be dead
+                space, responsive only over the 13px box itself.
+
+                The small arrow is the one part of the card that still
+                OPENS the contact instead of selecting it, and it has to
+                stay real: a contact with zero touches (the "Send the First
+                Note" lane) appears on THIS card and nowhere else on the
+                page — the warmth sections below only ever hold contacts
+                who have been touched at least once. `stopPropagation`
+                keeps its click from also toggling the checkbox underneath.
+                {% endcomment %}
+                <label class="net-mini" title="{{ a.reason|capfirst }}">
+                  <input class="net-mini-check" type="checkbox" name="ids"
+                         value="{{ a.contact.id }}"
+                         aria-label="Select {{ a.contact.name|smart_title }}">
+                  <span class="net-mini-text">
+                    <span class="net-mini-name">{{ a.contact.name|smart_title }}</span>
+                    <span class="net-mini-firm">{{ a.firm_name|smart_title }}</span>
+                  </span>
+                  <a class="net-mini-open" href="{% url 'crm:contact_detail' a.contact.id %}"
+                     aria-label="Open {{ a.contact.name|smart_title }}'s profile"
+                     title="Open profile">›</a>
+                </label>
               {% endfor %}
             </div>
           {% else %}
@@ -103,7 +144,26 @@
           {% endif %}
         </div>
       {% endfor %}
+      {% comment %}
+      The bulk bar. Sticky to the bottom of the panel and `hidden` until
+      something is ticked, so it costs nothing on a board with no selection.
+      Every verb here is reversible, and each button says what it does in
+      the user's words rather than the model's — "Stop following up" is
+      `thread_state="parked"`, which is a term only this codebase uses.
+      Deliberately NO delete: see `_BULK_VERBS` in crm/views.py for why the
+      product has no hard-delete path for a contact at all.
+      {% endcomment %}
+      <div class="bulk-bar" data-bulk-bar hidden>
+        <span class="bulk-count"><b data-bulk-n>0</b> selected</span>
+        <span class="bulk-acts">
+          <button type="submit" name="verb" value="snooze" class="btn">Snooze 3d</button>
+          <button type="submit" name="verb" value="park" class="btn">Stop following up</button>
+          <button type="submit" name="verb" value="archive" class="btn">Archive</button>
+          <button type="button" class="btn bulk-clear" data-bulk-clear>Clear</button>
+        </span>
       </div>
+      </div>
+      </form>
     </section>
 
     {# ---- Right: Firm Coverage by tier (draggable) ---- #}
@@ -267,6 +327,96 @@
 </div>
 
 <script>
+  // Bulk selection on the actions panel. Progressive enhancement only: the
+  // checkboxes and the submit buttons are real form controls that work
+  // without any of this — the script adds the live count, shift-click
+  // ranges, and the per-lane "Select all" (which is hidden in markup and
+  // revealed here, so it never appears as a dead control when JS is off).
+  (function () {
+    var form = document.getElementById("bulk-form");
+    if (!form) return;
+    var bar = form.querySelector("[data-bulk-bar]");
+    var count = form.querySelector("[data-bulk-n]");
+    var boxes = Array.prototype.slice.call(
+      form.querySelectorAll(".net-mini-check"));
+    if (!boxes.length) return;
+    var lastIdx = null;
+
+    function sync() {
+      var n = boxes.filter(function (b) { return b.checked; }).length;
+      count.textContent = n;
+      bar.hidden = n === 0;
+      // The tint lives on the CARD, which has no :checked of its own —
+      // `:has()` would do it in CSS but is worth not depending on for a
+      // state this load-bearing.
+      boxes.forEach(function (b) {
+        b.closest(".net-mini").classList.toggle("is-picked", b.checked);
+      });
+    }
+
+    // The card is a <label>, so clicking it forwards to the checkbox —
+    // EXCEPT most browsers already skip that forwarding when the actual
+    // click landed on another interactive descendant, like this anchor.
+    // That skip is real but not something to depend on sight-unseen for a
+    // control this load-bearing: stopping propagation here makes the
+    // outcome certain instead of implementation-defined, at zero cost.
+    form.querySelectorAll(".net-mini-open").forEach(function (open) {
+      open.addEventListener("click", function (e) { e.stopPropagation(); });
+    });
+
+    boxes.forEach(function (box, i) {
+      box.addEventListener("click", function (e) {
+        // Shift-click extends from the last box touched — the gesture
+        // every mail client uses, and the one that makes "a whole block"
+        // one action instead of eighty-three.
+        if (e.shiftKey && lastIdx !== null) {
+          var lo = Math.min(lastIdx, i), hi = Math.max(lastIdx, i);
+          for (var j = lo; j <= hi; j++) boxes[j].checked = box.checked;
+        }
+        lastIdx = i;
+        sync();
+      });
+    });
+
+    form.querySelectorAll("[data-lane-all]").forEach(function (btn) {
+      btn.hidden = false;
+      btn.addEventListener("click", function () {
+        var lane = btn.closest(".net-group");
+        var mine = Array.prototype.slice.call(
+          lane.querySelectorAll(".net-mini-check"));
+        // Toggle: a second click clears the lane it just filled.
+        var fill = mine.some(function (b) { return !b.checked; });
+        mine.forEach(function (b) { b.checked = fill; });
+        btn.textContent = fill ? "Clear lane" : "Select all";
+        sync();
+      });
+    });
+
+    form.querySelector("[data-bulk-clear]").addEventListener("click", function () {
+      boxes.forEach(function (b) { b.checked = false; });
+      form.querySelectorAll("[data-lane-all]").forEach(function (b) {
+        b.textContent = "Select all";
+      });
+      lastIdx = null;
+      sync();
+    });
+
+    // Archive is the one verb that takes people OFF the board, so it is the
+    // one that asks. Snooze and park both leave everyone visible and
+    // reverse themselves; a confirm on those would be noise.
+    form.addEventListener("submit", function (e) {
+      var verb = e.submitter && e.submitter.value;
+      var n = boxes.filter(function (b) { return b.checked; }).length;
+      if (verb === "archive" && n &&
+          !confirm("Archive " + n + " contact" + (n === 1 ? "" : "s") +
+                   "? They keep every touch and come back in one click.")) {
+        e.preventDefault();
+      }
+    });
+
+    sync();
+  })();
+
   (function () {
     var dragged = null;
     document.querySelectorAll(".firm-card").forEach(function (card) {

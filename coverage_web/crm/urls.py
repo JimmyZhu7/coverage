@@ -34,6 +34,9 @@ urlpatterns = [
     # shadowed by the int converter (it can't be, but the ordering keeps the
     # relationship obvious).
     path("contacts/archived/", views.contact_archived, name="contact_archived"),
+    # Multi-select bulk verbs from the Network board (snooze / park /
+    # archive). Same literal-before-converter ordering as the line above.
+    path("contacts/bulk/", views.contacts_bulk, name="contacts_bulk"),
     path("contacts/<int:pk>/archive/", views.contact_archive, name="contact_archive"),
     path("contacts/<int:pk>/unarchive/", views.contact_unarchive, name="contact_unarchive"),
     # Drag-and-drop tier changes from the Network board (POST firm+tier).

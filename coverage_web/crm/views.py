@@ -24,6 +24,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count as models_Count, Max as models_Max, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.timesince import timesince
 from django.views.decorators.http import require_POST
@@ -693,6 +694,112 @@ def _set_archived(request: HttpRequest, pk: int, *, archived: bool) -> Contact:
         contact.archived = archived
         contact.save(update_fields=["archived"])
     return contact
+
+
+# The bulk verbs the Network board offers over a multi-selection, and the
+# past-tense word each reports back. All three are REVERSIBLE, and that is
+# the selection criterion, not an accident of what was easy:
+#
+#   snooze  -> `snoozed_until`, expires by itself in 3 days.
+#   park    -> `thread_state="parked"`; the contact leaves the cadence queue
+#              but keeps every touch, and logging one more puts them back.
+#   archive -> off the board and out of coverage counts, restored in one
+#              click from Archived Contacts.
+#
+# There is deliberately no `delete`. The product has no hard-delete path for
+# a contact ANYWHERE — `contact_archived.html` says so in as many words
+# ("Nothing is deleted: every touch stays on the record and comes back with
+# the person") — and a multi-select is the worst possible place to
+# introduce the first one, because the same mis-click that snoozes three
+# people would erase eighty-three and their entire correspondence history.
+# Archive is what "get rid of these" means here, and it means it safely.
+_BULK_VERBS = {
+    "snooze": "snoozed for 3 days",
+    "park": "taken out of the follow-up queue",
+    "archive": "archived",
+}
+
+
+@login_required
+@require_POST
+def contacts_bulk(request: HttpRequest) -> HttpResponse:
+    """Apply one reversible verb to a hand-picked set of contacts.
+
+    Unlike `today_park_all`, which re-derives its ids from the engine, this
+    one MUST trust the posted ids — the whole feature is the user choosing
+    an arbitrary subset. The safety property is tenancy, not derivation:
+    every id is resolved through `Contact.objects.for_user`, so another
+    tenant's id is silently absent from the queryset rather than acted on,
+    and a stale id from a re-rendered page simply matches nothing.
+    """
+    verb = (request.POST.get("verb") or "").strip()
+    if verb not in _BULK_VERBS:
+        return HttpResponse(status=400)
+
+    ids = []
+    for raw in request.POST.getlist("ids"):
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+
+    scope = (request.POST.get("scope") or "").strip()
+    back = reverse("crm:contact_list") + (f"?scope={quote(scope)}" if scope else "")
+    if not ids:
+        messages.info(request, "Nothing was selected.")
+        return redirect(back)
+
+    rows = list(
+        Contact.objects.for_user(request.user)
+        .filter(pk__in=ids, archived=False)
+        .values_list("id", "name")
+    )
+    if not rows:
+        messages.info(request, "Nothing was selected.")
+        return redirect(back)
+
+    if verb == "snooze":
+        Contact.objects.for_user(request.user).filter(
+            pk__in=[cid for cid, _ in rows]
+        ).update(snoozed_until=timezone.now() + timedelta(days=3))
+    elif verb == "park":
+        # A LOOP over the audited override, not a bulk `.update()` — the
+        # same call and the same reasoning as `today_park_all`: parking
+        # moves `thread_state`, and only the override path is allowed to,
+        # writing one `manual_override` touch per contact so the log never
+        # has a gap about who left the queue or when. Slower, and correct.
+        for cid, _ in rows:
+            services.set_contact_state(
+                request.user.id, cid,
+                thread_state="parked",
+                note="Parked from the Network board (bulk)",
+            )
+    else:  # archive
+        # A plain ORM write, matching `_set_archived`: `archived` is a
+        # UI/lifecycle flag, not part of the warmth/thread_state ratchet, so
+        # it does not go through the pipeline.
+        Contact.objects.for_user(request.user).filter(
+            pk__in=[cid for cid, _ in rows]
+        ).update(archived=True)
+
+    record_event(
+        f"contacts_bulk_{verb}", user=request.user,
+        source="network", count=len(rows),
+    )
+    # Name them when it's a handful, count them when it isn't — a list of
+    # eighty-three names is not a confirmation, it's a wall.
+    who = (", ".join(name for _, name in rows[:3])
+           + (f" and {len(rows) - 3} more" if len(rows) > 3 else ""))
+    undo = ("They're in Archived Contacts if you want them back."
+            if verb == "archive" else
+            "Logging a touch puts anyone back in the queue."
+            if verb == "park" else "")
+    messages.success(
+        request,
+        f"{len(rows)} contact{'' if len(rows) == 1 else 's'} "
+        f"{_BULK_VERBS[verb]}: {who}. {undo}".strip(),
+    )
+    return redirect(back)
 
 
 @login_required

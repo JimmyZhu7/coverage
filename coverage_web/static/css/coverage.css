@@ -907,6 +907,12 @@ main { min-height: 60vh; }
 .home-msgs { max-width: 720px; margin: 0 auto var(--s4); }
 .home-msgs .msg { text-align: center; }
 
+/* The app-wide flash zone (base.html), inside <main> and above the page's
+   own content. Matches the page gutter so a message lines up with the
+   heading under it rather than sitting flush to the viewport. */
+.page-msgs { padding: var(--s4) var(--s5) 0; }
+.page-msgs:empty { display: none; }
+
 .msg { padding: var(--s2) var(--s3); border-radius: var(--r-ctl);
   margin: var(--s2) 0; font-size: var(--fs-s); border: 1px solid var(--line); }
 .msg.success { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }

@@ -145,6 +145,30 @@
   </header>
   {# tabindex="-1" so the skip link's target can actually take focus. #}
   <main id="main" tabindex="-1">
+    {% comment %}
+    Flash messages, for EVERY page. Three templates (home, import, settings)
+    each rendered their own copy of this loop, which meant any view that
+    redirected somewhere else posted into a void: `contact_archive` has
+    always ended with "Archived {name}. They're in Archived Contacts if you
+    want them back." and then redirected to the Network board, which never
+    rendered it — so the one sentence telling the user their contact was
+    recoverable was written and thrown away, every time.
+
+    Rendered here rather than in each page so a view can rely on being
+    heard wherever it redirects. `.msg` and its variants already existed
+    globally in coverage.css; only the loop was missing.
+
+    role="alert" interrupts, role="status" waits its turn. An error the user
+    must act on earns the interruption; "Saved." does not.
+    {% endcomment %}
+    {% if messages %}
+      <div class="page-msgs">
+        {% for m in messages %}
+          <p class="msg {% if m.tags %}{{ m.tags }}{% endif %}"
+             role="{% if 'error' in m.tags %}alert{% else %}status{% endif %}">{{ m }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer">
