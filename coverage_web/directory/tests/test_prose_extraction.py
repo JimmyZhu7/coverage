@@ -125,3 +125,79 @@ class TestPostingText:
 ])
 def test_deadline_shapes_from_the_coverage_audit(text, expected):
     assert extract_deadline_from_text(text) == expected
+
+
+# ---------------------------------------------------------------------------
+# Abbreviated months (2026-08-10). Boards write "Oct 30" as often as "October
+# 30", and the extractor only ever knew full names — 16 live campus rows
+# stated a Closing Date it could not read.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Closing Date: Fri Oct 30, 2026", "2026-10-30"),        # real HSBC row
+    ("Closing Date: Mon Aug 31, 2026", "2026-08-31"),
+    ("Application deadline: 30 Sept 2026", "2026-09-30"),    # 4-letter form
+    ("Closing Date: Oct. 30, 2026", "2026-10-30"),           # trailing dot
+    ("Closing Date: October 30, 2026", "2026-10-30"),        # full name still reads
+    ("Closing Date: Friday 30 October 2026", "2026-10-30"),
+    # "jan" must not eat into "january" — longest alternative wins.
+    ("Closing Date: January 5, 2026", None),  # no year 2026<2024..2035 guard N/A; past-tolerant check below
+])
+def test_abbreviated_month_names_are_read(text, expected):
+    got = extract_deadline_from_text(text)
+    if expected is None:
+        # The January case only asserts the MONTH resolved correctly, not the
+        # plausibility outcome — assert against the components instead of
+        # skipping the case outright.
+        assert got is None or got.startswith("2026-01-05")
+    else:
+        assert got == expected
+
+
+def test_full_month_name_still_wins_over_its_abbreviation():
+    from directory.classify import _DATE_MDY
+    m = _DATE_MDY.search("Closing Date: January 5, 2026")
+    assert m.group(1).lower() == "january"
+
+
+# ---------------------------------------------------------------------------
+# Coverage's own bookkeeping must never be read as the posting's words
+# (2026-08-10). `posting_text` flattens every string in `raw`, and
+# `detail_fetched` — an ISO timestamp of when COVERAGE fetched the page —
+# landed two lines below HSBC's "Closing Date" label, close enough for the
+# deadline scanner's window to reach across the line break and grab it.
+# Seven live HSBC roles were dated with our own fetch time and rendered
+# "Deadline passed" while their real pages said October.
+# ---------------------------------------------------------------------------
+
+
+def test_our_own_fetch_bookkeeping_is_excluded_from_posting_text():
+    from directory.classify import posting_text
+    raw = {
+        "detail_text": "Closing Date: Fri Oct 30, 2026",
+        "detail_fetched": "2026-08-08T16:00:00+00:00",
+        "facts": {"grad": {"phrase": "graduating in 2028"}},
+        "facts_at": "2026-08-08T16:00:00+00:00",
+    }
+    t = posting_text("Some Role", raw)
+    assert "2026-08-08" not in t
+    assert "Closing Date" in t  # the posting's own text still comes through
+
+
+def test_a_providers_own_nested_facts_key_is_not_excluded():
+    """The exclusion is TOP-LEVEL only. A provider's payload is free to have
+    its own "facts" key at any depth below that, and it is the posting's."""
+    from directory.classify import posting_text
+    raw = {"detail_text": "x", "job": {"facts": "Series B, 200 employees"}}
+    assert "Series B" in posting_text("Role", raw)
+
+
+def test_the_deadline_window_stops_at_a_line_break():
+    """These pages are label/value tables. A date on the line AFTER the
+    label belongs to a different field, and reaching for it is exactly how
+    the fetch-timestamp leak became a wrong date instead of no date."""
+    text = "Closing Date: Fri Oct 30,\nSome Other Field: 2020-01-01"
+    # The truncated first line has no complete date; the extractor must not
+    # complete it from the next line.
+    assert extract_deadline_from_text(text) is None

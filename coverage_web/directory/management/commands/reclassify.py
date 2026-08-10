@@ -189,6 +189,30 @@ class Command(BaseCommand):
                     # got their date from a provider API field (prose
                     # extraction didn't exist yet), which is the 1.0 tier.
                     confidence = 1.0
+                elif confidence < 1.0 and (opp.raw or {}).get("detail_text"):
+                    # A PROSE-derived date has to keep tracking the prose it
+                    # came from. Everything else in this loop is fill-only,
+                    # and for a value read out of a page that the page can
+                    # later change, fill-only means wrong forever.
+                    #
+                    # Live example: HSBC's markets internship carried
+                    # 2026-08-08, a date that appears nowhere in its current
+                    # text, while the page itself says "Closing Date: Fri Oct
+                    # 30, 2026" — so the board showed "Deadline passed" on a
+                    # role open for another eleven weeks, and kept showing it
+                    # because a set deadline was never re-read.
+                    #
+                    # Gated on actually HOLDING the text: with no
+                    # detail_text there is nothing to disagree with, and
+                    # clearing on that basis would delete good dates from
+                    # rows whose page simply has not been fetched. Never
+                    # touches confidence 1.0 — that is the provider's own
+                    # field, and prose does not get a vote against it.
+                    from_text = extract_deadline_from_text(text)
+                    parsed = parse_date(from_text) if from_text else None
+                    if parsed != deadline:
+                        deadline, precision, confidence = (
+                            (parsed, "day", 0.6) if parsed else (None, "", 0.0))
 
                 if (bucket != opp.bucket or cohort != opp.cohort
                         or class_year != opp.class_year

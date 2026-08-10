@@ -1023,9 +1023,23 @@ def extract_sponsorship(text: str | None) -> str:
     return "unknown"
 
 
-_MONTHS = {m: i + 1 for i, m in enumerate((
-    "january", "february", "march", "april", "may", "june", "july",
-    "august", "september", "october", "november", "december"))}
+_MONTH_NAMES = ("january", "february", "march", "april", "may", "june",
+                "july", "august", "september", "october", "november",
+                "december")
+_MONTHS = {m: i + 1 for i, m in enumerate(_MONTH_NAMES)}
+# Three-letter abbreviations, plus the four-letter "Sept". Boards write dates
+# both ways and the full-name-only list read exactly half of them: HSBC's
+# pages state "Closing Date: Fri Oct 30, 2026" and every one of them fell
+# through, on 16 live campus rows. Worse than a miss — several of those rows
+# were still carrying an older, wrong date, so the board showed "Deadline
+# passed" on roles that stay open for another eleven weeks.
+_MONTHS.update({m[:3]: i + 1 for i, m in enumerate(_MONTH_NAMES)})
+_MONTHS["sept"] = 9
+#: Longest-first so "january" wins over "jan"; the optional "." covers
+#: "Oct." Anchored with \b so it cannot fire inside a longer word.
+_MONTH_RX = (r"\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|"
+             r"july|jul|august|aug|september|sept|sep|october|oct|"
+             r"november|nov|december|dec)\.?")
 # A deadline KEYWORD, then a date within the next ~80 characters. The keyword
 # gate is what keeps this conservative: a bare date in a posting is usually a
 # start date or a posted date, and treating those as deadlines would put
@@ -1040,11 +1054,10 @@ _DEADLINE_KEY = re.compile(
     r"(?:received|submitted))|closing date|deadline)", re.IGNORECASE)
 _DATE_ISO = re.compile(r"(20\d{2})-(\d{2})-(\d{2})")
 _DATE_MDY = re.compile(
-    r"(january|february|march|april|may|june|july|august|september|october|"
-    r"november|december)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})", re.IGNORECASE)
+    _MONTH_RX + r"\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})", re.IGNORECASE)
 _DATE_DMY = re.compile(
-    r"(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|"
-    r"august|september|october|november|december),?\s+(20\d{2})", re.IGNORECASE)
+    r"(\d{1,2})(?:st|nd|rd|th)?\s+" + _MONTH_RX + r",?\s+(20\d{2})",
+    re.IGNORECASE)
 # A slash date, which boards write in both conventions and never label.
 # BMO posts "Application Deadline: 08/27/2026"; a UK board writing the same
 # day says 27/08/2026. Read ONLY when the two numbers cannot swap roles —
@@ -1064,7 +1077,13 @@ def extract_deadline_from_text(text: str | None) -> str | None:
     if not t:
         return None
     for key_match in _DEADLINE_KEY.finditer(t):
-        window = t[key_match.end():key_match.end() + 80]
+        # The window stops at the first line break. These pages are label /
+        # value tables ("Closing Date: Fri Oct 30, 2026"), so a date on the
+        # NEXT line belongs to a different field — and letting the window
+        # reach it is how a truncated "Closing Date: Fri Oct 30,…" borrowed
+        # the date sitting two lines below it. A label's value is on the
+        # label's line.
+        window = t[key_match.end():key_match.end() + 80].split("\n")[0]
         iso = _DATE_ISO.search(window)
         if iso:
             y, m, d = int(iso.group(1)), int(iso.group(2)), int(iso.group(3))
@@ -1093,11 +1112,33 @@ def extract_deadline_from_text(text: str | None) -> str | None:
     return None
 
 
+#: Keys in `raw` that COVERAGE wrote, not the provider — our fetch
+#: bookkeeping and our own derived facts. Excluded from `posting_text` so the
+#: extractors only ever read the posting's own words.
+#:
+#: This was not hypothetical. `detail_fetched` holds an ISO timestamp of when
+#: we read the page, and flattening it into the searchable text put
+#: "2026-08-08T16:..." two lines below HSBC's "Closing Date" label — close
+#: enough for the deadline scanner's window to reach it. Seven live HSBC roles
+#: were dated with OUR FETCH TIME and rendered "Deadline passed", while their
+#: pages said "Closing Date: Fri Oct 30, 2026".
+#:
+#: `detail_text` is deliberately NOT here: it is the posting's own body and
+#: the single richest thing the extractors read. `facts` is, because a fact's
+#: stored evidence phrase is our copy of text already present in
+#: `detail_text` — reading it again only lets a derived value be re-derived
+#: from itself.
+_OURS_NOT_THE_POSTINGS = ("detail_fetched", "facts", "facts_at",
+                          "detail_source")
+
+
 def posting_text(title: str | None, raw: dict | None) -> str:
     """Every string in the posting, flattened for the extractors: the title
     plus all string values in the provider's raw payload, recursively.
     Capped, because a payload is untrusted input and one pathological
-    posting must not make extraction quadratic."""
+    posting must not make extraction quadratic.
+
+    Coverage's own keys are skipped — see `_OURS_NOT_THE_POSTINGS`."""
     parts: list[str] = [(title or "")]
 
     def walk(node, depth=0):
@@ -1106,7 +1147,11 @@ def posting_text(title: str | None, raw: dict | None) -> str:
         if isinstance(node, str):
             parts.append(node)
         elif isinstance(node, dict):
-            for v in node.values():
+            for k, v in node.items():
+                # Only at the top level: a provider is free to have its own
+                # nested "facts" key and that one IS the posting's.
+                if depth == 0 and k in _OURS_NOT_THE_POSTINGS:
+                    continue
                 walk(v, depth + 1)
         elif isinstance(node, (list, tuple)):
             for v in node:
