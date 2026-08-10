@@ -551,6 +551,83 @@ def test_a_reping_card_offers_no_skip_because_skip_would_lie(client):
     import re
     card = re.search(r"Reping Target.*?</article>", body, re.S).group(0)
     assert "Skip" not in card and "Snooze" not in card
+    # Park it is the SAME exemption for a stronger reason: parking silences
+    # every future reminder about this person, not just today's, and the
+    # one card that exists because a confirmed deadline is imminent is
+    # exactly the one card that must never be permanently dismissable.
+    assert "Park it" not in card
+
+
+# ---------------------------------------------------------------------------
+# The manual "never see this again" — Park it as a ghost button on an
+# ordinary (non-quiet) card, alongside Snooze/Skip rather than gated behind
+# the engine already deciding the contact has gone stale.
+# ---------------------------------------------------------------------------
+def test_an_ordinary_card_offers_park_it_next_to_snooze_and_skip(client):
+    """The only way to permanently stop a reminder used to be waiting for
+    the cadence engine to decide a contact had gone quiet. A student who
+    simply does not want to keep seeing a reminder for someone had no
+    control that said so — only Snooze (3 days) and Skip (1 day), both of
+    which come back."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Shelby Dibs", warmth="cold", thread_state="no_reply",
+    )
+    _touch(user, c, "outreach", days_ago=20)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    import re
+    card = re.search(r"Shelby Dibs.*?</article>", body, re.S).group(0)
+    assert "Snooze" in card and "Skip" in card
+    assert "Park it" in card
+    assert f'{reverse("crm:today_act", args=[c.id, "park"])}' in card
+
+
+def test_the_ghost_park_it_button_actually_parks(client):
+    """Not just markup — the button has to do what the primary Park it
+    button does: the audited override, one manual_override touch, contact
+    stays on the board."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Shelby Dibs", warmth="cold", thread_state="no_reply",
+    )
+    _touch(user, c, "outreach", days_ago=20)
+    client.force_login(user)
+
+    client.post(reverse("crm:today_act", args=[c.id, "park"]))
+
+    c.refresh_from_db()
+    assert c.thread_state == "parked"
+    assert Touch.all_objects.filter(
+        user=user, contact=c, kind="manual_override"
+    ).exists()
+    # And they are OFF today's queue, not deleted or archived. Scoped to
+    # the cockpit specifically: the activity feed further down the SAME
+    # page is a log of what happened and correctly still names her in its
+    # own "Manual override" line — this checks the QUEUE, not the whole page.
+    assert c.archived is False
+    ctx = _cockpit_context(user)
+    queued_names = [a["contact"]["name"] for lane in ctx["lanes"] for a in lane["items"]]
+    assert "Shelby Dibs" not in queued_names
+
+
+def test_the_gone_quiet_lane_does_not_get_a_second_park_button(client):
+    """`a.action == "park"` already renders Park it as the PRIMARY button.
+    The new ghost version is gated on `a.action != "park"` specifically so
+    that card doesn't show the same verb twice."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Gone Quiet Guy", warmth="advocate",
+        thread_state="replied",
+    )
+    _touch(user, c, "chat", days_ago=90)  # well past the advocate keep-warm window
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    import re
+    card = re.search(r"Gone Quiet Guy.*?</article>", body, re.S).group(0)
+    assert card.count("Park it") == 1
 
 
 # ---------------------------------------------------------------------------

@@ -128,6 +128,14 @@ as the row's left edge, every control and hx contract byte-identical.
     drawing Skip on an exempt card produced a button that wrote snoozed_until
     and then re-rendered the same card — a control that visibly did nothing.
     No buttons is honest; broken buttons are not.
+
+    The SAME exemption gates "Park it" here, and for a stronger reason than
+    it gates Snooze: parking is not a few days of quiet, it is "stop asking
+    about this person until I log a touch myself" — offering that on a
+    reping card would let a click permanently silence the one reminder that
+    exists because a real, confirmed deadline is close. `a.action != "park"`
+    only avoids a second, redundant Park button next to the primary one
+    `.act-primary` already renders for that lane.
     {% endcomment %}
     {% if a.snoozable %}
     <div class="act-ghosts">
@@ -139,6 +147,30 @@ as the row's left edge, every control and hx contract byte-identical.
               aria-label="Dismiss {{ a.contact.name }} for today"
               hx-post="{% url 'crm:today_act' a.contact.id 'skip' %}"
               title="Dismiss for today">Skip</button>
+      {% if a.action != "park" %}
+        {% comment %}
+        The permanent version of dismissal — the vocabulary matches the
+        "Gone quiet" lane's own button on purpose, so the page speaks one
+        word for one action rather than two words for the same thing. Goes
+        through the same audited override as that button and
+        `today_park_all`: one `manual_override` touch, no bulk UPDATE, and
+        the contact stays on the board — logging any touch on them brings
+        them straight back into the queue.
+
+        No confirm dialog, matching this exact verb's OTHER two buttons on
+        this page: the primary "Park it" above (a.action == "park") and
+        contact_detail's own Archive button are both bare, frictionless
+        submits. A single-target, fully reversible action gets a confirm
+        step nowhere else in this app; only the Network board's BULK
+        archive earned one, because a multi-select can act on eighty-three
+        people from one click and a review-before-commit step matters
+        there in a way it doesn't for one card at a time.
+        {% endcomment %}
+        <button type="button" class="btn act-ghost"
+                aria-label="Stop showing {{ a.contact.name }} in today's queue"
+                hx-post="{% url 'crm:today_act' a.contact.id 'park' %}"
+                title="Take them out of the queue until you log a touch">Park it</button>
+      {% endif %}
     </div>
     {% endif %}
   </div>
