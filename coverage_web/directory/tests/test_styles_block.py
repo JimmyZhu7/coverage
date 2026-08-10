@@ -281,3 +281,64 @@ def test_the_panel_can_never_be_wider_than_the_screen():
     # Viewport-relative, and matching the clamp's 12px gutter on both sides.
     assert "max-width: calc(100dvw - 24px)" in block
     assert "92vw" not in block
+
+
+# ---------------------------------------------------------------------------
+# The fact-chip ellipsis (2026-08-10). `.fact-chip` caps long labels at 18ch
+# with `overflow: hidden; text-overflow: ellipsis`, but it was ALSO
+# `display: inline-flex` — and `text-overflow` is defined only for block
+# containers; a flex container ignores it with no warning. Longer labels
+# were hard-clipped mid-character with no "…" to mark the cut: "Won't
+# sponsor you here" silently lost "here", read by the reader as the text
+# running straight into the chip's own border.
+#
+# A second, compounding bug: the rule had no `white-space: nowrap`, so a
+# multi-word label ("Won't sponsor you here") could WRAP onto a second line
+# inside the fixed-height box instead of truncating on one — which is what
+# the reported screenshot actually showed, text overrunning the chip
+# vertically rather than a clean single-line ellipsis.
+# ---------------------------------------------------------------------------
+
+
+def _fact_chip_rule() -> str:
+    css = _CSS.read_text()
+    i = css.index(".fact-chip {")
+    return css[i:css.index("}", i) + 1]
+
+
+def test_fact_chip_is_not_a_flex_container():
+    """`text-overflow: ellipsis` has no effect on flex/inline-flex containers
+    per spec. Whatever `.fact-chip` is, it must not be one."""
+    rule = _fact_chip_rule()
+    assert "display: inline-flex" not in rule
+    assert "display: flex" not in rule
+
+
+def test_fact_chip_forces_single_line_before_it_ellipsizes():
+    """All three preconditions for a working single-line ellipsis, in one
+    place — losing any one silently reintroduces the bug."""
+    rule = _fact_chip_rule()
+    assert "overflow: hidden" in rule
+    assert "text-overflow: ellipsis" in rule
+    assert "white-space: nowrap" in rule
+
+
+@pytest.mark.django_db
+def test_a_long_verdict_label_renders_as_one_unwrapped_line(client):
+    """Regression, end to end: the exact case reported — a visa-refusal chip
+    long enough to hit the 18ch cap must render as a single text run the
+    browser can ellipsize, not a wrapped multi-line block."""
+    from accounts.models import User
+    from directory.models import Firm, Opportunity
+
+    u = User.objects.create_user(
+        email="stu@example.com", password="x", class_year=2029,
+        work_authorization={"hk": "sponsorship"})
+    f = Firm.objects.create(slug="test-hk-bank", name="Test HK Bank")
+    Opportunity.objects.create(
+        firm=f, url="https://x/1", title="Analyst", bucket="internship",
+        status="open", region="hk", sponsorship="no")
+    client.force_login(u)
+    resp = client.get("/opportunities/")
+    assert b"Won&#x27;t sponsor you here" in resp.content or \
+           b"Won't sponsor you here" in resp.content

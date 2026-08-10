@@ -1258,7 +1258,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    Every chip's `title` is the sentence it was extracted from; see
    directory/facts.py for why a chip that cannot show its evidence does not
    ship. -------------------------------------------------------------- */
-.fact-chip { display: inline-flex; align-items: center; flex: none;
+.fact-chip { display: inline-block; flex: none; vertical-align: middle;
   border-radius: 4px; padding: 1px 6px; font-family: var(--font-mono);
   font-size: 10px; line-height: 15px; letter-spacing: -0.01em;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
@@ -1269,7 +1269,17 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
      cap still exists because a
      language chip can carry two names; it just sits above the longest
      label the extractors actually produce. */
-  max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+  max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* `inline-flex`, not `inline-block`, was here first, for the vertical
+     centring `align-items: center` gave a short label against the taller
+     line box around it. But `text-overflow: ellipsis` is defined only for
+     BLOCK containers — a flex container ignores it outright, with no
+     warning and no fallback. Every chip past 18ch was hard-clipped
+     mid-character at the box edge with no "…" to say so: "Won't sponsor
+     you here" silently lost "here", "For 2027-2028 grads" lost the trailing
+     "s". `inline-block` restores the ellipsis; `vertical-align: middle`
+     plus the unchanged `line-height: 15px` keep the centring the flex was
+     doing. */ }
   /* A wall — sponsorship refused, a language you may not have. Bordered in
    the danger tint rather than filled: it is a fact about the posting, not
    an alarm about the student, and eight filled red chips down a column
