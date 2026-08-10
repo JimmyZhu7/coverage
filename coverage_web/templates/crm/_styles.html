@@ -558,15 +558,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .gap-t1 { border-left-color: var(--danger); }
   .gap-t2 { border-left-color: var(--stale-t); }
   .gap-t3 { border-left-color: var(--line-strong); }
-  .gap-head { display: flex; gap: var(--s1); flex-wrap: wrap; }
-  .gap-head .pill { font-size: 10px; padding: 2px var(--s2); line-height: 1.5; }
-  .pill.gap-tier { background: var(--paper); color: var(--ink-2); }
-  .pill.gap-due { background: var(--danger-soft); color: var(--danger);
-    border-color: var(--danger); }
+  /* Plain text, not pills — the tier is already the card's own border
+     colour (see .gap-t1/2/3 below), so a filled T1 badge restated the
+     same fact in a second shape. Text carries it for anyone the colour
+     doesn't reach; the mono face keeps it feeling like a tag without the
+     chrome. */
+  .gap-head { display: flex; gap: var(--s2); align-items: baseline; }
+  .gap-tier-tag { font-size: 10px; font-family: var(--font-mono);
+    color: var(--ink-3); font-weight: var(--w-med); }
+  .gap-due-tag { font-size: 10px; font-family: var(--font-mono);
+    color: var(--danger); font-weight: var(--w-med); }
   .gap-name { font-weight: var(--w-bold); font-size: var(--fs-s); line-height: 1.25;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden; }
   .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
+  /* The one number worth showing without a hover: not the whole formula
+     (tier weight × gap points + bonus — that still lives in the card's
+     `title=` for anyone hovering), just the score it resolves to, so a
+     touch-only screen can still see WHY this card outranks its neighbour.
+     Mono so it reads as a number, not more state-line prose. */
+  .gap-exp { font-family: var(--font-mono); color: var(--ink-2); }
   .gap-act { margin-top: auto; padding: 5px var(--s2); font-size: var(--fs-xs);
     text-align: center; white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; display: block; }
@@ -754,6 +765,21 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .seg-replied { background: var(--w-replied-bar); }
   .seg-chatted { background: var(--w-chatted-bar); }
   .seg-advocate { background: var(--w-advocate-bar); }
+
+  /* The one-click action every under-target firm card carries — the same
+     "who to work next" the Coverage Gaps strip computes for its worst 6,
+     extended to the whole board. Deliberately NOT `.gap-act`'s full button
+     chrome: 55-odd of 69 cards show this, and the strip's tall button would
+     have pushed the 92px-floor grid rows well past what a status board
+     should cost. A quiet link, sized to the compact firm-card pills next
+     to it, adds one short line — the grid's `minmax(92px, auto)` rows
+     already absorb that per the badge-wrap doctrine above; a row mixing
+     covered and uncovered firms is simply as tall as its tallest card. */
+  .firm-card-act { flex: none; margin-top: -2px; }
+  .fc-act-link { display: block; font-size: 10px; font-weight: var(--w-med);
+    color: var(--accent-ink); text-decoration: none; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .fc-act-link:hover { text-decoration: underline; }
 
   .warmth-section { background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s4) var(--s5); margin-bottom: var(--s4);

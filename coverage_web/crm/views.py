@@ -200,6 +200,24 @@ _WARMTH_SECTIONS = [
     ("no_reply", "Emailed, No Reply"),
 ]
 
+# Warmest-first tie-break for "who to work next at this firm" — chatted
+# beats replied beats cold, an advocate is never a candidate (there's
+# nothing left to convert them into).
+_LEVER_RANK = {"chatted": 0, "replied": 1, "cold": 2}
+
+
+def _pick_lever(contacts):
+    """The single best contact to work next at a firm: the warmest
+    non-advocate, ties broken by id so the pick is stable across renders.
+
+    Shared by the Coverage Gaps strip and every firm card on the board
+    below it — before this, each computed its own copy, so a firm's "top
+    pick" in the gaps strip could disagree with itself if the two were
+    ever edited separately."""
+    candidates = [c for c in contacts if c.warmth != "advocate"]
+    candidates.sort(key=lambda c: (_LEVER_RANK.get(c.warmth, 3), c.id))
+    return candidates[0] if candidates else None
+
 
 def contact_region(c) -> str | None:
     """The region a Contact row belongs to, or None when it genuinely isn't
@@ -370,6 +388,23 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 break
         else:
             grouped["others"].append(a)
+    # `cadence.due_actions` sorts its OWN output by (priority, tier, firm
+    # name) — never by how long the contact has gone quiet, because it has
+    # no opinion on lane order. Once split into these verb-lanes, "Follow
+    # Up" alone can hold 80+ people, all the same action, all the same
+    # priority, differing only in how overdue they are — and that was the
+    # one thing the list wasn't sorted by. Longest-silent-first inside each
+    # lane, priority still breaking ties first (a re-ping guarding a real
+    # deadline outranks an ordinary follow-up regardless of either one's
+    # idle time). Not `_today_sort_key`: that key's leading term is
+    # `_today_class`, the Today page's OWN critical/momentum/cold split,
+    # which doesn't exist here — the lane a card is in already answers the
+    # question that term is for.
+    for items in grouped.values():
+        items.sort(key=lambda a: (
+            a["priority"], -a.get("idle_business_days", 0),
+            a["tier"], str(a["firm_name"]),
+        ))
     action_groups = [
         {"key": key, "label": label, "items": grouped[key]}
         for key, label, _ in _ACTION_GROUPS
@@ -418,6 +453,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             for w in ("cold", "replied", "chatted", "advocate")
         ]
         advocates = sum(1 for c in cs if c.warmth == "advocate")
+        adv_met = advocates >= adv_target
         return {
             "firm": uf.firm,
             "tier": uf.tier,
@@ -433,11 +469,21 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             # things you haven't done.
             "advocates": advocates,
             "adv_target": adv_target,
-            "adv_met": advocates >= adv_target,
+            "adv_met": adv_met,
             # Socket booleans for the template: [True, False] is "one of two
             # filled". Capped at the target — a third advocate at a
             # two-target firm overfills nothing, it just keeps the ✓.
             "adv_slots": [i < advocates for i in range(adv_target)],
+            # What the Coverage Gaps strip already computes for its worst 6
+            # firms, extended to all 69: WHERE this firm sits on the warmth
+            # ladder, and the one contact who moves it forward. A card used
+            # to state status only ("2 Act Now", a bar, a fraction) with no
+            # path from reading it to doing something about it — the click
+            # target existed for six firms and nowhere else on the board.
+            "gap_label": (None if adv_met else
+                         coverage.GAP_LABELS[coverage.gap_state(
+                             (c.warmth for c in cs), advocates, adv_target)]),
+            "lever": None if adv_met else _pick_lever(cs),
         }
 
     tier_sections = []
@@ -496,17 +542,12 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # One click to act on each gap: somewhere to start when the firm is
     # empty, and the warmest person who isn't an advocate yet when it
     # isn't — that contact is the shortest path to closing the gap.
+    # `_pick_lever` — same function every firm card below uses.
     firms_by_id = {uf.firm_id: uf.firm for uf in user_firms}
-    lever_rank = {"chatted": 0, "replied": 1, "cold": 2}
     for g in gaps:
         firm = firms_by_id.get(g["firm_id"])
         g["slug"] = firm.slug if firm else ""
-        candidates = [
-            c for c in by_firm_contacts.get(g["firm_id"], []) if c.warmth != "advocate"
-        ]
-        # Sort by warmth then id so the pick is stable across renders.
-        candidates.sort(key=lambda c: (lever_rank.get(c.warmth, 3), c.id))
-        g["lever"] = candidates[0] if candidates else None
+        g["lever"] = _pick_lever(by_firm_contacts.get(g["firm_id"], []))
 
     # --- Full contact cards ---------------------------------------------
     # Warmth sections normally; in School scope the sections ARE the

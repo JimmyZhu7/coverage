@@ -229,3 +229,153 @@ def test_network_gaps_weight_a_confirmed_deadline_only(client):
     assert "7d to close" in gap_block
     assert "3d to close" not in gap_block
     assert gap_block.index("Soon Co") < gap_block.index("Rumor Co")
+
+
+# ---------------------------------------------------------------------------
+# 4. Every under-covered firm card carries the SAME one-click action the
+#    Coverage Gaps strip computes for its worst 6 — not just those 6.
+#    `_pick_lever` (crm/views.py) is the single function both surfaces call,
+#    so a firm's "who to work next" answer can never disagree with itself
+#    between the strip and its own card.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_a_firm_ranked_outside_the_strip_still_gets_its_own_lever(client):
+    """The strip only ever shows the worst 6. Before this, the one-click
+    action existed nowhere else — a firm ranked 7th or worse had a status
+    but no path from reading it to doing something about it."""
+    user = User.objects.create_user(email="lever@example.com", password="x")
+    # Six firms with NOTHING (no_contacts, 4 points) always outrank a
+    # seventh that has one warm-but-unconverted contact (no_advocate, 2
+    # points) at the same tier, so the seventh is guaranteed to fall outside
+    # `rank_gaps`'s default `limit=6`.
+    empties = [Firm.objects.create(slug=f"empty-{i}", name=f"Empty {i}") for i in range(6)]
+    for f in empties:
+        UserFirm.all_objects.create(user=user, firm=f, tier=1)
+    seventh = Firm.objects.create(slug="seventh-co", name="Seventh Co")
+    UserFirm.all_objects.create(user=user, firm=seventh, tier=1)
+    Contact.all_objects.create(user=user, name="Warm One", firm=seventh, warmth="chatted")
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+
+    gap_block = _gap_strip(body)
+    assert "Seventh Co" not in gap_block  # confirms it's outside the strip
+    # And yet its OWN card, further down the page, still carries the lever.
+    assert "Work Warm One" in body
+    assert reverse("crm:contact_new") + "?firm=seventh-co" not in body  # has a lever, not the empty-firm CTA
+
+
+@pytest.mark.django_db
+def test_an_unranked_firm_still_gets_the_add_contact_cta(client):
+    """`rank_gaps` skips untiered firms outright — they never reach the
+    strip at all, tiered or not. Proves the card-level action is a
+    genuinely separate mechanism, not a reflection of strip membership:
+    an Unranked firm with nobody still gets a CTA, and it is the
+    add-a-contact form (there is no lever — nobody exists to work)."""
+    user = User.objects.create_user(email="unranked@example.com", password="x")
+    firm = Firm.objects.create(slug="wildcard-co", name="Wildcard Co")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=None)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+    assert "Wildcard Co" in body
+    # Not the bare phrase: the embedded stylesheet's own section comment
+    # ("Coverage Gaps strip: where...") contains it too, in <head>, on
+    # every page regardless of whether the section renders. The rendered
+    # heading is a different, more specific string.
+    assert '<h2 class="strip-title">Coverage Gaps' not in body
+    assert reverse("crm:contact_new") + "?firm=wildcard-co" in body
+
+
+def test_pick_lever_returns_none_with_no_candidates():
+    from crm.views import _pick_lever
+
+    assert _pick_lever([]) is None
+
+
+@pytest.mark.django_db
+def test_a_covered_firm_shows_no_action_at_all(client):
+    """`adv_met` firms are done, not a task — the same posture the gap
+    ladder already holds (COVERED scores 0 and is never a gap)."""
+    user = User.objects.create_user(email="met@example.com", password="x")
+    user.assets = {"advocate_target": 2}
+    user.save(update_fields=["assets"])
+    firm = Firm.objects.create(slug="settled-co", name="Settled Co")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    for i in range(2):
+        Contact.all_objects.create(
+            user=user, name=f"Advocate {i}", firm=firm, warmth="advocate"
+        )
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+    assert "Settled Co" in body
+    # Not the bare class name: the embedded stylesheet defines
+    # `.fc-act-link { ... }` in <head> on every page regardless of whether
+    # any card renders one. The rendered markup always carries the
+    # `class="..."` attribute form, which the CSS selector text does not.
+    assert 'class="fc-act-link"' not in body
+
+
+@pytest.mark.django_db
+def test_the_gap_strip_shows_its_score_without_a_hover(client):
+    """The full formula lives in a `title=` tooltip, unreachable on any
+    touch device — but the SCORE it resolves to, the thing a card is
+    actually ranked by, must be plain text, not hover-only."""
+    user = User.objects.create_user(email="math@example.com", password="x")
+    firm = Firm.objects.create(slug="exposed-co", name="Exposed Co")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+    gap_block = _gap_strip(body)
+    # Tier 1, no contacts: 3 × 4 = exposure 12.
+    assert 'class="gap-exp"' in gap_block
+    assert "exp 12" in gap_block
+    # The full breakdown still rides along in the hover tooltip.
+    assert "= exposure 12" in gap_block
+
+
+# ---------------------------------------------------------------------------
+# 5. "Contacts Needing Action" sorts each lane longest-silent-first.
+#    Before this, `cadence.due_actions` only ever sorted by
+#    (priority, tier, firm name) — real for choosing which LANE an action
+#    lands in, meaningless for ordering 80+ people inside the SAME lane, all
+#    the same priority. The lane fell back to alphabetical-by-firm, which is
+#    what this test proves is no longer true.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db(transaction=True)
+def test_follow_up_lane_sorts_longest_silent_first(client):
+    from django.utils import timezone as tz
+
+    user = User.objects.create_user(email="stale@example.com", password="x")
+    # Named so alphabetical order would put Aardvark BEFORE Zebra — the
+    # opposite of the order this test expects once idle time decides it.
+    aardvark = Firm.objects.create(slug="aardvark-co", name="Aardvark Co")
+    zebra = Firm.objects.create(slug="zebra-co", name="Zebra Co")
+    UserFirm.all_objects.create(user=user, firm=aardvark, tier=2)
+    UserFirm.all_objects.create(user=user, firm=zebra, tier=2)
+
+    barely = Contact.all_objects.create(
+        user=user, name="Barely Overdue", firm=aardvark, warmth="cold",
+        thread_state="no_reply",
+    )
+    long_overdue = Contact.all_objects.create(
+        user=user, name="Long Overdue", firm=zebra, warmth="cold",
+        thread_state="no_reply",
+    )
+    from crm.models import Touch
+    Touch.all_objects.create(user=user, contact=barely, kind="outreach",
+                             channel="email", ts=tz.now() - timedelta(days=8))
+    Touch.all_objects.create(user=user, contact=long_overdue, kind="outreach",
+                             channel="email", ts=tz.now() - timedelta(days=40))
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+    follow_up_start = body.index("Follow Up")
+    lane = body[follow_up_start:follow_up_start + 3000]
+    assert "Long Overdue" in lane and "Barely Overdue" in lane
+    # Longest-silent (Zebra Co's contact) renders FIRST despite sorting
+    # alphabetically last — proof the idle clock, not the firm name, now
+    # decides the order.
+    assert lane.index("Long Overdue") < lane.index("Barely Overdue")

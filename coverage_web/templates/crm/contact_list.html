@@ -24,8 +24,10 @@
   {% comment %}
   Coverage Gaps: the worst-exposed tiered firms, worst first. The formula is
   documented in crm/coverage.py — tier weight × gap points + a deadline
-  bonus for a CONFIRMED close — and each card shows its own arithmetic in
-  the tooltip so the rank is arguable, not asserted.
+  bonus for a CONFIRMED close — and each card SHOWS its own arithmetic
+  in `.gap-math` (not just a hover tooltip: the title= attribute below is
+  unreachable on any touch device, which is most of this app's own screen
+  sizes, so the rank used to be arguable only if you owned a mouse).
   {% endcomment %}
   {% if gaps %}
   <section class="gap-strip">
@@ -35,11 +37,20 @@
         <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"
              title="Tier {{ g.tier }} (×{{ g.tier_weight }}) × {{ g.label|lower }} ({{ g.gap_points }}){% if g.deadline_bonus %} + deadline in {{ g.days_out }}d ({{ g.deadline_bonus }}){% endif %} = exposure {{ g.exposure }}">
           <div class="gap-head">
-            <span class="pill gap-tier">T{{ g.tier }}</span>
-            {% if g.deadline_bonus %}<span class="pill gap-due">{{ g.days_out }}d to close</span>{% endif %}
+            <span class="gap-tier-tag">T{{ g.tier }}</span>
+            {% if g.deadline_bonus %}<span class="gap-due-tag">{{ g.days_out }}d to close</span>{% endif %}
           </div>
           <div class="gap-name">{{ g.name|smart_title }}</div>
-          <div class="gap-state">{{ g.label }} · {{ g.advocates }}/{{ g.target }} advocates</div>
+          {% comment %}
+          The state and the score share one line rather than two: the tier
+          is already the border colour, so restating "T1 ×3" in a second
+          sentence under the state line was the same fact printed three
+          times on one card. `title=` above still carries the full
+          breakdown for anyone hovering — this is the one number from it
+          worth always showing without a hover, not the whole formula.
+          {% endcomment %}
+          <div class="gap-state">{{ g.label }} · {{ g.advocates }}/{{ g.target }} advocates
+            <span class="gap-exp">· exp {{ g.exposure }}</span></div>
           {% if g.lever %}
             <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Work {{ g.lever.name|smart_title }}</a>
           {% else %}
@@ -69,9 +80,19 @@
             <span class="scrub-count">{{ group.items|length }}</span>
           </div>
           {% if group.items %}
+            {% comment %}
+            Sorted longest-silent-first within the lane (see contact_list()
+            in views.py) — a re-ping guarding a real deadline still floats
+            above an ordinary follow-up regardless of either one's idle
+            time, but two follow-ups no longer tie on nothing and fall back
+            to alphabetical-by-firm. The `title` is the only place that
+            ordering becomes legible: without it, a re-sorted wall of 83
+            names reads identically to an unsorted one.
+            {% endcomment %}
             <div class="net-minis">
               {% for a in group.items %}
-                <a class="net-mini" href="{% url 'crm:contact_detail' a.contact.id %}">
+                <a class="net-mini" href="{% url 'crm:contact_detail' a.contact.id %}"
+                   title="{{ a.reason|capfirst }}">
                   <span class="net-mini-name">{{ a.contact.name|smart_title }}</span>
                   <span class="net-mini-firm">{{ a.firm_name|smart_title }}</span>
                 </a>
@@ -147,6 +168,28 @@
                     {% for slot in fc.adv_slots %}<i class="adv-socket{% if slot %} is-filled{% endif %}"></i>{% endfor %}{% if fc.adv_met %} ✓{% endif %}
                   </span>
                 </div>
+                {% comment %}
+                What the Coverage Gaps strip above already gives its worst 6
+                firms, extended to all of them: a status is not a task, and
+                this was the one thing 55-odd of these cards couldn't do —
+                the click target existed for six firms on the whole page and
+                nowhere else. `draggable="false"` so starting a drag on the
+                link hands off to the card's own drag-to-retier handler
+                instead of the browser's native "drag this link" gesture.
+                Hidden once `adv_met` — a covered firm is a status, not a
+                task, same as the gap strip never nagging about one.
+                {% endcomment %}
+                {% if fc.gap_label %}
+                  <div class="firm-card-act">
+                    {% if fc.lever %}
+                      <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
+                         href="{% url 'crm:contact_detail' fc.lever.id %}">Work {{ fc.lever.name|smart_title }}</a>
+                    {% else %}
+                      <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
+                         href="{% url 'crm:contact_new' %}?firm={{ fc.firm.slug }}">＋ Add a contact</a>
+                    {% endif %}
+                  </div>
+                {% endif %}
               </div>
             {% endfor %}
           </div>
