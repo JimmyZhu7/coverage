@@ -651,6 +651,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     gap: var(--s3); flex-wrap: wrap;
     padding: var(--s3) var(--s5); border-top: 1px solid var(--line);
     background: var(--surface); box-shadow: 0 -6px 16px -12px rgb(0 0 0 / 0.25); }
+  /* `display: flex` above beats the browser's own `[hidden] { display: none }`
+     rule at equal specificity, because an author stylesheet always wins a
+     specificity tie against the user-agent one — so the JS toggling
+     `hidden` was silently doing nothing, and "0 selected" sat permanently
+     visible with three buttons that acted on nobody. Any element that sets
+     its own `display` and is also shown/hidden via the `hidden` attribute
+     needs this pairing, or the attribute is decorative. */
+  .bulk-bar[hidden] { display: none; }
   .bulk-count { font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap; }
   .bulk-count b { color: var(--ink); font-weight: var(--w-med);
     font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
