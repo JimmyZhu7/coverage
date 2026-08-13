@@ -903,8 +903,24 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     .arch-when { grid-column: 1 / -1; }
   }
 
+  /* Capped to two rows (roughly 8 cards at this page's usual desktop
+     width) and internally scrollable, matching .net-panel's own pattern
+     two sections up: a warmth group holding 93 cards ("Emailed, No
+     Reply") used to push the whole page to match its length, burying
+     Firm Coverage and everything below it a full screen down. 460px =
+     two .contact-card rows (212px floor × 2) plus one gap, with a little
+     slack for a card that grows past its floor. */
   .contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--s4); }
+    gap: var(--s4); max-height: 460px; overflow-y: scroll; }
+  .contact-grid { scrollbar-width: thin; scrollbar-color: var(--line-strong) var(--paper); }
+  .contact-grid::-webkit-scrollbar { width: 12px; }
+  .contact-grid::-webkit-scrollbar-track { background: var(--paper);
+    border-radius: 999px; margin: var(--s2) 0; }
+  .contact-grid::-webkit-scrollbar-thumb { background: var(--line-strong);
+    border-radius: 999px; border: 3px solid var(--paper); background-clip: padding-box;
+    min-height: 40px; }
+  .contact-grid::-webkit-scrollbar-thumb:hover { background: var(--accent);
+    border: 3px solid var(--paper); background-clip: padding-box; }
   /* Fixed height so every contact card is identical; the footer pins to the
      bottom (margin-top:auto) and the variable bits (bullets, email) are
      clamped so nothing overflows. */
