@@ -18,6 +18,7 @@ Honesty limits, stated up front:
 from __future__ import annotations
 
 import re
+import urllib.parse
 
 from .http import fetch_text
 from .models import AvatureBoard, FetchResult, Opportunity, VerificationResult
@@ -90,7 +91,23 @@ def fetch(board: AvatureBoard) -> FetchResult:
 
 
 def classify_url(url: str) -> dict | None:
-    return {"url": url} if "/jobs/" in (url or "") else None
+    """`/jobs/` alone is not Avature's signature — iCIMS posting URLs
+    (`https://{tenant}.icims.com/jobs/<id>/<slug>/job`) contain the exact
+    same substring. Confirmed live: every one of 406 open icims-sourced
+    rows' URLs matched this test, and because `avature` is dispatched
+    before `icims` in CONNECTORS (see coverage_connectors/__init__.py),
+    avature.verify() answered EVERY one of them first with a false
+    "needs-verification" — icims's own working verify() (a real
+    404/410-on-closed check) was never reached. No per-firm feed registry
+    exists here (see module docstring) to check the host allowlist the way
+    sitemap.py does, but icims.com hosts are never Avature's, and deferring
+    to the connector that actually owns them is always correct."""
+    u = url or ""
+    if "/jobs/" not in u:
+        return None
+    if urllib.parse.urlparse(u).netloc.lower().endswith(".icims.com"):
+        return None
+    return {"url": u}
 
 
 def verify(url: str) -> VerificationResult:
