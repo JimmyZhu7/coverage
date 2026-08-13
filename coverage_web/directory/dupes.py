@@ -160,6 +160,19 @@ _DASHES = str.maketrans({"‐": "-", "‑": "-", "‒": "-",
                          " ": " "})
 _EDGE_NOISE = re.compile(r"^[\s\-–—,;:.·|/]+|[\s\-–—,;:.·|/]+$")
 _SPACE_AROUND_DASH = re.compile(r"\s*-\s*")
+# DBS's own Workday board opened the same "Assistant Vice President,
+# Treasures Relationship Manager, Consumer Banking Group" role twice under
+# two req ids (WD86250 / WD86252) with byte-identical descriptions — the only
+# difference between the two titles is a missing space after the first comma
+# ("...President, Treasures..." vs "...President,Treasures..."). `" ".join(
+# s.split())` above only collapses whitespace that already exists; it never
+# inserts a space DBS's title happens to be missing, so the two titles stayed
+# distinct strings and neither Class A nor Class B folding ever saw them as
+# the same posting. Normalizing comma spacing to a single canonical form
+# (no space before, exactly one space after) fixes this the same way dash
+# spacing is already normalized above, and also catches the mirror case (a
+# STRAY space before the comma, e.g. "Senior Associate ,Treasures...").
+_SPACE_AROUND_COMMA = re.compile(r"\s*,\s*")
 
 
 def normalize_label(value: str) -> str:
@@ -168,6 +181,7 @@ def normalize_label(value: str) -> str:
     s = (value or "").translate(_DASHES).casefold()
     s = " ".join(s.split())
     s = _SPACE_AROUND_DASH.sub("-", s)
+    s = _SPACE_AROUND_COMMA.sub(", ", s)
     return _EDGE_NOISE.sub("", s)
 
 

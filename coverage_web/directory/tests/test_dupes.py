@@ -289,6 +289,27 @@ class TestNormalizeLabel:
     def test_genuinely_different_titles_stay_different(self):
         assert normalize_label("Legal Associate") != normalize_label("Fiscal Associate")
 
+    def test_missing_space_after_comma_unifies(self):
+        """DBS's own Workday board opened 'Assistant Vice President,
+        Treasures Relationship Manager, Consumer Banking Group' twice (req
+        ids WD86250 / WD86252, byte-identical descriptions); the second
+        req's title is missing the space after the first comma. Neither
+        Class A (different req ids) nor the old Class B (exact string match)
+        caught the pair — collapsing comma spacing the same way dash spacing
+        is already collapsed does."""
+        assert (normalize_label(
+            "Assistant Vice President, Treasures Relationship Manager, "
+            "Consumer Banking Group")
+            == normalize_label(
+            "Assistant Vice President,Treasures Relationship Manager, "
+            "Consumer Banking Group"))
+
+    def test_stray_space_before_comma_unifies(self):
+        """The one-tier-down DBS pair: 'Senior Associate ,Treasures...' has
+        a stray space BEFORE the comma instead of a missing one after it."""
+        assert (normalize_label("Senior Associate ,Treasures Relationship Manager")
+                == normalize_label("Senior Associate, Treasures Relationship Manager"))
+
 
 class TestFoldDuplicates:
     def test_identical_rows_fold_to_one(self):
@@ -305,6 +326,21 @@ class TestFoldDuplicates:
     def test_different_firms_are_left_alone(self):
         kept, folded = fold_duplicates([_Row(1, firm_id=1), _Row(2, firm_id=2)])
         assert folded == 0
+
+    def test_dbs_comma_space_variant_folds(self):
+        """End-to-end regression for the confirmed DBS defect: two real
+        Workday req ids for the same posting, titles differing only by the
+        space after the first comma, now fold at the display layer."""
+        kept, folded = fold_duplicates([
+            _Row(13814, firm_id=202, location="New Delhi",
+                 title="Assistant Vice President, Treasures Relationship "
+                       "Manager, Consumer Banking Group"),
+            _Row(13815, firm_id=202, location="New Delhi",
+                 title="Assistant Vice President,Treasures Relationship "
+                       "Manager, Consumer Banking Group"),
+        ])
+        assert folded == 1
+        assert len(kept) == 1
 
     def test_different_locations_are_left_alone(self):
         kept, folded = fold_duplicates([_Row(1, location="London"),
