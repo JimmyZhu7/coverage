@@ -673,7 +673,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     text-align: center; margin: var(--s3) 0; }
 
   /* ---- Contact search/sort toolbar (crm/_contact_search.html) ----------- */
-  .csearch-bar { display: flex; gap: var(--s3); margin: var(--s3) 0 var(--s4); }
+  /* `align-items: center` is load-bearing, not decorative: the sort control
+     is a native select, progressively enhanced (base.html) into a
+     `.csel`/`.csel-btn` custom dropdown, and without an explicit cross-axis
+     alignment here the row's default `stretch` inflated the button to 61px
+     against the search field's 41px — both sides of the pair share one
+     flex row and neither had ever set align-items to anything but the
+     default. */
+  .csearch-bar { display: flex; align-items: center; gap: var(--s3); margin: var(--s3) 0 var(--s4); }
   .csearch-field { position: relative; flex: 1 1 260px; display: flex; align-items: center; }
   .csearch-field svg { position: absolute; left: 13px; color: var(--ink-3); pointer-events: none; }
   .csearch-field input { padding-left: 34px; }
