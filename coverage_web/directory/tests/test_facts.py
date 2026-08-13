@@ -113,6 +113,29 @@ def test_two_required_languages_both_travel():
     assert got["langs"] == ["Mandarin", "Cantonese"]
 
 
+def test_a_language_explicitly_not_required_is_not_a_wall():
+    """Regression test for the confirmed Morgan Stanley/Blackstone defect:
+    the old guard only looked FORWARD from where the match ended, but in
+    all three live examples the negation sits INSIDE the match itself,
+    between the language name and the requirement keyword that made the
+    pattern fire — never after it. Confirmed live: id=1911 'Proficiency in
+    German is not required', id=1878 'Knowledge of German is beneficial but
+    not essential', id=348 '...advantageous but not required'. All three
+    previously stored facts.language with the negation quoted as its own
+    'phrase', rendering a blocking 'German needed' chip."""
+    assert extract_languages("Proficiency in German is not required.") is None
+    assert extract_languages(
+        "Knowledge of German is beneficial but not essential.") is None
+    assert extract_languages(
+        "Proficiency in a European language (Italian or German) is "
+        "advantageous but not required.") is None
+    # A genuine requirement is unaffected by an unrelated negation elsewhere
+    # in the same sentence.
+    assert extract_languages(
+        "Fluency in Mandarin is required; German is not offered here."
+    )["value"] == "Mandarin"
+
+
 # --- Cover letter ----------------------------------------------------------
 
 def test_a_required_cover_letter_is_read():

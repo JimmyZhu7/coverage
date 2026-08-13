@@ -299,12 +299,33 @@ _LANG_SOFT = re.compile(
     r"desirable|beneficial|bonus|nice to have|welcome[d]?|valued|"
     r"an asset|would help)\b", re.IGNORECASE)
 
+# A flat-out NEGATIVE statement, which _LANG_SOFT cannot see because it only
+# looks forward from where the match ENDS -- and a negation like these three
+# sits INSIDE the match itself, between the language name and the
+# requirement keyword that made `_LANG_REQ` fire in the first place, not
+# after it. Confirmed live on Morgan Stanley id=1911 ("Proficiency in German
+# is not required" -- the requirement keyword IS the negated word, so the
+# match ends right where the negation starts and the old forward-only guard
+# never got a chance to run), Morgan Stanley id=1878 ("Knowledge of German is
+# beneficial but not essential" -- "essential" is what triggered the match,
+# and "not" sits directly before it, inside the matched span) and Blackstone
+# id=348 ("...advantageous but not required" -- same shape). All three
+# stored `facts.language` with the negation quoted as its own `phrase`,
+# rendering as a blocking "German needed" chip on postings that explicitly
+# say German is not required. Checked over a window spanning the match
+# itself (not just the text after it) so it catches negations wherever they
+# fall relative to the keyword that triggered the match.
+_LANG_NEGATED = re.compile(
+    r"\bnot\b[^.\n]{0,20}?(?:required|essential|necessary|mandatory|needed|a must)\b",
+    re.IGNORECASE)
+
 
 def extract_languages(text: str) -> dict | None:
     found, phrase = [], ""
     for m in _LANG_REQ.finditer(text):
         lang = (m.group(1) or m.group(2) or "").title()
-        if _LANG_SOFT.search(text[m.end():m.end() + 40]):
+        window = text[max(0, m.start() - 20):m.end() + 40]
+        if _LANG_SOFT.search(text[m.end():m.end() + 40]) or _LANG_NEGATED.search(window):
             continue
         if lang and lang not in found:
             found.append(lang)
