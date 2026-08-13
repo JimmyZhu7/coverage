@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 
 from .http import fetch_json, fetch_text, post_json
-from .models import FetchResult, Opportunity, SocGenBoard
+from .models import FetchResult, Opportunity, SocGenBoard, VerificationResult
 
 name = "socgen"
 
@@ -174,3 +174,27 @@ def fetch(board: SocGenBoard) -> FetchResult:
     except Exception as exc:  # noqa: BLE001 — one board must not sink the run
         return FetchResult(board=board, ok=False, opportunities=[],
                            raw_count=0, error=f"{type(exc).__name__}: {exc}")
+
+
+def classify_url(url: str) -> dict | None:
+    return {"url": url} if (url or "").startswith(_ORIGIN) else None
+
+
+def verify(url: str) -> VerificationResult:
+    """`coverage_connectors.verify()`'s dispatch loop calls `classify_url`
+    then `verify` on every registered connector in turn until one claims the
+    URL — this module used to define neither, so reaching it without a
+    prior match raised a bare AttributeError and killed the whole dispatch
+    for any SocGen-shaped URL. Same honest "needs-verification" contract as
+    phenom.py and avature.py: re-running the three-step CSRF+token+proxy
+    flow (see module docstring) to check ONE posting has not been verified
+    live, so closed-detection on the next board re-fetch remains the
+    removal path for this provider."""
+    if not classify_url(url):
+        return VerificationResult("socgen", url, "needs-verification",
+                                   "URL is not a recognized Société Générale careers URL", [])
+    return VerificationResult(
+        "socgen", url, "needs-verification",
+        "SocGen has no per-posting liveness endpoint verified yet — "
+        "closed-detection on the next board re-fetch is the removal path", [],
+    )

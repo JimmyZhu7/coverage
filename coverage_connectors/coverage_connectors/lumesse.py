@@ -33,9 +33,20 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from .http import fetch_json
-from .models import FetchResult, LumesseBoard, Opportunity
+from .models import FetchResult, LumesseBoard, Opportunity, VerificationResult
 
 name = "lumesse"
+
+# jobFields.applicationUrl — what actually gets stored as Opportunity.url —
+# points at a Lumesse TalentLink apply form on a `{region}-apply.
+# lumessetalentlink.com` host (verified against BOCI's live board:
+# "https://au01-apply.lumessetalentlink.com/apply-app/pages/
+# application-form?jobId=..."), the same domain family as the board's own
+# `host` config (e.g. "au01-foc.lumessetalentlink.com"). No per-firm
+# registry exists to reconstruct a board's `host`/`tech_id` from a bare URL
+# the way sitemap.py's `_SITEMAPS` does, so verify() below cannot re-query
+# the FO-REST API for a specific job — only recognize the URL as ours.
+_HOST_RE = re.compile(r"\.lumessetalentlink\.com", re.IGNORECASE)
 
 _PAGE = 50
 _MAX_JOBS = 1000
@@ -131,3 +142,27 @@ def fetch(board: LumesseBoard) -> FetchResult:
     except Exception as exc:  # noqa: BLE001 — one board must not sink the run
         return FetchResult(board=board, ok=False, opportunities=[],
                            raw_count=0, error=f"{type(exc).__name__}: {exc}")
+
+
+def classify_url(url: str) -> dict | None:
+    return {"url": url} if _HOST_RE.search(url or "") else None
+
+
+def verify(url: str) -> VerificationResult:
+    """`coverage_connectors.verify()`'s dispatch loop calls `classify_url`
+    then `verify` on every registered connector in turn until one of them
+    claims the URL — this module used to define neither, so reaching it
+    without a prior match raised a bare AttributeError and killed the whole
+    dispatch for any BOCI-shaped URL. Same honest "needs-verification"
+    contract as phenom.py and avature.py: no per-firm registry exists here
+    (see `_HOST_RE`'s note) to re-query the FO-REST API for one specific
+    job, so closed-detection on the next board re-fetch remains the removal
+    path for this provider."""
+    if not classify_url(url):
+        return VerificationResult("lumesse", url, "needs-verification",
+                                   "URL is not a recognized Lumesse TalentLink URL", [])
+    return VerificationResult(
+        "lumesse", url, "needs-verification",
+        "Lumesse has no per-posting liveness endpoint verified yet — "
+        "closed-detection on the next board re-fetch is the removal path", [],
+    )

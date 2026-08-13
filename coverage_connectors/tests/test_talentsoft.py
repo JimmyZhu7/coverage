@@ -46,3 +46,30 @@ def test_duplicate_hrefs_collapse(monkeypatch):
     monkeypatch.setattr(talentsoft, "fetch_text", lambda url, **kw: _CARD + _CARD)
     r = talentsoft.fetch(BOARD)
     assert len(r.opportunities) == 1
+
+
+def test_classify_url_recognizes_talentsoft_posting_urls():
+    """CONFIRMED DEFECT: this module used to define neither classify_url()
+    nor verify(), so coverage_connectors.verify()'s dispatch loop raised a
+    bare AttributeError the instant it reached talentsoft without a prior
+    connector match — reproduced live against a jobs.ca-cib.com URL."""
+    url = "https://jobs.ca-cib.com/job/job-analyste-risque-de-marche-h-f_114899.aspx"
+    assert talentsoft.classify_url(url) is not None
+    assert talentsoft.classify_url("https://example.com/jobs/1") is None
+
+
+def test_verify_never_crashes_and_reports_honestly():
+    url = "https://jobs.ca-cib.com/job/job-analyste-risque-de-marche-h-f_114899.aspx"
+    v = talentsoft.verify(url)
+    assert v.provider == "talentsoft"
+    assert v.result == "needs-verification"
+
+    unrecognized = talentsoft.verify("https://example.com/jobs/1")
+    assert unrecognized.result == "needs-verification"
+
+
+def test_verify_is_reachable_through_the_public_dispatcher():
+    from coverage_connectors import verify as public_verify
+    url = "https://jobs.ca-cib.com/job/job-analyste-risque-de-marche-h-f_114899.aspx"
+    v = public_verify(url)
+    assert v.provider == "talentsoft"

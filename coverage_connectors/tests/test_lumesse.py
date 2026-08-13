@@ -86,3 +86,35 @@ def test_fetch_failure_is_board_level(monkeypatch):
     monkeypatch.setattr(lumesse, "fetch_json", boom)
     r = lumesse.fetch(BOARD)
     assert r.ok is False and "timeout" in (r.error or "")
+
+
+def test_classify_url_recognizes_lumessetalentlink_apply_urls():
+    """CONFIRMED DEFECT: this module used to define neither classify_url()
+    nor verify(), so coverage_connectors.verify()'s dispatch loop raised a
+    bare AttributeError the instant it reached lumesse without a prior
+    connector match — reproduced live against a BOCI Lumesse URL."""
+    url = ("https://au01-apply.lumessetalentlink.com/apply-app/pages/"
+           "application-form?jobId=X-1&langCode=en_GB")
+    assert lumesse.classify_url(url) is not None
+    assert lumesse.classify_url("https://example.com/jobs/1") is None
+
+
+def test_verify_never_crashes_and_reports_honestly():
+    url = ("https://au01-apply.lumessetalentlink.com/apply-app/pages/"
+           "application-form?jobId=X-1&langCode=en_GB")
+    v = lumesse.verify(url)
+    assert v.provider == "lumesse"
+    assert v.result == "needs-verification"
+
+    unrecognized = lumesse.verify("https://example.com/jobs/1")
+    assert unrecognized.result == "needs-verification"
+
+
+def test_verify_is_reachable_through_the_public_dispatcher():
+    """The end-to-end regression: coverage_connectors.verify() must not
+    AttributeError on a Lumesse URL any more."""
+    from coverage_connectors import verify as public_verify
+    url = ("https://au01-apply.lumessetalentlink.com/apply-app/pages/"
+           "application-form?jobId=X-1&langCode=en_GB")
+    v = public_verify(url)
+    assert v.provider == "lumesse"

@@ -23,9 +23,16 @@ import html
 import re
 
 from .http import fetch_text
-from .models import FetchResult, Opportunity, TalentsoftBoard
+from .models import FetchResult, Opportunity, TalentsoftBoard, VerificationResult
 
 name = "talentsoft"
+
+# Talentsoft's own posting-URL convention (verified against jobs.ca-cib.com,
+# the tenant this connector was built for): "/job/<slug>_<digits>.aspx" — the
+# trailing "_<numeric id>.aspx" is the ATS's own shape, not a CA-CIB-specific
+# one, matching the docstring's claim that any Talentsoft tenant serving the
+# same list markup rides this connector unchanged.
+_JOB_URL_RE = re.compile(r"/job/[^/?#]*_\d+\.aspx", re.IGNORECASE)
 
 _CARD = re.compile(
     r'ts-offer-card__title-link[^>]*href="(?P<href>[^"]+)"[^>]*>\s*'
@@ -73,3 +80,28 @@ def fetch(board: TalentsoftBoard) -> FetchResult:
     except Exception as exc:  # noqa: BLE001 — one board must not sink the run
         return FetchResult(board=board, ok=False, opportunities=[],
                            raw_count=0, error=f"{type(exc).__name__}: {exc}")
+
+
+def classify_url(url: str) -> dict | None:
+    return {"url": url} if _JOB_URL_RE.search(url or "") else None
+
+
+def verify(url: str) -> VerificationResult:
+    """`coverage_connectors.verify()`'s dispatch loop calls `classify_url`
+    then `verify` on every registered connector in turn until one claims the
+    URL — this module used to define neither, so reaching it without a
+    prior match raised a bare AttributeError and killed the whole dispatch
+    for any Talentsoft-shaped URL (reproduced live against a
+    jobs.ca-cib.com posting). Same honest "needs-verification" contract as
+    phenom.py and avature.py: no per-tenant registry exists to re-fetch one
+    specific posting's own page reliably across every Talentsoft tenant, so
+    closed-detection on the next board re-fetch remains the removal path
+    for this provider."""
+    if not classify_url(url):
+        return VerificationResult("talentsoft", url, "needs-verification",
+                                   "URL is not a recognized Talentsoft posting URL", [])
+    return VerificationResult(
+        "talentsoft", url, "needs-verification",
+        "Talentsoft has no per-posting liveness endpoint verified yet — "
+        "closed-detection on the next board re-fetch is the removal path", [],
+    )

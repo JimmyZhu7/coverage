@@ -69,3 +69,27 @@ def test_a_missing_csrf_or_token_fails_the_board(monkeypatch):
     monkeypatch.setattr(socgen, "fetch_text", lambda url, **kw: "<html>no settings</html>")
     r = socgen.fetch(BOARD)
     assert r.ok is False and "csrfToken" in (r.error or "")
+
+
+def test_classify_url_recognizes_the_careers_origin():
+    """CONFIRMED DEFECT: this module used to define neither classify_url()
+    nor verify(), so coverage_connectors.verify()'s dispatch loop raised a
+    bare AttributeError the instant it reached socgen without a prior
+    connector match."""
+    assert socgen.classify_url("https://careers.societegenerale.com/en/job-offers/25000HQJ-en") is not None
+    assert socgen.classify_url("https://example.com/jobs/1") is None
+
+
+def test_verify_never_crashes_and_reports_honestly():
+    v = socgen.verify("https://careers.societegenerale.com/en/job-offers/25000HQJ-en")
+    assert v.provider == "socgen"
+    assert v.result == "needs-verification"
+
+    unrecognized = socgen.verify("https://example.com/jobs/1")
+    assert unrecognized.result == "needs-verification"
+
+
+def test_verify_is_reachable_through_the_public_dispatcher():
+    from coverage_connectors import verify as public_verify
+    v = public_verify("https://careers.societegenerale.com/en/job-offers/25000HQJ-en")
+    assert v.provider == "socgen"
