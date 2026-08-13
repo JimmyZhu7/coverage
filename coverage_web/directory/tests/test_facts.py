@@ -122,6 +122,31 @@ def test_graduate_programme_start_is_not_the_applicants_own_graduation():
     assert got and got["years"] == ["2028"]
 
 
+def test_a_colon_between_graduate_and_programme_still_excludes():
+    """Regression test for the confirmed SIG defect (id=9171): the negative
+    lookahead's leading gap was plain `\\s+`, which cannot cross a colon.
+    SIG's own template also writes "Soon-to-be or recent graduate : Our
+    programme starts in early September 2026." -- word-adjacency held
+    ("graduate" then "programme"), but a colon sits between them, so the old
+    `\\s+`-only gap never found the forbidden pattern and the exclusion
+    silently never fired, reading the programme's own start year (2026) as
+    the applicant's stated graduation year. Real stored text, copied off the
+    live row."""
+    assert extract_grad_years(
+        "or smarter, more effective ways to operate. Soon-to-be or recent "
+        "graduate : Our programme starts in early September 2026. We "
+        "welcome applications from final-year students.") is None
+    # The plain word-adjacent case (no punctuation at all) must keep working.
+    assert extract_grad_years(
+        "Soon-to-be or recent graduate: our programme starts in "
+        "September 2026.") is None
+    # A genuine graduation statement elsewhere in the same posting is still read.
+    got = extract_grad_years(
+        "Soon-to-be or recent graduate : Our programme starts in early "
+        "September 2026. Applicants must be on track to graduate in 2027.")
+    assert got and got["years"] == ["2027"]
+
+
 # --- Language --------------------------------------------------------------
 
 def test_a_required_language_is_a_wall():

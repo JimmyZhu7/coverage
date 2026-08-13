@@ -196,7 +196,19 @@ _GRAD = re.compile(
     # this fix exists for. Forcing a real word boundary before the lookahead
     # runs means the only match Python's backtracking can settle on is the
     # WHOLE word, so the lookahead actually sees what follows it.
-    r"(?:graduat\w*\b(?!\s+(?:\w+\s+){0,2}(?:programme|program|scheme)\b)"
+    #
+    # The lookahead's leading gap is `[\s:;,-]*` (any MIX of whitespace and
+    # light punctuation, zero or more), not the plain `\s+` a first pass
+    # reaches for: SIG's own template also writes "Soon-to-be or recent
+    # graduate : Our programme starts in early September 2026" -- a colon
+    # between "graduate" and "programme" that `\s+` cannot cross, so the
+    # forbidden pattern was never found and the exclusion silently never
+    # fired. `\s+` requires a whitespace character; a colon is neither
+    # whitespace nor `\w`, so the lookahead's own forbidden-pattern search
+    # dead-ended one character in. Confirmed live on SIG id=9171, whose
+    # extractor read the programme's OWN start year (2026) off this sentence
+    # as if it were the applicant's stated graduation year.
+    r"(?:graduat\w*\b(?![\s:;,\-–—]*(?:\w+\s+){0,2}(?:programme|program|scheme)\b)"
     r"|degree completion)[^.\n]{0,%d}?((?:19|20)\d{2})"
     r"(?:\s*(?:-|–|—|to|and|through|or)\s*"
     r"(?:[\w']+\s+){0,3}?((?:19|20)\d{2}))?" % _NEAR, re.IGNORECASE)
