@@ -97,6 +97,46 @@ def test_oracle_verify_does_not_close_when_id_is_missing(monkeypatch):
     assert v.result == "needs-verification"
 
 
+def test_oracle_fetch_flags_truncation_when_total_exceeds_returned(monkeypatch):
+    """CONFIRMED DEFECT: unlike workday.py/eightfold.py/avature.py/
+    icims.py/goldmansachs.py, this connector never set `truncated` at all,
+    so ingest.py's truncated-pair exemption from closed-detection could
+    never engage — an under-returned oracle search (capped at limit=25 per
+    keyword, no pagination) ran the normal close-on-absence path unguarded.
+    Reproduced live: JPM's "insight" keyword reports TotalJobsCount=1631
+    and opportunity 4731's requisition was outside the top 25 returned,
+    despite being genuinely live — it was falsely closed as a result."""
+    payload_with_more = {
+        "items": [{"TotalJobsCount": 1631, "requisitionList": [
+            {"Id": 1, "Title": "Role One", "PrimaryLocation": "NYC"},
+        ]}]
+    }
+    monkeypatch.setattr(oracle_mod, "fetch_json", lambda url, **kw: payload_with_more)
+    result = fetch(JPM)
+    assert result.ok
+    assert result.truncated is True
+
+
+def test_oracle_fetch_not_truncated_when_total_matches_returned(monkeypatch):
+    monkeypatch.setattr(oracle_mod, "fetch_json", lambda url, **kw: _ORACLE_PAYLOAD)
+    result = fetch(JPM)
+    assert result.ok
+    assert result.truncated is False
+
+
+def test_oracle_fetch_not_truncated_when_envelope_carries_no_total(monkeypatch):
+    """A missing/renamed TotalJobsCount must not be misread as truncation —
+    same "can't tell, so don't act" posture verify() already takes on a
+    malformed envelope."""
+    payload_no_total = {"items": [{"requisitionList": [
+        {"Id": 1, "Title": "Role One", "PrimaryLocation": "NYC"},
+    ]}]}
+    monkeypatch.setattr(oracle_mod, "fetch_json", lambda url, **kw: payload_no_total)
+    result = fetch(JPM)
+    assert result.ok
+    assert result.truncated is False
+
+
 def test_oracle_verify_does_not_close_on_a_malformed_envelope(monkeypatch):
     """The concrete failure mode C3 describes: Oracle renames/omits a key
     (here, `items` itself is missing) and `_search` swallows it into `[]`,

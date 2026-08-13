@@ -38,11 +38,23 @@ _URL_RE = re.compile(
 )
 
 
-def _search(host: str, site: str, keyword: str) -> list[dict]:
+def _search(host: str, site: str, keyword: str) -> tuple[list[dict], int | None]:
+    """(matched requisitions, provider-reported total for this keyword).
+
+    `total` is Oracle's own `TotalJobsCount` — the count of every
+    requisition matching this keyword, which can be (and, for JPM's
+    "insight", genuinely is: 1,631 live) far more than the `limit=25` this
+    connector ever asks for or gets back per search. `None` when the
+    envelope carries no such field (missing/malformed — the same case
+    `verify()` already treats as "can't tell", never as evidence)."""
     url = _SEARCH_URL.format(host=host, site=site, kw=urllib.parse.quote(keyword))
     data = fetch_json(url)
     items = data.get("items", [])
-    return items[0].get("requisitionList", []) if items else []
+    if not items:
+        return [], None
+    block = items[0]
+    total = block.get("TotalJobsCount")
+    return block.get("requisitionList", []), (total if isinstance(total, int) else None)
 
 
 def _normalize(req: dict, board: OracleBoard) -> Opportunity:
@@ -68,11 +80,25 @@ def fetch(board: OracleBoard) -> FetchResult:
     rows)."""
     seen: set[str] = set()
     reqs: list[dict] = []
+    # True when ANY keyword's own search under-returned against Oracle's
+    # reported total — e.g. JPM's "insight" search: TotalJobsCount=1631
+    # against this connector's hardcoded limit=25, with no pagination.
+    # Unlike workday.py/eightfold.py/avature.py/icims.py/goldmansachs.py,
+    # this connector never set `truncated` at all, so ingest.py's
+    # truncated-pair exemption from closed-detection could never engage —
+    # every under-returned oracle fetch ran the normal close-on-absence
+    # path unguarded. Confirmed the mechanism live: JPM opportunity 4731
+    # (Id 210765240), freshly posted 2026-08-10 and genuinely still open,
+    # fell outside the top-25-by-relevancy "insight" results and was
+    # falsely closed in the same batch as 3 other JPM oracle rows.
+    truncated = False
     for kw in board.keywords:
         try:
-            found = _search(board.host, board.site_number, kw)
+            found, total = _search(board.host, board.site_number, kw)
         except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
             return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
+        if total is not None and total > len(found):
+            truncated = True
         for req in found:
             rid = str(req.get("Id") or "")
             if not rid or rid in seen:
@@ -86,7 +112,8 @@ def fetch(board: OracleBoard) -> FetchResult:
         opportunities = [o for o in (_normalize(r, board) for r in reqs) if o.url]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(reqs))
+    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(reqs),
+                        truncated=truncated)
 
 
 def classify_url(url: str) -> dict | None:
@@ -118,7 +145,7 @@ def verify(url: str) -> VerificationResult:
         return VerificationResult("oracle", url, "needs-verification",
                                    f"oracle site {site!r} but no requisition Id in the URL", [])
     try:
-        reqs = _search(host, site, job_id)
+        reqs, _total = _search(host, site, job_id)
     except urllib.error.HTTPError as e:
         return VerificationResult("oracle", url, "unreachable",
                                    f"HTTP {e.code} from Oracle Recruiting Cloud", [])
