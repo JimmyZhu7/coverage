@@ -111,6 +111,38 @@ def test_headings_become_paragraph_breaks():
     assert blocks[2].startswith("Qualifications")
 
 
+def test_barclays_own_headings_also_become_breaks():
+    """Live report: a Barclays posting rendered as one unbroken wall of text
+    in the drawer. Its template uses "Purpose of the role" and
+    "Accountabilities" where the rest of _SECTIONS only recognized "About
+    the role" and "Responsibilities" — so it never split at all."""
+    text = (
+        "Job Description Purpose of the role Bringing quantitative expertise "
+        "to the team. Accountabilities Develop and implement quantitative "
+        "models. Design and maintain trading platforms and risk systems."
+    )
+    blocks = paragraphs(text)
+    assert len(blocks) == 3
+    assert blocks[1].startswith("Purpose of the role")
+    assert blocks[2].startswith("Accountabilities")
+
+
+def test_a_title_specific_heading_does_not_orphan_the_title_word():
+    """A real live posting: "...trading infrastructure. Assistant Vice
+    President Expectations To advise..." Adding "Vice President
+    Expectations" AND "Assistant Vice President Expectations" as separate
+    _SECTIONS entries once split this into two pieces sandwiching a lone
+    "Assistant" paragraph — the shorter phrase's own lookbehind is satisfied
+    right after "Assistant" ends in a letter, independent of the longer
+    phrase matching earlier. Neither is in the list now; assert no orphan."""
+    text = (
+        "Design and maintain trading infrastructure. Assistant Vice "
+        "President Expectations To advise and influence decision making."
+    )
+    blocks = paragraphs(text)
+    assert not any(b.strip() == "Assistant" for b in blocks)
+
+
 def test_a_heading_word_mid_sentence_is_not_a_break():
     """"the requirements of the programme" is prose, "Requirements" is a
     heading. Case is the only thing that tells them apart."""

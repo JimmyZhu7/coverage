@@ -564,9 +564,22 @@ def extract_facts(text: str | None) -> dict:
 _SECTIONS = (
     "job description summary", "job description", "about the team",
     "about the role", "about the program", "about the programme",
+    "about you", "purpose of the role", "role overview",
     "what you'll do", "what you will do", "what you'll need",
     "what we are looking for", "what we're looking for", "who can apply",
     "your role", "your team", "responsibilities", "key responsibilities",
+    # Barclays' own template, 190/133 hits sampled live across its postings
+    # — "Accountabilities" (bare, or prefixed "Key") is that firm's word for
+    # what every other firm here calls "Responsibilities". A third heading
+    # from the same template, "<title> Expectations" (Analyst/Assistant Vice
+    # President/Vice President/...), was tried and dropped: any two of its
+    # title variants that share a suffix ("Vice President Expectations"
+    # inside "Assistant Vice President Expectations") both independently
+    # satisfy the split regex, since the shorter one's own lookbehind is
+    # happy to fire right after "Assistant" — sandwiching that single word
+    # into its own orphan paragraph. Not worth enumerating every seniority
+    # title to chase.
+    "accountabilities", "key accountabilities",
     "qualifications", "basic qualifications", "desired qualifications",
     "preferred qualifications", "requirements", "eligibility",
     "skills and qualifications", "selection process", "recruitment process",
