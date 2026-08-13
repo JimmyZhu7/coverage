@@ -125,3 +125,48 @@ def test_non_campus_row_with_reported_deadline_is_now_in_scope(monkeypatch):
     # The row with no existing reported deadline stays out of scope — this
     # fix targets stale REPORTED deadlines, not a blanket bucket="other" sweep.
     assert untouched.deadline is None
+
+
+@pytest.mark.django_db
+def test_n_locations_placeholder_replaced_with_recovered_city(monkeypatch):
+    """Workday's list API only ever hands over an aggregate count once a
+    posting carries more than one location entry ("2 Locations"); this
+    command already fetches and stores the real per-posting location into
+    raw["detail_location"] but never wired it back into the DISPLAYED
+    `location` column. TD Securities id 19411 shows this live: detail_
+    location already correct, `location` still the opaque placeholder."""
+    firm = Firm.objects.create(slug="td", name="TD Securities")
+    opp = Opportunity.objects.create(
+        firm=firm, title="Personal Banking Associate Trainee",
+        bucket="entry_level", status="open",
+        url="https://td.example/job/1", location="2 Locations",
+    )
+    monkeypatch.setattr(
+        enrich_mod, "fetch_posting",
+        lambda url, **kw: ("no deadline or sponsorship language here",
+                           "Markham, Ontario, Canada; Scarborough, Ontario, Canada"),
+    )
+    call_command("enrich_postings")
+
+    opp.refresh_from_db()
+    assert opp.location == "Markham, Ontario, Canada; Scarborough, Ontario, Canada"
+    assert opp.raw["detail_location"] == opp.location
+
+
+@pytest.mark.django_db
+def test_real_location_is_left_alone(monkeypatch):
+    """A row whose location is NOT the "N Locations" placeholder must never
+    be overwritten by this path — only the one known-bad shape is corrected."""
+    firm = Firm.objects.create(slug="acme", name="Acme")
+    opp = Opportunity.objects.create(
+        firm=firm, title="Analyst", bucket="entry_level", status="open",
+        url="https://acme.example/job/1", location="London, United Kingdom",
+    )
+    monkeypatch.setattr(
+        enrich_mod, "fetch_posting",
+        lambda url, **kw: ("no deadline language here", "Somewhere Else"),
+    )
+    call_command("enrich_postings")
+
+    opp.refresh_from_db()
+    assert opp.location == "London, United Kingdom"

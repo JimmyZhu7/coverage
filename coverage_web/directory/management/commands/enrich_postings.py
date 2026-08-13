@@ -63,6 +63,19 @@ _TAGS = re.compile(r"<(script|style|noscript)[^>]*>.*?</\1>", re.I | re.S)
 _MARKUP = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
 
+# Workday's list API hands over only an aggregate count ("2 Locations") once
+# a posting carries more than one location entry — never the city names —
+# and `coverage_connectors.workday._normalize()` stores that count verbatim
+# as `Opportunity.location`. This command already fetches and computes the
+# real per-posting location (`fetch_posting`'s `location` return) and has
+# stored it into `raw["detail_location"]` since that field was added, but
+# nothing ever copied it back into the DISPLAYED `location` column — proof
+# live in the DB: TD Securities opportunity 19411 already carries
+# raw["detail_location"] = "Markham, Ontario, Canada; Scarborough, Ontario,
+# Canada" while `location` still reads "2 Locations" verbatim. 1,325 open
+# rows show this placeholder today.
+_N_LOCATIONS_PLACEHOLDER = re.compile(r"^\d+\s+Locations?$", re.IGNORECASE)
+
 
 # Workday detail pages are JS shells — a plain GET returns 0 characters of
 # text (verified across raymondjames/invesco/db tenants). But the same posting
@@ -451,6 +464,17 @@ class Command(BaseCommand):
                                if was == "unknown" else
                                f"sponsorship {was} -> {sponsorship}")
                 sponsored += 1
+            # The board only ever gave us "N Locations" — this fetch's own
+            # structured location, when it recovered one, is real city text
+            # and always an improvement over an opaque count. Fill-or-
+            # refresh, same posture as detail_location below: a placeholder
+            # today may cover a genuinely different set of cities next time
+            # the same row is re-read, so this isn't gated to "only if never
+            # set before".
+            recovers_location = bool(
+                location and _N_LOCATIONS_PLACEHOLDER.match(o.location or ""))
+            if recovers_location:
+                changes.append(f"location {o.location!r} -> {location!r}")
             if not changes:
                 answered_blank += 1
 
@@ -474,6 +498,10 @@ class Command(BaseCommand):
             raw["detail_source"] = "payload" if payload_text(o.raw) else "fetch"
             o.raw = raw
             update = ["raw"]
+
+            if recovers_location:
+                o.location = location[:255]
+                update.append("location")
 
             # FILL, and on a re-read also CORRECT. Fill-only was right while a
             # page was read once and never again; with a staleness queue it
