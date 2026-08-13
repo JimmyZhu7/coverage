@@ -15,22 +15,42 @@ same-day catch-up for rows a specific audit has ALREADY confirmed live
 against the provider, rather than a fresh full-table scan (which would be
 both slow and impolite to re-run against every provider for one row).
 
-Confirmed live 2026-08-14: Opportunity id=8885 ("Marshall Wace",
+Round 2, 2026-08-14: Opportunity id=8885 ("Marshall Wace",
 "Recruitment Assistant", stored status='open',
 url=https://job-boards.greenhouse.io/marshallwace/jobs/8501520002) —
-`coverage_connectors.greenhouse.verify()` on that exact URL returns
+`coverage_connectors.greenhouse.verify()` on that exact URL returned
 `result='closed', evidence='boards-api 404 for job 8501520002 — no longer
 listed'`. A direct `curl` against `boards-api.greenhouse.io` (bypassing the
-connector) reproduces the same 404, and the firm's own board listing
-(`.../v1/boards/marshallwace/jobs`) currently returns `{"jobs":[],
-"meta":{"total":0}}` — a clean empty list, not an error, ruling out a
-board-wide outage.
+connector) reproduced the same 404, and the firm's own board listing
+(`.../v1/boards/marshallwace/jobs`) returned `{"jobs":[], "meta":{"total":0}}`
+— a clean empty list, not an error, ruling out a board-wide outage. Applied
+and now closed in the live DB, so it has dropped out of DEFAULT_IDS below.
 
-The DEFAULT_IDS list below is exactly the rows this round's audit confirmed;
---ids overrides it for any future one-off audit finding, so this command
-doesn't need to be re-written each time. Live network, read-only against the
-provider unless --apply is given; the live database itself is never written
-to without it, per this repo's read-only-DB-by-default rule.
+Round 3, 2026-08-14: Opportunity id=10630 ("Raymond James", "Senior
+Registered Client Service Associate (Boca Raton, FL)", stored status='open',
+last_checked=last_verified=2026-08-13, url=https://raymondjames.wd1.
+myworkdayjobs.com/raymondjamescareers/job/Boca-Raton-Florida---United-States/
+Senior-Registered-Client-Service-Associate--Boca-Raton--FL-_R-0011569) — the
+row's own `last_checked` timestamp shows it was touched by that day's routine
+`scrape` run, which stamps `last_verified` off nothing stronger than "the
+board's bulk list endpoint still returned this URL" (see `directory.ingest.
+_apply_opportunity`). Workday's list/search index can lag its own detail
+endpoint — confirmed here: `coverage_connectors.workday.verify()`, which
+checks the posting's OWN job-detail endpoint (falling back to the posting
+page's `postingAvailable` flag on a blocked CxS call, per this repo's earlier
+TD-Securities fix), returns `result='closed', evidence="CxS job-detail HTTP
+403; posting page's own postingAvailable flag reads false"` — a stronger,
+per-posting signal the list-based scrape never checks. `reverify`'s routine
+7-day sweep would eventually catch this on its own, but not for days; this
+command is the same-day catch-up an audit-confirmed finding deserves,
+same as round 2's.
+
+The DEFAULT_IDS list below is exactly the rows the current audit round
+confirmed and not yet applied; --ids overrides it for any future one-off
+audit finding, so this command doesn't need to be re-written each time. Live
+network, read-only against the provider unless --apply is given; the live
+database itself is never written to without it, per this repo's
+read-only-DB-by-default rule.
 """
 
 from __future__ import annotations
@@ -42,8 +62,9 @@ from coverage_connectors import verify
 
 from directory.models import Opportunity
 
-# Confirmed dead by this round's read-only audit — see module docstring.
-DEFAULT_IDS = [8885]
+# Confirmed dead by the current round's read-only audit — see module
+# docstring. Round 2's id=8885 was applied and dropped once closed.
+DEFAULT_IDS = [10630]
 
 
 class Command(BaseCommand):
