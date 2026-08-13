@@ -203,6 +203,57 @@ def duplicate_key(row: Any) -> tuple[Any, str, str]:
     )
 
 
+# Workday's LIST endpoint hands over only an aggregate count ("2 Locations")
+# once a posting carries more than one location entry — never the city names
+# — and that count is stored verbatim into `Opportunity.location`
+# (enrich_postings.py's own `_N_LOCATIONS_PLACEHOLDER` documents the same
+# shape on the fetch side). A count is not a place: Franklin Templeton's
+# "Head of Global Talent Acquisition" is one real global hire split into a
+# US-tagged Workday req (location "4 Locations") and a UK-tagged req
+# ("2 Locations") for candidate-sourcing purposes — both postings' own body
+# text states the identical 6-city pool, and both carry
+# `raw["detail_location"] = None`, i.e. Coverage never recovered real
+# place-name text for either row. Treating "4 Locations" and "2 Locations" as
+# two DIFFERENT stated cities (which is what plain `normalize_label` did —
+# they simply don't casefold to the same string) makes the placeholder a
+# hard divider it was never entitled to be. `_cluster_by_location` folds it
+# into the blank bucket instead, the same bucket a genuinely missing location
+# already falls into.
+_N_LOCATIONS_PLACEHOLDER = re.compile(r"^\d+\s+locations?$", re.IGNORECASE)
+
+# A location string is sometimes a real city wrapped in a qualifier that
+# names something OTHER than a place: a country/region code, or (on DBS's
+# Workday board specifically) the posting entity's own internal code. Neither
+# is a place name, so leaving it in the comparison invents a hard divider
+# between two rows that mean the same city — confirmed live on three DBS
+# pairs sharing one requisition-shape each: "PRC - Shanghai" / "Shanghai"
+# (WD80532 / WD83461), "Vadodara-DBIL" / "Vadodara" (WD85424 / WD87755), and
+# "Ahmedabad-DBIL" / "Ahmedabad" (WD85423 / WD86836) — "DBIL" is DBS Bank
+# India Limited's own entity code, not a place.
+#
+# This is deliberately a curated allow-list, not a general "strip the extra
+# word" rule. A bare word-superset rule was checked against a full sweep of
+# DBS's 721 open rows and it ALSO fires on "Ghatkopar Mumbai" vs "Mumbai" and
+# "New Taipei" vs "Taipei" — a real Mumbai suburb and a real, administratively
+# separate city, not qualifier noise. Only tokens confirmed to name something
+# other than a place are ever stripped; every other extra word stays a hard
+# divider, per this module's own rule for genuinely different cities.
+_LOCATION_QUALIFIERS = frozenset({"prc", "dbil"})
+
+
+def _location_cluster_key(location: str) -> str:
+    """`normalize_label(location)` for CLUSTERING only: known non-place
+    qualifier tokens dropped, and the Workday "N Locations" placeholder
+    folded to the same blank key a missing location already uses. Never used
+    for display, and never for `duplicate_key()` — that function's whole job
+    is to stay the strict, unforgiving form of the location."""
+    normalized = normalize_label(location)
+    if _N_LOCATIONS_PLACEHOLDER.match(normalized):
+        return ""
+    words = [w for w in normalized.split(" ") if w not in _LOCATION_QUALIFIERS]
+    return " ".join(words)
+
+
 def _survivor_rank(row: Any, sticky_ids: frozenset) -> tuple:
     """Which copy the student should see. Lower sorts first.
 
@@ -244,7 +295,7 @@ def _cluster_by_location(members: list[Any]) -> list[list[Any]]:
     """
     by_place: dict[str, list[Any]] = {}
     for row in members:
-        by_place.setdefault(normalize_label(getattr(row, "location", "")), []).append(row)
+        by_place.setdefault(_location_cluster_key(getattr(row, "location", "")), []).append(row)
 
     blanks = by_place.pop("", [])
     if blanks:

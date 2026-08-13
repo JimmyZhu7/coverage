@@ -430,6 +430,94 @@ class TestFoldDuplicates:
         assert folded == 1
         assert [r.id for r in kept] == [1, 3]
 
+    def test_workday_n_locations_placeholder_folds_like_a_blank(self):
+        """End-to-end regression for the confirmed Franklin Templeton defect:
+        one real global 'Head of Global Talent Acquisition' hire, split into
+        a US-tagged Workday req (location '4 Locations') and a UK-tagged req
+        ('2 Locations') for candidate sourcing. Neither placeholder names a
+        real city (`raw["detail_location"]` is unset on both live rows), so
+        the two counts must not act as two different stated places."""
+        kept, folded = fold_duplicates([
+            _Row(6513, firm_id=301, location="4 Locations",
+                 title="Head of Global Talent Acquisition"),
+            _Row(6230, firm_id=301, location="2 Locations",
+                 title="Head of Global Talent Acquisition"),
+        ])
+        assert folded == 1
+        assert len(kept) == 1
+
+    def test_n_locations_placeholder_does_not_fold_across_real_cities(self):
+        """The placeholder is a blank, not a wildcard: with a genuinely
+        stated city also in the group, an ambiguous placeholder row must
+        stay its own cluster rather than guess which city it belongs to —
+        same rule as `test_blank_location_stays_out_when_the_title_spans_cities`."""
+        kept, folded = fold_duplicates([
+            _Row(1, location="London"),
+            _Row(2, location="New York"),
+            _Row(3, location="3 Locations"),
+        ])
+        assert folded == 0
+        assert len(kept) == 3
+
+    def test_dbs_country_qualifier_folds_with_the_bare_city(self):
+        """End-to-end regression for the confirmed DBS defect: two real
+        Workday req ids for the same Shanghai posting, one location carrying
+        a 'PRC - ' country qualifier the other lacks."""
+        kept, folded = fold_duplicates([
+            _Row(15061, firm_id=202, location="PRC - Shanghai",
+                 title="Trade Operations Specialist"),
+            _Row(15030, firm_id=202, location="Shanghai",
+                 title="Trade Operations Specialist"),
+        ])
+        assert folded == 1
+        assert len(kept) == 1
+
+    def test_dbs_entity_code_qualifier_folds_with_the_bare_city(self):
+        """The same DBS pattern recurs with the bank's own entity code
+        (DBIL = DBS Bank India Limited) instead of a country qualifier, on
+        two independent title-groups."""
+        kept, folded = fold_duplicates([
+            _Row(13932, firm_id=202, location="Vadodara-DBIL",
+                 title="Senior Associate, Treasures Relationship Manager, "
+                       "Consumer Banking Group"),
+            _Row(19428, firm_id=202, location="Vadodara",
+                 title="Senior Associate, Treasures Relationship Manager, "
+                       "Consumer Banking Group"),
+        ])
+        assert folded == 1
+        assert len(kept) == 1
+
+        kept, folded = fold_duplicates([
+            _Row(13933, firm_id=202, location="Ahmedabad-DBIL",
+                 title="Senior Associate, Treasures Relationship Manager, "
+                       "Consumer Banking Group"),
+            _Row(13720, firm_id=202, location="Ahmedabad",
+                 title="Senior Associate, Treasures Relationship Manager, "
+                       "Consumer Banking Group"),
+        ])
+        assert folded == 1
+        assert len(kept) == 1
+
+    def test_ghatkopar_and_new_taipei_stay_genuinely_different_places(self):
+        """The qualifier allow-list is curated, not a bare word-superset
+        rule, precisely because a superset rule also fires here: Ghatkopar is
+        a real Mumbai suburb and New Taipei City is a real, administratively
+        separate city from Taipei City. Neither 'ghatkopar' nor 'new' is a
+        known non-place qualifier, so both stay hard dividers."""
+        kept, folded = fold_duplicates([
+            _Row(1, firm_id=202, location="Ghatkopar Mumbai", title="Analyst"),
+            _Row(2, firm_id=202, location="Mumbai", title="Analyst"),
+        ])
+        assert folded == 0
+        assert len(kept) == 2
+
+        kept, folded = fold_duplicates([
+            _Row(3, firm_id=202, location="New Taipei", title="Analyst"),
+            _Row(4, firm_id=202, location="Taipei", title="Analyst"),
+        ])
+        assert folded == 0
+        assert len(kept) == 2
+
     def test_pwc_barcelona_practice_areas_are_not_duplicates(self):
         """Explicitly ruled out: same boilerplate shape, different practices."""
         kept, folded = fold_duplicates([
