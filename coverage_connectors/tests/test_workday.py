@@ -256,6 +256,61 @@ def test_verify_does_not_close_on_a_malformed_200(monkeypatch):
     assert result.result == "needs-verification"
 
 
+def test_verify_falls_back_to_posting_page_when_cxs_api_blocked(monkeypatch):
+    """Regression test for the confirmed TD Securities defect (Opportunity
+    id=17403): the CxS job-detail endpoint 403s (Cloudflare `S22 permission
+    denied`) while the plain posting page stays reachable and its own
+    `postingAvailable` bootstrap flag reads false. Without the fallback,
+    verify() could only ever report 'unreachable' here -- which reverify.py
+    never acts on -- so a genuinely dead posting stayed open forever."""
+    def raise_403(url, **kw):
+        raise urllib.error.HTTPError(url, 403, "permission denied", None, None)
+
+    monkeypatch.setattr(workday, "fetch_json", raise_403)
+    monkeypatch.setattr(workday, "fetch_text",
+                        lambda url, **kw: 'window.workday = {"postingAvailable": false};')
+
+    result = workday.verify(
+        "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers/job/Greenville-South-Carolina/"
+        "Contact-Center-Rep-II--TDAF--Bilingual-Spanish-Greenville--SC-MTL--NJ-Jacksonville"
+        "--FL_R_1498964-1"
+    )
+    assert result.result == "closed"
+    assert "postingAvailable flag reads false" in result.evidence
+
+
+def test_verify_fallback_confirms_open_too(monkeypatch):
+    """The control case from the same investigation: a live sibling TD
+    posting (id=17024) read `postingAvailable: true` from the same fallback
+    path in the same run, ruling out a template/rate-limit artifact."""
+    def raise_403(url, **kw):
+        raise urllib.error.HTTPError(url, 403, "permission denied", None, None)
+
+    monkeypatch.setattr(workday, "fetch_json", raise_403)
+    monkeypatch.setattr(workday, "fetch_text",
+                        lambda url, **kw: 'window.workday = {"postingAvailable": true};')
+
+    result = workday.verify(
+        "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers/job/Toronto-Ontario/"
+        "Senior-Java-Developer--TD-Securities_R_1502226"
+    )
+    assert result.result == "verified-open"
+
+
+def test_verify_stays_unreachable_when_fallback_page_also_fails(monkeypatch):
+    """No page, no flag -- still an honest 'unreachable', never a guess."""
+    def raise_403(url, **kw):
+        raise urllib.error.HTTPError(url, 403, "permission denied", None, None)
+
+    monkeypatch.setattr(workday, "fetch_json", raise_403)
+    monkeypatch.setattr(workday, "fetch_text", raise_403)
+
+    result = workday.verify(
+        "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers/job/Greenville-South-Carolina/Role_R1"
+    )
+    assert result.result == "unreachable"
+
+
 def test_verify_via_search_text_zero_results(monkeypatch):
     monkeypatch.setattr(workday, "post_json", lambda url, payload, **kw: {"total": 0, "jobPostings": []})
     result = workday.verify("https://carlyle.wd1.myworkdayjobs.com/Carlyle?q=R456")

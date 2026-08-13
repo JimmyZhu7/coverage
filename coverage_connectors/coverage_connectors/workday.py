@@ -52,7 +52,7 @@ import re
 import urllib.error
 import urllib.parse
 
-from .http import fetch_json, post_json
+from .http import fetch_json, fetch_text, post_json
 from .models import FetchResult, Opportunity, VerificationResult, WorkdayBoard
 
 name = "workday"
@@ -180,6 +180,38 @@ def classify_url(url: str) -> dict | None:
     return {"tenant_host": tenant_host, "site": site, "job_path": job_path, "search_text": search_text}
 
 
+# Cloudflare guards the CxS job-detail endpoint on some tenants and can 403
+# it outright ("S22 permission denied") while the plain posting PAGE — the
+# same url stored on the row — stays reachable and unblocked. Confirmed live
+# 2026-08-13/14: TD Securities requisition R_1498964-1 (Opportunity id=17403,
+# stored status='open') 403s from the CxS API on every attempt, but its
+# posting page fetches 200 and embeds Workday's own client bootstrap JSON,
+# `window.workday = {...}`, whose `postingAvailable` flag is what actually
+# drives the page's client-rendered "this posting doesn't exist" state. That
+# page read `postingAvailable: false`; a live sibling TD posting (id=17024)
+# fetched the same way in the same run read `postingAvailable: true`, ruling
+# out a rate-limit or per-tenant template artifact. Without this fallback,
+# `verify()` can only ever answer "unreachable" for a row behind a
+# Cloudflare-guarded CxS endpoint — including one that is genuinely gone —
+# and `reverify.py` never acts on "unreachable", so the row stays open
+# indefinitely no matter how many times it is re-checked.
+_POSTING_AVAILABLE_RE = re.compile(r'"postingAvailable"\s*:\s*(true|false)', re.IGNORECASE)
+
+
+def _posting_available_from_page(url: str) -> bool | None:
+    """True/False from the posting page's own `postingAvailable` flag, or
+    None when the page itself couldn't be read or doesn't carry the flag —
+    never a guess."""
+    try:
+        page = fetch_text(url)
+    except Exception:  # noqa: BLE001 — the page is unreachable too; let the caller fall back
+        return None
+    m = _POSTING_AVAILABLE_RE.search(page)
+    if not m:
+        return None
+    return m.group(1).lower() == "true"
+
+
 def verify(url: str) -> VerificationResult:
     """Ported from `verify_rows.py`'s `_verify_workday`: hits the CxS
     job-detail endpoint when the URL carries a job path, else re-runs a
@@ -237,6 +269,20 @@ def verify(url: str) -> VerificationResult:
             f"workday tenant {tenant_host!r}/{site!r} but no job path or ?q= requisition number in the URL", [],
         )
     except urllib.error.HTTPError as e:
+        if job_path:
+            # The CxS API itself is blocked -- fall back to the posting page
+            # the row's own url already points at. See _posting_available_from_page.
+            available = _posting_available_from_page(url)
+            if available is False:
+                return VerificationResult(
+                    "workday", url, "closed",
+                    f"CxS job-detail HTTP {e.code}; posting page's own "
+                    "postingAvailable flag reads false", [])
+            if available is True:
+                return VerificationResult(
+                    "workday", url, "verified-open",
+                    f"CxS job-detail HTTP {e.code}; posting page's own "
+                    "postingAvailable flag reads true", [])
         return VerificationResult("workday", url, "unreachable", f"HTTP {e.code} from Workday CxS", [])
     except Exception as e:  # noqa: BLE001
         return VerificationResult("workday", url, "unreachable", str(e)[:200], [])
