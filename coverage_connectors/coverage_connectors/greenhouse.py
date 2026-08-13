@@ -18,21 +18,28 @@ it's a literal API value, not a guess.
 
 Known limitation, carried over unchanged from the original: `verify()`
 classifies the candidate-facing `job-boards.greenhouse.io` /
-`boards.greenhouse.io` URL shape only — never the internal
-`boards-api.greenhouse.io` JSON endpoint `fetch()` itself calls, and never a
-firm's own custom domain. Some firms point Greenhouse's `absolute_url` at
-their own site with the job id recoverable only from a `gh_jid=` query
-param (confirmed live: williamblair's board does this). The original's
-`_GREENHOUSE_RE` never handled that shape either, so this isn't a
-regression — a custom-domain URL verifies as "needs-verification" rather
-than this package guessing a board token it has no reliable way to recover
-from an arbitrary third-party domain.
+`boards.greenhouse.io` URL shape, plus a short list of known custom-domain
+embeds (see `_CUSTOM_DOMAIN_TOKENS` below) — never the internal
+`boards-api.greenhouse.io` JSON endpoint `fetch()` itself calls, and never an
+UNLISTED custom domain. Some firms point Greenhouse's `absolute_url` at their
+own site with the job id recoverable only from a `gh_jid=` query param
+(confirmed live: williamblair's board does this — all 48 open rows use
+`https://www.williamblair.com/Careers/job-description?gh_jid=<id>`, and every
+one of them classified as `provider='unknown'` before the mapping below
+existed, which meant `reverify`'s single-URL liveness backstop — the layer
+that catches a posting dying in a way `scrape`'s board-diff closed-detection
+never sees — could never usefully check a single William Blair row). A
+custom domain carries no token of its own to read out of the URL, so this is
+only closeable for domains this package already knows the token for (from
+`directory/boards.py`'s own board registration) — guessing a token from an
+arbitrary third-party domain would be worse than "needs-verification".
 """
 
 from __future__ import annotations
 
 import re
 import urllib.error
+import urllib.parse
 
 from .http import fetch_json
 from .models import FetchResult, GreenhouseBoard, Opportunity, VerificationResult
@@ -47,6 +54,17 @@ _JOB_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs/{job_id}"
 _BOARD_URL_RE = re.compile(
     r"(?:boards|job-boards)\.greenhouse\.io/([^/?#]+)(?:/jobs/(\d+))?", re.IGNORECASE
 )
+
+# Firms whose own site embeds Greenhouse's board under a custom domain, with
+# the job id recoverable only from a `gh_jid=` query param and the token
+# nowhere in the url. Each entry here has to be confirmed against a real
+# board registration in `directory/boards.py`, not guessed — see module
+# docstring.
+_CUSTOM_DOMAIN_TOKENS = {
+    "www.williamblair.com": "williamblair",
+    "williamblair.com": "williamblair",
+}
+_GH_JID_RE = re.compile(r"[?&]gh_jid=(\d+)")
 
 
 def _normalize(job: dict, board: GreenhouseBoard) -> Opportunity:
@@ -91,9 +109,13 @@ def classify_url(url: str) -> dict | None:
     URL, else None. `job_id` is None for a bare board URL with no
     `/jobs/<id>` path."""
     m = _BOARD_URL_RE.search(url or "")
-    if not m:
+    if m:
+        return {"token": m.group(1), "job_id": m.group(2)}
+    token = _CUSTOM_DOMAIN_TOKENS.get(urllib.parse.urlsplit(url or "").netloc.lower())
+    if not token:
         return None
-    return {"token": m.group(1), "job_id": m.group(2)}
+    jid = _GH_JID_RE.search(url or "")
+    return {"token": token, "job_id": jid.group(1)} if jid else None
 
 
 def verify(url: str) -> VerificationResult:

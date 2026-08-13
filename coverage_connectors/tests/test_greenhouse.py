@@ -125,17 +125,35 @@ def test_verify_unreachable_on_non_404_http_error(monkeypatch):
     assert result.result == "unreachable"
 
 
-def test_verify_needs_verification_on_custom_domain_url():
-    """Known limitation, ported faithfully (not a regression): some firms
-    (williamblair, live-verified) point Greenhouse's `absolute_url` at their
-    OWN domain with the job id only recoverable from a `gh_jid=` query
-    param, e.g. https://www.williamblair.com/Careers/job-description?gh_jid=...
-    The original's `_GREENHOUSE_RE` never handled this shape either -- it
-    only recognizes the job-boards.greenhouse.io/boards.greenhouse.io host.
-    A firm on a custom domain therefore verifies as "needs-verification",
-    honestly, rather than this package guessing a board token it has no
-    reliable way to recover from an arbitrary third-party domain."""
-    result = greenhouse.verify("https://www.williamblair.com/Careers/job-description?gh_jid=5181697007")
+def test_classify_url_known_custom_domain():
+    """Regression test for the confirmed William Blair defect: all 48 open
+    William Blair rows use `https://www.williamblair.com/Careers/job-
+    description?gh_jid=<id>`, a shape `_BOARD_URL_RE` never matches, which
+    left every one of them stuck at provider='unknown' -- meaning
+    `reverify`'s single-URL liveness backstop could never usefully check a
+    single William Blair row. See module docstring and
+    `_CUSTOM_DOMAIN_TOKENS`."""
+    info = greenhouse.classify_url(
+        "https://www.williamblair.com/Careers/job-description?gh_jid=5186505007")
+    assert info == {"token": "williamblair", "job_id": "5186505007"}
+
+
+def test_verify_open_on_known_custom_domain_url(monkeypatch, greenhouse_job_detail_fixture):
+    monkeypatch.setattr(greenhouse, "fetch_json", lambda url, **kw: greenhouse_job_detail_fixture)
+
+    result = greenhouse.verify(
+        "https://www.williamblair.com/Careers/job-description?gh_jid=5181697007")
+
+    assert result.result == "verified-open"
+
+
+def test_verify_needs_verification_on_unlisted_custom_domain_url():
+    """An UNLISTED third-party domain must still fall through honestly --
+    this package has no reliable way to recover a board token from an
+    arbitrary domain it has never been told about, so it must not guess
+    one. Only domains in `_CUSTOM_DOMAIN_TOKENS`, each backed by a real
+    board registration in `directory/boards.py`, are ever resolved."""
+    result = greenhouse.verify("https://careers.example-bank.com/job?gh_jid=5181697007")
     assert result.result == "needs-verification"
 
 
