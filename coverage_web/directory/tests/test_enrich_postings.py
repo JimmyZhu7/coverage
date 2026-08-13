@@ -8,6 +8,7 @@ no cadence that would ever revisit it.
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 import pytest
@@ -17,6 +18,7 @@ from django.utils import timezone
 from directory.management.commands.enrich_postings import (
     URGENT_STALE_DAYS,
     _queue,
+    fetch_posting,
 )
 from directory.management.commands import enrich_postings as enrich_mod
 from directory.models import Firm, Opportunity
@@ -170,3 +172,88 @@ def test_real_location_is_left_alone(monkeypatch):
 
     opp.refresh_from_db()
     assert opp.location == "London, United Kingdom"
+
+
+class _FakeResponse:
+    """Mirrors the two attributes `fetch_posting` reads off a real
+    `requests.Response`: `.status_code` and `.json()`. Not a mock of the
+    whole `requests` surface — a double shaped exactly like what a real
+    Goldman Sachs GraphQL POST returns, confirmed live 2026-08-14 (see the
+    docstring on `_GS_ROLE_URL`)."""
+
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class TestGoldmanSachsDetailFetch:
+    """Regression test for the confirmed Goldman Sachs coverage gap: a plain
+    GET of higher.gs.com is an SPA shell, so every one of the 146 rows this
+    command has ever touched for this firm carries `detail_text == "Careers
+    | Goldman Sachs"` — the client-rendered page's own <title>, not the
+    posting. `GetRoleById` is higher.gs.com's own unauthenticated GraphQL
+    operation for a single role's full content; the payload shape below is
+    trimmed from a real live response for roleId 180086_GS_CAMPUS."""
+
+    URL = "https://higher.gs.com/roles/180086_GS_CAMPUS"
+
+    def _payload(self, description="<p>About the program</p>", locations=None):
+        return {"data": {"role": {
+            "roleId": "180086_GS_CAMPUS",
+            "descriptionHtml": description,
+            "locations": locations if locations is not None else [
+                {"city": "Hong Kong", "state": None, "country": "Hong Kong SAR",
+                 "primary": True},
+            ],
+        }}}
+
+    def test_role_description_is_read_through_graphql(self, monkeypatch):
+        captured = {}
+
+        def fake_post(url, *, data, headers, timeout):
+            captured["url"] = url
+            captured["body"] = json.loads(data)
+            return _FakeResponse(200, self._payload())
+
+        monkeypatch.setattr(enrich_mod.requests, "post", fake_post)
+        text, location = fetch_posting(self.URL)
+
+        assert text == "About the program"
+        assert location == "Hong Kong, Hong Kong SAR"
+        # The id sent is the numeric prefix sliced out of the URL's roleId —
+        # no separate lookup, no new field on the list query.
+        assert captured["body"]["variables"]["externalSourceId"] == "180086"
+        assert captured["url"] == enrich_mod._GS_ENDPOINT
+
+    def test_non_gs_role_url_does_not_hit_the_graphql_branch(self, monkeypatch):
+        """A URL that merely resembles higher.gs.com but has no numeric
+        `_GS_CAMPUS` roleId must fall through, not error."""
+        def fail_post(*a, **k):
+            raise AssertionError("must not POST for a non-role URL")
+
+        monkeypatch.setattr(enrich_mod.requests, "post", fail_post)
+        monkeypatch.setattr(enrich_mod.requests, "get",
+                            lambda *a, **k: _FakeResponse(404, {}))
+        text, location = fetch_posting("https://higher.gs.com/search")
+        assert text is None
+        assert location == ""
+
+    def test_graphql_error_status_reads_as_unreachable_not_answered(self, monkeypatch):
+        """A non-200 must come back as `(None, "")` — retried next run — not
+        as an empty-but-answered page."""
+        monkeypatch.setattr(
+            enrich_mod.requests, "post",
+            lambda *a, **k: _FakeResponse(500, {}))
+        assert fetch_posting(self.URL) == (None, "")
+
+    def test_empty_description_reads_as_unreachable_not_answered(self, monkeypatch):
+        """A 200 whose `role` is null (a GraphQL response can do this without
+        raising, per goldmansachs.py's own `verify()` note) must not be
+        recorded as a page that genuinely said nothing."""
+        monkeypatch.setattr(
+            enrich_mod.requests, "post",
+            lambda *a, **k: _FakeResponse(200, {"data": {"role": None}}))
+        assert fetch_posting(self.URL) == (None, "")

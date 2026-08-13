@@ -95,6 +95,31 @@ def workday_api_url(url: str) -> str | None:
             f"/wday/cxs/{tenant}/{site}/job/x/{job_path}")
 
 
+# Goldman Sachs — higher.gs.com is an SPA shell too, and a generic GET picks
+# up nothing but the client-rendered page's own <title> ("Careers | Goldman
+# Sachs"), which is why every one of the 146 goldmansachs rows this command
+# has ever touched carries that exact placeholder as `detail_text`, 132 of
+# them currently open. higher.gs.com's own unauthenticated `GetRoleById`
+# GraphQL operation serves the real content the list-search `GetCampusRoles`
+# query (coverage_connectors/goldmansachs.py) never carries — confirmed live
+# 2026-08-14 with a plain POST, no JS engine: `descriptionHtml` came back as
+# a real multi-paragraph posting body.
+#
+# `externalSourceId` needs no new field added to the connector's existing
+# `GetCampusRoles` selection: it is already sitting in the `roleId` the list
+# query fetches today, as the digits before `_GS_CAMPUS`
+# ("180086_GS_CAMPUS" -> "180086") — confirmed live to match
+# `externalSource.sourceId` exactly, so it can be sliced straight out of the
+# URL this command already has.
+_GS_ROLE_URL = re.compile(r"higher\.gs\.com/roles/(\d+)_GS_CAMPUS", re.IGNORECASE)
+_GS_ENDPOINT = "https://api-higher.gs.com/gateway/api/v1/graphql"
+_GS_ROLE_QUERY = (
+    "query GetRoleById($externalSourceId: String!, $externalSourceFetch: Boolean) { "
+    "role(externalSourceId: $externalSourceId, externalSourceFetch: $externalSourceFetch) { "
+    "roleId descriptionHtml locations { city state country primary } } }"
+)
+
+
 # iCIMS detail pages are ALSO JS shells — a plain GET of careers-sig.icims.com
 # returns 351 characters of page chrome and none of the posting (which is how
 # 70 SIG rows were recorded as "answered" by a page that answered nothing).
@@ -175,6 +200,37 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
                          for extra in info.get("additionalLocations") or ()
                          if isinstance(extra, str)]
                 location = "; ".join(loc for loc in dict.fromkeys(locs) if loc)
+                if body:
+                    return page_text(body), location
+        except (requests.RequestException, ValueError):
+            return None, ""
+        return None, ""
+
+    gs = _GS_ROLE_URL.search(url or "")
+    if gs:
+        try:
+            resp = requests.post(
+                _GS_ENDPOINT,
+                data=json.dumps({
+                    "operationName": "GetRoleById",
+                    "query": _GS_ROLE_QUERY,
+                    "variables": {"externalSourceId": gs.group(1),
+                                  "externalSourceFetch": True},
+                }).encode(),
+                headers={**UA, "Content-Type": "application/json",
+                         "Accept": "application/json"},
+                timeout=TIMEOUT)
+            if resp.status_code == 200:
+                role = ((resp.json() or {}).get("data") or {}).get("role") or {}
+                body = role.get("descriptionHtml") or ""
+                locs = []
+                for loc in role.get("locations") or []:
+                    piece = ", ".join(
+                        str(p) for p in (loc.get("city"), loc.get("state"),
+                                          loc.get("country")) if p)
+                    if piece:
+                        locs.append(piece)
+                location = "; ".join(dict.fromkeys(locs))
                 if body:
                     return page_text(body), location
         except (requests.RequestException, ValueError):
