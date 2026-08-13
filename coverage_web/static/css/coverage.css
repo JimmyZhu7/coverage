@@ -1096,6 +1096,17 @@ ul.checkboxselectmultiple { list-style: none; padding: 0; margin: var(--s1) 0;
 .pill, .chip, .prio {
   display: inline-flex; align-items: center; gap: var(--s1);
   font-size: var(--fs-micro); font-weight: var(--w-med);
+  /* Every badge on the page is one line, but none of them set their own
+     line-height, so all of them inherited body's prose value (--lh-body,
+     ~1.5) at 11px — a line box a third taller than the glyphs it holds.
+     `align-items: center` centers that oversized box, not the text inside
+     it, so any ascender/descender asymmetry in the word (e.g. "chatted"'s
+     descender-free run against "Persona"'s p/y) reads as the label sitting
+     visibly off-centre in its pill. Same bug .fact-chip already hit and
+     fixed with its own tight line-height; this is the shared base every
+     other pill/chip/prio badge in the app draws from, so it gets the fix
+     once here instead of per-instance. */
+  line-height: 1;
   text-transform: uppercase; letter-spacing: 0.05em;
   padding: 3px 11px; border-radius: var(--r-badge);
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
