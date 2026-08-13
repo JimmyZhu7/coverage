@@ -326,8 +326,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* A live deadline count earns the warning colour; a zero is just a zero. */
   .ribbon-stat.is-urgent .ribbon-num { color: var(--stale-t); }
   .ribbon-stat.is-urgent::after { background: var(--stale-t); }
-  /* The funnel is a sentence, not a measurement — it sits at the quiet end.
-     13rem is sized for the populated label ("Submitted › Interview › Offer").
+  /* 13rem is sized for the populated label ("Submitted › Interview › Offer").
      Empty, that made the one cell with no number the WIDEST on the strip,
      which read as a broken cell rather than a quiet one. The empty variant
      takes the same basis as its numbered neighbours. */
@@ -342,7 +341,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      label-only cells on one line as each other, which is the alignment that
      actually reads. */
   .ribbon-stat:not(:has(.ribbon-num)) { justify-content: center; }
-  .ribbon-funnel .ribbon-num { font-size: var(--fs-l); }
+  /* The funnel's number USED to render at --fs-l against its three
+     neighbours' --fs-xl ("the funnel is a sentence, not a measurement").
+     Direct feedback on the populated strip: side by side the smaller digit
+     read as a misaligned cell, not a quieter one — its shorter line-height
+     also pulled the label 5px closer to the number than the other three
+     cells, so nothing on the row shared a baseline. One size for every
+     `.ribbon-num` fixes both at once. */
 
   @media (max-width: 700px) {
     /* Two up, wrapping — the gap keeps drawing the dividers, so there is
