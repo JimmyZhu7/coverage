@@ -58,22 +58,31 @@ from .models import FetchResult, Opportunity, VerificationResult, WorkdayBoard
 name = "workday"
 
 _PAGE_SIZE = 20   # Workday's CxS API 400s above this — verified live, no silent clamp.
-_MAX_JOBS = 1500  # 75 pages/board. Was 60 (three pages), which was not a
-                  # coverage compromise but a correctness one: ingest closes
+_MAX_JOBS = 2500  # 125 pages/board. Was 1500 (raised from 60, then 500 — see
+                  # history below), which itself ran out of headroom: TD
+                  # Securities' board grew from the 1,421 it was measured at
+                  # to 1,587 (confirmed live 2026-08-13/14), tripping
+                  # `truncated=True` on every fetch that landed above 1,500
+                  # and blocking ingest's pair-level auto-close for the whole
+                  # (TD Securities, workday) pair — 210 open rows that could
+                  # no longer be auto-closed, confirmed against ScrapeRun
+                  # history for the 'all' connector (runs 124, 176, 179, 182).
+                  # A fixed cap sized to today's largest board is a fix that
+                  # re-breaks itself the next time that board grows, so this
+                  # is raised with real headroom (2,500 vs. TD's observed
+                  # 1,587) rather than to the exact current total.
+                  #
+                  # Earlier history, preserved because the reasoning still
+                  # applies at the new value: 60 (three pages) was not a
+                  # coverage compromise but a correctness one — ingest closes
                   # any open row a successful fetch didn't return, so on
                   # boards reporting 186-1,371 results the cap was marking
                   # hundreds of LIVE postings closed every night. Two rows
                   # sampled from that population — a Barclays 2027 summer
                   # internship and a PwC FY27 intern role — came back
                   # verified-open from the firms' own sites while sitting in
-                  # the database as closed.
-                  #
-                  # 500 came first and still left eight boards partial.
-                  # Measured against every live Workday board: reading all
-                  # 50 to the end costs 558 requests against 400 at a cap of
-                  # 500 — 158 more, once a night, for 10,595 postings
-                  # instead of a truncated view of them. The largest board
-                  # (TD Securities, 1,421) fits under 1,500 with headroom.
+                  # the database as closed. 500 came first and still left
+                  # eight boards partial.
                   #
                   # The cap stays because an unbounded fetch against a
                   # 10,000-posting tenant is nobody's friend, and truncation
