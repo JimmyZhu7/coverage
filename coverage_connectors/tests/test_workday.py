@@ -12,6 +12,7 @@ from __future__ import annotations
 import urllib.error
 
 from coverage_connectors import workday
+from coverage_connectors.http import FetchError
 from coverage_connectors.models import WorkdayBoard
 
 
@@ -256,6 +257,18 @@ def test_verify_does_not_close_on_a_malformed_200(monkeypatch):
     assert result.result == "needs-verification"
 
 
+def _raise_403_wrapped(url, **kw):
+    """What fetch_json ACTUALLY raises in production on a persistent 403 --
+    fetch_bytes retries a non-404/410 HTTPError, then wraps the last one in
+    FetchError on exhaustion (see http.py). A bare `raise HTTPError(...)`
+    here would test dead code: the first version of these tests did exactly
+    that, passed, and shipped a fallback that never ran in production
+    (Opportunity id=17403 stayed stuck at 'unreachable' — round 2's own
+    recheck caught it). Raising the real wrapper type is the only way this
+    test can fail if that regresses again."""
+    raise FetchError(url, "GET", urllib.error.HTTPError(url, 403, "permission denied", None, None))
+
+
 def test_verify_falls_back_to_posting_page_when_cxs_api_blocked(monkeypatch):
     """Regression test for the confirmed TD Securities defect (Opportunity
     id=17403): the CxS job-detail endpoint 403s (Cloudflare `S22 permission
@@ -263,12 +276,13 @@ def test_verify_falls_back_to_posting_page_when_cxs_api_blocked(monkeypatch):
     `postingAvailable` bootstrap flag reads false. Without the fallback,
     verify() could only ever report 'unreachable' here -- which reverify.py
     never acts on -- so a genuinely dead posting stayed open forever."""
-    def raise_403(url, **kw):
-        raise urllib.error.HTTPError(url, 403, "permission denied", None, None)
-
-    monkeypatch.setattr(workday, "fetch_json", raise_403)
+    monkeypatch.setattr(workday, "fetch_json", _raise_403_wrapped)
+    # Real shape: a bare JS object key, no quotes -- `window.workday = {
+    # postingAvailable: false, ...}`. This page is client-side JS, not
+    # JSON. A quoted-key mock here is exactly what let the regex bug (fixed
+    # alongside the exception-type bug above) pass its own test unnoticed.
     monkeypatch.setattr(workday, "fetch_text",
-                        lambda url, **kw: 'window.workday = {"postingAvailable": false};')
+                        lambda url, **kw: 'window.workday = {postingAvailable: false, other: 1};')
 
     result = workday.verify(
         "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers/job/Greenville-South-Carolina/"
@@ -283,12 +297,9 @@ def test_verify_fallback_confirms_open_too(monkeypatch):
     """The control case from the same investigation: a live sibling TD
     posting (id=17024) read `postingAvailable: true` from the same fallback
     path in the same run, ruling out a template/rate-limit artifact."""
-    def raise_403(url, **kw):
-        raise urllib.error.HTTPError(url, 403, "permission denied", None, None)
-
-    monkeypatch.setattr(workday, "fetch_json", raise_403)
+    monkeypatch.setattr(workday, "fetch_json", _raise_403_wrapped)
     monkeypatch.setattr(workday, "fetch_text",
-                        lambda url, **kw: 'window.workday = {"postingAvailable": true};')
+                        lambda url, **kw: 'window.workday = {postingAvailable: true, other: 1};')
 
     result = workday.verify(
         "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers/job/Toronto-Ontario/"
@@ -299,16 +310,52 @@ def test_verify_fallback_confirms_open_too(monkeypatch):
 
 def test_verify_stays_unreachable_when_fallback_page_also_fails(monkeypatch):
     """No page, no flag -- still an honest 'unreachable', never a guess."""
-    def raise_403(url, **kw):
-        raise urllib.error.HTTPError(url, 403, "permission denied", None, None)
-
-    monkeypatch.setattr(workday, "fetch_json", raise_403)
-    monkeypatch.setattr(workday, "fetch_text", raise_403)
+    monkeypatch.setattr(workday, "fetch_json", _raise_403_wrapped)
+    monkeypatch.setattr(workday, "fetch_text", _raise_403_wrapped)
 
     result = workday.verify(
         "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers/job/Greenville-South-Carolina/Role_R1"
     )
     assert result.result == "unreachable"
+
+
+def test_posting_available_reads_the_bare_js_key_workday_actually_sends(monkeypatch):
+    """Confirmed live against Opportunity id=17403's real bootstrap script:
+    `postingAvailable: false,` with no quotes around the key -- a JS object
+    literal, not JSON. A quoted-only regex silently never matches this and
+    returns None, which is indistinguishable from 'page unreadable' to the
+    caller -- the exact way this fallback kept returning 'unreachable' even
+    after the exception-type bug above was fixed."""
+    monkeypatch.setattr(workday, "fetch_text",
+                        lambda url, **kw: 'x = {a: 1, postingAvailable: false, b: 2};')
+    assert workday._posting_available_from_page("https://x.wd1.myworkdayjobs.com/Site/job/p_R1") is False
+
+
+def test_posting_available_still_reads_a_quoted_key(monkeypatch):
+    """Belt and braces: if Workday ever does emit real JSON with quoted
+    keys, that must keep working too."""
+    monkeypatch.setattr(workday, "fetch_text",
+                        lambda url, **kw: '{"a": 1, "postingAvailable": true, "b": 2}')
+    assert workday._posting_available_from_page("https://x.wd1.myworkdayjobs.com/Site/job/p_R1") is True
+
+
+def test_verify_falls_back_on_a_bare_unwrapped_httperror_too(monkeypatch):
+    """The other real shape: fetch_bytes raises 404/410 immediately,
+    unretried and unwrapped (see http.py) -- a bare HTTPError, not a
+    FetchError. The fallback must handle both, since a persistent
+    Cloudflare 403 and an immediate 404 arrive as different exception
+    types for the same reason (only one of them gets retried)."""
+    def raise_404(url, **kw):
+        raise urllib.error.HTTPError(url, 404, "not found", None, None)
+
+    monkeypatch.setattr(workday, "fetch_json", raise_404)
+    monkeypatch.setattr(workday, "fetch_text",
+                        lambda url, **kw: 'window.workday = {"postingAvailable": false};')
+
+    result = workday.verify(
+        "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers/job/Greenville-South-Carolina/Role_R2"
+    )
+    assert result.result == "closed"
 
 
 def test_verify_via_search_text_zero_results(monkeypatch):

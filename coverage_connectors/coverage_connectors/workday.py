@@ -52,7 +52,7 @@ import re
 import urllib.error
 import urllib.parse
 
-from .http import fetch_json, fetch_text, post_json
+from .http import FetchError, fetch_json, fetch_text, post_json
 from .models import FetchResult, Opportunity, VerificationResult, WorkdayBoard
 
 name = "workday"
@@ -195,7 +195,14 @@ def classify_url(url: str) -> dict | None:
 # Cloudflare-guarded CxS endpoint — including one that is genuinely gone —
 # and `reverify.py` never acts on "unreachable", so the row stays open
 # indefinitely no matter how many times it is re-checked.
-_POSTING_AVAILABLE_RE = re.compile(r'"postingAvailable"\s*:\s*(true|false)', re.IGNORECASE)
+# The key is a bare JS object literal on the real page (`postingAvailable:
+# false,`), not JSON (`"postingAvailable": false`) -- confirmed live against
+# id=17403's actual bootstrap script. A quoted-only pattern silently never
+# matches, which is exactly how this fallback still returned "unreachable"
+# after the FetchError-vs-HTTPError fix: the exception got caught correctly,
+# but the flag it went looking for never matched. The quotes are optional
+# here for that reason, not for defensiveness.
+_POSTING_AVAILABLE_RE = re.compile(r'"?postingAvailable"?\s*:\s*(true|false)', re.IGNORECASE)
 
 
 def _posting_available_from_page(url: str) -> bool | None:
@@ -268,21 +275,33 @@ def verify(url: str) -> VerificationResult:
             "workday", url, "needs-verification",
             f"workday tenant {tenant_host!r}/{site!r} but no job path or ?q= requisition number in the URL", [],
         )
-    except urllib.error.HTTPError as e:
-        if job_path:
+    except (urllib.error.HTTPError, FetchError) as e:
+        # A 404/410 reaches here as a bare HTTPError (fetch_bytes raises those
+        # immediately, unretried). Anything else -- a 403 from Cloudflare,
+        # most commonly -- gets retried by fetch_bytes and, on exhaustion,
+        # wrapped in http.FetchError; the original HTTPError survives as
+        # `.cause`. Missing that second shape meant this fallback silently
+        # never ran: id=17403 (TD Securities) 403s on the CxS API on every
+        # attempt, always arrives as FetchError, and sat stuck at
+        # "unreachable" forever with the fallback below unreachable code.
+        cause = e if isinstance(e, urllib.error.HTTPError) else e.cause
+        code = cause.code if isinstance(cause, urllib.error.HTTPError) else None
+        if job_path and code is not None:
             # The CxS API itself is blocked -- fall back to the posting page
             # the row's own url already points at. See _posting_available_from_page.
             available = _posting_available_from_page(url)
             if available is False:
                 return VerificationResult(
                     "workday", url, "closed",
-                    f"CxS job-detail HTTP {e.code}; posting page's own "
+                    f"CxS job-detail HTTP {code}; posting page's own "
                     "postingAvailable flag reads false", [])
             if available is True:
                 return VerificationResult(
                     "workday", url, "verified-open",
-                    f"CxS job-detail HTTP {e.code}; posting page's own "
+                    f"CxS job-detail HTTP {code}; posting page's own "
                     "postingAvailable flag reads true", [])
-        return VerificationResult("workday", url, "unreachable", f"HTTP {e.code} from Workday CxS", [])
+        if code is not None:
+            return VerificationResult("workday", url, "unreachable", f"HTTP {code} from Workday CxS", [])
+        return VerificationResult("workday", url, "unreachable", str(e)[:200], [])
     except Exception as e:  # noqa: BLE001
         return VerificationResult("workday", url, "unreachable", str(e)[:200], [])
