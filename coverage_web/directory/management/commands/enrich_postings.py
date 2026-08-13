@@ -45,6 +45,7 @@ from urllib.parse import urlsplit
 
 import requests
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 from django.utils import timezone
 
 from directory.boards import BOARDS
@@ -260,8 +261,20 @@ def _queue(rows, *, refetch: bool, stale_days: int, today) -> tuple[list, int]:
             stale.append(o)          # read before we recorded when
             continue
         age = (now - at).days
-        closing_soon = (o.deadline is not None
-                        and 0 <= (o.deadline - today).days <= URGENT_WINDOW_DAYS)
+        # Urgent covers two shapes, not one: a deadline approaching (the
+        # original case) AND a deadline that already reads as past on a row
+        # still open. The second is not "closing soon", it is closing-soon's
+        # mirror image and just as urgent to confirm — it is the exact
+        # signature of a stale reading actively lying to a student (HSBC
+        # Sheffield WIT, id 1617/1618: read 2026-08-09 while the firm had
+        # already pushed it to 2026-08-16, and the row sat outside this
+        # window because `(deadline - today).days` was negative rather than
+        # "soon"). A deadline already in the past is never LESS urgent to
+        # verify than one 30 days out.
+        days_to_deadline = (o.deadline - today).days if o.deadline is not None else None
+        closing_soon = days_to_deadline is not None and (
+            days_to_deadline < 0 or days_to_deadline <= URGENT_WINDOW_DAYS
+        )
         if closing_soon and age >= min(URGENT_STALE_DAYS, stale_days):
             urgent_stale.append(o)
         elif age >= stale_days:
@@ -338,7 +351,24 @@ class Command(BaseCommand):
         tag = "[dry-run] " if dry else ""
 
         rows = list(
-            Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
+            Opportunity.objects.filter(status="open")
+            .filter(
+                Q(bucket__in=TARGET_BUCKETS)
+                # A non-campus row can still carry a deadline WE reported
+                # (confidence < 1.0, e.g. read out of BMO's Phenom-listed
+                # postings at ingest) — and outside TARGET_BUCKETS it was
+                # never in this command's queryset at all, so that reading
+                # could never be revisited once wrong. BMO ids 19224/9485/
+                # 9433 are bucket="other" and had gone unrefreshed since
+                # ingest (4+ months) for exactly this reason: not "checked
+                # and still stale", never checked a second time, ever. Scope
+                # is narrow on purpose — only rows already showing a
+                # reported date, not every non-campus posting — so this
+                # doesn't turn into an unbounded enrichment run over
+                # experienced-hire boards this command was never meant to
+                # cover.
+                | Q(deadline__isnull=False, confidence__lt=1.0)
+            )
             .select_related("firm")
             .order_by("firm__name", "id")
         )
