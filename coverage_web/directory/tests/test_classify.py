@@ -16,6 +16,7 @@ from directory.classify import (
     OTHER,
     board_is_campus,
     classify_role,
+    clean_title,
     extract_class_year,
     extract_cohort,
 )
@@ -645,3 +646,29 @@ def test_region_census_20260809(location, expected):
 ])
 def test_non_campus_region_census_20260809(location, expected):
     assert normalize_region(location) == expected
+
+
+# ---------------------------------------------------------------------------
+# clean_title / _REQ_CODE — a trailing bracket with a digit and no internal
+# space used to be stripped unconditionally, which ate IMC's bare cohort-year
+# suffixes ("Graduate Software Engineer (2027)" -> "Graduate Software
+# Engineer") and made two distinct, currently-open postings (Amsterdam job
+# ids 4564480101 / 2026 and 4667814101 / 2027) clean to an identical title —
+# directory/dupes.py then folded the 2027 row out of the feed entirely.
+@pytest.mark.parametrize("title, expected", [
+    # The confirmed defect: a bare 4-digit cohort year in parens must survive.
+    ("Graduate Software Engineer (2026)", "Graduate Software Engineer (2026)"),
+    ("Graduate Software Engineer (2027)", "Graduate Software Engineer (2027)"),
+    ("Summer Analyst [2026]", "Summer Analyst [2026]"),
+    # Real requisition codes must still be stripped — the fix must not
+    # blunt the rule it is narrowing.
+    ("Project Intern (J19302)", "Project Intern"),
+    ("Business Analyst (R-788678)", "Business Analyst"),
+    ("Data Engineer [REQ-30087]", "Data Engineer"),
+    # A worded parenthetical (has a space) was already left alone.
+    ("Summer Analyst (Summer 2027)", "Summer Analyst (Summer 2027)"),
+    # A year plus anything else is still a real code, not a bare year.
+    ("Graduate Engineer (2026A)", "Graduate Engineer"),
+])
+def test_clean_title_keeps_bare_cohort_years(title, expected):
+    assert clean_title(title) == expected

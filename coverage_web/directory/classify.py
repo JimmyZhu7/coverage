@@ -542,8 +542,18 @@ _TITLE_REGION_WORDS = {
 }
 # A trailing requisition code in brackets: has a digit, no spaces inside —
 # "(J19302)", "(R-788678)", "[REQ-30087]". A worded parenthetical with spaces
-# ("(Summer 2027)") has a space and is left alone.
-_REQ_CODE = re.compile(r"\s*[\(\[](?=[^)\]\s]*\d)[A-Za-z0-9][\w.\-/]*[\)\]]\s*$")
+# ("(Summer 2027)") has a space and is left alone. A bare 4-digit year
+# ("(2026)", "(2027)") is explicitly excluded even though it has no space:
+# IMC posts "Graduate Software Engineer (2026)" and "... (2027)" as two
+# distinct, currently-open cohort postings (Amsterdam job ids 4564480101 and
+# 4667814101) whose titles differ ONLY in that suffix — stripping it made
+# both clean to "Graduate Software Engineer", which directory/dupes.py then
+# folds into one row, silently hiding the 2027 posting from the board. A req
+# code is never a bare calendar year with nothing else in the brackets, so
+# excluding that one shape costs nothing real req codes need.
+_REQ_CODE = re.compile(
+    r"\s*[\(\[](?=[^)\]\s]*\d)(?!(?:19|20)\d{2}[\)\]])[A-Za-z0-9][\w.\-/]*[\)\]]\s*$"
+)
 _WS = re.compile(r"\s{2,}")
 
 
