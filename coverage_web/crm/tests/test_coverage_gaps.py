@@ -168,7 +168,7 @@ def test_tier_cost_makes_the_commitment_visible():
 # 3. The Network page renders both, against real rows.
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db
-def test_network_page_shows_gaps_advocate_fractions_and_tier_cost(client):
+def test_network_page_shows_gaps_and_advocate_fractions(client):
     user = User.objects.create_user(email="net@example.com", password="x")
     user.assets = {"advocate_target": 2}
     user.save(update_fields=["assets"])
@@ -196,9 +196,12 @@ def test_network_page_shows_gaps_advocate_fractions_and_tier_cost(client):
     assert "2 of 2 advocates" in body and "0 of 2 advocates" in body
     assert 'adv-socket is-filled' in body
     assert '<i class="adv-socket"></i>' in body
-    # And the tier's cost: 2 firms × 2 = 4 advocates, 2 in place.
-    assert "2 firms × 2" in body
-    assert "= 4 advocates" in body
+    # The tier cost line ("2 firms × 2 = 4 advocates · ... in place · ... to
+    # go") was pulled from Firm Coverage per direct feedback that it read as
+    # clutter under every tier label. coverage.tier_cost() is still exercised
+    # directly by test_tier_cost_makes_the_commitment_visible above; only the
+    # render was removed.
+    assert "firms × 2" not in body
 
 
 @pytest.mark.django_db

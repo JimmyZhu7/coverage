@@ -667,6 +667,24 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .net-none { color: var(--ink-3); font-style: italic; font-size: var(--fs-s);
     text-align: center; margin: var(--s3) 0; }
 
+  /* ---- Contact search/sort toolbar (crm/_contact_search.html) ----------- */
+  .csearch-bar { display: flex; gap: var(--s3); margin: var(--s3) 0 var(--s4); }
+  .csearch-field { position: relative; flex: 1 1 260px; display: flex; align-items: center; }
+  .csearch-field svg { position: absolute; left: 13px; color: var(--ink-3); pointer-events: none; }
+  .csearch-field input { padding-left: 34px; }
+  /* Native search inputs grow a clear-x on their own; nothing else here needs it. */
+  .csearch-bar select { flex: none; width: auto; min-width: 9.5rem; }
+  .csearch-empty { color: var(--ink-3); font-style: italic; font-size: var(--fs-s);
+    text-align: center; margin: var(--s4) 0; }
+  /* Toggled by class, not the `hidden` attribute — `.contact-card` and
+     `.arch-row` both declare their own `display` (flex / grid), which beats
+     the browser's `[hidden] { display: none }` at an equal specificity tie.
+     A dedicated class sidesteps that trap outright rather than needing a
+     `[hidden]` override remembered per component (see `.bulk-bar[hidden]`
+     above for the alternative, and the bug it was fixing). */
+  .is-csearch-hidden { display: none; }
+  @media (max-width: 560px) { .csearch-bar { flex-direction: column; } }
+
   /* Both board columns share one pattern: the strip-title sits ABOVE a
      single surface panel. The panels have the SAME fixed height and always
      show the scrollbar lane at their right edge — the scrollbar is a

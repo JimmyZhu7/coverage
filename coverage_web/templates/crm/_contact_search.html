@@ -1,0 +1,119 @@
+{% comment %}
+Shared search + sort toolbar for contact lists (Network's Contacts section,
+Archived Contacts). Included with `target` = the id of the container that
+holds the `[data-searchable]` items. Zero server round trip: everything a
+row needs to match or sort by is baked into its own data-* attributes at
+render time, so the JS never re-parses rendered, title-cased text.
+
+Groups are optional. An item's group is `.closest("[data-group]")`, falling
+back to the target container itself — Network's warmth `<details>` mark
+themselves `data-group` (per-group counts + collapse-while-searching), while
+Archived has no groups and the script quietly treats the whole list as one.
+{% endcomment %}
+<div class="csearch-bar">
+  <label class="csearch-field">
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.8"/><path d="M13.5 13.5l-3-3" stroke-linecap="round"/></svg>
+    <input type="search" data-csearch-q placeholder="Search by name or firm…" aria-label="Search contacts" autocomplete="off">
+  </label>
+  <select data-csearch-sort aria-label="Sort contacts">
+    <option value="default">Sort: Default</option>
+    <option value="name">Name A–Z</option>
+    <option value="firm">Firm A–Z</option>
+    <option value="stale">Longest since touch</option>
+    <option value="recent">Most recent touch</option>
+  </select>
+</div>
+<p class="csearch-empty" data-csearch-empty hidden>No contacts match "<span data-csearch-empty-q></span>".</p>
+<script>
+  (function () {
+    // The toolbar renders ABOVE the items it searches (better UX than
+    // burying it under 130 cards), which means at the moment this inline
+    // script executes, the rest of #{{ target }} hasn't been parsed into
+    // the DOM yet — querySelectorAll("[data-searchable]") would find zero.
+    // Deferring the actual wiring past DOMContentLoaded fixes it without
+    // moving the markup.
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", init);
+    } else {
+      init();
+    }
+
+    function init() {
+    var root = document.getElementById("{{ target }}");
+    if (!root) return;
+    var input = root.querySelector("[data-csearch-q]");
+    var sortSel = root.querySelector("[data-csearch-sort]");
+    var globalEmpty = root.querySelector("[data-csearch-empty]");
+    var globalEmptyQ = root.querySelector("[data-csearch-empty-q]");
+    var items = Array.prototype.slice.call(root.querySelectorAll("[data-searchable]"));
+    if (!input || !sortSel || !items.length) return;
+    var openBeforeSearch = null; // null = not currently searching
+
+    function groupOf(el) { return el.closest("[data-group]") || root; }
+    function numOr(v, fallback) { return v === "" || v == null ? fallback : +v; }
+
+    function applySearch() {
+      var q = input.value.trim().toLowerCase();
+      var counts = new Map();
+      var totalVisible = 0;
+      items.forEach(function (el) {
+        var match = !q || (el.dataset.search || "").toLowerCase().indexOf(q) !== -1;
+        el.classList.toggle("is-csearch-hidden", !match);
+        if (match) totalVisible++;
+        var g = groupOf(el);
+        counts.set(g, (counts.get(g) || 0) + (match ? 1 : 0));
+      });
+      counts.forEach(function (n, g) {
+        var countEl = g.querySelector ? g.querySelector("[data-group-count]") : null;
+        if (countEl) countEl.textContent = n;
+        var emptyEl = g.querySelector ? g.querySelector("[data-group-empty]") : null;
+        if (emptyEl) emptyEl.hidden = !(q && n === 0);
+        if (g.tagName === "DETAILS") {
+          if (q) {
+            if (openBeforeSearch === null) openBeforeSearch = new WeakMap();
+            if (!openBeforeSearch.has(g)) openBeforeSearch.set(g, g.open);
+            g.open = n > 0;
+          } else if (openBeforeSearch && openBeforeSearch.has(g)) {
+            g.open = openBeforeSearch.get(g);
+          }
+        }
+      });
+      if (!q) openBeforeSearch = null;
+      if (globalEmpty) globalEmpty.hidden = !(q && totalVisible === 0);
+      if (globalEmptyQ) globalEmptyQ.textContent = input.value.trim();
+    }
+
+    function applySort() {
+      var mode = sortSel.value;
+      var byGroup = new Map();
+      items.forEach(function (el) {
+        var g = groupOf(el);
+        if (!byGroup.has(g)) byGroup.set(g, []);
+        byGroup.get(g).push(el);
+      });
+      byGroup.forEach(function (list) {
+        var parent = list[0] && list[0].parentElement;
+        if (!parent) return;
+        var sorted = list.slice();
+        if (mode === "name") {
+          sorted.sort(function (a, b) { return (a.dataset.name || "").localeCompare(b.dataset.name || ""); });
+        } else if (mode === "firm") {
+          sorted.sort(function (a, b) { return (a.dataset.firm || "").localeCompare(b.dataset.firm || ""); });
+        } else if (mode === "stale") {
+          // Oldest touch (or never touched, -Infinity) first.
+          sorted.sort(function (a, b) { return numOr(a.dataset.touch, -Infinity) - numOr(b.dataset.touch, -Infinity); });
+        } else if (mode === "recent") {
+          // Newest touch first; never-touched sinks to the end.
+          sorted.sort(function (a, b) { return numOr(b.dataset.touch, -Infinity) - numOr(a.dataset.touch, -Infinity); });
+        } else {
+          sorted.sort(function (a, b) { return numOr(a.dataset.order, 0) - numOr(b.dataset.order, 0); });
+        }
+        sorted.forEach(function (el) { parent.appendChild(el); });
+      });
+    }
+
+    input.addEventListener("input", applySearch);
+    sortSel.addEventListener("change", applySort);
+    }
+  })();
+</script>

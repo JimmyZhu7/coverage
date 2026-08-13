@@ -39,11 +39,16 @@
     to nothing. Same ledger row the queue, the firm page and My Applications
     use: identity, then the date as a mono column, then the one action.
     {% endcomment %}
-    <div class="panel">
+    <div class="panel" id="archived-contacts">
       <p class="sec-label">{{ contact_total }} archived</p>
+      {% include "crm/_contact_search.html" with target="archived-contacts" %}
       <div class="arch-list">
         {% for c in contacts %}
-          <div class="arch-row">
+          <div class="arch-row" data-searchable data-order="{{ forloop.counter0 }}"
+               data-name="{{ c.name }}"
+               data-firm="{% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %}"
+               data-touch="{% if c.last_touch_ts %}{{ c.last_touch_ts|date:'U' }}{% endif %}"
+               data-search="{{ c.name }} {% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %} {{ c.role }} {{ c.email }}">
             <div class="arch-id">
               <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
               <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}</span>

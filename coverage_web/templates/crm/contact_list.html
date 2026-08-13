@@ -247,23 +247,29 @@
   </div>
 
   {# ---- Full contact cards, by warmth ---- #}
-  <section class="net-contacts">
+  <section class="net-contacts" id="net-contacts">
     <h2 class="strip-title">Contacts <span class="scrub-count">{{ contact_total }}</span></h2>
     {% if unconfirmed_total %}
       {# Never let a region tab pass off a guess as a confirmed match. #}
       <p class="net-caveat">{{ unconfirmed_total }} of these have no region set. Shown on a guess.</p>
     {% endif %}
+    {% include "crm/_contact_search.html" with target="net-contacts" %}
     {% for section in sections %}
       {# Empty sections start collapsed so they don't take up the board. #}
-      <details class="warmth-section"{% if section.cards %} open{% endif %}>
+      <details class="warmth-section" data-group{% if section.cards %} open{% endif %}>
         <summary class="net-group-head">
           <span>{% if section.key != "school" %}<i class="dot dot-{% if section.key == 'no_reply' %}cold{% else %}{{ section.key }}{% endif %}"></i> {% endif %}{{ section.label }}</span>
-          <span class="scrub-count">{{ section.cards|length }}</span>
+          <span class="scrub-count" data-group-count>{{ section.cards|length }}</span>
         </summary>
         {% if section.cards %}
           <div class="contact-grid">
             {% for card in section.cards %}
-              <div class="contact-card kin-reveal" style="--i:{{ forloop.counter0 }}">
+              <div class="contact-card kin-reveal" style="--i:{{ forloop.counter0 }}"
+                   data-searchable data-order="{{ forloop.counter0 }}"
+                   data-name="{{ card.c.name }}"
+                   data-firm="{% if card.c.firm %}{{ card.c.firm.name }}{% else %}{{ card.c.firm_text }}{% endif %}"
+                   data-touch="{% if card.c.last_touch_ts %}{{ card.c.last_touch_ts|date:'U' }}{% endif %}"
+                   data-search="{{ card.c.name }} {% if card.c.firm %}{{ card.c.firm.name }}{% else %}{{ card.c.firm_text }}{% endif %} {{ card.c.role }} {{ card.school }}">
                 <div class="cc-head">
                   {% comment %}The staleness ring: silence made visible. The
                   ring drains as the cadence clock this contact runs on is
@@ -303,6 +309,7 @@
               </div>
             {% endfor %}
           </div>
+          <p class="net-none" data-group-empty hidden>No matches in this group.</p>
         {% else %}
           <p class="net-none">No contacts.</p>
         {% endif %}
