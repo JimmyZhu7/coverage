@@ -478,7 +478,12 @@ def due_actions(
         cid = c.get("id")
         ctouches = by_contact.get(cid, [])
         firm_id = c.get("firm_id", c.get("firm"))
-        firm_name = meta.get(firm_id, {}).get("name") or c.get("firm_text") or firm_id or "?"
+        # A hand-added contact can genuinely have no firm at all (no firm_id,
+        # no firm_text) — capture_discover.py writes exactly that when the
+        # source record named no employer. The old terminal fallback was the
+        # literal string "?", which templates render verbatim as a bare
+        # question mark next to the contact's name instead of a label.
+        firm_name = meta.get(firm_id, {}).get("name") or c.get("firm_text") or firm_id or "No firm listed"
         # Same None-coercion as _firm_meta (a `.get(..., 3)` default alone
         # would not catch an explicit `tier=None` from an "Unranked" drag —
         # that used to raise a TypeError comparing None to int in the
