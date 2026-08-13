@@ -310,6 +310,49 @@ class TestNormalizeLabel:
         assert (normalize_label("Senior Associate ,Treasures Relationship Manager")
                 == normalize_label("Senior Associate, Treasures Relationship Manager"))
 
+    def test_comma_and_dash_separators_unify(self):
+        """DRW's own Greenhouse board posts the same requisition-shape title
+        with a comma at one job id and a dash at another (ids 3402/3398 NYC,
+        3401/3399 Greenwich); Fidelity International's Tokyo manager role the
+        same way (ids 1363/1360). The old normalize_label canonicalized
+        whitespace AROUND an existing dash or comma into two different fixed
+        forms and never equated the two separator styles with each other."""
+        assert (normalize_label("Software Engineer, Cumberland/FICCO Tools Engineering")
+                == normalize_label("Software Engineer - Cumberland/FICCO Tools Engineering"))
+        assert (normalize_label("Wholesale Sales Senior Manager")
+                == normalize_label("Wholesale Sales, Senior Manager"))
+
+    def test_slash_colon_and_pipe_separators_unify(self):
+        """Morgan Stanley (comma+slash vs comma+' / '), SIG (dash vs pipe)."""
+        assert (normalize_label("Associate, Risk/Policy Management")
+                == normalize_label("Associate, Risk / Policy Management"))
+        assert (normalize_label("Quantitative Systematic Trader- Experienced Hire")
+                == normalize_label("Quantitative Systematic Trader | Experienced Hire"))
+
+    def test_no_separator_at_all_unifies_with_a_dash(self):
+        """MUFG: 'AVP-' (no space before the dash) vs 'AVP ' (no separator at
+        all, just a space) — the words are the same either way."""
+        assert (normalize_label(
+            "AVP- Corporate Functions/Risk Management/ Issue Management- "
+            "Internal Audit")
+            == normalize_label(
+            "AVP Corporate Functions/ Risk Management/ Issue Management- "
+            "Internal Audit"))
+
+    def test_three_separator_styles_of_the_same_words_all_unify(self):
+        """Barclays Pune's 'Engineering Manager VP' cluster: no separator,
+        a plain dash, and an en dash, across 7 live rows."""
+        assert (normalize_label("Engineering Manager VP")
+                == normalize_label("Engineering Manager - VP")
+                == normalize_label("Engineering Manager – VP"))
+
+    def test_different_words_joined_by_a_separator_still_stay_different(self):
+        """The fix must not turn every separator into a wildcard: PwC
+        Barcelona's two practice areas share the same boilerplate shape and
+        are genuinely different roles."""
+        assert (normalize_label("Barcelona - Legal Associate")
+                != normalize_label("Barcelona - Fiscal Associate"))
+
 
 class TestFoldDuplicates:
     def test_identical_rows_fold_to_one(self):
@@ -338,6 +381,19 @@ class TestFoldDuplicates:
             _Row(13815, firm_id=202, location="New Delhi",
                  title="Assistant Vice President,Treasures Relationship "
                        "Manager, Consumer Banking Group"),
+        ])
+        assert folded == 1
+        assert len(kept) == 1
+
+    def test_drw_comma_vs_dash_variant_folds(self):
+        """End-to-end regression for the confirmed DRW defect: two real
+        Greenhouse job ids for the same posting, titles differing only by
+        comma vs dash, now fold at the display layer."""
+        kept, folded = fold_duplicates([
+            _Row(3402, firm_id=86, location="New York City",
+                 title="Software Engineer, Cumberland/FICCO Tools Engineering"),
+            _Row(3398, firm_id=86, location="New York City",
+                 title="Software Engineer - Cumberland/FICCO Tools Engineering"),
         ])
         assert folded == 1
         assert len(kept) == 1

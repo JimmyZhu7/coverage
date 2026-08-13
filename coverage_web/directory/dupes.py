@@ -159,29 +159,37 @@ _DASHES = str.maketrans({"‐": "-", "‑": "-", "‒": "-",
                          "“": '"', "”": '"',
                          " ": " "})
 _EDGE_NOISE = re.compile(r"^[\s\-–—,;:.·|/]+|[\s\-–—,;:.·|/]+$")
-_SPACE_AROUND_DASH = re.compile(r"\s*-\s*")
-# DBS's own Workday board opened the same "Assistant Vice President,
-# Treasures Relationship Manager, Consumer Banking Group" role twice under
-# two req ids (WD86250 / WD86252) with byte-identical descriptions — the only
-# difference between the two titles is a missing space after the first comma
-# ("...President, Treasures..." vs "...President,Treasures..."). `" ".join(
-# s.split())` above only collapses whitespace that already exists; it never
-# inserts a space DBS's title happens to be missing, so the two titles stayed
-# distinct strings and neither Class A nor Class B folding ever saw them as
-# the same posting. Normalizing comma spacing to a single canonical form
-# (no space before, exactly one space after) fixes this the same way dash
-# spacing is already normalized above, and also catches the mirror case (a
-# STRAY space before the comma, e.g. "Senior Associate ,Treasures...").
-_SPACE_AROUND_COMMA = re.compile(r"\s*,\s*")
+# A poster reaches for '-', ',', '/', ':', ';' or '|' near-interchangeably to
+# join the same two clauses of a title, and sometimes uses no separator at
+# all. Confirmed live: DRW's Cumberland/FICCO req is titled with a comma on
+# one Greenhouse posting and a dash on the sibling posting of the SAME words
+# (ids 3402/3398 New York, 3401/3399 Greenwich); Fidelity International's
+# Tokyo "Wholesale Sales[,] Senior Manager" the same way (ids 1363/1360,
+# comma vs dash, both independently verified open); a read-only sweep of all
+# 15,479 open rows grouped by firm+location turned up 19 more firm+location
+# groups differing ONLY in which of these characters (or none) joined the
+# same words — MUFG ("AVP-" vs "AVP " with no separator at all), TD
+# Securities, Morgan Stanley (comma+slash vs comma+" / "), PwC Makati,
+# Raymond James, Ares, Societe Generale, SIG (dash vs pipe) and Barclays Pune
+# (dash / en-dash / no separator, one 7-row cluster). The previous version of
+# this function canonicalized whitespace AROUND an existing dash or comma
+# into two different fixed forms (space-free "-" vs ", ") but never equated
+# the two separator styles with each other or with slash/colon/pipe/no-
+# separator renderings, so every pair above hashed to a different
+# `duplicate_key()` and fold_duplicates() left both rows on the board.
+# Collapsing every one of these characters straight to a space — rather than
+# canonicalizing toward one preferred spelling — folds all of the shapes at
+# once, including "no separator" for free, while still leaving genuinely
+# different WORDS (PwC Barcelona's "Legal" vs "Fiscal" practice areas) apart.
+_SEPARATORS = re.compile(r"[-,:;/|]")
 
 
 def normalize_label(value: str) -> str:
     """Casefolded, whitespace- and punctuation-insensitive form of a title or
     location, for asking "is this the same words?" — never for display."""
     s = (value or "").translate(_DASHES).casefold()
+    s = _SEPARATORS.sub(" ", s)
     s = " ".join(s.split())
-    s = _SPACE_AROUND_DASH.sub("-", s)
-    s = _SPACE_AROUND_COMMA.sub(", ", s)
     return _EDGE_NOISE.sub("", s)
 
 
