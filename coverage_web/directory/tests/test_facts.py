@@ -81,6 +81,20 @@ def test_a_historic_year_is_not_an_eligibility_window():
     assert extract_grad_years("Our graduate programme began in 2015.") is None
 
 
+def test_an_or_list_with_the_later_year_first_still_sorts_low_to_high():
+    """Regression test for the confirmed Optiver/RBC defect: 'graduating in
+    2028 or after 2027 September' is an OR-eligibility statement (graduate
+    in 2028, or already graduated by Sept 2027), not an ascending range —
+    but the connector regex treats 'or' the same as '-'/'to', so the years
+    were captured in the sentence's own order and the label read the
+    backwards '2028–2027'. Confirmed live on 6 rows (Optiver ids
+    19209/18634/18629/18627, RBC ids 417/416)."""
+    got = extract_grad_years("candidates graduating in 2028 or after 2027 September")
+    assert got["value"] == "2027–2028"
+    got = extract_grad_years("candidates graduating in Spring 2028 or December 2027")
+    assert got["value"] == "2027–2028"
+
+
 # --- Language --------------------------------------------------------------
 
 def test_a_required_language_is_a_wall():

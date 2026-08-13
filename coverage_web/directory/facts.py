@@ -192,7 +192,17 @@ def extract_grad_years(text: str) -> dict | None:
         years = [y for y in years if 2024 <= int(y) <= 2035]
         if not years:
             continue
-        label = years[0] if len(years) == 1 else f"{years[0]}–{years[-1]}"
+        # Sorted before the label is built, not just taken in the order the
+        # regex captured them: "or" joins an OR-list as often as it joins a
+        # range ("graduating in 2028 or after 2027 September"; RBC's
+        # "graduating in Spring 2028 or December 2027"), and the connector
+        # regex above matches "or" identically to "-"/"to"/"and", so a
+        # later-year-first OR-list produced years=['2028','2027'] and a
+        # rendered chip reading "Grad 2028–2027" -- a backwards range for
+        # what is actually "2028, or already graduated by Dec 2027".
+        # Confirmed live on 6 rows across Optiver and RBC Capital Markets.
+        ordered = sorted(years, key=int)
+        label = ordered[0] if len(ordered) == 1 else f"{ordered[0]}–{ordered[-1]}"
         return {"value": label, "years": years,
                 "phrase": _sentence(text, m.start(), m.end())}
     return None
