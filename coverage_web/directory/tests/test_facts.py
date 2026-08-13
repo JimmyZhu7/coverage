@@ -95,6 +95,33 @@ def test_an_or_list_with_the_later_year_first_still_sorts_low_to_high():
     assert got["value"] == "2027–2028"
 
 
+def test_graduate_programme_start_is_not_the_applicants_own_graduation():
+    """Regression test for the confirmed SIG defect (12 of 25 open rows,
+    48%): 'invited to join our full-time graduate programme in either
+    September 2027, January 2028 or August 2028' states when the
+    POST-INTERNSHIP FULL-TIME OFFER starts, not when the applicant
+    graduates — but the bare `graduat\\w*` gate matched the word "graduate"
+    inside "graduate programme" identically to a genuine graduation
+    statement. Confirmed live on SIG id=9111, whose own true graduation cue
+    ("completed 3 years at university by June 2027") implies a 2028
+    graduate, while the old extractor stored value='2027' straight off the
+    programme-start sentence."""
+    assert extract_grad_years(
+        "Successful interns will be invited to join our full-time graduate "
+        "programme in either September 2027, January 2028 or August 2028, "
+        "depending on availability.") is None
+    # A genuine "graduate scheme" start-date phrasing is refused the same way.
+    assert extract_grad_years(
+        "you will be invited to join our graduate scheme in either "
+        "January or August 2028") is None
+    # But a real graduation statement elsewhere in the same posting is still read.
+    got = extract_grad_years(
+        "Successful interns will be invited to join our full-time graduate "
+        "programme in either September 2027, January 2028 or August 2028. "
+        "Applicants must be on track to graduate in 2028.")
+    assert got and got["years"] == ["2028"]
+
+
 # --- Language --------------------------------------------------------------
 
 def test_a_required_language_is_a_wall():

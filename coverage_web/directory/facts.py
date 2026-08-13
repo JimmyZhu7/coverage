@@ -175,7 +175,29 @@ _GRAD = re.compile(
     # few words past its connector ("or the spring of 2029"), not just one.
     # "degree completion" is the same statement without the word: Deutsche
     # Bank writes "Bachelor's degree completion: 2026 or later".
-    r"(?:graduat\w*|degree completion)[^.\n]{0,%d}?((?:19|20)\d{2})"
+    #
+    # The negative lookahead excludes "graduat\w*" when it is itself the
+    # NOUN "graduate" naming the post-internship full-time PROGRAMME, not
+    # the applicant's own graduation. SIG's own template invites successful
+    # interns "to join our full-time graduate programme in either September
+    # 2027, January 2028 or August 2028" -- a statement about when the
+    # OFFERED job starts, not about when the applicant graduates -- and the
+    # bare `graduat\w*` gate matched the word "graduate" inside "graduate
+    # programme"/"graduate scheme" identically to a genuine "planning to
+    # graduate in 2027". Confirmed live on 12 of SIG's 25 grad-chip rows
+    # (48%), several producing a value flatly contradicted by the row's own
+    # true graduation cue elsewhere in the same posting.
+    #
+    # `\b` pinned right after `\w*`, before the lookahead: without it, a
+    # greedy `\w*` that fails the lookahead at the full word ("graduate")
+    # backtracks to a SHORTER match ("graduat") where the lookahead trivially
+    # passes (the very next character, "e", isn't whitespace, so the
+    # forbidden pattern can't even start) -- silently defeating the exclusion
+    # this fix exists for. Forcing a real word boundary before the lookahead
+    # runs means the only match Python's backtracking can settle on is the
+    # WHOLE word, so the lookahead actually sees what follows it.
+    r"(?:graduat\w*\b(?!\s+(?:\w+\s+){0,2}(?:programme|program|scheme)\b)"
+    r"|degree completion)[^.\n]{0,%d}?((?:19|20)\d{2})"
     r"(?:\s*(?:-|–|—|to|and|through|or)\s*"
     r"(?:[\w']+\s+){0,3}?((?:19|20)\d{2}))?" % _NEAR, re.IGNORECASE)
 
