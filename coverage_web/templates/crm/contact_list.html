@@ -180,21 +180,6 @@
         <div class="tier-section" data-tier="{{ section.tier|default:'' }}">
           <div class="tier-label">
             <span>{{ section.label }}</span>
-            {% comment %}
-            The cost line: what this tier is actually promising. 14 firms at
-            a target of 2 is 28 advocates — visible so an over-tiered board
-            can be re-tiered on purpose instead of discovered one unanswered
-            email at a time.
-            {% endcomment %}
-            {% if section.cost and section.cost.firms %}
-              <span class="tier-cost">
-                {{ section.cost.firms }} firm{{ section.cost.firms|pluralize }} × {{ section.cost.target }}
-                = {{ section.cost.needed }} advocates ·
-                <b>{{ section.cost.have }}</b> in place ·
-                {% if section.cost.remaining %}{{ section.cost.remaining }} to go{% else %}tier covered{% endif %}
-                {% if section.cost.uncovered %}· {{ section.cost.uncovered }} with no contacts{% endif %}
-              </span>
-            {% endif %}
           </div>
           <div class="tier-grid">
             {% for fc in section.cards %}
