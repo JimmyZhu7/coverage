@@ -49,6 +49,7 @@ from .classify import (
     derive_class_year, extract_class_year, extract_cohort,
     extract_deadline_from_text, extract_sponsorship, normalize_region, posting_text,
 )
+from .dupes import identity_fragment, provider_identity
 from .models import Firm, Opportunity, ScrapeRun
 
 # Connector confidence-band string labels are absent for ATS postings (the
@@ -294,6 +295,19 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
 
     existing = Opportunity.objects.filter(firm=firm, url=opp.url).first()
     if existing is None:
+        # The url missed, but the url is only the ADDRESS of a posting, not
+        # its name. Before minting a second row, ask whether the provider has
+        # already told us this is a posting we hold under a different address
+        # — a tal.net posting listed in a second candidate pool, an iCIMS job
+        # whose title (and therefore slug) was edited, a Workday posting whose
+        # multi-city URL picked a different city this run. Each of those used
+        # to create a duplicate AND close the original, which is two wrong
+        # facts from one cosmetic url change. See directory.dupes for the
+        # evidence behind each pattern.
+        existing = _match_by_identity(firm, opp.url)
+        if existing is not None:
+            stats["deduped_by_identity"] = stats.get("deduped_by_identity", 0) + 1
+    if existing is None:
         Opportunity.objects.create(
             firm=firm,
             title=title,
@@ -317,7 +331,7 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
             last_checked=now,
         )
         stats["created"] += 1
-        return
+        return opp.url
 
     was_closed = existing.status == "closed"
     changed = existing.content_hash != h
@@ -375,6 +389,32 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     else:
         stats["unchanged"] += 1
 
+    # The url of the row actually touched, which is NOT always the url that
+    # was fetched: an identity match updates a row filed under the provider's
+    # older address. `ingest_results` needs the real one for closed-detection,
+    # because a url missing from `seen` is a url it closes.
+    return existing.url
+
+
+def _match_by_identity(firm: Firm, url: str):
+    """The existing row for the same real posting as `url`, filed under a
+    different address — or None.
+
+    Two steps on purpose. The `url__contains` filter only NARROWS (it can
+    over-match, and `/opp/1459` does match `/opp/14590`); the equality check on
+    `provider_identity` is what actually decides. Doing it this way keeps the
+    cost at one indexable query on the create path — which is the minority
+    path on a steady-state run — instead of a regex scan of the table.
+    """
+    identity = provider_identity(url)
+    if identity is None:
+        return None
+    fragment = identity_fragment(identity)
+    for candidate in Opportunity.objects.filter(firm=firm, url__contains=fragment):
+        if provider_identity(candidate.url) == identity:
+            return candidate
+    return None
+
 
 # --------------------------------------------------------------------------- results -> DB
 
@@ -392,6 +432,9 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
         "fetched": 0, "skipped_no_url": 0,
         "created": 0, "updated": 0, "unchanged": 0, "reopened": 0, "closed": 0,
         "deadline_parse_failed": 0,
+        # Rows that would have been a second copy of a posting we already hold,
+        # matched back to it by provider id instead. See directory.dupes.
+        "deduped_by_identity": 0,
         "providers": set(), "firms_touched": set(), "created_firms": [],
         "errors": [],
     }
@@ -445,7 +488,15 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
                 # savepoint per row: one malformed posting must not roll back
                 # (or abort) every other firm's upserts in this transaction.
                 with transaction.atomic():
-                    _apply_opportunity(firm, opp, now, stats, campus_hint=campus)
+                    touched = _apply_opportunity(firm, opp, now, stats,
+                                                 campus_hint=campus)
+                # An identity match updates a row stored under the provider's
+                # PREVIOUS url for this posting. That url was never in this
+                # fetch, so without this line closed-detection would read its
+                # absence as a death and close the very row we just verified
+                # live — turning the duplicate fix into a disappearing act.
+                if touched:
+                    seen_by_pair[pair].add(touched)
             except Exception as exc:  # noqa: BLE001 — isolate, record, continue
                 # Keep the url in `seen`: the fetch returned it live, so a
                 # transient upsert error must NOT make closed-detection flip

@@ -36,7 +36,7 @@ It says what it excludes in plain words: no "premium", no lock icon, no
 "unlock" — the everything mode is free, one click away, and just noisier
 data. It lives INSIDE #cov-results so its numbers refresh with the filters.
 {% endcomment %}
-{% if hidden_other or hidden_fit or hidden_region or hidden_count %}
+{% if hidden_other or hidden_fit or hidden_region or hidden_count or hidden_dupes %}
   <p class="scope-line scope-hidden">
     {% comment %}
     Separators are SPANS with their own padding, not "·" characters leaning on
@@ -47,14 +47,21 @@ data. It lives INSIDE #cov-results so its numbers refresh with the filters.
     a separator that will lose its space again the next time this is edited.
     {% endcomment %}
     {% if hidden_other %}Showing campus roles only<span class="scope-sep">·</span>{{ hidden_other }} experienced role{{ hidden_other|pluralize }} hidden<span class="scope-sep">·</span><a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a>{% endif %}
-    {% if hidden_fit or hidden_region or hidden_count %}
+    {% if hidden_fit or hidden_region or hidden_count or hidden_dupes %}
       {% if hidden_other %}<span class="scope-sep">·</span>Also hidden:{% else %}Hidden:{% endif %}
       {% if hidden_fit %}<a href="{% url 'opportunities' %}?{{ show_unfit_qs }}"
-        >{{ hidden_fit }} you don't qualify for</a>{% if hidden_region or hidden_count %},{% endif %}{% endif %}
+        >{{ hidden_fit }} you don't qualify for</a>{% if hidden_region or hidden_count or hidden_dupes %},{% endif %}{% endif %}
       {% if hidden_region %}<a href="{% url 'opportunities' %}?{{ show_unregioned_qs }}"
-        >{{ hidden_region }} with no tracked region</a>{% if hidden_count %},{% endif %}{% endif %}
+        >{{ hidden_region }} with no tracked region</a>{% if hidden_count or hidden_dupes %},{% endif %}{% endif %}
       {% if hidden_count %}<a href="{% url 'my_applications' %}#hidden"
-        >{{ hidden_count }} you marked "not for me"</a>{% endif %}
+        >{{ hidden_count }} you marked "not for me"</a>{% if hidden_dupes %},{% endif %}{% endif %}
+      {% comment %}Duplicates get the same treatment as every other hide: a
+      count and its own undo. A firm that files one job as two requisitions is
+      showing you one thing to do, but Coverage does not get to decide for you
+      that the second copy is noise — the link says how many were folded and
+      brings every copy back.{% endcomment %}
+      {% if hidden_dupes %}<a href="{% url 'opportunities' %}?{{ show_dupes_qs }}"
+        >{{ hidden_dupes }} repeat listing{{ hidden_dupes|pluralize }}</a>{% endif %}
     {% endif %}
   </p>
 {% endif %}

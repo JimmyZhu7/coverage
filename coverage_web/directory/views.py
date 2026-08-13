@@ -46,6 +46,7 @@ from directory.classify import (
 # The one definition of "closing soon" — see deadlines.py for why it isn't
 # spelled out at each call site (and for the crm/views.py follow-up).
 from directory.deadlines import CLOSING_SOON_DAYS, is_closing_soon
+from directory.dupes import fold_duplicates
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
 from directory.recommend import Candidate, Profile, parse_target_cycle, recommend
@@ -1252,13 +1253,19 @@ def opportunities(request):
     # is not a decision. Signed-out visitors have no dismissals, so this costs
     # them a set literal and no query.
     hidden_ids: set[int] = set()
+    # Rows this user has a relationship with (tracked, applied, dismissed).
+    # Only used to break ties when two copies of one posting are folded below:
+    # showing the copy they never touched would make their own pipeline state
+    # look lost.
+    sticky_ids: set[int] = set()
     if request.user.is_authenticated:
         from analytics.models import UserOpportunity
-        hidden_ids = set(
+        mine = list(
             UserOpportunity.objects.for_user(request.user)
-            .filter(dismissed=True)
-            .values_list("opportunity_id", flat=True)
+            .values_list("opportunity_id", "dismissed")
         )
+        sticky_ids = {oid for oid, _ in mine}
+        hidden_ids = {oid for oid, dismissed in mine if dismissed}
         if hidden_ids:
             open_qs = open_qs.exclude(id__in=hidden_ids)
 
@@ -1448,6 +1455,27 @@ def opportunities(request):
     # bands in Python and never cared about SQL order.
     rows = list(qs.order_by("firm__name", F("deadline").asc(nulls_last=True), "title"))
 
+    # ---- Duplicate folding (?dupes=1 to switch it off), on the MATERIALISED
+    # rows for the same reason the fit filter is: it depends on who is asking
+    # (a copy the student already tracked wins the tie), so it must never
+    # reach the shared facet counts. The counts describe the BOARD; this
+    # describes one student's render of it.
+    #
+    # Some firms genuinely file one job as several requisitions — SIG posts
+    # every 2027 internship under two iCIMS job numbers, Deutsche Bank runs
+    # apprentice intakes as parallel reqs — and those reqs close on their own
+    # schedules, so the rows must all stay in the database and stay
+    # close-tracked. Only the render is collapsed. See directory.dupes.
+    rows, hidden_dupes = ([r for r in rows], 0) if request.GET.get(
+        "dupes", ""
+    ).strip() == "1" else fold_duplicates(rows, sticky_ids=sticky_ids)
+
+    # The undo, built from the LIVE querystring like every other one on this
+    # page — a hardcoded `?dupes=1` would silently drop the student's filters.
+    show_dupes_params = request.GET.copy()
+    show_dupes_params["dupes"] = "1"
+    show_dupes_qs = show_dupes_params.urlencode()
+
     # ---- The fit filter (?fit=1), applied to the MATERIALISED rows. It is
     # deliberately not in _apply_filters: it depends on who is asking, so it
     # must never shape the shared facet counts, and it hides only roles whose
@@ -1532,14 +1560,27 @@ def opportunities(request):
                     profile,
                     [
                         Candidate.from_opportunity(o)
-                        for o in open_qs.filter(bucket__in=TARGET_BUCKETS)
-                        # A pick is a RECOMMENDATION, held to a higher bar
-                        # than a listing: a role whose own text blocks this
-                        # user (wrong stated year, refuses their visa) may
-                        # still be worth seeing on the board, but the product
-                        # must not point at it and say "for you".
-                        if not (lambda v: v and v["blocking"])(
-                            _eligibility(o, elig_profile))
+                        # Folded first, and scored second. Two copies of one
+                        # posting score identically by construction, so an
+                        # unfolded input spends two of six pick slots saying
+                        # the same thing — the most expensive place on the
+                        # page to repeat yourself. This reads `open_qs`, not
+                        # the filtered `rows`, so the ranking still sees the
+                        # whole board (see the note above).
+                        for o in fold_duplicates(
+                            [
+                                o for o in open_qs.filter(bucket__in=TARGET_BUCKETS)
+                                # A pick is a RECOMMENDATION, held to a higher
+                                # bar than a listing: a role whose own text
+                                # blocks this user (wrong stated year, refuses
+                                # their visa) may still be worth seeing on the
+                                # board, but the product must not point at it
+                                # and say "for you".
+                                if not (lambda v: v and v["blocking"])(
+                                    _eligibility(o, elig_profile))
+                            ],
+                            sticky_ids=sticky_ids,
+                        )[0]
                     ],
                 )
             ]
@@ -1833,6 +1874,8 @@ def opportunities(request):
                              if elig_profile and elig_profile.get("class_year") else 0),
         "hidden_fit": hidden_fit,
         "show_unfit_qs": _qs_without(request, "fit"),
+        "hidden_dupes": hidden_dupes,
+        "show_dupes_qs": show_dupes_qs,
         # `_results.html` is included on a full render and returned bare on an
         # htmx swap. The out-of-band count fragment must only ship on the
         # second: on a full page load the counts are already correct in the
