@@ -16,6 +16,25 @@ DETAIL endpoint (what the provider actually serves an applicant) — the list
 drops it, ingest closes it, and nothing ever re-opens it even while the
 detail page stays live and applyable.
 
+Round 6, 2026-08-14: workday.py's own detail_url construction had a bug
+(job_path captured a trailing UI-route suffix like "/apply" off BMO's stored
+URLs, so `coverage_connectors.workday.verify()` 422'd on every one of these
+rows and could only ever report "unreachable" — see workday.py's
+`classify_url` for the fix). With that fixed, a fresh 3-row sample of BMO's
+still-closed phenom pool (closed_at all 2026-08-14, a 90-row batch — 3
+reverify runs each writing one shared timestamp to every row it touched that
+run) went 2 of 3 genuinely live via the corrected `verify()`: ids 9514
+("Retail Relationship Banker", Compton CA — CxS job-detail JSON canApply=True,
+endDate=2026-08-29) and 9433 ("Wealth Planning Consultant", Toronto — same
+shape). The third, id=9378 ("Personal Banking Associate", Montreal), stayed
+correctly unresolved (the corrected detail_url now 403s rather than 200s —
+still not a confirmed-dead signal, so it is deliberately left alone here,
+same as `verify()`'s own "an error is never evidence of life or death" rule).
+Same identical mechanism as rounds 4 and 5 below: Phenom's search widget
+desyncing from the live Workday tenant the posting resolves into, now
+additionally compounded (until this round's code fix) by every re-check
+422'ing before it could even reach that determination.
+
 Round 5, 2026-08-14: a random 10-row sample of BMO's phenom-sourced closed
 inventory (135 of the DB's 183 phenom+myworkdayjobs.com closed rows are
 BMO's) re-verified 2 of 10 still genuinely live through
@@ -90,9 +109,10 @@ from coverage_connectors import verify
 from directory.models import Opportunity
 
 # Confirmed live by the current round's read-only audit — see module
-# docstring for why each one closed wrongly. Round 4's ids (9595, 3979) were
-# applied and reopened, so they have dropped out of this list.
-DEFAULT_IDS = [9530, 9490, 9539, 9361, 9526, 9544]
+# docstring for why each one closed wrongly. Round 4's ids (9595, 3979) and
+# round 5's six ids (9530, 9490, 9539, 9361, 9526, 9544) were applied and
+# reopened, so they have dropped out of this list.
+DEFAULT_IDS = [9514, 9433]
 
 
 class Command(BaseCommand):

@@ -222,19 +222,47 @@ def test_classify_url_with_job_path():
                      "job_path": "New-York/Some-Role_R123", "search_text": None}
 
 
-def test_classify_url_strips_a_trailing_apply_segment():
-    """PINS A FIXED BUG: phenom.py stores a BMO posting's url as the feed's
-    own applyUrl, which is the real job path PLUS a trailing /apply page --
-    e.g. ".../job/Mississauga-ON-CAN/Associate_R260018720/apply". Left in,
-    job_path captured that whole three-segment string, `verify()`'s
-    job-detail fetch 404s, and `deadline_dates` (and the fresh "verified-
-    open" signal itself) never reach the row at all. Confirmed live
-    2026-08-14: four of five BMO rows sampled for the frozen-deadline
-    defect carry exactly this /apply-suffixed url shape."""
+def test_classify_url_drops_trailing_suffix_past_the_two_job_path_segments():
+    """Regression test for a real bug found live (2026-08-14): a Phenom-
+    sourced board (BMO) stores its Workday-hosted URLs with the applyUrl's
+    own "/apply" UI-route suffix still attached, e.g.
+    ".../job/Compton-CA-USA/Retail-Relationship-Banker_R260017067/apply".
+    `_WORKDAY_URL_RE`'s job_path group is greedy and swallowed that suffix
+    too, so `verify()`'s detail_url became
+    ".../job/{location}/{title}_{reqId}/apply" -- confirmed live to 422 on
+    bmo.wd3.myworkdayjobs.com's real CxS endpoint, even though the correct
+    2-segment path (no "/apply") returns 200 with real jobPostingInfo
+    (canApply=True, endDate=2026-08-29) for the same posting (id=9514).
+    Every check on such a URL therefore permanently read "unreachable" and
+    could never confirm the posting live. `classify_url` must cap job_path
+    to the documented 2-segment shape and discard any trailing suffix."""
     info = workday.classify_url(
-        "https://bmo.wd3.myworkdayjobs.com/External/job/Mississauga-ON-CAN/Associate_R260018720/apply"
+        "https://bmo.wd3.myworkdayjobs.com/External/job/Compton-CA-USA/"
+        "Retail-Relationship-Banker_R260017067/apply"
     )
-    assert info["job_path"] == "Mississauga-ON-CAN/Associate_R260018720"
+    assert info["job_path"] == "Compton-CA-USA/Retail-Relationship-Banker_R260017067"
+
+
+def test_verify_open_via_job_path_with_trailing_suffix_stripped(monkeypatch):
+    """End-to-end: verify() on a URL carrying the "/apply" suffix must hit
+    the correct 2-segment detail_url (asserted via the captured URL) and
+    report verified-open, not fall through to unreachable."""
+    captured = {}
+
+    def fake_fetch_json(url, **kw):
+        captured["url"] = url
+        return {"jobPostingInfo": {"title": "Retail Relationship Banker", "postedOn": "Posted 15 Days Ago"}}
+
+    monkeypatch.setattr(workday, "fetch_json", fake_fetch_json)
+    result = workday.verify(
+        "https://bmo.wd3.myworkdayjobs.com/External/job/Compton-CA-USA/"
+        "Retail-Relationship-Banker_R260017067/apply"
+    )
+    assert captured["url"] == (
+        "https://bmo.wd3.myworkdayjobs.com/wday/cxs/bmo/External/job/"
+        "Compton-CA-USA/Retail-Relationship-Banker_R260017067"
+    )
+    assert result.result == "verified-open"
 
 
 def test_classify_url_with_search_query():

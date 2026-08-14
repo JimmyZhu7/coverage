@@ -20,8 +20,15 @@ over a list-based close.
 
 Round 5 added six more BMO/phenom ids to DEFAULT_IDS (9530, 9490, 9539,
 9361, 9526, 9544) — same mechanism, a second and third independent sample
-of the same closed pool. `test_default_ids_reports_the_current_round_rows`
-below exercises DEFAULT_IDS as it stands today.
+of the same closed pool. Those six have since been applied and reopened too.
+
+Round 6 fixed the actual code bug behind all of this (workday.py's
+`classify_url` was capturing a trailing UI-route suffix like "/apply" into
+job_path, so `verify()` 422'd on every BMO/phenom row's detail_url and could
+never report anything but "unreachable" — see workday.py) and, with that
+fixed, added two freshly-confirmed ids to DEFAULT_IDS (9514, 9433).
+`test_default_ids_reports_the_current_round_rows` below exercises
+DEFAULT_IDS as it stands today.
 """
 
 from __future__ import annotations
@@ -72,11 +79,12 @@ def test_default_run_reports_and_writes_nothing(monkeypatch):
 
 
 def test_default_ids_is_the_current_round_bmo_list():
-    """Round 5: the literal DEFAULT_IDS list must be the six BMO/phenom ids
-    this round's audit confirmed still live (two independent samples of the
-    same closed pool, 2/10 then 4/4) — round 4's ids (9595, 3979) have since
+    """Round 6: the literal DEFAULT_IDS list must be the two BMO/phenom ids
+    this round's audit confirmed still live (9514, 9433), sampled from the
+    90-row batch reverify closed on 2026-08-14 — round 4's ids (9595, 3979)
+    and round 5's six ids (9530, 9490, 9539, 9361, 9526, 9544) have since
     been applied and reopened and must not linger here."""
-    assert cmd_mod.DEFAULT_IDS == [9530, 9490, 9539, 9361, 9526, 9544]
+    assert cmd_mod.DEFAULT_IDS == [9514, 9433]
 
 
 @pytest.mark.django_db

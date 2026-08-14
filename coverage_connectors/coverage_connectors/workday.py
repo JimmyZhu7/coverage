@@ -257,9 +257,6 @@ def fetch(board: WorkdayBoard) -> FetchResult:
                         truncated=isinstance(total, int) and total > len(jobs))
 
 
-_TRAILING_APPLY_RE = re.compile(r"/apply/?$", re.IGNORECASE)
-
-
 def classify_url(url: str) -> dict | None:
     """{"tenant_host", "site", "job_path", "search_text"} if `url` is a
     recognized myworkdayjobs.com URL, else None. `search_text` is read from
@@ -267,26 +264,31 @@ def classify_url(url: str) -> dict | None:
     verify layer used to carry a requisition-number re-query through a
     plain job-board URL).
 
-    A trailing `/apply` segment is stripped off `job_path` before it is
-    returned. Workday's real job path is exactly two segments
+    `job_path` is capped to its first two segments before it is returned.
+    A real Workday job path is exactly two segments
     ("{location-slug}/{title-slug}_{reqId}" — see `_WORKDAY_URL_RE`'s own
-    comment), but `phenom.py`'s `_normalize` stores a BMO posting's `url` as
-    the feed's own `applyUrl` — a legitimate Workday link, just one that
-    points at the "Apply" page one segment past the job path, not the job
-    path itself. Left unstripped, this connector's own two-segment regex
-    still (correctly) captures group(3) greedily through that extra
-    segment, so the job-detail fetch in `verify()` 404s/`unreachable`s on
-    every one of these URLs — confirmed live 2026-08-14: four of five BMO
-    rows sampled for the frozen-deadline defect (ids 9359/9490/9446/9504)
-    carry a `/apply`-suffixed url and, unstripped, verify() reports
-    "unreachable" for all four rather than ever reaching the deadline text
-    the job-detail endpoint actually carries."""
+    comment), but some callers store the URL with extra UI-route segments
+    tacked on past the reqId — e.g. `phenom.py`'s `_normalize` stores a BMO
+    posting's `url` as the feed's own `applyUrl`, which ends in a trailing
+    `/apply` UI-route segment (confirmed live 2026-08-14 on
+    bmo.wd3.myworkdayjobs.com: id=9514's stored URL carries one).
+    `_WORKDAY_URL_RE`'s job_path group is greedy and swallows that suffix
+    too, so the job-detail fetch `verify()` builds from it is
+    `.../job/{location}/{title}_{reqId}/apply`, which 422s outright on
+    Workday's real CxS endpoint every time — confirmed live 2026-08-14: four
+    of five BMO rows sampled for the frozen-deadline defect
+    (ids 9359/9490/9446/9504) carry a `/apply`-suffixed url and, uncapped,
+    verify() reports "unreachable" for all four rather than ever reaching
+    the deadline text the job-detail endpoint actually carries. Capping to
+    the first two segments matches the documented shape and drops any
+    trailing suffix regardless of what a given board happens to append —
+    not just `/apply` specifically."""
     m = _WORKDAY_URL_RE.search(url or "")
     if not m:
         return None
     tenant_host, site, job_path = m.group(1), m.group(2), m.group(3)
     if job_path:
-        job_path = _TRAILING_APPLY_RE.sub("", job_path)
+        job_path = "/".join(job_path.split("/")[:2])
     qs = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
     search_text = (qs.get("q") or [None])[0]
     return {"tenant_host": tenant_host, "site": site, "job_path": job_path, "search_text": search_text}
