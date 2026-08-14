@@ -21,6 +21,8 @@ from directory.management.commands.enrich_postings import (
     _queue,
     fetch_posting,
     has_live_api,
+    microdata_jobposting_location,
+    page_title,
     payload_text,
 )
 from directory.management.commands import enrich_postings as enrich_mod
@@ -120,7 +122,7 @@ def test_non_campus_row_with_reported_deadline_is_now_in_scope(monkeypatch):
 
     monkeypatch.setattr(
         enrich_mod, "fetch_posting",
-        lambda url, **kw: ("Application Deadline: 08/30/2026", ""),
+        lambda url, **kw: ("Application Deadline: 08/30/2026", "", ""),
     )
     call_command("enrich_postings")
 
@@ -149,7 +151,8 @@ def test_n_locations_placeholder_replaced_with_recovered_city(monkeypatch):
     monkeypatch.setattr(
         enrich_mod, "fetch_posting",
         lambda url, **kw: ("no deadline or sponsorship language here",
-                           "Markham, Ontario, Canada; Scarborough, Ontario, Canada"),
+                           "Markham, Ontario, Canada; Scarborough, Ontario, Canada",
+                           ""),
     )
     call_command("enrich_postings")
 
@@ -169,12 +172,91 @@ def test_real_location_is_left_alone(monkeypatch):
     )
     monkeypatch.setattr(
         enrich_mod, "fetch_posting",
-        lambda url, **kw: ("no deadline language here", "Somewhere Else"),
+        lambda url, **kw: ("no deadline language here", "Somewhere Else", ""),
     )
     call_command("enrich_postings")
 
     opp.refresh_from_db()
     assert opp.location == "London, United Kingdom"
+
+
+@pytest.mark.django_db
+class TestSitemapTitleAndMicrodataLocationRecovery:
+    """Regression tests for the confirmed HSBC title-truncation defect: a
+    `sitemap` board (coverage_connectors/sitemap.py) has no title field of
+    its own, so ingest reconstructs one from the posting URL's slug — and
+    HSBC's own slugs truncate long titles mid-word ("...-Hong" instead of
+    "...-Hong-Kong", confirmed live on 8 rows: ids 1615, 1621, 1626-1630,
+    1632). HSBC's page states its real title in `og:title` and its location
+    as schema.org MICRODATA (`itemprop="jobLocation"` with nested
+    `<meta itemprop="addressLocality" ...>` tags) rather than the
+    `<script type="application/ld+json">` block `jobposting_jsonld` reads —
+    confirmed live: 0 of these pages carry an ld+json JobPosting block."""
+
+    HSBC_PAGE = (
+        '<html><head>'
+        '<meta property="og:title" content="Investment Banking - Internship">'
+        '</head><body>'
+        '<span itemprop="jobLocation" itemscope itemtype="http://schema.org/Place">'
+        '<span itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">'
+        '<meta itemprop="addressLocality" content="Central">'
+        '<meta itemprop="addressRegion" content="Hong Kong Island">'
+        '<meta itemprop="addressCountry" content="HK"></span></span>'
+        '</body></html>'
+    )
+
+    def test_microdata_location_is_read_when_no_jsonld_block_exists(self):
+        assert (microdata_jobposting_location(self.HSBC_PAGE)
+                == "Central, Hong Kong Island, HK")
+
+    def test_page_title_reads_og_title(self):
+        assert page_title(self.HSBC_PAGE) == "Investment Banking - Internship"
+
+    def test_page_title_is_blank_when_the_page_has_none(self):
+        assert page_title("<html><body>no meta tags here</body></html>") == ""
+
+    def test_a_sitemap_boards_truncated_slug_title_is_corrected(self, monkeypatch):
+        """The exact live shape: the slug-reconstructed title ends mid-word
+        ('...Hong'), and the page's own og:title states the real, short,
+        untruncated title."""
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Central Investment Banking Internship Hong",
+            bucket="entry_level", status="open", source="sitemap",
+            url="https://apply.careers.hsbc.com/emergingtalent/job/x/123/",
+        )
+
+        class _Resp:
+            status_code = 200
+            text = self.HSBC_PAGE
+
+        monkeypatch.setattr(enrich_mod.requests, "get", lambda *a, **k: _Resp())
+        call_command("enrich_postings")
+
+        opp.refresh_from_db()
+        assert opp.title == "Investment Banking - Internship"
+        assert opp.location == "Central, Hong Kong Island, HK"
+
+    def test_a_non_sitemap_boards_title_is_never_overwritten(self, monkeypatch):
+        """Every other connector already carries a real title from its own
+        ingest-time API payload — recovered og:title must never override it,
+        even if the fetched page happens to word it differently."""
+        firm = Firm.objects.create(slug="acme", name="Acme")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Analyst Programme", bucket="entry_level",
+            status="open", source="greenhouse",
+            url="https://acme.example/job/1",
+        )
+
+        class _Resp:
+            status_code = 200
+            text = self.HSBC_PAGE
+
+        monkeypatch.setattr(enrich_mod.requests, "get", lambda *a, **k: _Resp())
+        call_command("enrich_postings")
+
+        opp.refresh_from_db()
+        assert opp.title == "Analyst Programme"
 
 
 class _FakeResponse:
@@ -222,10 +304,11 @@ class TestGoldmanSachsDetailFetch:
             return _FakeResponse(200, self._payload())
 
         monkeypatch.setattr(enrich_mod.requests, "post", fake_post)
-        text, location = fetch_posting(self.URL)
+        text, location, title = fetch_posting(self.URL)
 
         assert text == "About the program"
         assert location == "Hong Kong, Hong Kong SAR"
+        assert title == ""
         # The id sent is the numeric prefix sliced out of the URL's roleId —
         # no separate lookup, no new field on the list query.
         assert captured["body"]["variables"]["externalSourceId"] == "180086"
@@ -240,17 +323,18 @@ class TestGoldmanSachsDetailFetch:
         monkeypatch.setattr(enrich_mod.requests, "post", fail_post)
         monkeypatch.setattr(enrich_mod.requests, "get",
                             lambda *a, **k: _FakeResponse(404, {}))
-        text, location = fetch_posting("https://higher.gs.com/search")
+        text, location, title = fetch_posting("https://higher.gs.com/search")
         assert text is None
         assert location == ""
+        assert title == ""
 
     def test_graphql_error_status_reads_as_unreachable_not_answered(self, monkeypatch):
-        """A non-200 must come back as `(None, "")` — retried next run — not
-        as an empty-but-answered page."""
+        """A non-200 must come back as `(None, "", "")` — retried next run —
+        not as an empty-but-answered page."""
         monkeypatch.setattr(
             enrich_mod.requests, "post",
             lambda *a, **k: _FakeResponse(500, {}))
-        assert fetch_posting(self.URL) == (None, "")
+        assert fetch_posting(self.URL) == (None, "", "")
 
     def test_empty_description_reads_as_unreachable_not_answered(self, monkeypatch):
         """A 200 whose `role` is null (a GraphQL response can do this without
@@ -259,7 +343,7 @@ class TestGoldmanSachsDetailFetch:
         monkeypatch.setattr(
             enrich_mod.requests, "post",
             lambda *a, **k: _FakeResponse(200, {"data": {"role": None}}))
-        assert fetch_posting(self.URL) == (None, "")
+        assert fetch_posting(self.URL) == (None, "", "")
 
 
 class TestOracleDetailFetch:
@@ -295,10 +379,11 @@ class TestOracleDetailFetch:
             return _FakeResponse(200, self._payload())
 
         monkeypatch.setattr(enrich_mod.requests, "get", fake_get)
-        text, location = fetch_posting(self.URL)
+        text, location, title = fetch_posting(self.URL)
 
         assert text == "We're looking for talented individuals..."
         assert location == "New York, New York"
+        assert title == ""
         assert "keyword=210765547" in captured["url"]
         assert "siteNumber=CX_1001" in captured["url"]
 
@@ -333,7 +418,7 @@ class TestOracleDetailFetch:
         monkeypatch.setattr(
             enrich_mod.requests, "get",
             lambda *a, **k: _FakeResponse(200, {"items": [{"requisitionList": []}]}))
-        assert fetch_posting(self.URL) == (None, "")
+        assert fetch_posting(self.URL) == (None, "", "")
 
     def test_both_description_fields_empty_reads_as_unreachable_not_answered(self, monkeypatch):
         """Matches the live-confirmed pattern for 2 of the 3 sampled JPM ids:
@@ -343,7 +428,7 @@ class TestOracleDetailFetch:
         monkeypatch.setattr(
             enrich_mod.requests, "get",
             lambda *a, **k: _FakeResponse(200, {"items": [{"requisitionList": [req]}]}))
-        assert fetch_posting(self.URL) == (None, "")
+        assert fetch_posting(self.URL) == (None, "", "")
 
 
 @pytest.mark.django_db

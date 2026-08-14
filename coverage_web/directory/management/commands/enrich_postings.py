@@ -194,17 +194,57 @@ def jobposting_jsonld(page_html: str) -> tuple[str | None, str]:
     return None, ""
 
 
+# HSBC's careers site (a SuccessFactors Career Site Builder shell, registered
+# as a `sitemap` board — see coverage_connectors/sitemap.py) states its
+# JobPosting fields as inline schema.org MICRODATA (`itemprop="jobLocation"`
+# with nested `<meta itemprop="addressLocality" ...>` tags), not the
+# `<script type="application/ld+json">` block `jobposting_jsonld` reads —
+# confirmed live: 0 of these pages carry an ld+json JobPosting block. A
+# fallback so this source's own location statement isn't left unread just
+# because it filed it in the other schema.org serialization.
+_MICRODATA_ADDR_PART = re.compile(
+    r'itemprop="address(Locality|Region|Country)"[^>]*content="([^"]*)"',
+    re.IGNORECASE)
+
+
+def microdata_jobposting_location(page_html: str) -> str:
+    parts = [v for _, v in _MICRODATA_ADDR_PART.findall(page_html or "")
+             if v and v.strip().lower() != "unavailable"]
+    return ", ".join(dict.fromkeys(parts))
+
+
+# A sitemap board (see coverage_connectors/sitemap.py) has no title field of
+# its own — the ingest-time title is reconstructed from the posting URL's
+# slug, and HSBC's own slugs truncate long titles mid-word ("...-Hong/"
+# instead of "...-Hong-Kong/", confirmed on 8 live rows: ids 1615, 1621,
+# 1626-1630, 1632). The posting's own page states its real, untruncated
+# title in `og:title` — HSBC's is short and clean ("Investment Banking -
+# Internship", confirmed live), never the slug's city-prefixed, truncated
+# form — so a fetched page can correct what the slug guessed wrong.
+_OG_TITLE = re.compile(
+    r'<meta[^>]+property="og:title"[^>]*content="([^"]*)"', re.IGNORECASE)
+
+
+def page_title(page_html: str) -> str:
+    m = _OG_TITLE.search(page_html or "")
+    return html_mod.unescape(m.group(1)).strip() if m else ""
+
+
 def fetch_posting(url: str, *, greenhouse_token: str | None = None
-                  ) -> tuple[str | None, str]:
-    """(text, stated_location) — the posting's own words plus whatever
-    location its page's structured data states, or (None, "") when the page
-    could not be read.
+                  ) -> tuple[str | None, str, str]:
+    """(text, stated_location, stated_title) — the posting's own words plus
+    whatever location and title its page's own structured data states, or
+    (None, "", "") when the page could not be read.
 
     None vs "" on the text matters: an unreachable page is retried next run;
     a reachable page that says nothing is recorded as answered. The location
     is never derived — it is the provider's own field (Workday's location +
     country, iCIMS/JSON-LD jobLocation, Greenhouse's location and offices) or
-    it is empty.
+    it is empty. The title is likewise never derived — every board branch
+    below except the last already has a real title from its ingest-time API
+    payload, so only the final, API-less branch (a plain page GET —
+    HSBC's sitemap board among them) recovers one, from the page's own
+    `og:title`.
     """
     api = workday_api_url(url)
     if api:
@@ -223,10 +263,10 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
                          if isinstance(extra, str)]
                 location = "; ".join(loc for loc in dict.fromkeys(locs) if loc)
                 if body:
-                    return page_text(body), location
+                    return page_text(body), location, ""
         except (requests.RequestException, ValueError):
-            return None, ""
-        return None, ""
+            return None, "", ""
+        return None, "", ""
 
     gs = _GS_ROLE_URL.search(url or "")
     if gs:
@@ -254,10 +294,10 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
                         locs.append(piece)
                 location = "; ".join(dict.fromkeys(locs))
                 if body:
-                    return page_text(body), location
+                    return page_text(body), location, ""
         except (requests.RequestException, ValueError):
-            return None, ""
-        return None, ""
+            return None, "", ""
+        return None, "", ""
 
     jid = _GH_JID.search(url or "")
     if jid and greenhouse_token:
@@ -274,10 +314,10 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
                          if isinstance(o, dict)]
                 location = "; ".join(loc for loc in dict.fromkeys(locs) if loc)
                 if body:
-                    return page_text(body), location
+                    return page_text(body), location, ""
         except (requests.RequestException, ValueError):
-            return None, ""
-        return None, ""
+            return None, "", ""
+        return None, "", ""
 
     oracle_m = _ORACLE_URL.search(url or "")
     if oracle_m:
@@ -298,23 +338,26 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
                         if match.get(k))
                     location = match.get("PrimaryLocation") or ""
                     if body:
-                        return page_text(body), location
+                        return page_text(body), location, ""
         except (requests.RequestException, ValueError):
-            return None, ""
-        return None, ""
+            return None, "", ""
+        return None, "", ""
 
     if _ICIMS_URL.match(url or ""):
         url = f"{url}{'&' if '?' in url else '?'}in_iframe=1"
     try:
         resp = requests.get(url, headers=UA, timeout=TIMEOUT)
     except requests.RequestException:
-        return None, ""
+        return None, "", ""
     if resp.status_code != 200 or not resp.text:
-        return None, ""
+        return None, "", ""
     description, location = jobposting_jsonld(resp.text)
+    if not location:
+        location = microdata_jobposting_location(resp.text)
+    title = page_title(resp.text)
     if description:
-        return page_text(description), location
-    return page_text(resp.text), location
+        return page_text(description), location, title
+    return page_text(resp.text), location, title
 
 
 def has_live_api(url: str, *, greenhouse_token: str | None) -> bool:
@@ -602,10 +645,11 @@ class Command(BaseCommand):
             # GET) still ask the payload first, since it may be the only
             # copy reachable at all.
             location = ""
+            title = ""
             token = gh_tokens.get(o.firm.slug)
             used_payload = False
             if has_live_api(o.url, greenhouse_token=token):
-                text, location = fetch_posting(o.url, greenhouse_token=token)
+                text, location, title = fetch_posting(o.url, greenhouse_token=token)
                 if text is None:
                     text = payload_text(o.raw)
                     used_payload = bool(text)
@@ -620,7 +664,7 @@ class Command(BaseCommand):
                 if text:
                     from_payload += 1
                 else:
-                    text, location = fetch_posting(o.url, greenhouse_token=token)
+                    text, location, title = fetch_posting(o.url, greenhouse_token=token)
                     if text is None:
                         failed += 1
                         continue
@@ -649,10 +693,27 @@ class Command(BaseCommand):
             # today may cover a genuinely different set of cities next time
             # the same row is re-read, so this isn't gated to "only if never
             # set before".
+            # A blank location is the same kind of "board never gave us one"
+            # gap as the "N Locations" placeholder — a `sitemap` board (HSBC)
+            # has no location field at ingest at all, so it starts out blank
+            # rather than carrying that placeholder string. Recovering into
+            # either is a strict improvement over what was there.
             recovers_location = bool(
-                location and _N_LOCATIONS_PLACEHOLDER.match(o.location or ""))
+                location and (not o.location
+                              or _N_LOCATIONS_PLACEHOLDER.match(o.location)))
             if recovers_location:
                 changes.append(f"location {o.location!r} -> {location!r}")
+            # A `sitemap` board's title is reconstructed from the posting
+            # URL's slug at ingest — the only title source it has — and
+            # HSBC's own slugs truncate long titles mid-word ("...-Hong"
+            # instead of "...-Hong-Kong"). Scoped to that one board type: every
+            # other connector already carries a real title from its own API
+            # at ingest, so there is nothing here for this to correct.
+            title = title[:255].strip()
+            recovers_title = bool(
+                title and o.source == "sitemap" and title != o.title)
+            if recovers_title:
+                changes.append(f"title {o.title!r} -> {title!r}")
             if not changes:
                 answered_blank += 1
 
@@ -680,6 +741,10 @@ class Command(BaseCommand):
             if recovers_location:
                 o.location = location[:255]
                 update.append("location")
+
+            if recovers_title:
+                o.title = title
+                update.append("title")
 
             # FILL, and on a re-read also CORRECT. Fill-only was right while a
             # page was read once and never again; with a staleness queue it
