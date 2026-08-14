@@ -141,6 +141,22 @@ def classify_url(url: str) -> dict | None:
     if not m:
         return None
     tenant_host, site, job_path = m.group(1), m.group(2), m.group(3)
+    if job_path:
+        # A real Workday job path is exactly two segments
+        # ("{location-slug}/{title-slug}_{reqId}" -- see module docstring,
+        # bug (2)). Some callers store the URL with extra UI-route segments
+        # tacked on past the reqId -- e.g. a Phenom-sourced board's applyUrl
+        # copied verbatim ends in "/apply" (confirmed live 2026-08-14 on
+        # bmo.wd3.myworkdayjobs.com: id=9514's stored URL carries a trailing
+        # "/apply"). `_WORKDAY_URL_RE`'s job_path group is greedy and swallows
+        # that suffix too, so the CxS detail URL verify() builds from it is
+        # `.../job/{location}/{title}_{reqId}/apply`, which 422s outright.
+        # Every check on such a URL therefore falls to "unreachable" and can
+        # never legitimately confirm the posting live, no matter how many
+        # times it's retried. Capping to the first two segments here matches
+        # the documented shape and drops any trailing suffix regardless of
+        # what a given board happens to append.
+        job_path = "/".join(job_path.split("/")[:2])
     qs = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
     search_text = (qs.get("q") or [None])[0]
     return {"tenant_host": tenant_host, "site": site, "job_path": job_path, "search_text": search_text}
