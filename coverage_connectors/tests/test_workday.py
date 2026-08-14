@@ -195,6 +195,21 @@ def test_classify_url_with_job_path():
                      "job_path": "New-York/Some-Role_R123", "search_text": None}
 
 
+def test_classify_url_strips_a_trailing_apply_segment():
+    """PINS A FIXED BUG: phenom.py stores a BMO posting's url as the feed's
+    own applyUrl, which is the real job path PLUS a trailing /apply page --
+    e.g. ".../job/Mississauga-ON-CAN/Associate_R260018720/apply". Left in,
+    job_path captured that whole three-segment string, `verify()`'s
+    job-detail fetch 404s, and `deadline_dates` (and the fresh "verified-
+    open" signal itself) never reach the row at all. Confirmed live
+    2026-08-14: four of five BMO rows sampled for the frozen-deadline
+    defect carry exactly this /apply-suffixed url shape."""
+    info = workday.classify_url(
+        "https://bmo.wd3.myworkdayjobs.com/External/job/Mississauga-ON-CAN/Associate_R260018720/apply"
+    )
+    assert info["job_path"] == "Mississauga-ON-CAN/Associate_R260018720"
+
+
 def test_classify_url_with_search_query():
     info = workday.classify_url(
         "https://carlyle.wd1.myworkdayjobs.com/Carlyle?q=R456"
@@ -216,6 +231,51 @@ def test_verify_open_via_job_path(monkeypatch):
     )
     assert result.result == "verified-open"
     assert "2027 Summer Analyst" in result.evidence
+    assert result.deadline_dates == []
+
+
+def test_verify_reads_deadline_stated_in_the_job_description(monkeypatch):
+    """PINS A FIXED BUG: BMO's own posting descriptions (routed here via
+    myworkdayjobs.com even for rows ingested with source="phenom") state a
+    real, reposting-updated deadline as literal HTML text --
+    "Application Deadline:</span></p>...08/30/2026" -- that `verify()` used
+    to discard entirely (deadline_dates was hardcoded `[]`), freezing
+    `reverify.py`'s idea of the deadline at whatever was scraped at first
+    ingest. Confirmed live 2026-08-14 against four such BMO requisitions."""
+    monkeypatch.setattr(
+        workday, "fetch_json",
+        lambda url, **kw: {"jobPostingInfo": {
+            "title": "Senior Technology Officer",
+            "postedOn": "Posted 30+ Days Ago",
+            "jobDescription": (
+                "<p>Some intro text.</p><p><span>Application "
+                "Deadline:</span></p><p>08/30/2026</p><p>More body text.</p>"
+            ),
+        }},
+    )
+    result = workday.verify(
+        "https://bmo.wd3.myworkdayjobs.com/External/job/Toronto-ON-CAN/Senior-Technology-Officer_R260004979"
+    )
+    assert result.result == "verified-open"
+    assert result.deadline_dates == ["2026-08-30"]
+
+
+def test_verify_deadline_extraction_ignores_unrelated_dates(monkeypatch):
+    """A date elsewhere in a lengthy description -- a start date, a posted
+    date -- must not be mistaken for a deadline just because it is a
+    fully-specified MM/DD/YYYY date somewhere in the text."""
+    monkeypatch.setattr(
+        workday, "fetch_json",
+        lambda url, **kw: {"jobPostingInfo": {
+            "title": "Analyst",
+            "postedOn": "Posted 1 Day Ago",
+            "jobDescription": "<p>Anticipated start date: 09/01/2026.</p>",
+        }},
+    )
+    result = workday.verify(
+        "https://bmo.wd3.myworkdayjobs.com/External/job/Toronto-ON-CAN/Analyst_R1"
+    )
+    assert result.result == "verified-open"
     assert result.deadline_dates == []
 
 

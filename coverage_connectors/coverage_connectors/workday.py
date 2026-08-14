@@ -51,6 +51,7 @@ from __future__ import annotations
 import re
 import urllib.error
 import urllib.parse
+from datetime import date
 
 from .http import fetch_json, post_json
 from .models import FetchResult, Opportunity, VerificationResult, WorkdayBoard
@@ -67,6 +68,47 @@ _WORKDAY_URL_RE = re.compile(
     # truncated at the first internal slash. See module docstring, bug (2).
     r"https?://([\w.-]+)\.myworkdayjobs\.com/([^/?#]+)(?:/job/([^?#]+))?", re.IGNORECASE
 )
+
+# The CxS *list* endpoint (`_fetch_all`, used by `fetch()`) genuinely carries
+# no deadline field, as the module docstring says. But the job-DETAIL
+# endpoint's `jobPostingInfo.jobDescription` (used by `verify()`'s job_path
+# branch) is the firm's own HTML posting body, and some firms bake a real,
+# reposting-updated deadline into it as literal text -- e.g. BMO's postings
+# read "Application Deadline:</span></p>...08/30/2026" verbatim. Confirmed
+# live 2026-08-14 against four BMO requisitions whose stored `deadline` was
+# frozen at first-ingest values 21-82 days stale while their live
+# jobDescription stated a deadline 16-21 days in the future.
+#
+# Keyword-gated and window-bounded, same conservative shape as the prose
+# deadline extractor the rest of Coverage uses (`directory.classify
+# .extract_deadline_from_text`) -- not reused directly because this package
+# has no dependency on Coverage's Django app (see the package docstring's
+# "no state" contract). MM/DD/YYYY is the numeric US form Workday's own
+# templates emit; a bare date elsewhere in a lengthy description is NOT
+# treated as a deadline without the keyword immediately preceding it.
+_TAG_RE = re.compile(r"<[^>]+>")
+_DEADLINE_KEYWORD_RE = re.compile(r"application\s+deadline", re.IGNORECASE)
+_DATE_MDY_NUMERIC_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(20\d{2})")
+
+
+def _deadline_from_description(html_description: str) -> str | None:
+    """An ISO date, only when "Application Deadline" sits within ~120
+    characters (HTML tags stripped first) before a fully-specified
+    MM/DD/YYYY date. `None` otherwise -- including on any date that fails
+    real-calendar validation, which is skipped rather than invented."""
+    text = _TAG_RE.sub(" ", html_description or "")
+    keyword = _DEADLINE_KEYWORD_RE.search(text)
+    if not keyword:
+        return None
+    window = text[keyword.end():keyword.end() + 120]
+    m = _DATE_MDY_NUMERIC_RE.search(window)
+    if not m:
+        return None
+    month, day, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return None
 
 
 def _jobs_url(tenant_host: str, site: str, tenant: str = "", domain: str = "myworkdayjobs.com") -> str:
@@ -131,16 +173,36 @@ def fetch(board: WorkdayBoard) -> FetchResult:
                         raw_count=data.get("total", len(jobs)))
 
 
+_TRAILING_APPLY_RE = re.compile(r"/apply/?$", re.IGNORECASE)
+
+
 def classify_url(url: str) -> dict | None:
     """{"tenant_host", "site", "job_path", "search_text"} if `url` is a
     recognized myworkdayjobs.com URL, else None. `search_text` is read from
     a `?q=` query param if present (the same convention the original's
     verify layer used to carry a requisition-number re-query through a
-    plain job-board URL)."""
+    plain job-board URL).
+
+    A trailing `/apply` segment is stripped off `job_path` before it is
+    returned. Workday's real job path is exactly two segments
+    ("{location-slug}/{title-slug}_{reqId}" — see `_WORKDAY_URL_RE`'s own
+    comment), but `phenom.py`'s `_normalize` stores a BMO posting's `url` as
+    the feed's own `applyUrl` — a legitimate Workday link, just one that
+    points at the "Apply" page one segment past the job path, not the job
+    path itself. Left unstripped, this connector's own two-segment regex
+    still (correctly) captures group(3) greedily through that extra
+    segment, so the job-detail fetch in `verify()` 404s/`unreachable`s on
+    every one of these URLs — confirmed live 2026-08-14: four of five BMO
+    rows sampled for the frozen-deadline defect (ids 9359/9490/9446/9504)
+    carry a `/apply`-suffixed url and, unstripped, verify() reports
+    "unreachable" for all four rather than ever reaching the deadline text
+    the job-detail endpoint actually carries."""
     m = _WORKDAY_URL_RE.search(url or "")
     if not m:
         return None
     tenant_host, site, job_path = m.group(1), m.group(2), m.group(3)
+    if job_path:
+        job_path = _TRAILING_APPLY_RE.sub("", job_path)
     qs = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
     search_text = (qs.get("q") or [None])[0]
     return {"tenant_host": tenant_host, "site": site, "job_path": job_path, "search_text": search_text}
@@ -150,8 +212,13 @@ def verify(url: str) -> VerificationResult:
     """Ported from `verify_rows.py`'s `_verify_workday`: hits the CxS
     job-detail endpoint when the URL carries a job path, else re-runs a
     `searchText` query keyed off the URL's own `?q=<reqnum>` — 0 results
-    means closed. Workday's CxS API exposes no deadline field at all, so
-    `deadline_dates` is always `[]` here, matching the original."""
+    means closed. There is no *structured* deadline field anywhere in the
+    CxS API, but the job-path branch's `jobPostingInfo.jobDescription` is
+    the firm's own posting HTML, and `_deadline_from_description` reads a
+    stated "Application Deadline" out of it when present — see that
+    function's docstring. `deadline_dates` stays `[]` whenever the
+    description carries no such text (most tenants), or when verification
+    falls through the searchText branch (which has no description at all)."""
     info = classify_url(url)
     if not info:
         return VerificationResult("workday", url, "needs-verification",
@@ -183,8 +250,12 @@ def verify(url: str) -> VerificationResult:
                                            "job-detail endpoint returned no jobPostingInfo — "
                                            "unrecognized response shape, not a confirmed removal", [])
             posted = posting.get("postedOn", "")
-            return VerificationResult("workday", url, "verified-open",
-                                       f'title="{title}" postedOn={posted}', [], posted_date=posted or None)
+            deadline = _deadline_from_description(posting.get("jobDescription", ""))
+            evidence = f'title="{title}" postedOn={posted}'
+            if deadline:
+                evidence += f" deadline(from description)={deadline}"
+            return VerificationResult("workday", url, "verified-open", evidence,
+                                       [deadline] if deadline else [], posted_date=posted or None)
         if search_text:
             data = _fetch_all(tenant_host, site, search_text)
             postings = data.get("jobPostings", [])
