@@ -406,15 +406,42 @@ def _group_picks(cards):
     return shared, order
 
 
-# Track suffixes the seeds append to a cycle slug.
-_CYCLE_TRACKS = {
-    "ib": "IB", "pe": "PE", "st": "S&T", "am": "AM",
-    "hk": "Hong Kong", "us": "US", "eu": "Europe", "sg": "Singapore",
-}
+# Track suffixes the seeds append to a cycle slug. TRACKS ONLY: the region
+# codes (hk/us/eu/sg) used to sit in this same dict, which is what made the
+# firm page say the market twice. `cycle_label("sa2028_hk")` expanded the
+# suffix to "Hong Kong" and seated it in the slot that otherwise holds a desk,
+# and _timeline.html then appended the row's own `region` after it — so seven
+# rows read "SA 2028 · HONG KONG · HK" under the uppercase .tl-scope, directly
+# beneath rows that read "SA 2028 · HK". It also meant one slot held two
+# vocabularies: a track on 20 rows, a market on 7.
+#
+# Splitting the suffix by KIND (rather than labelling `region` through
+# REGION_LABELS, the intuitive fix) is what actually removes the duplication —
+# labelling would have produced "SA 2028 · HONG KONG · HONG KONG".
+_CYCLE_TRACKS = {"ib": "IB", "pe": "PE", "st": "S&T", "am": "AM"}
+
+
+def _cycle_suffix(cycle: str) -> str:
+    """The `_`-suffix of a cycle slug, lowercased. "" for a human cycle."""
+    raw = (cycle or "").strip()
+    if not raw or " " in raw:           # already human ("SA 2028")
+        return ""
+    return raw.partition("_")[2].lower()
+
+
+def cycle_region(cycle: str) -> str:
+    """The market a cycle slug names in its own suffix, if it names one.
+
+    `sa2028_hk` -> `hk`; `sa2028_ib` -> "" (that is a desk, not a market).
+    REGION_LABELS is the one vocabulary of what a region code is, so this
+    cannot drift from the Region filter's idea of the same thing.
+    """
+    suffix = _cycle_suffix(cycle)
+    return suffix if suffix in REGION_LABELS else ""
 
 
 def cycle_label(cycle: str) -> str:
-    """`sa2028_ib` -> `SA 2028 · IB`.
+    """`sa2028_ib` -> `SA 2028 · IB`. Cycle and TRACK; never the market.
 
     The column holds two spellings of one vocabulary — importers wrote
     `sa2028_ib`, the seeds wrote `SA 2028` — and the firm page printed
@@ -422,6 +449,9 @@ def cycle_label(cycle: str) -> str:
     `SA2028_IB` sitting in the product's own body copy. Formatting on read
     rather than migrating: the stored value is what the importer matched on,
     and rewriting it would break re-imports for a display bug.
+
+    A region suffix is dropped here and handed to `cycle_region` instead, so
+    the market is named exactly once per row. See `_CYCLE_TRACKS`.
     """
     raw = (cycle or "").strip()
     if not raw:
@@ -435,8 +465,62 @@ def cycle_label(cycle: str) -> str:
         label = f"{season} {year}"
     else:
         label = head.replace("-", " ").title()
+    if tail.lower() in REGION_LABELS:   # a market, not a desk — see cycle_region
+        return label
     track = _CYCLE_TRACKS.get(tail.lower(), tail.replace("-", " ").title() if tail else "")
     return f"{label} · {track}" if track else label
+
+
+# How a firm_dates row says where its date came from. `FirmDate.source_url` is
+# a URLField, but URLField only validates under `full_clean()` and neither
+# importer calls it (import_firm_dates.py and seed_directory.py both write
+# `str(entry.get("source", ""))` verbatim; scripts/demo_seed.py writes the
+# literal "seed:demo"). So the column holds two different KINDS of value —
+# real citations and provenance tokens — and 26 of the 39 rows are tokens.
+#
+# The token rows are the reason this map exists. "seed:historical-pattern" is
+# not a citation; it is the note "we estimated this from previous cycles". The
+# page used to render it as `<a href="seed:historical-pattern">source</a>`,
+# byte-identical in style to the two real goldmansachs.com links above it, so
+# a student got four identical SOURCE pills of which two navigated nowhere.
+# Apollo's "seed:demo" row was worse: a hard past date wearing CONFIRMED and
+# offering a demo placeholder as its proof.
+#
+# Resolved on READ, not migrated: the stored string is what the importer
+# matched on, the same reason `cycle_label` formats rather than rewrites.
+_SOURCE_NOTES = {
+    "seed:historical-pattern": (
+        "from past cycles",
+        "Estimated from this firm's previous cycles — the firm has not "
+        "published this date yet.",
+    ),
+    "seed:demo": (
+        "sample data",
+        "Placeholder from the demo seed, not a date this firm published.",
+    ),
+}
+
+
+def _source_marker(raw: str) -> dict:
+    """Where a cycle date came from, as something the page can render honestly.
+
+    A link ONLY when the value is a real http(s) URL a click can open.
+    Anything else is a provenance NOTE — same information, said in words,
+    rendered as plain text rather than as a link that goes nowhere.
+    """
+    val = (raw or "").strip()
+    if not val:
+        return {}
+    if val.lower().startswith(("http://", "https://")):
+        return {"url": val, "label": "source",
+                "why": "Opens the page this date was read from."}
+    label, why = _SOURCE_NOTES.get(
+        val,
+        ("unverified",
+         "No published page behind this date — it has not been verified "
+         "against the firm's own site."),
+    )
+    return {"label": label, "why": why}
 
 
 def _firm_date_row(fd, *, today):
@@ -458,14 +542,18 @@ def _firm_date_row(fd, *, today):
     confirmed = (fd.confidence or 0.0) >= 0.8 and prec in ("day", "month", "")
     return {
         "cycle": cycle_label(fd.cycle),
-        "region": fd.region,
+        # The row's own column when it has one, else the market its cycle slug
+        # names. Stated beats inferred; a slug whose suffix DISAGREES with the
+        # column is a data error rather than a second fact worth printing (no
+        # such rows live — the suffix and the column agree on all 7).
+        "region": fd.region or cycle_region(fd.cycle),
         "event_kind": fd.event_kind,
         "event_label": EVENT_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " ").capitalize()),
         "date_text": date_text,
         "precision": prec,
         "confidence": confidence_marker(fd.confidence),
         "state": "confirmed" if confirmed else "rumored",
-        "source_url": fd.source_url,
+        "source": _source_marker(fd.source_url),
     }
 
 
@@ -907,12 +995,30 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     off the end of a three-chip row. The verdict is the better of the two:
     it is the personalised reading, and it only exists where both sides
     stated.
+
+    `year_out` is the same failure and gets the same treatment. It is built
+    from `facts["grad"]`, so the card rendered "For 2027–2028 grads" (verdict)
+    immediately followed by "Grad 2027–2028" (fact) — identical years, the
+    identical source sentence in both tooltips, and the identical grey. On the
+    first /opportunities/ load 101 of 491 cards carried the pair, across eight
+    firms. It costs more than repetition: `_FACT_CHIPS_MAX` is 2, so the
+    duplicate eats a slot, and 60 of the 227 affected rows DB-wide have a
+    different real fact (GPA, duration, assessment, cover letter) waiting
+    behind it — one page-1 card read "For 2027–2028 grads · Grad 2027–2028 ·
+    GPA 3.0".
+
+    Suppression is scoped to the BLOCKING verdict on purpose. `year_ok` says
+    "Your year (2029)" and `year_likely` "Likely your year (2029)" — neither
+    repeats the window, so the fact chip is the only place a student can read
+    what the posting actually stated, and it stays. Anonymous visitors get no
+    verdict at all and are untouched.
     """
     facts = (o.raw or {}).get("facts") or {}
     made = {}
+    kind = (verdict or {}).get("kind")
 
     spon = (o.sponsorship or "unknown").lower()
-    if verdict and verdict.get("kind") == "visa_out":
+    if kind == "visa_out":
         spon = "unknown"   # the verdict beside it already says this
     if spon == "no":
         made["sponsorship"] = {"label": "No sponsorship", "css": "fact-wall",
@@ -935,11 +1041,14 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     # Walls are the facts that can END the decision: a visa answer, a language
     # you do not speak, a year of study you are not in.
     css = {"language": "fact-wall", "study": "fact-wall", "pay": "fact-pay"}
-    for kind, label in labels.items():
-        fact = facts.get(kind)
+    for fact_kind, label in labels.items():
+        if fact_kind == "grad" and kind == "year_out":
+            continue           # the verdict beside it already says this
+        fact = facts.get(fact_kind)
         if fact:
-            made[kind] = {"label": label(fact), "css": css.get(kind, "fact-plain"),
-                          "why": fact.get("phrase", "")}
+            made[fact_kind] = {"label": label(fact),
+                               "css": css.get(fact_kind, "fact-plain"),
+                               "why": fact.get("phrase", "")}
 
     return [made[k] for k in _FACT_CHIP_ORDER if k in made][:_FACT_CHIPS_MAX]
 

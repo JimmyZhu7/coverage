@@ -49,7 +49,7 @@ without cutting text off.
     {% endcomment %}
     {% if r.show_firm %}<span class="rolecard-firm">{{ r.firm_name|smart_title }}</span>{% endif %}
     {% if r.class_year %}<span class="class-chip" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
-    {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_title }}</span>{% endif %}
+    {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_location }}</span>{% endif %}
   </div>
 
   {% comment %}

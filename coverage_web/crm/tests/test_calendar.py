@@ -651,3 +651,71 @@ def test_a_provider_stated_deadline_is_not_marked(logged_in, client):
     ics = client.get(f"/app/calendar/feed/{logged_in.calendar_token}.ics").content.decode()
     assert "Stated Analyst closes" in ics
     assert "(reported)" not in ics
+
+
+# ---------------------------------------------------------------------------
+# Layer 4 — a tracked role's title reads the same here as it does in the feed.
+#
+# The calendar applied no smart_title at all: `_role_label` returned the raw
+# `Opportunity.title` and _calendar_event.html rendered {{ ev.title }}
+# unfiltered, so every tracked, dated role read differently on the two pages.
+# ---------------------------------------------------------------------------
+def test_a_tracked_role_reads_the_same_on_the_calendar_as_in_the_feed(client, logged_in):
+    from analytics.models import UserOpportunity
+    from core.templatetags.textstyle import smart_title
+    from directory.models import Opportunity
+
+    raw = "Discovery Program: equity + macro research (On-site)"
+    firm = Firm.objects.create(slug="pjt", name="PJT Partners")
+    today = timezone.localdate()
+    opp = Opportunity.objects.create(
+        firm=firm, title=raw, bucket="internship", status="open",
+        url="https://pjt.com/discovery", deadline=today.replace(day=15),
+    )
+    UserOpportunity.all_objects.create(user=logged_in, opportunity=opp)
+
+    body = client.get(reverse("crm:calendar")).content.decode()
+    shown = smart_title(raw)
+    assert shown in body, "the calendar shows the standardized title"
+    assert raw not in body, "and not the raw scrape casing"
+    # The clause-boundary rule is what makes the two agree on this title.
+    assert "Discovery Program: Equity + Macro Research (On-Site)" == shown
+
+
+def test_the_ics_feed_carries_the_same_standardized_title(client, logged_in):
+    """The .ics summary is the copy that lands on a phone's lock screen, so it
+    is the one that most needs to match. Same helper, so it cannot drift."""
+    from analytics.models import UserOpportunity
+    from directory.models import Opportunity
+
+    firm = Firm.objects.create(slug="bofa", name="Bank of America")
+    opp = Opportunity.objects.create(
+        firm=firm, title="campus insight forum: the power to lead",
+        bucket="event", status="open", url="https://bofa.com/forum",
+        deadline=timezone.localdate() + timedelta(days=5),
+    )
+    UserOpportunity.all_objects.create(user=logged_in, opportunity=opp)
+
+    logged_in.refresh_from_db()
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert "Campus Insight Forum: The Power to Lead" in body
+
+
+def test_a_curated_firm_name_is_not_recased_by_the_calendar(client, logged_in):
+    """`smart_title` rewrites "PIMCO" to "Pimco". Firm names are curated, not
+    scraped, so only the ROLE half of the label goes through the filter."""
+    from analytics.models import UserOpportunity
+    from directory.models import Opportunity
+
+    firm = Firm.objects.create(slug="pimco", name="PIMCO")
+    opp = Opportunity.objects.create(
+        firm=firm, title="summer analyst programme", bucket="internship",
+        status="open", url="https://pimco.com/sa",
+        deadline=timezone.localdate() + timedelta(days=3),
+    )
+    UserOpportunity.all_objects.create(user=logged_in, opportunity=opp)
+
+    body = client.get(reverse("crm:calendar")).content.decode()
+    assert "PIMCO · Summer Analyst Programme" in body

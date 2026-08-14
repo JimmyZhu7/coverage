@@ -203,7 +203,11 @@ values.
             <span class="name">Timeline</span>
             <span class="bar"><i style="--w: {{ firm_score.axes.timeline.score }}%"></i></span>
             <span class="val">{{ firm_score.axes.timeline.score }}</span>
-            <span class="meta">{% if firm_score.axes.timeline.next_event %}{{ firm_score.axes.timeline.next_event }} in {{ firm_score.axes.timeline.days_until }}d, {{ firm_score.axes.timeline.warm_contacts }} warm{% else %}no confirmed date{% endif %}</span>
+            {% comment %}`next_event` is the raw firm_dates enum and printed
+            here as "app_close in 77d". `next_event_label` is the same event
+            in the words this surface already uses for it — set in
+            crm/views.py from FIRM_DATE_LABELS.{% endcomment %}
+            <span class="meta">{% if firm_score.axes.timeline.next_event_label %}{{ firm_score.axes.timeline.next_event_label }} in {{ firm_score.axes.timeline.days_until }}d, {{ firm_score.axes.timeline.warm_contacts }} warm{% else %}no confirmed date{% endif %}</span>
           </div>
           <div class="axis" style="--i:3">
             <span class="name">Structural</span>

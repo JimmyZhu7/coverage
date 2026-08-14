@@ -293,7 +293,7 @@
                   {% if r.urgency.label %}<span class="lens-flag">{{ r.urgency.label }}</span>{% endif %}
                   <span class="lens-role">
                     <a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a>
-                    <span class="lens-firm">{{ r.firm_name|smart_title }}{% if r.location %} · {{ r.location|smart_title }}{% endif %}</span>
+                    <span class="lens-firm">{{ r.firm_name|smart_title }}{% if r.location %} · {{ r.location|smart_location }}{% endif %}</span>
                     {% comment %}What the posting states about applying, same
                     chips as the feed and the firm page. This page is where a
                     student decides what to do this week, and it knew none of
@@ -338,7 +338,7 @@
                 <h3 class="apps-title"><a href="{{ uo.url }}" target="_blank" rel="nofollow noopener">{{ uo.title|smart_title }}</a></h3>
                 {% comment %}City variants share a title; the location is the
                 only thing telling two saves apart.{% endcomment %}
-                {% if uo.location %}<span class="apps-loc">{{ uo.location|smart_title }}</span>{% endif %}
+                {% if uo.location %}<span class="apps-loc">{{ uo.location|smart_location }}</span>{% endif %}
                 {% if stage.key == 'closed' %}<span class="apps-done-mark">Done, no longer live</span>{% endif %}
 
                 {% comment %}

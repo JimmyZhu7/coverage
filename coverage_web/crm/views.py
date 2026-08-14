@@ -1084,6 +1084,21 @@ def _contact_live_context(
                 "version": f"scoring-v1+at{adv_target}",
             },
         )
+        # The Timeline axis's `next_event` is a DB enum (app_open / app_close
+        # / insight_deadline — scoring.py's `event_kind`), and _contact_live
+        # printed it unfiltered: "app_close in 77d, 2 warm". The same card
+        # already says the same event in English two lines above it, because
+        # the scorer's reasoning string runs it through a verb map ("closes in
+        # ~3 months"), so one panel contradicted itself on a single screen.
+        # Labelled here rather than in coverage_domain: the enum is what the
+        # scorer matches on, and FIRM_DATE_LABELS is the crm surface's own
+        # lowercase vocabulary — the same map the Today strip and the calendar
+        # already read, so the three cannot drift.
+        nxt = (firm_score.get("axes", {}).get("timeline") or {}).get("next_event")
+        if nxt:
+            firm_score["axes"]["timeline"]["next_event_label"] = (
+                _FIRM_DATE_LABELS.get(nxt, nxt.replace("_", " "))
+            )
 
     # Warmth-meter animation endpoints. On a plain GET both are the current
     # level (no visible motion); on a POST that ratcheted, `from` is the old

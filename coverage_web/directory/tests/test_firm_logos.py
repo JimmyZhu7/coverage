@@ -220,8 +220,19 @@ def test_a_cycle_slug_is_rendered_as_english():
     value would break the importer's own matching for a display bug."""
     from directory.views import cycle_label
     assert cycle_label("sa2028_ib") == "SA 2028 · IB"
-    assert cycle_label("sa2028_hk") == "SA 2028 · Hong Kong"
     assert cycle_label("insight") == "Insight"
+
+
+def test_a_region_suffix_is_not_mistaken_for_a_track():
+    """`sa2028_hk` used to expand to "SA 2028 · Hong Kong", seating a MARKET
+    in the slot that means DESK — and _timeline.html then printed the row's
+    own region after it ("SA 2028 · HONG KONG · HK"). Naming the market is
+    `cycle_region`'s job, and it happens once."""
+    from directory.views import cycle_label, cycle_region
+    assert cycle_label("sa2028_hk") == "SA 2028"
+    assert cycle_region("sa2028_hk") == "hk"
+    assert cycle_region("sa2028_ib") == ""
+    assert cycle_region("SA 2028") == ""
 
 
 def test_an_already_human_cycle_is_left_alone():

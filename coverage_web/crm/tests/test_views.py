@@ -686,6 +686,37 @@ def test_contact_detail_never_shows_raw_state_enums(client):
 
 
 @pytest.mark.django_db
+def test_the_fit_scores_timeline_axis_names_the_event_in_words(client):
+    """The Timeline axis printed the raw firm_dates enum: "app_close in 77d,
+    2 warm". The same card already said the same event in English two lines
+    above, because the scorer's reasoning string runs it through a verb map —
+    so one panel contradicted itself on a single screen.
+
+    Goes through the real page, not `scoring.score_firm` directly: the enum
+    reached the user across the view/template seam, which is where it had to
+    be caught."""
+    from directory.models import FirmDate
+
+    user = _user()
+    now = timezone.now()
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs", regions=["us"])
+    contact = Contact.all_objects.create(
+        user=user, name="Dana MD", firm=firm, role="Managing Director",
+    )
+    Touch.all_objects.create(user=user, contact=contact, ts=now - timedelta(days=3),
+                             kind="chat", channel="coffee_chat")
+    FirmDate.objects.create(
+        firm=firm, cycle="sa2028_ib", region="us", event_kind="app_close",
+        date=(now + timedelta(days=77)).date(), precision="day", confidence=1.0,
+    )
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    assert "app_close" not in body
+    assert "applications close in 77d" in body
+
+
+@pytest.mark.django_db
 def test_the_state_line_does_not_say_one_thing_twice(client):
     """warmth=replied + thread=replied used to render "Replied · They
     replied" — the exact redundancy the sentence exists to remove."""

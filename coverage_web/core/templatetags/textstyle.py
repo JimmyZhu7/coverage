@@ -19,7 +19,9 @@ names pass through `smart_title` wherever they appear.
 3. **Minor words stay lowercase** mid-phrase ("Head of Diversity", "Women in
    Banking") but are capitalized as the first or last word — standard
    title-case convention rather than capitalize-every-word, which reads
-   amateur in a finance product.
+   amateur in a finance product. A colon, semicolon, or standalone dash/pipe
+   RESTARTS that convention, because the word after one opens a new clause
+   ("Insight Forum: The Power to Lead", not "...: the Power to Lead").
 
 Hyphen and slash compounds are cased per part ("off-cycle" → "Off-Cycle",
 "m/f/d" → "M/F/D"). Whitespace is collapsed, which also trims the stray
@@ -39,10 +41,24 @@ register = template.Library()
 # common Romance-language connectives that show up in global boards'
 # postings ("Associate de Auditoría Financiera").
 _MINOR = {
-    "a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of",
-    "on", "or", "per", "so", "the", "to", "via", "vs", "with",
+    "a", "an", "and", "as", "at", "but", "by", "for", "in", "into", "nor",
+    "of", "on", "or", "per", "so", "the", "to", "via", "vs", "with",
     "de", "del", "della", "di", "da", "du", "des", "la", "le", "el", "y", "e",
 }
+
+# Punctuation that ends the clause before it, so the word AFTER it is a first
+# word for title-case purposes. Without this, force_cap applied only to index 0
+# and the final index OF THE WHOLE STRING, so a title that restarts mid-way
+# came out with a lowercase word opening its second half: "Bank of America
+# Campus Insight Forum: the Power to Lead", "2026 Women Who Lead: an Insight
+# into Banking", "Senior Premier Banker - la Cienega Corridor", "APAC Virtual
+# Recruitment Event | a Career with Bank of America", "Business Manager | S3 |
+# t&o | Milton Keynes".
+_CLAUSE_BREAKS = {"-", "–", "—", "|", "·"}
+
+
+def _restarts_a_clause(prev: str) -> bool:
+    return prev.endswith((":", ";")) or prev in _CLAUSE_BREAKS
 
 # All-caps tokens longer than the 4-letter acronym cut that are still
 # genuinely acronyms/brands, not shouting.
@@ -126,7 +142,124 @@ def smart_title(value):
         return ""
     last = len(words) - 1
     return " ".join(
-        _case_word(w, force_cap=(i == 0 or i == last)) for i, w in enumerate(words)
+        _case_word(w, force_cap=(i == 0 or i == last
+                                 or _restarts_a_clause(words[i - 1])))
+        for i, w in enumerate(words)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Locations
+#
+# A location is not a title, and `smart_title` says so itself: its docstring
+# scopes it to firm names, job titles and person names. Six templates piped
+# `Opportunity.location` through it anyway, so the English TITLE-CASE
+# minor-word convention ("Head of Diversity") ran over place names and
+# downcased whatever particle landed mid-string:
+#
+#   'Batesville; Des Moines'      -> 'Batesville; des Moines'   (10 open rows)
+#   'Wilmington, DE, United States' -> 'Wilmington, de, ...'    (11 open rows)
+#   'Milano Via Turati 25-27'     -> 'Milano via Turati 25-27'
+#   '411 E Wisconsin Ave'         -> '411 e Wisconsin Ave'
+#   'Gemini Building A, Prague'   -> 'Gemini Building a, Prague'
+#   'Portage La Prairie'          -> 'Portage la Prairie'
+#
+# The fix is NOT deleting "des" from _MINOR. Five open rows carry 'Geneva Place
+# des Bergues 3', where the lowercase is correct French street casing, and
+# 'RIO DE JANEIRO' depends on the rule too. The rule is right; the FIELD is
+# wrong for it.
+#
+# So a location gets its own path, and its rule is: RESPECT THE CASE THE SOURCE
+# CHOSE. A particle written lowercase stays lowercase (the source knows its own
+# orthography better than we do); one written capitalized stays capitalized (it
+# is part of the proper name). Only where the source offers no signal at all —
+# an all-caps token — does the title-case convention get to decide.
+# ---------------------------------------------------------------------------
+_SEGMENT_RE = re.compile(r"[,;:\-]")
+
+
+def _location_codes(text: str) -> set[str]:
+    """All-caps tokens that occupy a whole delimited segment, i.e. sit in the
+    "City, ST" slot rather than inside a phrase: the DE of 'Wilmington, DE,
+    United States', the NY of 'NY - 375 - 18', the ON of 'ON-81 Bay Street'.
+
+    Positional rather than a list of known codes, because the SAME token means
+    different things in different places: "DE" alone between commas is
+    Delaware, but the "DE" inside an undelimited run ('VILLE DE QUEBEC') is the
+    Romance particle, and lowercasing that one is correct.
+    """
+    codes = set()
+
+    def _code(token: str) -> str:
+        """The code a lone token spells, or "". Digits are allowed alongside
+        the letters — 'RO03' and 'BG1' are building codes, not words."""
+        letters = _letters(token)
+        if (token.isalnum() and letters.isupper() and 1 <= len(letters) <= 3):
+            return letters
+        return ""
+
+    for segment in _SEGMENT_RE.split(text):
+        codes.add(_code(segment.strip()))
+    # ...and the trailing token, which is the state/territory slot whether or
+    # not a comma announces it: 'WASHINGTON DC', 'NYC (1285)'. Measured from
+    # the last word that HAS letters, so a trailing '(1285)' does not hide it.
+    for word in reversed([w for w in _SPLIT_RE.split(text) if _letters(w)]):
+        codes.add(_code(word.strip()))
+        break
+    codes.discard("")
+    return codes
+
+
+def _case_word_location(word: str, *, codes: set[str], shouting: bool,
+                        force_cap: bool) -> str:
+    letters = _letters(word)
+    if letters and letters.lower() in _MINOR and not force_cap:
+        if letters in codes:
+            return word          # a state/country code, not a particle
+        if letters.islower() or letters.istitle():
+            return word          # the source made the call; it is not ours to undo
+        # An ALL-CAPS particle carries no case signal of its own, so the
+        # title-case convention decides: 'VILLE DE QUEBEC' -> 'Ville de Quebec'.
+        return word.lower()
+    if shouting and letters and letters not in codes:
+        # Nothing in the whole string is lowercase, so every token is shouting
+        # rather than an acronym. Fold it first so `_case_atom` recaps it
+        # instead of preserving it: 'RIO DE JANEIRO' -> 'Rio de Janeiro'.
+        word = word.lower()
+    return "".join(
+        part if part in "-/" else _case_atom(part)
+        for part in _SUB_SEP.split(word)
+    )
+
+
+@register.filter(name="smart_location")
+def smart_location(value):
+    """Standardize a place string. Like `smart_title`, minus the title-case
+    minor-word rule, which has no business in a location. See above.
+
+    `force_cap` on the first and last word survives, for the same reason it
+    exists in `smart_title`: a particle that OPENS a name is part of it, not a
+    connective inside it — 'EL DORADO HILLS, CA', 'ON-81 Bay Street'.
+
+    KNOWN LIMIT: a fully-shouting string offers no case signal to respect, so
+    'WEST DES MOINES, IA' still renders 'WEST des Moines, IA' — 'DES' there is
+    indistinguishable from the 'DE' of 'RIO DE JANEIRO', which the same rule
+    gets right. One open row is affected; the ten mixed-case 'Des Moines' rows
+    are not.
+    """
+    if not value:
+        return value
+    text = str(value).strip()
+    words = [w for w in _SPLIT_RE.split(text) if w.strip()]
+    if not words:
+        return ""
+    codes = _location_codes(text)
+    shouting = not any(ch.islower() for ch in text)
+    last = len(words) - 1
+    return " ".join(
+        _case_word_location(w, codes=codes, shouting=shouting,
+                            force_cap=(i == 0 or i == last))
+        for i, w in enumerate(words)
     )
 
 

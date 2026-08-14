@@ -18,7 +18,20 @@ solid; rumored ones are dashed and wear their confidence openly.
           {% else %}
             <span class="pill conf-{{ row.confidence.level }}" title="Not yet confirmed; shown with its confidence.">rumored · confidence {{ row.confidence.label }}{% if row.confidence.value %} ({{ row.confidence.value }}){% endif %}</span>
           {% endif %}
-          {% if row.source_url %}<a class="pill fresh" href="{{ row.source_url }}" rel="nofollow noopener" target="_blank">source</a>{% endif %}
+          {% comment %}
+          A pill that LOOKS like a citation has to be one. `source_url` holds
+          real URLs on 12 rows and provenance tokens ("seed:historical-pattern",
+          "seed:demo") on 26, and the old truthiness gate turned both into the
+          same anchor — so two of Goldman's four SOURCE pills opened the firm's
+          careers site and two navigated nowhere. `_source_marker` in views.py
+          splits them: a link only where a click can land, and where it can't,
+          the note itself in plain text.
+          {% endcomment %}
+          {% if row.source.url %}
+            <a class="pill fresh" href="{{ row.source.url }}" rel="nofollow noopener" target="_blank" title="{{ row.source.why }}">{{ row.source.label }}</a>
+          {% elif row.source.label %}
+            <span class="pill" title="{{ row.source.why }}">{{ row.source.label }}</span>
+          {% endif %}
         </span>
       </li>
     {% endfor %}
