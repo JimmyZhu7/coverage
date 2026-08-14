@@ -16,7 +16,7 @@ from django.core.management import call_command
 from django.utils import timezone
 
 from directory.management.commands.enrich_postings import (
-    PAST_DEADLINE_STALE_DAYS,
+    PAST_DEADLINE_STALE_HOURS,
     URGENT_STALE_DAYS,
     _queue,
     fetch_posting,
@@ -543,26 +543,48 @@ class TestPastDeadlineGetsTighterRecheckThanClosingSoon:
     Aug 16 minutes after Coverage's morning scrape. The old code reused
     URGENT_STALE_DAYS (7 days) for an already-past deadline, the same
     threshold as merely "closing soon" — meaning a row caught showing an
-    already-expired date could sit unconfirmed for up to a week. This must
-    now requeue at the tighter PAST_DEADLINE_STALE_DAYS (1 day)."""
+    already-expired date could sit unconfirmed for up to a week. Round 4
+    tightened that to one calendar day, but a whole-day gate (measured via
+    `(now - at).days`) was STILL loose enough to let the same row survive an
+    entire scheduled refresh pass: render.yaml's `coverage-scrape` cron runs
+    this command every 6 hours, yet id 1618 — fetched 01:07 UTC, read as
+    already past — was still unrefreshed at 12:58 UTC, after the 06:00
+    refresh had already run, because `age.days` was still 0. This must
+    requeue at the tighter PAST_DEADLINE_STALE_HOURS (6 hours), matching the
+    cron's own cadence."""
 
-    def test_past_deadline_requalifies_after_one_day_not_seven(self):
+    def test_past_deadline_requalifies_after_six_hours_not_one_day(self):
         today = timezone.localdate()
-        one_day_ago = (timezone.now()
-                       - timedelta(days=PAST_DEADLINE_STALE_DAYS)).isoformat()
-        row = _Row(1, deadline=today - timedelta(days=5), detail_fetched=one_day_ago)
+        six_hours_ago = (timezone.now()
+                         - timedelta(hours=PAST_DEADLINE_STALE_HOURS)).isoformat()
+        row = _Row(1, deadline=today - timedelta(days=5), detail_fetched=six_hours_ago)
 
         todo, refreshed = _queue([row], refetch=False, stale_days=21, today=today)
 
         assert todo == [row]
         assert refreshed == 1
 
-    def test_past_deadline_fetched_today_is_not_yet_requeued(self):
-        """The one gap this threshold cannot close: a row fetched TODAY that
-        already reads past (HSBC's exact shape) will not be looked at again
-        until age >= PAST_DEADLINE_STALE_DAYS — no periodic-refresh pipeline
-        can make yesterday's fetch see today's site edit. This pins that
-        known limit so it can't silently regress to "never" again."""
+    def test_past_deadline_stale_since_this_mornings_refresh_pass_is_requeued(self):
+        """The exact HSBC Sheffield WIT shape: fetched 12.5h ago (this
+        morning's refresh pass), already reading past. A whole-day gate
+        (`age.days == 0`) would leave this sitting through the NEXT
+        scheduled refresh pass too; the hour-based gate must catch it now."""
+        today = timezone.localdate()
+        this_mornings_fetch = (timezone.now() - timedelta(hours=12, minutes=30)).isoformat()
+        row = _Row(1, deadline=today - timedelta(days=5),
+                  detail_fetched=this_mornings_fetch)
+
+        todo, refreshed = _queue([row], refetch=False, stale_days=21, today=today)
+
+        assert todo == [row]
+        assert refreshed == 1
+
+    def test_past_deadline_fetched_just_now_is_not_yet_requeued(self):
+        """The one gap this threshold cannot close: a row fetched THIS
+        INSTANT that already reads past will not be looked at again until
+        age >= PAST_DEADLINE_STALE_HOURS — no periodic-refresh pipeline can
+        make this fetch see a site edit that hasn't happened yet. This pins
+        that known limit so it can't silently regress to "never" again."""
         today = timezone.localdate()
         just_now = timezone.now().isoformat()
         row = _Row(1, deadline=today - timedelta(days=5), detail_fetched=just_now)
@@ -573,13 +595,13 @@ class TestPastDeadlineGetsTighterRecheckThanClosingSoon:
         assert refreshed == 0
 
     def test_past_deadline_threshold_is_tighter_than_closing_soon(self):
-        """A row stale exactly PAST_DEADLINE_STALE_DAYS with an ALREADY-PAST
+        """A row stale exactly PAST_DEADLINE_STALE_HOURS with an ALREADY-PAST
         deadline must requeue; a row stale the same short duration but only
         "closing soon" (not yet past) must NOT requeue until it hits the
-        wider URGENT_STALE_DAYS -- proving the two shapes use different
+        much wider URGENT_STALE_DAYS -- proving the two shapes use different
         thresholds rather than one loosened for both."""
         today = timezone.localdate()
-        stale = (timezone.now() - timedelta(days=PAST_DEADLINE_STALE_DAYS)).isoformat()
+        stale = (timezone.now() - timedelta(hours=PAST_DEADLINE_STALE_HOURS)).isoformat()
         past = _Row(1, deadline=today - timedelta(days=1), detail_fetched=stale)
         soon = _Row(2, deadline=today + timedelta(days=10), detail_fetched=stale)
 

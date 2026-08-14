@@ -491,17 +491,25 @@ URGENT_WINDOW_DAYS = 30
 # open — this is not "closing soon", it is the mirror image and a strictly
 # stronger signal: the board is showing an expired date right now, today,
 # to a student deciding whether to apply. The 7-day URGENT_STALE_DAYS
-# threshold was reused for this case too until round 4: HSBC Sheffield WIT
-# (id 1618) was fetched at 01:07 UTC on 2026-08-14 and read "Aug 09" —
-# already past — while HSBC's own page, re-fetched minutes later the same
-# day, had already moved to "Aug 16". Because the row's `age` was 0 right
-# after that very fetch, the 7-day threshold meant this exact row would not
-# be looked at again for up to a week even though it was already showing a
-# wrong, expired date. One day closes that gap to "the next run," which is
-# the best any periodic-refresh pipeline can do against a same-day site
-# change — it cannot make yesterday's fetch see today's edit, but it can
-# stop treating a known-wrong reading as good for a week.
-PAST_DEADLINE_STALE_DAYS = 1
+# threshold was reused for this case too until round 4, which tightened it
+# to one calendar DAY (measured via `(now - at).days`, so effectively a
+# 24h+ wait). That was still not tight enough: render.yaml's `coverage-
+# scrape` cron runs this command every 6 hours ("0 */6 * * *" — "Four passes
+# a day keeps deadlines honest across US and Asia hours", by that file's own
+# comment), but a whole-day gate meant an already-wrong reading could sit
+# through TWO of those scheduled passes before requalifying. Confirmed live
+# 2026-08-14 on the exact row this constant exists for: HSBC Sheffield WIT
+# id 1618 was fetched at 01:07 UTC (reading "Aug 09", correct at the time)
+# and was still sitting unrefreshed at 12:58 UTC — after the 06:00 refresh
+# pass had already run — because `age.days` was still 0. HSBC's own page had
+# already moved to "Aug 16" by then. Measuring in hours against the cron's
+# own 6-hour cadence closes the gap to "the next scheduled pass", which is
+# the tightest any periodic-refresh pipeline can do without polling more
+# often than the infrastructure already runs — it cannot make this
+# morning's fetch see this afternoon's site edit, but it can stop a known-
+# wrong "deadline passed" reading from surviving a whole extra refresh
+# cycle.
+PAST_DEADLINE_STALE_HOURS = 6
 
 
 def _fetched_at(o):
@@ -552,8 +560,16 @@ def _queue(rows, *, refetch: bool, stale_days: int, today) -> tuple[list, int]:
         days_to_deadline = (o.deadline - today).days if o.deadline is not None else None
         already_past = days_to_deadline is not None and days_to_deadline < 0
         closing_soon = days_to_deadline is not None and 0 <= days_to_deadline <= URGENT_WINDOW_DAYS
-        if already_past and age >= min(PAST_DEADLINE_STALE_DAYS, stale_days):
-            urgent_stale.append(o)
+        if already_past:
+            # Hours, not days: this is the one branch a whole-day gate left
+            # exposed through an entire scheduled refresh pass (see
+            # PAST_DEADLINE_STALE_HOURS). `stale_days` is still the operator's
+            # override knob (e.g. `--stale-days 0` disables re-reads entirely,
+            # already handled above), so it still bounds this branch — just
+            # converted to hours rather than compared against whole days.
+            age_hours = (now - at).total_seconds() / 3600
+            if age_hours >= min(PAST_DEADLINE_STALE_HOURS, stale_days * 24):
+                urgent_stale.append(o)
         elif closing_soon and age >= min(URGENT_STALE_DAYS, stale_days):
             urgent_stale.append(o)
         elif age >= stale_days:
