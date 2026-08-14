@@ -1166,8 +1166,18 @@ a.pill:hover { text-decoration: underline; }
 .axis { display: grid; grid-template-columns: 1fr auto; align-items: center;
   gap: 2px var(--s3); font-size: var(--fs-s); }
 .axis .name { color: var(--ink-2); font-size: var(--fs-xs); font-weight: var(--w-med); }
+/* Placed, not auto-placed. The `auto` track above exists for this number,
+   but `.val` is emitted AFTER the full-width `.bar` in _contact_live.html,
+   so auto-placement pushed it onto a fourth row in column 1 and collapsed
+   the track to 0px — the score read as a line of its own under the bar
+   ("Depth" / bar / "0.0" / "0 chats evidenced"). Pinning it here rather
+   than reordering eight spans keeps it right of the name whatever the
+   markup order becomes, and the tabular-nums finally buy a column: the
+   track hugs the number and ends at the rail's right edge, so all eight
+   scores align on their last digit. */
 .axis .val { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-weight: var(--w-med); font-size: var(--fs-xs); }
+  font-weight: var(--w-med); font-size: var(--fs-xs);
+  grid-column: 2; grid-row: 1; }
 .axis .bar { grid-column: 1 / -1; height: 6px; border-radius: var(--r-badge);
   background: var(--band-cold-s); overflow: hidden; border: 1px solid var(--line); }
 /* Bars GROW to their value on render, staggered by the axis's --i. Width
