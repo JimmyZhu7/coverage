@@ -91,7 +91,13 @@ def fetch(board: McKinseyBoard) -> FetchResult:
                 data = _page(kw, start)
             except Exception as e:  # noqa: BLE001
                 return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-            batch = data.get("docs", [])
+            # `.get("docs") or []`, never `.get("docs", [])`: the gateway
+            # returns the key PRESENT with value `null` on a legitimate
+            # zero-hit page, and `.get`'s default only fires when the key is
+            # missing — `for doc in None` would raise an uncaught TypeError
+            # out here (outside the network try above) and kill the whole
+            # board's fetch. Same root cause as `verify`'s envelope guard.
+            batch = data.get("docs") or []
             for doc in batch:
                 jid = str(doc.get("jobID") or "")
                 if not jid or jid in seen:
@@ -126,8 +132,8 @@ def verify(url: str) -> VerificationResult:
     `fetch`'s), and `keyword` is derived by lopping the slug's FIRST token off
     (`slug.split("-", 1)[-1]`) — a crude derivation that can easily miss the
     words that actually rank the real posting, especially past page 1 of a
-    saturated query. `data.get("docs", [])` also silently returns `[]` for a
-    missing/renamed envelope key, indistinguishable from a genuine zero
+    saturated query. `data.get("docs") or []` also silently yields `[]` for a
+    missing/renamed/null envelope key, indistinguishable from a genuine zero
     matches. None of that is a positive "this posting is gone" signal, and
     `reverify.py` acts on "closed" with zero corroboration."""
     info = classify_url(url)
@@ -140,7 +146,7 @@ def verify(url: str) -> VerificationResult:
         data = _page(keyword, 1)
     except Exception as e:  # noqa: BLE001
         return VerificationResult("mckinsey", url, "unreachable", str(e)[:200], [])
-    for doc in data.get("docs", []):
+    for doc in data.get("docs") or []:
         if slug.lower() in (doc.get("friendlyURL") or "").lower():
             return VerificationResult("mckinsey", url, "verified-open",
                                        f'title="{doc.get("title", "")}" matched by friendlyURL', [])
