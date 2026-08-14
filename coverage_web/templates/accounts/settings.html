@@ -121,6 +121,41 @@
     font-variant-numeric: tabular-nums; }
   .set-num .set-unit { color: var(--ink-3); font-size: var(--fs-s); white-space: nowrap; }
   .set-default { color: var(--ink-3); font-size: var(--fs-xs); white-space: nowrap; }
+  /* Two knobs to a row (Cadence only, so far). Seven full-width .set-rows
+     put seven near-identical spinners in a 700px column, each one label and
+     one number marooned at opposite edges of the card with a rule between —
+     a lot of scrolling to read a set of numbers that belong together.
+     auto-fit rather than a media query: the pair collapses to one column
+     whenever the card cannot give both 320px, which is the actual condition,
+     and so it survives the sidebar appearing at 820px as well as a phone. */
+  .set-grid-2 { display: grid; align-items: start;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: var(--s5); padding: var(--s3) 0 var(--s2); }
+  /* Label and number on ONE line, description underneath across the whole
+     field. Stacking label / description / control instead — the profile
+     grid's shape — measured no shorter than the seven full-width rows it
+     replaced: two columns halve the count but pushing the input below the
+     text puts the height straight back. A setting and its value belong on
+     the same line anyway; the prose is the footnote.
+     minmax(0, 1fr) on the text column so a long label wraps instead of
+     squeezing the input, which must never shrink below its 88px.
+     The control track is a FIXED 12rem, not auto. On auto it sized to each
+     field's own content, and since the units run from "days" to "business
+     days" the seven inputs landed at seven different offsets — only their
+     right edges lined up, and a bordered box is the thing the eye tracks.
+     12rem clears the widest pairing (88px input + gap + 82px of "business
+     days" = 178px) so every input starts on the same line down the column. */
+  .set-field { display: grid; grid-template-columns: minmax(0, 1fr) 12rem;
+    align-items: center; column-gap: var(--s3); }
+  .set-field > .set-row-control { justify-self: start; }
+  .set-field > .set-row-desc, .set-field > .set-row-err { grid-column: 1 / -1; }
+  /* An odd knob count leaves the last field alone on its row, and it STAYS in
+     one cell rather than spanning both. Spanning looked tidier in the
+     abstract and was worse in fact: the control track is pinned to the right
+     edge of whatever it spans, so a full-width Advocate Target threw its
+     input the entire width of the card away from its own label — the exact
+     defect this layout exists to remove. Half a row of air costs nothing. */
+
   /* Angles textarea: full width of the card body, monospace-free. */
   .set-stack { padding: var(--s2) 0; }
   .set-stack textarea { width: 100%; margin: 0; }
@@ -142,6 +177,21 @@
   }
   @media (max-width: 560px) {
     .set-form .grid-2 { grid-template-columns: 1fr; }
+    /* The two-up itself needs no rule here — auto-fit dropped it to one
+       column long before 560px. Only its gap is worth tightening. */
+    .set-grid-2 { gap: var(--s4); }
+    /* Same reason .set-row stacks: a 12rem control reserved beside the label
+       leaves a phone about 130px of label, and "Pre-Deadline Re-Ping" does
+       not fit in 130px. Label, then input, then the prose. */
+    .set-field { grid-template-columns: minmax(0, 1fr); }
+    /* A phone gives the track about 200px, and three labels reading name AND
+       number do not fit in 200px — they overlapped each other outright. The
+       number is the part to drop: the live sentence directly under the rail
+       states every one of them in full, so nothing is lost, while the names
+       are what make the dots mean anything. */
+    .cad-rail { margin-left: 26px; margin-right: 26px; }
+    .cad-lab u { display: none; }
+    .cad-sentence { margin-left: 0; margin-right: 0; }
     /* Stack label above control: at 375px a select or number input beside a
        long label gets crushed to unusable width. */
     .set-row { flex-direction: column; align-items: stretch; gap: var(--s3); }
@@ -168,16 +218,21 @@
     padding: var(--s5) var(--s5) var(--s4);
     border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--paper); }
   /* Shared section label (coverage.css §6b), minus the rule — it captions a
-     diagram. The mono face and the 30px drop to clear the track are local. */
-  .cad-rail-title { margin: 0 0 30px; font-family: var(--font-mono); }
+     diagram. Only the mono face is local; the gap down to the track belongs
+     to .cad-rail's margin-top and is deliberately NOT set here. Owning it in
+     both places means the two margins collapse to whichever is larger, and
+     the stacked-label rule below could then raise its own margin by 20px and
+     see the rail move by nothing at all. */
+  .cad-rail-title { margin: 0; font-family: var(--font-mono); }
   /* The track is flat and quiet; the SPAN is what carries colour. A gradient
      across the whole rail said the clock was running everywhere, when the
      thing worth seeing is the one stretch Coverage is counting: nothing
      until the follow-up, nothing until the circle-back, everything after the
      re-ping. Symmetric margins so a marker at 0% and one at 100% get equal
-     room for their labels. */
+     room for their labels — 44px, since a label is now name AND number on
+     one line and so about twice as wide as it used to be. */
   .cad-rail { position: relative; height: 5px; border-radius: 999px;
-    background: var(--line); margin: 0 30px 34px; }
+    background: var(--line); margin: 30px 44px var(--s3); }
   /* `left` + `width`, set directly by the JS on every draw — NOT `right:
      calc(100% - var(--to))`. That version looked identical on first paint
      and then froze: mutating the custom property later left `right`'s
@@ -204,36 +259,76 @@
     transform: translateX(-100%); }
   .cad-rail.is-live .cad-fill::after { animation: cad-sheen 620ms ease-out; }
   @keyframes cad-sheen { to { transform: translateX(100%); } }
+  /* The idle pulse: one small dot crossing the coloured span on a slow loop,
+     the same device the capture flow uses on its pipes (see .cap-pipe). It
+     says the thing the static rail cannot — that this stretch is a clock
+     that is running — and it says it on the span alone, so it never implies
+     the engine is counting anywhere else. Ornament over a fact the sentence
+     below already states outright, so it stops dead under reduced-motion
+     with nothing lost. Staggered per rail: three dots marching in lockstep
+     read as a loading bar. */
+  .cad-fill::before { content: ""; position: absolute; top: 50%; left: 0;
+    width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%;
+    background: color-mix(in srgb, var(--ink) 55%, transparent);
+    animation: cad-travel 3.2s linear infinite; }
+  .cad-rail-weeks .cad-fill::before { animation-delay: 1.05s; }
+  .cad-rail-deadline .cad-fill::before { animation-delay: 2.1s; }
+  @keyframes cad-travel { from { left: 0; opacity: 0; } 15% { opacity: 1; }
+    85% { opacity: 1; } to { left: 100%; opacity: 0; } }
+  /* A marker is a DOT on the track, not a chip beside it. The old marker
+     stacked an icon glyph in a bordered, shadowed 24px circle over a name
+     over a number — three pieces of chrome for one position, in three type
+     treatments, and the glyph carried no information at all: ✉ meant "note",
+     "follow-up" AND "re-ping", so it distinguished nothing it was drawn to
+     distinguish. The dot is the position; the ring is punched in the panel's
+     own colour so the track appears to pass behind it. */
   .cad-mark { position: absolute; left: var(--x, 0%); top: 50%;
-    transform: translate(-50%, -50%); display: grid; justify-items: center;
+    transform: translate(-50%, -50%); display: grid; place-items: center;
     transition: left 520ms cubic-bezier(0.22, 1, 0.36, 1); }
-  .cad-mark i { font-style: normal; font-size: 12px; line-height: 1;
-    width: 24px; height: 24px; display: grid; place-items: center;
-    background: var(--surface); border: 1.5px solid var(--accent-line);
-    border-radius: 50%; color: var(--accent-ink); box-shadow: var(--shadow-1);
+  .cad-mark::after { content: ""; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 3px var(--paper);
     transition: transform 200ms var(--t-ease, ease-out); }
-  .cad-rail.is-live .cad-mark i { animation: cad-pop 420ms cubic-bezier(0.22, 1, 0.36, 1); }
-  @keyframes cad-pop { 40% { transform: scale(1.16); } }
-  .cad-mark-park i { border-color: var(--line-strong); color: var(--ink-3); }
-  .cad-mark-advocate i { border-color: var(--ok-line); color: var(--ok); }
-  .cad-mark-close i { border-color: var(--danger); color: var(--danger); }
-  /* Name above, number below, both on one line each and both quiet — the
-     old pair sat 18px and 28px out in two different type families and read
-     as four rows of text per rail. */
-  .cad-mark b { position: absolute; top: -20px; font-size: 10px;
-    font-weight: var(--w-med); letter-spacing: 0.02em; color: var(--ink-2);
-    white-space: nowrap; }
-  .cad-mark u { position: absolute; top: 26px; text-decoration: none;
-    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-size: 10px; color: var(--ink-3); white-space: nowrap; }
+  .cad-rail.is-live .cad-mark::after { animation: cad-pop 420ms cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes cad-pop { 40% { transform: scale(1.5); } }
+  .cad-mark-park::after { background: var(--ink-3); }
+  .cad-mark-advocate::after { background: var(--ok); }
+  .cad-mark-close::after { background: var(--danger); }
+  /* Name and number on ONE line above the dot. They were two bands, 18px
+     above and 28px below the track, which turned each rail into four rows of
+     text; read together they are one fact ("Park, day 17") and they now look
+     like one. */
+  .cad-lab { position: absolute; bottom: 15px; display: flex;
+    align-items: baseline; gap: 5px; white-space: nowrap;
+    transition: bottom 200ms var(--t-ease, ease-out); }
+  /* The second row, assigned per draw by layoutLabels() — see the JS for why
+     it is measured rather than fixed. 20px is one 16px label box plus air.
+     The rail then drops by exactly that much, so a raised label keeps its
+     clearance under the caption instead of climbing into it. */
+  .cad-mark.is-raised .cad-lab { bottom: 35px; }
+  .cad-rail.is-stacked { margin-top: 50px; }
+  .cad-rail { transition: margin-top 200ms var(--t-ease, ease-out); }
+  /* The two markers pinned to the ends of their rail (Note at 0%, Closes at
+     100%) hang their label INWARD instead of centring it on the dot. Centred,
+     half of each one sat out past the end of the track, and the label of the
+     nearest moving marker had that much less room before it collided —
+     visible as soon as a short follow-up window pulls Follow-up back toward
+     day 0. Only these two are safe to anchor: they never move. */
+  .cad-mark-note .cad-lab { left: -2px; right: auto; }
+  .cad-mark-close .cad-lab { right: -2px; left: auto; }
+  .cad-lab b { font-size: 10px; font-weight: var(--w-med);
+    letter-spacing: 0.02em; color: var(--ink-2); }
+  .cad-lab u { text-decoration: none; font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; font-size: 10px; color: var(--ink-3); }
   /* When the only follow-up is turned off (max cold touches = 1) its marker
      dims rather than vanishes: the rail should show what you gave up. */
   .cad-mark.is-off { opacity: 0.35; filter: grayscale(1); }
-  .cad-sentence { margin: 0; font-size: var(--fs-xs); color: var(--ink-2);
+  .cad-sentence { margin: 0 44px; font-size: var(--fs-xs); color: var(--ink-2);
     line-height: 1.55; }
   @media (prefers-reduced-motion: reduce) {
-    .cad-mark, .cad-fill { transition: none; }
-    .cad-rail.is-live .cad-fill::after, .cad-rail.is-live .cad-mark i { animation: none; }
+    .cad-mark, .cad-fill, .cad-lab { transition: none; }
+    .cad-fill::before { animation: none; opacity: 0; }
+    .cad-rail.is-live .cad-fill::after,
+    .cad-rail.is-live .cad-mark::after { animation: none; }
   }
 
   /* ---- The pace ring: setting and readout as the same shape -------------
@@ -472,9 +567,9 @@
               <p class="cad-rail-title">A cold contact's life</p>
               <div class="cad-rail" aria-hidden="true">
                 <span class="cad-fill"></span>
-                <span class="cad-mark cad-mark-note" style="--x: 0%"><i>✉</i><b>Note</b><u>day 0</u></span>
-                <span class="cad-mark cad-mark-followup"><i>✉</i><b>Follow-up</b><u></u></span>
-                <span class="cad-mark cad-mark-park"><i>◦</i><b>Park</b><u></u></span>
+                <span class="cad-mark cad-mark-note" style="--x: 0%"><span class="cad-lab"><b>Note</b><u>day 0</u></span></span>
+                <span class="cad-mark cad-mark-followup"><span class="cad-lab"><b>Follow-up</b><u></u></span></span>
+                <span class="cad-mark cad-mark-park"><span class="cad-lab"><b>Park</b><u></u></span></span>
               </div>
               <p class="cad-sentence" id="cad-cold-sentence" aria-live="off"></p>
             </div>
@@ -482,8 +577,8 @@
               <p class="cad-rail-title">Keeping warm people warm</p>
               <div class="cad-rail cad-rail-weeks" aria-hidden="true">
                 <span class="cad-fill"></span>
-                <span class="cad-mark cad-mark-chatted"><i>☕</i><b>Chatted</b><u></u></span>
-                <span class="cad-mark cad-mark-advocate"><i>★</i><b>Advocate</b><u></u></span>
+                <span class="cad-mark cad-mark-chatted"><span class="cad-lab"><b>Chatted</b><u></u></span></span>
+                <span class="cad-mark cad-mark-advocate"><span class="cad-lab"><b>Advocate</b><u></u></span></span>
               </div>
               <p class="cad-sentence" id="cad-warm-sentence" aria-live="off"></p>
             </div>
@@ -491,8 +586,8 @@
               <p class="cad-rail-title">Before a deadline closes</p>
               <div class="cad-rail cad-rail-deadline" aria-hidden="true">
                 <span class="cad-fill"></span>
-                <span class="cad-mark cad-mark-reping"><i>✉</i><b>Re-ping</b><u></u></span>
-                <span class="cad-mark cad-mark-close" style="--x: 100%"><i>▮</i><b>Closes</b><u>day 0</u></span>
+                <span class="cad-mark cad-mark-reping"><span class="cad-lab"><b>Re-ping</b><u></u></span></span>
+                <span class="cad-mark cad-mark-close" style="--x: 100%"><span class="cad-lab"><b>Closes</b><u>day 0</u></span></span>
               </div>
               <p class="cad-sentence" id="cad-deadline-sentence" aria-live="off"></p>
             </div>
@@ -501,21 +596,33 @@
           <form method="post" action="{% url 'accounts:settings' %}">
             {% csrf_token %}
             <input type="hidden" name="section" value="cadence">
-            {% for row in cadence_form.rows %}
-              <div class="set-row">
-                <div class="set-row-main">
+            {% comment %}
+            Two to a row, no rules — see the .set-grid-2 note in the
+            stylesheet. The row's parts are unchanged: the <label for>, the
+            -desc and -err ids the widget's aria-describedby points at, and
+            the inline default all still belong to the same field.
+
+            The control moved UP, to sit beside its label rather than after
+            the prose. Source order is the tab order, and a number input
+            reached before its own explanation is the right way round: the
+            explanation is the input's accessible description and gets read
+            on focus regardless of where it sits in the markup.
+            {% endcomment %}
+            <div class="set-grid-2">
+              {% for row in cadence_form.rows %}
+                <div class="set-field">
                   <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                  <div class="set-row-control set-num">
+                    {{ row.field }}<span class="set-unit">{{ row.unit }}</span>
+                  </div>
                   <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
                     <span class="set-default">Default: {{ row.default }} {{ row.unit }}.</span></div>
                   {% if row.field.errors %}
                     <div class="set-row-err" id="{{ row.field.auto_id }}-err">{{ row.field.errors }}</div>
                   {% endif %}
                 </div>
-                <div class="set-row-control set-num">
-                  {{ row.field }}<span class="set-unit">{{ row.unit }}</span>
-                </div>
-              </div>
-            {% endfor %}
+              {% endfor %}
+            </div>
             <div class="set-save"><button type="submit" class="btn btn-primary">Save Cadence</button></div>
           </form>
         </div>
@@ -909,6 +1016,50 @@
       f.style.left = fromPct + "%";
       f.style.width = Math.max(0, toPct - fromPct) + "%";
     }
+    // Two labels whose boxes would touch cannot share a line, so the later
+    // one steps up onto a second row and the rail drops to make room.
+    //
+    // Measured, not guessed, and recomputed on every draw: which pairs
+    // collide depends on the numbers you just typed and on how wide the rail
+    // happens to be. A one-day follow-up window parks "Follow-up day 1" on
+    // top of "Note day 0"; a phone gives the whole track 200px. The
+    // alternative — staggering every rail permanently — spends a second row
+    // of text on the rails that do not need one, which is most of them in
+    // most configurations, and that is the clutter this diagram just shed.
+    //
+    // Label WIDTH is safe to read mid-transition; only `left` animates, and
+    // that is why positions come from --x rather than from a rect.
+    function layoutLabels() {
+      viz.querySelectorAll(".cad-rail").forEach(function (rail) {
+        var w = rail.getBoundingClientRect().width;
+        if (!w) return;
+        var items = [].slice.call(rail.querySelectorAll(".cad-mark")).map(function (m) {
+          var lab = m.querySelector(".cad-lab");
+          var lw = lab.getBoundingClientRect().width;
+          var cx = (parseFloat(m.style.getPropertyValue("--x")) || 0) / 100 * w;
+          // Note and Closes hang their label inward (see the CSS); everyone
+          // else centres theirs on the dot.
+          var left = m.classList.contains("cad-mark-note") ? cx
+                   : m.classList.contains("cad-mark-close") ? cx - lw
+                   : cx - lw / 2;
+          return { el: m, left: left, right: left + lw };
+        }).sort(function (a, b) { return a.left - b.left; });
+
+        // Greedy two-row packing, left to right: take the bottom row when it
+        // is clear, otherwise step up. 6px is the minimum gap that still
+        // reads as two labels rather than one run-on string.
+        var rowEnd = [-Infinity, -Infinity];
+        var stacked = false;
+        items.forEach(function (it) {
+          var row = it.left >= rowEnd[0] + 6 ? 0 : 1;
+          it.el.classList.toggle("is-raised", row === 1);
+          rowEnd[row] = it.right;
+          if (row === 1) stacked = true;
+        });
+        rail.classList.toggle("is-stacked", stacked);
+      });
+    }
+
     // One sheen + one dot-pop per edit, then the class comes off so the next
     // keystroke can retrigger it. Restarting a CSS animation needs the class
     // gone for a frame, hence the rAF rather than a bare toggle.
@@ -964,6 +1115,9 @@
       document.getElementById("cad-deadline-sentence").textContent =
         "Warm contacts at a firm get re-pinged " + reping +
         " days before its confirmed deadline.";
+
+      // Last, so it measures the labels this draw just wrote.
+      layoutLabels();
     }
     if (viz) {
       // Correct on the very first paint, unconditionally — a settings
@@ -976,6 +1130,23 @@
       ].forEach(function (name) {
         var el = document.querySelector('[name="' + name + '"]');
         if (el) el.addEventListener("input", function () { drawCadence(); bump(); });
+      });
+      // Label boxes are measured, so anything that changes their size or the
+      // rail's has to re-run the packing: the webfont landing after first
+      // paint, and any resize across the point where two labels stop fitting
+      // side by side. Positions and sentences are untouched by either, so
+      // this re-packs rather than redrawing.
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(layoutLabels);
+      }
+      var repackPending = false;
+      window.addEventListener("resize", function () {
+        if (repackPending) return;
+        repackPending = true;
+        requestAnimationFrame(function () {
+          layoutLabels();
+          repackPending = false;
+        });
       });
     }
 
