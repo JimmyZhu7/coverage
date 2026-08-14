@@ -942,9 +942,24 @@ _STATE_IMPLIES_WARMTH = {
 # never at rest; the export still carries them raw.
 _NOTE_MARKER = re.compile(r"^\[(?:gmail|capture):[^\]]*\]\s*")
 
+# `services.set_contact_state`'s audit trail (pipeline.py's `set_state`)
+# writes every manual-override touch's note as "manual override:
+# <column>=<value>, ..." optionally followed by " — <human note>". The
+# column=value pairs are the same kind of machine bookkeeping as the bracket
+# markers above — real for the audit trail, meaningless to a user reading
+# their OWN history: "thread_state=chat_done" names a database column, not a
+# fact about them, and it duplicated the row's own "Manual override"
+# kind_label besides. Confirmed live: James Bai's contact page (id=312)
+# rendered "thread_state=chat_done — Correction: ..." verbatim as a History
+# entry. Stripped at display, same posture as `_NOTE_MARKER` — only the
+# human-authored explanation after the dash (if any) is shown.
+_MANUAL_OVERRIDE_PREFIX = re.compile(
+    r"^manual override:[^—]*(?:—\s*)?", re.IGNORECASE)
+
 
 def _display_note(note: str | None) -> str:
-    return _NOTE_MARKER.sub("", note or "").strip()
+    note = _NOTE_MARKER.sub("", note or "").strip()
+    return _MANUAL_OVERRIDE_PREFIX.sub("", note).strip()
 
 
 def _status_line(contact: Contact) -> str:

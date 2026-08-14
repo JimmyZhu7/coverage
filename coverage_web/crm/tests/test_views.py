@@ -198,6 +198,56 @@ def test_contact_detail_shows_fit_score_axes_and_reasoning(client):
 
 
 # ---------------------------------------------------------------------------
+# 5b. Manual-override touch notes: the "manual override: <col>=<val>, ..."
+# audit prefix is machine bookkeeping (services.set_contact_state's own
+# comment), not something a user reading their own History should see —
+# confirmed live on James Bai (contact id=312), whose top History entry
+# rendered "thread_state=chat_done — Correction: ..." verbatim. Stripped at
+# display, same posture as the existing `[gmail:...]`/`[capture:...]`
+# marker-stripping right above `_display_note` in crm/views.py.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_manual_override_column_value_prefix_is_hidden_from_history(client):
+    user = _user()
+    now = timezone.now()
+    contact = Contact.all_objects.create(user=user, name="James Bai", role="IB Associate")
+    Touch.all_objects.create(
+        user=user, contact=contact, ts=now, kind="manual_override",
+        note=("manual override: thread_state=chat_done — Correction: a "
+              "duplicate chat_scheduled was logged in error. Restoring the "
+              "correct chat_done state."),
+    )
+
+    client.force_login(user)
+    resp = client.get(reverse("crm:contact_detail", args=[contact.id]))
+    body = resp.content.decode()
+
+    assert "thread_state=chat_done" not in body
+    assert "Correction: a duplicate chat_scheduled was logged in error." in body
+
+
+@pytest.mark.django_db
+def test_manual_override_with_no_human_note_shows_no_column_dump(client):
+    """A bare "manual override: warmth=hot" (no " — <note>" suffix) has no
+    human-authored text to keep — the whole column=value dump is hidden
+    rather than shown as if it meant something to the reader."""
+    user = _user()
+    now = timezone.now()
+    contact = Contact.all_objects.create(user=user, name="Dana Cole", role="Analyst")
+    Touch.all_objects.create(
+        user=user, contact=contact, ts=now, kind="manual_override",
+        note="manual override: warmth=hot",
+    )
+
+    client.force_login(user)
+    resp = client.get(reverse("crm:contact_detail", args=[contact.id]))
+    body = resp.content.decode()
+
+    assert "warmth=hot" not in body
+    assert "Manual override" in body
+
+
+# ---------------------------------------------------------------------------
 # 9. Tenant isolation: user B cannot see user A's contact.
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db
