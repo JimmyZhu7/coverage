@@ -64,6 +64,30 @@ def test_the_drawer_shows_each_fact_beside_its_evidence(client, role):
     assert "Minimum GPA of 3.5." in html
 
 
+def test_a_stated_start_year_reaches_the_drawer(client, db):
+    """Round 7 regression: `extract_start_year` (facts.py) stores an
+    accurate 'start' fact on 9.5% of open target-bucket rows, but no
+    `_FACT_LABELS` entry ever turned it into a rendered chip -- it was
+    computed, phrase-verified, and then silently discarded before it
+    reached any student-facing surface. The card's 2-chip budget is
+    already spoken for by sponsorship/pay/language, so this only checks
+    the drawer, which has room for everything a posting states."""
+    firm = Firm.objects.create(slug="hsbc-start", name="HSBC")
+    role = Opportunity.objects.create(
+        firm=firm, url="https://hsbc.test/1", title="2027 Summer Analyst",
+        bucket="internship", status="open", region="us", location="New York",
+        raw={"detail_text": "Start Date and Duration: Mon Jul 19, 2027; 2 years",
+             "facts": {"start": {
+                 "value": "2027",
+                 "phrase": "Start Date and Duration: Mon Jul 19, 2027; 2 years",
+             }}},
+    )
+    html = client.get(reverse("role_description", args=[role.id])).content.decode()
+    assert "Start date" in html
+    assert "2027" in html
+    assert "Start Date and Duration: Mon Jul 19, 2027; 2 years" in html
+
+
 def test_a_posting_we_never_fetched_says_so(client, role):
     role.raw = {}
     role.save(update_fields=["raw"])

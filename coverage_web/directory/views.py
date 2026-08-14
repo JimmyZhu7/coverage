@@ -1968,6 +1968,7 @@ _FACT_LABELS = (
     ("study", "Year of study"),
     ("language", "Language"),
     ("grad", "Graduating"),
+    ("start", "Start date"),
     ("gpa", "GPA"),
     ("duration", "Length"),
     ("cover_letter", "Cover letter"),
