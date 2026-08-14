@@ -286,6 +286,30 @@ def test_zero_touch_contact_not_treated_as_stale():
     assert my == ["first_outreach"], my
 
 
+def test_firm_known_is_false_only_for_the_terminal_no_firm_fallback():
+    """A hand-added contact with no firm_id AND no firm_text hits the
+    terminal "No firm listed" placeholder (cadence.py's own comment: this
+    replaced an even worse literal "?"). `firm_known` travels alongside so a
+    template can style the placeholder differently from a real firm name —
+    confirmed live: contact id=473 (Giulia Savino) rendered "NO FIRM LISTED"
+    through the same span/class used for real firms like ACCRACARE."""
+    c = contact(1, firm_id=None, firm_text="", warmth="cold", thread_state="no_reply")
+    actions = cadence.due_actions([c], [], [], as_of=AS_OF, firms=FIRMS)
+    mine = [a for a in actions if a["contact"]["id"] == 1]
+    assert mine and mine[0]["firm_name"] == "No firm listed"
+    assert mine[0]["firm_known"] is False
+
+    # A contact with free-text firm_text but no firm_id (the common shape —
+    # 33 of 34 firm-less contacts in the live audit) is NOT the fallback:
+    # the free text is a real, if unranked, employer name.
+    c2 = contact(2, firm_id=None, firm_text="West Monroe", warmth="cold",
+                 thread_state="no_reply")
+    actions2 = cadence.due_actions([c2], [], [], as_of=AS_OF, firms=FIRMS)
+    mine2 = [a for a in actions2 if a["contact"]["id"] == 2]
+    assert mine2 and mine2[0]["firm_name"] == "West Monroe"
+    assert mine2[0]["firm_known"] is True
+
+
 # --------------------------------------------------------------------------
 # Remaining branches of the decision tree.
 # --------------------------------------------------------------------------

@@ -444,6 +444,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* School contacts: the firm slot holds a university, so it must not be
      styled like an employer. */
   .opp-firm.is-school { color: var(--stale-t); }
+  /* A hand-added contact with no firm_id and no firm_text falls back to the
+     literal placeholder string "No firm listed" (cadence.py), which used to
+     render through this exact span with no visual distinction from a real
+     employer — "NO FIRM LISTED" sat in the same slot, same uppercase, same
+     weight as "ACCRACARE". Muted and italic marks it as the absence of a
+     fact rather than a fact. */
+  .opp-firm.is-missing { color: var(--ink-3); font-style: italic;
+    text-transform: none; letter-spacing: normal; }
 
   /* The card's evidence: WHY it's asking, and WHEN you last touched them.
      Deliberately NOT truncated — a claim cut off mid-sentence is worse than
@@ -630,6 +638,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .net-mini-firm { font-size: var(--fs-xs); color: var(--ink-3);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Same "No firm listed" placeholder as .opp-firm.is-missing above — this
+     card's base color already matches --ink-3, so italic is the only
+     signal left to distinguish it from a real (if unranked) firm name. */
+  .net-mini-firm.is-missing { font-style: italic; }
   /* The one part of the card that still OPENS the contact instead of
      selecting it — small and quiet on purpose, so the dominant gesture
      stays "click to select" and this reads as the exception. Real, not

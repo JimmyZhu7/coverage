@@ -131,7 +131,7 @@
                          aria-label="Select {{ a.contact.name|smart_title }}">
                   <span class="net-mini-text">
                     <span class="net-mini-name">{{ a.contact.name|smart_title }}</span>
-                    <span class="net-mini-firm">{{ a.firm_name|smart_title }}</span>
+                    <span class="net-mini-firm{% if not a.firm_known %} is-missing{% endif %}">{{ a.firm_name|smart_title }}</span>
                   </span>
                   <a class="net-mini-open" href="{% url 'crm:contact_detail' a.contact.id %}"
                      aria-label="Open {{ a.contact.name|smart_title }}'s profile"

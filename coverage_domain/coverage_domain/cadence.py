@@ -440,7 +440,7 @@ def due_actions(
     Returns:
         A list of action dicts, each:
             {"contact", "action", "reason", "priority", "tier",
-             "firm_name", "ctx"}
+             "firm_name", "firm_known", "ctx"}
         `contact` is the input dict as-is (the web layer needs it). `ctx`
         carries the raw numbers the reason string renders, so a UI can build
         its own phrasing without re-parsing `reason`. Sorted by
@@ -483,6 +483,16 @@ def due_actions(
         # source record named no employer. The old terminal fallback was the
         # literal string "?", which templates render verbatim as a bare
         # question mark next to the contact's name instead of a label.
+        # "No firm listed" is that same kind of terminal placeholder, and it
+        # has the identical problem one level up: nothing distinguishes it
+        # from a real employer name once it reaches the template, so it
+        # rendered in the exact same slot/styling as ACCRACARE or ENDPOINT.
+        # `firm_known` travels alongside it so the template can style the
+        # placeholder differently, the way `is-school` already does for a
+        # university sitting in the same slot.
+        firm_known = bool(
+            meta.get(firm_id, {}).get("name") or c.get("firm_text") or firm_id
+        )
         firm_name = meta.get(firm_id, {}).get("name") or c.get("firm_text") or firm_id or "No firm listed"
         # Same None-coercion as _firm_meta (a `.get(..., 3)` default alone
         # would not catch an explicit `tier=None` from an "Unranked" drag —
@@ -504,7 +514,8 @@ def due_actions(
         def add(action: str, reason: str, prio: int, **ctx: Any) -> None:
             actions.append({
                 "contact": c, "action": action, "reason": reason,
-                "priority": prio, "tier": tier, "firm_name": firm_name, "ctx": ctx,
+                "priority": prio, "tier": tier, "firm_name": firm_name,
+                "firm_known": firm_known, "ctx": ctx,
             })
 
         thread_state = c.get("thread_state")

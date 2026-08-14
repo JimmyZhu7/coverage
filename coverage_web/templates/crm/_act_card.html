@@ -29,7 +29,7 @@ as the row's left edge, every control and hx contract byte-identical.
     hand-added contact has no firm_id whether the free text reads "USC" or
     "HSBC", and keying on that labelled eight HSBC bankers alumni.
     {% endcomment %}
-    <span class="opp-firm{% if a.contact.school_affiliation %} is-school{% endif %}">{{ a.firm_name|smart_title }}{% if a.contact.school_affiliation %} · alum{% endif %}</span>
+    <span class="opp-firm{% if a.contact.school_affiliation %} is-school{% elif not a.firm_known %} is-missing{% endif %}">{{ a.firm_name|smart_title }}{% if a.contact.school_affiliation %} · alum{% endif %}</span>
     <h3 class="act-name"><a href="{% url 'crm:contact_detail' a.contact.id %}">{{ a.contact.name|smart_title }}</a></h3>
     {% if a.contact.role %}<p class="act-role">{{ a.contact.role|smart_title }}</p>{% endif %}
   </div>
