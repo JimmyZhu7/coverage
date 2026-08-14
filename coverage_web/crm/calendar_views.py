@@ -44,6 +44,7 @@ from django.views.decorators.http import require_POST
 
 from analytics.models import UserOpportunity
 from core.templatetags.textstyle import smart_title
+from directory.dupes import fold_duplicates
 from directory.models import FirmDate
 
 from .forms import CalendarEventForm
@@ -126,7 +127,7 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
         })
 
     # Layer 4 — closing dates on roles this user tracks.
-    for uo in _tracked_deadlines(user, first, last):
+    for uo in _fold_tracked(list(_tracked_deadlines(user, first, last))):
         opp = uo.opportunity
         buckets.setdefault(opp.deadline, []).append({
             "id": None,
@@ -208,6 +209,33 @@ def _tracked_deadlines(user, first: date, last: date):
             .select_related("opportunity", "opportunity__firm"))
 
 
+def _fold_tracked(rows: list) -> list:
+    """Collapse identity duplicates among tracked deadlines: one requisition
+    filed under two candidate-pool addresses (see directory/dupes.py) is one
+    line on the calendar, not two.
+
+    `UserOpportunity` carries none of the firm/title/location/deadline
+    fields `fold_duplicates` keys on, so every row would key to the same
+    bucket and the fold would swallow real tracked deadlines instead of the
+    one genuine duplicate (this is the exact trap `my_applications` in
+    directory/views.py avoids the same way). Folding runs on the underlying
+    Opportunity objects, and survivors are mapped back to their
+    UserOpportunity by object identity.
+
+    When a student tracked both duplicate addresses at different funnel
+    stages, the one with real progress wins the fold over
+    `fold_duplicates`' own deadline/location/first_seen/id tie-break.
+    """
+    opps = [uo.opportunity for uo in rows]
+    progressed_ids = {
+        uo.opportunity_id for uo in rows
+        if (uo.applied_status or "saved") != "saved"
+    }
+    survivors, _folded = fold_duplicates(opps, sticky_ids=progressed_ids)
+    kept = {id(o) for o in survivors}
+    return [uo for uo, opp in zip(rows, opps) if id(opp) in kept]
+
+
 def _month_rail(user, year: int, month: int, today: date) -> list[dict]:
     """The scrolling strip of months above the grid, each with its own count.
 
@@ -248,12 +276,14 @@ def _month_rail(user, year: int, month: int, today: date) -> list[dict]:
         counts[key] = counts.get(key, 0) + row["n"]
 
     # Layer 4 in the rail too. A month strip that counts three of the four
-    # layers sends you to a month that looks empty and isn't.
-    for row in (_tracked_deadlines(user, first, last)
-                .annotate(bucket=TruncMonth("opportunity__deadline"))
-                .values("bucket").annotate(n=Count("id"))):
-        key = (row["bucket"].year, row["bucket"].month)
-        counts[key] = counts.get(key, 0) + row["n"]
+    # layers sends you to a month that looks empty and isn't. Folded in
+    # Python rather than with .annotate()/.values(): the fold has to run on
+    # Opportunity objects (see _fold_tracked), which a GROUP BY can't do, so
+    # the rows are materialised first and bucketed by month here instead.
+    for uo in _fold_tracked(list(_tracked_deadlines(user, first, last))):
+        d = uo.opportunity.deadline
+        key = (d.year, d.month)
+        counts[key] = counts.get(key, 0) + 1
 
     # The bar is a comparison against the busiest month on the rail, not an
     # absolute — "eleven" means nothing on its own, but "twice October" does.
@@ -504,7 +534,9 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
     # Layer 4 — the roles this user tracks, on the day they close. These are
     # the rows that most deserve the alarm: a starred posting is a stated
     # intention, and this feed is what turns it into a reminder.
-    for uo in _tracked_deadlines(user, window_start.date(), window_end.date()):
+    for uo in _fold_tracked(
+        list(_tracked_deadlines(user, window_start.date(), window_end.date()))
+    ):
         opp = uo.opportunity
         # The marker rides in the SUMMARY, not the description: a phone
         # notification shows the summary and nothing else, and that

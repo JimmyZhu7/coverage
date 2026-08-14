@@ -2339,6 +2339,36 @@ def my_applications(request):
         .select_related("opportunity", "opportunity__firm")
         .order_by("opportunity__firm__name", "opportunity__title")
     )
+
+    # Identity duplicates (one requisition filed under two candidate-pool
+    # addresses, e.g. a tal.net posting listed on both `pl/1` and `pl/2`)
+    # must fold here exactly as they do on Browse Openings, or a student who
+    # tracked the same job under both addresses sees it twice and the page's
+    # own stage/lens counts overstate their pipeline.
+    #
+    # `fold_duplicates` keys on `firm_id`/`title`/`location`/`deadline`, none
+    # of which UserOpportunity carries — every row would key to the same
+    # `(None, '')` bucket and the fold would discard real tracked
+    # applications instead of the one genuine duplicate. So it runs on the
+    # underlying Opportunity objects, in the same order as `rows`, and the
+    # survivors are mapped back to their UserOpportunity by (Python) object
+    # identity rather than by re-deriving anything from the folded rows.
+    #
+    # If a student tracked both duplicate addresses at different funnel
+    # stages (applied on one, still saved on the other), the stage with real
+    # progress is the one worth keeping — fold_duplicates' own tie-break
+    # (deadline, then location, then first_seen, then id) knows nothing
+    # about funnel stage, so the progressed opportunity is marked sticky to
+    # win the fold.
+    opps = [uo.opportunity for uo in rows]
+    progressed_ids = {
+        uo.opportunity_id for uo in rows
+        if (uo.applied_status or "saved") != "saved"
+    }
+    survivors, _folded = fold_duplicates(opps, sticky_ids=progressed_ids)
+    kept = {id(o) for o in survivors}
+    rows = [uo for uo, opp in zip(rows, opps) if id(opp) in kept]
+
     # setdefault so any unexpected legacy status can't KeyError the page.
     groups: dict[str, list] = {key: [] for key, _ in _STAGES}
     for uo in rows:

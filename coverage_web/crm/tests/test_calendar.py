@@ -719,3 +719,82 @@ def test_a_curated_firm_name_is_not_recased_by_the_calendar(client, logged_in):
 
     body = client.get(reverse("crm:calendar")).content.decode()
     assert "PIMCO · Summer Analyst Programme" in body
+
+
+# ---------------------------------------------------------------------------
+# Layer 4 — identity duplicates must fold, the same way Browse Openings and
+# My Applications do. _tracked_deadlines() never called fold_duplicates, so
+# a requisition filed under two candidate-pool addresses and tracked under
+# both showed up twice on the grid, twice in the month rail's count, and
+# twice in the .ics feed. See directory/dupes.py and the round-8 dedup
+# finding this fix addresses.
+# ---------------------------------------------------------------------------
+
+def _duplicate_pair(user, *, days, status_a="", status_b=""):
+    from analytics.models import UserOpportunity
+    from directory.models import Opportunity
+
+    firm = Firm.objects.filter(slug="bofa-dup").first() or Firm.objects.create(
+        slug="bofa-dup", name="Bank of America")
+    deadline = timezone.localdate() + timedelta(days=days)
+    opp_a = Opportunity.objects.create(
+        firm=firm, title="Campus Insight Forum", location="New York, NY",
+        bucket="event", status="open", deadline=deadline,
+        url="https://bankcampuscareers.tal.net/pl/1/opp/14594")
+    opp_b = Opportunity.objects.create(
+        firm=firm, title="Campus Insight Forum", location="New York, NY",
+        bucket="event", status="open", deadline=deadline,
+        url="https://bankcampuscareers.tal.net/pl/2/opp/14594")
+    UserOpportunity.all_objects.create(user=user, opportunity=opp_a, applied_status=status_a)
+    UserOpportunity.all_objects.create(user=user, opportunity=opp_b, applied_status=status_b)
+    return opp_a, opp_b
+
+
+def test_a_tracked_identity_duplicate_shows_once_on_the_grid(logged_in, client):
+    """Counted through the context, not the rendered HTML: the template
+    includes each day's events twice (the grid cell and the narrow-screen
+    agenda), so a raw text count would double even a correctly-folded
+    single event."""
+    _duplicate_pair(logged_in, days=5)
+    resp = client.get("/app/calendar/")
+    tracked = [e for week in resp.context["weeks"] for cell in week
+               for e in cell["events"] if e["source"] == "tracked"]
+    assert len(tracked) == 1
+    assert tracked[0]["title"] == "Bank of America · Campus Insight Forum"
+
+
+def test_the_month_rail_count_does_not_double_count_the_duplicate(logged_in, client):
+    """Layer 4's rail count used a raw .annotate()/Count("id") over
+    _tracked_deadlines(), which has no idea two rows are one posting."""
+    _duplicate_pair(logged_in, days=5)
+    # A second, genuinely distinct tracked deadline in the same month, so a
+    # fold that swallowed everything (the UserOpportunity trap) would also
+    # be caught by this count, not just an unfolded duplicate.
+    _tracked_role(logged_in, days=6, title="Distinct Analyst Role")
+
+    resp = client.get("/app/calendar/")
+    this_month = next(m for m in resp.context["rail"] if m["is_now"])
+    assert this_month["count"] == 2
+
+
+def test_the_ics_feed_carries_the_duplicate_once(client, logged_in):
+    """Counted by VEVENT, not by substring: each event's two VALARMs repeat
+    the summary text in their own DESCRIPTION, so a bare substring count
+    would read 3 even for one correctly-folded event."""
+    _duplicate_pair(logged_in, days=6)
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert body.count("SUMMARY:Bank of America · Campus Insight Forum closes") == 1
+
+
+def test_the_progressed_duplicate_wins_on_the_calendar(logged_in, client):
+    """Applied on one address, only saved on the other: the applied copy is
+    what the student actually acted on, so it is the one that should
+    survive the fold rather than an arbitrary tie-break."""
+    opp_a, opp_b = _duplicate_pair(logged_in, days=5, status_a="saved", status_b="submitted")
+    resp = client.get("/app/calendar/")
+    events = [e for day in resp.context["weeks"] for cell in day
+              for e in cell["events"] if e["source"] == "tracked"]
+    assert len(events) == 1
+    assert events[0]["stage"] == "submitted"
