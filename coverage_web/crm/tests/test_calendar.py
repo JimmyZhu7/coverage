@@ -234,7 +234,13 @@ def test_a_bad_submission_still_reports_the_months_real_counts(client, logged_in
         "y": today.year, "m": today.month,
     })
     assert resp.status_code == 400
-    assert "<b>1</b> deadlines" in resp.content.decode()
+    body = resp.content.decode()
+    # One deadline, singular. The negative guard is load-bearing: the
+    # singular string is a substring of the plural one, so the positive
+    # assertion alone still passes against the old hard-coded "s".
+    assert "<b>1</b> deadline" in body
+    assert "<b>1</b> deadlines" not in body
+    assert "<b>0</b> chats" in body and "<b>0</b> events" in body
 
 
 def test_clicking_a_day_prefills_that_date_and_opens_the_form(client, logged_in):

@@ -364,9 +364,9 @@
     <a class="cal-today-link" title="Live-updating feed for Apple/Google Calendar"
        href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe</a>
     <p class="cal-legend">
-      <span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> chats</span>
-      <span class="cal-key cal-key-event"><b>{{ counts.event }}</b> events</span>
-      <span class="cal-key cal-key-deadline"><b>{{ counts.deadline }}</b> deadlines</span>
+      <span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> chat{{ counts.chat|pluralize }}</span>
+      <span class="cal-key cal-key-event"><b>{{ counts.event }}</b> event{{ counts.event|pluralize }}</span>
+      <span class="cal-key cal-key-deadline"><b>{{ counts.deadline }}</b> deadline{{ counts.deadline|pluralize }}</span>
     </p>
   </div>
 
