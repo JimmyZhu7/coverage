@@ -222,10 +222,16 @@ def test_the_funnel_is_the_partition_and_sums_to_the_total(client, board, tracke
     stage_sum = sum(len(s["items"]) for s in resp.context["stages"])
     assert stage_sum == resp.context["total"] == 6
 
-    # The lenses overlap the funnel and each other's complement — they are
-    # explicitly NOT part of that sum.
-    lens_sum = sum(len(l["items"]) for l in resp.context["lenses"])
-    assert lens_sum == 3 < stage_sum   # 2 closing + 1 rolling, all also above
+    # The lenses are a SECOND partition, of the live rows, over the same set —
+    # never a third pile of roles. Each of the six fixture rows sits in exactly
+    # one lens: past -> passed, today + day 9 -> closing, day 10 + day 90 ->
+    # later, no deadline -> rolling.
+    by_key = {lens["key"]: len(lens["items"]) for lens in resp.context["lenses"]}
+    assert by_key == {"passed": 1, "closing": 2, "later": 2, "rolling": 1}
+    assert sum(by_key.values()) == resp.context["live_total"] == 6
+    # Before the residue lenses existed this sum was 3 — the day-10 and
+    # day-90 rows were in no lens at all while still being counted in the
+    # "of N live" denominator printed beside every lens.
 
 
 @pytest.mark.django_db
