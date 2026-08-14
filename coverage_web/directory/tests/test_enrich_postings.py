@@ -675,3 +675,79 @@ class TestLiveApiPrecedenceOverStalePayload:
         opp.refresh_from_db()
         assert opp.deadline.isoformat() == "2026-04-19"
         assert opp.raw["detail_source"] == "payload"
+
+
+@pytest.mark.django_db
+class TestSelfWrittenDetailTextNeverShortCircuitsTheLiveFetch:
+    """Round 7 regression: for any board with `has_live_api()==False`
+    (icims, lever, talentgateway, beisen, ...), the FIRST enrichment pass
+    writes its fetched text into `raw["detail_text"]`. On every later run,
+    `payload_text(o.raw)` walked that exact same cached string, found it
+    prose-length, and returned it as if it were the board's OWN list
+    payload — permanently short-circuiting `fetch_posting()` before
+    `location` is ever computed. Confirmed live: 0 of 75 open icims rows
+    that already carried `detail_text` had ever recovered a
+    `detail_location`, including rows fetched within the prior 24-48h
+    (SIG id=19383). `detail_fetched` kept advancing every run while
+    `location` stayed permanently blank."""
+
+    ICIMS_URL = "https://sig-icims.icims.com/jobs/11191/discovery-program/job"
+
+    ICIMS_PAGE_WITH_LOCATION = (
+        '<html><head>'
+        '<script type="application/ld+json">'
+        '{"@type": "JobPosting", "description": "<p>Grow with our equity '
+        'research team on real trading desks, mentored by senior '
+        'analysts every single day of this rotational internship '
+        'program.</p>", '
+        '"jobLocation": {"address": {"addressLocality": "Bala Cynwyd", '
+        '"addressRegion": "PA", "addressCountry": "US"}}}'
+        '</script></head><body></body></html>'
+    )
+
+    def _raw_with_own_prior_detail_text(self):
+        # Mirrors exactly what `handle()` itself writes at the bottom of a
+        # prior pass: no board-native prose field, only this command's own
+        # bookkeeping keys. Long enough that, before this fix, it would have
+        # tripped the old `payload_text()` walk (>= _PAYLOAD_MIN after HTML
+        # stripping) and been mistaken for a fresh board payload.
+        prose = ("Grow with our equity research team on real trading desks, "
+                 "mentored by senior analysts every single day of this "
+                 "rotational internship program designed to build the next "
+                 "generation of investment professionals across every desk "
+                 "in the firm, from macro trading to systematic strategies "
+                 "and everything in between this summer.")
+        return {
+            "detail_text": prose,
+            "detail_fetched": (timezone.now() - timedelta(days=30)).isoformat(),
+            "detail_source": "fetch",
+        }
+
+    def test_own_prior_detail_text_is_not_read_back_as_a_board_payload(self):
+        """Direct unit check on `payload_text()`: the command's own
+        bookkeeping keys must never be mistaken for the board's payload,
+        regardless of how long the cached string is."""
+        assert payload_text(self._raw_with_own_prior_detail_text()) is None
+
+    def test_prior_own_detail_text_no_longer_blocks_the_live_fetch(self, monkeypatch):
+        firm = Firm.objects.create(slug="sig", name="Susquehanna")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Discovery Program: Growth Equity",
+            bucket="entry_level", status="open", source="icims",
+            url=self.ICIMS_URL, location="",
+            raw=self._raw_with_own_prior_detail_text(),
+        )
+        assert has_live_api(self.ICIMS_URL, greenhouse_token=None) is False
+
+        class _Resp:
+            status_code = 200
+            text = self.ICIMS_PAGE_WITH_LOCATION
+
+        monkeypatch.setattr(enrich_mod.requests, "get", lambda *a, **k: _Resp())
+        call_command("enrich_postings", refetch=True)
+
+        opp.refresh_from_db()
+        # Before the fix: payload_text(o.raw) returned the cached prose,
+        # fetch_posting() was never called, and location stayed "".
+        assert opp.location == "Bala Cynwyd, PA, US"
+        assert opp.raw["detail_source"] == "fetch"

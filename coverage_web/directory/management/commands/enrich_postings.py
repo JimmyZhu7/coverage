@@ -575,6 +575,18 @@ _PROSE_MIN = 120        # a field shorter than this is a label, not prose
 _PAYLOAD_MIN = 300      # below this the payload has not really described the job
 # Keys that hold long strings which are never a description.
 _NOT_PROSE = ("url", "link", "id", "code", "date", "image", "logo", "slug")
+# This command's OWN bookkeeping keys, written into raw at the bottom of
+# handle() (detail_text/detail_fetched/detail_location/detail_source). They
+# must never be read back as "the board's own payload": once a
+# has_live_api()==False row is fetched and detail_text is cached, every
+# later run would otherwise find its own prior detail_text sitting in raw,
+# mistake it for a fresh board payload, and short-circuit fetch_posting()
+# forever -- freezing location/deadline/sponsorship extraction while
+# detail_fetched keeps advancing (round 7: 0 of 75 open icims rows, 0/5
+# lever, 0/9 talentgateway, 0/10 beisen ever recovered a detail_location
+# despite already carrying detail_text).
+_SELF_WRITTEN_KEYS = frozenset(
+    {"detail_text", "detail_fetched", "detail_location", "detail_source"})
 
 
 def payload_text(raw: dict | None) -> str | None:
@@ -592,6 +604,8 @@ def payload_text(raw: dict | None) -> str | None:
             return
         if isinstance(node, str):
             k = key.lower()
+            if k in _SELF_WRITTEN_KEYS:
+                return
             if any(bad in k for bad in _NOT_PROSE):
                 return
             looks_prose = ("<" in node and ">" in node) or (
