@@ -213,6 +213,70 @@ def microdata_jobposting_location(page_html: str) -> str:
     return ", ".join(dict.fromkeys(parts))
 
 
+# ...but HSBC's microdata is itself truncated. Confirmed live 2026-08-14 on
+# the same 8 rows the microdata reader was added for: the page's own
+# `itemprop="addressRegion"` states content="Hong" — the identical mid-word
+# cut the URL slug makes — so reading the microdata swapped a truncated
+# title for a truncated LOCATION, "Central, Hong, HK", which is what those
+# rows have carried since.
+#
+# The same page states the location correctly and in full in its VISIBLE
+# text, behind a "Location:" label: "Central, Hong Kong Island, HK". That
+# text is already fetched and stored verbatim in raw["detail_text"] on every
+# one of these rows — every other fact this command extracts is read out of
+# it — so the fuller answer was sitting unread next to the truncated one.
+#
+# This reads the label out of the RAW HTML rather than out of page_text()'s
+# stripped output on purpose: in stripped text the value's end is
+# unmarked (it runs straight into the next label, "…HK Programme Type:
+# Internship") and would have to be guessed, while in the HTML the value is
+# still fenced by the block element that holds it. Bounded by the first
+# block close (or <br>) after the label so a stray "Location:" in prose
+# cannot run away with the rest of the page.
+_PLAIN_LOCATION_LABEL = re.compile(
+    r"Location:(?:&nbsp;|&#160;|&#xa0;|\s)*"
+    r"(?P<value>.{0,400}?)"
+    r"(?:</(?:p|div|li|td|tr|section|h[1-6]|dd|dl|ul|ol)>|<br\b)",
+    re.IGNORECASE | re.DOTALL)
+# A location line is a handful of place names. Anything longer than this came
+# from a "Location:" that introduced a sentence, not a place.
+MAX_LABEL_LOCATION = 120
+
+
+def plain_text_jobposting_location(page_html: str) -> str:
+    """The place named by the page's own visible "Location:" label, or "" when
+    it carries none (or when what follows the label reads as prose)."""
+    m = _PLAIN_LOCATION_LABEL.search(page_html or "")
+    if not m:
+        return ""
+    value = page_text(m.group("value")).strip(" ,;-")
+    return value if 0 < len(value) <= MAX_LABEL_LOCATION else ""
+
+
+def stated_page_location(page_html: str) -> str:
+    """The location a plain page states about itself, reading BOTH its visible
+    "Location:" label and its schema.org microdata and keeping the fuller of
+    the two.
+
+    Not "always prefer the label": the microdata is the only location some
+    boards state at all, and a label match is only trusted over it when it
+    says strictly more — every part the microdata named still appears, and
+    there is more of it (HSBC's "Central, Hong, HK" vs "Central, Hong Kong
+    Island, HK"). A label that instead CONTRADICTS the microdata is the one
+    the page is least sure about, so the structured field keeps the row.
+    """
+    micro = microdata_jobposting_location(page_html)
+    plain = plain_text_jobposting_location(page_html)
+    if not plain:
+        return micro
+    if not micro:
+        return plain
+    parts = [p.strip() for p in micro.split(",") if p.strip()]
+    fuller = (len(plain) > len(micro)
+              and all(p.lower() in plain.lower() for p in parts))
+    return plain if fuller else micro
+
+
 # A sitemap board (see coverage_connectors/sitemap.py) has no title field of
 # its own — the ingest-time title is reconstructed from the posting URL's
 # slug, and HSBC's own slugs truncate long titles mid-word ("...-Hong/"
@@ -239,8 +303,10 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
     None vs "" on the text matters: an unreachable page is retried next run;
     a reachable page that says nothing is recorded as answered. The location
     is never derived — it is the provider's own field (Workday's location +
-    country, iCIMS/JSON-LD jobLocation, Greenhouse's location and offices) or
-    it is empty. The title is likewise never derived — every board branch
+    country, iCIMS/JSON-LD jobLocation, Greenhouse's location and offices, or
+    for a plain page GET whichever of its microdata and its own visible
+    "Location:" label states more — see `stated_page_location`) or it is
+    empty. The title is likewise never derived — every board branch
     below except the last already has a real title from its ingest-time API
     payload, so only the final, API-less branch (a plain page GET —
     HSBC's sitemap board among them) recovers one, from the page's own
@@ -353,7 +419,7 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
         return None, "", ""
     description, location = jobposting_jsonld(resp.text)
     if not location:
-        location = microdata_jobposting_location(resp.text)
+        location = stated_page_location(resp.text)
     title = page_title(resp.text)
     if description:
         return page_text(description), location, title

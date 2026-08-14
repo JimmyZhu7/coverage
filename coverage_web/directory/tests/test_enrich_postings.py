@@ -24,6 +24,8 @@ from directory.management.commands.enrich_postings import (
     microdata_jobposting_location,
     page_title,
     payload_text,
+    plain_text_jobposting_location,
+    stated_page_location,
 )
 from directory.management.commands import enrich_postings as enrich_mod
 from directory.models import Firm, Opportunity
@@ -191,7 +193,12 @@ class TestSitemapTitleAndMicrodataLocationRecovery:
     as schema.org MICRODATA (`itemprop="jobLocation"` with nested
     `<meta itemprop="addressLocality" ...>` tags) rather than the
     `<script type="application/ld+json">` block `jobposting_jsonld` reads —
-    confirmed live: 0 of these pages carry an ld+json JobPosting block."""
+    confirmed live: 0 of these pages carry an ld+json JobPosting block.
+
+    Second round: the microdata is truncated the same way the slug is
+    (`addressRegion` content="Hong"), so the location fix only moved the
+    truncation — the 8 rows read "Central, Hong, HK" until the page's own
+    visible "Location:" label was read as well. See LIVE_HSBC_PAGE below."""
 
     HSBC_PAGE = (
         '<html><head>'
@@ -257,6 +264,104 @@ class TestSitemapTitleAndMicrodataLocationRecovery:
 
         opp.refresh_from_db()
         assert opp.title == "Analyst Programme"
+
+    # --- the microdata is truncated too -------------------------------------
+    #
+    # The fixture above states addressRegion="Hong Kong Island" — the value the
+    # page OUGHT to carry. The live page states content="Hong", the identical
+    # mid-word cut the URL slug makes, so reading the microdata replaced a
+    # truncated title with a truncated location ("Central, Hong, HK") on all 8
+    # rows. The page's own visible "Location:" label states it in full.
+    LIVE_HSBC_PAGE = (
+        '<html><head>'
+        '<meta property="og:title" content="Investment Banking - Internship">'
+        '</head><body>'
+        '<div class="row"><div class="col-xs-12">'
+        '<span class="joblayouttoken-label">Location:&nbsp;\n        </span>\n'
+        '<span data-careersite-propertyid="location">'
+        '<p id="job-location" class="jobLocation job-location-inline">'
+        '<span class="jobGeoLocation">Central, Hong Kong Island, HK\n'
+        '</span></p>'
+        '<style type="text/css">#job-location { display: inline; }</style>'
+        '</span></div></div>'
+        '<div><span class="joblayouttoken-label">Programme Type:&nbsp;</span>'
+        '<p>Internship</p></div>'
+        '<span itemprop="jobLocation" itemscope itemtype="http://schema.org/Place">'
+        '<span itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">'
+        '<meta itemprop="addressLocality" content="Central">'
+        '<meta itemprop="addressRegion" content="Hong">'
+        '<meta itemprop="addressCountry" content="HK"></span></span>'
+        '</body></html>'
+    )
+
+    def test_the_live_pages_microdata_region_is_itself_truncated(self):
+        """The defect this class's second round exists for, stated plainly."""
+        assert (microdata_jobposting_location(self.LIVE_HSBC_PAGE)
+                == "Central, Hong, HK")
+
+    def test_visible_location_label_is_read_in_full(self):
+        """Bounded by the block that holds it, so it stops at "…HK" and does
+        not run on into the next label ("Programme Type: Internship")."""
+        assert (plain_text_jobposting_location(self.LIVE_HSBC_PAGE)
+                == "Central, Hong Kong Island, HK")
+
+    def test_the_exact_live_shape_resolves_to_the_fuller_string(self):
+        """Truncated microdata + full visible label -> the full one wins."""
+        assert (stated_page_location(self.LIVE_HSBC_PAGE)
+                == "Central, Hong Kong Island, HK")
+
+    def test_a_label_free_page_still_falls_back_to_microdata(self):
+        """The original fix must not regress: microdata is the only location
+        some boards state at all."""
+        assert plain_text_jobposting_location(self.HSBC_PAGE) == ""
+        assert (stated_page_location(self.HSBC_PAGE)
+                == "Central, Hong Kong Island, HK")
+
+    def test_a_label_that_contradicts_the_microdata_does_not_win(self):
+        """Only a strictly FULLER label supersedes the structured field — a
+        label naming a different place is the page disagreeing with itself,
+        and the structured field keeps the row."""
+        page = (
+            '<div>Location: London, England, GB</div>'
+            '<meta itemprop="addressLocality" content="Singapore">'
+            '<meta itemprop="addressCountry" content="SG">'
+        )
+        assert stated_page_location(page) == "Singapore, SG"
+
+    def test_a_location_colon_inside_prose_is_not_mistaken_for_a_place(self):
+        """The label reader is bounded by length as well as by markup, so a
+        sentence that happens to open with "Location:" is discarded rather
+        than written into the location column."""
+        page = (
+            "<p>Location: This role sits within our global banking division "
+            "and the successful candidate will be expected to travel between "
+            "several of our offices during the programme.</p>"
+        )
+        assert plain_text_jobposting_location(page) == ""
+        assert stated_page_location(page) == ""
+
+    def test_the_live_shape_end_to_end_stores_the_fuller_location(self, monkeypatch):
+        """Same command run as the title test above, against the page as it
+        actually reads live — `location` and `raw["detail_location"]` must
+        both land on the full string, not "Central, Hong, HK"."""
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Central Investment Banking Internship Hong",
+            bucket="entry_level", status="open", source="sitemap",
+            url="https://apply.careers.hsbc.com/emergingtalent/job/x/123/",
+        )
+
+        class _Resp:
+            status_code = 200
+            text = self.LIVE_HSBC_PAGE
+
+        monkeypatch.setattr(enrich_mod.requests, "get", lambda *a, **k: _Resp())
+        call_command("enrich_postings")
+
+        opp.refresh_from_db()
+        assert opp.location == "Central, Hong Kong Island, HK"
+        assert opp.raw["detail_location"] == "Central, Hong Kong Island, HK"
+        assert opp.title == "Investment Banking - Internship"
 
 
 class _FakeResponse:
