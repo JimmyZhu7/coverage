@@ -127,6 +127,54 @@ def _fetch_all(tenant_host: str, site: str, search_text: str = "",
     return {**first, "jobPostings": postings}
 
 
+# A house number followed by a word, at the very start: "890 Herron Road,
+# Montreal, Quebec", "1060-1068 Stelton Road, Piscataway, New Jersey".
+# Anchored and bounded so a real place that merely contains digits
+# ("2 Locations", "Milano Bicocca Calendario 3") is never touched.
+_STREET_HEAD = re.compile(r"^\d{1,6}(?:-\d{1,6})?[ -]\S")
+_SLOT_GAP = re.compile(r"\s{2,}")
+
+
+def normalize_locations_text(text: str) -> str:
+    """Punctuate Workday's `locationsText` run so it reads as a place.
+
+    Workday joins City / State / Country with single spaces and leaves the
+    slot EMPTY when it has no value, which is why Citi's Hong Kong roles
+    arrive as "Hong Kong  Hong Kong" (city / no state / country) and the
+    London ones as "London  United Kingdom". The doubled name is not a
+    duplicated token — "Kowloon  Hong Kong" has the same shape with a
+    different city — so deduplicating repeated words would fix a bug that
+    does not exist and would mangle "New York New York United States", where
+    the city really is also the state.
+
+    The genuine defect is that the run reaches the student unpunctuated. A
+    2+ space gap is Workday's own slot boundary, so it is the one place the
+    string can be segmented without guessing: it becomes a comma. Runs joined
+    by single spaces carry no boundary information and are left exactly as
+    they arrived rather than invented into.
+
+    Second rule, same posture: a leading street address is dropped when a
+    PLACE NAME follows it. "890 Herron Road, Montreal, Quebec" tells a student
+    scanning a feed nothing "Montreal, Quebec" does not, and a suite number
+    reads as leaked source data. What survives has to look like a place,
+    though — "2121 N Pearl St, Suite 500 212" is an address in both halves,
+    and trimming it to "Suite 500 212" would be a worse string than the one it
+    replaced, so that row keeps what the board gave it. Dropping detail is
+    honest; inventing it is not, and the raw `locationsText` is still kept
+    verbatim in `Opportunity.raw` either way.
+    """
+    if not text:
+        return text
+    parts = [p.strip(" ,;") for p in _SLOT_GAP.split(text.strip())]
+    joined = ", ".join(p for p in parts if p)
+    fields = [f.strip() for f in joined.split(",") if f.strip()]
+    if (len(fields) >= 2
+            and _STREET_HEAD.match(fields[0])
+            and any(not any(ch.isdigit() for ch in f) for f in fields[1:])):
+        fields = fields[1:]
+    return ", ".join(fields)
+
+
 def _normalize(job: dict, board: WorkdayBoard) -> Opportunity:
     path = job.get("externalPath", "")
     # Must include board.site between the host and the job path -- see
@@ -136,7 +184,9 @@ def _normalize(job: dict, board: WorkdayBoard) -> Opportunity:
     return Opportunity(
         firm=board.firm,
         title=job.get("title", ""),
-        location=job.get("locationsText", ""),
+        # The board's raw run is still kept verbatim in `raw` (raw=job below),
+        # so normalizing here loses nothing and repairs what the student reads.
+        location=normalize_locations_text(job.get("locationsText", "")),
         url=url,
         source="workday",
         posted_at=job.get("postedOn") or None,
