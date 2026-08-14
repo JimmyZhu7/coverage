@@ -1643,15 +1643,34 @@ def opportunities(request):
     # rolling, then the rest. (`i["level"] == "passed"` as the second key
     # keeps passed-deadline rows out of the days-left ordering, which would
     # otherwise put the most-overdue role first.)
+    #
+    # `cl["roles"]` and `cl["_opps"]` are built in lockstep above (one
+    # `item`/`o` appended per row, same loop iteration) so they start
+    # index-aligned — `_group_city_variants` below relies on that alignment
+    # to zip each item back to the Opportunity it came from. Sorting only
+    # `cl["roles"]` and leaving `cl["_opps"]` in original insertion order
+    # broke that alignment: `_group_city_variants` then computed each item's
+    # family key from the WRONG Opportunity, folding unrelated postings
+    # (different divisions, different cities) under another role's "+N more
+    # locations" disclosure. Confirmed live on Morgan Stanley's "2027
+    # Technology Summer Analyst Program (Hong Kong)" card, which picked up a
+    # Mumbai wealth-management role and a Seattle Parametric role as if they
+    # were the same programme in another city. Sorting both lists together
+    # as paired tuples keeps them aligned through the reorder.
     for cl in clusters.values():
-        cl["roles"].sort(key=lambda i: (
-            not i["dated"],
-            i["level"] == "passed",
-            i["days_left"] if i["days_left"] is not None else 9999,
-            not i["is_fresh"],
-            i["seen_days"] if i["seen_days"] is not None else 9999,
-            i["title"].lower(),
-        ))
+        paired = sorted(
+            zip(cl["roles"], cl.get("_opps", [])),
+            key=lambda pair: (
+                not pair[0]["dated"],
+                pair[0]["level"] == "passed",
+                pair[0]["days_left"] if pair[0]["days_left"] is not None else 9999,
+                not pair[0]["is_fresh"],
+                pair[0]["seen_days"] if pair[0]["seen_days"] is not None else 9999,
+                pair[0]["title"].lower(),
+            ),
+        )
+        cl["roles"] = [item for item, _o in paired]
+        cl["_opps"] = [o for _item, o in paired]
         cl["open_count"] = len(cl["roles"])
         cl["rolling_count"] = cl["open_count"] - cl["closing_count"]
 
