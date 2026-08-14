@@ -330,6 +330,21 @@ STALE_DAYS = 21
 # reading costs and the more often it is worth spending a request to confirm.
 URGENT_STALE_DAYS = 7
 URGENT_WINDOW_DAYS = 30
+# Tighter still for a deadline that already reads as PAST on a row still
+# open — this is not "closing soon", it is the mirror image and a strictly
+# stronger signal: the board is showing an expired date right now, today,
+# to a student deciding whether to apply. The 7-day URGENT_STALE_DAYS
+# threshold was reused for this case too until round 4: HSBC Sheffield WIT
+# (id 1618) was fetched at 01:07 UTC on 2026-08-14 and read "Aug 09" —
+# already past — while HSBC's own page, re-fetched minutes later the same
+# day, had already moved to "Aug 16". Because the row's `age` was 0 right
+# after that very fetch, the 7-day threshold meant this exact row would not
+# be looked at again for up to a week even though it was already showing a
+# wrong, expired date. One day closes that gap to "the next run," which is
+# the best any periodic-refresh pipeline can do against a same-day site
+# change — it cannot make yesterday's fetch see today's edit, but it can
+# stop treating a known-wrong reading as good for a week.
+PAST_DEADLINE_STALE_DAYS = 1
 
 
 def _fetched_at(o):
@@ -378,10 +393,11 @@ def _queue(rows, *, refetch: bool, stale_days: int, today) -> tuple[list, int]:
         # "soon"). A deadline already in the past is never LESS urgent to
         # verify than one 30 days out.
         days_to_deadline = (o.deadline - today).days if o.deadline is not None else None
-        closing_soon = days_to_deadline is not None and (
-            days_to_deadline < 0 or days_to_deadline <= URGENT_WINDOW_DAYS
-        )
-        if closing_soon and age >= min(URGENT_STALE_DAYS, stale_days):
+        already_past = days_to_deadline is not None and days_to_deadline < 0
+        closing_soon = days_to_deadline is not None and 0 <= days_to_deadline <= URGENT_WINDOW_DAYS
+        if already_past and age >= min(PAST_DEADLINE_STALE_DAYS, stale_days):
+            urgent_stale.append(o)
+        elif closing_soon and age >= min(URGENT_STALE_DAYS, stale_days):
             urgent_stale.append(o)
         elif age >= stale_days:
             stale.append(o)

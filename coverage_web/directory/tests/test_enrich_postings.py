@@ -16,6 +16,7 @@ from django.core.management import call_command
 from django.utils import timezone
 
 from directory.management.commands.enrich_postings import (
+    PAST_DEADLINE_STALE_DAYS,
     URGENT_STALE_DAYS,
     _queue,
     fetch_posting,
@@ -259,6 +260,58 @@ class TestGoldmanSachsDetailFetch:
             enrich_mod.requests, "post",
             lambda *a, **k: _FakeResponse(200, {"data": {"role": None}}))
         assert fetch_posting(self.URL) == (None, "")
+
+
+@pytest.mark.django_db
+class TestPastDeadlineGetsTighterRecheckThanClosingSoon:
+    """Round 4 regression: HSBC Sheffield WIT (id 1618) was re-fetched today
+    and STILL read a past deadline (Aug 9) because HSBC's own page moved to
+    Aug 16 minutes after Coverage's morning scrape. The old code reused
+    URGENT_STALE_DAYS (7 days) for an already-past deadline, the same
+    threshold as merely "closing soon" — meaning a row caught showing an
+    already-expired date could sit unconfirmed for up to a week. This must
+    now requeue at the tighter PAST_DEADLINE_STALE_DAYS (1 day)."""
+
+    def test_past_deadline_requalifies_after_one_day_not_seven(self):
+        today = timezone.localdate()
+        one_day_ago = (timezone.now()
+                       - timedelta(days=PAST_DEADLINE_STALE_DAYS)).isoformat()
+        row = _Row(1, deadline=today - timedelta(days=5), detail_fetched=one_day_ago)
+
+        todo, refreshed = _queue([row], refetch=False, stale_days=21, today=today)
+
+        assert todo == [row]
+        assert refreshed == 1
+
+    def test_past_deadline_fetched_today_is_not_yet_requeued(self):
+        """The one gap this threshold cannot close: a row fetched TODAY that
+        already reads past (HSBC's exact shape) will not be looked at again
+        until age >= PAST_DEADLINE_STALE_DAYS — no periodic-refresh pipeline
+        can make yesterday's fetch see today's site edit. This pins that
+        known limit so it can't silently regress to "never" again."""
+        today = timezone.localdate()
+        just_now = timezone.now().isoformat()
+        row = _Row(1, deadline=today - timedelta(days=5), detail_fetched=just_now)
+
+        todo, refreshed = _queue([row], refetch=False, stale_days=21, today=today)
+
+        assert todo == []
+        assert refreshed == 0
+
+    def test_past_deadline_threshold_is_tighter_than_closing_soon(self):
+        """A row stale exactly PAST_DEADLINE_STALE_DAYS with an ALREADY-PAST
+        deadline must requeue; a row stale the same short duration but only
+        "closing soon" (not yet past) must NOT requeue until it hits the
+        wider URGENT_STALE_DAYS -- proving the two shapes use different
+        thresholds rather than one loosened for both."""
+        today = timezone.localdate()
+        stale = (timezone.now() - timedelta(days=PAST_DEADLINE_STALE_DAYS)).isoformat()
+        past = _Row(1, deadline=today - timedelta(days=1), detail_fetched=stale)
+        soon = _Row(2, deadline=today + timedelta(days=10), detail_fetched=stale)
+
+        todo, _ = _queue([past, soon], refetch=False, stale_days=21, today=today)
+
+        assert [o.id for o in todo] == [1]
 
 
 @pytest.mark.django_db
