@@ -203,9 +203,20 @@ def normalize_label(value: str) -> str:
 # Barclays, PwC, Morgan Stanley, Deutsche Bank, Point72 ("Quantitative
 # Researcher - Macro" / "Macro Quantitative Researcher") and Blue Owl ("Real
 # Assets Accounting, Senior Associate" / "Senior Associate - Real Assets
-# Accounting"). Sorting the normalized words makes the grouping key
-# order-insensitive on top of separator-insensitive, without touching
-# location clustering, which stays a strict place-name match.
+# Accounting"). Sorting the normalized words makes the key order-insensitive
+# on top of separator-insensitive.
+#
+# REPORT-ONLY, DELIBERATELY. This feeds `duplicate_key()` — the
+# dedupe_opportunities LOOKALIKE listing, which only prints candidates for a
+# human to judge — and NOT `fold_duplicates()`, which hides cards from the
+# live feed. Word order alone is too weak a signal to hide a job on:
+# Brookfield genuinely runs "Finance Manager" (id=955, Infrastructure) and
+# "Manager, Finance" (id=10488, Energy) as two different open Toronto
+# requisitions, both deadline-less, so neither the deadline veto nor location
+# clustering would save that pair. A false SPLIT costs a student a scroll; a
+# false FOLD costs them a job they never saw. fold_duplicates() therefore
+# stays word-order strict until some corroborating signal (business unit, or
+# the same requisition id) can tell an anagram apart from a genuine repost.
 def _title_bag(title: str) -> tuple[str, ...]:
     """Sorted normalized words of a title, for "same words, any order?"."""
     return tuple(sorted(normalize_label(title).split(" ")))
@@ -350,7 +361,7 @@ def fold_duplicates(
     by_role: dict[tuple, list[Any]] = {}
     for row in rows:
         key = (getattr(row, "firm_id", None),
-               _title_bag(getattr(row, "title", "")))
+               normalize_label(getattr(row, "title", "")))
         by_role.setdefault(key, []).append(row)
 
     keep: set[int] = set()

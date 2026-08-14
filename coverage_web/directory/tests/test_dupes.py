@@ -409,21 +409,26 @@ class TestFoldDuplicates:
         kept, folded = fold_duplicates([_Row(1, firm_id=1), _Row(2, firm_id=2)])
         assert folded == 0
 
-    def test_brookfield_word_order_pair_folds(self):
-        """End-to-end regression for the confirmed Brookfield defect: ids
-        955 ('Finance Manager') and 10488 ('Manager, Finance'), same firm,
-        same Toronto, Ontario location, both open — used to survive as two
-        separate cards because `by_role`'s key never sorted title words."""
+    def test_brookfield_word_order_pair_does_not_fold(self):
+        """The live feed stays word-order STRICT. Brookfield's ids 955
+        ('Finance Manager', Infrastructure) and 10488 ('Manager, Finance',
+        Energy) are anagram titles at the same firm and same Toronto, Ontario
+        location, but they are two different real open requisitions — and
+        neither states a deadline, so the deadline veto cannot protect them.
+        Folding them hid a live Energy role from students. `_title_bag`
+        word-order matching belongs to `duplicate_key()`'s report-only
+        LOOKALIKE listing, never to `fold_duplicates()`."""
         kept, folded = fold_duplicates([
             _Row(955, firm_id=46, title="Finance Manager", location="Toronto, Ontario"),
             _Row(10488, firm_id=46, title="Manager, Finance", location="Toronto, Ontario"),
         ])
-        assert folded == 1
-        assert len(kept) == 1
+        assert folded == 0
+        assert [r.id for r in kept] == [955, 10488]
 
     def test_word_order_pair_at_different_locations_still_stays_apart(self):
-        """The fix must only equate word order, never location — the same
-        title reordered at two different real cities is still two jobs."""
+        """Word order alone never folds, and location is a second, independent
+        divider — the same title reordered at two different real cities is
+        unambiguously two jobs."""
         kept, folded = fold_duplicates([
             _Row(1, title="Finance Manager", location="Toronto, Ontario"),
             _Row(2, title="Manager, Finance", location="London, United Kingdom"),
