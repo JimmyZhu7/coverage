@@ -240,7 +240,14 @@ def _build_actions(user):
     for a in actions:
         c = a["contact"]
         a["label"] = ACTION_LABELS.get(a["action"], a["action"])
-        a["reason"] = _sentenceize(a.get("reason", ""))
+        # The age is read from the engine's own `ctx`, not scraped back out of
+        # its prose, so the rewrite can never disagree with the number that
+        # produced the sentence.
+        a["reason"] = _age_in_days(
+            _sentenceize(a.get("reason", "")),
+            (a.get("ctx") or {}).get("hours"),
+            now=now,
+        )
         a["warmth_pct"] = _warmth_pct(c.get("warmth", "cold"))
         # Compose surface: the opener seeds the draft body so the weekly list
         # doubles as the place outreach starts (§5).
@@ -1018,6 +1025,36 @@ def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 
 
 _PAREN = _re.compile(r"\s*\([^)]*\)")
+_HOURS_AGO = _re.compile(r"\b\d+h ago\b")
+# Past this, an hour count stops being a measurement and starts being
+# arithmetic homework. The thank-you window is 24h, so anything inside two
+# days still earns hours; beyond that the surface speaks days like everything
+# else on it.
+_AGE_HOURS_MAX = 48.0
+
+
+def _age_in_days(reason: str, hours: float | None, *, now) -> str:
+    """Rewrite the engine's "58h ago" as "2d ago" once the hours stop earning
+    their place.
+
+    The cadence engine measures the thank-you branch in hours because the
+    window it enforces IS hours (`chat done 58h ago — send thank-you (within
+    24h)`), and `_sentenceize` strips every parenthetical — so the window that
+    justified the unit never reaches the screen while the bare hour count
+    does. One chat then rendered three ways in one scroll: "Chatted 2d ago"
+    on the Debrief card, "Chat done 58h ago" here, and "2 business days ago"
+    on this same card's ledger row.
+
+    Days are derived from the calendar date, not from `hours / 24`, so this
+    agrees with the Debrief card's own `(today - chat_date).days` rather than
+    rounding past it. The engine's raw fragment stays untouched at the source
+    (coverage_domain is another workstream) — the action dict already carries
+    `hours` structurally, which is what makes this a presentation-layer fix."""
+    if not reason or hours is None or hours < _AGE_HOURS_MAX:
+        return reason
+    when = timezone.localtime(now - timedelta(hours=hours)).date()
+    days = (timezone.localtime(now).date() - when).days
+    return _HOURS_AGO.sub(f"{days}d ago", reason)
 
 
 def _sentenceize(reason: str) -> str:
