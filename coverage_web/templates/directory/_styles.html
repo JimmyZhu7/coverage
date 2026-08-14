@@ -534,7 +534,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     100% { transform: scale(3); opacity: 0; } }
 
   @media (prefers-reduced-motion: reduce) {
-    .rolling-dot::after, .fuse-fill, .firmcol { animation: none !important; }
+    .rolling-dot::after, .fuse-fill { animation: none !important; }
     .fuse-fill { width: var(--fuse); }
   }
 
@@ -548,8 +548,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     gap: var(--s4); align-items: start; }
   @media (max-width: 720px) { .firmcols { grid-template-columns: 1fr; } }
 
-  @keyframes cluster-rise { from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); } }
   /* ---- Firm-page role rows: the ledger form again. One row per role,
      role-level facts only — the page header owns the firm-level ones. ---- */
   .frow-group { margin-top: var(--s5); }
@@ -583,8 +581,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .firmcol { background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--r-panel); box-shadow: var(--shadow-1);
     display: flex; flex-direction: column; height: 468px; overflow: hidden;
-    animation: cluster-rise 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: calc(min(var(--i, 0), 16) * 34ms);
     transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
   .firmcol:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2);
     transform: translateY(-2px); }
