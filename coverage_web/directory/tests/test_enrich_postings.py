@@ -611,6 +611,73 @@ class TestPastDeadlineGetsTighterRecheckThanClosingSoon:
 
 
 @pytest.mark.django_db
+class TestScopedIdsBackfill:
+    """`--ids` is the scoped backfill an audit reaches for once it has named
+    specific rows (the HSBC Sheffield WIT pair, ids 1617/1618) rather than
+    waiting for the normal queue to re-qualify them — it must force a
+    refetch regardless of staleness, and must leave every OTHER open row
+    completely untouched."""
+
+    def test_named_id_is_force_refetched_even_though_too_fresh_to_queue(self, monkeypatch):
+        """The exact HSBC shape: fetched a couple of hours ago, well under
+        PAST_DEADLINE_STALE_HOURS, so the normal queue would skip it — but an
+        explicit --ids must refetch it anyway."""
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        fresh_ts = (timezone.now() - timedelta(hours=2)).isoformat()
+        opp = Opportunity.objects.create(
+            firm=firm, title="Sheffield Women in Technology", bucket="entry_level",
+            status="open", url="https://apply.careers.hsbc.com/emergingtalent/job/x/1618/",
+            deadline=timezone.localdate() - timedelta(days=5),
+            deadline_precision="day", confidence=0.6,
+            raw={"detail_text": "old", "detail_fetched": fresh_ts},
+        )
+        monkeypatch.setattr(
+            enrich_mod, "fetch_posting",
+            lambda url, **kw: ("Closing Date: Sun Aug 16, 2026", "", ""),
+        )
+
+        call_command("enrich_postings", ids=str(opp.id))
+
+        opp.refresh_from_db()
+        assert opp.deadline.isoformat() == "2026-08-16"
+
+    def test_ids_leaves_every_other_open_row_untouched(self, monkeypatch):
+        """A blind run would also refetch whatever else the normal queue
+        surfaced; `--ids` must touch ONLY the rows named, proving this is a
+        scoped backfill and not a general run with an extra filter bolted on."""
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        named = Opportunity.objects.create(
+            firm=firm, title="Sheffield Women in Technology", bucket="entry_level",
+            status="open", url="https://apply.careers.hsbc.com/emergingtalent/job/x/1618/",
+            deadline=timezone.localdate() - timedelta(days=5),
+            deadline_precision="day", confidence=0.6,
+            raw={"detail_text": "old"},
+        )
+        other_stale = Opportunity.objects.create(
+            firm=firm, title="Some Other Programme", bucket="entry_level",
+            status="open", url="https://apply.careers.hsbc.com/emergingtalent/job/x/9999/",
+            deadline=timezone.localdate() - timedelta(days=5),
+            deadline_precision="day", confidence=0.6,
+            raw={"detail_text": "old",
+                "detail_fetched": (timezone.now() - timedelta(days=30)).isoformat()},
+        )
+        monkeypatch.setattr(
+            enrich_mod, "fetch_posting",
+            lambda url, **kw: ("Closing Date: Sun Aug 16, 2026", "", ""),
+        )
+
+        call_command("enrich_postings", ids=str(named.id))
+
+        named.refresh_from_db()
+        other_stale.refresh_from_db()
+        assert named.deadline.isoformat() == "2026-08-16"
+        # Untouched — the normal queue would have re-fetched this row too
+        # (30 days stale), but --ids scopes to exactly the named row.
+        assert other_stale.deadline.isoformat() == (
+            timezone.localdate() - timedelta(days=5)).isoformat()
+
+
+@pytest.mark.django_db
 class TestLiveApiPrecedenceOverStalePayload:
     """Round 4 regression: BMO id=19224's Phenom list payload carries a
     descriptionTeaser snippet frozen near the posting's original

@@ -653,40 +653,59 @@ class Command(BaseCommand):
         parser.add_argument("--stale-days", type=int, default=STALE_DAYS,
                             help=f"Re-read a page this many days after the last "
                                  f"read (default {STALE_DAYS}; 0 disables).")
+        parser.add_argument("--ids", type=str, default="",
+                            help="Comma-separated Opportunity ids to force-refetch "
+                                 "immediately, bypassing the bucket/staleness queue "
+                                 "entirely — a scoped backfill for rows a specific "
+                                 "audit already named, not a general run.")
         parser.add_argument("--dry-run", action="store_true")
 
     def handle(self, *args, **opts):
         dry = opts["dry_run"]
         tag = "[dry-run] " if dry else ""
 
-        rows = list(
-            Opportunity.objects.filter(status="open")
-            .filter(
-                Q(bucket__in=TARGET_BUCKETS)
-                # A non-campus row can still carry a deadline WE reported
-                # (confidence < 1.0, e.g. read out of BMO's Phenom-listed
-                # postings at ingest) — and outside TARGET_BUCKETS it was
-                # never in this command's queryset at all, so that reading
-                # could never be revisited once wrong. BMO ids 19224/9485/
-                # 9433 are bucket="other" and had gone unrefreshed since
-                # ingest (4+ months) for exactly this reason: not "checked
-                # and still stale", never checked a second time, ever. Scope
-                # is narrow on purpose — only rows already showing a
-                # reported date, not every non-campus posting — so this
-                # doesn't turn into an unbounded enrichment run over
-                # experienced-hire boards this command was never meant to
-                # cover.
-                | Q(deadline__isnull=False, confidence__lt=1.0)
+        # An explicit --ids list is a targeted backfill for rows already named
+        # by an audit (e.g. a stale-deadline finding on two specific postings)
+        # — it bypasses TARGET_BUCKETS and the staleness queue on purpose,
+        # since the whole point is refetching THESE rows now rather than
+        # waiting for them to re-qualify through the normal cadence.
+        ids = [int(x) for x in opts["ids"].split(",") if x.strip()]
+        if ids:
+            rows = list(
+                Opportunity.objects.filter(id__in=ids)
+                .select_related("firm")
+                .order_by("firm__name", "id")
             )
-            .select_related("firm")
-            .order_by("firm__name", "id")
-        )
-        today = timezone.localdate()
-        todo, refreshed = _queue(rows, refetch=opts["refetch"],
-                                 stale_days=opts["stale_days"], today=today)
-        if opts["limit"]:
-            todo = todo[: opts["limit"]]
-            refreshed = sum(1 for o in todo if (o.raw or {}).get("detail_text"))
+            todo, refreshed = rows, len(rows)
+        else:
+            rows = list(
+                Opportunity.objects.filter(status="open")
+                .filter(
+                    Q(bucket__in=TARGET_BUCKETS)
+                    # A non-campus row can still carry a deadline WE reported
+                    # (confidence < 1.0, e.g. read out of BMO's Phenom-listed
+                    # postings at ingest) — and outside TARGET_BUCKETS it was
+                    # never in this command's queryset at all, so that reading
+                    # could never be revisited once wrong. BMO ids 19224/9485/
+                    # 9433 are bucket="other" and had gone unrefreshed since
+                    # ingest (4+ months) for exactly this reason: not "checked
+                    # and still stale", never checked a second time, ever. Scope
+                    # is narrow on purpose — only rows already showing a
+                    # reported date, not every non-campus posting — so this
+                    # doesn't turn into an unbounded enrichment run over
+                    # experienced-hire boards this command was never meant to
+                    # cover.
+                    | Q(deadline__isnull=False, confidence__lt=1.0)
+                )
+                .select_related("firm")
+                .order_by("firm__name", "id")
+            )
+            today = timezone.localdate()
+            todo, refreshed = _queue(rows, refetch=opts["refetch"],
+                                     stale_days=opts["stale_days"], today=today)
+            if opts["limit"]:
+                todo = todo[: opts["limit"]]
+                refreshed = sum(1 for o in todo if (o.raw or {}).get("detail_text"))
 
         run = None
         if not dry:
