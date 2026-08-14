@@ -2523,14 +2523,17 @@ def firm_detail(request, slug):
         role = ""
 
     open_qs = firm.opportunities.filter(status="open")
-    campus_total = open_qs.filter(bucket__in=TARGET_BUCKETS).count()
-    other_total = open_qs.count() - campus_total
 
     # Campus buckets first (insight, internship, entry_level), experienced
     # rows after, so the opt-in views still lead with the roles the product
-    # is for.
-    opps = list(
-        _apply_role_filter(open_qs, role).select_related("firm").order_by(
+    # is for. The fold runs over the FULL open set, before the role filter,
+    # so the scope sentence's campus/other counts describe the same folded
+    # universe the cards are drawn from — counting the raw queryset instead
+    # put "912" in the sentence above a section headed "Experienced 790",
+    # the two numbers separated only by which side of fold_duplicates()
+    # they were computed on (round 10 recheck, Barclays).
+    all_open = list(
+        open_qs.select_related("firm").order_by(
             _BUCKET_ORDER, F("deadline").asc(nulls_last=True), "title"
         )
     )
@@ -2539,7 +2542,18 @@ def firm_detail(request, slug):
     # under two candidate-pool req numbers, and without this the firm page
     # showed byte-identical cards twice and its own "Open Roles" count
     # disagreed with the feed's count for the same firm.
-    opps, _folded = fold_duplicates(opps)
+    all_open, _folded = fold_duplicates(all_open)
+    campus_total = sum(1 for o in all_open if o.bucket in TARGET_BUCKETS)
+    other_total = len(all_open) - campus_total
+    # Mirror _apply_role_filter's vocabulary over the folded list: "" (and
+    # anything unrecognised, already normalised above) is the campus scope,
+    # OTHER includes pre-classifier "" buckets, "all" is everything.
+    if role == "all":
+        opps = all_open
+    elif role == OTHER:
+        opps = [o for o in all_open if o.bucket in (OTHER, "")]
+    else:
+        opps = [o for o in all_open if o.bucket in TARGET_BUCKETS]
     cards = [_card(o, now=now, today=today) for o in opps]
     context = {
         "firm": firm,
