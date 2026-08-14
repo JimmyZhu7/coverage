@@ -627,14 +627,6 @@ def payload_text(raw: dict | None) -> str | None:
     def walk(node, key="", depth=0):
         if depth > 6 or sum(len(f) for f in found) > MAX_TEXT:
             return
-        # Checked for every node type, not just strings: a self-written key
-        # can hold a whole nested structure (extract_facts' `facts` is a
-        # dict of dicts), and the field name that marks it as ours is only
-        # visible at THIS level — a string two levels inside `facts` is
-        # keyed "grad" or "phrase" by the time `walk` reaches it, not
-        # "facts", so a leaf-only check here would miss the entire subtree.
-        if key.lower() in _SELF_WRITTEN_KEYS:
-            return
         if isinstance(node, str):
             k = key.lower()
             if any(bad in k for bad in _NOT_PROSE):
