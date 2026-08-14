@@ -341,9 +341,19 @@ def _score_responsiveness(
 ) -> tuple[float, dict[str, Any]]:
     """Reply ratio (how often they answer) blended with median reply latency
     (how fast). Latency is measured per reply as the gap to the immediately
-    preceding outbound touch. No outbound at all -> 0 (no signal yet)."""
+    preceding outbound touch. No outbound at all -> 0 (no signal yet).
+
+    "They answered" is `_MEANINGFUL_KINDS`, the same set `_score_recency`
+    decays from and a superset of the `_REPLY_KINDS` `_compute_depth`
+    promotes on — a `chat_scheduled` or a `chat` is a person answering just
+    as much as a `reply_received` is, and which of the three got logged is
+    an artifact of how the touch was captured, not of what the contact did.
+    Narrowing this to the bare literal "reply_received" made the engine
+    contradict itself: the same history scored "replied, no chat yet; ...;
+    no reply to 1 note" in one generated sentence, and cost 8-18 composite
+    points purely for having been logged as a chat."""
     sends = [t for t in touches if t.get("kind") in _OUTBOUND_KINDS]
-    replies = [t for t in touches if t.get("kind") == "reply_received"]
+    replies = [t for t in touches if t.get("kind") in _MEANINGFUL_KINDS]
     meta: dict[str, Any] = {"sends": len(sends), "replies": len(replies), "median_latency_days": None}
     if not sends and not replies:
         return 0.0, meta
@@ -360,7 +370,7 @@ def _score_responsiveness(
             continue
         if t.get("kind") in _OUTBOUND_KINDS:
             last_out = dt
-        elif t.get("kind") == "reply_received" and last_out is not None:
+        elif t.get("kind") in _MEANINGFUL_KINDS and last_out is not None:
             latencies.append(max(0.0, _days_between(dt, last_out)))
     if latencies:
         latencies.sort()
@@ -454,7 +464,11 @@ def _contact_reason(
             clauses.append(f"replies in ~{int(round(ml))}d")
         elif ml is not None:
             clauses.append("slow to reply")
-    elif resp_meta.get("sends"):
+    elif resp_meta.get("sends") and depth_level == 0:
+        # Only claim silence when the log has no engagement at all. A
+        # manual_override can raise depth to "replied"/"chatted" without
+        # leaving an engagement touch behind, and "replied, no chat yet;
+        # no reply to 1 note" is one sentence arguing with itself.
         n = resp_meta["sends"]
         clauses.append(f"no reply to {n} note{'s' if n != 1 else ''}")
 
