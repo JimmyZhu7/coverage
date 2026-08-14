@@ -439,6 +439,58 @@ def cycle_label(cycle: str) -> str:
     return f"{label} · {track}" if track else label
 
 
+# How a firm_dates row says where its date came from. `FirmDate.source_url` is
+# a URLField, but URLField only validates under `full_clean()` and neither
+# importer calls it (import_firm_dates.py and seed_directory.py both write
+# `str(entry.get("source", ""))` verbatim; scripts/demo_seed.py writes the
+# literal "seed:demo"). So the column holds two different KINDS of value —
+# real citations and provenance tokens — and 26 of the 39 rows are tokens.
+#
+# The token rows are the reason this map exists. "seed:historical-pattern" is
+# not a citation; it is the note "we estimated this from previous cycles". The
+# page used to render it as `<a href="seed:historical-pattern">source</a>`,
+# byte-identical in style to the two real goldmansachs.com links above it, so
+# a student got four identical SOURCE pills of which two navigated nowhere.
+# Apollo's "seed:demo" row was worse: a hard past date wearing CONFIRMED and
+# offering a demo placeholder as its proof.
+#
+# Resolved on READ, not migrated: the stored string is what the importer
+# matched on, the same reason `cycle_label` formats rather than rewrites.
+_SOURCE_NOTES = {
+    "seed:historical-pattern": (
+        "from past cycles",
+        "Estimated from this firm's previous cycles — the firm has not "
+        "published this date yet.",
+    ),
+    "seed:demo": (
+        "sample data",
+        "Placeholder from the demo seed, not a date this firm published.",
+    ),
+}
+
+
+def _source_marker(raw: str) -> dict:
+    """Where a cycle date came from, as something the page can render honestly.
+
+    A link ONLY when the value is a real http(s) URL a click can open.
+    Anything else is a provenance NOTE — same information, said in words,
+    rendered as plain text rather than as a link that goes nowhere.
+    """
+    val = (raw or "").strip()
+    if not val:
+        return {}
+    if val.lower().startswith(("http://", "https://")):
+        return {"url": val, "label": "source",
+                "why": "Opens the page this date was read from."}
+    label, why = _SOURCE_NOTES.get(
+        val,
+        ("unverified",
+         "No published page behind this date — it has not been verified "
+         "against the firm's own site."),
+    )
+    return {"label": label, "why": why}
+
+
 def _firm_date_row(fd, *, today):
     """One firm_dates row as a timeline entry. confirmed vs rumored is read
     off confidence + precision: a high-confidence, non-estimated date is
@@ -465,7 +517,7 @@ def _firm_date_row(fd, *, today):
         "precision": prec,
         "confidence": confidence_marker(fd.confidence),
         "state": "confirmed" if confirmed else "rumored",
-        "source_url": fd.source_url,
+        "source": _source_marker(fd.source_url),
     }
 
 
