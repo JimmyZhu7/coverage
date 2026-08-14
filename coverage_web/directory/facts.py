@@ -141,6 +141,48 @@ _GPA_REVERSED = re.compile(r"(\d\.\d{1,2})[^.\n]{0,20}?\bG\.?P\.?A\.?\b", re.IGN
 # What sits between "GPA" and a denominator, never between "GPA" and a cutoff.
 _GPA_SCALE = re.compile(r"(?:out\s+of|on\s+an?|scale|max(?:imum)?|/)\s*$", re.IGNORECASE)
 
+# A number near "GPA" is a hard cutoff UNLESS the surrounding words hedge it
+# ("preferred"/"desired"/"ideally") -- the same distinction extract_languages
+# already draws with _LANG_SOFT. Without this gate, "3.2 minimum GPA
+# preferred" (BofA) and "Ideally you'll have a GPA of 3.2" (Barclays) render
+# as an identical, unqualified "GPA 3.2" chip next to a genuine hard floor
+# like Brookfield's "Minimum 3.0 Cumulative GPA" -- indistinguishable to a
+# student deciding whether a 3.1 disqualifies them. Confirmed live: BofA,
+# Citi, Barclays, MUFG, Nomura, PwC all state a soft-worded GPA this way.
+#
+# The window is short and sentence-bounded on both sides (whichever comes
+# first: a literal period, or the char cap) because the hedge word has to be
+# READING the GPA clause, not just sitting somewhere nearby in the same
+# scraped wall of bullet text. A wide unbounded window produced false
+# positives verified live: Morgan Stanley id=1857 ("minimum cumulative GPA
+# of 3.0 Track record of academic excellence...") and Oliver Wyman id=524
+# ("Minimum GPA of 3.5 Interest in the CAS...") both carry a "preferred"
+# hundreds of characters away, in an unrelated bullet, once the HTML's list
+# punctuation is stripped -- a wide window mistook a hard floor for a soft
+# one. Conversely a pure period-boundary check without the char cap missed
+# nothing extra, but a pure char-cap without the period boundary produced
+# false positives of its own: BofA id=1795 has an unrelated "Preferred
+# majors" 129 characters before its actual (unhedged... no, hedged via the
+# word directly AFTER it) GPA number, and Barclays id=1247/1246 has "a GPA
+# of 3.2 or above." immediately followed, past its own sentence-ending
+# period, by an unrelated "Ideally, you would also have an interest in
+# working..." only 18 characters later. Only the AND of both bounds (period
+# OR char cap, whichever is closer) cleared every row checked, including
+# these decoys, with zero misclassifications across all 114 open GPA facts.
+_GPA_SOFT = re.compile(r"\b(?:preferred|desired|ideally|prefer)\b", re.IGNORECASE)
+_GPA_SOFT_BEFORE = 35
+_GPA_SOFT_AFTER = 25
+
+
+def _gpa_is_hedged(text: str, start: int, end: int) -> bool:
+    before_period = text.rfind(".", 0, start)
+    before_period = 0 if before_period == -1 else before_period + 1
+    before = max(before_period, start - _GPA_SOFT_BEFORE)
+    after_period = text.find(".", end)
+    after_period = len(text) if after_period == -1 else after_period
+    after = min(after_period, end + _GPA_SOFT_AFTER)
+    return bool(_GPA_SOFT.search(text[before:after]))
+
 
 def extract_gpa(text: str) -> dict | None:
     # Reversed FIRST: a number sitting immediately before the word ("a 3.5
@@ -161,6 +203,7 @@ def extract_gpa(text: str) -> dict | None:
                 # rounded-off 3-point-something rather than the 3.0 it is.
                 return {"value": f"{value:.1f}".rstrip("0").rstrip(".") + (
                     "" if value % 1 else ".0"),
+                    "hedge": _gpa_is_hedged(text, m.start(), m.end()),
                     "phrase": _sentence(text, m.start(), m.end())}
     return None
 

@@ -926,7 +926,7 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
         "study": lambda f: f["value"],
         "language": lambda f: f"{f['value']} needed",
         "grad": lambda f: f"Grad {f['value']}",
-        "gpa": lambda f: f"GPA {f['value']}",
+        "gpa": lambda f: f"GPA {f['value']} pref." if f.get("hedge") else f"GPA {f['value']}",
         "duration": lambda f: f["value"],
         "cover_letter": lambda f: "Cover letter",
         "transcript": lambda f: "Transcript",

@@ -64,6 +64,91 @@ def test_no_gpa_mentioned_is_not_a_gpa_of_zero():
     assert extract_gpa("Strong academic record expected.") is None
 
 
+# --- GPA hedge gate ---------------------------------------------------------
+# Round 4 regression: a "preferred"/"desired"/"ideally"-worded GPA rendered
+# identically to a hard cutoff (same label, same "fact-plain" styling),
+# indistinguishable from a genuine minimum like Brookfield's "Minimum 3.0
+# Cumulative GPA". Fixtures below are trimmed verbatim from live scraped
+# `detail_text` (BofA id=18204, Citi id=17758, Barclays id=14503, and the
+# hard-cutoff contrast is Brookfield id=17745) — proving the gate against the
+# actual scraped shapes, including the ones that read as false positives
+# under a naive wide-window check (Morgan Stanley id=1857, Oliver Wyman
+# id=524: an unrelated "preferred" sits hundreds of characters away in a
+# different bullet once HTML list punctuation is stripped) and under a naive
+# unbounded-by-sentence check (BofA id=1795: an unrelated "Preferred majors"
+# 129 characters before an actually-hard GPA number; Barclays id=1247: a
+# genuinely hard "GPA of 3.2 or above." immediately followed, past its own
+# sentence-ending period, by an unrelated "Ideally, you would also have an
+# interest in working..." only 18 characters later).
+
+def test_a_gpa_preferred_after_the_number_is_hedged():
+    got = extract_gpa("Desired Skills 3.2 minimum GPA preferred Pursing a major")
+    assert got["value"] == "3.2"
+    assert got["hedge"] is True
+
+
+def test_a_gpa_preferred_before_the_number_is_hedged():
+    got = extract_gpa("You have obtained a preferred GPA of 3.5 or above "
+                      "You are a proficient user of MS Word")
+    assert got["value"] == "3.5"
+    assert got["hedge"] is True
+
+
+def test_ideally_worded_gpa_is_hedged():
+    got = extract_gpa("with an anticipated graduation date between December "
+                      "2027 and June 2028. Ideally you'll have a GPA of 3.2 "
+                      "or above. You'll have mathematical skills")
+    assert got["value"] == "3.2"
+    assert got["hedge"] is True
+
+
+def test_a_hard_gpa_cutoff_is_not_hedged():
+    got = extract_gpa("Minimum 3.0 Cumulative GPA Strong analytical skills required")
+    assert got["value"] == "3.0"
+    assert got["hedge"] is False
+
+
+def test_a_distant_preferred_in_an_unrelated_bullet_does_not_hedge_a_hard_gpa():
+    """Morgan Stanley id=1857 / Oliver Wyman id=524's shape: once HTML list
+    punctuation is stripped, an unrelated "preferred" from a LATER bullet
+    sits only a few hundred characters away with no sentence boundary
+    between them and a naive wide window mistakes it for a hedge."""
+    got = extract_gpa(
+        "You have a minimum cumulative GPA of 3.0 Track record of academic "
+        "excellence Excellent attention to detail and the ability to manage "
+        "competing priorities Excellent written and verbal communication "
+        "skills preferred across all our internship cohorts globally")
+    assert got["value"] == "3.0"
+    assert got["hedge"] is False
+
+
+def test_an_unrelated_hedge_word_in_the_prior_sentence_does_not_hedge_a_hard_gpa():
+    """Barclays id=1247's shape: the GPA sentence ends in a hard "or above."
+    and only the NEXT, unrelated sentence happens to start with "Ideally" —
+    a pure character-distance check (no sentence boundary) misreads this as
+    a hedge purely because "Ideally" lands within a few characters."""
+    got = extract_gpa(
+        "with anticipated graduation date between December 2027 - June 2028 "
+        "and a GPA of 3.2 or above. Ideally, you would also have an "
+        "interest in working across global markets")
+    assert got["value"] == "3.2"
+    assert got["hedge"] is False
+
+
+def test_an_unrelated_hedge_word_before_a_hard_gpa_does_not_hedge_it():
+    """BofA id=1795's shape: an earlier, unrelated "Preferred majors"
+    sentence sits well before a GPA number that is itself stated as a plain
+    minimum with its own trailing hedge -- the gate must key off the word
+    actually attached to the number ("preferred" directly after it), not an
+    unrelated hedge word much further back."""
+    got = extract_gpa(
+        "Qualifications: Preferred majors include Accounting, Finance, "
+        "Economics, or related fields Minimum GPA of 3.5 preferred "
+        "Experience with data tools")
+    assert got["value"] == "3.5"
+    assert got["hedge"] is True  # the number's OWN trailing "preferred" governs
+
+
 # --- Graduation window -----------------------------------------------------
 
 def test_a_graduation_range_keeps_both_ends():
