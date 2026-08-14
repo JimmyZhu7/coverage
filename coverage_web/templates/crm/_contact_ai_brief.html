@@ -1,0 +1,28 @@
+{% comment %}
+Rendered two ways: inline (requested=False, brief=None) as the initial
+"Generate" prompt inside the contact-live panel's <details>, and as the
+htmx response after a POST to crm:contact_ai_brief (requested=True), where
+brief is either the drafted text or None (unconfigured/failed).
+{% endcomment %}
+{% if not requested %}
+  <p class="cd-ai-hint">A short prep note drafted from this contact's own history.</p>
+  <button class="btn"
+          hx-post="{% url 'crm:contact_ai_brief' contact.pk %}"
+          hx-target="#contact-ai-brief" hx-swap="innerHTML"
+          hx-indicator="#contact-ai-brief-loading">
+    Generate brief
+  </button>
+  <span id="contact-ai-brief-loading" class="htmx-indicator cd-ai-loading">Drafting…</span>
+{% elif brief %}
+  <p class="cd-ai-label">AI-drafted from this contact's history. Check it before you rely on it.</p>
+  <p class="cd-ai-brief">{{ brief|linebreaksbr }}</p>
+  <button class="btn"
+          hx-post="{% url 'crm:contact_ai_brief' contact.pk %}"
+          hx-target="#contact-ai-brief" hx-swap="innerHTML"
+          hx-indicator="#contact-ai-brief-loading">
+    Regenerate
+  </button>
+  <span id="contact-ai-brief-loading" class="htmx-indicator cd-ai-loading">Drafting…</span>
+{% else %}
+  <p class="cd-ai-hint">Brief unavailable right now.</p>
+{% endif %}

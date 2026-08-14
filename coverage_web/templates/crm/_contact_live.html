@@ -61,6 +61,15 @@ values.
       {% if contact.notes %}
         <p class="cd-notes">{{ contact.notes|linebreaksbr }}</p>
       {% endif %}
+      {% comment %}Own htmx target, not #contact-live: generating a brief
+      must never discard an unsaved opener draft sitting in the textarea
+      above it.{% endcomment %}
+      <details class="cd-opener">
+        <summary>Coffee chat brief</summary>
+        <div id="contact-ai-brief">
+          {% include "crm/_contact_ai_brief.html" with contact=contact brief=None requested=False %}
+        </div>
+      </details>
     </div>
 
     {# ---- Where this stands, and moving it ---- #}

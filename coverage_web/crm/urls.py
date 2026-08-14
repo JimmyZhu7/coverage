@@ -47,4 +47,5 @@ urlpatterns = [
     path("contacts/<int:pk>/touch/", views.log_touch, name="log_touch"),
     # htmx: save the Compose draft (contact.opener) in place.
     path("contacts/<int:pk>/opener/", views.contact_opener, name="contact_opener"),
+    path("contacts/<int:pk>/ai-brief/", views.contact_ai_brief, name="contact_ai_brief"),
 ]

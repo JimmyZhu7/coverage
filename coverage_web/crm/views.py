@@ -37,7 +37,7 @@ from crm.forms import ChatDebriefForm, ContactForm
 from directory.classify import TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
 
-from . import coverage, debrief as debrief_svc, services
+from . import ai_brief, coverage, debrief as debrief_svc, services
 from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
 
 
@@ -1153,3 +1153,21 @@ def contact_opener(request: HttpRequest, pk: int) -> HttpResponse:
     record_event("opener_saved", user=request.user)
     return render(request, "crm/_contact_live.html",
                   _contact_live_context(request, contact))
+
+
+@login_required
+@require_POST
+def contact_ai_brief(request: HttpRequest, pk: int) -> HttpResponse:
+    """Draft a coffee-chat prep brief for `contact` from their own history
+    (see crm/ai_brief.py). POST, not GET: this is a paid API call once
+    ANTHROPIC_API_KEY is set, so it must never fire from a prefetch, a
+    browser "Reload," or a crawler following a link — only a deliberate
+    click. Renders inline via htmx; the panel states plainly this is
+    AI-drafted and unconfigured/failed cases show a plain unavailable
+    message rather than an error."""
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    brief = ai_brief.generate_coffee_chat_brief(contact)
+    if brief is not None:
+        record_event("ai_brief_generated", user=request.user)
+    return render(request, "crm/_contact_ai_brief.html",
+                  {"contact": contact, "brief": brief, "requested": True})

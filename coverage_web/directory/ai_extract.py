@@ -1,5 +1,11 @@
-"""Deadline extraction over cached posting text, using an LLM as a second
-pass behind the regex extractors in `classify.py` and `facts.py`.
+"""LLM access for the app: deadline extraction over cached posting text (this
+module's original, primary purpose), plus `complete_text()`, a thin shared
+client any other feature (e.g. `crm.ai_brief`'s coffee-chat briefs) can call
+rather than each hand-rolling its own Anthropic API plumbing. One
+configuration surface, one retry/timeout policy, one place that goes dark
+when `ANTHROPIC_API_KEY` is unset.
+
+DEADLINE EXTRACTION, specifically
 
 WHY THIS EXISTS
 ---------------
@@ -211,3 +217,47 @@ def extract_deadline_ai(
     # evidence -- kept distinguishable so a future audit can tell which
     # mechanism produced a given deadline without re-deriving it from raw.
     return DeadlineGuess(value=deadline_iso, phrase=quote, confidence=0.5)
+
+
+DEFAULT_TEXT_MODEL = "claude-sonnet-5"
+
+
+def complete_text(
+    prompt: str,
+    *,
+    model: str = DEFAULT_TEXT_MODEL,
+    max_tokens: int = 600,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    retries: int = DEFAULT_RETRIES,
+) -> str | None:
+    """A free-form completion for prose features (coffee-chat briefs, outreach
+    drafts) that don't fit the single-fact grounded-quote contract above.
+
+    Returns `None` when unconfigured or on any API failure -- callers must
+    treat this the same way they'd treat "the AI feature isn't available
+    right now" (show nothing, or a plain "AI brief unavailable" note), never
+    as an error worth a 500. There is no grounding check here, because
+    there's no single quotable fact to verify: the caller's OWN prompt is
+    responsible for constraining the model to the context it's given (see
+    `crm/ai_brief.py` for the pattern -- an explicit "only use the facts
+    below, never invent one" instruction plus a visible "AI-drafted, check
+    before you send it" label wherever this output reaches a user)."""
+    if not is_configured():
+        return None
+    p = (prompt or "").strip()
+    if not p:
+        return None
+    try:
+        response = _post_json(
+            {
+                "model": model,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": p}],
+            },
+            timeout=timeout,
+            retries=retries,
+        )
+    except AIExtractError:
+        return None
+    text = _extract_response_text(response).strip()
+    return text or None

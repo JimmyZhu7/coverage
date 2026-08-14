@@ -1007,6 +1007,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cd-opener textarea { width: 100%; margin-top: var(--s2); font-size: var(--fs-s); }
   .cd-opener-foot { display: flex; justify-content: flex-end; margin-top: var(--s2); }
 
+  /* The coffee-chat AI brief panel — reuses .cd-opener's <details> chrome
+     above; these are just the swapped-in content states. htmx's own
+     indicator convention (opacity 0 -> 1 while .htmx-request is set on the
+     element) has no base rule anywhere else in this app yet, so it's
+     defined here narrowly rather than assumed global. */
+  .cd-ai-hint { margin-top: var(--s2); font-size: var(--fs-s); color: var(--ink-3); }
+  .cd-ai-label { margin: var(--s2) 0 0; font-size: var(--fs-micro); font-weight: var(--w-med);
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3); }
+  .cd-ai-brief { margin: var(--s1) 0 var(--s2); font-size: var(--fs-s); color: var(--ink-2);
+    white-space: pre-line; }
+  .htmx-indicator { opacity: 0; transition: opacity var(--t-fast); }
+  .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { opacity: 1; }
+  .cd-ai-loading { margin-left: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
+
   /* Eight-week trace under the pace ring. */
   .pace-spark { display: flex; align-items: flex-end; gap: 3px; height: 26px;
     margin-top: var(--s3); padding-top: var(--s2);

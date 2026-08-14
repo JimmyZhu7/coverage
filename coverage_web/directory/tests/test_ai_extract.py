@@ -11,7 +11,7 @@ import pytest
 from django.test import override_settings
 
 from directory import ai_extract
-from directory.ai_extract import AIExtractError, DeadlineGuess, extract_deadline_ai, is_configured
+from directory.ai_extract import AIExtractError, DeadlineGuess, complete_text, extract_deadline_ai, is_configured
 
 
 class FakeHTTPResponse:
@@ -180,3 +180,31 @@ def test_post_json_raises_after_exhausting_retries(monkeypatch):
 
     with pytest.raises(AIExtractError):
         ai_extract._post_json({"x": 1}, timeout=5, retries=1)
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_complete_text_returns_none_without_a_key(monkeypatch):
+    called = []
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: called.append(1))
+    assert complete_text("Write a brief.") is None
+    assert called == []
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_complete_text_returns_none_for_blank_prompt():
+    assert complete_text("") is None
+    assert complete_text("   ") is None
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_complete_text_returns_the_model_text(monkeypatch):
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: _api_text_response("Here is your brief."))
+    assert complete_text("Write a brief.") == "Here is your brief."
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_complete_text_returns_none_on_api_failure(monkeypatch):
+    def raiser(*a, **kw):
+        raise AIExtractError(RuntimeError("boom"))
+    monkeypatch.setattr(ai_extract, "_post_json", raiser)
+    assert complete_text("Write a brief.") is None
