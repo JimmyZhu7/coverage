@@ -572,8 +572,16 @@ main { min-height: 60vh; }
   /* flex-start, never center: a centred flex row that overflows spills
      half its content LEFT of the scroll origin, where scrollLeft cannot
      reach — the first pill sat at x=-42 with the row already at 0. */
+  /* padding-right matches the mask's 28px fade. Settings is the LAST pill,
+     so centring it pins the row flush to its end — and flush against the
+     end, the pill's own tail sits inside the fade and finishes at ~18%
+     opacity. The padding adds 28px of scrollable air past the last pill, so
+     scrolling to the end parks the fade over empty space instead of over
+     the you-are-here marker. The affordance still works: the fade only
+     stops covering a pill once there is genuinely nothing further right. */
   .site-nav { overflow-x: auto; flex: 1 1 auto; min-width: 0;
     flex-wrap: nowrap; justify-content: flex-start;
+    padding-right: 28px;
     scrollbar-width: none; -webkit-overflow-scrolling: touch;
     mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
     -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
