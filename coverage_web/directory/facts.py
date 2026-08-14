@@ -499,7 +499,34 @@ def _rate(v: float) -> str:
     return f"${v:.2f}".rstrip("0").rstrip(".") if v % 1 else f"${v:.0f}"
 
 
+
+# A multi-location posting lists one rate per city under a single "Pay
+# Range" heading, and the FIRST match in document order is not any kind of
+# "primary" figure -- it is simply whichever city the board happened to
+# print first. Returning on that first match silently drops every other
+# city's rate from the same block, including a higher one: Wells Fargo id
+# 5079 states "Charlotte, NC: $33.66/Hour ... Minneapolis, MN:
+# $37.02/Hour" and stored only $33.66, with the Minneapolis figure never
+# looked at again. All matches sharing the anchor's hourly/annual
+# classification and sitting within this many characters of it are merged
+# into one low-to-high range instead -- bounded so a real second pay
+# statement much later in a long posting (a signing bonus, a different
+# role's rate) is not pulled into the same figure. Wide enough for the
+# widest block observed live (Wells Fargo, 6 cities, ~230 chars).
+_PAY_BLOCK_SPAN = 500
+
+# The number is USD unless the posting says otherwise -- and several TD
+# Securities Canada postings do, right after the range ("$52,700 - $74,400
+# CAD"). Dropping that code entirely (the previous behaviour) rendered a
+# CAD figure as an indistinguishable bare "$" chip next to genuinely-USD
+# chips from other firms on the same board. Checked live: the code always
+# sits within a few characters of the matched range, never buried in
+# unrelated prose further away.
+_CURRENCY = re.compile(r"\b(USD|CAD|GBP|EUR|AUD|SGD|HKD|BMD|NZD|CHF|JPY)\b")
+
+
 def extract_pay(text: str) -> dict | None:
+    candidates = []
     for m in _PAY.finditer(text):
         low, high = _money(m.group(1)), _money(m.group(2))
         if low is None or high is None or high < low:
@@ -510,17 +537,41 @@ def extract_pay(text: str) -> dict | None:
             # An "hourly rate" over $500 is not an hourly rate.
             if high > 500:
                 continue
-            value = (f"{_rate(low)}/hr" if low == high
-                     else f"{_rate(low)}–{_rate(high)}/hr")
-        else:
-            if low < 10_000:
-                continue
-            value = (f"${int(low) // 1000}k" if low == high
-                     else f"${int(low) // 1000}k–${int(high) // 1000}k")
-        return {"value": value, "low": low, "high": high,
-                "unit": "hour" if hourly else "year",
-                "phrase": _sentence(text, m.start(), m.end())}
-    return None
+        elif low < 10_000:
+            continue
+        candidates.append((m, low, high, hourly))
+    if not candidates:
+        return None
+
+    anchor = candidates[0]
+    hourly = anchor[3]
+    group = [c for c in candidates
+             if c[3] == hourly and c[0].start() - anchor[0].start() <= _PAY_BLOCK_SPAN]
+    low = min(c[1] for c in group)
+    high = max(c[2] for c in group)
+
+    if hourly:
+        value = (f"{_rate(low)}/hr" if low == high
+                 else f"{_rate(low)}–{_rate(high)}/hr")
+    else:
+        value = (f"${int(low) // 1000}k" if low == high
+                 else f"${int(low) // 1000}k–${int(high) // 1000}k")
+
+    currency = None
+    for m, *_rest in group:
+        found = _CURRENCY.search(text[max(0, m.start() - 10): m.end() + 20])
+        if found:
+            currency = found.group(1).upper()
+            break
+    if currency and currency != "USD":
+        value = f"{value} {currency}"
+
+    span_start = min(c[0].start() for c in group)
+    span_end = max(c[0].end() for c in group)
+    return {"value": value, "low": low, "high": high,
+            "unit": "hour" if hourly else "year",
+            "currency": currency,
+            "phrase": _sentence(text, span_start, span_end)}
 
 
 # --- Rolling review --------------------------------------------------------

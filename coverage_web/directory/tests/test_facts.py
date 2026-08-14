@@ -344,6 +344,86 @@ def test_a_deal_size_is_not_a_salary():
     assert extract_pay("We advise on transactions of $50 - $500 million.") is None
 
 
+# --- Pay: multi-location merge + currency -----------------------------------
+# Round 4 regression: extract_pay `return`ed on the FIRST regex match, so a
+# multi-location posting's higher-paying city was silently discarded, and any
+# stated non-USD currency code was dropped entirely, rendering a CAD figure
+# identically to a genuinely-USD one. Fixtures are trimmed verbatim from live
+# scraped `detail_text` (Wells Fargo id=5079: 3 locations; id=1262: 6
+# locations; id=5080: the "2 Locations" placeholder whose own text actually
+# lists 3 cities; TD Securities id=19632 for the currency code).
+
+def test_multi_location_pay_range_takes_the_full_low_to_high_span():
+    """Wells Fargo id=5079's exact shape: Minneapolis pays more than
+    Charlotte/Irving, but the OLD code returned on the first match
+    (Charlotte, $33.66) and never looked at the rest of the block."""
+    got = extract_pay(
+        "Pay Range Charlotte, NC : $33.66 – $33.66/Hour Irving, TX : "
+        "$33.66 - $33.66/Hour Minneapolis, MN : $37.02 - $37.02/Hour "
+        "Wells Fargo only considers candidates")
+    assert got["value"] == "$33.66–$37.02/hr"
+    assert got["low"] == 33.66
+    assert got["high"] == 37.02
+
+
+def test_six_city_pay_block_still_finds_the_outlier_city():
+    """Wells Fargo id=1262: the higher Minneapolis rate sits 4th of 6 cities
+    in the block, well past the first match's own sentence."""
+    got = extract_pay(
+        "Pay Range: Charlotte, NC: $33.66 - $33.66/Hour Des Moines, IA: "
+        "$33.66 - $33.66/Hour Dallas Metro, TX: $33.66 - $33.66/Hour "
+        "Minneapolis, MN: $37.02-$37.02/Hour Phoenix Metro, AZ: $33.66 - "
+        "$33.66/Hour San Antonio, TX: $33.66 - $33.66/Hour In this role")
+    assert got["value"] == "$33.66–$37.02/hr"
+
+
+def test_lower_first_listed_city_is_not_the_final_answer():
+    """Wells Fargo id=5080: the first-listed city ($43.27) is actually the
+    HIGH end here — Charlotte ($36.06) and Minneapolis ($39.91), listed
+    after it, are both lower. The merged range must span all three either
+    way, not just keep whichever was printed first."""
+    got = extract_pay(
+        "Pay Range: New York, NY & San Francisco, CA: $43.27-$43.27 hourly "
+        "Charlotte, NC: $36.06 – $36.06 hourly Minneapolis, MN: $39.91 – "
+        "$39.91 hourly Wells Fargo only considers candidates")
+    assert got["value"] == "$36.06–$43.27/hr"
+    assert got["low"] == 36.06
+    assert got["high"] == 43.27
+
+
+def test_a_pay_range_far_later_in_a_long_posting_is_not_merged_in():
+    """The merge is bounded to the same pay-range block: a second, unrelated
+    dollar range much later in a long posting (a different section
+    entirely) must not widen the reported figure."""
+    filler = "x" * 800
+    got = extract_pay(
+        f"Pay Range: $85,000 - $95,000. {filler} Referral Bonus: "
+        f"$150,000 - $200,000 for qualifying hires.")
+    assert got["value"] == "$85k–$95k"
+
+
+def test_a_stated_non_usd_currency_code_is_kept_on_the_chip():
+    """TD Securities id=19632's exact shape: the code sits right after the
+    range, with no unit phrase in between."""
+    got = extract_pay(
+        "Pay Details: $52,700 - $74,400 CAD TD is committed to providing "
+        "fair and equitable compensation opportunities")
+    assert got["value"] == "$52k–$74k CAD"
+    assert got["currency"] == "CAD"
+
+
+def test_an_unstated_currency_is_not_labeled_usd():
+    got = extract_pay("Pay Range $85,000-$100,000")
+    assert got["currency"] is None
+    assert "USD" not in got["value"]
+
+
+def test_an_explicit_usd_code_does_not_add_a_redundant_suffix():
+    got = extract_pay("Salary: $120,000 - $140,000 USD annually")
+    assert got["currency"] == "USD"
+    assert got["value"] == "$120k–$140k"  # no "USD" suffix — it's the default
+
+
 # --- Rolling ---------------------------------------------------------------
 
 def test_stated_rolling_review_is_read():
