@@ -195,3 +195,103 @@ def test_a_done_row_states_that_it_is_done(client, pipeline):
     background tint alone."""
     body = client.get(reverse("my_applications")).content.decode()
     assert "Done, no longer live" in body
+
+
+# ---------------------------------------------------------------------------
+# Identity-duplicate folding — my_applications() must fold the same way
+# Browse Openings does, without the trap that made a naive wiring collapse a
+# real 13-row pipeline down to 1 (see directory/dupes.py's fold_duplicates
+# and the round-8 dedup finding).
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def duplicate_pipeline(db):
+    """Two Opportunity rows that are the same tal.net requisition filed under
+    two candidate-pool addresses (identical firm + title + location), plus a
+    THIRD, genuinely different tracked role at the same firm. The third role
+    is the trap: a naive fold that keys on UserOpportunity (which has no
+    firm/title/location of its own) collapses all three into one instead of
+    folding only the true pair.
+    """
+    firm = Firm.objects.create(name="Bank of America", slug="bofa")
+    dup_a = Opportunity.objects.create(
+        firm=firm, url="https://bankcampuscareers.tal.net/pl/1/opp/14594",
+        title="Campus Insight Forum", location="New York, NY",
+        bucket="event", status="open", deadline=None,
+    )
+    dup_b = Opportunity.objects.create(
+        firm=firm, url="https://bankcampuscareers.tal.net/pl/2/opp/14594",
+        title="Campus Insight Forum", location="New York, NY",
+        bucket="event", status="open", deadline=None,
+    )
+    other = Opportunity.objects.create(
+        firm=firm, url="https://bankcampuscareers.tal.net/pl/1/opp/9999",
+        title="Summer Analyst, Global Markets", location="New York, NY",
+        bucket="internship", status="open", deadline=None,
+    )
+    user = _user()
+    return user, dup_a, dup_b, other
+
+
+@pytest.mark.django_db
+def test_a_tracked_identity_duplicate_folds_to_one_row(client, duplicate_pipeline):
+    """The bug: tracking both addresses of the same posting showed it twice
+    and inflated the funnel total. Folding must remove exactly the one
+    duplicate, leaving the unrelated tracked role untouched."""
+    user, dup_a, dup_b, other = duplicate_pipeline
+    for o in (dup_a, dup_b, other):
+        UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+
+    assert resp.context["total"] == 2
+    titles = [i["title"] for s in resp.context["stages"] for i in s["items"]]
+    assert titles.count("Campus Insight Forum") == 1
+    assert titles.count("Summer Analyst, Global Markets") == 1
+
+
+@pytest.mark.django_db
+def test_folding_does_not_touch_a_real_13_row_pipeline(client, duplicate_pipeline):
+    """The regression this fix exists to prevent: passing UserOpportunity
+    rows (or the calendar's plain dicts) straight into fold_duplicates keys
+    every row to the same (None, '') bucket and discards all but one
+    tracked role. Ten genuinely distinct tracked roles, plus the one
+    duplicate pair, must survive as eleven — not collapse to one."""
+    user, dup_a, dup_b, other = duplicate_pipeline
+    firm = dup_a.firm
+    UserOpportunity.all_objects.create(user=user, opportunity=dup_a, applied_status="saved")
+    UserOpportunity.all_objects.create(user=user, opportunity=dup_b, applied_status="saved")
+    UserOpportunity.all_objects.create(user=user, opportunity=other, applied_status="saved")
+    for n in range(9):
+        o = Opportunity.objects.create(
+            firm=firm, url=f"https://bankcampuscareers.tal.net/pl/1/opp/{5000 + n}",
+            title=f"Distinct Role {n}", location="New York, NY",
+            bucket="internship", status="open", deadline=None,
+        )
+        UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+
+    assert resp.context["total"] == 11
+
+
+@pytest.mark.django_db
+def test_progressed_stage_wins_the_fold_over_the_untouched_copy(client, duplicate_pipeline):
+    """If a student applied on one duplicate address and only saved the
+    other, the applied copy is the one worth keeping — not whichever
+    fold_duplicates' own (deadline/location/first_seen/id) tie-break would
+    have picked."""
+    user, dup_a, dup_b, other = duplicate_pipeline
+    UserOpportunity.all_objects.create(user=user, opportunity=dup_a, applied_status="saved")
+    UserOpportunity.all_objects.create(user=user, opportunity=dup_b, applied_status="submitted")
+    UserOpportunity.all_objects.create(user=user, opportunity=other, applied_status="saved")
+    client.force_login(user)
+
+    by_key = {s["key"]: s for s in client.get(reverse("my_applications")).context["stages"]}
+
+    assert by_key["submitted"]["count"] == 1
+    assert by_key["submitted"]["items"][0]["title"] == "Campus Insight Forum"
+    assert by_key["saved"]["count"] == 1
+    assert by_key["saved"]["items"][0]["title"] == "Summer Analyst, Global Markets"
