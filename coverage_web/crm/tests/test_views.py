@@ -292,6 +292,57 @@ def test_structural_axis_never_prints_a_bare_question_mark(client):
 
 
 # ---------------------------------------------------------------------------
+# 5b. The Leverage axis said "role unknown" on a page whose own header
+# printed the role. Live on /app/contacts/484/: eyebrow "Amazon · Sales",
+# rail "Leverage 30.0 — role unknown", 37 contacts affected.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_leverage_does_not_call_a_shown_role_unknown(client):
+    """"Sales" is a real role the header prints and the keyword table does
+    not recognise. The rail may say it could not rank it; it may not say we
+    do not know it."""
+    user = _user()
+    contact = Contact.all_objects.create(user=user, name="Travis Chen", role="Sales")
+
+    client.force_login(user)
+    raw = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    body = re.sub(r"\s+", " ", raw)
+
+    assert "· Sales" in body, "the header still prints the role"
+    assert "role unknown" not in body
+    assert "no seniority read from this role" in body
+
+
+@pytest.mark.django_db
+def test_leverage_says_no_role_on_file_when_there_is_no_role(client):
+    """The other half of the split. A blank role is the ONE case the old
+    string was true for, and it keeps a true string."""
+    user = _user()
+    contact = Contact.all_objects.create(user=user, name="Nameless Role", role="")
+
+    client.force_login(user)
+    raw = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    body = re.sub(r"\s+", " ", raw)
+
+    assert "no role on file" in body
+    assert "no seniority read from this role" not in body
+
+
+@pytest.mark.django_db
+def test_a_ranked_role_still_reports_its_seniority(client):
+    user = _user()
+    contact = Contact.all_objects.create(user=user, name="Dana MD", role="Managing Director")
+
+    client.force_login(user)
+    raw = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    body = re.sub(r"\s+", " ", raw)
+
+    assert "seniority 100.0/100 from role" in body
+    assert "no seniority read from this role" not in body
+    assert "no role on file" not in body
+
+
+# ---------------------------------------------------------------------------
 # 5b. Manual-override touch notes: the "manual override: <col>=<val>, ..."
 # audit prefix is machine bookkeeping (services.set_contact_state's own
 # comment), not something a user reading their own History should see —

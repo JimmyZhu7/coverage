@@ -424,12 +424,22 @@ def _seniority_from_role(role: str | None) -> float | None:
 def _score_leverage(
     contact: Mapping[str, Any], params: Mapping[str, Any]
 ) -> tuple[float, dict[str, Any]]:
-    seniority = _seniority_from_role(contact.get("role"))
+    role = contact.get("role")
+    seniority = _seniority_from_role(role)
     base = seniority if seniority is not None else params["leverage_unknown_role"]
     alum = bool(contact.get("school_affiliation"))
     score = base + (params["leverage_school_bonus"] if alum else 0.0)
     return _clamp(score), {
         "seniority": None if seniority is None else _round1(seniority),
+        # `seniority is None` answers TWO different questions the same way:
+        # "there is no role" and "the role did not match the keyword table"
+        # (_seniority_from_role returns None for both). The contact rail read
+        # the first meaning off the second and printed "role unknown" on
+        # pages whose own header printed the role — 37 of 163 contacts with a
+        # role, including strings as explicit as "Manager, Talent Acquisition"
+        # and "Bain campus recruiting lead for USC". The two questions get
+        # two answers here so a display layer can tell them apart.
+        "role_given": bool(role),
         "school_affiliation": alum,
     }
 
