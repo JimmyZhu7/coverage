@@ -126,10 +126,22 @@
   .mrail-m.is-active .mrail-bar { background: var(--accent); }
   .mrail-m.is-active .mrail-lab { color: var(--accent-ink); font-weight: var(--w-bold); }
   .mrail-m.is-active .mrail-n { color: var(--accent-ink); }
-  /* The month TODAY is in, when you have navigated away from it. A dot under
+  /* The month TODAY is in, when you have navigated away from it. A dot beside
      the label rather than a colour, so "today lives here" and "you are
-     reading this" never have to be told apart by hue. */
-  .mrail-m.is-now:not(.is-active) .mrail-lab::after { content: " •"; color: var(--accent); }
+     reading this" never have to be told apart by hue.
+
+     Absolute, NOT inline. As `content: " •"` inside the label the dot was
+     part of the label's own line box, and .mrail-m centres that shrink-to-fit
+     box over the bar — so the dot widened the box from 19.5px to 32.5px and
+     pushed the month's letters 6.5px left of the bar they name, while the
+     other 23 columns stayed dead centre. The one column the marker exists to
+     draw the eye to was the only misregistered one. Taking it out of flow
+     leaves the label's box the width of its letters, so the letters stay put
+     and only the dot hangs off the side. The sibling .cycband-m marker in
+     coverage.css is fixed the same way for the same reason. */
+  .mrail-m.is-now:not(.is-active) .mrail-lab { position: relative; }
+  .mrail-m.is-now:not(.is-active) .mrail-lab::after { content: "•"; color: var(--accent);
+    position: absolute; left: 100%; top: 0; margin-left: 2px; }
 
   /* Wrapping rules live BELOW every .mrail-* base rule on purpose: they carry
      the same specificity, so placed above they lose and silently do nothing —
