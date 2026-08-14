@@ -125,7 +125,7 @@
                 who have been touched at least once. `stopPropagation`
                 keeps its click from also toggling the checkbox underneath.
                 {% endcomment %}
-                <label class="net-mini" title="{{ a.reason|capfirst }}">
+                <label class="net-mini kin-reveal" style="--i:{{ forloop.counter0 }}" title="{{ a.reason|capfirst }}">
                   <input class="net-mini-check" type="checkbox" name="ids"
                          value="{{ a.contact.id }}"
                          aria-label="Select {{ a.contact.name|smart_title }}">
