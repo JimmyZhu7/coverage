@@ -548,6 +548,40 @@ def test_genuine_silence_still_reads_as_silence():
     assert "no reply to 1 note" in r["reasoning"]
 
 
+def test_silence_is_stated_once_not_twice():
+    """The line read "no reply yet; no reply to 1 note" — the depth clause and
+    the send-count clause are both gated on depth_level == 0, so they always
+    co-occurred, and for 92 of the 94 live contacts in that state the count
+    was 1, making the second clause a literal restatement of the first.
+
+    The counted clause is the survivor: it is the one that carries a number.
+    """
+    r = scoring.score_contact({"id": 1}, [touch(1, "outreach", 23)], as_of=AS_OF)
+    assert r["reasoning"].count("no reply") == 1
+    assert "no reply yet" not in r["reasoning"]
+    assert r["reasoning"].startswith("no reply to 1 note")
+
+
+def test_two_sends_still_reports_the_count_that_earns_its_place():
+    """Where the count is not 1 it says something the depth clause cannot,
+    which is exactly why the fix keeps this clause and drops the other."""
+    r = scoring.score_contact(
+        {"id": 1}, [touch(1, "outreach", 23), touch(1, "follow_up", 9)], as_of=AS_OF
+    )
+    assert "no reply to 2 notes" in r["reasoning"]
+    assert r["reasoning"].count("no reply") == 1
+
+
+def test_a_depth_zero_contact_with_no_outbound_still_says_no_reply_yet():
+    """The send-count clause needs `sends > 0`. A contact whose only touches
+    are courtesy kinds (excluded from _OUTBOUND_KINDS) has no counted clause
+    to inherit the statement, so the bare one must still fire — dropping it
+    unconditionally would leave the depth ladder silent."""
+    r = scoring.score_contact({"id": 1}, [touch(1, "thank_you", 4)], as_of=AS_OF)
+    assert "no reply yet" in r["reasoning"]
+    assert "no reply to" not in r["reasoning"]
+
+
 def test_manual_override_warmth_does_not_produce_a_self_contradicting_line():
     # set_state's audit touch raises depth to "replied" without leaving an
     # engagement touch behind; the line must not then claim no reply.
