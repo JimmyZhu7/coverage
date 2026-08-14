@@ -45,6 +45,19 @@ per-posting signal the list-based scrape never checks. `reverify`'s routine
 command is the same-day catch-up an audit-confirmed finding deserves,
 same as round 2's.
 
+Round 7, 2026-08-14: Opportunities id=9376 ("BMO", "Director, Intraday
+Liquidity Risk Oversight"), id=9389 ("BMO", "Senior Relationship Manager,
+Multinational Companies"), id=9522 ("BMO", "Sr. Treasury Sales Consultant")
+— all three stored status='open', deadline=2026-08-13 (a passed date),
+last_checked=last_verified=2026-08-14T03:47:13Z (today's routine `scrape`
+run, same list-endpoint-lag mechanism as round 3's Raymond James row above).
+`coverage_connectors.workday.verify()` on all three returned `result=
+'closed', evidence="CxS job-detail HTTP 422; posting page's own
+postingAvailable flag reads false"` — the same per-posting signal, just a
+422 instead of round 3's 403 on the blocked structured call, falling back
+to the same `postingAvailable` page flag. Same-day catch-up, same as
+round 3's.
+
 The DEFAULT_IDS list below is exactly the rows the current audit round
 confirmed and not yet applied; --ids overrides it for any future one-off
 audit finding, so this command doesn't need to be re-written each time. Live
@@ -64,7 +77,7 @@ from directory.models import Opportunity
 
 # Confirmed dead by the current round's read-only audit — see module
 # docstring. Round 2's id=8885 was applied and dropped once closed.
-DEFAULT_IDS = [10630]
+DEFAULT_IDS = [10630, 9376, 9389, 9522]
 
 
 class Command(BaseCommand):
