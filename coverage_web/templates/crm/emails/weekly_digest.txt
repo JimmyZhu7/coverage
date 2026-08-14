@@ -1,0 +1,31 @@
+{% autoescape off %}{% comment %}
+Plain text, not HTML — autoescape is off for the whole file so a firm name
+with an "&" or a mailto: URL's "&"-joined query params render as literal
+characters instead of HTML entities (Django's template engine autoescapes by
+default regardless of the .txt extension; only an explicit tag turns it off).
+{% endcomment %}Coverage · your week of {{ digest.today|date:"N j" }}
+{% if digest.closing %}
+CLOSING THIS WEEK
+{% for item in digest.closing %}
+* {{ item.firm_name }} · {{ item.title }}{% if item.location %} · {{ item.location }}{% endif %}
+  {{ item.stage_label }} · {{ item.deadline.countdown }} ({{ item.deadline.label }})
+  {{ item.url }}
+{% endfor %}{% endif %}{% if digest.actions %}
+WHO TO PING
+{% for a in digest.actions %}
+* {{ a.contact.name }} · {{ a.firm_name }} · {{ a.label }}
+  {{ a.reason }}{% if a.mailto and a.contact.email %}
+  {{ a.mailto }}{% endif %}
+{% endfor %}{% if digest.actions_overflow %}
+...and {{ digest.actions_overflow }} more waiting for you in Today.
+{% endif %}{% endif %}{% if digest.picks %}
+NEW FOR YOU
+{% for pick in digest.picks %}
+* {{ pick.firm_name }} · {{ pick.title }}{% if pick.location %} · {{ pick.location }}{% endif %}
+  {{ pick.why }}
+  {{ pick.url }}
+{% endfor %}{% endif %}
+Open Coverage: {{ site_url }}{% url 'crm:week' %}
+
+You're getting this because you're onboarded on Coverage. It runs weekly, built from your own tracked roles and contacts, and stops on its own the week neither has anything due.
+{% endautoescape %}

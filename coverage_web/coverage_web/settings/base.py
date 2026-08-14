@@ -78,6 +78,13 @@ CAPTURE_INBOUND_SECRET = env("CAPTURE_INBOUND_SECRET", default="local-dev-captur
 # domain whose inbound MX points at Postmark. Placeholder until DNS is set up.
 CAPTURE_INBOUND_DOMAIN = env("CAPTURE_INBOUND_DOMAIN", default="in.coverage.app")
 
+# The scheme+host the app is reachable at, for links that have to be built
+# outside a request (no `request.build_absolute_uri` to lean on) — today,
+# only the weekly digest email's "open in Coverage" links (crm/digest.py,
+# the send_weekly_digest command). Defaults to local dev; set the real
+# deployed origin once one exists (see docs on deploy status).
+SITE_URL = env("SITE_URL", default="http://localhost:8000")
+
 # Anthropic API key for the LLM-backed extraction pass (directory/ai_extract.py)
 # and any future AI feature (coffee-chat briefs, outreach drafts). Blank by
 # default — every AI code path checks ai_extract.is_configured() first and

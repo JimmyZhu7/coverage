@@ -2313,6 +2313,50 @@ def _stage_card(uo, *, today) -> dict:
     }
 
 
+def _tracked_rows(user):
+    """The user's tracked, non-dismissed rows, folded exactly as Browse
+    Openings folds them — the one partition of "what is this student
+    tracking" that My Applications and the weekly digest (`crm.digest`) both
+    read, so the two surfaces can never disagree about which rows exist or
+    which of a folded pair survives.
+
+    Identity duplicates (one requisition filed under two candidate-pool
+    addresses, e.g. a tal.net posting listed on both `pl/1` and `pl/2`) must
+    fold here exactly as they do on Browse Openings, or a student who tracked
+    the same job under both addresses sees it twice and any count built on
+    this list overstates their pipeline.
+
+    `fold_duplicates` keys on `firm_id`/`title`/`location`/`deadline`, none of
+    which UserOpportunity carries — every row would key to the same
+    `(None, '')` bucket and the fold would discard real tracked applications
+    instead of the one genuine duplicate. So it runs on the underlying
+    Opportunity objects, in the same order as `rows`, and the survivors are
+    mapped back to their UserOpportunity by (Python) object identity rather
+    than by re-deriving anything from the folded rows.
+
+    If a student tracked both duplicate addresses at different funnel stages
+    (applied on one, still saved on the other), the stage with real progress
+    is the one worth keeping — fold_duplicates' own tie-break (deadline, then
+    location, then first_seen, then id) knows nothing about funnel stage, so
+    the progressed opportunity is marked sticky to win the fold."""
+    from analytics.models import UserOpportunity
+
+    rows = list(
+        UserOpportunity.objects.for_user(user)
+        .filter(dismissed=False)
+        .select_related("opportunity", "opportunity__firm")
+        .order_by("opportunity__firm__name", "opportunity__title")
+    )
+    opps = [uo.opportunity for uo in rows]
+    progressed_ids = {
+        uo.opportunity_id for uo in rows
+        if (uo.applied_status or "saved") != "saved"
+    }
+    survivors, _folded = fold_duplicates(opps, sticky_ids=progressed_ids)
+    kept = {id(o) for o in survivors}
+    return [uo for uo, opp in zip(rows, opps) if id(opp) in kept]
+
+
 @login_required
 def my_applications(request):
     """The user's tracked roles: one funnel partition, plus two deadline
@@ -2335,44 +2379,8 @@ def my_applications(request):
     Done rows are excluded from both lenses. A finished application has no
     deadline urgency left in it, and letting one back into Closing Soon would
     put a dead role at the top of the page."""
-    from analytics.models import UserOpportunity
-
     today = timezone.localdate()
-    rows = list(
-        UserOpportunity.objects.for_user(request.user)
-        .filter(dismissed=False)
-        .select_related("opportunity", "opportunity__firm")
-        .order_by("opportunity__firm__name", "opportunity__title")
-    )
-
-    # Identity duplicates (one requisition filed under two candidate-pool
-    # addresses, e.g. a tal.net posting listed on both `pl/1` and `pl/2`)
-    # must fold here exactly as they do on Browse Openings, or a student who
-    # tracked the same job under both addresses sees it twice and the page's
-    # own stage/lens counts overstate their pipeline.
-    #
-    # `fold_duplicates` keys on `firm_id`/`title`/`location`/`deadline`, none
-    # of which UserOpportunity carries — every row would key to the same
-    # `(None, '')` bucket and the fold would discard real tracked
-    # applications instead of the one genuine duplicate. So it runs on the
-    # underlying Opportunity objects, in the same order as `rows`, and the
-    # survivors are mapped back to their UserOpportunity by (Python) object
-    # identity rather than by re-deriving anything from the folded rows.
-    #
-    # If a student tracked both duplicate addresses at different funnel
-    # stages (applied on one, still saved on the other), the stage with real
-    # progress is the one worth keeping — fold_duplicates' own tie-break
-    # (deadline, then location, then first_seen, then id) knows nothing
-    # about funnel stage, so the progressed opportunity is marked sticky to
-    # win the fold.
-    opps = [uo.opportunity for uo in rows]
-    progressed_ids = {
-        uo.opportunity_id for uo in rows
-        if (uo.applied_status or "saved") != "saved"
-    }
-    survivors, _folded = fold_duplicates(opps, sticky_ids=progressed_ids)
-    kept = {id(o) for o in survivors}
-    rows = [uo for uo, opp in zip(rows, opps) if id(opp) in kept]
+    rows = _tracked_rows(request.user)
 
     # setdefault so any unexpected legacy status can't KeyError the page.
     groups: dict[str, list] = {key: [] for key, _ in _STAGES}
@@ -2475,6 +2483,8 @@ def my_applications(request):
     # the feed for the obvious reason, but they must live SOMEWHERE: a hidden
     # thing with no way back is a decision the product made permanent on the
     # user's behalf.
+    from analytics.models import UserOpportunity
+
     hidden = list(
         UserOpportunity.objects.for_user(request.user)
         .filter(dismissed=True)
