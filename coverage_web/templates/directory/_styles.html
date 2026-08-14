@@ -647,12 +647,20 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 
 
   /* Fixed header height so every firm card's header aligns, regardless of how
-     the name wraps or which pills show. */
-  .firmcol-head { display: flex; gap: var(--s3); align-items: center; flex: none;
+     the name wraps or which pills show. The names hang from the TOP of the
+     head, not from the centre of their own stack: a fixed box is only half
+     the promise, and `align-items: center` broke the other half by making
+     each name's position depend on what came after it. Picked-for-you has no
+     tier pill, so its id block ran 42.2px against a firm's 61.4px and
+     centring pushed its name 9.6px lower than Morgan Stanley's beside it.
+     A two-line firm name would have done the same thing. The logo keeps its
+     own centring, so the tiles stay exactly where they were. */
+  .firmcol-head { display: flex; gap: var(--s3); align-items: flex-start; flex: none;
     min-height: 92px; padding: var(--s3) var(--s5); border-bottom: 1px solid var(--line); }
   /* Per-firm tint: --hue comes from the firm_hue filter; saturation and
      lightness are fixed here so every chip shares one muted color family. */
   .firmcol-logo { width: 38px; height: 38px; flex: none; border-radius: 10px;
+    align-self: center;
     /* 31% lightness measured 4.11:1 against the 90% tile on some hues —
        under the 4.5 the monogram's text needs. 24% clears it on every hue
        in the wheel; the tile stays put, so nothing else shifts. */
