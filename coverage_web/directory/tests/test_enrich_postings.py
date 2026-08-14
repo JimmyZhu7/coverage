@@ -262,6 +262,90 @@ class TestGoldmanSachsDetailFetch:
         assert fetch_posting(self.URL) == (None, "")
 
 
+class TestOracleDetailFetch:
+    """Regression test for the confirmed Oracle coverage gap: a plain GET of
+    a jpmc.fa.oraclecloud.com job URL is a JS shell whose only text node is
+    the <title> "JPMC Candidate Experience page" (43 open rows carry that
+    literal string as detail_text; another 79 have never been fetched at
+    all). The public, unauthenticated `recruitingCEJobRequisitions` search
+    endpoint oracle.py's own fetch()/verify() already call answers a
+    re-query by requisition id (keyword=<id>) with real posting text —
+    confirmed live for requisition 210765547 to be a 163-char
+    ShortDescriptionStr with empty Responsibilities/Qualifications, real
+    coverage even though short of a full posting body."""
+
+    URL = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210765547"
+
+    def _payload(self, short="We're looking for talented individuals...",
+                 responsibilities="", qualifications=""):
+        req = {"Id": "210765547", "PrimaryLocation": "New York, New York"}
+        if short:
+            req["ShortDescriptionStr"] = short
+        if responsibilities:
+            req["ExternalResponsibilitiesStr"] = responsibilities
+        if qualifications:
+            req["ExternalQualificationsStr"] = qualifications
+        return {"items": [{"requisitionList": [req]}]}
+
+    def test_short_description_is_read_through_the_search_endpoint(self, monkeypatch):
+        captured = {}
+
+        def fake_get(url, *, headers, timeout):
+            captured["url"] = url
+            return _FakeResponse(200, self._payload())
+
+        monkeypatch.setattr(enrich_mod.requests, "get", fake_get)
+        text, location = fetch_posting(self.URL)
+
+        assert text == "We're looking for talented individuals..."
+        assert location == "New York, New York"
+        assert "keyword=210765547" in captured["url"]
+        assert "siteNumber=CX_1001" in captured["url"]
+
+    def test_has_live_api_recognizes_oracle_urls(self):
+        assert has_live_api(self.URL, greenhouse_token=None) is True
+
+    def test_bare_site_url_without_job_id_falls_through_to_generic_get(self, monkeypatch):
+        """A URL that merely shares the oraclecloud.com host but has no
+        `/job/<id>` path (a bare site listing) must not hit the
+        recruitingCEJobRequisitions search branch — it must fall through to
+        the generic plain-GET branch, requesting the URL as given rather
+        than a keyword-search endpoint."""
+        captured = {}
+
+        class _PlainResponse:
+            status_code = 200
+            text = "<html>some page chrome</html>"
+
+        def fake_get(url, *, headers, timeout):
+            captured["url"] = url
+            return _PlainResponse()
+
+        monkeypatch.setattr(enrich_mod.requests, "get", fake_get)
+        bare_url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001"
+        fetch_posting(bare_url)
+        assert captured["url"] == bare_url
+
+    def test_requisition_not_found_reads_as_unreachable_not_answered(self, monkeypatch):
+        """A 200 whose requisitionList doesn't contain this Id (the search
+        under-matched, or the id has since rolled off) must not be recorded
+        as a page that genuinely said nothing."""
+        monkeypatch.setattr(
+            enrich_mod.requests, "get",
+            lambda *a, **k: _FakeResponse(200, {"items": [{"requisitionList": []}]}))
+        assert fetch_posting(self.URL) == (None, "")
+
+    def test_both_description_fields_empty_reads_as_unreachable_not_answered(self, monkeypatch):
+        """Matches the live-confirmed pattern for 2 of the 3 sampled JPM ids:
+        a match is found but ShortDescriptionStr is also empty/absent — must
+        not be recorded as answered with a blank string."""
+        req = {"Id": "210765547", "PrimaryLocation": ""}
+        monkeypatch.setattr(
+            enrich_mod.requests, "get",
+            lambda *a, **k: _FakeResponse(200, {"items": [{"requisitionList": [req]}]}))
+        assert fetch_posting(self.URL) == (None, "")
+
+
 @pytest.mark.django_db
 class TestPastDeadlineGetsTighterRecheckThanClosingSoon:
     """Round 4 regression: HSBC Sheffield WIT (id 1618) was re-fetched today

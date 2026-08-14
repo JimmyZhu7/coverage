@@ -135,6 +135,28 @@ _ICIMS_URL = re.compile(r"https://[\w.-]+\.icims\.com/jobs/", re.IGNORECASE)
 # token the catalog already knows.
 _GH_JID = re.compile(r"[?&]gh_jid=(\d+)")
 
+# Oracle Recruiting Cloud detail pages are ALSO JS shells — a plain GET of a
+# jpmc.fa.oraclecloud.com job URL returns only the page's <title>, "JPMC
+# Candidate Experience page" (43 open rows carry that literal string as
+# detail_text today; another 79 have never been fetched at all). The same
+# public, unauthenticated `recruitingCEJobRequisitions` search endpoint
+# coverage_connectors/oracle.py already calls for board fetch/verify answers
+# a re-query by requisition id (keyword=<id>) with ShortDescriptionStr /
+# ExternalResponsibilitiesStr / ExternalQualificationsStr — real posting
+# text, though for JPM specifically confirmed live to run only 97-163 chars
+# (ShortDescriptionStr, the page's own og:description teaser) with the two
+# Responsibilities/Qualifications fields empty. Real coverage, not a
+# Goldman-style full-body fix — but strictly better than the bare shell
+# title this command stores today.
+_ORACLE_URL = re.compile(
+    r"([\w.-]+\.oraclecloud\.com)/hcmUI/CandidateExperience/en/sites/([^/?#]+)/job/(\d+)",
+    re.IGNORECASE,
+)
+_ORACLE_SEARCH_URL = (
+    "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+    "?onlyData=true&expand=requisitionList&finder=findReqs;siteNumber={site},limit=25,keyword={rid}"
+)
+
 _LD_JSON = re.compile(
     r"<script[^>]*application/ld\+json[^>]*>(.*?)</script>", re.I | re.S)
 
@@ -257,6 +279,30 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
             return None, ""
         return None, ""
 
+    oracle_m = _ORACLE_URL.search(url or "")
+    if oracle_m:
+        host, site, rid = oracle_m.groups()
+        search_url = _ORACLE_SEARCH_URL.format(host=host, site=site, rid=rid)
+        try:
+            resp = requests.get(search_url, headers={**UA, "Accept": "application/json"},
+                                timeout=TIMEOUT)
+            if resp.status_code == 200:
+                items = (resp.json() or {}).get("items") or []
+                reqs = items[0].get("requisitionList", []) if items else []
+                match = next((r for r in reqs if str(r.get("Id")) == rid), None)
+                if match:
+                    body = "\n\n".join(
+                        str(match[k]) for k in
+                        ("ShortDescriptionStr", "ExternalResponsibilitiesStr",
+                         "ExternalQualificationsStr")
+                        if match.get(k))
+                    location = match.get("PrimaryLocation") or ""
+                    if body:
+                        return page_text(body), location
+        except (requests.RequestException, ValueError):
+            return None, ""
+        return None, ""
+
     if _ICIMS_URL.match(url or ""):
         url = f"{url}{'&' if '?' in url else '?'}in_iframe=1"
     try:
@@ -304,6 +350,8 @@ def has_live_api(url: str, *, greenhouse_token: str | None) -> bool:
         return True
     jid = _GH_JID.search(url or "")
     if jid and greenhouse_token:
+        return True
+    if _ORACLE_URL.search(url or ""):
         return True
     return False
 
