@@ -60,8 +60,12 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
     assert sections == {
         # Appearance sits under "You" because a theme is a fact about how
         # this person reads, not about how the engine behaves.
-        "profile", "work-auth", "appearance", "cadence", "pace", "capture",
-        "security", "data", "legal", "danger",
+        "profile", "work-auth", "appearance", "cadence", "pace",
+        # Push Alerts (deadline notifications) — its own small, isolated
+        # section, deliberately not merged into a broader Notification
+        # Preferences area yet (see settings.html's comment on that block).
+        "push-alerts",
+        "capture", "security", "data", "legal", "danger",
     }
 
 

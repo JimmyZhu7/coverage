@@ -10,22 +10,25 @@ page and the live firm-search filter during onboarding.
 
 from __future__ import annotations
 
+import json
+
 from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
 from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from analytics.events import record_event
 from capture.services import capture_health
 from crm.models import Contact, UserFirm
 from directory.models import Firm
 
+from .models import PushSubscription
 from . import services
 from .forms import (
     CYCLE_SUGGESTIONS,
@@ -315,6 +318,12 @@ def settings_view(request):
             "cadence_form": section_forms["cadence"],
             "pace_form": section_forms["pace"],
             "default_weekly_goal": WeeklyPaceForm.DEFAULT_GOAL,
+            # Push notifications (deadline alerts). Blank key = the toggle
+            # renders as unavailable rather than a button that dead-ends —
+            # same "Setup Needed" posture the social sign-in buttons use for
+            # an unconfigured provider. See accounts/push.py.
+            "vapid_public_key": django_settings.VAPID_PUBLIC_KEY,
+            "push_subscribed": PushSubscription.objects.for_user(request.user).exists(),
             **_security_context(request.user),
         },
     )
@@ -545,6 +554,90 @@ def timezone_detect(request):
     request.user.save(update_fields=["timezone"])
     record_event("timezone_autodetected", user=request.user, timezone=posted)
     return HttpResponse(status=200)
+
+
+# ---------------------------------------------------------------------------
+# Web Push subscriptions (deadline alerts) — accounts/push.py sends,
+# accounts/models.py's PushSubscription stores. Settings' Notifications
+# toggle POSTs here directly from JS; see the inline script it carries.
+# ---------------------------------------------------------------------------
+@login_required
+@require_POST
+def push_subscribe(request):
+    """Save (or refresh) one browser's Web Push subscription. Body is the
+    Push API's own subscription shape, exactly what `PushSubscription.
+    toJSON()` produces client-side:
+
+        {"endpoint": "...", "keys": {"p256dh": "...", "auth": "..."}}
+
+    `all_objects`, not `objects.for_user` (coverage_web/tenancy.py's
+    documented escape hatch): this is the one deliberate cross-tenant write
+    in the whole flow, because the row's owner is exactly what a
+    re-subscribe on a shared device is allowed to change — `for_user` can't
+    express "create for this user, possibly reassigning a row someone else
+    currently owns."
+
+    `update_or_create` keyed on `endpoint` (its own unique constraint): the
+    Push API mints a fresh endpoint on every `subscribe()` call, so this is
+    a plain create in the overwhelming case, and only ever an update when
+    the SAME browser registration posts again — the same device asking a
+    second time, or a different account signed into it since. Either way
+    the newest POST is the authoritative owner, matching how the Push API
+    itself treats "endpoint + keys" as a bearer credential for that
+    browser's channel.
+    """
+    try:
+        payload = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return HttpResponseBadRequest("invalid JSON")
+    if not isinstance(payload, dict):
+        return HttpResponseBadRequest("invalid JSON")
+
+    endpoint = (payload.get("endpoint") or "").strip()
+    keys = payload.get("keys") or {}
+    p256dh = (keys.get("p256dh") or "").strip() if isinstance(keys, dict) else ""
+    auth = (keys.get("auth") or "").strip() if isinstance(keys, dict) else ""
+    if not endpoint or not p256dh or not auth:
+        return HttpResponseBadRequest("endpoint and keys.p256dh/keys.auth are required")
+
+    PushSubscription.all_objects.update_or_create(
+        endpoint=endpoint,
+        defaults={
+            "user": request.user,
+            "p256dh": p256dh,
+            "auth": auth,
+            "user_agent": request.META.get("HTTP_USER_AGENT", "")[:255],
+        },
+    )
+    record_event("push_subscribed", user=request.user)
+    return HttpResponse(status=201)
+
+
+@login_required
+@require_POST
+def push_unsubscribe(request):
+    """Delete the CALLER'S OWN subscription for one endpoint.
+
+    `for_user`, not `all_objects` — the write above is the one deliberate
+    cross-tenant exception in this flow, not this one. A POST naming an
+    endpoint that belongs to (or never belonged to) someone else deletes
+    nothing rather than reaching across tenants; the queryset is
+    user-scoped before the endpoint filter even runs.
+    """
+    try:
+        payload = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return HttpResponseBadRequest("invalid JSON")
+    if not isinstance(payload, dict):
+        return HttpResponseBadRequest("invalid JSON")
+
+    endpoint = (payload.get("endpoint") or "").strip()
+    if not endpoint:
+        return HttpResponseBadRequest("endpoint is required")
+
+    PushSubscription.objects.for_user(request.user).filter(endpoint=endpoint).delete()
+    record_event("push_unsubscribed", user=request.user)
+    return HttpResponse(status=204)
 
 
 # ---------------------------------------------------------------------------

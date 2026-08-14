@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import secrets
 
+from django.conf import settings
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
+
+from coverage_web.tenancy import PrivateModel
 
 
 # The five most-spoken languages (by total speakers) as an interface-language
@@ -206,3 +209,46 @@ class User(AbstractUser):
             import secrets
             self.calendar_token = secrets.token_urlsafe(24)
         super().save(*args, **kwargs)
+
+
+class PushSubscription(PrivateModel):
+    """One row per browser/device a user has turned Web Push notifications
+    on for (accounts/push.py, the Push API's own subscription object — see
+    `PushManager.subscribe()` in MDN's docs). Private-zone, like every other
+    per-user row (`coverage_web/tenancy.py`): a subscription is meaningless
+    without the account it alerts.
+
+    A user can hold several — a laptop and a phone are two independent
+    subscriptions, deliberately not collapsed into one row on the user, so
+    losing one (a browser profile wiped, a token expired) never touches the
+    other. `send_deadline_push_alerts` sends to every active subscription a
+    user has and deletes any single one the push service reports as gone
+    (404/410 — see that command's docstring), never the whole account.
+
+    `endpoint` is the actual uniqueness key, not `(user, endpoint)`: it names
+    one specific browser's one specific registration with its push service,
+    which can never legitimately belong to two rows at once — ours or
+    another account's. A `TextField` rather than `URLField` because real
+    endpoints (FCM's especially) routinely run past `URLField`'s 200-char
+    default and Postgres has no meaningful length ceiling on a unique text
+    column to worry about trading away.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    endpoint = models.TextField(unique=True)
+    # The Push API subscription's `keys.p256dh` / `keys.auth` — the receiver
+    # public key and auth secret AES128GCM payload encryption needs (RFC
+    # 8291). Both arrive from the browser already base64url-encoded; stored
+    # as-is, since `pywebpush.webpush()` expects exactly that string form.
+    p256dh = models.CharField(max_length=255)
+    auth = models.CharField(max_length=255)
+    # Free-text `navigator.userAgent`, for support/debugging only — never
+    # parsed or relied on for anything the send path decides.
+    user_agent = models.CharField(max_length=255, blank=True, default="")
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "push_subscriptions"
+
+    def __str__(self) -> str:
+        return f"{self.user_id} · {self.endpoint[:40]}"

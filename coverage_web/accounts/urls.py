@@ -24,6 +24,10 @@ urlpatterns = [
     path("security/signout-all/", views.signout_other_sessions, name="signout_all"),
     path("delete/", views.delete_account, name="delete"),
     path("timezone/", views.timezone_detect, name="timezone_detect"),
+    # Web Push deadline alerts (accounts/push.py); the Settings Notifications
+    # toggle POSTs to these directly from JS.
+    path("push/subscribe/", views.push_subscribe, name="push_subscribe"),
+    path("push/unsubscribe/", views.push_unsubscribe, name="push_unsubscribe"),
     path("privacy/", views.privacy, name="privacy"),
     path("terms/", views.terms, name="terms"),
 ]

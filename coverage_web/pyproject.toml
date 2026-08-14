@@ -20,6 +20,13 @@ dependencies = [
     # so the command imports it lazily and degrades to "PNG sources only"
     # rather than making a missing system library break `manage.py`.
     "cairosvg>=2.7",
+    # Web Push (deadline alerts, send_deadline_push_alerts): VAPID-signed
+    # request signing + AES128GCM payload encryption per RFC 8291/8292. The
+    # standard, well-tested implementation — hand-rolling either the signing
+    # or the encryption is real applied cryptography and exactly the kind of
+    # thing a library exists to get right once. Also pulls in py-vapid,
+    # whose Vapid class the generate_vapid_keys command uses.
+    "pywebpush>=2.0",
     # Runtime deps: crm/views imports the domain engines; directory/ingest
     # imports the connectors. Declared so `uv sync --package coverage-web`
     # (and the Docker build) install them, not just `uv sync --all-packages`.

@@ -54,6 +54,22 @@
   installed Coverage opens on Today, not the marketing page.{% endcomment %}
   <link rel="manifest" href="{% static 'manifest.webmanifest' %}">
   <meta name="theme-color" content="#1d3a5f">
+  {% comment %}Registers the notification-display worker (deadline push
+  alerts — see static/service-worker.js's own docstring for why it is NOT
+  an offline-cache worker) for every signed-in visitor, same "students live
+  on phones" reasoning as the manifest above. Registering is harmless and
+  free even before anyone turns notifications on; SUBSCRIBING only happens
+  from the explicit Settings toggle (static/js/push-subscribe.js) — this
+  script never requests permission or calls PushManager on its own.{% endcomment %}
+  {% if user.is_authenticated %}
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("{% static 'service-worker.js' %}").catch(function () {});
+      });
+    }
+  </script>
+  {% endif %}
   {% comment %}
   Theme, applied BEFORE the stylesheet so a stored choice never flashes the
   other palette. Inline and tiny on purpose: any deferred script runs after

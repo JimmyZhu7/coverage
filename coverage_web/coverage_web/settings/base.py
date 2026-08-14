@@ -93,6 +93,26 @@ SITE_URL = env("SITE_URL", default="http://localhost:8000")
 # module docstring before turning this on in production.
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 
+# ---------------------------------------------------------------------------
+# Web Push (deadline alerts — accounts.push, send_deadline_push_alerts).
+#
+# VAPID (RFC 8292) identifies this server to the browsers' own push relays
+# (Chrome/Firefox/Safari's infrastructure, not a third-party push SaaS) with
+# a self-generated EC keypair — `python manage.py generate_vapid_keys`
+# prints a public/private pair in exactly the format these three settings
+# want. All three blank by default, same posture as every other optional
+# integration on this page: the app boots, every test passes, and the
+# Settings toggle simply renders as unavailable until real values land (see
+# accounts.push.is_configured()). No paid service and no ongoing cost either
+# way — the relay is free, built into the browser.
+VAPID_PUBLIC_KEY = env("VAPID_PUBLIC_KEY", default="")
+VAPID_PRIVATE_KEY = env("VAPID_PRIVATE_KEY", default="")
+# The "sub" claim VAPID requires — a contact address the push services can
+# reach if this server's traffic ever needs throttling or blocking. Stored
+# without the "mailto:" prefix; accounts.push adds it, so this setting reads
+# as a plain address wherever else it might be surfaced.
+VAPID_CLAIM_EMAIL = env("VAPID_CLAIM_EMAIL", default="")
+
 # The custom user model (docs/build-plan.md §2's `users` table). Set from
 # the very first migration — see accounts/models.py for the model and
 # README/the build task for why this must never be swapped after real

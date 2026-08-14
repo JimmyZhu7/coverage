@@ -71,6 +71,16 @@ services:
         sync: false # optional; leave blank to disable
       - key: ANTHROPIC_API_KEY
         sync: false # optional; leave blank to disable AI extraction/briefs — costs per call once set
+      # Web Push deadline alerts (accounts.push). Blank = the Settings toggle
+      # renders as unavailable and the coverage-push-alerts cron below
+      # no-ops — no third-party service, generate with
+      # `manage.py generate_vapid_keys` (see .env.example).
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_CLAIM_EMAIL
+        sync: false
 
   # ---- Freshness pass every 6 hours (scrape + reclassify + reverify) -----
   # Four passes a day keeps deadlines honest across US and Asia hours.
@@ -103,3 +113,44 @@ services:
           envVarKey: CAPTURE_INBOUND_SECRET
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost # cron serves no HTTP; any value satisfies the settings import
+
+  # ---- Deadline push alerts, once a day (T-7 and T-2 both, in one run) --
+  # accounts.push.is_configured() no-ops until VAPID_PUBLIC_KEY/
+  # VAPID_PRIVATE_KEY are set below, so this is safe to deploy before those
+  # exist — see .env.example for how to generate them
+  # (`manage.py generate_vapid_keys`). A fixed UTC hour is fine even though
+  # students span US/HK: the command computes each user's own "today" from
+  # their stored timezone before deciding what's due (see the command's
+  # docstring), so the wall-clock run time only shifts WHEN in their day the
+  # notification lands, never WHICH day.
+  - type: cron
+    name: coverage-push-alerts
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 13 * * *" # 13:00 UTC = 9am US Eastern / 9pm Hong Kong
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py send_deadline_push_alerts"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: DJANGO_SECRET_KEY
+      - key: CAPTURE_INBOUND_SECRET
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: CAPTURE_INBOUND_SECRET
+      - key: DJANGO_ALLOWED_HOSTS
+        value: localhost
+      - key: VAPID_PUBLIC_KEY
+        sync: false # from `manage.py generate_vapid_keys`; blank = this cron no-ops
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_CLAIM_EMAIL
+        sync: false # contact address for VAPID's "sub" claim, no "mailto:" prefix
