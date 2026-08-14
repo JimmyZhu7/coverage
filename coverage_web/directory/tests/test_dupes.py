@@ -687,3 +687,69 @@ class TestFoldDuplicatesOnRealRows:
         # and each has to keep being close-tracked on its own.
         assert Opportunity.objects.filter(firm=firm).count() == 2
         assert kept[0].id in {a.id, b.id}
+
+
+@pytest.mark.django_db
+class TestFirmDetailFoldsDuplicates:
+    """firm_detail() is the one place that used to build its row list
+    straight off the ORM without ever calling fold_duplicates — Browse
+    Openings, My Applications, and the calendar all fold, so a firm page
+    showed the same byte-identical requisition twice and its own "Open
+    Roles" count disagreed with the feed's count for the same firm. This
+    reproduces the live HSBC shape: two `Women in Technology` rows that
+    differ only in the req number buried in the URL.
+    """
+
+    def test_two_req_numbers_for_one_posting_render_as_one_card(self, client):
+        firm = Firm.objects.create(slug="hsbc", name="HSBC", status="active")
+        Opportunity.objects.create(
+            firm=firm, title="Women in Technology - Women Who Code - Insight Programme",
+            location="Sheffield, GB, S1 4NB", bucket="insight", status="open",
+            url="https://mycareer.hsbc.com/en_GB/external/OpportunityDetail"
+                "?opportunityId=1365759057",
+        )
+        Opportunity.objects.create(
+            firm=firm, title="Women in Technology - Women Who Code - Insight Programme",
+            location="Sheffield, GB, S1 4NB", bucket="insight", status="open",
+            url="https://mycareer.hsbc.com/en_GB/external/OpportunityDetail"
+                "?opportunityId=1365759357",
+        )
+        # A genuinely distinct role must survive untouched.
+        Opportunity.objects.create(
+            firm=firm, title="Global Banking Summer Analyst", location="London, GB",
+            bucket="internship", status="open",
+            url="https://mycareer.hsbc.com/en_GB/external/OpportunityDetail"
+                "?opportunityId=9999999999",
+        )
+
+        res = client.get("/firms/hsbc/")
+        assert res.status_code == 200
+        body = res.content.decode()
+
+        assert body.count("Women in Technology - Women Who Code") == 1
+        # The header count must match what's actually on the page, and match
+        # what the feed (which already folds) would say for this firm: 2
+        # distinct roles, not 3 raw rows.
+        assert Opportunity.objects.filter(firm=firm, status="open").count() == 3
+        assert '<span class="scrub-count">2</span>' in body
+
+    def test_a_real_repeating_series_still_shows_every_date(self, client):
+        """The veto in fold_duplicates: two DIFFERENT stated deadlines on an
+        otherwise-identical title/location must not collapse — a firm page
+        that hid one would cost the student a date they could still make."""
+        firm = Firm.objects.create(slug="boci", name="BOCI", status="active")
+        Opportunity.objects.create(
+            firm=firm, title="Graduate Programme", location="Hong Kong",
+            bucket="entry_level", status="open", deadline=date(2026, 9, 1),
+            url="https://boci.example/req/1",
+        )
+        Opportunity.objects.create(
+            firm=firm, title="Graduate Programme", location="Hong Kong",
+            bucket="entry_level", status="open", deadline=date(2026, 10, 1),
+            url="https://boci.example/req/2",
+        )
+
+        res = client.get("/firms/boci/")
+        body = res.content.decode()
+        assert body.count("Graduate Programme") == 2
+        assert '<span class="scrub-count">2</span>' in body

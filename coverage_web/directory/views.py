@@ -2500,14 +2500,22 @@ def firm_detail(request, slug):
     # Campus buckets first (insight, internship, entry_level), experienced
     # rows after — the firm page shows everything but leads with the roles
     # the product is for.
-    opps = firm.opportunities.filter(status="open").select_related("firm").order_by(
-        _BUCKET_ORDER, F("deadline").asc(nulls_last=True), "title"
+    opps = list(
+        firm.opportunities.filter(status="open").select_related("firm").order_by(
+            _BUCKET_ORDER, F("deadline").asc(nulls_last=True), "title"
+        )
     )
+    # Same identity-duplicate fold as Browse Openings and My Applications
+    # (see directory.dupes.fold_duplicates): one firm posts the same role
+    # under two candidate-pool req numbers, and without this the firm page
+    # showed byte-identical cards twice and its own "Open Roles" count
+    # disagreed with the feed's count for the same firm.
+    opps, _folded = fold_duplicates(opps)
     context = {
         "firm": firm,
         "cards": [_card(o, now=now, today=today) for o in opps],
         "timeline": _timeline(firm, today=today),
-        "total": opps.count(),
+        "total": len(opps),
         **_my_network_at(request.user, firm, today=today),
     }
     return render(request, "directory/firm_detail.html", context)
