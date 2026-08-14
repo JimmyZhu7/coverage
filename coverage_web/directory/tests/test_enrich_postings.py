@@ -840,3 +840,70 @@ class TestSelfWrittenDetailTextNeverShortCircuitsTheLiveFetch:
         # fetch_posting() was never called, and location stayed "".
         assert opp.location == "Bala Cynwyd, PA, US"
         assert opp.raw["detail_source"] == "fetch"
+
+
+@pytest.mark.django_db
+class TestSelfWrittenFactsNeverShortCircuitsTheLiveFetch:
+    """Sibling of the round-7 detail_text fix, for extract_facts' own
+    derived bookkeeping instead of enrich_postings' own. `refresh` runs
+    extract_facts over every open row on every pass (unconditionally), and
+    it writes its derived `raw["facts"]` dict into the SAME `raw` blob
+    enrich_postings reads. `payload_text()`'s _SELF_WRITTEN_KEYS guard only
+    excluded enrich_postings' own four keys, so a row that had ever gone
+    through extract_facts once (i.e. nearly every open row) had its OWN
+    derived facts dict — nested strings like facts["grad"]["phrase"] — walked
+    back in as if HSBC's board had supplied them, permanently short-
+    circuiting fetch_posting(). Confirmed live 2026-08-14: `enrich_postings
+    --ids 1617,1618` (HSBC Sheffield WIT) reported "from board payloads" and
+    found neither a deadline nor sponsorship, because HSBC's live page —
+    which states "Closing Date: Sun Aug 16, 2026" — was never actually
+    fetched."""
+
+    def _raw_with_only_extracted_facts(self):
+        # Mirrors exactly what extract_facts.py writes: no board-native
+        # prose field at all, only its own derived dict. The grad phrase
+        # alone clears _PROSE_MIN/_PAYLOAD_MIN after the nested walk.
+        return {
+            "facts": {
+                "grad": {
+                    "value": "2027",
+                    "years": ["2027"],
+                    "phrase": ("Open to candidates who have graduated or will "
+                              "graduate by March 2027 This insight programme "
+                              "may give you the opportunity to continue with "
+                              "the firm afterwards if you perform well during "
+                              "the assessed period of the programme."),
+                },
+            },
+            "facts_at": (timezone.now() - timedelta(days=1)).isoformat(),
+        }
+
+    def test_own_facts_dict_is_not_read_back_as_a_board_payload(self):
+        """Direct unit check on `payload_text()`: extract_facts' derived
+        dict must never be mistaken for the board's payload, however long
+        its nested prose fields run."""
+        assert payload_text(self._raw_with_only_extracted_facts()) is None
+
+    def test_prior_extracted_facts_no_longer_block_the_live_fetch(self, monkeypatch):
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Sheffield Women in Technology", bucket="entry_level",
+            status="open", source="sitemap",
+            url="https://apply.careers.hsbc.com/emergingtalent/job/x/1618/",
+            deadline=timezone.localdate() - timedelta(days=5),
+            deadline_precision="day", confidence=0.6,
+            raw=self._raw_with_only_extracted_facts(),
+        )
+        assert has_live_api(opp.url, greenhouse_token=None) is False
+
+        monkeypatch.setattr(
+            enrich_mod, "fetch_posting",
+            lambda url, **kw: ("Closing Date: Sun Aug 16, 2026", "", ""),
+        )
+        call_command("enrich_postings", ids=str(opp.id))
+
+        opp.refresh_from_db()
+        # Before the fix: payload_text(o.raw) returned the cached facts
+        # prose, fetch_posting() was never called, and the stale deadline
+        # was never corrected.
+        assert opp.deadline.isoformat() == "2026-08-16"

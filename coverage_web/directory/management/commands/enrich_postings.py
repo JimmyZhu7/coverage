@@ -591,18 +591,27 @@ _PROSE_MIN = 120        # a field shorter than this is a label, not prose
 _PAYLOAD_MIN = 300      # below this the payload has not really described the job
 # Keys that hold long strings which are never a description.
 _NOT_PROSE = ("url", "link", "id", "code", "date", "image", "logo", "slug")
-# This command's OWN bookkeeping keys, written into raw at the bottom of
-# handle() (detail_text/detail_fetched/detail_location/detail_source). They
-# must never be read back as "the board's own payload": once a
-# has_live_api()==False row is fetched and detail_text is cached, every
-# later run would otherwise find its own prior detail_text sitting in raw,
-# mistake it for a fresh board payload, and short-circuit fetch_posting()
-# forever -- freezing location/deadline/sponsorship extraction while
-# detail_fetched keeps advancing (round 7: 0 of 75 open icims rows, 0/5
-# lever, 0/9 talentgateway, 0/10 beisen ever recovered a detail_location
-# despite already carrying detail_text).
+# This pipeline's OWN bookkeeping keys, written into `raw` by commands
+# downstream of a board fetch: enrich_postings' own
+# detail_text/detail_fetched/detail_location/detail_source, plus
+# extract_facts' facts/facts_at — the derived-fact dict `refresh` computes
+# FROM detail_text on every single pass (extract_facts runs unconditionally
+# over every open row, per refresh.py). None of these may ever be read back
+# as "the board's own payload": once a has_live_api()==False row is fetched
+# and detail_text is cached, every later run would otherwise find its own
+# prior detail_text (round 7 fix) — or, once extract_facts has run at least
+# once, its own derived `facts` dict (this fix) — sitting in raw and mistake
+# it for a fresh board payload, short-circuiting fetch_posting() forever.
+# Confirmed live 2026-08-14: a scoped re-read of HSBC Sheffield WIT ids
+# 1617/1618 (`enrich_postings --ids`) reported "from board payloads" and
+# found neither a deadline nor sponsorship, because raw["facts"]["grad"]["
+# phrase"] — extract_facts' own cached grad-eligibility sentence, well over
+# _PAYLOAD_MIN — walked in as if HSBC's board had supplied it, and the
+# actual live page (which states "Closing Date: Sun Aug 16, 2026") was never
+# fetched at all.
 _SELF_WRITTEN_KEYS = frozenset(
-    {"detail_text", "detail_fetched", "detail_location", "detail_source"})
+    {"detail_text", "detail_fetched", "detail_location", "detail_source",
+     "facts", "facts_at"})
 
 
 def payload_text(raw: dict | None) -> str | None:
@@ -618,10 +627,16 @@ def payload_text(raw: dict | None) -> str | None:
     def walk(node, key="", depth=0):
         if depth > 6 or sum(len(f) for f in found) > MAX_TEXT:
             return
+        # Checked for every node type, not just strings: a self-written key
+        # can hold a whole nested structure (extract_facts' `facts` is a
+        # dict of dicts), and the field name that marks it as ours is only
+        # visible at THIS level — a string two levels inside `facts` is
+        # keyed "grad" or "phrase" by the time `walk` reaches it, not
+        # "facts", so a leaf-only check here would miss the entire subtree.
+        if key.lower() in _SELF_WRITTEN_KEYS:
+            return
         if isinstance(node, str):
             k = key.lower()
-            if k in _SELF_WRITTEN_KEYS:
-                return
             if any(bad in k for bad in _NOT_PROSE):
                 return
             looks_prose = ("<" in node and ">" in node) or (
