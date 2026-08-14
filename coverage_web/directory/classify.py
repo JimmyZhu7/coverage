@@ -1004,7 +1004,7 @@ _SPONSOR_NO = (
     "not offer visa sponsorship", "no visa sponsorship",
     "sponsorship is not available", "sponsorship will not be",
     "without sponsorship", "without the need for sponsorship",
-    "without the need for visa sponsorship", "now or in the future",
+    "without the need for visa sponsorship",
     "not eligible for sponsorship",
 )
 _SPONSOR_YES = (
@@ -1014,19 +1014,51 @@ _SPONSOR_YES = (
     "h-1b sponsorship", "h1b sponsorship",
 )
 
+# "now or in the future" is handled separately from the plain _SPONSOR_NO
+# substrings above because the same six words open two completely different
+# things: the standard US declarative NO-sponsorship sentence ("must be
+# authorized to work ... without the need for sponsorship now or in the
+# future.") AND the standard US/HK/SG visa-status APPLICATION-FORM QUESTION
+# every candidate answers regardless of the firm's actual policy ("Will you
+# now or in the future require sponsorship...? * Select..."). A bare
+# substring match cannot tell these apart, and previously always returned
+# "no" -- misreading a per-candidate screening question as an employer
+# policy statement on 59 open rows across 7 firms (Point72, DRW, Five
+# Rings, IMC Trading, Qube Research & Technologies, Bridgewater, Solomon
+# Partners), each producing a false "No sponsorship" fact-wall chip and a
+# false blocking eligibility verdict.
+#
+# The two are told apart by what follows the phrase: a declarative sentence
+# runs on to a period with no "?" in the next stretch; a form question is
+# bounded by its own "?" within a short span (the scraped "* Select..."
+# dropdown marker sits right after it). Checked live against all 101 open
+# rows whose only _SPONSOR_NO-family trigger was this phrase: every row
+# with a "?" within 200 chars after the phrase was the scraped dropdown
+# question (59 rows, zero exceptions); every row without one was a genuine
+# policy statement (42 rows across Wells Fargo, SIG, Morgan Stanley,
+# Houlihan Lokey, MUFG, William Blair, Citi -- zero false positives).
+_SPONSOR_FUTURE = re.compile(r"now or in the future", re.IGNORECASE)
+_SPONSOR_FUTURE_WINDOW = 200
+
+
+def _future_phrase_is_statement(text: str) -> bool:
+    """True if at least one "now or in the future" occurrence in `text` is a
+    declarative employer statement, rather than every occurrence being the
+    scraped visa-status application-form question."""
+    for m in _SPONSOR_FUTURE.finditer(text):
+        if "?" not in text[m.end(): m.end() + _SPONSOR_FUTURE_WINDOW]:
+            return True
+    return False
+
 
 def extract_sponsorship(text: str | None) -> str:
-    """"yes" / "no" / "unknown" from posting prose.
-
-    "now or in the future" is in the NO list because it is the standard US
-    phrasing of exactly that answer ("must be authorized to work ... without
-    the need for sponsorship now or in the future") and never appears in a
-    sponsoring posting's boilerplate.
-    """
+    """"yes" / "no" / "unknown" from posting prose."""
     t = (text or "").lower()
     if not t:
         return "unknown"
     if any(k in t for k in _SPONSOR_NO):
+        return "no"
+    if "now or in the future" in t and _future_phrase_is_statement(text or ""):
         return "no"
     if any(k in t for k in _SPONSOR_YES):
         return "yes"

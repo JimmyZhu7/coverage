@@ -19,6 +19,7 @@ from directory.classify import (
     clean_title,
     extract_class_year,
     extract_cohort,
+    extract_sponsorship,
 )
 
 
@@ -672,3 +673,50 @@ def test_non_campus_region_census_20260809(location, expected):
 ])
 def test_clean_title_keeps_bare_cohort_years(title, expected):
     assert clean_title(title) == expected
+
+
+# ---------------------------------------------------------------------------
+# extract_sponsorship / _SPONSOR_NO's "now or in the future" phrase — round 4
+# regression. The bare substring match could not tell a genuine employer
+# NO-sponsorship statement from the standard US/HK/SG visa-status
+# APPLICATION-FORM QUESTION every candidate answers regardless of the firm's
+# real policy. Both text fixtures below are trimmed verbatim from live
+# scraped `detail_text` (DRW id=3395 for the question, Wells Fargo id=19202
+# for the declarative statement) — not paraphrased, so the fix is proven
+# against the actual scraped shape, not an idealized one.
+@pytest.mark.parametrize("text, expected", [
+    # The confirmed defect: a scraped dropdown SCREENING QUESTION, bounded
+    # by its own "?" and the "* Select..." form-field marker, must NOT read
+    # as an employer NO-sponsorship statement.
+    ("Are you a foreign national requiring a work pass to work in Singapore? "
+     "* Select... Will you now or in the future require DRW to assist you "
+     "with an application to the Ministry of Manpower for a work pass in "
+     "respect of your prospective employment with DRW in Singapore? * "
+     "Select... If you are currently the holder of a valid work pass",
+     "unknown"),
+    ("Will you now or in the future require employment pass sponsorship? "
+     "* Select... In which language(s) are you fluent", "unknown"),
+    ("Do you require visa sponsorship now or in the future? * Select... "
+     "Which specific role or department", "unknown"),
+    # The genuine article: a declarative employer sentence using the exact
+    # same six words must still read as "no" — the fix must not blunt the
+    # rule it is narrowing.
+    ("Wells Fargo only considers candidates who are presently authorized to "
+     "work for any employer in the United States and who do not require "
+     "work visa sponsorship from Wells Fargo now or in the future in order "
+     "to retain their authorization to work in the United States. Based on "
+     "the volume of applications", "no"),
+    ("Susquehanna cannot provide sponsorship for work authorization is not "
+     "available for this position now or in the future. What we offer",
+     "no"),
+    ("MUFG will not hire individuals for internships whose work eligibility "
+     "is based on their F-1 or other visa status that will expire and not "
+     "require visa sponsorship now or in the future. MUFG will not hire",
+     "no"),
+    # A different _SPONSOR_NO phrase entirely must be unaffected by this gate.
+    ("Unfortunately we are unable to sponsor employment visas for this role.",
+     "no"),
+    (None, "unknown"),
+])
+def test_extract_sponsorship_future_phrase_question_vs_statement(text, expected):
+    assert extract_sponsorship(text) == expected
