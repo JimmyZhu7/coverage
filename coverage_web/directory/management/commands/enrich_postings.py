@@ -575,18 +575,31 @@ _PROSE_MIN = 120        # a field shorter than this is a label, not prose
 _PAYLOAD_MIN = 300      # below this the payload has not really described the job
 # Keys that hold long strings which are never a description.
 _NOT_PROSE = ("url", "link", "id", "code", "date", "image", "logo", "slug")
-# This command's OWN bookkeeping keys, written into raw at the bottom of
-# handle() (detail_text/detail_fetched/detail_location/detail_source). They
-# must never be read back as "the board's own payload": once a
-# has_live_api()==False row is fetched and detail_text is cached, every
-# later run would otherwise find its own prior detail_text sitting in raw,
+# COVERAGE'S OWN keys, not the board's -- everything we derived and wrote
+# back into raw ourselves. They must never be read back as "the board's own
+# payload": once a has_live_api()==False row is fetched and our own text is
+# cached, every later run would otherwise find that text sitting in raw,
 # mistake it for a fresh board payload, and short-circuit fetch_posting()
 # forever -- freezing location/deadline/sponsorship extraction while
 # detail_fetched keeps advancing (round 7: 0 of 75 open icims rows, 0/5
 # lever, 0/9 talentgateway, 0/10 beisen ever recovered a detail_location
 # despite already carrying detail_text).
+#
+# `facts`/`facts_at` belong here for the same reason and were missed when
+# that fix landed: `extract_facts` writes them, `directory/facts.py` says so
+# in its own header, and both `ingest._DERIVED_RAW_KEYS` and
+# `classify._OURS_NOT_THE_POSTINGS` already name all four. The evidence
+# phrase we store in `facts[...]["phrase"]` is long enough to pass for a
+# description, so a row whose board payload says nothing could still be
+# "answered" by our own earlier reading of it -- re-deriving a derived value
+# from itself. Worst on a `sitemap` row, whose payload provably carries no
+# title and no location at all (the connector stores the URL slug and an
+# empty string), so the short-circuit made those rows permanently
+# unrepairable rather than merely stale: 3 of HSBC's 20 open rows (1617,
+# 1618, 1631) recovered neither field on any run, ever.
 _SELF_WRITTEN_KEYS = frozenset(
-    {"detail_text", "detail_fetched", "detail_location", "detail_source"})
+    {"detail_text", "detail_fetched", "detail_location", "detail_source",
+     "facts", "facts_at"})
 
 
 def payload_text(raw: dict | None) -> str | None:
@@ -603,10 +616,7 @@ def payload_text(raw: dict | None) -> str | None:
         if depth > 6 or sum(len(f) for f in found) > MAX_TEXT:
             return
         if isinstance(node, str):
-            k = key.lower()
-            if k in _SELF_WRITTEN_KEYS:
-                return
-            if any(bad in k for bad in _NOT_PROSE):
+            if any(bad in key.lower() for bad in _NOT_PROSE):
                 return
             looks_prose = ("<" in node and ">" in node) or (
                 len(node) >= _PROSE_MIN and node.count(" ") >= 15)
@@ -614,6 +624,17 @@ def payload_text(raw: dict | None) -> str | None:
                 found.append(node)
         elif isinstance(node, dict):
             for k, v in node.items():
+                # Prune OUR keys by name, at the top level and whatever type
+                # they hold. Testing the name only once a STRING node was
+                # reached missed every one of ours whose value is a dict:
+                # `raw["facts"]` is a dict, so the walk descended straight
+                # past the name into `facts["start"]["phrase"]` and read our
+                # own extraction back as the board's description. Top level
+                # only, matching `classify.posting_text` -- a provider is
+                # free to have its own nested "facts" and that one IS the
+                # posting's.
+                if depth == 0 and k in _SELF_WRITTEN_KEYS:
+                    continue
                 walk(v, k, depth + 1)
         elif isinstance(node, (list, tuple)):
             for v in node:
