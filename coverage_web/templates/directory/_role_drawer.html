@@ -17,7 +17,7 @@ last and unmissable — this drawer is for deciding, not for applying.
     {% if deadline %}<span class="drawer-deadline{% if reported %} is-reported{% endif %}"
       {% if reported %}title="{{ reported.why }}"{% endif %}>{{ deadline.label }}{% if reported %} <span class="drawer-reported">{{ reported.label }}</span>{% endif %}</span>{% endif %}
     {% if o.cohort %}<span>{{ o.cohort }} intake</span>{% endif %}
-    {% if o.bucket %}<span>{{ o.bucket_label|default:o.bucket }}</span>{% endif %}
+    {% if o.bucket %}<span>{{ bucket_label }}</span>{% endif %}
   </p>
 </header>
 

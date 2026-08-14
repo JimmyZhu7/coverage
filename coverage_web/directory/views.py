@@ -2108,6 +2108,7 @@ def role_description(request, pk):
     return render(request, "directory/_role_drawer.html", {
         "o": opp,
         "firm": opp.firm,
+        "bucket_label": BUCKET_LABELS.get(opp.bucket, opp.bucket),
         "blocks": paragraphs(raw.get("detail_text")),
         "fetched": bool(raw.get("detail_text")),
         "deadline": deadline_marker(opp.deadline, opp.deadline_precision, today=today),

@@ -123,6 +123,37 @@ def test_a_missing_role_is_a_404(client, db):
     assert client.get(reverse("role_description", args=[999999])).status_code == 404
 
 
+@pytest.mark.django_db
+def test_the_bucket_chip_shows_the_human_label_not_the_raw_code(client):
+    """Live report: the drawer's meta line read the literal snake_case
+    bucket code ("entry_level", "other") instead of its label ("Entry-Level",
+    "Other"). `role_description()` built its context with only `"o": opp`
+    and never a `bucket_label` key, unlike the two sibling call sites in this
+    module that both compute `BUCKET_LABELS.get(bucket, bucket)` -- and
+    `Opportunity` has no `bucket_label` attribute, so the template's
+    `o.bucket_label` lookup always failed silently and fell through to the
+    raw code via the `default` filter."""
+    firm = Firm.objects.create(slug="citi-el", name="Citi")
+    role = Opportunity.objects.create(
+        firm=firm, url="https://citi.test/1", title="Officer, Finance Analyst",
+        bucket="entry_level", status="open",
+    )
+    html = client.get(reverse("role_description", args=[role.id])).content.decode()
+    assert "Entry-Level" in html
+    assert "entry_level" not in html
+
+
+@pytest.mark.django_db
+def test_the_other_bucket_chip_is_capitalized(client):
+    firm = Firm.objects.create(slug="sig-other", name="SIG")
+    role = Opportunity.objects.create(
+        firm=firm, url="https://sig.test/1", title="Trading Systems Developer",
+        bucket="other", status="open",
+    )
+    html = client.get(reverse("role_description", args=[role.id])).content.decode()
+    assert "<span>Other</span>" in html
+
+
 # --- Reading the text ------------------------------------------------------
 
 def test_headings_become_paragraph_breaks():
