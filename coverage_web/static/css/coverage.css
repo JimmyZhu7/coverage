@@ -1188,14 +1188,28 @@ a.pill:hover { text-decoration: underline; }
   position: relative; height: 10px; border-radius: var(--r-badge);
   background: var(--band-cold-s); overflow: hidden; border: 1px solid var(--line);
 }
+/* The ramp belongs to the TRACK, not to the fill. Painted on a box that is
+   only var(--to) wide, the whole cold→advocate gradient gets squeezed into
+   whatever slice is filled, so EVERY level's bar ends in the advocate red —
+   a cold contact got a crimson tip two lines under the words "No reply yet".
+   So the fill is always full width and the reveal is a clip: the gradient's
+   positioning area stays the whole track at every level and right through
+   the animation. Stops sit on the same quartiles as the fill (utils.py
+   _warmth_pct), so a bar ends in exactly its own warmth colour instead of
+   on a third scale that agrees with neither the fill nor the labels.
+   --from/--to are still the animation contract; only the property changed. */
 .meter-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--w-cold-bar), var(--w-replied-bar) 45%,
-              var(--w-chatted-bar) 72%, var(--w-advocate-bar));
-  width: var(--to);
+  background: linear-gradient(90deg, var(--w-cold-bar) 25%, var(--w-replied-bar) 50%,
+              var(--w-chatted-bar) 75%, var(--w-advocate-bar) 100%);
+  width: 100%;
+  clip-path: inset(0 calc(100% - var(--to)) 0 0);
   animation: warmthgrow 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-@keyframes warmthgrow { from { width: var(--from); } to { width: var(--to); } }
+@keyframes warmthgrow {
+  from { clip-path: inset(0 calc(100% - var(--from)) 0 0); }
+  to   { clip-path: inset(0 calc(100% - var(--to)) 0 0); }
+}
 .meter-scale { display: flex; justify-content: space-between;
   font-size: var(--fs-micro); color: var(--ink-3); margin-top: var(--s1);
   text-transform: uppercase; letter-spacing: 0.05em; }
@@ -1755,7 +1769,7 @@ select:focus-visible, input:focus-visible {
 
 /* ---- 17. Reduced motion ---------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  .meter-fill { animation: none; width: var(--to); }
+  .meter-fill { animation: none; clip-path: inset(0 calc(100% - var(--to)) 0 0); }
   .moved-flag { animation: none; }
   *, *::before, *::after { animation-duration: 0.01ms !important;
     animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
