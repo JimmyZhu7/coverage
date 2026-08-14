@@ -327,6 +327,26 @@ def test_mckinsey_paginates_and_dedupes(monkeypatch):
     assert ba.url.endswith("/business-analyst-intern")
 
 
+def test_mckinsey_fetch_survives_a_null_docs_page(monkeypatch):
+    """The gateway returns `docs` PRESENT with value `null` on a legitimate
+    zero-hit page. `.get("docs", [])` only defaults on a MISSING key, so it
+    handed `None` to the `for doc in batch` loop — which sits outside the
+    per-page network try — and the uncaught TypeError killed the whole
+    board's fetch. Must come back ok with zero rows instead."""
+    monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: {"numFound": 0, "docs": None})
+    result = fetch(McKinseyBoard(firm="McKinsey & Company", keywords=("intern",)))
+    assert result.ok and result.error is None
+    assert result.opportunities == [] and result.raw_count == 0
+
+
+def test_mckinsey_verify_does_not_crash_on_a_null_docs_page(monkeypatch):
+    """Same null-`docs` envelope through `verify`'s single-page read: no
+    TypeError, and a null page is not a confirmed closure."""
+    monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: {"numFound": 0, "docs": None})
+    v = verify("https://www.mckinsey.com/careers/search-jobs/jobs/business-analyst-intern")
+    assert v.result == "needs-verification"
+
+
 def test_mckinsey_verify_open_when_slug_matches(monkeypatch):
     payload = {"numFound": 1, "docs": [
         {"jobID": "1", "title": "Business Analyst Intern", "cities": ["Boston"],
@@ -349,7 +369,7 @@ def test_mckinsey_verify_does_not_close_when_slug_is_absent(monkeypatch):
 
 def test_mckinsey_verify_does_not_close_on_a_malformed_envelope(monkeypatch):
     """The concrete C4 failure mode: `docs` renamed/missing silently becomes
-    `[]` via `.get("docs", [])`, indistinguishable from a genuine zero
+    `[]` via `.get("docs") or []`, indistinguishable from a genuine zero
     matches. Must not close."""
     monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: {"unexpectedKey": []})
     v = verify("https://www.mckinsey.com/careers/search-jobs/jobs/business-analyst-intern")

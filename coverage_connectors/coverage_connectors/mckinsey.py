@@ -91,7 +91,13 @@ def fetch(board: McKinseyBoard) -> FetchResult:
                 data = _page(kw, start)
             except Exception as e:  # noqa: BLE001
                 return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-            batch = data.get("docs", [])
+            # `.get("docs") or []`, never `.get("docs", [])`: the gateway
+            # returns the key PRESENT with value `null` on a legitimate
+            # zero-hit page, and `.get`'s default only fires when the key is
+            # missing — `for doc in None` would raise an uncaught TypeError
+            # out here (outside the network try above) and kill the whole
+            # board's fetch. Same root cause as `verify`'s envelope guard.
+            batch = data.get("docs") or []
             for doc in batch:
                 jid = str(doc.get("jobID") or "")
                 if not jid or jid in seen:
