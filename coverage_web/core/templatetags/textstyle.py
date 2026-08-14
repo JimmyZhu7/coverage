@@ -48,8 +48,27 @@ _MINOR = {
 # genuinely acronyms/brands, not shouting.
 _ACRONYMS = {"EMEA", "APAC", "LATAM", "NYSE", "NASDAQ", "FICC", "BRICS"}
 
+# Acronyms recognized regardless of how the DB happens to have stored their
+# case. Contact.firm_text in particular is free text a student typed, so the
+# same acronym shows up as "USC" from one contact and "usc" from another —
+# the acronym is a fact about the token, not about which casing landed in
+# the DB. Deliberately small and manually curated (not "any short lowercase
+# token"): most short lowercase words are ordinary words ("the", "her",
+# firm names like "sap"), and defaulting them to all-caps would be its own
+# mis-casing bug.
+_ACRONYMS_ANY_CASE = _ACRONYMS | {"USC"}
+
 _SPLIT_RE = re.compile(r"(\s+)")
 _SUB_SEP = re.compile(r"([-/])")
+
+# An all-caps letter run with a symbol stitched into the middle of it
+# ("E*TRADE", "AT&T") is stylized branding, not shouting — but `_letters()`
+# strips the symbol before measuring length, so "E*TRADE" measured only
+# "ETRADE" (6 letters), sailed past the 4-letter acronym cutoff, and was
+# recapped to "E*trade". A symbol embedded between two letters is itself
+# the signal that this is an intentional brand mark, independent of how
+# many letters surround it.
+_EMBEDDED_SYMBOL = re.compile(r"[A-Za-z][*&][A-Za-z]")
 
 
 def _letters(token: str) -> str:
@@ -64,12 +83,16 @@ def _case_atom(atom: str) -> str:
     if letters.isupper():
         # Acronym vs shouting: short stays, long gets title-cased. A
         # parenthesized all-caps token is a ticker/fund code ("(TRECO)")
-        # whatever its length — preserve it.
-        if len(letters) <= 4 or letters in _ACRONYMS or atom.startswith("("):
+        # whatever its length — preserve it, as is a symbol-stitched brand
+        # mark like "E*TRADE".
+        if (len(letters) <= 4 or letters in _ACRONYMS
+                or _EMBEDDED_SYMBOL.search(atom) or atom.startswith("(")):
             return atom
         return atom[:1] + atom[1:].lower() if atom[:1].isalpha() else _recap(atom)
     if not letters.islower() and not letters.istitle():
         return atom  # mixed case: PwC, BofA, McKinsey, iCIMS — their branding
+    if letters.islower() and letters.upper() in _ACRONYMS_ANY_CASE:
+        return letters.upper()
     return _recap(atom)
 
 
