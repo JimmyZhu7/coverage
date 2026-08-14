@@ -171,6 +171,54 @@ def test_verify_needs_verification_on_unlisted_custom_domain_url():
     assert result.result == "needs-verification"
 
 
+def test_classify_url_custom_domain_janestreet():
+    # Jane Street embeds its Greenhouse board at www.janestreet.com with the
+    # job id only in a gh_jid= query param -- same shape as williamblair.
+    # directory/boards.py registers Jane Street's real token as "janestreet".
+    info = greenhouse.classify_url(
+        "https://www.janestreet.com/join-jane-street/apply/8072596002?gh_jid=8072596002"
+    )
+    assert info == {"token": "janestreet", "job_id": "8072596002"}
+
+
+def test_classify_url_custom_domain_janestreet_bare_apex():
+    info = greenhouse.classify_url("https://janestreet.com/join-jane-street/apply/8072596002?gh_jid=8072596002")
+    assert info == {"token": "janestreet", "job_id": "8072596002"}
+
+
+def test_verify_resolves_janestreet_custom_domain_url(monkeypatch, greenhouse_job_detail_fixture):
+    """Before the _CUSTOM_DOMAIN_TOKENS entry, every Jane Street row's URL
+    (www.janestreet.com/join-jane-street/apply/<id>?gh_jid=<id>) fell through
+    to needs-verification, silently no-oping reverify's single-URL liveness
+    backstop for all 232 open Jane Street rows. This proves verify() now
+    actually reaches boards-api for a Jane Street custom-domain URL."""
+    seen_urls = []
+
+    def fake_fetch_json(url, **kw):
+        seen_urls.append(url)
+        return greenhouse_job_detail_fixture
+
+    monkeypatch.setattr(greenhouse, "fetch_json", fake_fetch_json)
+    result = greenhouse.verify(
+        "https://www.janestreet.com/join-jane-street/apply/8072596002?gh_jid=8072596002"
+    )
+
+    assert result.result == "verified-open"
+    assert seen_urls == ["https://boards-api.greenhouse.io/v1/boards/janestreet/jobs/8072596002"]
+
+
+def test_verify_closed_on_janestreet_custom_domain_404(monkeypatch):
+    def raise_404(url, **kw):
+        raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+
+    monkeypatch.setattr(greenhouse, "fetch_json", raise_404)
+    result = greenhouse.verify(
+        "https://www.janestreet.com/join-jane-street/apply/8072596002?gh_jid=8072596002"
+    )
+
+    assert result.result == "closed"
+
+
 def test_wafd_scalar_json_degrades_to_board_failure(monkeypatch):
     """A WAF returning valid-but-scalar JSON (a bare string) must surface as
     ok=False, not escape as an AttributeError that aborts the whole run.

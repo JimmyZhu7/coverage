@@ -23,7 +23,8 @@ embeds (see `_CUSTOM_DOMAIN_TOKENS` below) — never the internal
 `boards-api.greenhouse.io` JSON endpoint `fetch()` itself calls, and never an
 UNLISTED custom domain. Some firms point Greenhouse's `absolute_url` at their
 own site with the job id recoverable only from a `gh_jid=` query param
-(confirmed live: williamblair's board does this — all 48 open rows use
+(confirmed live: williamblair's, KKR's, and Jane Street's boards all do
+this — williamblair's board alone had all 48 open rows using
 `https://www.williamblair.com/Careers/job-description?gh_jid=<id>`, and every
 one of them classified as `provider='unknown'` before the mapping below
 existed, which meant `reverify`'s single-URL liveness backstop — the layer
@@ -32,7 +33,11 @@ never sees — could never usefully check a single William Blair row). A
 custom domain carries no token of its own to read out of the URL, so this is
 only closeable for domains this package already knows the token for (from
 `directory/boards.py`'s own board registration) — guessing a token from an
-arbitrary third-party domain would be worse than "needs-verification".
+arbitrary third-party domain would be worse than "needs-verification". The
+original's `_GREENHOUSE_RE` never handled that shape either, so this isn't a
+regression — an unlisted custom-domain URL still verifies as
+"needs-verification" rather than this package guessing a board token it has
+no reliable way to recover from an arbitrary third-party domain.
 """
 
 from __future__ import annotations
@@ -73,6 +78,14 @@ _CUSTOM_DOMAIN_TOKENS = {
     # pre-fix williamblair case).
     "www.kkr.com": "stage",
     "kkr.com": "stage",
+    # Jane Street: directory/boards.py registers token "janestreet"; every
+    # stored Jane Street Opportunity.url is a
+    # www.janestreet.com/join-jane-street/apply/<id>?gh_jid=<id> embed, and
+    # without this entry every one of those rows fell through to
+    # provider='unknown' / needs-verification, exactly the pre-fix
+    # williamblair failure mode.
+    "www.janestreet.com": "janestreet",
+    "janestreet.com": "janestreet",
 }
 _GH_JID_RE = re.compile(r"[?&]gh_jid=(\d+)")
 
