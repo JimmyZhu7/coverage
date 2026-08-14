@@ -406,15 +406,42 @@ def _group_picks(cards):
     return shared, order
 
 
-# Track suffixes the seeds append to a cycle slug.
-_CYCLE_TRACKS = {
-    "ib": "IB", "pe": "PE", "st": "S&T", "am": "AM",
-    "hk": "Hong Kong", "us": "US", "eu": "Europe", "sg": "Singapore",
-}
+# Track suffixes the seeds append to a cycle slug. TRACKS ONLY: the region
+# codes (hk/us/eu/sg) used to sit in this same dict, which is what made the
+# firm page say the market twice. `cycle_label("sa2028_hk")` expanded the
+# suffix to "Hong Kong" and seated it in the slot that otherwise holds a desk,
+# and _timeline.html then appended the row's own `region` after it — so seven
+# rows read "SA 2028 · HONG KONG · HK" under the uppercase .tl-scope, directly
+# beneath rows that read "SA 2028 · HK". It also meant one slot held two
+# vocabularies: a track on 20 rows, a market on 7.
+#
+# Splitting the suffix by KIND (rather than labelling `region` through
+# REGION_LABELS, the intuitive fix) is what actually removes the duplication —
+# labelling would have produced "SA 2028 · HONG KONG · HONG KONG".
+_CYCLE_TRACKS = {"ib": "IB", "pe": "PE", "st": "S&T", "am": "AM"}
+
+
+def _cycle_suffix(cycle: str) -> str:
+    """The `_`-suffix of a cycle slug, lowercased. "" for a human cycle."""
+    raw = (cycle or "").strip()
+    if not raw or " " in raw:           # already human ("SA 2028")
+        return ""
+    return raw.partition("_")[2].lower()
+
+
+def cycle_region(cycle: str) -> str:
+    """The market a cycle slug names in its own suffix, if it names one.
+
+    `sa2028_hk` -> `hk`; `sa2028_ib` -> "" (that is a desk, not a market).
+    REGION_LABELS is the one vocabulary of what a region code is, so this
+    cannot drift from the Region filter's idea of the same thing.
+    """
+    suffix = _cycle_suffix(cycle)
+    return suffix if suffix in REGION_LABELS else ""
 
 
 def cycle_label(cycle: str) -> str:
-    """`sa2028_ib` -> `SA 2028 · IB`.
+    """`sa2028_ib` -> `SA 2028 · IB`. Cycle and TRACK; never the market.
 
     The column holds two spellings of one vocabulary — importers wrote
     `sa2028_ib`, the seeds wrote `SA 2028` — and the firm page printed
@@ -422,6 +449,9 @@ def cycle_label(cycle: str) -> str:
     `SA2028_IB` sitting in the product's own body copy. Formatting on read
     rather than migrating: the stored value is what the importer matched on,
     and rewriting it would break re-imports for a display bug.
+
+    A region suffix is dropped here and handed to `cycle_region` instead, so
+    the market is named exactly once per row. See `_CYCLE_TRACKS`.
     """
     raw = (cycle or "").strip()
     if not raw:
@@ -435,6 +465,8 @@ def cycle_label(cycle: str) -> str:
         label = f"{season} {year}"
     else:
         label = head.replace("-", " ").title()
+    if tail.lower() in REGION_LABELS:   # a market, not a desk — see cycle_region
+        return label
     track = _CYCLE_TRACKS.get(tail.lower(), tail.replace("-", " ").title() if tail else "")
     return f"{label} · {track}" if track else label
 
@@ -510,7 +542,11 @@ def _firm_date_row(fd, *, today):
     confirmed = (fd.confidence or 0.0) >= 0.8 and prec in ("day", "month", "")
     return {
         "cycle": cycle_label(fd.cycle),
-        "region": fd.region,
+        # The row's own column when it has one, else the market its cycle slug
+        # names. Stated beats inferred; a slug whose suffix DISAGREES with the
+        # column is a data error rather than a second fact worth printing (no
+        # such rows live — the suffix and the column agree on all 7).
+        "region": fd.region or cycle_region(fd.cycle),
         "event_kind": fd.event_kind,
         "event_label": EVENT_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " ").capitalize()),
         "date_text": date_text,

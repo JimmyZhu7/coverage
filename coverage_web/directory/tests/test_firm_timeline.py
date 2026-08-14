@@ -1,5 +1,8 @@
 """The Cycle Dates timeline on a firm page: what it may claim, and how.
 
+Two defects live here, both found by reading the RENDERED page rather than the
+helper that feeds it — the market being named twice, and:
+
 `FirmDate.source_url` is a URLField that nothing validates, so 26 of the 39
 live rows hold a provenance token ("seed:historical-pattern", "seed:demo")
 rather than a citation. The template's only gate was truthiness, so every
@@ -91,3 +94,39 @@ def test_an_empty_source_shows_no_pill_at_all(client):
     body = _page(client, firm)
     for token in ("from past cycles", "sample data", "unverified", ">source<"):
         assert token not in body
+
+
+# ---------------------------------------------------------------------------
+# The market is named once
+#
+# `cycle_label` expanded a REGION suffix ("sa2028_hk" -> "SA 2028 · Hong Kong")
+# into the slot that otherwise holds a TRACK, and the template then appended
+# the row's own region again, so seven rows read "SA 2028 · HONG KONG · HK"
+# directly beneath rows reading "SA 2028 · HK".
+# ---------------------------------------------------------------------------
+def test_a_region_suffixed_cycle_does_not_print_the_market_twice(client):
+    """The suffix and the region column agreed on all 7 live rows, so the
+    second mention was never carrying a fact — pure duplication."""
+    firm = _firm()
+    _date(firm, cycle="sa2028_hk", region="hk")
+    body = _page(client, firm)
+    assert "SA 2028 · hk" in body
+    assert "Hong Kong" not in body
+
+
+def test_a_track_suffixed_cycle_keeps_both_track_and_region(client):
+    """The middle slot means TRACK. `sa2028_ib` in `us` says two different
+    things and must keep saying both."""
+    firm = _firm()
+    _date(firm, cycle="sa2028_ib", region="us")
+    body = _page(client, firm)
+    assert "SA 2028 · IB · us" in body
+
+
+def test_a_region_suffix_still_names_the_market_when_the_row_has_no_region(client):
+    """Dropping the suffix outright would lose the market on any row whose
+    own `region` column is blank."""
+    firm = _firm()
+    _date(firm, cycle="sa2028_hk", region="")
+    body = _page(client, firm)
+    assert "SA 2028 · hk" in body
