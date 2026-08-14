@@ -78,6 +78,14 @@ CAPTURE_INBOUND_SECRET = env("CAPTURE_INBOUND_SECRET", default="local-dev-captur
 # domain whose inbound MX points at Postmark. Placeholder until DNS is set up.
 CAPTURE_INBOUND_DOMAIN = env("CAPTURE_INBOUND_DOMAIN", default="in.coverage.app")
 
+# Anthropic API key for the LLM-backed extraction pass (directory/ai_extract.py)
+# and any future AI feature (coffee-chat briefs, outreach drafts). Blank by
+# default — every AI code path checks ai_extract.is_configured() first and
+# no-ops rather than erroring, so the app boots and every test passes with
+# nothing set. Costs real money per call once set; see ai_extract.py's
+# module docstring before turning this on in production.
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
+
 # The custom user model (docs/build-plan.md §2's `users` table). Set from
 # the very first migration — see accounts/models.py for the model and
 # README/the build task for why this must never be swapped after real

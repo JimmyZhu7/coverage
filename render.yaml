@@ -69,6 +69,8 @@ services:
         sync: false # e.g. Coverage <no-reply@yourdomain.app>
       - key: SENTRY_DSN
         sync: false # optional; leave blank to disable
+      - key: ANTHROPIC_API_KEY
+        sync: false # optional; leave blank to disable AI extraction/briefs — costs per call once set
 
   # ---- Freshness pass every 6 hours (scrape + reclassify + reverify) -----
   # Four passes a day keeps deadlines honest across US and Asia hours.
