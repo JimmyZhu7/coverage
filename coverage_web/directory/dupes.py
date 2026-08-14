@@ -193,12 +193,30 @@ def normalize_label(value: str) -> str:
     return _EDGE_NOISE.sub("", s)
 
 
-def duplicate_key(row: Any) -> tuple[Any, str, str]:
-    """The grouping key: same firm, same words for the role, same words for
-    the place."""
+# normalize_label already equates punctuation and separator style ("Wholesale
+# Sales, Senior Manager" == "Wholesale Sales - Senior Manager"), but leaves
+# WORD ORDER as a hard divider. A poster reorders the same clause as often as
+# they reswap its separator: Brookfield posts the identical opening as both
+# "Manager, Finance" (id=955) and "Finance Manager" (id=10488), same firm,
+# same Toronto location, both open — and a full bag-of-words sweep of every
+# open row (round 5) found 18 such groups across Stifel, TD Securities,
+# Barclays, PwC, Morgan Stanley, Deutsche Bank, Point72 ("Quantitative
+# Researcher - Macro" / "Macro Quantitative Researcher") and Blue Owl ("Real
+# Assets Accounting, Senior Associate" / "Senior Associate - Real Assets
+# Accounting"). Sorting the normalized words makes the grouping key
+# order-insensitive on top of separator-insensitive, without touching
+# location clustering, which stays a strict place-name match.
+def _title_bag(title: str) -> tuple[str, ...]:
+    """Sorted normalized words of a title, for "same words, any order?"."""
+    return tuple(sorted(normalize_label(title).split(" ")))
+
+
+def duplicate_key(row: Any) -> tuple[Any, tuple[str, ...], str]:
+    """The grouping key: same firm, same words for the role (any order),
+    same words for the place."""
     return (
         getattr(row, "firm_id", None),
-        normalize_label(getattr(row, "title", "")),
+        _title_bag(getattr(row, "title", "")),
         normalize_label(getattr(row, "location", "")),
     )
 
@@ -332,7 +350,7 @@ def fold_duplicates(
     by_role: dict[tuple, list[Any]] = {}
     for row in rows:
         key = (getattr(row, "firm_id", None),
-               normalize_label(getattr(row, "title", "")))
+               _title_bag(getattr(row, "title", "")))
         by_role.setdefault(key, []).append(row)
 
     keep: set[int] = set()

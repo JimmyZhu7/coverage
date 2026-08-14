@@ -23,6 +23,8 @@ from coverage_connectors.models import Opportunity as ConnOpp
 
 from directory import ingest
 from directory.dupes import (
+    _title_bag,
+    duplicate_key,
     fold_duplicates,
     identity_fragment,
     normalize_label,
@@ -354,6 +356,43 @@ class TestNormalizeLabel:
                 != normalize_label("Barcelona - Fiscal Associate"))
 
 
+class TestTitleBag:
+    """Round 5 regression: `normalize_label` unifies punctuation and
+    separator style but leaves WORD ORDER a hard divider, so word-order
+    variants of the same title never folded. Brookfield posted the identical
+    opening as both 'Manager, Finance' (id=955) and 'Finance Manager'
+    (id=10488), same firm, same Toronto location, both open. A full sweep of
+    every open row found 18 such groups, including Point72's 'Quantitative
+    Researcher - Macro' / 'Macro Quantitative Researcher' and Blue Owl's
+    'Real Assets Accounting, Senior Associate' / 'Senior Associate - Real
+    Assets Accounting'."""
+
+    def test_reordered_comma_title_matches(self):
+        assert _title_bag("Manager, Finance") == _title_bag("Finance Manager")
+
+    def test_reordered_dash_title_matches(self):
+        assert (_title_bag("Quantitative Researcher - Macro")
+                == _title_bag("Macro Quantitative Researcher"))
+
+    def test_longer_reordered_title_matches(self):
+        assert (_title_bag("Real Assets Accounting, Senior Associate")
+                == _title_bag("Senior Associate - Real Assets Accounting"))
+
+    def test_genuinely_different_word_sets_still_differ(self):
+        """The fix must not turn every same-length title into a match —
+        Barcelona's Legal vs Fiscal practice areas share every word except
+        one and must stay apart."""
+        assert (_title_bag("Barcelona - Legal Associate")
+                != _title_bag("Barcelona - Fiscal Associate"))
+
+    def test_duplicate_key_uses_the_word_order_insensitive_title(self):
+        row_a = _Row(1, title="Manager, Finance")
+        row_b = _Row(2, title="Finance Manager")
+        assert duplicate_key(row_a)[1] == duplicate_key(row_b)[1]
+        assert duplicate_key(row_a)[0] == duplicate_key(row_b)[0]
+        assert duplicate_key(row_a)[2] == duplicate_key(row_b)[2]
+
+
 class TestFoldDuplicates:
     def test_identical_rows_fold_to_one(self):
         kept, folded = fold_duplicates([_Row(1), _Row(2)])
@@ -369,6 +408,28 @@ class TestFoldDuplicates:
     def test_different_firms_are_left_alone(self):
         kept, folded = fold_duplicates([_Row(1, firm_id=1), _Row(2, firm_id=2)])
         assert folded == 0
+
+    def test_brookfield_word_order_pair_folds(self):
+        """End-to-end regression for the confirmed Brookfield defect: ids
+        955 ('Finance Manager') and 10488 ('Manager, Finance'), same firm,
+        same Toronto, Ontario location, both open — used to survive as two
+        separate cards because `by_role`'s key never sorted title words."""
+        kept, folded = fold_duplicates([
+            _Row(955, firm_id=46, title="Finance Manager", location="Toronto, Ontario"),
+            _Row(10488, firm_id=46, title="Manager, Finance", location="Toronto, Ontario"),
+        ])
+        assert folded == 1
+        assert len(kept) == 1
+
+    def test_word_order_pair_at_different_locations_still_stays_apart(self):
+        """The fix must only equate word order, never location — the same
+        title reordered at two different real cities is still two jobs."""
+        kept, folded = fold_duplicates([
+            _Row(1, title="Finance Manager", location="Toronto, Ontario"),
+            _Row(2, title="Manager, Finance", location="London, United Kingdom"),
+        ])
+        assert folded == 0
+        assert len(kept) == 2
 
     def test_dbs_comma_space_variant_folds(self):
         """End-to-end regression for the confirmed DBS defect: two real
