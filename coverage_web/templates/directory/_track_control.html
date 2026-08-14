@@ -11,7 +11,7 @@ so a stray feed click can't un-apply someone.
             hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "saved"}'
             hx-target="#track-{{ r.id }}" hx-swap="outerHTML"
             title="Save this role">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11.5l-3.5 2 .9-3.9L2.5 6.9l4-.35L8 3l1.5 3.55 4 .35-2.9 2.7.9 3.9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11.5l-3.5 2 .9-3.9L2.5 6.9l4-.35L8 3l1.5 3.55 4 .35-2.9 2.7.9 3.9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       Save
     </button>
     {% comment %}Save's opposite. Without it the only verbs were "act on
