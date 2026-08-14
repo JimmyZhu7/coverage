@@ -271,6 +271,43 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
     return page_text(resp.text), location
 
 
+def has_live_api(url: str, *, greenhouse_token: str | None) -> bool:
+    """True when `fetch_posting` can reach this URL through a real, live API
+    call (Workday's wday/cxs JSON, Goldman's GraphQL, Greenhouse's board
+    API) rather than a plain GET of the posting page.
+
+    Why this matters: `payload_text()` below is asked first BECAUSE some
+    boards' detail pages cannot be fetched at all (McKinsey resets the
+    connection on any non-browser client) — for those, the board's own list
+    payload is the only copy available, stale or not. But BMO's Phenom
+    board pairs a list payload that carries Phenom's own frozen ML-parsed
+    preview snippet (dated to the posting's original `dateCreated`) with a
+    detail URL that resolves into a live Workday tenant — one this command
+    can already read straight from Workday's own `wday/cxs` API, same as
+    every other Workday-backed board. Asking the payload first there means
+    the live page is never consulted a second time: verified live 2026-08-14
+    on opportunity id 19224, whose stored deadline (2026-04-19, sourced from
+    Phenom's cached snippet near its 2026-03-23 `dateCreated`) is four
+    months stale next to Workday's own API, fetched fresh, stating
+    08/30/2026 — and this was not a one-off: `payload_text()` returns
+    non-None for 35/35 open Phenom-source rows carrying a deadline, so NONE
+    of them were ever actually checked against their live Workday page.
+    Reversing precedence for these reliable-API URLs fixes it at the root:
+    a live, unblockable API is asked before a payload that COULD be stale,
+    while a page that genuinely resets the connection (no live API,
+    `has_live_api` returns False) keeps consulting its payload first, same
+    as always.
+    """
+    if workday_api_url(url):
+        return True
+    if _GS_ROLE_URL.search(url or ""):
+        return True
+    jid = _GH_JID.search(url or "")
+    if jid and greenhouse_token:
+        return True
+    return False
+
+
 def page_text(html: str) -> str:
     """Visible-ish text from a posting page, whitespace collapsed."""
     html = _TAGS.sub(" ", html)
@@ -490,18 +527,39 @@ class Command(BaseCommand):
                 hosts.append(host)
             last_hit[host] = time.monotonic()
 
-            # The board's own payload first: free, unblockable, and on some
-            # boards the only copy we are allowed to have.
+            # The board's own payload first, UNLESS this URL has a live,
+            # unblockable API of its own (Workday/Goldman/Greenhouse) --
+            # then that live source is asked first, since the payload can
+            # be a frozen preview snippet the board cached at ingest time
+            # (see `has_live_api`'s docstring: BMO/Phenom postings resolve
+            # into a live Workday tenant, but Phenom's own list payload
+            # answers first and the live page is never reached). Boards
+            # with no live API (McKinsey resets the connection on a plain
+            # GET) still ask the payload first, since it may be the only
+            # copy reachable at all.
             location = ""
-            text = payload_text(o.raw)
-            if text:
-                from_payload += 1
-            else:
-                text, location = fetch_posting(
-                    o.url, greenhouse_token=gh_tokens.get(o.firm.slug))
+            token = gh_tokens.get(o.firm.slug)
+            used_payload = False
+            if has_live_api(o.url, greenhouse_token=token):
+                text, location = fetch_posting(o.url, greenhouse_token=token)
                 if text is None:
-                    failed += 1
-                    continue
+                    text = payload_text(o.raw)
+                    used_payload = bool(text)
+                    if text:
+                        from_payload += 1
+                    else:
+                        failed += 1
+                        continue
+            else:
+                text = payload_text(o.raw)
+                used_payload = bool(text)
+                if text:
+                    from_payload += 1
+                else:
+                    text, location = fetch_posting(o.url, greenhouse_token=token)
+                    if text is None:
+                        failed += 1
+                        continue
             fetched += 1
 
             deadline, ok = _parse_deadline(extract_deadline_from_text(text))
@@ -551,7 +609,7 @@ class Command(BaseCommand):
                 raw["detail_location"] = location
             # Where it came from, because the two age differently: a payload
             # copy is refreshed by every scrape, a fetched one only here.
-            raw["detail_source"] = "payload" if payload_text(o.raw) else "fetch"
+            raw["detail_source"] = "payload" if used_payload else "fetch"
             o.raw = raw
             update = ["raw"]
 

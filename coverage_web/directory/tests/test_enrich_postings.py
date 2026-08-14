@@ -19,6 +19,8 @@ from directory.management.commands.enrich_postings import (
     URGENT_STALE_DAYS,
     _queue,
     fetch_posting,
+    has_live_api,
+    payload_text,
 )
 from directory.management.commands import enrich_postings as enrich_mod
 from directory.models import Firm, Opportunity
@@ -257,3 +259,92 @@ class TestGoldmanSachsDetailFetch:
             enrich_mod.requests, "post",
             lambda *a, **k: _FakeResponse(200, {"data": {"role": None}}))
         assert fetch_posting(self.URL) == (None, "")
+
+
+@pytest.mark.django_db
+class TestLiveApiPrecedenceOverStalePayload:
+    """Round 4 regression: BMO id=19224's Phenom list payload carries a
+    descriptionTeaser snippet frozen near the posting's original
+    dateCreated (2026-03-23, stating "04/19/2026"), while the SAME URL
+    resolves into a live Workday tenant stating "08/30/2026" through the
+    wday/cxs API this command already knows how to read. Because
+    `payload_text()` used to be asked unconditionally before
+    `fetch_posting()`, the live Workday answer was never reached for any of
+    35/35 open Phenom-source rows carrying a deadline. `has_live_api()` and
+    the reordered fetch in `handle()` fix this by asking the live API FIRST
+    whenever one exists, falling back to the payload only when the live
+    fetch fails outright."""
+
+    STALE_PAYLOAD_TEXT = (
+        "Application Deadline . 04/19/2026 . This is a great opportunity to "
+        "join our team and build your career in banking technology while "
+        "working with a talented group of engineers on real customer "
+        "problems every single day of the internship program this summer"
+    )
+    WORKDAY_URL = ("https://bmo.wd3.myworkdayjobs.com/External/job/Toronto-ON-CAN/"
+                   "Cloud-Application-Developer_R260005483/apply")
+
+    def _stale_raw(self):
+        # Mirrors Phenom's own nested shape (descriptionTeaser plus the
+        # ml_job_parser sub-fields) closely enough to trip payload_text()'s
+        # own prose-detection walk exactly as the live BMO payload does.
+        raw = {
+            "descriptionTeaser": self.STALE_PAYLOAD_TEXT,
+            "ml_job_parser": {"descriptionTeaser_ats": self.STALE_PAYLOAD_TEXT},
+        }
+        assert payload_text(raw) is not None, "fixture must actually trip payload_text()"
+        return raw
+
+    def test_has_live_api_recognizes_workday_urls(self):
+        assert has_live_api(self.WORKDAY_URL, greenhouse_token=None) is True
+        assert has_live_api("https://careers.mckinsey.com/job/123",
+                            greenhouse_token=None) is False
+
+    def test_workday_url_prefers_live_fetch_over_stale_payload(self, monkeypatch):
+        """The core fix: even though the stored payload answers (and would
+        yield the stale 04/19/2026 date), a Workday-resolvable URL must
+        still hit the live API and store ITS answer."""
+        firm = Firm.objects.create(slug="bmo", name="BMO")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Cloud Application Developer", bucket="other",
+            status="open", url=self.WORKDAY_URL,
+            deadline=timezone.localdate() + timedelta(days=1),
+            deadline_precision="day", confidence=0.6,
+            raw=self._stale_raw(),
+        )
+        live_payload = {"jobPostingInfo": {
+            "jobDescription": "Application Deadline: 08/30/2026 Address: Toronto",
+            "location": "Toronto, ON", "additionalLocations": [],
+            "country": {"descriptor": "Canada"},
+        }}
+        monkeypatch.setattr(
+            enrich_mod.requests, "get",
+            lambda *a, **k: _FakeResponse(200, live_payload))
+        call_command("enrich_postings", refetch=True)
+
+        opp.refresh_from_db()
+        assert opp.deadline.isoformat() == "2026-08-30"
+        assert opp.raw["detail_source"] == "fetch"
+
+    def test_blocked_board_still_falls_back_to_payload(self, monkeypatch):
+        """A URL with no live API (the McKinsey shape: a plain GET that
+        would fail) must still be answered from the payload, same as
+        before this fix — this only reorders precedence for URLs that
+        genuinely have a live API to prefer."""
+        firm = Firm.objects.create(slug="mckinsey", name="McKinsey")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Business Analyst", bucket="entry_level",
+            status="open", url="https://careers.mckinsey.com/job/123",
+            deadline=timezone.localdate() + timedelta(days=1),
+            deadline_precision="day", confidence=0.6,
+            raw=self._stale_raw(),
+        )
+
+        def fail_get(*a, **k):
+            raise enrich_mod.requests.RequestException("connection reset")
+        monkeypatch.setattr(enrich_mod.requests, "get", fail_get)
+        call_command("enrich_postings", refetch=True)
+
+        opp.refresh_from_db()
+        assert opp.deadline.isoformat() == "2026-04-19"
+        assert opp.raw["detail_source"] == "payload"
