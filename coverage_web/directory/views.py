@@ -45,7 +45,11 @@ from directory.classify import (
 )
 # The one definition of "closing soon" — see deadlines.py for why it isn't
 # spelled out at each call site (and for the crm/views.py follow-up).
-from directory.deadlines import CLOSING_SOON_DAYS, is_closing_soon
+from directory.deadlines import (
+    CLOSING_SOON_DAYS,
+    closing_soon_window,
+    is_closing_soon,
+)
 from directory.dupes import fold_duplicates
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
@@ -2412,19 +2416,58 @@ def my_applications(request):
         _lens_item(uo, today=today) for uo in live
         if uo.opportunity.deadline is None
     ]
+    # The two lenses above leave a hole, and the fractions printed beside them
+    # ("1 of 12 live", "9 of 12 live") invite the student to subtract and find
+    # it. `is_closing_soon` is a two-sided window, so a dated row lands outside
+    # it in BOTH directions: further out than the window, or already behind it.
+    # Both get a lens, so every live row is accounted for on this band.
+    window_first, window_last = closing_soon_window(today)
+    later = [
+        _lens_item(uo, today=today) for uo in live
+        if uo.opportunity.deadline is not None
+        and uo.opportunity.deadline > window_last
+    ]
+    later.sort(key=lambda i: (i["days_left"], i["firm_name"].lower()))
+    passed = [
+        _lens_item(uo, today=today) for uo in live
+        if uo.opportunity.deadline is not None
+        and uo.opportunity.deadline < window_first
+    ]
+    passed.sort(key=lambda i: (i["days_left"], i["firm_name"].lower()))
 
+    # Read down the band and you read down the calendar: what has gone, what
+    # is going, what is coming, what never had a date. `empty_state` is what
+    # separates the two lenses that are worth a sentence when empty (both are
+    # coaching: go find roles that close soon / everything you track is dated)
+    # from the two that are just noise when empty.
     lenses = [
+        {
+            "key": "passed",
+            "label": "Deadline Passed",
+            "items": passed,
+            "note": "The posted date has gone by. Check the posting before you count on it.",
+            "empty_state": False,
+        },
         {
             "key": "closing",
             "label": "Closing Soon",
             "items": closing,
             "note": f"Deadline inside the next {CLOSING_SOON_DAYS} days.",
+            "empty_state": True,
+        },
+        {
+            "key": "later",
+            "label": "Further Out",
+            "items": later,
+            "note": f"Dated, but more than {CLOSING_SOON_DAYS} days away. Not urgent yet.",
+            "empty_state": False,
         },
         {
             "key": "rolling",
             "label": "Rolling",
             "items": rolling,
             "note": "No posted deadline. Reviewed as they arrive, so apply early.",
+            "empty_state": True,
         },
     ]
     # Roles the student marked "not for me". They live here rather than in

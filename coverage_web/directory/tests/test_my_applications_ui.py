@@ -153,6 +153,58 @@ def test_the_live_fraction_survives(client, pipeline):
 
 
 @pytest.mark.django_db
+def test_the_lens_fractions_account_for_every_live_row(client, db):
+    """Every fraction on the band is written over the same denominator, which
+    invites a subtraction. The band ran Closing Soon + Rolling only, so a live
+    role dated 94 days out — or one whose date has already gone by — appeared
+    in neither, and the arithmetic came up short with nothing on the page to
+    explain the difference."""
+    firm = Firm.objects.create(name="SIG", slug="sig")
+
+    def opp(n, days):
+        return Opportunity.objects.create(
+            firm=firm, url=f"https://x/{n}", title=f"Summer Analyst {n}",
+            bucket="internship", status="open",
+            deadline=None if days is None else TODAY + timedelta(days=days),
+        )
+
+    user = _user()
+    for o, status in [(opp(1, 3), "saved"), (opp(2, 94), "submitted"),
+                      (opp(3, None), "saved"), (opp(4, -5), "saved"),
+                      (opp(5, 2), "closed")]:
+        UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status=status)
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+    lenses = resp.context["lenses"]
+    by_key = {lens["key"]: lens for lens in lenses}
+
+    assert resp.context["live_total"] == 4
+    assert sum(len(lens["items"]) for lens in lenses) == 4, "no live row falls through"
+    assert [i["title"] for i in by_key["closing"]["items"]] == ["Summer Analyst 1"]
+    assert [i["title"] for i in by_key["later"]["items"]] == ["Summer Analyst 2"]
+    assert [i["title"] for i in by_key["rolling"]["items"]] == ["Summer Analyst 3"]
+    assert [i["title"] for i in by_key["passed"]["items"]] == ["Summer Analyst 4"]
+
+    body = resp.content.decode()
+    assert "Further Out" in body, "the residue is named on the page, not just in context"
+    assert "Deadline Passed" in body
+    assert "These two lists" not in body, "the intro cannot promise a count of lists"
+
+
+@pytest.mark.django_db
+def test_the_residue_lenses_stay_off_the_page_when_they_hold_nothing(client, pipeline):
+    """Closing Soon and Rolling earn their empty state because it coaches. A
+    permanent "Deadline Passed — 0 of 3 live" band coaches nothing, so it only
+    appears when it has rows to show."""
+    body = client.get(reverse("my_applications")).content.decode()
+
+    assert "Closing Soon" in body
+    assert "Further Out" not in body
+    assert "Deadline Passed" not in body
+
+
+@pytest.mark.django_db
 def test_an_empty_lens_offers_a_way_out(client, db):
     """Empty states get a message AND an action. A student tracking only
     rolling roles sees an empty Closing Soon, and it must not be a blank
