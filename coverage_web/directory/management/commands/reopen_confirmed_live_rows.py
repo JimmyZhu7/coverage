@@ -16,6 +16,25 @@ DETAIL endpoint (what the provider actually serves an applicant) — the list
 drops it, ingest closes it, and nothing ever re-opens it even while the
 detail page stays live and applyable.
 
+Round 5, 2026-08-14: a random 10-row sample of BMO's phenom-sourced closed
+inventory (135 of the DB's 183 phenom+myworkdayjobs.com closed rows are
+BMO's) re-verified 2 of 10 still genuinely live through
+`coverage_connectors.workday.verify()` — ids 9530 ("Service Transition &
+Operational Resiliency Leader") and 9490 ("Vice President, Commodities
+Development"), both closed_at 2026-08-14 03:47:13 in the same batch as
+several genuinely-dead rows in the same sample. A second, independent
+4-row sample drawn from the same BMO/phenom closed pool went 4 for 4:
+ids 9539 ("Customer Service Representative"), 9361 ("Associate Banker"),
+9526 ("Senior Network and Cloud Penetration Tester"), and 9544 ("Commercial
+Relationship Manager Associate") — all four `verified-open` via the same
+CxS-422-then-postingAvailable-flag fallback, one of them (9539) additionally
+corroborated by a forward-looking `Application Deadline: 08/30/2026` read
+straight off the posting page, ruling out a stale/incorrect flag. All six
+share the identical mechanism round 4's id=9595 already documented below:
+Phenom's search widget desyncing from the live Workday tenant the same
+posting resolves into. Round 4's two ids (9595, 3979) have since been
+applied and reopened, so they have dropped out of DEFAULT_IDS below.
+
 Round 4, 2026-08-14, two independent mechanisms produced this same
 list-vs-detail split:
 
@@ -71,8 +90,9 @@ from coverage_connectors import verify
 from directory.models import Opportunity
 
 # Confirmed live by the current round's read-only audit — see module
-# docstring for why each one closed wrongly.
-DEFAULT_IDS = [9595, 3979]
+# docstring for why each one closed wrongly. Round 4's ids (9595, 3979) were
+# applied and reopened, so they have dropped out of this list.
+DEFAULT_IDS = [9530, 9490, 9539, 9361, 9526, 9544]
 
 
 class Command(BaseCommand):

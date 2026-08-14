@@ -3,7 +3,9 @@ the live provider itself confirms are still live. No live network: the
 command module's `verify` import is monkeypatched, same convention as
 test_close_confirmed_dead_rows.py / test_reopen_truncated_oracle_closures.py.
 
-Regression coverage for the two confirmed round-4 findings:
+Regression coverage for the two confirmed round-4 findings (since applied
+and reopened, so no longer in DEFAULT_IDS, but still exercised generically
+below to prove the command handles either source):
 - Opportunity id=9595 (BMO, source="phenom") — closed by Phenom's search
   widget dropping the row while the underlying Workday tenant's own
   wday/cxs API and its posting page's `postingAvailable` flag both still
@@ -15,6 +17,11 @@ Both are exercised generically here (the command is source-agnostic, unlike
 reopen_truncated_oracle_closures which is scoped to source="oracle") since
 the fix for both is the same shape: trust the provider's own live verdict
 over a list-based close.
+
+Round 5 added six more BMO/phenom ids to DEFAULT_IDS (9530, 9490, 9539,
+9361, 9526, 9544) — same mechanism, a second and third independent sample
+of the same closed pool. `test_default_ids_reports_the_current_round_rows`
+below exercises DEFAULT_IDS as it stands today.
 """
 
 from __future__ import annotations
@@ -64,11 +71,45 @@ def test_default_run_reports_and_writes_nothing(monkeypatch):
     assert live.status == "closed"  # reported, not written
 
 
+def test_default_ids_is_the_current_round_bmo_list():
+    """Round 5: the literal DEFAULT_IDS list must be the six BMO/phenom ids
+    this round's audit confirmed still live (two independent samples of the
+    same closed pool, 2/10 then 4/4) — round 4's ids (9595, 3979) have since
+    been applied and reopened and must not linger here."""
+    assert cmd_mod.DEFAULT_IDS == [9530, 9490, 9539, 9361, 9526, 9544]
+
+
 @pytest.mark.django_db
-def test_default_ids_reports_both_current_round_rows(monkeypatch):
-    """DEFAULT_IDS must pick up both confirmed rows (BMO/phenom id=9595,
-    Millennium/eightfold id=3979) with no --ids argument, across two
-    different sources — this command is not scoped to one connector."""
+def test_default_ids_reports_the_current_round_rows(monkeypatch):
+    """DEFAULT_IDS must pick up this round's six confirmed BMO rows with no
+    --ids argument. A test database assigns its own pk sequence, so
+    DEFAULT_IDS is monkeypatched to point at these fixture rows rather than
+    faking their real pks — same convention as round 4's test above."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    rows = [
+        _closed_opp(firm, f"https://bmo.wd3.myworkdayjobs.com/External/job/x/Role-{i}_R{i}",
+                    title=f"Role {i}")
+        for i in range(6)
+    ]
+    monkeypatch.setattr(cmd_mod, "DEFAULT_IDS", [r.id for r in rows])
+    monkeypatch.setattr(
+        cmd_mod, "verify",
+        lambda url: _result("workday", url, "verified-open",
+                            "CxS job-detail HTTP 422; postingAvailable true"))
+    call_command("reopen_confirmed_live_rows")  # no --ids: exercises DEFAULT_IDS
+
+    for r in rows:
+        r.refresh_from_db()
+        assert r.status == "closed"  # report-only by default
+
+
+@pytest.mark.django_db
+def test_default_ids_reports_both_round4_rows_across_sources(monkeypatch):
+    """DEFAULT_IDS is not scoped to one connector — round 4's two rows
+    (BMO/phenom id=9595, Millennium/eightfold id=3979) both had to be picked
+    up with no --ids argument, across two different sources — kept as a
+    generic regression now that those two ids have moved out of the live
+    DEFAULT_IDS list."""
     bmo = Firm.objects.create(slug="bmo", name="BMO")
     millennium = Firm.objects.create(slug="millennium", name="Millennium")
     phenom_row = _closed_opp(
