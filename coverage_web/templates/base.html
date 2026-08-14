@@ -110,19 +110,6 @@
         <a href="/app/calendar/"{% if request.path|slice:":13" == "/app/calendar" %} class="active"{% endif %}>Calendar</a>
         <a href="/welcome/"{% if request.path|slice:":8" == "/welcome" or request.path|slice:":8" == "/capture" %} class="active"{% endif %}>Settings</a>
       </nav>
-      {% comment %}On the phone the nav is one scrollable row; without this
-      the row can open scrolled to wherever the browser left it, with the
-      page you are ON out of view. block:'nearest' so centring the pill can
-      never scroll the page itself.{% endcomment %}
-      <script>
-        (function () {
-          var here = document.querySelector(".site-nav a.active");
-          if (here && document.querySelector(".site-nav").scrollWidth >
-              document.querySelector(".site-nav").clientWidth) {
-            here.scrollIntoView({ inline: "center", block: "nearest" });
-          }
-        })();
-      </script>
       <div class="site-auth">
         {% if user.is_authenticated %}
           <a href="/welcome/#profile" class="site-user">
@@ -141,6 +128,64 @@
           <a href="/accounts/login/">Sign In</a>
         {% endif %}
       </div>
+      {% comment %}On the phone the nav is one scrollable row; without this
+      the row can open scrolled to wherever the browser left it, with the
+      page you are ON out of view. block:'nearest' so centring the pill can
+      never scroll the page itself.
+
+      This script sits AFTER .site-auth, and re-runs on resize, for a reason.
+      Placed immediately after </nav> it ran while .site-auth — the avatar
+      and Sign Out, which share this flex row — did not yet exist, so the
+      nav measured ~236px instead of its final 174px. scrollIntoView cannot
+      overshoot: it CLAMPS to that wider box's maxScroll (~276). When
+      .site-auth then laid out and the nav shrank, maxScroll grew to 340 but
+      the browser kept the now-56px-short scrollLeft. On Settings — the LAST
+      pill — that landed the accent-filled you-are-here marker half outside
+      the box, reading "SET" with its tail cut off. Measured on a 375px
+      phone: 41.9px of a 92.8px pill inside the nav, 55% clipped.
+
+      Moving the script below .site-auth is necessary but NOT sufficient, and
+      neither is a requestAnimationFrame. The pills are webfont-set, so the
+      row's scrollWidth GROWS after the first frame — 482.5 to 538 here —
+      while the nav's own box stays 174. A one-shot call therefore clamps to
+      the pre-font maximum of 308.5 and is 55.5px short of the real 364,
+      which is the same clipped pill by a second route.
+
+      So: re-centre whenever anything in this row changes size, watching the
+      pills as well as the nav, because it is the CONTENT width that moves
+      here and a container-only observer never fires. Stop at load. Guessing
+      which reflow is the last one is what produced both bugs; observing
+      instead covers whatever lands late next.
+
+      The pointerdown latch is the manners: once a reader has dragged the
+      row themselves, a late reflow must not yank it back.{% endcomment %}
+      <script>
+        (function () {
+          var nav = document.querySelector(".site-nav");
+          var here = nav && nav.querySelector("a.active");
+          if (!here) return;
+          var touched = false;
+          nav.addEventListener("pointerdown", function () { touched = true; },
+                               { once: true, passive: true });
+          function centre() {
+            if (touched) return;
+            if (nav.scrollWidth > nav.clientWidth) {
+              here.scrollIntoView({ inline: "center", block: "nearest" });
+            }
+          }
+          centre();
+          if (window.ResizeObserver) {
+            var ro = new ResizeObserver(centre);
+            ro.observe(nav);
+            Array.prototype.forEach.call(nav.children, function (pill) {
+              ro.observe(pill);
+            });
+            window.addEventListener("load", function () {
+              requestAnimationFrame(function () { ro.disconnect(); });
+            });
+          }
+        })();
+      </script>
     </div>
   </header>
   {# tabindex="-1" so the skip link's target can actually take focus. #}
