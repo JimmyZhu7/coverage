@@ -199,3 +199,60 @@ def test_into_is_a_minor_word():
         "2027 Insight into Internal Audit Opportunities")
     assert smart_title("Bank of America | Insight Day - Step into Finance") == (
         "Bank of America | Insight Day - Step into Finance")
+
+
+# ---------------------------------------------------------------------------
+# Ordinals. The DB values are clean — a regex for [0-9](St|Nd|Rd|Th) over every
+# open row's stored location matches nothing — so this mis-casing was entirely
+# manufactured at render time, on 140 open rows (122 locations, 18 titles).
+#
+# The fix lives in `_recap`, the leaf BOTH filters funnel each token into, not
+# in `smart_title`: 122 of the 140 render through `smart_location`, so a fix
+# in smart_title alone would have gone green on its own test and left every
+# one of them on the page still reading "745 7Th Avenue".
+# ---------------------------------------------------------------------------
+ORDINAL_LOCATIONS = [
+    ("New York, 745 7th Avenue", "New York, 745 7th Avenue"),
+    ("Mumbai, Nirlon Knowledge Park (BX) 9th & 11-12 Floor",
+     "Mumbai, Nirlon Knowledge Park (BX) 9th & 11-12 Floor"),
+    ("Calgary, 888 3rd Street SW", "Calgary, 888 3rd Street SW"),
+    ("New York, NY (1271 AOA/6th Ave)", "New York, NY (1271 AOA/6th Ave)"),
+    ("Pasig - 4th Floor JMT Corporate Condominium",
+     "Pasig - 4th Floor JMT Corporate Condominium"),
+    ("1st Avenue", "1st Avenue"),
+    # A shouting source has no case of its own to respect, so the ordinal is
+    # folded down with everything else rather than left as "42ND".
+    ("WEST 42ND STREET", "West 42nd Street"),
+]
+
+
+@pytest.mark.parametrize("raw,expected", ORDINAL_LOCATIONS)
+def test_an_ordinal_suffix_is_not_a_word_start_in_a_location(raw, expected):
+    assert smart_location(raw) == expected
+
+
+ORDINAL_TITLES = [
+    ("Relationship Banker II (19th & 1st)", "Relationship Banker II (19th & 1st)"),
+    ("Relationship Banker 83rd Ave & Lake Pleasant Pkwy",
+     "Relationship Banker 83rd Ave & Lake Pleasant Pkwy"),
+    ("Senior Manager, 1st Line Controls", "Senior Manager, 1st Line Controls"),
+    ("October 19th - Direct Investing", "October 19th - Direct Investing"),
+    ("22nd Street", "22nd Street"),
+]
+
+
+@pytest.mark.parametrize("raw,expected", ORDINAL_TITLES)
+def test_an_ordinal_suffix_is_not_a_word_start_in_a_title(raw, expected):
+    assert smart_title(raw) == expected
+
+
+def test_the_ordinal_guard_does_not_swallow_ordinary_words():
+    """The guard keys on "digit immediately before the letters", so a word
+    that merely BEGINS with an ordinal's letters is untouched. Without the
+    boundary the regex would also have matched the "st" of "Stanley"."""
+    assert smart_title("morgan stanley") == "Morgan Stanley"
+    assert smart_title("this thursday") == "This Thursday"
+    assert smart_title("2026 standard chartered") == "2026 Standard Chartered"
+    # A digit glued to letters that are NOT an ordinal suffix still recaps.
+    assert smart_title("3m company") == "3M Company"
+    assert smart_location("500 startup lane") == "500 Startup Lane"

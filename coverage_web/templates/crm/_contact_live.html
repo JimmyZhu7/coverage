@@ -181,8 +181,19 @@ values.
           <span class="bar"><i style="--w: {{ contact_score.axes.leverage.score }}%"></i></span>
           <span class="val">{{ contact_score.axes.leverage.score }}</span>
           {% comment %}seniority is a 0-100 scale (scoring._seniority_from_role),
-          not a tier — "role tier 40.0" read as nonsense.{% endcomment %}
-          <span class="meta">{% if contact_score.axes.leverage.seniority != None %}seniority {{ contact_score.axes.leverage.seniority }}/100 from role{% else %}role unknown{% endif %}{% if contact_score.axes.leverage.school_affiliation %} · alum{% endif %}</span>
+          not a tier — "role tier 40.0" read as nonsense.
+
+          "role unknown" was the fallback for a NULL seniority, and a null
+          seniority means one of two things: no role on file, or a role the
+          keyword table did not recognise. On 37 of the 163 contacts that
+          have a role it meant the second, so this line said "role unknown"
+          twenty lines under a header printing the role — "Amazon · Sales",
+          "Manager, Talent Acquisition", "Bain campus recruiting lead for
+          USC". One screen contradicting itself. `role_given` splits the two
+          cases; widening the keyword table would only have shrunk the 37
+          while silently moving real Leverage scores off
+          leverage_unknown_role.{% endcomment %}
+          <span class="meta">{% if contact_score.axes.leverage.seniority != None %}seniority {{ contact_score.axes.leverage.seniority }}/100 from role{% elif contact_score.axes.leverage.role_given %}no seniority read from this role{% else %}no role on file{% endif %}{% if contact_score.axes.leverage.school_affiliation %} · alum{% endif %}</span>
         </div>
       </div>
     </div>
@@ -223,7 +234,18 @@ values.
             <span class="name">Structural</span>
             <span class="bar"><i style="--w: {{ firm_score.axes.structural.score }}%"></i></span>
             <span class="val">{{ firm_score.axes.structural.score }}</span>
-            <span class="meta">rules v1: region {{ firm_score.axes.structural.region_overlap|yesno:"match,no,?" }}, track {{ firm_score.axes.structural.track_overlap|yesno:"match,no,?" }}</span>
+            {% comment %}"rules v1: region match, track no" was the scoring
+            engine talking to itself. "rules v1" is scoring.py's own method
+            label (`"method": "rules_v1"`), which is a fact about our code,
+            not about this firm; "track no" is the raw yesno token rather
+            than a sentence; and the third branch printed a literal "?" for
+            the case where one side's list is empty. Every other meta on
+            these two cards is plain English — "0 chats evidenced (level
+            0/3)", "1 in last 14d vs 1 in 45d", "no confirmed date" — so
+            this one line was the only jargon on the rail. The axis is still
+            honestly rule-based; that belongs in the docs, not in the copy a
+            student reads.{% endcomment %}
+            <span class="meta">{{ firm_score.axes.structural.region_overlap|yesno:"in your region,outside your region,region not listed" }}, {{ firm_score.axes.structural.track_overlap|yesno:"in your track,outside your track,track not listed" }}</span>
           </div>
         </div>
       </div>

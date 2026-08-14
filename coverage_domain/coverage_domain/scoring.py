@@ -424,12 +424,22 @@ def _seniority_from_role(role: str | None) -> float | None:
 def _score_leverage(
     contact: Mapping[str, Any], params: Mapping[str, Any]
 ) -> tuple[float, dict[str, Any]]:
-    seniority = _seniority_from_role(contact.get("role"))
+    role = contact.get("role")
+    seniority = _seniority_from_role(role)
     base = seniority if seniority is not None else params["leverage_unknown_role"]
     alum = bool(contact.get("school_affiliation"))
     score = base + (params["leverage_school_bonus"] if alum else 0.0)
     return _clamp(score), {
         "seniority": None if seniority is None else _round1(seniority),
+        # `seniority is None` answers TWO different questions the same way:
+        # "there is no role" and "the role did not match the keyword table"
+        # (_seniority_from_role returns None for both). The contact rail read
+        # the first meaning off the second and printed "role unknown" on
+        # pages whose own header printed the role — 37 of 163 contacts with a
+        # role, including strings as explicit as "Manager, Talent Acquisition"
+        # and "Bain campus recruiting lead for USC". The two questions get
+        # two answers here so a display layer can tell them apart.
+        "role_given": bool(role),
         "school_affiliation": alum,
     }
 
@@ -442,13 +452,28 @@ def _contact_reason(
     model. Fixed clause order reads naturally and reproduces exactly."""
     clauses: list[str] = []
 
+    # The silence gets counted once. Below, a depth-0 contact with outbound on
+    # record gets "no reply to N note(s)" — which already says "no reply", and
+    # says it with the number. Emitting the bare depth clause too produced
+    # "no reply yet; no reply to 1 note" on 94 of 133 contacts, and for 92 of
+    # them N was 1, so the second clause was a literal restatement of the
+    # first. The page said it a third time in the warmth caption above
+    # ("Warmth Cold · No reply yet"). The COUNTED clause is the one that
+    # survives, because for the sends >= 2 rows it carries a fact the depth
+    # clause cannot.
+    counted_silence = (
+        depth_level == 0
+        and bool(resp_meta.get("sends"))
+        and not resp_meta.get("replies")
+    )
+
     if depth_level >= 3:
         clauses.append("advocate")
     elif depth_level == 2:
         clauses.append(f"{chat_count} chat{'s' if chat_count != 1 else ''}")
     elif depth_level == 1:
         clauses.append("replied, no chat yet")
-    else:
+    elif not counted_silence:
         clauses.append("no reply yet")
 
     ds = recency_meta.get("days_since_meaningful")
@@ -464,7 +489,7 @@ def _contact_reason(
             clauses.append(f"replies in ~{int(round(ml))}d")
         elif ml is not None:
             clauses.append("slow to reply")
-    elif resp_meta.get("sends") and depth_level == 0:
+    elif counted_silence:
         # Only claim silence when the log has no engagement at all. A
         # manual_override can raise depth to "replied"/"chatted" without
         # leaving an engagement touch behind, and "replied, no chat yet;

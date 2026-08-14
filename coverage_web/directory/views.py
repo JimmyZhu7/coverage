@@ -2492,23 +2492,55 @@ def my_applications(request):
 
 
 def firm_detail(request, slug):
-    """A single firm's page: its open openings plus its cycle timeline
-    (firm_dates, confirmed vs rumored)."""
+    """A single firm's page: its open campus openings plus its cycle timeline
+    (firm_dates, confirmed vs rumored).
+
+    SCOPE. This page used to render `status="open"` with no bucket filter, and
+    it was the only user-facing surface in the app that did. The result: the
+    contacts board said "Barclays 13 Open", and one click later this page said
+    "Open Roles 925" and spent 87% of its height on German-language and Pune
+    back-office requisitions — with nothing anywhere on the page explaining
+    which number was the lie. Neither number was; they were answering
+    different questions, and only one of them was asked out loud.
+
+    So firm detail now takes the same scope every other surface takes (the
+    three campus buckets) and, like the feed, states that scope and offers the
+    same `?role=` opt-in out of it. Experienced rows are not hidden — they are
+    one click away and counted in the sentence that hides them.
+    """
     firm = get_object_or_404(Firm, slug=slug)
     now = timezone.now()
     today = timezone.localdate()
 
+    # Firm detail's own `?role=` vocabulary: the campus scope (the default)
+    # plus the two opt-ins the feed already names. A bucket-specific role is
+    # deliberately NOT offered here — this page carries one scope line, not a
+    # filter bar, and a `?role=internship` deep link would leave that line
+    # describing a scope the rows do not have. Anything unrecognised falls
+    # back to campus, the same posture as `_effective_role`.
+    role = request.GET.get("role", "")
+    if role not in ROLE_OPTIN:
+        role = ""
+
+    open_qs = firm.opportunities.filter(status="open")
+    campus_total = open_qs.filter(bucket__in=TARGET_BUCKETS).count()
+    other_total = open_qs.count() - campus_total
+
     # Campus buckets first (insight, internship, entry_level), experienced
-    # rows after — the firm page shows everything but leads with the roles
-    # the product is for.
-    opps = firm.opportunities.filter(status="open").select_related("firm").order_by(
+    # rows after, so the opt-in views still lead with the roles the product
+    # is for.
+    opps = _apply_role_filter(open_qs, role).select_related("firm").order_by(
         _BUCKET_ORDER, F("deadline").asc(nulls_last=True), "title"
     )
+    cards = [_card(o, now=now, today=today) for o in opps]
     context = {
         "firm": firm,
-        "cards": [_card(o, now=now, today=today) for o in opps],
+        "cards": cards,
         "timeline": _timeline(firm, today=today),
-        "total": opps.count(),
+        "total": len(cards),
+        "role": role,
+        "campus_total": campus_total,
+        "other_total": other_total,
         **_my_network_at(request.user, firm, today=today),
     }
     return render(request, "directory/firm_detail.html", context)

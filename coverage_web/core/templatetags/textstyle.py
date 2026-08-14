@@ -112,10 +112,24 @@ def _case_atom(atom: str) -> str:
     return _recap(atom)
 
 
+# An ordinal suffix is not the start of a word. "745 7th Avenue" tokenizes to
+# "7th", whose first LETTER is the "t" — so `_recap` uppercased it and the app
+# manufactured "745 7Th Avenue", "9Th Floor", "83Rd Ave", "19Th & 1St" on 140
+# open rows at render time, over DB values that were clean. It lives here
+# rather than in `smart_title` because `smart_location` funnels through the
+# same leaf: 122 of the 140 are locations, so a fix one level up would pass
+# its own unit test and change nothing on the page.
+_ORDINAL_TAIL = re.compile(r"(?:st|nd|rd|th)(?![A-Za-z])", re.IGNORECASE)
+
+
 def _recap(atom: str) -> str:
-    """Uppercase the first letter of `atom`, lowercase the rest."""
+    """Uppercase the first letter of `atom`, lowercase the rest — unless the
+    letters are an ordinal suffix hanging off the digits in front of them,
+    which belong to the number, not to a word of their own."""
     for i, ch in enumerate(atom):
         if ch.isalpha():
+            if i and atom[i - 1].isdigit() and _ORDINAL_TAIL.match(atom, i):
+                return atom.lower()
             return atom[:i] + ch.upper() + atom[i + 1:].lower()
     return atom
 

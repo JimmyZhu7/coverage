@@ -72,6 +72,26 @@
   <section class="section">
     <h2>Open Roles <span class="scrub-count">{{ total }}</span></h2>
     {% comment %}
+    THE SCOPE LINE. This page counted every open requisition a firm had —
+    925 for Barclays, against the "13 Open" the contacts board showed for the
+    same firm on the same day. The gap was all experienced hiring, and the
+    page named none of it: the group heading read "Other 912" and no sentence
+    said what "Other" was or why the two numbers disagreed.
+
+    It now says its scope in the feed's own words, with the same opt-in.
+    Wording is deliberately parallel to _results.html so the two surfaces
+    read as one product rather than two sentences about the same idea.
+    {% endcomment %}
+    {% if cards %}
+      {% if role == "all" %}
+        <p class="scope-line scope-hidden">Showing everything we scraped<span class="scope-sep">·</span>{{ campus_total }} campus, {{ other_total }} experienced<span class="scope-sep">·</span><a href="{% url 'directory:firm_detail' firm.slug %}">Campus roles only</a></p>
+      {% elif role == "other" %}
+        <p class="scope-line scope-hidden">Showing experienced roles only<span class="scope-sep">·</span>{{ campus_total }} campus role{{ campus_total|pluralize }} hidden<span class="scope-sep">·</span><a href="{% url 'directory:firm_detail' firm.slug %}">Campus roles only</a></p>
+      {% elif other_total %}
+        <p class="scope-line scope-hidden">Showing campus roles only<span class="scope-sep">·</span>{{ other_total }} experienced role{{ other_total|pluralize }} hidden<span class="scope-sep">·</span><a href="{% url 'directory:firm_detail' firm.slug %}?role=all">Show everything</a></p>
+      {% endif %}
+    {% endif %}
+    {% comment %}
     Grouped by kind under the ruled section label, in the order the view
     already sorts (campus buckets first, deadline inside each). The kind used
     to ride every card as a pill — 75 restatements of five values; one label
@@ -89,9 +109,26 @@
         </div>
       {% endfor %}
     {% else %}
+      {% comment %}An empty campus scope is not an empty firm. Saying
+      "Nothing open right now" on a firm running 912 experienced searches
+      would be the old bug wearing the opposite sign: a true statement about
+      a scope the reader was never told about. The count and the way out
+      belong in the empty state itself, not in a scope line the reader has
+      no rows to attach it to.{% endcomment %}
       <div class="empty">
-        <h2>Nothing open right now.</h2>
-        <p>We'll list this firm's openings as soon as the next check finds any.</p>
+        {% if role == "other" %}
+          <h2>No experienced roles open here.</h2>
+          <p>Everything this firm has open is campus.
+            <a href="{% url 'directory:firm_detail' firm.slug %}">Show campus roles</a>.</p>
+        {% elif other_total %}
+          <h2>No campus roles open right now.</h2>
+          <p>{{ other_total }} experienced role{{ other_total|pluralize }} open here, which is
+            hiring this product is not for.
+            <a href="{% url 'directory:firm_detail' firm.slug %}?role=all">Show everything</a>.</p>
+        {% else %}
+          <h2>Nothing open right now.</h2>
+          <p>We'll list this firm's openings as soon as the next check finds any.</p>
+        {% endif %}
       </div>
     {% endif %}
   </section>

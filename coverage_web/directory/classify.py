@@ -50,7 +50,13 @@ BUCKET_LABELS = {
     INSIGHT: "Insight Programme",
     INTERNSHIP: "Internship",
     ENTRY_LEVEL: "Entry-Level",
-    OTHER: "Other",
+    # "Other" is what this bucket is to the classifier — the residue after
+    # three positive tests. It is not what it is to a reader: every row in it
+    # is an experienced hire. A firm page headed "Other 912" told nobody what
+    # the 912 were, while the only place the app used the honest word was the
+    # feed's own scope caption. The value stays `other`; the word a person
+    # reads is the word for the thing.
+    OTHER: "Experienced",
 }
 
 
