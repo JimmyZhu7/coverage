@@ -13,9 +13,9 @@ from __future__ import annotations
 import pytest
 
 from directory.facts import (extract_assessment, extract_cover_letter,
-                             extract_facts, extract_gpa, extract_grad_years,
-                             extract_languages, extract_pay, extract_rolling,
-                             extract_study_stage)
+                             extract_duration, extract_facts, extract_gpa,
+                             extract_grad_years, extract_languages,
+                             extract_pay, extract_rolling, extract_study_stage)
 
 
 # --- GPA -------------------------------------------------------------------
@@ -286,6 +286,48 @@ def test_a_language_explicitly_not_required_is_not_a_wall():
     assert extract_languages(
         "Fluency in Mandarin is required; German is not offered here."
     )["value"] == "Mandarin"
+
+
+# --- Programme length --------------------------------------------------
+# Regression test for the confirmed McKinsey id=1946 / Morgan Stanley id=1852
+# defect: the mandatory digit group in `_WEEKS` sat immediately before
+# "week(s)", so on a stated range the match started at the number ADJACENT
+# to "weeks" and never reached back far enough to capture the low bound.
+# "8-12 weeks internship" rendered a chip claiming a fixed 12-week
+# programme for something the posting itself states as 8-12 weeks.
+
+def test_a_plain_stated_length_is_read():
+    got = extract_duration("This is a 10 week internship programme.")
+    assert got["value"] == "10 weeks"
+    assert got["weeks"] == 10
+    assert got["low_weeks"] is None
+
+
+def test_a_stated_week_range_keeps_its_low_bound():
+    """McKinsey id=1946's exact live shape."""
+    got = extract_duration(
+        "During your 8-12 weeks internship, you will serve as a junior "
+        "consultant.")
+    assert got["value"] == "8-12 weeks"
+    assert got["weeks"] == 12
+    assert got["low_weeks"] == 8
+    assert "8-12 weeks" in got["phrase"]
+
+
+def test_a_second_stated_week_range_keeps_its_low_bound():
+    """Morgan Stanley id=1852's exact live shape."""
+    got = extract_duration("This is 8-10 weeks internship program for students.")
+    assert got["value"] == "8-10 weeks"
+    assert got["weeks"] == 10
+    assert got["low_weeks"] == 8
+
+
+def test_a_week_range_out_of_band_drops_only_the_low_bound():
+    """A nonsense low bound (outside the 2-52 week band) must not sink the
+    whole fact -- the high bound is still a genuine programme length."""
+    got = extract_duration("This is 1-10 weeks internship program for students.")
+    assert got["value"] == "10 weeks"
+    assert got["low_weeks"] is None
 
 
 # --- Cover letter ----------------------------------------------------------

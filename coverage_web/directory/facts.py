@@ -653,25 +653,47 @@ def extract_study_stage(text: str) -> dict | None:
 # state it far more often than they state a deadline. Gated on the programme
 # words either side, so a "10 week" mention of something else in the body
 # cannot become the programme's length.
+#
+# A stated range ("8-12 weeks internship") carries an optional low bound
+# ahead of the digit group that actually sits next to "week(s)". Without it,
+# the mandatory digit group anchors on whichever number is ADJACENT to
+# "week(s)" -- for "8-12 weeks" that is "12", and the match starts there,
+# never reaching back to capture the "8-". The chip then reads a fixed
+# 12-week programme for something the posting itself states as 8-12 weeks.
+# Confirmed live: McKinsey id=1946 ("During your 8-12 weeks internship...")
+# and Morgan Stanley id=1852 ("This is 8-10 weeks internship program...").
 _WEEKS = re.compile(
-    r"\b(\d{1,2})[- ]week[s]? (?:summer )?(?:internship|programme|program|placement|analyst)|"
+    r"\b(?:(\d{1,2})\s*[-–]\s*)?(\d{1,2})[- ]week[s]? (?:summer )?(?:internship|programme|program|placement|analyst)|"
     r"(?:internship|programme|program|placement) (?:is |runs |lasts )?"
-    r"(?:for )?(?:approximately )?(\d{1,2}) weeks",
+    r"(?:for )?(?:approximately )?(?:(\d{1,2})\s*[-–]\s*)?(\d{1,2}) weeks",
     re.IGNORECASE)
 
 
 def extract_duration(text: str) -> dict | None:
     for m in _WEEKS.finditer(text):
-        raw = m.group(1) or m.group(2)
+        if m.group(2):
+            low_raw, high_raw = m.group(1), m.group(2)
+        else:
+            low_raw, high_raw = m.group(3), m.group(4)
         try:
-            weeks = int(raw)
+            weeks = int(high_raw)
         except (TypeError, ValueError):
             continue
         # A campus programme is a summer or a placement year, never one week
         # or sixty. Outside that band the number belongs to something else.
-        if 2 <= weeks <= 52:
-            return {"value": f"{weeks} weeks", "weeks": weeks,
-                    "phrase": _sentence(text, m.start(), m.end())}
+        if not (2 <= weeks <= 52):
+            continue
+        low = None
+        if low_raw is not None:
+            try:
+                low_val = int(low_raw)
+            except (TypeError, ValueError):
+                low_val = None
+            if low_val is not None and 2 <= low_val <= weeks:
+                low = low_val
+        value = f"{low}-{weeks} weeks" if low is not None else f"{weeks} weeks"
+        return {"value": value, "weeks": weeks, "low_weeks": low,
+                "phrase": _sentence(text, m.start(), m.end())}
     return None
 
 
