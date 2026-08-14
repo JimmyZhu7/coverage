@@ -172,7 +172,7 @@ def test_a_user_cannot_unsubscribe_another_users_subscription(client, user, othe
 def test_settings_renders_the_toggle_disabled_when_vapid_is_unset(client, logged_in):
     resp = client.get(reverse("accounts:settings"))
     body = resp.content.decode()
-    assert 'id="push-alerts"' in body
+    assert 'id="notifications"' in body
     assert "disabled" in body[body.index('id="push-alerts-toggle"'):body.index('id="push-alerts-toggle"') + 200]
 
 

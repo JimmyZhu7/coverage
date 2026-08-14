@@ -17,17 +17,19 @@ a password-reset email is today. Buying a real provider later is a one-line
 env var change (`EMAIL_URL=smtp+tls://...`, see .env.example); it requires no
 change to this command, `crm/digest.py`, or the templates.
 
-WHO GETS ONE. Every `User` with `onboarded_at` set (accounts/models.py) and
-`deleted_at` unset, AND something to report this week — `crm.digest.
-assemble_digest` returns `None` for everyone else, and that skip is logged
-by email so a dry run reads as a full roster, not a silent partial one. See
-that module's docstring for the exact "nothing to report" rule.
+WHO GETS ONE. Every `User` with `onboarded_at` set (accounts/models.py),
+`deleted_at` unset, `weekly_digest_opt_out` False, AND something to report
+this week — `crm.digest.assemble_digest` returns `None` for everyone else,
+and that skip is logged by email so a dry run reads as a full roster, not a
+silent partial one. See that module's docstring for the exact "nothing to
+report" rule.
 
-NO OPT-OUT YET, ON PURPOSE. `accounts.models.User` carries no email-
-preference column today (checked before writing this command). Rather than
-invent a settings-page control this pass doesn't own, every onboarded user
-with content gets the digest — a real opt-out is a natural next step, flagged
-in this feature's commit message, not built here.
+OPT-OUT. `User.weekly_digest_opt_out` (default False — opted IN by default,
+same posture as the rest of this docstring's title) is set from the
+Notifications card on Settings (accounts/forms.NotificationsForm), the same
+card the Push Alerts toggle lives on. `--user` bypasses this gate along with
+`onboarded_at`, since it exists for previewing/testing a specific account
+regardless of their live preference.
 
 TIMEZONE. Every other "today" boundary in this app activates the user's own
 `User.timezone` per request (`accounts.middleware.TimezoneMiddleware`) so a
@@ -98,7 +100,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--user", metavar="EMAIL", default="",
             help="Restrict to one account by email, bypassing the onboarded_at "
-                 "gate — for previewing or testing a specific user's digest.")
+                 "gate and the weekly_digest_opt_out preference — for "
+                 "previewing or testing a specific user's digest.")
 
     def handle(self, *args, **opts):
         dry = opts["dry_run"]
@@ -112,12 +115,15 @@ class Command(BaseCommand):
                 raise CommandError(f"no user with email {opts['user']!r}") from exc
         else:
             users = list(
-                User.objects.filter(onboarded_at__isnull=False, deleted_at__isnull=True)
+                User.objects.filter(
+                    onboarded_at__isnull=False, deleted_at__isnull=True,
+                    weekly_digest_opt_out=False,
+                )
                 .order_by("email")
             )
 
         if not users:
-            self.stdout.write("No eligible users (onboarded, not deleted).")
+            self.stdout.write("No eligible users (onboarded, not deleted, not opted out).")
             return
 
         site_url = getattr(settings, "SITE_URL", "").rstrip("/")

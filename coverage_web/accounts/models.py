@@ -190,6 +190,12 @@ class User(AbstractUser):
     # Leaking this one leaks a read-only calendar, and regenerating it (drop
     # the value, save) revokes every stale subscription at once.
     calendar_token = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    # Opts a user OUT of send_weekly_digest (crm/digest.py). Default False —
+    # the digest already only sends when there's something real to report
+    # (crm.digest's "nothing to report" rule), so the honest default is on,
+    # not an empty checkbox nobody finds. Settings' Notifications card is the
+    # one place this is set; the digest command's queryset excludes it.
+    weekly_digest_opt_out = models.BooleanField(default=False)
     onboarded_at = models.DateTimeField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)

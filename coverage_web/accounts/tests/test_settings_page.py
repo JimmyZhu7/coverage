@@ -61,10 +61,11 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
         # Appearance sits under "You" because a theme is a fact about how
         # this person reads, not about how the engine behaves.
         "profile", "work-auth", "appearance", "cadence", "pace",
-        # Push Alerts (deadline notifications) — its own small, isolated
-        # section, deliberately not merged into a broader Notification
-        # Preferences area yet (see settings.html's comment on that block).
-        "push-alerts",
+        # Notifications: Push Alerts (device state) and the weekly digest
+        # opt-out (account preference), one card — see settings.html's
+        # comment on that block for why they share a card but not a save
+        # path.
+        "notifications",
         "capture", "security", "data", "legal", "danger",
     }
 

@@ -436,7 +436,7 @@
       <a href="#cadence">Cadence</a>
       <a href="#pace">Weekly Pace</a>
       <p class="settings-nav-group">Notifications</p>
-      <a href="#push-alerts">Push Alerts</a>
+      <a href="#notifications">Notifications</a>
       <p class="settings-nav-group">Email Capture</p>
       <a href="#capture">Email Capture</a>
       <p class="settings-nav-group">Account</p>
@@ -688,21 +688,23 @@
       </section>
 
       {% comment %}
-      ---- Push Alerts ----
-      Deliberately its own small, self-contained section — NOT merged into a
-      broader "Notification Preferences" area alongside the weekly digest's
-      email opt-out. That unified pass is a separate, later change (both
-      features landed the same session and this settings page is high-
-      traffic enough that one pass beats two agents colliding on it). This
-      block is scoped to stand alone and move wholesale when that pass
-      lands: its own card, its own script tag, no shared state with
-      anything else on the page.
+      ---- Notifications ----
+      Push Alerts and the weekly digest opt-out, one card: they answer the
+      same question ("how do you want to hear about a closing deadline"),
+      even though they save through two different paths. Push is device
+      state (accounts.PushSubscription rows, its own JS/endpoint pair,
+      instant — no Save button) and the digest is an account preference
+      (accounts.forms.NotificationsForm, the same POST-a-section pattern
+      Cadence/Weekly Pace use). Kept as two clearly-labeled rows inside one
+      card rather than merged into one control, since "on this device" and
+      "for this account" are genuinely different scopes and collapsing them
+      would misstate one or the other.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="push-alerts" style="--i:4"
-               aria-labelledby="push-alerts-h">
+      <section class="set-card kin-reveal" id="notifications" style="--i:4"
+               aria-labelledby="notifications-h">
         <div class="set-head">
-          <h2 id="push-alerts-h">Push Alerts</h2>
-          <p>A Notification When A Tracked Role Is Closing Soon</p>
+          <h2 id="notifications-h">Notifications</h2>
+          <p>How You Hear About A Closing Deadline</p>
         </div>
         <div class="set-body">
           <div class="set-row" data-push-root
@@ -729,6 +731,18 @@
                      {% if not vapid_public_key %}disabled{% endif %}>
             </div>
           </div>
+          <form method="post" action="{% url 'accounts:settings' %}" class="set-row">
+            {% csrf_token %}
+            <input type="hidden" name="section" value="notifications">
+            <div class="set-row-main">
+              <label class="set-row-label" for="{{ notifications_form.weekly_digest_enabled.id_for_label }}">Weekly Email Digest</label>
+              <div class="set-row-desc">What closes this week, who to ping, and what's new. Sent only when there's something to report.</div>
+            </div>
+            <div class="set-row-control">
+              {{ notifications_form.weekly_digest_enabled }}
+              <button type="submit" class="btn">Save</button>
+            </div>
+          </form>
         </div>
       </section>
       <script src="{% static 'js/push-subscribe.js' %}" defer></script>

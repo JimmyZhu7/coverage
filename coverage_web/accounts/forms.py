@@ -753,3 +753,38 @@ class WeeklyPaceForm(SectionForm):
         # rather than "no goal".
         user.weekly_touch_goal = self.cleaned_data.get("weekly_touch_goal")
         user.save(update_fields=["weekly_touch_goal"])
+
+
+class NotificationsForm(SectionForm):
+    """`User.weekly_digest_opt_out` — the one settings-writable field the
+    Notifications card owns. Push Alerts' own on/off state lives in
+    `accounts.PushSubscription` rows, not a User column, and is set via its
+    own JS/endpoint pair (accounts/push.py) rather than this form — the two
+    controls share a card because they answer the same question ("how do you
+    want to hear about a closing deadline"), not because they share a save
+    path.
+
+    The form field is named and valued the OPPOSITE of the column it writes,
+    on purpose: a checkbox next to "Weekly Email Digest" has to mean "send
+    it" when checked, or a student reads a checked box under a feature name
+    as that feature being ON and gets the opposite of what they asked for.
+    The column is named `_opt_out` (matching send_weekly_digest's own
+    docstring and query), so this form is the one place that translation
+    happens — `weekly_digest_enabled` in, negated on the way to `apply_to`."""
+
+    section = "notifications"
+    success_message = "Notification preferences saved."
+
+    # required=False, initial=True: an unchecked BooleanField posts nothing
+    # at all, so a first-time GET render must supply the default explicitly
+    # rather than relying on the field's own `initial` (which only applies
+    # to an unbound form with no `initial_for` override).
+    weekly_digest_enabled = forms.BooleanField(required=False, initial=True)
+
+    @classmethod
+    def initial_for(cls, user) -> dict:
+        return {"weekly_digest_enabled": not user.weekly_digest_opt_out}
+
+    def apply_to(self, user) -> None:
+        user.weekly_digest_opt_out = not self.cleaned_data["weekly_digest_enabled"]
+        user.save(update_fields=["weekly_digest_opt_out"])

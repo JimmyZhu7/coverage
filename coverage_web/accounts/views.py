@@ -35,6 +35,7 @@ from .forms import (
     REGION_CHOICES,
     TRACK_CHOICES,
     CadenceForm,
+    NotificationsForm,
     ProfileForm,
     WeeklyPaceForm,
     WorkAuthorizationForm,
@@ -45,7 +46,7 @@ from .forms import (
 # their hidden `section` input posts. See accounts/forms.SectionForm.
 SECTION_FORMS = {
     form_cls.section: form_cls
-    for form_cls in (WorkAuthorizationForm, CadenceForm, WeeklyPaceForm)
+    for form_cls in (WorkAuthorizationForm, CadenceForm, WeeklyPaceForm, NotificationsForm)
 }
 
 # Step order of the onboarding wizard.
@@ -318,6 +319,7 @@ def settings_view(request):
             "cadence_form": section_forms["cadence"],
             "pace_form": section_forms["pace"],
             "default_weekly_goal": WeeklyPaceForm.DEFAULT_GOAL,
+            "notifications_form": section_forms["notifications"],
             # Push notifications (deadline alerts). Blank key = the toggle
             # renders as unavailable rather than a button that dead-ends —
             # same "Setup Needed" posture the social sign-in buttons use for

@@ -365,6 +365,66 @@ def test_weekly_pace_feeds_the_today_pace_ring(client, logged_in):
 
 
 # ---------------------------------------------------------------------------
+# Notifications — the weekly digest opt-out. NotificationsForm's field is
+# named and valued the OPPOSITE of the column it writes (see the form's own
+# docstring): these tests exercise both sides of that translation, not just
+# the column.
+# ---------------------------------------------------------------------------
+def test_notifications_defaults_to_enabled_for_a_fresh_account(logged_in):
+    assert logged_in.weekly_digest_opt_out is False
+
+
+def test_unchecking_the_digest_box_opts_out(client, logged_in):
+    # An unchecked BooleanField posts no key at all — this IS "unchecked",
+    # not a missing-parameter oversight in the test.
+    resp = _post(client, section="notifications")
+    assert resp.status_code == 302
+    logged_in.refresh_from_db()
+    assert logged_in.weekly_digest_opt_out is True
+
+
+def test_checking_the_digest_box_opts_back_in(client, logged_in):
+    logged_in.weekly_digest_opt_out = True
+    logged_in.save(update_fields=["weekly_digest_opt_out"])
+
+    _post(client, section="notifications", weekly_digest_enabled="on")
+
+    logged_in.refresh_from_db()
+    assert logged_in.weekly_digest_opt_out is False
+
+
+def test_notifications_section_renders_checked_by_default(client, logged_in):
+    resp = client.get(reverse(SETTINGS))
+    body = resp.content.decode()
+    snippet = body[body.index('id="id_weekly_digest_enabled"'):]
+    assert "checked" in snippet[:200]
+
+
+def test_notifications_section_renders_unchecked_once_opted_out(client, logged_in):
+    logged_in.weekly_digest_opt_out = True
+    logged_in.save(update_fields=["weekly_digest_opt_out"])
+
+    resp = client.get(reverse(SETTINGS))
+    body = resp.content.decode()
+    snippet = body[body.index('id="id_weekly_digest_enabled"'):]
+    assert "checked" not in snippet[:200]
+
+
+def test_send_weekly_digest_excludes_an_opted_out_user(db):
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    User.objects.create_user(
+        email="digest-out@example.com", password="x",
+        onboarded_at="2026-08-01T00:00:00Z", weekly_digest_opt_out=True,
+    )
+    out = StringIO()
+    call_command("send_weekly_digest", "--dry-run", stdout=out)
+    assert "digest-out@example.com" not in out.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # Advocate Target — a live engine parameter that had no control at all
 # ---------------------------------------------------------------------------
 # `crm.coverage.advocate_target()` has always read `assets["advocate_target"]`,
