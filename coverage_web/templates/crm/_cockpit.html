@@ -250,6 +250,7 @@ on every quick action so all of it stays in sync.
               <span class="activity-dot in"></span>
               <a class="newat-firm" href="{% url 'directory:firm_detail' r.slug %}">{{ r.firm|smart_title }}</a>
               <span class="newat-role">{{ r.title|smart_title|truncatechars:52 }}</span>
+              {% if r.location %}<span class="newat-loc">{{ r.location|smart_location }}</span>{% endif %}
             </li>
           {% endfor %}
         </ul>

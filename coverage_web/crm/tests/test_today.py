@@ -1223,3 +1223,79 @@ def test_the_day_count_comes_from_the_calendar_not_from_dividing_by_24():
     # 63 hours back from 18:00 is 03:00 two calendar days earlier.
     out = _age_in_days("Chat done 63h ago. Send thank-you.", 63.0, now=now)
     assert out == "Chat done 2d ago. Send thank-you.", "round(63/24) would say 3"
+
+
+# ---------------------------------------------------------------------------
+# "New at your firms" must not let two genuinely different postings read as
+# one exact duplicate.
+# ---------------------------------------------------------------------------
+def test_new_at_firms_carries_location_so_same_title_rows_are_told_apart():
+    """Reproduces the live bug: Goldman Sachs posted the same campus title
+    ("Internal Audit — Summer Analyst") in both London and Birmingham on the
+    same day. Both are real, distinct rows with distinct URLs, but the widget
+    built its row dict from `o.title`/`o.firm.name` only, so the two entries
+    rendered byte-for-byte identical text with nothing to tell them apart.
+    `o.location` was sitting right there on the queryset, unused.
+    """
+    from directory.models import Opportunity
+
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    UserFirm.all_objects.create(user=user, firm=firm)
+
+    # An older posting so GS is not treated as a board debut (a firm whose
+    # OLDEST row is itself inside the 7-day window gets excluded entirely —
+    # see `_new_at_your_firms`'s debut filter).
+    anchor = Opportunity.objects.create(
+        firm=firm, title="Older Anchor Role", bucket="internship",
+        status="open", location="New York",
+        url="https://gs.com/careers/anchor")
+    Opportunity.objects.filter(pk=anchor.pk).update(
+        first_seen=timezone.now() - timedelta(days=30))
+
+    Opportunity.objects.create(
+        firm=firm, title="Internal Audit — Summer Analyst", bucket="internship",
+        status="open", location="London",
+        url="https://gs.com/careers/181882_gs_campus")
+    Opportunity.objects.create(
+        firm=firm, title="Internal Audit — Summer Analyst", bucket="internship",
+        status="open", location="Birmingham",
+        url="https://gs.com/careers/181880_gs_campus")
+
+    roles = _cockpit_context(user)["new_at_firms"]["roles"]
+    same_title = [r for r in roles if r["title"] == "Internal Audit — Summer Analyst"]
+    assert len(same_title) == 2, "both distinct postings must reach the widget"
+    assert {r["location"] for r in same_title} == {"London", "Birmingham"}, (
+        "the two rows must carry their real, DIFFERENT locations, not go "
+        "unlabeled and read as one duplicate"
+    )
+
+
+def test_new_at_firms_widget_renders_both_locations_in_the_page(client):
+    """Same fixture, through the actual template: `_cockpit.html` must print
+    both cities, not just carry them in the context dict."""
+    from directory.models import Opportunity
+
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    UserFirm.all_objects.create(user=user, firm=firm)
+
+    anchor = Opportunity.objects.create(
+        firm=firm, title="Older Anchor Role", bucket="internship",
+        status="open", location="New York",
+        url="https://gs.com/careers/anchor")
+    Opportunity.objects.filter(pk=anchor.pk).update(
+        first_seen=timezone.now() - timedelta(days=30))
+
+    Opportunity.objects.create(
+        firm=firm, title="Internal Audit — Summer Analyst", bucket="internship",
+        status="open", location="London",
+        url="https://gs.com/careers/181882_gs_campus")
+    Opportunity.objects.create(
+        firm=firm, title="Internal Audit — Summer Analyst", bucket="internship",
+        status="open", location="Birmingham",
+        url="https://gs.com/careers/181880_gs_campus")
+
+    body = _login_and_get(client, user)
+    assert "London" in body
+    assert "Birmingham" in body

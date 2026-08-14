@@ -552,6 +552,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .newat-firm:hover { color: var(--accent-ink); }
   .newat-role { color: var(--ink-2); min-width: 0; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
+  {% comment %}
+  Two rows at the same firm with the same title (a London req and a
+  Birmingham req both landing in the same batch) read as an exact,
+  unlabelled duplicate without this — `flex: none` so the city never
+  loses the truncation fight to a long title; the role above already
+  gives ground via `min-width: 0`, so the city is what survives.
+  {% endcomment %}
+  .newat-loc { flex: none; color: var(--ink-3); white-space: nowrap; }
+  .newat-loc::before { content: "·"; margin-right: 8px; }
   @media (max-width: 700px) { .newat-list { columns: 1; } }
 
   /* ---- Coverage Gaps strip: where you are least covered, worst first ---- */
