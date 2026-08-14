@@ -138,6 +138,20 @@ def test_classify_url_known_custom_domain():
     assert info == {"token": "williamblair", "job_id": "5186505007"}
 
 
+def test_classify_url_kkr_custom_domain():
+    """Regression test for the confirmed KKR defect (round 5): all 127 open
+    KKR rows use `https://www.kkr.com/careers/career-opportunities/post?
+    gh_jid=<id>`, a shape `_BOARD_URL_RE` never matches. Before this fix,
+    kkr.com was absent from `_CUSTOM_DOMAIN_TOKENS`, so classify_url()
+    returned None for every KKR row and each one lost verify()'s single-URL
+    liveness backstop -- the exact mechanism the module docstring already
+    documents for the pre-fix William Blair case. Token 'stage' confirmed
+    against directory/boards.py's own board registration."""
+    info = greenhouse.classify_url(
+        "https://www.kkr.com/careers/career-opportunities/post?gh_jid=6119767004")
+    assert info == {"token": "stage", "job_id": "6119767004"}
+
+
 def test_verify_open_on_known_custom_domain_url(monkeypatch, greenhouse_job_detail_fixture):
     monkeypatch.setattr(greenhouse, "fetch_json", lambda url, **kw: greenhouse_job_detail_fixture)
 

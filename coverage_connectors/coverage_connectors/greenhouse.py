@@ -63,6 +63,16 @@ _BOARD_URL_RE = re.compile(
 _CUSTOM_DOMAIN_TOKENS = {
     "www.williamblair.com": "williamblair",
     "williamblair.com": "williamblair",
+    # KKR embeds its Greenhouse board at www.kkr.com with the job id only in
+    # a gh_jid= query param — same shape as williamblair above. Token
+    # confirmed against directory/boards.py's own board registration
+    # ("kkr", GreenhouseBoard(token="stage")), not guessed. Without this
+    # entry classify_url() returns None for every kkr.com URL and all 127
+    # open KKR rows lose verify()'s single-URL liveness backstop (same
+    # mechanism this module's docstring already documents for the
+    # pre-fix williamblair case).
+    "www.kkr.com": "stage",
+    "kkr.com": "stage",
 }
 _GH_JID_RE = re.compile(r"[?&]gh_jid=(\d+)")
 
