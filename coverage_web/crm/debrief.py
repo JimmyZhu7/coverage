@@ -54,6 +54,18 @@ def pending(user, *, as_of=None, limit: int = 6) -> list[dict]:
     `ChatDebrief` row (written or dismissed), and belongs to a contact the
     user hasn't already debriefed a LATER chat for — one prompt per person,
     so two chats in one week can't produce two cards for the same face.
+
+    `days_ago` is a CALENDAR-date difference in the request's active
+    timezone (`timezone.localtime(...).date()` subtraction), not
+    `(as_of - t.ts).days` — a raw timedelta floors elapsed hours // 24,
+    which is timezone-independent and drifts from the calendar-date
+    convention `crm.today._age_in_days` and `last_business_days` already
+    use once a touch's elapsed time crosses a local calendar-date
+    boundary. One chat rendering "2d ago" here and "3d ago" there for the
+    same fact was exactly that drift (Touch 558, ~58.46h elapsed under
+    Asia/Hong_Kong: floors to 2, calendar-diffs to 3). This is now the one
+    formula for "how many days ago was this touch" — see `_age_in_days`'s
+    docstring in `crm/today.py` for the sibling half of that agreement.
     """
     as_of = as_of or timezone.now()
     cutoff = as_of - timedelta(days=DEBRIEF_EXPIRES_AFTER_DAYS)
@@ -79,7 +91,9 @@ def pending(user, *, as_of=None, limit: int = 6) -> list[dict]:
             {
                 "touch": t,
                 "contact": t.contact,
-                "days_ago": (as_of - t.ts).days,
+                "days_ago": (
+                    timezone.localtime(as_of).date() - timezone.localtime(t.ts).date()
+                ).days,
             }
         )
         if len(out) >= limit:

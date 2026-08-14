@@ -1225,6 +1225,62 @@ def test_the_day_count_comes_from_the_calendar_not_from_dividing_by_24():
     assert out == "Chat done 2d ago. Send thank-you.", "round(63/24) would say 3"
 
 
+def test_debrief_and_today_agree_on_days_ago_for_the_same_chat():
+    """The round-9 recheck's live finding, pinned: Ellen Chung, Touch 558,
+    one chat, ~58.46h elapsed under Asia/Hong_Kong — "Chatted 2d ago" on the
+    Debrief card (`crm.debrief.pending`) vs "Chat done 3d ago" on the
+    Don't-lose-these card (`crm.today._age_in_days`). The two disagreed
+    because `debrief.pending()`'s `days_ago` was a raw timedelta floor
+    (`(as_of - t.ts).days`, timezone-independent: 58h floors to 2 no matter
+    where midnight falls) while `_age_in_days` already computed a calendar-
+    date difference in the account's active timezone (58h back from just
+    after HK midnight lands 3 local calendar days earlier). Same fact, two
+    formulas, two answers. `debrief.pending()` now uses the same
+    `timezone.localtime(...).date()` convention, so both read this single
+    chat identically.
+
+    58h is anchored at HK 00:30 rather than reusing 57h/63h from the tests
+    above so the elapsed *duration* floors to 2 (`timedelta(hours=58).days
+    == 2`) while the *calendar* difference is 3 — the exact shape that made
+    the two formulas disagree.
+    """
+    from zoneinfo import ZoneInfo
+
+    from crm import debrief as debrief_svc
+    from crm.today import _age_in_days
+
+    hk = ZoneInfo("Asia/Hong_Kong")
+    user = _user(email="hk-ellen@example.com", weekly_touch_goal=14, timezone="Asia/Hong_Kong")
+    contact = Contact.all_objects.create(
+        user=user, name="Ellen Chung", warmth="chatted", thread_state="chat_done",
+    )
+
+    as_of = timezone.now().astimezone(hk).replace(
+        hour=0, minute=30, second=0, microsecond=0
+    )
+    touch = Touch.all_objects.create(
+        user=user, contact=contact, kind="chat", channel="email",
+        ts=as_of - timedelta(hours=58),
+    )
+
+    # Mirrors what TimezoneMiddleware does for a real request carrying this
+    # account's timezone.
+    timezone.activate(hk)
+    try:
+        pending = debrief_svc.pending(user, as_of=as_of)
+        assert [p["touch"].id for p in pending] == [touch.id]
+        debrief_days = pending[0]["days_ago"]
+
+        today_reason = _age_in_days(
+            "Chat done 58h ago. Send thank-you.", 58.0, now=as_of,
+        )
+    finally:
+        timezone.deactivate()
+
+    assert debrief_days == 3, "sanity: the calendar-date diff under HK is 3, not floor(58/24)=2"
+    assert today_reason == f"Chat done {debrief_days}d ago. Send thank-you."
+
+
 # ---------------------------------------------------------------------------
 # "New at your firms" must not let two genuinely different postings read as
 # one exact duplicate.
