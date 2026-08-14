@@ -342,3 +342,141 @@ def test_a_long_verdict_label_renders_as_one_unwrapped_line(client):
     resp = client.get("/opportunities/")
     assert b"Won&#x27;t sponsor you here" in resp.content or \
            b"Won't sponsor you here" in resp.content
+
+
+# ---------------------------------------------------------------------------
+# The chip cap is a LABEL budget, and it has to be able to pay for the box it
+# is written on (2026-08-14).
+#
+# `box-sizing: border-box` is set file-wide, so `max-width: 18ch` was never
+# 18 characters of label: 6px of padding and 1px of border on each side came
+# out of the same 108px, leaving 94px — 15.7ch. Measured on the live feed at
+# 1280px, 138 of 375 chips ellipsized under it, including "Portuguese needed",
+# which is SEVENTEEN characters. Two of the misses were sub-pixel — "Your year
+# (2029)" and "Penultimate year" need 94.41px against 94.00px — so they were
+# invisible to any `scrollWidth > clientWidth` check while still rendering as
+# "Your year (202…", a graduation year without its last digit.
+#
+# These tests do the arithmetic the comment used to assert by eye: they read
+# the padding, border and cap straight out of the shipped rule, work out how
+# much LABEL that leaves, and check it against the longest label the product's
+# own code can produce — built by calling that code, not by quoting it.
+# ---------------------------------------------------------------------------
+
+# 1ch is the advance of "0", which in this face at font-size 10px is 6px —
+# measured in Chrome on the live page (max-width 107.998px for the old 18ch).
+_CH_PX = 6.0
+
+
+def _chip_label_budget_ch() -> float:
+    """How many characters of label `.fact-chip` actually delivers.
+
+    Deliberately derived from the rule as written, so that a cap that forgets
+    the border-box tax reports the budget it really has (15.7ch for the old
+    `max-width: 18ch`) rather than the one it claims.
+    """
+    rule = _fact_chip_rule()
+    pad = float(re.search(r"padding:\s*[\d.]+px\s+([\d.]+)px", rule).group(1))
+    border = float(re.search(r"border:\s*([\d.]+)px\s+solid", rule).group(1))
+    chrome_px = 2 * (pad + border)
+
+    decl = re.search(r"max-width:\s*([^;]+);", rule).group(1)
+    ch = float(re.search(r"([\d.]+)ch", decl).group(1))
+    # Everything the declaration adds back on top of the ch figure.
+    added_px = sum(float(x) for x in re.findall(r"([\d.]+)px", decl))
+    if "var(--chip-chrome)" in decl:
+        added_px += float(re.search(r"--chip-chrome:\s*([\d.]+)px", rule).group(1))
+    return (ch * _CH_PX + added_px - chrome_px) / _CH_PX
+
+
+def test_the_chip_cap_declares_the_padding_and_border_it_has_to_pay_for():
+    """If the box's chrome changes, the constant the cap adds back must change
+    with it — otherwise the cap silently starts under-delivering again, which
+    is exactly how it under-delivered for two revisions."""
+    rule = _fact_chip_rule()
+    pad = float(re.search(r"padding:\s*[\d.]+px\s+([\d.]+)px", rule).group(1))
+    border = float(re.search(r"border:\s*([\d.]+)px\s+solid", rule).group(1))
+    chrome = re.search(r"--chip-chrome:\s*([\d.]+)px", rule)
+    assert chrome, "the cap must name the chrome it is paying for"
+    assert float(chrome.group(1)) == 2 * (pad + border), (
+        f"--chip-chrome says {chrome.group(1)}px but the box spends "
+        f"{2 * (pad + border)}px on padding and border")
+
+
+def test_the_chip_never_exceeds_the_row_it_sits_in():
+    """The cap is now wider than a card column on a small phone, so it needs
+    the second bound. Without it the widest chip decides the card's width."""
+    decl = re.search(r"max-width:\s*([^;]+);", _fact_chip_rule()).group(1)
+    assert "100%" in decl and "min(" in decl, decl
+
+
+@pytest.mark.django_db
+def test_every_label_the_product_can_build_fits_the_chip_cap():
+    """The real failure mode: a label the code can produce, in a box that
+    cannot hold it. The labels come from `_eligibility` and `_fact_chips`
+    themselves — the same call the card template makes — so a new label that
+    outgrows the cap fails here rather than on someone's screen.
+
+    A monospace label of N characters is at most N ch wide (letter-spacing is
+    negative), so comparing character counts against the ch budget is the
+    conservative form of the comparison.
+    """
+    from directory.models import Firm, Opportunity
+    from directory.views import _eligibility, _fact_chips
+
+    f = Firm.objects.create(slug="budget-bank", name="Budget Bank")
+    grad = {"value": "2027–2028", "years": [2027, 2028],
+            "phrase": "Open to 2027 and 2028 graduates."}
+
+    year_out = Opportunity(firm=f, url="https://x/1", title="Analyst",
+                           bucket="internship", status="open",
+                           raw={"facts": {"grad": grad}})
+    year_ok = Opportunity(firm=f, url="https://x/2", title="Analyst",
+                          bucket="internship", status="open",
+                          raw={"facts": {"grad": grad}})
+    visa_out = Opportunity(firm=f, url="https://x/3", title="Analyst",
+                           bucket="internship", status="open",
+                           region="hk", sponsorship="no")
+    # The convention-derived verdict — the longest label of the four, because
+    # it prefixes the year match with "Likely".
+    likely = Opportunity(firm=f, url="https://x/4", title="Analyst",
+                         bucket="internship", status="open",
+                         class_year_derived=2029)
+
+    labels = []
+    for o, profile in (
+        (year_out, {"class_year": 2026, "work_auth": {}}),
+        (year_ok, {"class_year": 2027, "work_auth": {}}),
+        (visa_out, {"class_year": 2029, "work_auth": {"hk": "sponsorship"}}),
+        (likely, {"class_year": 2029, "work_auth": {}}),
+    ):
+        verdict = _eligibility(o, profile)
+        assert verdict, "each fixture should produce the verdict it was built for"
+        labels.append(verdict["label"])
+
+    # …and the posting-fact chips whose labels are fixed strings.
+    facts = Opportunity(firm=f, url="https://x/5", title="Analyst",
+                        bucket="internship", status="open", sponsorship="no",
+                        raw={"facts": {"grad": grad,
+                                       "gpa": {"value": "3.5", "hedge": True,
+                                               "phrase": "GPA 3.5 preferred."}}})
+    labels += [c["label"] for c in _fact_chips(facts)]
+
+    budget = _chip_label_budget_ch()
+    worst = max(labels, key=len)
+    assert len(worst) <= budget, (
+        f"{worst!r} is {len(worst)} characters and the chip delivers "
+        f"{budget:.2f}ch of label. Labels: {labels}")
+
+
+def test_the_feed_row_shrinks_its_chips_instead_of_slicing_them():
+    """The one row where chips compete for width: a fixed 330px, one line,
+    `overflow: hidden`. If the chips cannot shrink, that overflow does the
+    cutting — and it cuts mid-glyph with no ellipsis, which reads as a
+    rendering fault rather than as truncation."""
+    css = _feed_css()
+    rule = _rule(css, ".rolecard-facts .fact-chip")
+    assert "flex-shrink: 1" in rule, rule
+    assert "min-width: 0" in rule, (
+        "a flex item's automatic minimum size is its content, so without "
+        "min-width: 0 the chips refuse to shrink and the row overflows")

@@ -839,6 +839,25 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      inline <style> is a component the other page silently loses. Only the
      feed-specific SLOT stays here. */
 
+  /* …and this row is the ONE place a chip has a neighbour competing for its
+     width. Everywhere else chips sit in a wrapping row and a long label just
+     takes a second line; here the slot is a fixed 330px on desktop and 281px
+     on a phone, one line, `overflow: hidden`. That is why the chip's own
+     `max-width` used to be set to a third of this row (108px ≈ (330-8)/3) and
+     why it truncated 138 chips on the default feed — a row-shaped bound
+     wearing a chip-shaped rule, charged to every surface including the ones
+     with all the room in the world.
+     The bound belongs here, and flex already knows how to apply it: let the
+     chips shrink and the row hands each one a share of the shortfall
+     proportional to what it asked for. Measured on the live feed at 1280:
+     132 of 162 chip rows fit outright — the visa refusal and the year match
+     now render whole — and the 30 that do not are short by a median 9px,
+     which comes off the longest label first and shows an ellipsis where it
+     went. Without this, the row's `overflow: hidden` does the cutting
+     instead, and that cut has no ellipsis: it slices mid-glyph at the row
+     edge and reads as a rendering fault rather than as truncation. */
+  .rolecard-facts .fact-chip { flex-shrink: 1; min-width: 0; }
+
   /* Reserved slot 5 — the meta row: status, then provenance. `margin-top:auto`
      pins it to the bottom edge, which also absorbs any sub-pixel rounding in
      the slots above rather than letting it push the card taller. */

@@ -1279,19 +1279,35 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   border-radius: 4px; padding: 1px 6px; font-family: var(--font-mono);
   font-size: 10px; line-height: 15px; letter-spacing: -0.01em;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
-  /* 18ch, not 15: "No sponsorship" and "Grad 2027-2028" both measure ~16
-     characters in the mono face, so 235 of 483 chips rendered clipped at
-     15ch (95px of label in 88px of box) — the same "fixed the box, not the
-     content" mistake this file's card comment is about, one slot down. The
-     cap still exists because a
-     language chip can carry two names; it just sits above the longest
-     label the extractors actually produce. */
-  max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* The cap is a budget for the LABEL, so it has to be written as one. Twice
+     now it has been written as a box instead, and the box is not the label:
+     `box-sizing: border-box` is global (line 353), so `max-width: 18ch` spent
+     14px of those 18 characters on padding and border and handed the text
+     94px — 15.7ch, not 18. Measured live at 1280px: 138 of 375 chips on the
+     default feed ellipsized, including "Portuguese needed" at SEVENTEEN
+     characters, which is the whole proof that the number was never the
+     budget it claimed to be. Two of the misses were sub-pixel — "Your year
+     (2029)" and "Penultimate year" both need 94.41px against 94.00px, an
+     overflow small enough that integer `scrollWidth` rounds it away while
+     the reader still sees "Penultimate yea…" and a graduation year missing
+     its last digit.
+     So: `--chip-chrome` carries the padding and border, and the ch figure in
+     front of it is now genuinely the text. 24ch fits the longest label the
+     templates can produce — "Likely your year (2029)", 23 characters, 136px
+     — while still capping the ones with no ceiling at all, which is what the
+     cap was for: a language chip is whatever the extractor found plus the
+     word "needed", and three names would run the width of the card. `min(…,
+     100%)` is the second guard: the widest chip is now 158px, wider than a
+     card column gets on a small phone, and a chip must never be wider than
+     the thing it sits in. */
+  --chip-chrome: 14px;   /* 6px padding + 1px border, on both sides */
+  max-width: min(calc(24ch + var(--chip-chrome)), 100%);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   /* `inline-flex`, not `inline-block`, was here first, for the vertical
      centring `align-items: center` gave a short label against the taller
      line box around it. But `text-overflow: ellipsis` is defined only for
      BLOCK containers — a flex container ignores it outright, with no
-     warning and no fallback. Every chip past 18ch was hard-clipped
+     warning and no fallback. Every chip past the cap was hard-clipped
      mid-character at the box edge with no "…" to say so: "Won't sponsor
      you here" silently lost "here", "For 2027-2028 grads" lost the trailing
      "s". `inline-block` restores the ellipsis; `vertical-align: middle`
