@@ -100,14 +100,28 @@ on every quick action so all of it stays in sync.
         <div class="act-grid">
           {% for d in debriefs %}
             <article class="act-card kin-reveal act-debrief" style="--i:{{ forloop.counter0 }}">
-              <div class="act-top">
-                <span class="opp-firm">{% if d.contact.firm %}{{ d.contact.firm.name|smart_title }}{% else %}{{ d.contact.firm_text|smart_title }}{% endif %}</span>
+              {% comment %}
+              Same act-ident / act-context / act-quick shape _act_card.html
+              uses for the queue below — this lane kept its own pre-ledger-row
+              markup (firm+chip on one line, name and role as loose siblings
+              after it) even after that redesign, so the two card types
+              rendered visibly differently under the same shared CSS: name
+              landed on its own row here instead of stacking with firm the
+              way every other card does, and the layout read as broken next
+              to it. Same wrapper divs, same slots, content unchanged.
+              {% endcomment %}
+              <div class="act-ident">
+                <div class="act-idtext">
+                  <span class="opp-firm">{% if d.contact.firm %}{{ d.contact.firm.name|smart_title }}{% else %}{{ d.contact.firm_text|smart_title }}{% endif %}</span>
+                  <h3 class="act-name"><a href="{% url 'crm:contact_detail' d.contact.id %}">{{ d.contact.name|smart_title }}</a></h3>
+                  <p class="act-role">Chatted {% if d.days_ago %}{{ d.days_ago }}d ago{% else %}today{% endif %}</p>
+                </div>
                 <span class="chip warmth-{{ d.contact.warmth }}">{{ d.contact.warmth }}</span>
               </div>
-              <h3 class="act-name"><a href="{% url 'crm:contact_detail' d.contact.id %}">{{ d.contact.name|smart_title }}</a></h3>
-              <p class="act-role">Chatted {% if d.days_ago %}{{ d.days_ago }}d ago{% else %}today{% endif %}</p>
-              <div class="act-badges"><span class="prio prio-debrief">Write it down</span></div>
-              <p class="act-reason">Write down what you learned while it's fresh.</p>
+              <div class="act-context">
+                <div class="act-badges"><span class="prio prio-debrief">Write it down</span></div>
+                <p class="act-reason">Write down what you learned while it's fresh.</p>
+              </div>
               <div class="act-quick">
                 <div class="act-primary">
                   <a class="btn btn-primary act-btn"
