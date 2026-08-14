@@ -659,9 +659,19 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .net-mini-open { flex: none; width: 16px; height: 16px; margin: -2px;
     display: flex; align-items: center; justify-content: center;
     border-radius: 4px; color: var(--ink-3); font-size: 15px; line-height: 1;
-    text-decoration: none; }
+    text-decoration: none; position: relative; }
   .net-mini-open:hover { background: var(--surface); color: var(--accent-ink);
     text-decoration: none; }
+  /* The glyph stays 16px — that's the visual restraint the comment above
+     asks for — but the real tap target was the same 16px, well under even
+     WCAG 2.5.8 AA's 24px floor. An invisible ::after grows the hit area
+     without touching the glyph. Capped at +4px/side (24x24, not the 44px
+     ideal): the grid's row/column gap is only 8px (.net-minis), so a
+     bigger expansion would reach past the gap into the NEXT card's own
+     open-profile link — trading one mis-tap bug for a worse one, a wrong
+     contact's profile opening instead of no profile opening. 24px is the
+     most this geometry can give without that collision. */
+  .net-mini-open::after { content: ""; position: absolute; inset: -4px; }
   /* "Select all" in the lane header. Sized to the header's own micro type
      so it reads as part of the label, not a button parked next to it. */
   .lane-all { border: 0; background: none; padding: 0; margin-left: var(--s2);
