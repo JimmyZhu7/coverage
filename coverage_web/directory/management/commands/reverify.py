@@ -13,7 +13,16 @@ rotated away, a firm whose fetch keeps failing). `reverify` walks the open
 rows whose `last_checked` is oldest and asks the provider's own
 verify endpoint, one URL at a time:
 
-- "verified-open"       -> stamp last_verified + last_checked (fresh again)
+- "verified-open"       -> stamp last_verified + last_checked (fresh again),
+                           and refresh `deadline` from the verify result's
+                           own `deadline_dates` when it reports one -- a
+                           provider's verify endpoint is read fresh every
+                           pass, so it is the one place a stale `deadline`
+                           (set once at first ingest, never revisited by
+                           `scrape`'s list-endpoint fetch for a provider
+                           whose list API carries no deadline field, e.g.
+                           Workday) gets to be corrected once the firm bakes
+                           an updated one into the posting.
 - "closed"              -> status="closed" (with last_checked)
 - "unreachable"         -> stamp last_checked only — an error is never
                            evidence of life OR death (same rule as ingest's
@@ -32,7 +41,7 @@ Each run is recorded in scrape_runs (connector="reverify").
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -40,6 +49,21 @@ from django.utils import timezone
 from coverage_connectors import verify
 
 from directory.models import Opportunity, ScrapeRun
+
+
+def _fresh_deadline(deadline_dates: list[str]) -> date | None:
+    """The first genuinely-parseable date in a verify result's
+    `deadline_dates`, or `None`. `VerificationResult.deadline_dates` is
+    documented (coverage_connectors/models.py) to hold only "genuine
+    deadline-type dates the provider's verify endpoint exposed" -- this
+    trusts that contract rather than re-guessing which entry is the real
+    deadline. A value that fails to parse is skipped, never invented."""
+    for value in deadline_dates or []:
+        try:
+            return date.fromisoformat((value or "")[:10])
+        except (ValueError, TypeError):
+            continue
+    return None
 
 
 class Command(BaseCommand):
@@ -90,7 +114,13 @@ class Command(BaseCommand):
             opp.last_checked = now
             if verdict == "verified-open":
                 opp.last_verified = now
-                opp.save(update_fields=["last_checked", "last_verified"])
+                update_fields = ["last_checked", "last_verified"]
+                fresh = _fresh_deadline(result.deadline_dates) if result is not None else None
+                if fresh is not None and fresh != opp.deadline:
+                    opp.deadline = fresh
+                    opp.deadline_precision = "day"
+                    update_fields += ["deadline", "deadline_precision"]
+                opp.save(update_fields=update_fields)
             elif verdict == "closed":
                 opp.status = "closed"
                 opp.closed_at = now
