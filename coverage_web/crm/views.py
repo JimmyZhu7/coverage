@@ -79,6 +79,7 @@ from .utils import (  # noqa: F401
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
     TOUCH_KIND_LABELS,
     WARMTH_ORDER,
+    _calendar_days_ago,
     _clock,
     _confidence_label,
     _mailto,
@@ -784,9 +785,14 @@ def _stale_window_days(c, params) -> int:
     return max(round(merged["followup_after_business_days"] * 7 / 5), 1)
 
 
-def _contact_card(c, *, tier, today, cadence=None):
+def _contact_card(c, *, tier, today, cadence=None, as_of=None):
     """One full contact card (radar style): initials, pills, firm · role,
-    note bullets in plain grammar, and days since the last touch."""
+    note bullets in plain grammar, and days since the last touch.
+
+    `as_of` mirrors `crm.debrief.pending`'s optional parameter of the same
+    name: `None` means "real current time" (every live caller), and tests
+    pin it to get a deterministic calendar-date boundary without mocking
+    the clock."""
     parts = [p for p in (c.name or "").split() if p]
     initials = "".join(p[0] for p in parts[:2]).upper()
     bullets = []
@@ -796,7 +802,7 @@ def _contact_card(c, *, tier, today, cadence=None):
             if frag:
                 bullets.append(frag[0].upper() + frag[1:])
     last = c.last_touch_ts
-    days_since = (timezone.now() - last).days if last else None
+    days_since = _calendar_days_ago(last, as_of=as_of) if last else None
     window = _stale_window_days(c, cadence or {})
     # 0.0 = touched today, 1.0 = the engine's clock has run out. Never-touched
     # contacts show a full ring: silence since forever is the stalest state.

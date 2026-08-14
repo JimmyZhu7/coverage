@@ -11,6 +11,29 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote, urlencode
 
+from django.utils import timezone
+
+
+# ---------------------------------------------------------------------------
+# Time.
+# ---------------------------------------------------------------------------
+def _calendar_days_ago(ts, *, as_of=None) -> int:
+    """How many days ago `ts` happened, as a CALENDAR-date difference in the
+    active timezone (`localtime(as_of).date() - localtime(ts).date()`) — not
+    `(as_of - ts).days`, a raw timedelta floor that is timezone-independent
+    and effectively `elapsed_hours // 24`.
+
+    The single source of truth for this fact: `crm.debrief.pending`,
+    `crm.today._schedule`, and `crm.views._contact_card` each computed it
+    independently, and the raw-floor version drifted from this one once
+    elapsed time crossed a local calendar-date boundary — e.g. Touch 558,
+    ~58.46h elapsed under Asia/Hong_Kong: floor gives 2, calendar-diff gives
+    3, and two surfaces showing the same touch disagreed on "how long ago".
+    """
+    as_of = as_of or timezone.now()
+    return (timezone.localtime(as_of).date() - timezone.localtime(ts).date()).days
+
+
 # ---------------------------------------------------------------------------
 # Persistence -> domain adapter.
 # ---------------------------------------------------------------------------

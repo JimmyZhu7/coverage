@@ -38,6 +38,7 @@ from .utils import (
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
     TOUCH_KIND_LABELS,
     CHANNEL_LABELS,
+    _calendar_days_ago,
     _clock,
     _confidence_label,
     _mailto,
@@ -1078,7 +1079,7 @@ def _schedule(user, today) -> list[dict]:
         set_up = timezone.localtime(c.last_ts).date()
         if cadence.business_days_since(set_up, today) > 4:
             continue
-        days_ago = (today - set_up).days
+        days_ago = _calendar_days_ago(c.last_ts, as_of=now)
         rows.append({
             # Sorts after every timed row on the same day: a thing with a
             # known time outranks a thing without one.

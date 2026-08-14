@@ -27,7 +27,7 @@ from django.utils import timezone
 from analytics.models import ProductEvent
 from coverage_domain import cadence
 from crm.models import Contact, Touch, UserFirm
-from crm.views import TUNABLE_CADENCE_PARAMS, _cadence_params
+from crm.views import TUNABLE_CADENCE_PARAMS, _cadence_params, _contact_card
 from directory.models import Firm
 
 User = get_user_model()
@@ -434,6 +434,39 @@ def test_contact_list_renders(client):
     resp = client.get(reverse("crm:contact_list"))
     assert resp.status_code == 200
     assert "Listed Person" in resp.content.decode()
+
+
+def test_contact_card_days_since_matches_the_debrief_and_today_calendar_date_convention():
+    """The Network board's staleness ring used to compute `days_since` as a
+    raw timedelta floor (`(timezone.now() - last).days`) — the same class of
+    bug fixed for `crm.debrief.pending` (see
+    test_debrief_and_today_agree_on_days_ago_for_the_same_chat in
+    test_today.py, the Touch 558 case). Same fixture here: ~58.46h elapsed
+    under Asia/Hong_Kong floors to 2 but calendar-diffs to 3 — `_contact_card`
+    must land on 3, matching the Debrief and Today cards for the identical
+    fact, not silently drift back to the old floor once elapsed time crosses
+    a local calendar-date boundary.
+    """
+    from zoneinfo import ZoneInfo
+
+    hk = ZoneInfo("Asia/Hong_Kong")
+    as_of = timezone.now().astimezone(hk).replace(
+        hour=0, minute=30, second=0, microsecond=0
+    )
+    contact = Contact(name="Ellen Chung", warmth="chatted")
+    contact.last_touch_ts = as_of - timedelta(hours=58)
+
+    timezone.activate(hk)
+    try:
+        card = _contact_card(
+            contact, tier=None, today=as_of.date(), as_of=as_of,
+        )
+    finally:
+        timezone.deactivate()
+
+    assert card["days_since"] == 3, (
+        "sanity: the calendar-date diff under HK is 3, not floor(58/24)=2"
+    )
 
 
 @pytest.mark.django_db
