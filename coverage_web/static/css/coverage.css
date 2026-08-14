@@ -1210,7 +1210,17 @@ a.pill:hover { text-decoration: underline; }
   from { clip-path: inset(0 calc(100% - var(--from)) 0 0); }
   to   { clip-path: inset(0 calc(100% - var(--to)) 0 0); }
 }
-.meter-scale { display: flex; justify-content: space-between;
+/* One axis, one coordinate system. `space-between` positioned these four
+   words by their own text widths while the fill above them is a quartile of
+   the track, so the two never agreed: a REPLIED contact's bar tip landed
+   nearer the word CHATTED (83px) than the bolded REPLIED (121px), pointing
+   at a rung the contact has not reached. Equal columns put each word over
+   the quarter-segment its own fill level covers, at every width — at 375px
+   the old row left the tip 2.9px from CHATTED's first letter. minmax(0, 1fr)
+   rather than 1fr so a long word cannot widen its own column and reopen the
+   gap; grid-auto-flow keeps this true if WARMTH_ORDER ever changes length. */
+.meter-scale { display: grid; grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr); text-align: center;
   font-size: var(--fs-micro); color: var(--ink-3); margin-top: var(--s1);
   text-transform: uppercase; letter-spacing: 0.05em; }
 .meter-scale span.on { color: var(--ink); font-weight: var(--w-med); }

@@ -116,6 +116,52 @@ def test_every_level_ends_in_its_own_warmth_colour():
         )
 
 
+def test_scale_labels_share_the_fill_s_coordinate_system():
+    """The word row and the bar must be measured on the same axis.
+
+    `justify-content: space-between` laid the four words out by their own
+    text widths while the fill is a quartile of the track. Measured live at
+    1280px on contact 482 (replied): tip at 458.0, the bolded REPLIED span
+    at 287.0-336.9 and the inactive CHATTED at 541.3-597.6 — the tip's
+    NEAREST label was the rung above the contact's real state. At 375px the
+    tip sat 2.9px from CHATTED's first letter.
+    """
+    block = " ".join(_rule(".meter-scale").split())
+    assert "justify-content: space-between" not in block, (
+        "space-between positions the labels by text width, which is not the "
+        "axis the fill is measured on"
+    )
+    assert "display: grid" in block, block
+    assert "grid-auto-columns: minmax(0, 1fr)" in block, (
+        "the columns must be strictly equal; a bare 1fr lets a long word "
+        "widen its own column and pull the label off its segment"
+    )
+    assert "text-align: center" in block
+
+
+def test_each_label_sits_inside_the_segment_its_fill_level_covers():
+    """Re-derive the alignment from the same source the fill uses.
+
+    With n equal columns, label i spans [i/n, (i+1)/n] of the track and the
+    fill for that level stops at `_warmth_pct` = (i+1)/n. So every level's
+    bar ends on its own label's segment boundary instead of somewhere in the
+    gap between two words.
+    """
+    block = " ".join(_rule(".meter-scale").split())
+    assert "grid-auto-flow: column" in block, (
+        "auto-flow column keeps one cell per warmth level however many "
+        "WARMTH_ORDER holds"
+    )
+    n = len(WARMTH_ORDER)
+    for i, level in enumerate(WARMTH_ORDER):
+        cell_left, cell_right = i / n * 100, (i + 1) / n * 100
+        tip = _warmth_pct(level)
+        assert cell_left < tip <= cell_right, (
+            f"{level}'s bar stops at {tip}% but its label cell spans "
+            f"{cell_left}-{cell_right}%"
+        )
+
+
 def test_reduced_motion_still_lands_on_the_full_level():
     """The reduced-motion path skips the animation, not the fill level."""
     text = " ".join(CSS.read_text().split())
