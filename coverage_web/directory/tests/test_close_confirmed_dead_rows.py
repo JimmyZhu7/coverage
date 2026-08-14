@@ -80,6 +80,37 @@ def test_default_ids_reports_the_current_round_confirmed_row(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_default_ids_reports_the_round7_bmo_rows(monkeypatch):
+    """Regression test for the confirmed BMO defect (Opportunity ids 9376,
+    9389, 9522): the same list/detail lag as Raymond James id=10630, this
+    time surfaced by `coverage_connectors.workday.verify()` returning a 422
+    (rather than round 3's 403) on the blocked structured call before
+    falling back to the posting page's own postingAvailable flag. DEFAULT_IDS
+    must pick up all three rows with no --ids argument."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    dead_rows = [
+        _open_opp(firm, f"https://bmo.wd3.myworkdayjobs.com/External/job/x/role-{i}")
+        for i in range(3)
+    ]
+    # DEFAULT_IDS is hardcoded to the live rows' real ids (9376, 9389, 9522);
+    # a test database assigns its own pk sequence, so the default list is
+    # monkeypatched to point at THESE rows rather than faking their pks.
+    monkeypatch.setattr(cmd_mod, "DEFAULT_IDS", [o.id for o in dead_rows])
+    monkeypatch.setattr(
+        cmd_mod, "verify",
+        lambda url: VerificationResult(
+            provider="workday", url=url, result="closed",
+            evidence="CxS job-detail HTTP 422; posting page's own "
+                     "postingAvailable flag reads false",
+            deadline_dates=[]))
+    call_command("close_confirmed_dead_rows")  # no --ids: exercises DEFAULT_IDS
+
+    for dead in dead_rows:
+        dead.refresh_from_db()
+        assert dead.status == "open"  # report-only by default
+
+
+@pytest.mark.django_db
 def test_apply_closes_only_confirmed_dead_rows(monkeypatch):
     firm = Firm.objects.create(slug="marshallwace", name="Marshall Wace")
     dead = _open_opp(firm, "https://x/gone")
