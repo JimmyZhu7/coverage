@@ -223,7 +223,18 @@ values.
             <span class="name">Structural</span>
             <span class="bar"><i style="--w: {{ firm_score.axes.structural.score }}%"></i></span>
             <span class="val">{{ firm_score.axes.structural.score }}</span>
-            <span class="meta">rules v1: region {{ firm_score.axes.structural.region_overlap|yesno:"match,no,?" }}, track {{ firm_score.axes.structural.track_overlap|yesno:"match,no,?" }}</span>
+            {% comment %}"rules v1: region match, track no" was the scoring
+            engine talking to itself. "rules v1" is scoring.py's own method
+            label (`"method": "rules_v1"`), which is a fact about our code,
+            not about this firm; "track no" is the raw yesno token rather
+            than a sentence; and the third branch printed a literal "?" for
+            the case where one side's list is empty. Every other meta on
+            these two cards is plain English — "0 chats evidenced (level
+            0/3)", "1 in last 14d vs 1 in 45d", "no confirmed date" — so
+            this one line was the only jargon on the rail. The axis is still
+            honestly rule-based; that belongs in the docs, not in the copy a
+            student reads.{% endcomment %}
+            <span class="meta">{{ firm_score.axes.structural.region_overlap|yesno:"in your region,outside your region,region not listed" }}, {{ firm_score.axes.structural.track_overlap|yesno:"in your track,outside your track,track not listed" }}</span>
           </div>
         </div>
       </div>
