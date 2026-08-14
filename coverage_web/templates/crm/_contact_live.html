@@ -155,9 +155,19 @@ values.
           <span class="name">Responsiveness</span>
           <span class="bar"><i style="--w: {{ contact_score.axes.responsiveness.score }}%"></i></span>
           <span class="val">{{ contact_score.axes.responsiveness.score }}</span>
+          {% comment %}Two things this line got wrong, both of them wording,
+          neither of them the score. (1) "1 reply to 0 notes" is a sentence
+          arguing with itself — a mailbox scan can find their reply without
+          you ever having logged an outbound, and 22 of the visible contacts
+          are in exactly that state. (2) `replies` counts _MEANINGFUL_KINDS,
+          so a coffee chat is one of them: the SAME touch printed as "1 chat
+          evidenced" on Depth and "1 reply" here, one axis apart on one card.
+          Both counts are right; the nouns were not. "From them / from you"
+          says who moved without claiming which kind of touch it was.
+          {% endcomment %}
           <span class="meta">
-            {{ contact_score.axes.responsiveness.replies }} repl{{ contact_score.axes.responsiveness.replies|pluralize:"y,ies" }}
-            to {{ contact_score.axes.responsiveness.sends }} note{{ contact_score.axes.responsiveness.sends|pluralize }}{% if contact_score.axes.responsiveness.median_latency_days != None %}, ~{{ contact_score.axes.responsiveness.median_latency_days }}d median{% endif %}
+            {{ contact_score.axes.responsiveness.replies }} from them,
+            {% if contact_score.axes.responsiveness.sends %}{{ contact_score.axes.responsiveness.sends }} from you{% else %}nothing logged from you{% endif %}{% if contact_score.axes.responsiveness.median_latency_days != None %}, ~{{ contact_score.axes.responsiveness.median_latency_days }}d median{% endif %}
           </span>
         </div>
         <div class="axis" style="--i:2">

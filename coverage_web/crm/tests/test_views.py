@@ -197,6 +197,48 @@ def test_contact_detail_shows_fit_score_axes_and_reasoning(client):
     assert ProductEvent.all_objects.filter(user=user, event="score_viewed").exists()
 
 
+@pytest.mark.django_db
+def test_responsiveness_meta_does_not_argue_with_itself(client):
+    """A contact discovered by mailbox scan has their reply on record and no
+    outbound of yours. The axis printed "1 reply to 0 notes" — a sentence
+    contradicting itself, and unactionable: a student cannot tell what to do
+    about a reply to nothing. It also called a coffee chat a "reply", so the
+    SAME touch read "1 chat evidenced" on Depth and "1 reply" one line below."""
+    user = _user()
+    now = timezone.now()
+    contact = Contact.all_objects.create(user=user, name="Ellen Chung")
+    Touch.all_objects.create(user=user, contact=contact, ts=now - timedelta(days=2),
+                             kind="chat", channel="email", note="Discovered by mailbox scan")
+
+    client.force_login(user)
+    raw = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    body = re.sub(r"\s+", " ", raw)
+
+    assert "1 from them, nothing logged from you" in body
+    assert "0 note" not in body
+    assert "1 reply to" not in body, "a chat is not a reply, and there was no note"
+
+
+@pytest.mark.django_db
+def test_responsiveness_meta_names_both_sides_when_both_exist(client):
+    """The normal case still reads as a ratio, just without the "reply" noun
+    that the counter cannot honestly promise."""
+    user = _user()
+    now = timezone.now()
+    contact = Contact.all_objects.create(user=user, name="Dana MD")
+    Touch.all_objects.create(user=user, contact=contact, ts=now - timedelta(days=10),
+                             kind="outreach", channel="email")
+    Touch.all_objects.create(user=user, contact=contact, ts=now - timedelta(days=9),
+                             kind="reply_received", channel="email")
+
+    client.force_login(user)
+    raw = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    body = re.sub(r"\s+", " ", raw)
+
+    assert "1 from them, 1 from you" in body
+    assert "nothing logged from you" not in body
+
+
 # ---------------------------------------------------------------------------
 # 5b. Manual-override touch notes: the "manual override: <col>=<val>, ..."
 # audit prefix is machine bookkeeping (services.set_contact_state's own
