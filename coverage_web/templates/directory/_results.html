@@ -101,8 +101,13 @@ bind to.
   results below swap silently for a screen-reader user, so the headline count
   has to re-announce itself; making the whole strip a live region would read
   four numbers back on every keystroke in Search.{% endcomment %}
-  <span class="ss-item" role="status"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num" style="--i:0">{{ total }}</b> Open Roles</span>
-  <span class="ss-item"><b class="dash-num" style="--i:1">{{ clusters|length }}</b> Firms</span>
+  <span class="ss-item" role="status"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num" style="--i:0">{{ total }}</b> Open Role{{ total|pluralize }}</span>
+  {% comment %}`all_cluster_count`, never `clusters|length`. `clusters` is the
+  12-column lazy-load slice, so counting it told a student the whole covered
+  universe was twelve firms deep while the feed kept scrolling past seventy.
+  The count next to it (`total`) is summed over the full list, so the two
+  numbers on one line disagreed about which board they described.{% endcomment %}
+  <span class="ss-item"><b class="dash-num" style="--i:1">{{ all_cluster_count }}</b> Firm{{ all_cluster_count|pluralize }}</span>
   {% if dash.closing_week %}<span class="ss-item ss-warn"><b class="dash-num" style="--i:2">{{ dash.closing_week }}</b> Closing This Week</span>{% endif %}
   {% comment %}"Fresh" is driven by `dash.fresh_days` (== `_FRESH_DAYS` in
   views.py) rather than a hardcoded "This Week", so the window in the label
