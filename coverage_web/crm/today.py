@@ -683,7 +683,8 @@ def _new_at_your_firms(user, limit=5) -> dict:
     return {
         "count": qs.count(),
         "roles": [{"title": o.title, "firm": o.firm.name, "id": o.id,
-                   "url": o.url, "slug": o.firm.slug} for o in qs[:limit]],
+                   "url": o.url, "slug": o.firm.slug, "location": o.location}
+                  for o in qs[:limit]],
     }
 
 
