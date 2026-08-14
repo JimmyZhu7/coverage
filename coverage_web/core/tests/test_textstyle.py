@@ -4,7 +4,7 @@ to standardize."""
 
 import pytest
 
-from core.templatetags.textstyle import smart_title
+from core.templatetags.textstyle import smart_location, smart_title
 
 
 CASES = [
@@ -81,3 +81,67 @@ def test_an_ordinary_lowercase_short_word_is_not_treated_as_an_acronym():
     same way it currently mis-cases real acronyms."""
     assert smart_title("sap") == "Sap"
     assert smart_title("the brattle group") == "The Brattle Group"
+
+
+# --- Locations are not titles ---------------------------------------------
+# `smart_title`'s docstring scopes it to firm names, job titles and person
+# names, but six templates piped Opportunity.location through it, so the
+# English title-case minor-word convention ran over place names. Every RAW
+# string below is a live open-role location.
+
+LOCATION_CASES = [
+    # The reported defect: a capitalized particle mid-string got downcased.
+    ("Batesville; Des Moines", "Batesville; Des Moines"),
+    ("Boston or Des Moines", "Boston or Des Moines"),
+    ("West Des Moines, Iowa, United States of America",
+     "West Des Moines, Iowa, United States of America"),
+    # ...and it was never only the Iowa city.
+    ("Wilmington, DE, United States", "Wilmington, DE, United States"),
+    ("Milano Via Turati 25-27", "Milano Via Turati 25-27"),
+    ("WI-Milwaukee, 411 E Wisconsin Ave Ste 1850",
+     "WI-Milwaukee, 411 E Wisconsin Ave Ste 1850"),
+    ("Gemini Building A, Prague", "Gemini Building A, Prague"),
+    ("Portage La Prairie, Manitoba", "Portage La Prairie, Manitoba"),
+    ("Puerto La Cruz", "Puerto La Cruz"),
+    # A particle the SOURCE wrote lowercase is its own orthography and stays.
+    # This is why deleting "des" from _MINOR would have been the wrong fix.
+    ("Geneva Place des Bergues 3", "Geneva Place des Bergues 3"),
+    ("Rio de Janeiro", "Rio de Janeiro"),
+    # An all-caps particle inside a run carries no case signal, so the
+    # title-case convention still decides it.
+    ("VILLE DE QUEBEC, Canada", "Ville de Quebec, Canada"),
+    ("RIO DE JANEIRO", "Rio de Janeiro"),
+    # A particle that OPENS the name is part of it.
+    ("EL DORADO HILLS, CA", "El Dorado Hills, CA"),
+    ("DEL REY OAKS, CA", "Del Rey Oaks, CA"),
+    ("ON-81 Bay Street-Virtual", "ON-81 Bay Street-Virtual"),
+    # Shouting city names lose their fake acronyms...
+    ("SAN FRANCISCO, CA", "San Francisco, CA"),
+    ("NEW YORK, NY", "New York, NY"),
+    # ...but a real state/territory code in its own slot survives, comma or not.
+    ("WASHINGTON DC", "Washington DC"),
+    ("NYC (1285)", "NYC (1285)"),
+    ("NY - 375 - 18", "NY - 375 - 18"),
+    ("", ""),
+    (None, None),
+]
+
+
+@pytest.mark.parametrize("raw,expected", LOCATION_CASES)
+def test_smart_location(raw, expected):
+    assert smart_location(raw) == expected
+
+
+def test_the_title_filter_still_downcases_minor_words():
+    """smart_location must not have been implemented by weakening _MINOR —
+    titles still want the convention that locations do not."""
+    assert smart_title("Head of Diversity") == "Head of Diversity"
+    assert smart_title("Women in Banking") == "Women in Banking"
+
+
+def test_a_shouting_location_is_the_one_case_that_cannot_be_recovered():
+    """Documented limit, pinned so a future reader knows it is known rather
+    than missed: 'DES' in an all-caps string is indistinguishable from the
+    'DE' of RIO DE JANEIRO, and only one of them wants a capital. One open
+    row is affected; the ten mixed-case 'Des Moines' rows above are not."""
+    assert smart_location("WEST DES MOINES, IA") == "West des Moines, IA"

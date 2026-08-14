@@ -11,7 +11,7 @@ skimming the firm's own page. The description follows, and the link out is
 last and unmissable — this drawer is for deciding, not for applying.
 {% endcomment %}
 <header class="drawer-head">
-  <p class="drawer-firm">{{ firm.name|smart_title }}{% if o.location %} · {{ o.location|smart_title }}{% endif %}</p>
+  <p class="drawer-firm">{{ firm.name|smart_title }}{% if o.location %} · {{ o.location|smart_location }}{% endif %}</p>
   <h2 class="drawer-title">{{ o.title|smart_title }}</h2>
   <p class="drawer-meta">
     {% if deadline %}<span class="drawer-deadline{% if reported %} is-reported{% endif %}"

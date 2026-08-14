@@ -21,7 +21,7 @@ on actually holding the text.
       {% if card.cohort %}<span class="frow-cohort" title="{{ card.cohort }} programme year">{{ card.cohort }}</span>{% endif %}
     </p>
     <p class="frow-meta">
-      {% if card.location %}{{ card.location|smart_title }}{% else %}Location not listed{% endif %}
+      {% if card.location %}{{ card.location|smart_location }}{% else %}Location not listed{% endif %}
     </p>
     {% if card.facts or card.tags %}
       <div class="frow-chips">
