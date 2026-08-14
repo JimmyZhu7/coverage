@@ -491,17 +491,25 @@ URGENT_WINDOW_DAYS = 30
 # open — this is not "closing soon", it is the mirror image and a strictly
 # stronger signal: the board is showing an expired date right now, today,
 # to a student deciding whether to apply. The 7-day URGENT_STALE_DAYS
-# threshold was reused for this case too until round 4: HSBC Sheffield WIT
-# (id 1618) was fetched at 01:07 UTC on 2026-08-14 and read "Aug 09" —
-# already past — while HSBC's own page, re-fetched minutes later the same
-# day, had already moved to "Aug 16". Because the row's `age` was 0 right
-# after that very fetch, the 7-day threshold meant this exact row would not
-# be looked at again for up to a week even though it was already showing a
-# wrong, expired date. One day closes that gap to "the next run," which is
-# the best any periodic-refresh pipeline can do against a same-day site
-# change — it cannot make yesterday's fetch see today's edit, but it can
-# stop treating a known-wrong reading as good for a week.
-PAST_DEADLINE_STALE_DAYS = 1
+# threshold was reused for this case too until round 4, which tightened it
+# to one calendar DAY (measured via `(now - at).days`, so effectively a
+# 24h+ wait). That was still not tight enough: render.yaml's `coverage-
+# scrape` cron runs this command every 6 hours ("0 */6 * * *" — "Four passes
+# a day keeps deadlines honest across US and Asia hours", by that file's own
+# comment), but a whole-day gate meant an already-wrong reading could sit
+# through TWO of those scheduled passes before requalifying. Confirmed live
+# 2026-08-14 on the exact row this constant exists for: HSBC Sheffield WIT
+# id 1618 was fetched at 01:07 UTC (reading "Aug 09", correct at the time)
+# and was still sitting unrefreshed at 12:58 UTC — after the 06:00 refresh
+# pass had already run — because `age.days` was still 0. HSBC's own page had
+# already moved to "Aug 16" by then. Measuring in hours against the cron's
+# own 6-hour cadence closes the gap to "the next scheduled pass", which is
+# the tightest any periodic-refresh pipeline can do without polling more
+# often than the infrastructure already runs — it cannot make this
+# morning's fetch see this afternoon's site edit, but it can stop a known-
+# wrong "deadline passed" reading from surviving a whole extra refresh
+# cycle.
+PAST_DEADLINE_STALE_HOURS = 6
 
 
 def _fetched_at(o):
@@ -552,8 +560,16 @@ def _queue(rows, *, refetch: bool, stale_days: int, today) -> tuple[list, int]:
         days_to_deadline = (o.deadline - today).days if o.deadline is not None else None
         already_past = days_to_deadline is not None and days_to_deadline < 0
         closing_soon = days_to_deadline is not None and 0 <= days_to_deadline <= URGENT_WINDOW_DAYS
-        if already_past and age >= min(PAST_DEADLINE_STALE_DAYS, stale_days):
-            urgent_stale.append(o)
+        if already_past:
+            # Hours, not days: this is the one branch a whole-day gate left
+            # exposed through an entire scheduled refresh pass (see
+            # PAST_DEADLINE_STALE_HOURS). `stale_days` is still the operator's
+            # override knob (e.g. `--stale-days 0` disables re-reads entirely,
+            # already handled above), so it still bounds this branch — just
+            # converted to hours rather than compared against whole days.
+            age_hours = (now - at).total_seconds() / 3600
+            if age_hours >= min(PAST_DEADLINE_STALE_HOURS, stale_days * 24):
+                urgent_stale.append(o)
         elif closing_soon and age >= min(URGENT_STALE_DAYS, stale_days):
             urgent_stale.append(o)
         elif age >= stale_days:
@@ -575,18 +591,27 @@ _PROSE_MIN = 120        # a field shorter than this is a label, not prose
 _PAYLOAD_MIN = 300      # below this the payload has not really described the job
 # Keys that hold long strings which are never a description.
 _NOT_PROSE = ("url", "link", "id", "code", "date", "image", "logo", "slug")
-# This command's OWN bookkeeping keys, written into raw at the bottom of
-# handle() (detail_text/detail_fetched/detail_location/detail_source). They
-# must never be read back as "the board's own payload": once a
-# has_live_api()==False row is fetched and detail_text is cached, every
-# later run would otherwise find its own prior detail_text sitting in raw,
-# mistake it for a fresh board payload, and short-circuit fetch_posting()
-# forever -- freezing location/deadline/sponsorship extraction while
-# detail_fetched keeps advancing (round 7: 0 of 75 open icims rows, 0/5
-# lever, 0/9 talentgateway, 0/10 beisen ever recovered a detail_location
-# despite already carrying detail_text).
+# This pipeline's OWN bookkeeping keys, written into `raw` by commands
+# downstream of a board fetch: enrich_postings' own
+# detail_text/detail_fetched/detail_location/detail_source, plus
+# extract_facts' facts/facts_at — the derived-fact dict `refresh` computes
+# FROM detail_text on every single pass (extract_facts runs unconditionally
+# over every open row, per refresh.py). None of these may ever be read back
+# as "the board's own payload": once a has_live_api()==False row is fetched
+# and detail_text is cached, every later run would otherwise find its own
+# prior detail_text (round 7 fix) — or, once extract_facts has run at least
+# once, its own derived `facts` dict (this fix) — sitting in raw and mistake
+# it for a fresh board payload, short-circuiting fetch_posting() forever.
+# Confirmed live 2026-08-14: a scoped re-read of HSBC Sheffield WIT ids
+# 1617/1618 (`enrich_postings --ids`) reported "from board payloads" and
+# found neither a deadline nor sponsorship, because raw["facts"]["grad"]["
+# phrase"] — extract_facts' own cached grad-eligibility sentence, well over
+# _PAYLOAD_MIN — walked in as if HSBC's board had supplied it, and the
+# actual live page (which states "Closing Date: Sun Aug 16, 2026") was never
+# fetched at all.
 _SELF_WRITTEN_KEYS = frozenset(
-    {"detail_text", "detail_fetched", "detail_location", "detail_source"})
+    {"detail_text", "detail_fetched", "detail_location", "detail_source",
+     "facts", "facts_at"})
 
 
 def payload_text(raw: dict | None) -> str | None:
@@ -602,10 +627,16 @@ def payload_text(raw: dict | None) -> str | None:
     def walk(node, key="", depth=0):
         if depth > 6 or sum(len(f) for f in found) > MAX_TEXT:
             return
+        # Checked for every node type, not just strings: a self-written key
+        # can hold a whole nested structure (extract_facts' `facts` is a
+        # dict of dicts), and the field name that marks it as ours is only
+        # visible at THIS level — a string two levels inside `facts` is
+        # keyed "grad" or "phrase" by the time `walk` reaches it, not
+        # "facts", so a leaf-only check here would miss the entire subtree.
+        if key.lower() in _SELF_WRITTEN_KEYS:
+            return
         if isinstance(node, str):
             k = key.lower()
-            if k in _SELF_WRITTEN_KEYS:
-                return
             if any(bad in k for bad in _NOT_PROSE):
                 return
             looks_prose = ("<" in node and ">" in node) or (
@@ -637,40 +668,59 @@ class Command(BaseCommand):
         parser.add_argument("--stale-days", type=int, default=STALE_DAYS,
                             help=f"Re-read a page this many days after the last "
                                  f"read (default {STALE_DAYS}; 0 disables).")
+        parser.add_argument("--ids", type=str, default="",
+                            help="Comma-separated Opportunity ids to force-refetch "
+                                 "immediately, bypassing the bucket/staleness queue "
+                                 "entirely — a scoped backfill for rows a specific "
+                                 "audit already named, not a general run.")
         parser.add_argument("--dry-run", action="store_true")
 
     def handle(self, *args, **opts):
         dry = opts["dry_run"]
         tag = "[dry-run] " if dry else ""
 
-        rows = list(
-            Opportunity.objects.filter(status="open")
-            .filter(
-                Q(bucket__in=TARGET_BUCKETS)
-                # A non-campus row can still carry a deadline WE reported
-                # (confidence < 1.0, e.g. read out of BMO's Phenom-listed
-                # postings at ingest) — and outside TARGET_BUCKETS it was
-                # never in this command's queryset at all, so that reading
-                # could never be revisited once wrong. BMO ids 19224/9485/
-                # 9433 are bucket="other" and had gone unrefreshed since
-                # ingest (4+ months) for exactly this reason: not "checked
-                # and still stale", never checked a second time, ever. Scope
-                # is narrow on purpose — only rows already showing a
-                # reported date, not every non-campus posting — so this
-                # doesn't turn into an unbounded enrichment run over
-                # experienced-hire boards this command was never meant to
-                # cover.
-                | Q(deadline__isnull=False, confidence__lt=1.0)
+        # An explicit --ids list is a targeted backfill for rows already named
+        # by an audit (e.g. a stale-deadline finding on two specific postings)
+        # — it bypasses TARGET_BUCKETS and the staleness queue on purpose,
+        # since the whole point is refetching THESE rows now rather than
+        # waiting for them to re-qualify through the normal cadence.
+        ids = [int(x) for x in opts["ids"].split(",") if x.strip()]
+        if ids:
+            rows = list(
+                Opportunity.objects.filter(id__in=ids)
+                .select_related("firm")
+                .order_by("firm__name", "id")
             )
-            .select_related("firm")
-            .order_by("firm__name", "id")
-        )
-        today = timezone.localdate()
-        todo, refreshed = _queue(rows, refetch=opts["refetch"],
-                                 stale_days=opts["stale_days"], today=today)
-        if opts["limit"]:
-            todo = todo[: opts["limit"]]
-            refreshed = sum(1 for o in todo if (o.raw or {}).get("detail_text"))
+            todo, refreshed = rows, len(rows)
+        else:
+            rows = list(
+                Opportunity.objects.filter(status="open")
+                .filter(
+                    Q(bucket__in=TARGET_BUCKETS)
+                    # A non-campus row can still carry a deadline WE reported
+                    # (confidence < 1.0, e.g. read out of BMO's Phenom-listed
+                    # postings at ingest) — and outside TARGET_BUCKETS it was
+                    # never in this command's queryset at all, so that reading
+                    # could never be revisited once wrong. BMO ids 19224/9485/
+                    # 9433 are bucket="other" and had gone unrefreshed since
+                    # ingest (4+ months) for exactly this reason: not "checked
+                    # and still stale", never checked a second time, ever. Scope
+                    # is narrow on purpose — only rows already showing a
+                    # reported date, not every non-campus posting — so this
+                    # doesn't turn into an unbounded enrichment run over
+                    # experienced-hire boards this command was never meant to
+                    # cover.
+                    | Q(deadline__isnull=False, confidence__lt=1.0)
+                )
+                .select_related("firm")
+                .order_by("firm__name", "id")
+            )
+            today = timezone.localdate()
+            todo, refreshed = _queue(rows, refetch=opts["refetch"],
+                                     stale_days=opts["stale_days"], today=today)
+            if opts["limit"]:
+                todo = todo[: opts["limit"]]
+                refreshed = sum(1 for o in todo if (o.raw or {}).get("detail_text"))
 
         run = None
         if not dry:

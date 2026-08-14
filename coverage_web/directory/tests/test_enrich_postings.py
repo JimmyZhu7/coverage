@@ -16,7 +16,7 @@ from django.core.management import call_command
 from django.utils import timezone
 
 from directory.management.commands.enrich_postings import (
-    PAST_DEADLINE_STALE_DAYS,
+    PAST_DEADLINE_STALE_HOURS,
     URGENT_STALE_DAYS,
     _queue,
     fetch_posting,
@@ -543,26 +543,48 @@ class TestPastDeadlineGetsTighterRecheckThanClosingSoon:
     Aug 16 minutes after Coverage's morning scrape. The old code reused
     URGENT_STALE_DAYS (7 days) for an already-past deadline, the same
     threshold as merely "closing soon" — meaning a row caught showing an
-    already-expired date could sit unconfirmed for up to a week. This must
-    now requeue at the tighter PAST_DEADLINE_STALE_DAYS (1 day)."""
+    already-expired date could sit unconfirmed for up to a week. Round 4
+    tightened that to one calendar day, but a whole-day gate (measured via
+    `(now - at).days`) was STILL loose enough to let the same row survive an
+    entire scheduled refresh pass: render.yaml's `coverage-scrape` cron runs
+    this command every 6 hours, yet id 1618 — fetched 01:07 UTC, read as
+    already past — was still unrefreshed at 12:58 UTC, after the 06:00
+    refresh had already run, because `age.days` was still 0. This must
+    requeue at the tighter PAST_DEADLINE_STALE_HOURS (6 hours), matching the
+    cron's own cadence."""
 
-    def test_past_deadline_requalifies_after_one_day_not_seven(self):
+    def test_past_deadline_requalifies_after_six_hours_not_one_day(self):
         today = timezone.localdate()
-        one_day_ago = (timezone.now()
-                       - timedelta(days=PAST_DEADLINE_STALE_DAYS)).isoformat()
-        row = _Row(1, deadline=today - timedelta(days=5), detail_fetched=one_day_ago)
+        six_hours_ago = (timezone.now()
+                         - timedelta(hours=PAST_DEADLINE_STALE_HOURS)).isoformat()
+        row = _Row(1, deadline=today - timedelta(days=5), detail_fetched=six_hours_ago)
 
         todo, refreshed = _queue([row], refetch=False, stale_days=21, today=today)
 
         assert todo == [row]
         assert refreshed == 1
 
-    def test_past_deadline_fetched_today_is_not_yet_requeued(self):
-        """The one gap this threshold cannot close: a row fetched TODAY that
-        already reads past (HSBC's exact shape) will not be looked at again
-        until age >= PAST_DEADLINE_STALE_DAYS — no periodic-refresh pipeline
-        can make yesterday's fetch see today's site edit. This pins that
-        known limit so it can't silently regress to "never" again."""
+    def test_past_deadline_stale_since_this_mornings_refresh_pass_is_requeued(self):
+        """The exact HSBC Sheffield WIT shape: fetched 12.5h ago (this
+        morning's refresh pass), already reading past. A whole-day gate
+        (`age.days == 0`) would leave this sitting through the NEXT
+        scheduled refresh pass too; the hour-based gate must catch it now."""
+        today = timezone.localdate()
+        this_mornings_fetch = (timezone.now() - timedelta(hours=12, minutes=30)).isoformat()
+        row = _Row(1, deadline=today - timedelta(days=5),
+                  detail_fetched=this_mornings_fetch)
+
+        todo, refreshed = _queue([row], refetch=False, stale_days=21, today=today)
+
+        assert todo == [row]
+        assert refreshed == 1
+
+    def test_past_deadline_fetched_just_now_is_not_yet_requeued(self):
+        """The one gap this threshold cannot close: a row fetched THIS
+        INSTANT that already reads past will not be looked at again until
+        age >= PAST_DEADLINE_STALE_HOURS — no periodic-refresh pipeline can
+        make this fetch see a site edit that hasn't happened yet. This pins
+        that known limit so it can't silently regress to "never" again."""
         today = timezone.localdate()
         just_now = timezone.now().isoformat()
         row = _Row(1, deadline=today - timedelta(days=5), detail_fetched=just_now)
@@ -573,19 +595,86 @@ class TestPastDeadlineGetsTighterRecheckThanClosingSoon:
         assert refreshed == 0
 
     def test_past_deadline_threshold_is_tighter_than_closing_soon(self):
-        """A row stale exactly PAST_DEADLINE_STALE_DAYS with an ALREADY-PAST
+        """A row stale exactly PAST_DEADLINE_STALE_HOURS with an ALREADY-PAST
         deadline must requeue; a row stale the same short duration but only
         "closing soon" (not yet past) must NOT requeue until it hits the
-        wider URGENT_STALE_DAYS -- proving the two shapes use different
+        much wider URGENT_STALE_DAYS -- proving the two shapes use different
         thresholds rather than one loosened for both."""
         today = timezone.localdate()
-        stale = (timezone.now() - timedelta(days=PAST_DEADLINE_STALE_DAYS)).isoformat()
+        stale = (timezone.now() - timedelta(hours=PAST_DEADLINE_STALE_HOURS)).isoformat()
         past = _Row(1, deadline=today - timedelta(days=1), detail_fetched=stale)
         soon = _Row(2, deadline=today + timedelta(days=10), detail_fetched=stale)
 
         todo, _ = _queue([past, soon], refetch=False, stale_days=21, today=today)
 
         assert [o.id for o in todo] == [1]
+
+
+@pytest.mark.django_db
+class TestScopedIdsBackfill:
+    """`--ids` is the scoped backfill an audit reaches for once it has named
+    specific rows (the HSBC Sheffield WIT pair, ids 1617/1618) rather than
+    waiting for the normal queue to re-qualify them — it must force a
+    refetch regardless of staleness, and must leave every OTHER open row
+    completely untouched."""
+
+    def test_named_id_is_force_refetched_even_though_too_fresh_to_queue(self, monkeypatch):
+        """The exact HSBC shape: fetched a couple of hours ago, well under
+        PAST_DEADLINE_STALE_HOURS, so the normal queue would skip it — but an
+        explicit --ids must refetch it anyway."""
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        fresh_ts = (timezone.now() - timedelta(hours=2)).isoformat()
+        opp = Opportunity.objects.create(
+            firm=firm, title="Sheffield Women in Technology", bucket="entry_level",
+            status="open", url="https://apply.careers.hsbc.com/emergingtalent/job/x/1618/",
+            deadline=timezone.localdate() - timedelta(days=5),
+            deadline_precision="day", confidence=0.6,
+            raw={"detail_text": "old", "detail_fetched": fresh_ts},
+        )
+        monkeypatch.setattr(
+            enrich_mod, "fetch_posting",
+            lambda url, **kw: ("Closing Date: Sun Aug 16, 2026", "", ""),
+        )
+
+        call_command("enrich_postings", ids=str(opp.id))
+
+        opp.refresh_from_db()
+        assert opp.deadline.isoformat() == "2026-08-16"
+
+    def test_ids_leaves_every_other_open_row_untouched(self, monkeypatch):
+        """A blind run would also refetch whatever else the normal queue
+        surfaced; `--ids` must touch ONLY the rows named, proving this is a
+        scoped backfill and not a general run with an extra filter bolted on."""
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        named = Opportunity.objects.create(
+            firm=firm, title="Sheffield Women in Technology", bucket="entry_level",
+            status="open", url="https://apply.careers.hsbc.com/emergingtalent/job/x/1618/",
+            deadline=timezone.localdate() - timedelta(days=5),
+            deadline_precision="day", confidence=0.6,
+            raw={"detail_text": "old"},
+        )
+        other_stale = Opportunity.objects.create(
+            firm=firm, title="Some Other Programme", bucket="entry_level",
+            status="open", url="https://apply.careers.hsbc.com/emergingtalent/job/x/9999/",
+            deadline=timezone.localdate() - timedelta(days=5),
+            deadline_precision="day", confidence=0.6,
+            raw={"detail_text": "old",
+                "detail_fetched": (timezone.now() - timedelta(days=30)).isoformat()},
+        )
+        monkeypatch.setattr(
+            enrich_mod, "fetch_posting",
+            lambda url, **kw: ("Closing Date: Sun Aug 16, 2026", "", ""),
+        )
+
+        call_command("enrich_postings", ids=str(named.id))
+
+        named.refresh_from_db()
+        other_stale.refresh_from_db()
+        assert named.deadline.isoformat() == "2026-08-16"
+        # Untouched — the normal queue would have re-fetched this row too
+        # (30 days stale), but --ids scopes to exactly the named row.
+        assert other_stale.deadline.isoformat() == (
+            timezone.localdate() - timedelta(days=5)).isoformat()
 
 
 @pytest.mark.django_db
@@ -751,3 +840,70 @@ class TestSelfWrittenDetailTextNeverShortCircuitsTheLiveFetch:
         # fetch_posting() was never called, and location stayed "".
         assert opp.location == "Bala Cynwyd, PA, US"
         assert opp.raw["detail_source"] == "fetch"
+
+
+@pytest.mark.django_db
+class TestSelfWrittenFactsNeverShortCircuitsTheLiveFetch:
+    """Sibling of the round-7 detail_text fix, for extract_facts' own
+    derived bookkeeping instead of enrich_postings' own. `refresh` runs
+    extract_facts over every open row on every pass (unconditionally), and
+    it writes its derived `raw["facts"]` dict into the SAME `raw` blob
+    enrich_postings reads. `payload_text()`'s _SELF_WRITTEN_KEYS guard only
+    excluded enrich_postings' own four keys, so a row that had ever gone
+    through extract_facts once (i.e. nearly every open row) had its OWN
+    derived facts dict — nested strings like facts["grad"]["phrase"] — walked
+    back in as if HSBC's board had supplied them, permanently short-
+    circuiting fetch_posting(). Confirmed live 2026-08-14: `enrich_postings
+    --ids 1617,1618` (HSBC Sheffield WIT) reported "from board payloads" and
+    found neither a deadline nor sponsorship, because HSBC's live page —
+    which states "Closing Date: Sun Aug 16, 2026" — was never actually
+    fetched."""
+
+    def _raw_with_only_extracted_facts(self):
+        # Mirrors exactly what extract_facts.py writes: no board-native
+        # prose field at all, only its own derived dict. The grad phrase
+        # alone clears _PROSE_MIN/_PAYLOAD_MIN after the nested walk.
+        return {
+            "facts": {
+                "grad": {
+                    "value": "2027",
+                    "years": ["2027"],
+                    "phrase": ("Open to candidates who have graduated or will "
+                              "graduate by March 2027 This insight programme "
+                              "may give you the opportunity to continue with "
+                              "the firm afterwards if you perform well during "
+                              "the assessed period of the programme."),
+                },
+            },
+            "facts_at": (timezone.now() - timedelta(days=1)).isoformat(),
+        }
+
+    def test_own_facts_dict_is_not_read_back_as_a_board_payload(self):
+        """Direct unit check on `payload_text()`: extract_facts' derived
+        dict must never be mistaken for the board's payload, however long
+        its nested prose fields run."""
+        assert payload_text(self._raw_with_only_extracted_facts()) is None
+
+    def test_prior_extracted_facts_no_longer_block_the_live_fetch(self, monkeypatch):
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Sheffield Women in Technology", bucket="entry_level",
+            status="open", source="sitemap",
+            url="https://apply.careers.hsbc.com/emergingtalent/job/x/1618/",
+            deadline=timezone.localdate() - timedelta(days=5),
+            deadline_precision="day", confidence=0.6,
+            raw=self._raw_with_only_extracted_facts(),
+        )
+        assert has_live_api(opp.url, greenhouse_token=None) is False
+
+        monkeypatch.setattr(
+            enrich_mod, "fetch_posting",
+            lambda url, **kw: ("Closing Date: Sun Aug 16, 2026", "", ""),
+        )
+        call_command("enrich_postings", ids=str(opp.id))
+
+        opp.refresh_from_db()
+        # Before the fix: payload_text(o.raw) returned the cached facts
+        # prose, fetch_posting() was never called, and the stale deadline
+        # was never corrected.
+        assert opp.deadline.isoformat() == "2026-08-16"
