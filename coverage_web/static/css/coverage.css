@@ -1454,7 +1454,8 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .drawer-x { position: absolute; top: 10px; right: 12px; z-index: 2;
   width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
-  font-size: 13px; line-height: 1; }
+  display: flex; align-items: center; justify-content: center; }
+.drawer-x svg { width: 14px; height: 14px; }
 .drawer-x:hover { border-color: var(--accent-line); color: var(--accent-ink); }
 .drawer-loading { color: var(--ink-3); font-size: var(--fs-s); margin: 0; }
 
