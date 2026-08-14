@@ -43,6 +43,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from analytics.models import UserOpportunity
+from core.templatetags.textstyle import smart_title
 from directory.models import FirmDate
 
 from .forms import CalendarEventForm
@@ -168,8 +169,21 @@ def _role_label(opp) -> str:
     Scraped titles often carry their own firm name ("Bank of America |
     Insight Day"), and prefixing it produces "Bank of America · Bank of
     America | Insight Day" on the calendar and in the feed.
+
+    The role title is standardized through `smart_title`, the same filter every
+    OTHER surface applies to `Opportunity.title` (_rolecard.html,
+    my_applications.html, _role_drawer.html). The calendar was the one page
+    that applied nothing, so it showed raw scrape casing while the feed showed
+    the standardized form — every tracked, dated role read differently on the
+    two pages ("Discovery Program: Equity + Macro Research (On-site)" here
+    against "(On-Site)" there). Applied HERE rather than in the template so the
+    month grid, the narrow-screen agenda and the .ics feed cannot drift from
+    each other; the .ics is the one that ends up on a phone's lock screen.
+
+    The FIRM name is deliberately left raw: it is curated, not scraped, and
+    `smart_title` would rewrite "PIMCO" to "Pimco".
     """
-    title = (opp.title or "").strip()
+    title = smart_title((opp.title or "").strip())
     firm = (opp.firm.name or "").strip()
     if firm and title.lower().startswith(firm.lower()):
         return title
