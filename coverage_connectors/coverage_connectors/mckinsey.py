@@ -126,9 +126,13 @@ def verify(url: str) -> VerificationResult:
     `fetch`'s), and `keyword` is derived by lopping the slug's FIRST token off
     (`slug.split("-", 1)[-1]`) — a crude derivation that can easily miss the
     words that actually rank the real posting, especially past page 1 of a
-    saturated query. `data.get("docs", [])` also silently returns `[]` for a
-    missing/renamed envelope key, indistinguishable from a genuine zero
-    matches. None of that is a positive "this posting is gone" signal, and
+    saturated query. `data.get("docs") or []` also silently normalizes a
+    missing/renamed envelope key AND a present-but-`null` "docs" value (both
+    observed live, on a legitimate zero-hit single-keyword search) to `[]`,
+    indistinguishable from a genuine zero matches — the `or []` guards
+    against `for doc in None` crashing on that null-but-present case, not
+    just the missing-key case a bare `dict.get` default already covered.
+    None of that is a positive "this posting is gone" signal, and
     `reverify.py` acts on "closed" with zero corroboration."""
     info = classify_url(url)
     if not info:
@@ -140,7 +144,7 @@ def verify(url: str) -> VerificationResult:
         data = _page(keyword, 1)
     except Exception as e:  # noqa: BLE001
         return VerificationResult("mckinsey", url, "unreachable", str(e)[:200], [])
-    for doc in data.get("docs", []):
+    for doc in data.get("docs") or []:
         if slug.lower() in (doc.get("friendlyURL") or "").lower():
             return VerificationResult("mckinsey", url, "verified-open",
                                        f'title="{doc.get("title", "")}" matched by friendlyURL', [])

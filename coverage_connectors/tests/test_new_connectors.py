@@ -356,6 +356,20 @@ def test_mckinsey_verify_does_not_close_on_a_malformed_envelope(monkeypatch):
     assert v.result == "needs-verification"
 
 
+def test_mckinsey_verify_does_not_crash_when_docs_is_null(monkeypatch):
+    """Reproduces the live-confirmed crash: McKinsey's gateway search API
+    returns the JSON key "docs" PRESENT with value `null` (not absent, not
+    `[]`) on a legitimate zero-hit single-keyword search. A bare
+    `data.get("docs", [])` does NOT catch this — the dict.get default only
+    fires when the key is missing, so `for doc in None` raised an uncaught
+    TypeError that reverify.py's except-block then misclassified as
+    'unreachable' instead of the correct 'needs-verification'. Must return
+    needs-verification, not raise."""
+    monkeypatch.setattr(mck_mod, "fetch_json", lambda url, **kw: {"numFound": 0, "docs": None})
+    v = verify("https://www.mckinsey.com/careers/search-jobs/jobs/business-analyst-intern")
+    assert v.result == "needs-verification"
+
+
 def test_mckinsey_location_is_stable_regardless_of_city_order(monkeypatch):
     """PINS C9's fix directly: the same two cities in the opposite order must
     format identically, or a later fetch that gets them back in a different
