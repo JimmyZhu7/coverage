@@ -144,14 +144,17 @@ def test_the_bucket_chip_shows_the_human_label_not_the_raw_code(client):
 
 
 @pytest.mark.django_db
-def test_the_other_bucket_chip_is_capitalized(client):
+def test_the_other_bucket_chip_reads_the_human_label(client):
+    """BUCKET_LABELS[OTHER] is "Experienced", not "Other" -- see classify.py's
+    comment on that mapping: "Other" is what this bucket is to the classifier,
+    not what it is to a reader, since every row in it is an experienced hire."""
     firm = Firm.objects.create(slug="sig-other", name="SIG")
     role = Opportunity.objects.create(
         firm=firm, url="https://sig.test/1", title="Trading Systems Developer",
         bucket="other", status="open",
     )
     html = client.get(reverse("role_description", args=[role.id])).content.decode()
-    assert "<span>Other</span>" in html
+    assert "<span>Experienced</span>" in html
 
 
 # --- Reading the text ------------------------------------------------------
