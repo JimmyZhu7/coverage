@@ -1382,8 +1382,18 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .cycband-m.is-now .cycband-bar::after { background: var(--accent); }
 .cycband-m b { font-family: var(--font-mono); font-size: var(--fs-nano); font-weight: var(--w-med);
   text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3); }
-.cycband-m.is-now b { color: var(--accent-ink); }
-.cycband-m.is-now b::after { content: " •"; color: var(--accent); }
+.cycband-m.is-now b { color: var(--accent-ink); position: relative; }
+/* The "you are here" dot hangs OUTSIDE the label's box. Set inline as
+   `content: " •"` it was part of the label's own line, and the label is a
+   shrink-to-fit box that the grid centres over the bar — so the dot widened
+   the box by 12.8px and shoved the month's letters 6.4px left of the column
+   it names. Eleven months centred, and the twelfth, the one the marker exists
+   to point at, off its own bar. On a phone it was worse: the column is only
+   ~29px wide, so " •" wrapped to a second line and AUG rode up out of the
+   label row entirely. Out of flow, the box is the width of the letters again
+   and cannot wrap. ~8px of dot in a ~11px inter-label gap at 390px. */
+.cycband-m.is-now b::after { content: "•"; color: var(--accent);
+  position: absolute; left: 100%; top: 0; margin-left: 2px; }
 @keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 @media (prefers-reduced-motion: reduce) { .cycband-bar::after { animation: none; } }
 

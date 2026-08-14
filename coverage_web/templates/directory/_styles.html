@@ -779,8 +779,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rolecard-top-right { display: inline-flex; align-items: center; gap: var(--s2); flex: none; }
 
   /* Track control: a one-click Save star on the feed; funnel stages show as a
-     read-only chip that links to My Applications. */
-  .track { display: inline-flex; }
+     read-only chip that links to My Applications. The gap is load-bearing:
+     Save and "Not for me" are opposite verbs and were zero-gap siblings, so
+     the dismiss target began at exactly the pixel Save ended. */
+  .track { display: inline-flex; gap: 6px; }
   .track-btn { display: inline-flex; align-items: center; gap: 4px;
     border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
     color: var(--ink-3); cursor: pointer; padding: 2px 9px 2px 7px;
@@ -1006,8 +1008,22 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      is the verb you use while scrolling past, not the one you came for. */
   .track-hide { border: 0; background: none; padding: 2px 4px; cursor: pointer;
     font-size: var(--fs-micro); color: var(--ink-3); font-family: inherit;
-    border-radius: 6px; opacity: 0; transition: opacity var(--t-fast), color var(--t-fast); }
-  .rolecard:hover .track-hide, .track-hide:focus-visible { opacity: 1; }
+    border-radius: 6px; transition: opacity var(--t-fast), color var(--t-fast); }
+  /* Reveal-on-hover is only honest where a pointer can hover. Unguarded, the
+     hidden state shipped to touch too: `opacity: 0` with `pointer-events:
+     auto` left a live 62x19 dismiss target flush against the Save pill with
+     nothing drawn in it, reading as card padding. A blind tap there fired
+     POST .../track/ status=dismiss and the label appeared only AFTER the
+     card had gone. So the hidden state is scoped to hover-capable pointers,
+     and a coarse pointer gets the button drawn.
+     `pointer-events: none` is the second lock: opacity alone never stops a
+     click. The reveal rule MUST hand it back, or the desktop button that
+     works today stops working. */
+  @media (hover: hover) {
+    .track-hide { opacity: 0; pointer-events: none; }
+    .rolecard:hover .track-hide,
+    .track-hide:focus-visible { opacity: 1; pointer-events: auto; }
+  }
   .track-hide:hover { color: var(--danger); }
 
   /* The reversal list on My Applications. */
