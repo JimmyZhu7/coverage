@@ -443,7 +443,13 @@ _MONTHS = {m: i + 1 for i, m in enumerate((
 # false countdowns on the feed.
 _DEADLINE_KEY = re.compile(
     r"(?:apply by|application deadline|applications?\s+(?:close[sd]?|due|must be "
-    r"(?:received|submitted))|closing date|deadline)", re.IGNORECASE)
+    r"(?:received|submitted))|closing date|deadline|"
+    # "Application window is open until 30th August 2026" (William Blair) —
+    # a fully-specified closing date stated as an open-until window rather
+    # than a "close(s)"/"deadline" phrasing. Gated on "window" so a bare
+    # "applications are open" (no window, no date sense) never fires.
+    r"(?:application\s+)?window\s+(?:is|are|remains?)\s+open\s+(?:until|through))",
+    re.IGNORECASE)
 _DATE_ISO = re.compile(r"(20\d{2})-(\d{2})-(\d{2})")
 _DATE_MDY = re.compile(
     r"(january|february|march|april|may|june|july|august|september|october|"
