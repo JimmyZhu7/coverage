@@ -72,6 +72,24 @@ class TestDeadline:
         text = "deadline 2026-02-30, extended deadline March 1, 2026"
         assert extract_deadline_from_text(text) == "2026-03-01"
 
+    def test_application_window_open_until_phrasing(self):
+        """William Blair (Opportunity id=18113) states its closing date as
+        "Application window is open until 30th August 2026" — no "close",
+        "due", or "deadline" word at all — and the keyword gate used to miss
+        it entirely, leaving a role that closes in weeks with no deadline."""
+        text = ("Application Process Application window is open until 30th "
+                "August 2026 Those eligible will be asked to complete an "
+                "online assessment")
+        assert extract_deadline_from_text(text) == "2026-08-30"
+
+    def test_open_until_without_window_is_not_a_deadline(self):
+        """A bare "applications are open" carries no closing-date sense on
+        its own — only the "window ... open until/through" shape should
+        fire, so this must not be mistaken for a stated deadline."""
+        assert extract_deadline_from_text(
+            "Applications are open now. Team offsite 15 September 2026."
+        ) is None
+
     def test_the_keyword_window_is_bounded(self):
         """A date 300 characters after the word "deadline" is not attached
         to it — proximity is part of the meaning."""
