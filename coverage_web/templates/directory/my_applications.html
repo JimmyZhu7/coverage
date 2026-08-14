@@ -264,10 +264,20 @@
       <h2 class="apps-lenses-h" id="lenses-h">By deadline</h2>
       <p class="apps-lenses-intro">
         <strong>{{ total }} role{{ total|pluralize }} tracked</strong>, all of them in one
-        stage below. These two lists are the same roles seen by deadline, not extra ones: a saved role closing this week appears in both places. Every row below
+        stage below. These lists are the same roles seen by deadline, not extra ones: a saved role closing this week appears in both places. Every row below
         links back to the stage it is counted in.
       </p>
+      {% comment %}
+      Every live row lands in exactly one lens, so the fractions sum to the
+      denominator. They did not before: the band ran Closing Soon + Rolling
+      only, and a live role dated further out than the window (or already past
+      it) appeared in neither while still being counted in "of N live" — a
+      subtraction the page invited and never answered. Lenses that carry no
+      coaching copy when empty (`empty_state` false) stay off the page rather
+      than adding a permanent "0 of 12" band.
+      {% endcomment %}
       {% for lens in lenses %}
+        {% if lens.items or lens.empty_state %}
         <div class="apps-lens">
           <h3>{{ lens.label }}
             <span class="apps-lens-frac">{{ lens.items|length }} of {{ live_total }} live</span>
@@ -324,6 +334,7 @@
             </p>
           {% endif %}
         </div>
+        {% endif %}
       {% endfor %}
     </section>
 

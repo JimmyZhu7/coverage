@@ -573,6 +573,29 @@ def test_the_counts_describe_the_board_not_the_loaded_slice(client):
     resp = client.get("/opportunities/")
     assert resp.context["total"] == 20, "the strip counts the board"
     assert len(resp.context["clusters"]) == 12, "the page renders a slice"
+    # The context was always right; the STRIP was what lied. Asserting only on
+    # the context is what let `{{ clusters|length }}` survive in the template,
+    # printing "12 Firms" over a 20-firm board. Read the rendered strip.
+    body = re.sub(r"<style.*?</style>", "", resp.content.decode(), flags=re.S)
+    strip = body[body.index('class="stat-strip"'):]
+    strip = strip[:strip.index("</div>")]
+    assert ">20</b> Firms" in strip, "the strip names the board's firm count"
+    assert ">12</b> Firms" not in strip, "never the loaded slice"
+
+
+@pytest.mark.django_db
+def test_a_one_firm_board_says_firm_not_firms(client):
+    """The strip's counts are singular-aware. "1 Firms" is the same hardcoded
+    plural that "1 deadlines" was on the calendar, one line further along."""
+    f = Firm.objects.create(slug="solo", name="Solo Capital")
+    Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
+                               status="open", url="https://solo.com/a")
+    body = re.sub(r"<style.*?</style>", "",
+                  client.get("/opportunities/").content.decode(), flags=re.S)
+    strip = body[body.index('class="stat-strip"'):]
+    strip = strip[:strip.index("</div>")]
+    assert ">1</b> Firm<" in strip
+    assert ">1</b> Open Role<" in strip
 
 
 @pytest.mark.django_db

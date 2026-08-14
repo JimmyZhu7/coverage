@@ -19,6 +19,7 @@ from directory.management.commands.enrich_postings import (
     PAST_DEADLINE_STALE_HOURS,
     URGENT_STALE_DAYS,
     _queue,
+    drop_postal_parts,
     fetch_posting,
     has_live_api,
     microdata_jobposting_location,
@@ -422,6 +423,90 @@ class TestSitemapTitleAndMicrodataLocationRecovery:
         assert opp.location == "Central, Hong Kong Island, HK"
         assert opp.raw["detail_location"] == "Central, Hong Kong Island, HK"
         assert opp.title == "Investment Banking - Internship"
+
+    # --- ...and the page states a postal code with it ------------------------
+    #
+    # HSBC's US and Singapore pages state "New York, NY, US, 10001" and
+    # "Singapore, 01, SG, 117439". The ZIP is really part of what the page
+    # says; it is also useless on a feed card one row below a sibling reading
+    # "New York, NY". Ten live campus rows carried it.
+    ZIP_HSBC_PAGE = (
+        '<html><head>'
+        '<meta property="og:title" content="Investment Banking - Graduate">'
+        '</head><body>'
+        '<p><span class="joblayouttoken-label">Location:&nbsp;</span>'
+        '<span class="jobGeoLocation">New York, NY, US, 10001</span></p>'
+        '<span itemprop="jobLocation" itemscope itemtype="http://schema.org/Place">'
+        '<span itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">'
+        '<meta itemprop="addressLocality" content="New York">'
+        '<meta itemprop="addressRegion" content="NY">'
+        '<meta itemprop="addressCountry" content="US">'
+        '<meta itemprop="postalCode" content="10001"></span></span>'
+        '</body></html>'
+    )
+
+    def test_a_postal_code_is_not_a_place(self):
+        assert stated_page_location(self.ZIP_HSBC_PAGE) == "New York, NY, US"
+
+    @pytest.mark.parametrize("stated, expected", [
+        ("New York, NY, US, 10001", "New York, NY, US"),
+        ("Singapore, 01, SG, 117439", "Singapore, SG"),
+        # Left alone: an alphanumeric postcode is not "only digits", and a
+        # place that IS only digits keeps the row rather than emptying it.
+        ("London, SW1A 1AA, GB", "London, SW1A 1AA, GB"),
+        ("Central, Hong Kong Island, HK", "Central, Hong Kong Island, HK"),
+        ("10001", "10001"),
+        ("", ""),
+    ])
+    def test_only_purely_numeric_parts_are_dropped(self, stated, expected):
+        assert drop_postal_parts(stated) == expected
+
+    def test_a_location_this_command_wrote_itself_can_be_corrected(self, monkeypatch):
+        """The row is already populated, so it is neither blank nor an
+        "N Locations" placeholder and would never re-qualify — which is why
+        the ten live HSBC rows kept their ZIP. When the displayed value is
+        byte-identical to the `detail_location` a previous run of this same
+        extractor stored, nothing else has claimed it and a corrected
+        extraction may correct it."""
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Investment Banking - Graduate",
+            bucket="entry_level", status="open", source="sitemap",
+            url="https://apply.careers.hsbc.com/emergingtalent/job/x/456/",
+            location="New York, NY, US, 10001",
+            raw={"detail_location": "New York, NY, US, 10001"},
+        )
+
+        class _Resp:
+            status_code = 200
+            text = self.ZIP_HSBC_PAGE
+
+        monkeypatch.setattr(enrich_mod.requests, "get", lambda *a, **k: _Resp())
+        call_command("enrich_postings", ids=str(opp.id))
+
+        opp.refresh_from_db()
+        assert opp.location == "New York, NY, US"
+
+    def test_a_location_from_a_boards_own_field_is_never_overwritten(self, monkeypatch):
+        """The narrow half of the same rule. A location the board's own API
+        stated at ingest was never this command's to edit, so a page that
+        disagrees with it does not get to rewrite it."""
+        firm = Firm.objects.create(slug="acme", name="Acme")
+        opp = Opportunity.objects.create(
+            firm=firm, title="Analyst Programme", bucket="entry_level",
+            status="open", source="greenhouse", url="https://acme.example/job/9",
+            location="Jersey City, NJ",
+        )
+
+        class _Resp:
+            status_code = 200
+            text = self.ZIP_HSBC_PAGE
+
+        monkeypatch.setattr(enrich_mod.requests, "get", lambda *a, **k: _Resp())
+        call_command("enrich_postings", ids=str(opp.id))
+
+        opp.refresh_from_db()
+        assert opp.location == "Jersey City, NJ"
 
 
 class _FakeResponse:

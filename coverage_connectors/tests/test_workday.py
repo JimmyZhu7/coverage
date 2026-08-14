@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import urllib.error
 
+import pytest
+
 from coverage_connectors import workday
 from coverage_connectors.http import FetchError
 from coverage_connectors.models import WorkdayBoard
@@ -33,7 +35,12 @@ def test_fetch_normalizes_real_fixture(monkeypatch, workday_citi_page1_fixture):
     assert opp.firm == "Citi"
     assert opp.source == "workday"
     assert opp.title == raw["title"]
-    assert opp.location == raw["locationsText"]
+    # The board's own run is "London  United Kingdom" — city, EMPTY state slot,
+    # country. Punctuated on that slot boundary on the way in; the raw run is
+    # still kept verbatim on the Opportunity.
+    assert raw["locationsText"] == "London  United Kingdom"
+    assert opp.location == "London, United Kingdom"
+    assert opp.raw["locationsText"] == raw["locationsText"]
     # Must include the board's site slug -- tenant_host + path alone 404s
     # (a real bug in the original, fixed here; see workday.py's module docstring).
     assert opp.url == f"https://citi.wd5.myworkdayjobs.com/{board.site}{raw['externalPath']}"
@@ -427,3 +434,39 @@ def test_verify_via_search_text_zero_results(monkeypatch):
 def test_verify_needs_verification_without_path_or_query():
     result = workday.verify("https://citi.wd5.myworkdayjobs.com/Citi_Early_Careers_Events_Site")
     assert result.result == "needs-verification"
+
+
+# ---------------------------------------------------------------------------
+# locationsText: Workday's City/State/Country run, punctuated on its own
+# empty-slot boundary. Measured live on Citi's board (2026-08-14): 49 rows
+# carried an unpunctuated run, 40 carried a leading street address.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw, expected", [
+    # The empty State slot is the 2-space gap, and it is the ONE place the run
+    # can be segmented without guessing.
+    ("Hong Kong  Hong Kong", "Hong Kong, Hong Kong"),
+    ("London  United Kingdom", "London, United Kingdom"),
+    ("Kowloon  Hong Kong", "Kowloon, Hong Kong"),
+    ("Seoul, Korea,  Republic of", "Seoul, Korea, Republic of"),
+    # No empty slot means no boundary information. Left exactly as it arrived
+    # rather than invented into: "New York New York United States" is city ==
+    # state, so a repeated-token dedupe would corrupt it.
+    ("New York New York United States", "New York New York United States"),
+    ("Irving Texas United States", "Irving Texas United States"),
+    ("Singapore", "Singapore"),
+    # A street address tells a student nothing the city does not.
+    ("890 Herron Road, Montreal, Quebec", "Montreal, Quebec"),
+    ("1060-1068 Stelton Road, Piscataway, New Jersey", "Piscataway, New Jersey"),
+    ("115 South Jefferson Rd Campus, Whippany", "Whippany"),
+    # ...but only when a PLACE NAME survives it, and only at the head. Live
+    # row: trimming this one leaves "Suite 500 212", a worse string than the
+    # one it replaced.
+    ("2121 N Pearl St, Suite 500 212", "2121 N Pearl St, Suite 500 212"),
+    ("2 Locations", "2 Locations"),
+    ("Milano Bicocca Calendario 3", "Milano Bicocca Calendario 3"),
+    ("New York - 499 Park", "New York - 499 Park"),
+    ("", ""),
+])
+def test_locations_text_is_punctuated_not_guessed_at(raw, expected):
+    assert workday.normalize_locations_text(raw) == expected

@@ -1169,3 +1169,57 @@ def test_the_eligibility_cell_never_congratulates_an_unchecked_user(client):
     # No open roles name 2029 in this fixture, so the all-clear is EARNED.
     assert "All caught up on your year" in body
     assert "Add your class year" not in body
+
+
+# ---------------------------------------------------------------------------
+# One event, one unit. The thank-you prompt is the only string on this page
+# measured in hours, and the window that justified the hours is stripped
+# before it renders.
+# ---------------------------------------------------------------------------
+def test_the_thank_you_prompt_speaks_days_once_hours_stop_helping(client):
+    """The measured bug: one chat (Ellen Chung, the contact's only touch)
+    rendered three ways in one scroll of /app/ — "Chatted 2d ago" on the
+    Debrief card, "Chat done 58h ago" on the Don't-lose-these card, and
+    "2 business days ago" on that same card's ledger row. The engine formats
+    the thank-you branch in hours because its window IS hours, but
+    `_sentenceize` strips "(within 24h)"/"(OVERDUE)", so the anchor never
+    reaches the screen and a bare hour count sits between two day counts."""
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(
+        user=user, name="Ellen Chung", warmth="chatted", thread_state="chat_done"
+    )
+    Touch.all_objects.create(
+        user=user, contact=c, kind="chat", channel="email",
+        ts=timezone.now() - timedelta(hours=57),
+    )
+    client.force_login(user)
+
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Chat done" in body, "the thank-you prompt is on the page at all"
+    assert "h ago" not in body, "no hour count survives on a day-based surface"
+    assert "d ago. Send thank-you." in body
+
+
+def test_a_fresh_chat_keeps_its_hours():
+    """Hours are not banned, they are earned. Inside the 24h thank-you window
+    an hour count is the honest unit and rounding it to "0d ago" would be
+    worse than the bug."""
+    from crm.today import _age_in_days
+
+    now = timezone.now()
+    assert _age_in_days("Chat done 6h ago. Send thank-you.", 6.0, now=now) == (
+        "Chat done 6h ago. Send thank-you."
+    )
+
+
+def test_the_day_count_comes_from_the_calendar_not_from_dividing_by_24():
+    """"2d ago" here has to mean the same thing it means on the Debrief card
+    two cards up, which counts calendar days. 57.6h / 24 rounds to 2 by luck;
+    63h rounds to 3 while the chat is still two calendar days back, and the
+    two cards would disagree again in a smaller way."""
+    from crm.today import _age_in_days
+
+    now = timezone.localtime(timezone.now()).replace(hour=18, minute=0, second=0, microsecond=0)
+    # 63 hours back from 18:00 is 03:00 two calendar days earlier.
+    out = _age_in_days("Chat done 63h ago. Send thank-you.", 63.0, now=now)
+    assert out == "Chat done 2d ago. Send thank-you.", "round(63/24) would say 3"
