@@ -86,12 +86,26 @@
     color: var(--ink-2); }
   .mrail-plot { height: 30px; width: 100%; display: flex; align-items: flex-end;
     justify-content: center; }
-  .mrail-bar { width: 56%; min-height: 2px; border-radius: 3px 3px 0 0;
+  /* Two floors, not one. A single `min-height: 2px` made "one deadline" and
+     "no deadlines" the same 2px tick in the same colour once the phone plot
+     dropped to 16px (12% of 16px = 1.92px, under the floor, so the floor
+     won). Eight empty months and two one-deadline months rendered
+     identically — the rail's whole claim is that height IS the count, and at
+     the low end, where most months sit, it wasn't.
+
+     So the empty tick is now its own state at 2px, and a bar that carries a
+     count starts at 5px. 5px is chosen to clear the tick unmistakably while
+     staying under the smallest real step, so 1 vs 2 vs 8 still separate. The
+     sibling `.cycband-bar` reaches the same place with `max(var(--h), 7%)`;
+     an absolute floor is the right unit here because "visible" is a pixel
+     property, and this plot changes height between breakpoints. */
+  .mrail-bar { width: 56%; border-radius: 3px 3px 0 0;
     background: var(--accent-line);
-    height: var(--h); transform-origin: bottom;
+    height: max(var(--h), 5px); transform-origin: bottom;
     animation: mrail-grow 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--i, 0) * 18ms);
     transition: background-color var(--t-fast); }
+  .mrail-bar.is-empty { height: 2px; }
   @keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
   .mrail-m:hover .mrail-bar { background: var(--accent); }
   .mrail-lab { font-family: var(--font-mono); font-size: 10px; line-height: 1;
@@ -125,11 +139,18 @@
     .mrail { flex-wrap: wrap; row-gap: 2px; }
   }
   /* Three rows of eight on a phone, and a shorter plot so the block costs
-     ~165px instead of ~315px. The bars stay comparable across rows because
-     every one of them is a percentage of the same --h scale. */
+     ~190px instead of ~315px. The bars stay comparable across rows because
+     every one of them is a percentage of the same --h scale.
+
+     24px, not the 16px this first shipped at. A 16px box cannot carry the
+     8:1 range this rail routinely holds: the smallest real step landed at
+     1.92px, below even the empty tick, so the busiest month was the only
+     one with a shape. At 24px one deadline sits on the 5px floor and two
+     stand a pixel clear of it, so the low end reads as a low end rather
+     than as nothing. The extra 8px per row costs ~24px of page. */
   @media (max-width: 560px) {
     .mrail-m { flex: 1 0 11.5%; min-width: 0; padding: 2px 0 3px; gap: 2px; }
-    .mrail-plot { height: 16px; }
+    .mrail-plot { height: 24px; }
     .mrail-lab { font-size: var(--fs-nano); }
   }
 
@@ -412,7 +433,13 @@
           {% endcomment %}
           <span class="mrail-n" aria-hidden="true">{% if mo.count %}{{ mo.count }}{% endif %}</span>
           <span class="mrail-plot" aria-hidden="true">
-            <span class="mrail-bar" style="--h: {{ mo.bar_pct }}%; --i: {{ forloop.counter0 }}"></span>
+            {% comment %}is-empty is the "nothing here" tick. It is a class
+            rather than a --h of 0 because the two states need DIFFERENT
+            floors: a month holding one deadline has to clear the tick even
+            when its share of the busiest month rounds to a couple of
+            pixels.{% endcomment %}
+            <span class="mrail-bar{% if not mo.count %} is-empty{% endif %}"
+                  style="--h: {{ mo.bar_pct }}%; --i: {{ forloop.counter0 }}"></span>
           </span>
           <span class="mrail-lab">{{ mo.label }}</span>
           <span class="mrail-yr">{% if mo.show_year %}{{ mo.year }}{% endif %}</span>
