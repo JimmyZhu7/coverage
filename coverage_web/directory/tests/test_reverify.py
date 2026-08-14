@@ -5,7 +5,7 @@ No live network: the command module's `verify` import is monkeypatched."""
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from django.core.management import call_command
@@ -17,19 +17,21 @@ from directory.management.commands import reverify as reverify_mod
 from directory.models import Firm, Opportunity, ScrapeRun
 
 
-def _opp(firm, url, *, days_old=10):
+def _opp(firm, url, *, days_old=10, deadline=None):
     ts = timezone.now() - timedelta(days=days_old)
     o = Opportunity.objects.create(
-        firm=firm, url=url, title="Summer Analyst", bucket="internship", status="open"
+        firm=firm, url=url, title="Summer Analyst", bucket="internship", status="open",
+        deadline=deadline, deadline_precision="day" if deadline else "",
     )
     Opportunity.objects.filter(pk=o.pk).update(last_checked=ts, last_verified=ts)
     o.refresh_from_db()
     return o
 
 
-def _result(url, verdict):
+def _result(url, verdict, deadline_dates=None):
     return VerificationResult(
-        provider="greenhouse", url=url, result=verdict, evidence="test", deadline_dates=[]
+        provider="greenhouse", url=url, result=verdict, evidence="test",
+        deadline_dates=deadline_dates or [],
     )
 
 
@@ -84,6 +86,45 @@ def test_reverify_verdicts_update_rows_honestly(monkeypatch):
     assert run.stats["verified_open"] == 1
     assert run.stats["unreachable"] == 1
     assert run.stats["needs_verification"] == 1
+
+
+@pytest.mark.django_db
+def test_reverify_refreshes_a_stale_deadline_on_verified_open(monkeypatch):
+    """PINS A FIXED BUG: a BMO/Workday row whose deadline was frozen at
+    first-ingest (2026-05-24, long past) gets re-confirmed as verified-open
+    every reverify pass without the stale deadline ever moving, because the
+    old code only ever wrote last_checked/last_verified on that verdict. A
+    provider's verify endpoint that reports a fresh deadline_dates entry
+    must be allowed to correct it."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    stale = _opp(firm, "https://bmo.wd3.myworkdayjobs.com/x", deadline=date(2026, 5, 24))
+
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-08-30"]),
+    )
+    call_command("reverify")
+
+    stale.refresh_from_db()
+    assert stale.deadline == date(2026, 8, 30)
+    assert stale.deadline_precision == "day"
+    assert stale.status == "open"
+
+
+@pytest.mark.django_db
+def test_reverify_leaves_deadline_alone_when_the_provider_states_none(monkeypatch):
+    """The honesty contract extends to deadline: a provider whose verify
+    endpoint reports no deadline_dates (Workday tenants with no stated
+    deadline, Lever, an unreachable/undecidable check) must not clear or
+    guess at an existing stored deadline."""
+    firm = Firm.objects.create(slug="acme", name="Acme")
+    dated = _opp(firm, "https://x/no-signal", deadline=date(2026, 5, 24))
+
+    monkeypatch.setattr(reverify_mod, "verify", lambda url: _result(url, "verified-open"))
+    call_command("reverify")
+
+    dated.refresh_from_db()
+    assert dated.deadline == date(2026, 5, 24)
 
 
 @pytest.mark.django_db
