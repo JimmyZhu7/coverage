@@ -145,3 +145,48 @@ def test_a_shouting_location_is_the_one_case_that_cannot_be_recovered():
     'DE' of RIO DE JANEIRO, and only one of them wants a capital. One open
     row is affected; the ten mixed-case 'Des Moines' rows above are not."""
     assert smart_location("WEST DES MOINES, IA") == "West des Moines, IA"
+
+
+# --- Clause boundaries inside a title -------------------------------------
+# force_cap applied only to index 0 and the last index OF THE WHOLE STRING, so
+# a title that restarts mid-way opened its second half with a lowercase word.
+# Every RAW string below is a live open-role title.
+
+BOUNDARY_CASES = [
+    ("Bank of America Campus Insight Forum: The Power to Lead - Fall 2026",
+     "Bank of America Campus Insight Forum: The Power to Lead - Fall 2026"),
+    ("2026 Women Who Lead: An Insight into Banking",
+     "2026 Women Who Lead: An Insight into Banking"),
+    # A standalone dash or pipe is the same boundary, and the bigger half of
+    # the defect: nine more live titles.
+    ("Senior Premier Banker - La Cienega Corridor",
+     "Senior Premier Banker - La Cienega Corridor"),
+    ("VP, Regional Vice President - External Wholesaler - LA County, CA",
+     "VP, Regional Vice President - External Wholesaler - LA County, CA"),
+    ("APAC Virtual Recruitment Event | A Career with Bank of America in China",
+     "APAC Virtual Recruitment Event | A Career with Bank of America in China"),
+    ("Business Manager | S3 | T&O | Milton Keynes",
+     "Business Manager | S3 | T&O | Milton Keynes"),
+    ("Associate Banker II - So Portland, ME (Market St)",
+     "Associate Banker II - So Portland, ME (Market St)"),
+    ("Manager Customer Experience - Des Sources Branch",
+     "Manager Customer Experience - Des Sources Branch"),
+    # A minor word that is NOT at a boundary still stays lowercase.
+    ("Bank of America Campus Insight Forum: The Power to Lead",
+     "Bank of America Campus Insight Forum: The Power to Lead"),
+]
+
+
+@pytest.mark.parametrize("raw,expected", BOUNDARY_CASES)
+def test_a_clause_boundary_restarts_title_case(raw, expected):
+    assert smart_title(raw) == expected
+
+
+def test_into_is_a_minor_word():
+    """The same title downcased a minor word after a colon AND upcased a
+    preposition in one line: "…Lead: an Insight Into Banking…". "into" was
+    simply missing from _MINOR."""
+    assert smart_title("2027 Insight Into Internal Audit Opportunities") == (
+        "2027 Insight into Internal Audit Opportunities")
+    assert smart_title("Bank of America | Insight Day - Step into Finance") == (
+        "Bank of America | Insight Day - Step into Finance")

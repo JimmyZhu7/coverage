@@ -19,7 +19,9 @@ names pass through `smart_title` wherever they appear.
 3. **Minor words stay lowercase** mid-phrase ("Head of Diversity", "Women in
    Banking") but are capitalized as the first or last word — standard
    title-case convention rather than capitalize-every-word, which reads
-   amateur in a finance product.
+   amateur in a finance product. A colon, semicolon, or standalone dash/pipe
+   RESTARTS that convention, because the word after one opens a new clause
+   ("Insight Forum: The Power to Lead", not "...: the Power to Lead").
 
 Hyphen and slash compounds are cased per part ("off-cycle" → "Off-Cycle",
 "m/f/d" → "M/F/D"). Whitespace is collapsed, which also trims the stray
@@ -39,10 +41,24 @@ register = template.Library()
 # common Romance-language connectives that show up in global boards'
 # postings ("Associate de Auditoría Financiera").
 _MINOR = {
-    "a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of",
-    "on", "or", "per", "so", "the", "to", "via", "vs", "with",
+    "a", "an", "and", "as", "at", "but", "by", "for", "in", "into", "nor",
+    "of", "on", "or", "per", "so", "the", "to", "via", "vs", "with",
     "de", "del", "della", "di", "da", "du", "des", "la", "le", "el", "y", "e",
 }
+
+# Punctuation that ends the clause before it, so the word AFTER it is a first
+# word for title-case purposes. Without this, force_cap applied only to index 0
+# and the final index OF THE WHOLE STRING, so a title that restarts mid-way
+# came out with a lowercase word opening its second half: "Bank of America
+# Campus Insight Forum: the Power to Lead", "2026 Women Who Lead: an Insight
+# into Banking", "Senior Premier Banker - la Cienega Corridor", "APAC Virtual
+# Recruitment Event | a Career with Bank of America", "Business Manager | S3 |
+# t&o | Milton Keynes".
+_CLAUSE_BREAKS = {"-", "–", "—", "|", "·"}
+
+
+def _restarts_a_clause(prev: str) -> bool:
+    return prev.endswith((":", ";")) or prev in _CLAUSE_BREAKS
 
 # All-caps tokens longer than the 4-letter acronym cut that are still
 # genuinely acronyms/brands, not shouting.
@@ -126,7 +142,9 @@ def smart_title(value):
         return ""
     last = len(words) - 1
     return " ".join(
-        _case_word(w, force_cap=(i == 0 or i == last)) for i, w in enumerate(words)
+        _case_word(w, force_cap=(i == 0 or i == last
+                                 or _restarts_a_clause(words[i - 1])))
+        for i, w in enumerate(words)
     )
 
 
