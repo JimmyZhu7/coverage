@@ -111,6 +111,15 @@ LOCATION_CASES = [
     # title-case convention still decides it.
     ("VILLE DE QUEBEC, Canada", "Ville de Quebec, Canada"),
     ("RIO DE JANEIRO", "Rio de Janeiro"),
+    # ...but a particle that CLOSES one is still a particle. ISO 3166 long
+    # forms end in one, and the app must not manufacture a capital the source
+    # never wrote: the DB stores 'Republic of', so the page says 'Republic of'.
+    ("Seoul, Korea, Republic of", "Seoul, Korea, Republic of"),
+    ("Korea, Republic of", "Korea, Republic of"),
+    ("Taipei, Taiwan, Province of China", "Taipei, Taiwan, Province of China"),
+    # Same rule, different shape: a trailing street-number suffix is not a
+    # word to capitalize either.
+    ("Salzburg - Wilhelm-Spazier-Straße 2a", "Salzburg - Wilhelm-Spazier-Straße 2a"),
     # A particle that OPENS the name is part of it.
     ("EL DORADO HILLS, CA", "El Dorado Hills, CA"),
     ("DEL REY OAKS, CA", "Del Rey Oaks, CA"),
