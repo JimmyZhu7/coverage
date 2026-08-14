@@ -253,6 +253,29 @@ def plain_text_jobposting_location(page_html: str) -> str:
     return value if 0 < len(value) <= MAX_LABEL_LOCATION else ""
 
 
+# A postal code is a number, not a place. HSBC's careers site states its
+# location as "New York, NY, US, 10001" and "Singapore, 01, SG, 117439" — the
+# ZIP is genuinely part of what the page says, and it is genuinely useless to
+# a student scanning a feed one card below a sibling that reads "New York, NY".
+# Dropped here, at the extractor, rather than in `smart_location`: that filter
+# is deliberately case-only and is shared by My Applications, the role drawer
+# and the "+N more locations" join, where a trim rule would reduce opt-in rows
+# like "1585 Broadway- NY" to "NY".
+#
+# Purely numeric comma-parts only. An alphanumeric postcode ("SW1A 1AA",
+# "M5J 2S1") is left alone: the rule has to be one a reader can verify at a
+# glance, and "drop the part that is only digits" is that rule.
+_NUMERIC_PART = re.compile(r"^\d[\d\s-]*$")
+
+
+def drop_postal_parts(value: str) -> str:
+    """Strip purely numeric comma-parts from a stated location, unless that
+    would leave nothing behind."""
+    parts = [p.strip() for p in (value or "").split(",") if p.strip()]
+    kept = [p for p in parts if not _NUMERIC_PART.match(p)]
+    return ", ".join(kept) if kept else (value or "")
+
+
 def stated_page_location(page_html: str) -> str:
     """The location a plain page states about itself, reading BOTH its visible
     "Location:" label and its schema.org microdata and keeping the fuller of
@@ -265,8 +288,8 @@ def stated_page_location(page_html: str) -> str:
     Island, HK"). A label that instead CONTRADICTS the microdata is the one
     the page is least sure about, so the structured field keeps the row.
     """
-    micro = microdata_jobposting_location(page_html)
-    plain = plain_text_jobposting_location(page_html)
+    micro = drop_postal_parts(microdata_jobposting_location(page_html))
+    plain = drop_postal_parts(plain_text_jobposting_location(page_html))
     if not plain:
         return micro
     if not micro:
@@ -831,9 +854,22 @@ class Command(BaseCommand):
             # has no location field at ingest at all, so it starts out blank
             # rather than carrying that placeholder string. Recovering into
             # either is a strict improvement over what was there.
+            # Third case: this command OWNS the value already displayed. When
+            # `location` is byte-identical to the `detail_location` a previous
+            # run of this same extractor stored, nothing else has claimed it,
+            # so a corrected extraction may correct it. Without this, the
+            # postal-code strip above would only ever reach rows fetched for
+            # the first time — the 10 live HSBC rows reading "New York, NY, US,
+            # 10001" would keep the ZIP forever, because a non-blank location
+            # is not a placeholder and never re-qualified. It stays narrow on
+            # purpose: a location that came from anywhere else (a board's own
+            # API field, a hand correction) is left exactly alone.
+            owns_current = bool(
+                o.location and (o.raw or {}).get("detail_location") == o.location)
             recovers_location = bool(
                 location and (not o.location
-                              or _N_LOCATIONS_PLACEHOLDER.match(o.location)))
+                              or _N_LOCATIONS_PLACEHOLDER.match(o.location)
+                              or (owns_current and location != o.location)))
             if recovers_location:
                 changes.append(f"location {o.location!r} -> {location!r}")
             # A `sitemap` board's title is reconstructed from the posting
