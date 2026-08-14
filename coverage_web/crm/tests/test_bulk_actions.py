@@ -223,7 +223,7 @@ def test_the_board_renders_checkboxes_and_the_bulk_bar(client):
 
     assert 'name="ids"' in body
     assert 'class="net-mini-check"' in body
-    assert '<label class="net-mini"' in body  # the whole card toggles the box
+    assert '<label class="net-mini kin-reveal"' in body  # the whole card toggles the box
     assert 'net-mini-open' in body            # and a real link still opens it
     assert 'data-bulk-bar' in body
     # Every offered verb, and no delete button anywhere on the page.
