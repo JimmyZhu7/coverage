@@ -119,6 +119,7 @@
   --ok-soft:      #e6f0e9;
   --ok-line:      #cbdfd2;
   --danger:       #9d2b23;
+  --danger-ink:   #841f18;   /* hover/active, mirrors --accent-ink's role */
   --danger-soft:  #f7e8e6;
   --danger-line:  #e9c8c4;
 
@@ -257,6 +258,7 @@
     --ok-soft:      #1c2a22;
     --ok-line:      #2f4a3a;
     --danger:       #e2867c;
+    --danger-ink:   #e69890;   /* hover/active */
     --danger-soft:  #2e1e1d;
     --danger-line:  #4d302d;
   
@@ -312,6 +314,7 @@
   --ok-soft:      #1c2a22;
   --ok-line:      #2f4a3a;
   --danger:       #e2867c;
+  --danger-ink:   #e69890;   /* hover/active */
   --danger-soft:  #2e1e1d;
   --danger-line:  #4d302d;
 
@@ -967,7 +970,7 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn-primary:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: var(--on-accent); }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: var(--on-accent); }
-.btn-danger:hover { background: #841f18; border-color: #841f18; color: var(--on-accent); }
+.btn-danger:hover { background: var(--danger-ink); border-color: var(--danger-ink); color: var(--on-accent); }
 .btn[aria-disabled="true"], .btn:disabled { opacity: 0.5; pointer-events: none; }
 .actions { margin-top: var(--s5); display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
 
