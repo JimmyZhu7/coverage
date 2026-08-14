@@ -614,11 +614,36 @@ _STUDY_STAGE = (
 )
 _STUDY_RX = [(re.compile(p, re.IGNORECASE), label) for p, label in _STUDY_STAGE]
 
+# A study-stage phrase can name who is SPEAKING at an event rather than who
+# may apply to it — Bank of America's own insight-event template runs
+# "you'll hear from... senior leaders, recent graduates, as well as our
+# recruitment team" and "gain firsthand insights from recent graduates about
+# life at Bank of America", both of which named recent grads as panelists,
+# not attendees. Confirmed live on 9 open BofA rows (5634, 5376, 5379, 5380,
+# 5381, 5382, 18061, 4741, 1839): every one produced a false "Recent
+# graduate" eligibility chip sourced from exactly this speaker-bio sentence
+# shape, none of them an eligibility statement.
+#
+# The gate looks BACKWARD from the match for a "hear from"/"insights from"
+# governing verb within the same clause — the two confirmed shapes both put
+# that verb ahead of the stage phrase, sometimes with a run of appositive
+# nouns between them ("hear from, and have the opportunity to ask questions
+# to, our senior leaders, recent graduates,"), which is why the window is
+# wide rather than an adjacent-word check.
+_STUDY_SPEAKER_CONTEXT = re.compile(
+    r"(?:hear from|gain[^.\n]{0,40}?insights?\s+from|insights?\s+from|"
+    r"panel(?:ists)?\s+(?:of|include)|speakers?\s+(?:include|:))",
+    re.IGNORECASE,
+)
+_STUDY_CONTEXT_WINDOW = 150
+
 
 def extract_study_stage(text: str) -> dict | None:
     for rx, label in _STUDY_RX:
-        m = rx.search(text)
-        if m:
+        for m in rx.finditer(text):
+            window = text[max(0, m.start() - _STUDY_CONTEXT_WINDOW):m.start()]
+            if _STUDY_SPEAKER_CONTEXT.search(window):
+                continue
             return {"value": label, "phrase": _sentence(text, m.start(), m.end())}
     return None
 

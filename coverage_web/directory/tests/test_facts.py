@@ -14,7 +14,8 @@ import pytest
 
 from directory.facts import (extract_assessment, extract_cover_letter,
                              extract_facts, extract_gpa, extract_grad_years,
-                             extract_languages, extract_pay, extract_rolling)
+                             extract_languages, extract_pay, extract_rolling,
+                             extract_study_stage)
 
 
 # --- GPA -------------------------------------------------------------------
@@ -435,6 +436,55 @@ def test_silence_about_closing_is_not_rolling_review():
     """The claim this whole split exists to stop: ~600 open roles say nothing
     about how they close, and the feed called every one of them rolling."""
     assert extract_rolling("Join our 2028 Summer Analyst Programme.") is None
+
+
+# --- Year of study -----------------------------------------------------
+
+def test_a_stated_eligibility_stage_is_read():
+    got = extract_study_stage(
+        "Requirements: Final-year student or recent graduate in Computer "
+        "Science.")
+    assert got["value"] == "Final year"
+
+
+def test_recent_graduate_eligibility_statement_is_read():
+    got = extract_study_stage(
+        "This role is ideal for recent graduates or early-career "
+        "professionals.")
+    assert got["value"] == "Recent graduate"
+
+
+def test_hearing_from_recent_graduates_is_not_an_eligibility_statement():
+    """Round 5 regression: Bank of America id=18061's insight-event template
+    names recent grads as PANELISTS ('gain firsthand insights from recent
+    graduates about life at Bank of America'), not as who may attend. Before
+    the context gate this produced a false 'Recent graduate' chip on 9 open
+    BofA rows."""
+    assert extract_study_stage(
+        "Hear from senior leaders on the firm's South Korea's strategy, and "
+        "gain firsthand insights from recent graduates about life at Bank "
+        "of America.") is None
+
+
+def test_hear_from_across_a_long_appositive_list_is_still_excluded():
+    """The other confirmed BofA shape (ids 5634/5376/5379/5380/5381/5382):
+    the governing 'hear from' sits far ahead of 'recent graduates' across a
+    run of appositive nouns, not adjacent to it — the gate must look back
+    far enough to still catch it."""
+    assert extract_study_stage(
+        "During the session, you'll hear from, and have the opportunity to "
+        "ask questions to, our senior leaders, recent graduates, as well as "
+        "our recruitment team.") is None
+
+
+def test_a_genuine_requirement_after_an_unrelated_earlier_from_still_reads():
+    """The gate must not become so wide it swallows a real eligibility
+    statement merely because the word 'from' appears somewhere earlier in
+    the description, in an unrelated clause."""
+    got = extract_study_stage(
+        "Applications are welcome from students in all majors. "
+        "We are looking for a recent graduate to join our team.")
+    assert got["value"] == "Recent graduate"
 
 
 # --- The whole pass --------------------------------------------------------
