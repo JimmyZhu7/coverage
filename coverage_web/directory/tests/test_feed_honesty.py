@@ -668,6 +668,60 @@ def test_a_verdict_does_not_repeat_the_fact_that_produced_it(client, student):
     assert "Grad 2027-2028" in card or "Grad 2027" in card, "the freed slot shows a real fact"
 
 
+@pytest.mark.django_db
+def test_a_blocking_year_verdict_does_not_repeat_the_window_beside_itself(client, student):
+    """The year_out twin of the test above, and the one _fact_chips never got:
+    "For 2027–2028 grads" (verdict) and "Grad 2027–2028" (fact) are built from
+    the same facts["grad"] dict, carry the same source sentence in both
+    tooltips, and render in the same grey. 101 of 491 cards on the first feed
+    load carried the pair.
+
+    `_FACT_CHIPS_MAX` is 2, so the freed slot has to show a real fact — that is
+    the cost the duplication was imposing, not just the repetition."""
+    firm = Firm.objects.create(slug="citi", name="Citi")
+    Opportunity.objects.create(
+        firm=firm, title="Markets Summer Analyst", bucket="internship",
+        status="open", url="https://citi.com/markets",
+        raw={"facts": {
+            "grad": {"value": "2027–2028", "years": ["2027", "2028"],
+                     "phrase": "You will graduate between October 2027 and July 2028"},
+            "gpa": {"value": "3.0", "phrase": "minimum GPA of 3.0"},
+        }})
+    client.force_login(student)
+    body = client.get("/opportunities/").content.decode()
+    card = body[body.index("Markets Summer Analyst"):]
+    card = card[:card.index("</article>")] if "</article>" in card else card[:2000]
+    assert "For 2027–2028 grads" in card, "the personalised verdict is the one that stays"
+    assert "Grad 2027–2028" not in card, "the fact that produced it must not repeat"
+    assert "GPA 3.0" in card, "the freed slot shows a real fact"
+
+
+@pytest.mark.django_db
+def test_a_non_blocking_year_verdict_keeps_the_stated_window(client, student):
+    """year_ok says "Your year (2029)" and never repeats the window, so the
+    fact chip is the ONLY place the posting's own stated years appear. It must
+    survive — suppressing it there would delete information rather than a
+    duplicate."""
+    firm = Firm.objects.create(slug="bofa", name="Bank of America")
+    _grad_role(firm, ["2029"], "2029", title="Mine Summer Analyst")
+    client.force_login(student)
+    body = client.get("/opportunities/").content.decode()
+    card = body[body.index("Mine Summer Analyst"):]
+    card = card[:card.index("</article>")] if "</article>" in card else card[:2000]
+    assert "Your year (2029)" in card
+    assert "Grad 2029" in card
+
+
+@pytest.mark.django_db
+def test_an_anonymous_visitor_still_sees_the_stated_window(client):
+    """No profile means no verdict, so the fact chip carries the whole story."""
+    firm = Firm.objects.create(slug="barclays", name="Barclays")
+    _grad_role(firm, ["2027", "2028"], "2027–2028", title="Anon Summer Analyst")
+    body = client.get("/opportunities/").content.decode()
+    assert "Grad 2027–2028" in body
+    assert "grads" not in body.replace("Grad 2027–2028", "")
+
+
 def test_no_verdict_is_rendered_as_struck_through_text():
     """Strikethrough reads as NEGATION: struck-out "Won't sponsor you" says
     the opposite of what it means. A closed door is stated, not crossed out."""

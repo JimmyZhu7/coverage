@@ -995,12 +995,30 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     off the end of a three-chip row. The verdict is the better of the two:
     it is the personalised reading, and it only exists where both sides
     stated.
+
+    `year_out` is the same failure and gets the same treatment. It is built
+    from `facts["grad"]`, so the card rendered "For 2027–2028 grads" (verdict)
+    immediately followed by "Grad 2027–2028" (fact) — identical years, the
+    identical source sentence in both tooltips, and the identical grey. On the
+    first /opportunities/ load 101 of 491 cards carried the pair, across eight
+    firms. It costs more than repetition: `_FACT_CHIPS_MAX` is 2, so the
+    duplicate eats a slot, and 60 of the 227 affected rows DB-wide have a
+    different real fact (GPA, duration, assessment, cover letter) waiting
+    behind it — one page-1 card read "For 2027–2028 grads · Grad 2027–2028 ·
+    GPA 3.0".
+
+    Suppression is scoped to the BLOCKING verdict on purpose. `year_ok` says
+    "Your year (2029)" and `year_likely` "Likely your year (2029)" — neither
+    repeats the window, so the fact chip is the only place a student can read
+    what the posting actually stated, and it stays. Anonymous visitors get no
+    verdict at all and are untouched.
     """
     facts = (o.raw or {}).get("facts") or {}
     made = {}
+    kind = (verdict or {}).get("kind")
 
     spon = (o.sponsorship or "unknown").lower()
-    if verdict and verdict.get("kind") == "visa_out":
+    if kind == "visa_out":
         spon = "unknown"   # the verdict beside it already says this
     if spon == "no":
         made["sponsorship"] = {"label": "No sponsorship", "css": "fact-wall",
@@ -1023,11 +1041,14 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     # Walls are the facts that can END the decision: a visa answer, a language
     # you do not speak, a year of study you are not in.
     css = {"language": "fact-wall", "study": "fact-wall", "pay": "fact-pay"}
-    for kind, label in labels.items():
-        fact = facts.get(kind)
+    for fact_kind, label in labels.items():
+        if fact_kind == "grad" and kind == "year_out":
+            continue           # the verdict beside it already says this
+        fact = facts.get(fact_kind)
         if fact:
-            made[kind] = {"label": label(fact), "css": css.get(kind, "fact-plain"),
-                          "why": fact.get("phrase", "")}
+            made[fact_kind] = {"label": label(fact),
+                               "css": css.get(fact_kind, "fact-plain"),
+                               "why": fact.get("phrase", "")}
 
     return [made[k] for k in _FACT_CHIP_ORDER if k in made][:_FACT_CHIPS_MAX]
 
