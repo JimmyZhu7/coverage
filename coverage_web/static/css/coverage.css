@@ -1152,7 +1152,7 @@ a.pill:hover { text-decoration: underline; }
   padding: 3px 9px; border-radius: var(--r-badge);
   vertical-align: middle; margin-left: var(--s2);
 }
-.band .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 17px; }
+.band .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--fs-l); }
 .band.band-hot  { background: var(--band-hot-s);  color: var(--band-hot-t); }
 .band.band-warm { background: var(--band-warm-s); color: var(--band-warm-t); }
 .band.band-cool { background: var(--band-cool-s); color: var(--band-cool-t); }
@@ -1319,7 +1319,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    ship. -------------------------------------------------------------- */
 .fact-chip { display: inline-block; flex: none; vertical-align: middle;
   border-radius: 4px; padding: 1px 6px; font-family: var(--font-mono);
-  font-size: 10px; line-height: 15px; letter-spacing: -0.01em;
+  font-size: var(--fs-nano); line-height: 15px; letter-spacing: -0.01em;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
   /* The cap is a budget for the LABEL, so it has to be written as one. Twice
      now it has been written as a box instead, and the box is not the label:
@@ -1437,7 +1437,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    chips: one component, one definition. */
 .meta-read { flex: none; margin-left: auto; border: 1px solid var(--line);
   border-radius: 999px; background: var(--surface); color: var(--ink-3);
-  padding: 1px 8px; font-size: 10px; font-family: var(--font-mono);
+  padding: 1px 8px; font-size: var(--fs-nano); font-family: var(--font-mono);
   cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
 .meta-read:hover { border-color: var(--accent-line); color: var(--accent-ink); }
 
@@ -1483,7 +1483,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   background: var(--paper); }
 .drawer-fact { display: grid; grid-template-columns: 88px minmax(0, 1fr);
   gap: 2px var(--s2); align-items: baseline; }
-.df-k { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+.df-k { font-family: var(--font-mono); font-size: var(--fs-nano); text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--ink-3); }
 .df-v { font-size: var(--fs-s); font-weight: var(--w-bold); color: var(--ink); }
 .df-why { grid-column: 2; font-size: var(--fs-xs); color: var(--ink-3);
