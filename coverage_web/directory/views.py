@@ -2529,9 +2529,17 @@ def firm_detail(request, slug):
     # Campus buckets first (insight, internship, entry_level), experienced
     # rows after, so the opt-in views still lead with the roles the product
     # is for.
-    opps = _apply_role_filter(open_qs, role).select_related("firm").order_by(
-        _BUCKET_ORDER, F("deadline").asc(nulls_last=True), "title"
+    opps = list(
+        _apply_role_filter(open_qs, role).select_related("firm").order_by(
+            _BUCKET_ORDER, F("deadline").asc(nulls_last=True), "title"
+        )
     )
+    # Same identity-duplicate fold as Browse Openings and My Applications
+    # (see directory.dupes.fold_duplicates): one firm posts the same role
+    # under two candidate-pool req numbers, and without this the firm page
+    # showed byte-identical cards twice and its own "Open Roles" count
+    # disagreed with the feed's count for the same firm.
+    opps, _folded = fold_duplicates(opps)
     cards = [_card(o, now=now, today=today) for o in opps]
     context = {
         "firm": firm,
