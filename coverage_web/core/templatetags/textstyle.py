@@ -237,9 +237,17 @@ def smart_location(value):
     """Standardize a place string. Like `smart_title`, minus the title-case
     minor-word rule, which has no business in a location. See above.
 
-    `force_cap` on the first and last word survives, for the same reason it
-    exists in `smart_title`: a particle that OPENS a name is part of it, not a
+    `force_cap` on the FIRST word survives, for the same reason it exists in
+    `smart_title`: a particle that OPENS a name is part of it, not a
     connective inside it — 'EL DORADO HILLS, CA', 'ON-81 Bay Street'.
+
+    It does NOT extend to the last word, which is where this differs from
+    `smart_title`. Capitalizing a title's final word is an English
+    convention; a place name has no such convention, and applying it made the
+    app manufacture orthography no source wrote. ISO 3166 long forms end in a
+    particle — the boards send 'Seoul, Korea, Republic of' and 'Taiwan,
+    Province of China' — and force-capping the tail rendered 'Republic Of',
+    which is not how anyone writes it and not what the DB stores.
 
     KNOWN LIMIT: a fully-shouting string offers no case signal to respect, so
     'WEST DES MOINES, IA' still renders 'WEST des Moines, IA' — 'DES' there is
@@ -255,10 +263,9 @@ def smart_location(value):
         return ""
     codes = _location_codes(text)
     shouting = not any(ch.islower() for ch in text)
-    last = len(words) - 1
     return " ".join(
         _case_word_location(w, codes=codes, shouting=shouting,
-                            force_cap=(i == 0 or i == last))
+                            force_cap=(i == 0))
         for i, w in enumerate(words)
     )
 

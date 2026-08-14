@@ -510,3 +510,57 @@ def test_firm_determinism_snapshot():
                            firm_dates, as_of=AS_OF)
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
     assert a["inputs_hash"] == b["inputs_hash"]
+
+
+# --------------------------------------------------------------------------
+# Responsiveness must not contradict the rest of the engine.
+#
+# The real failure mode (contact "James Bai"): the user emailed, the contact
+# answered, and the answer was captured as a `chat` touch rather than a
+# `reply_received`. Depth, Recency and warmth all read the answer;
+# Responsiveness alone hardcoded `== "reply_received"`, so the same card
+# printed "1 chat; ...; no reply to 1 note" and the composite dropped.
+# --------------------------------------------------------------------------
+def _resp(kind):
+    """Outreach, then the contact answers via `kind` two days later."""
+    return scoring.score_contact(
+        {"id": 1}, [touch(1, "outreach", 23), touch(1, kind, 21)], as_of=AS_OF
+    )
+
+
+def test_chat_and_chat_scheduled_count_as_a_reply_like_reply_received():
+    for kind in ("chat_scheduled", "chat"):
+        axis = _resp(kind)["axes"]["responsiveness"]
+        assert axis["replies"] == 1, f"{kind} left the responsiveness numerator at 0"
+        assert axis["score"] > 0.0, f"{kind} scored 0 responsiveness"
+        assert axis["median_latency_days"] == 2.0, f"{kind} produced no reply latency"
+
+
+def test_answered_contact_is_never_told_they_did_not_reply():
+    for kind in ("reply_received", "chat_scheduled", "chat"):
+        reasoning = _resp(kind)["reasoning"]
+        assert "no reply to" not in reasoning, f"{kind}: {reasoning!r} argues with itself"
+
+
+def test_genuine_silence_still_reads_as_silence():
+    r = scoring.score_contact({"id": 1}, [touch(1, "outreach", 23)], as_of=AS_OF)
+    assert r["axes"]["responsiveness"]["replies"] == 0
+    assert "no reply to 1 note" in r["reasoning"]
+
+
+def test_manual_override_warmth_does_not_produce_a_self_contradicting_line():
+    # set_state's audit touch raises depth to "replied" without leaving an
+    # engagement touch behind; the line must not then claim no reply.
+    r = scoring.score_contact(
+        {"id": 1},
+        [touch(1, "outreach", 23),
+         touch(1, "manual_override", 20, note="manual override: warmth=replied")],
+        as_of=AS_OF,
+    )
+    assert r["reasoning"].startswith("replied, no chat yet")
+    assert "no reply to" not in r["reasoning"]
+
+
+def test_how_the_answer_was_logged_no_longer_changes_the_composite():
+    scores = {k: _resp(k)["composite"] for k in ("reply_received", "chat_scheduled")}
+    assert scores["chat_scheduled"] == scores["reply_received"], scores

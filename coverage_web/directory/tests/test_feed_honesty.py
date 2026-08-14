@@ -498,11 +498,34 @@ def test_one_programme_many_cities_folds_but_keeps_every_card(client):
     body = client.get("/opportunities/").content.decode()
     # Title sort puts London before Singapore; the fold preserves the
     # column's own ordering rather than imposing one.
-    assert "+2 more locations: London, Singapore" in body
+    assert "+2 more locations: London · Singapore" in body
     # Every sibling's own card still renders (inside the fold), with its own
     # save-target identity intact — grouping spends less column, changes
     # nothing about any row.
     assert body.count("GCB Summer Analyst") >= 3
+
+
+@pytest.mark.django_db
+def test_the_fold_separator_survives_locations_that_contain_commas(client):
+    """Most located rows carry an internal comma, so a comma-joined summary
+    turned "+3" into seven fragments with no boundary between places."""
+    firm = Firm.objects.create(slug="jpm", name="J.P. Morgan")
+    cities = ["Columbus, OH, United States", "Hong Kong",
+              "Seoul, Korea, Republic of", "Singapore"]
+    for city in cities:
+        Opportunity.objects.create(
+            firm=firm, title=f"Investment Banking Summer Analyst - 2027 - {city}",
+            bucket="internship", status="open", location=city,
+            url=f"https://jpm.com/ibd-{city[:6].replace(' ', '')}")
+    body = client.get("/opportunities/").content.decode()
+    start = body.index("+3 more locations:")
+    listed = body[start + len("+3 more locations:"):body.index("</summary>", start)]
+    parts = [p.strip() for p in listed.split("·")]
+    # A "+3" label must be followed by exactly three readable places, not by
+    # the seven comma-separated fragments the comma join produced.
+    assert len(parts) == 3, parts
+    known = {c.casefold() for c in cities}
+    assert all(p.casefold() in known for p in parts), parts
 
 
 @pytest.mark.django_db

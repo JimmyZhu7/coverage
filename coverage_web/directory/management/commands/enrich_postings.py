@@ -645,6 +645,17 @@ def payload_text(raw: dict | None) -> str | None:
                 found.append(node)
         elif isinstance(node, dict):
             for k, v in node.items():
+                # Prune OUR keys by name, at the top level and whatever type
+                # they hold. Testing the name only once a STRING node was
+                # reached missed every one of ours whose value is a dict:
+                # `raw["facts"]` is a dict, so the walk descended straight
+                # past the name into `facts["start"]["phrase"]` and read our
+                # own extraction back as the board's description. Top level
+                # only, matching `classify.posting_text` -- a provider is
+                # free to have its own nested "facts" and that one IS the
+                # posting's.
+                if depth == 0 and k in _SELF_WRITTEN_KEYS:
+                    continue
                 walk(v, k, depth + 1)
         elif isinstance(node, (list, tuple)):
             for v in node:

@@ -183,6 +183,66 @@ def test_real_location_is_left_alone(monkeypatch):
 
 
 @pytest.mark.django_db
+class TestOurOwnFactsAreNotABoardPayload:
+    """The live HSBC shape. `extract_facts` writes raw["facts"], and the
+    evidence phrase it stores is long and prose-shaped enough to pass
+    payload_text()'s walk. A sitemap row's real payload carries no title and
+    no location at all (the connector stores the URL slug and an empty
+    string), so treating our own extraction as "the board already described
+    this" short-circuited the page fetch and made those rows PERMANENTLY
+    unrepairable -- 3 of HSBC's 20 open rows (1617, 1618, 1631) recovered
+    neither field on any run. The other 17 were repairable only because their
+    facts phrase happened to fall under the payload length floor."""
+
+    FACTS_RAW = {
+        "title": "Sheffield Women in Technology Women who code Insight Programme S1 4NB",
+        "url": "https://apply.careers.hsbc.com/emergingtalent/job/s/1/",
+        "location": "",
+        "facts_at": "2026-08-14T01:07:00+00:00",
+        "facts": {"start": {"phrase": (
+            "…Location: Sheffield, GB, S1 4NB Programme Type: Insight Programme "
+            "Start Date and Duration: Mon Sep 28, 2026; 2 days Opening Date: "
+            "Mon Jul 06, 2026 Closing Date: Sun Aug 09, 2026 and we encourage "
+            "you to apply as soon as you possibly can because we do recruit on "
+            "a rolling basis throughout the whole of the season…")}},
+    }
+
+    def test_our_extracted_facts_never_read_back_as_the_boards_prose(self):
+        assert payload_text(self.FACTS_RAW) is None
+
+    def test_a_providers_own_nested_facts_key_is_still_read(self):
+        """Top-level prune only, matching `classify.posting_text`: a board is
+        free to file its description under a nested "facts"."""
+        prose = ("We are looking for talented students to join the programme "
+                 "and this paragraph is long enough and spaced enough to read "
+                 "as a real description rather than a label of any kind at all. "
+                 "You will rotate through three desks over ten weeks, work "
+                 "alongside a mentor, and finish with a formal review that "
+                 "decides whether a graduate offer follows the internship.")
+        assert len(prose) >= 300, "fixture must clear the payload length floor"
+        assert payload_text({"content": {"facts": {"body": prose}}}) is not None
+
+    def test_the_page_is_read_so_the_row_can_actually_be_repaired(self, monkeypatch):
+        firm = Firm.objects.create(slug="hsbc", name="HSBC")
+        opp = Opportunity.objects.create(
+            firm=firm, title=self.FACTS_RAW["title"], bucket="insight",
+            status="open", source="sitemap", url=self.FACTS_RAW["url"],
+            raw=dict(self.FACTS_RAW),
+        )
+        monkeypatch.setattr(
+            enrich_mod, "fetch_posting",
+            lambda url, **kw: ("prose", "Sheffield, GB, S1 4NB",
+                               "Women in Technology - Women who code - Insight Programme"),
+        )
+        call_command("enrich_postings")
+
+        opp.refresh_from_db()
+        assert opp.title == "Women in Technology - Women who code - Insight Programme"
+        assert opp.location == "Sheffield, GB, S1 4NB"
+        assert opp.raw["detail_source"] == "fetch"
+
+
+@pytest.mark.django_db
 class TestSitemapTitleAndMicrodataLocationRecovery:
     """Regression tests for the confirmed HSBC title-truncation defect: a
     `sitemap` board (coverage_connectors/sitemap.py) has no title field of
