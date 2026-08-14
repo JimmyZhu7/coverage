@@ -10,9 +10,13 @@ Honesty limits, stated up front:
 - The feed carries NO location field. `location` is left blank rather than
   guessed; a city that happens to sit in the title is left in the title.
 - The feed carries no application deadline; `deadline` is always None.
-- `verify()` re-reads the feed: a posting URL still present is verified-open;
-  one absent from its own feed is closed. (Avature detail pages 200 even when
-  filled, so the feed is the only honest liveness signal.)
+- `verify()` does NOT re-read the feed — there is no per-firm feed registry
+  here to look a single URL's board up in, only `board.feed_url` at fetch
+  time. A recognized Avature URL always comes back `needs-verification`
+  ("Avature liveness is resolved by the next feed fetch"); it never returns
+  verified-open or closed. Closed-detection instead happens at `fetch()`
+  time, board-diff style: a URL that stops appearing in the feed is what
+  closes a row, the same mechanism every other board-diffed connector uses.
 """
 
 from __future__ import annotations
