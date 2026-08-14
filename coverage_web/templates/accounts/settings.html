@@ -562,7 +562,7 @@
           readers and skimmers alike. The number inputs stay the controls:
           keyboard, validation, and the POST contract are all theirs.
           {% endcomment %}
-          <div class="cad-viz" id="cad-viz" data-defaults='{"followup_after_business_days": 6, "park_after_business_days": 10, "max_cold_touches": 2, "advocate_touch_min_weeks": 6, "chatted_touch_min_weeks": 8, "pre_deadline_reping_days": 10}'>
+          <div class="cad-viz" id="cad-viz">
             <div class="cad-rail-wrap">
               <p class="cad-rail-title">A cold contact's life</p>
               <div class="cad-rail" aria-hidden="true">
@@ -998,10 +998,23 @@
     // motion. Scales stretch to fit the values, so a park window of 120
     // days never pushes a marker off the rail.
     var viz = document.getElementById("cad-viz");
-    function num(name, fallback) {
+    // What the user typed, else what the field itself says it defaults to.
+    //
+    // The placeholder is the ONE copy of that number in the page:
+    // accounts.forms.CadenceForm fills it from coverage_domain's
+    // CADENCE_DEFAULTS, the same dict the engine merges and the same one
+    // printed in each row's "Default: N" hint. The diagram used to carry its
+    // own hardcoded JSON of example values, which drifted — it drew an 8-week
+    // chatted clock and a 6-week advocate one against real defaults of 3 and
+    // 4, so an untouched page illustrated numbers it contradicted two lines
+    // below. Reading the placeholder is what makes drift impossible rather
+    // than merely fixed once; it is also what the pace ring already does with
+    // its own goal input.
+    function num(name) {
       var el = document.querySelector('[name="' + name + '"]');
-      var v = el ? parseInt(el.value, 10) : NaN;
-      return isNaN(v) ? fallback : v;
+      if (!el) return NaN;
+      var v = parseInt(el.value, 10);
+      return isNaN(v) ? parseInt(el.placeholder, 10) : v;
     }
     function setMark(sel, pct, label) {
       var m = viz.querySelector(sel);
@@ -1075,13 +1088,16 @@
       });
     }
     function drawCadence() {
-      var d = JSON.parse(viz.dataset.defaults);
-      var f = num("followup_after_business_days", d.followup_after_business_days);
-      var park = num("park_after_business_days", d.park_after_business_days);
-      var touches = num("max_cold_touches", d.max_cold_touches);
-      var chat = num("chatted_touch_min_weeks", d.chatted_touch_min_weeks);
-      var adv = num("advocate_touch_min_weeks", d.advocate_touch_min_weeks);
-      var reping = num("pre_deadline_reping_days", d.pre_deadline_reping_days);
+      var f = num("followup_after_business_days");
+      var park = num("park_after_business_days");
+      var touches = num("max_cold_touches");
+      var chat = num("chatted_touch_min_weeks");
+      var adv = num("advocate_touch_min_weeks");
+      var reping = num("pre_deadline_reping_days");
+      // Only reachable if the form below stopped rendering one of its own
+      // inputs, in which case there is no honest number to draw. Leaving the
+      // last good frame up beats writing "day NaN" onto the rail.
+      if ([f, park, touches, chat, adv, reping].some(function (n) { return isNaN(n); })) return;
 
       // Cold rail: note at 0, follow-up at f, park at f+park (or just park
       // when the follow-up is off). Scale = end of story + 15% air.

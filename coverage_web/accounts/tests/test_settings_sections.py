@@ -16,6 +16,8 @@ columns. Each form owns its own keys and must leave its siblings alone.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -63,6 +65,28 @@ def test_cadence_section_shows_each_default_inline(client, logged_in):
 
     for key in TUNABLE_CADENCE_PARAMS:
         assert f"Default: {CADENCE_DEFAULTS[key]}" in body
+
+
+def test_cadence_diagram_draws_the_same_defaults_the_hints_promise(client, logged_in):
+    """The three rails read each knob's placeholder when nothing is typed, and
+    those placeholders are CADENCE_DEFAULTS — so an untouched page draws the
+    numbers it prints.
+
+    The diagram used to carry its own hardcoded `data-defaults` JSON of
+    example values, which drifted from the engine: it painted a 8-week
+    chatted clock, a 6-week advocate clock and a 10-day re-ping while the
+    hints two lines below said 3 weeks, 4 weeks and 14 days. A first-time
+    user saw a picture contradicting both the copy and the behaviour. There
+    is now one copy of each number in the page, emitted by the form.
+    """
+    from coverage_domain.cadence import CADENCE_DEFAULTS
+
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert "data-defaults" not in body  # no second source of truth
+    for key in TUNABLE_CADENCE_PARAMS:
+        tag = re.search(rf'<input[^>]*name="{key}"[^>]*>', body)
+        assert tag, f"no input rendered for {key}"
+        assert f'placeholder="{CADENCE_DEFAULTS[key]}"' in tag.group(0)
 
 
 # ---------------------------------------------------------------------------
