@@ -123,6 +123,59 @@ def test_a_missing_role_is_a_404(client, db):
     assert client.get(reverse("role_description", args=[999999])).status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# A closed posting's drawer must not claim it's still open. Reproduced live:
+# Opportunity id=12797 (TD Securities, Cherry Hill) is status='closed',
+# closed_at set, re-verified closed against the firm's own site — yet the
+# drawer rendered "It still shows as open because we also can't confirm it
+# closed" and an active "Open the application" link. The drawer is reachable
+# for a closed row from My Applications ('Read the posting' on any tracked
+# stage, regardless of the posting's own status), not just the feed (which
+# only lists status='open' rows and so never surfaces this path itself).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_a_closed_postings_drawer_says_so_and_drops_the_apply_claim(client):
+    from datetime import timedelta
+
+    from django.utils import timezone as dj_timezone
+
+    firm = Firm.objects.create(slug="td-sec", name="TD Securities")
+    now = dj_timezone.now()
+    role = Opportunity.objects.create(
+        firm=firm, url="https://td.wd3.myworkdayjobs.com/job/cherry-hill",
+        title="Banking Associate", bucket="internship", region="us",
+        location="Cherry Hill, New Jersey", status="closed",
+    )
+    # The exact shape id=12797 was found in: last_checked ahead of
+    # last_verified (the shape `_unconfirmed_note` otherwise fires a
+    # caution for) AND closed_at set.
+    Opportunity.objects.filter(pk=role.pk).update(
+        last_verified=now - timedelta(hours=11),
+        last_checked=now, closed_at=now,
+    )
+    html = client.get(reverse("role_description", args=[role.id])).content.decode()
+
+    assert "This posting is closed" in html
+    assert "no longer accepting applications" in html
+    # The false claim must be gone, not just relabelled.
+    assert "still shows as open" not in html
+    assert "Not recently confirmed live" not in html
+    # No active "apply here" call to action for a role that cannot be
+    # applied to anymore.
+    assert "Open the application on" not in html
+    assert role.url in html, "still reachable for reference, just not as a CTA"
+
+
+@pytest.mark.django_db
+def test_an_open_postings_drawer_is_unaffected_by_the_closed_branch(client, role):
+    """Sibling check: the new `{% if o.status == 'closed' %}` branch must not
+    change anything for the ~all-open common case."""
+    html = client.get(reverse("role_description", args=[role.id])).content.decode()
+    assert "This posting is closed" not in html
+    assert "Open the application on Morgan Stanley" in html
+
+
 @pytest.mark.django_db
 def test_the_bucket_chip_shows_the_human_label_not_the_raw_code(client):
     """Live report: the drawer's meta line read the literal snake_case
