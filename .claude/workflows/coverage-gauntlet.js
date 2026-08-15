@@ -220,6 +220,15 @@ Standing rules (non-negotiable):
 - Tests must exercise the REAL failure mode. Commit style: short
   present-tense user-visible title, body explains root cause with evidence.
 - Real judgment calls get skipped with a clear why, never pushed through.
+- Every fixed[]/skipped[] entry's "key" MUST be the ORIGINAL finding key
+  given to you below, copied verbatim — never paraphrased, renumbered, or
+  replaced with an index like "1". Round 12 lost a real fix's recheck
+  result this exact way: the builder reported key:"1", the Record step's
+  key-matching against confirmed findings silently failed to link it, and
+  a genuinely-broken-live defect almost got recorded as fixed. If you are
+  fixing something not in the numbered list below (found while working),
+  give it its own new, descriptive key and say so explicitly — never
+  reuse "1"/"2"/etc as a key for anything.
 - StructuredOutput must include branch (git branch --show-current) and
   worktree_had_changes.`
 
@@ -350,6 +359,13 @@ arrives, git history keeps the full story):
 3. Append genuinely-new refutations to "Refuted / dead ends".
 4. Rebuild "Open leads": drop leads resolved this round, add the
    integration critic's findings and the unverified findings below.
+   BEFORE trusting any "fixed" claim below, cross-check it against its
+   own area's recheck results by key. A recheck key that does NOT match
+   any confirmed-findings key (a builder mis-keyed its report — this has
+   happened before) is not evidence of nothing; go find which confirmed
+   finding it actually refers to from its note/description and file it
+   correctly. Never silently drop a recheck result just because its key
+   doesn't line up.
 5. Append any NEW failed approach this round exposed.
 6. Update "Live carve-outs" against current git reality (check git log /
    git status for the listed files; remove entries whose fixes landed).

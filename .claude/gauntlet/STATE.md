@@ -105,8 +105,11 @@ Round 12: reverify.py's staleness cutoff no longer starves on
 last_checked (code fix on main; migration + live backfill still pending,
 see open leads). Classification: extract_study_stage / _fact_chips no
 longer collapse an OR-eligibility disjunction ("current student OR recent
-graduate") into a single wall chip — both eligibility groups render.
-Content: firm-page Cycle Dates timeline no longer shows Applications
+graduate") into a single wall chip — both eligibility groups render;
+CONFIRMED backfilled live (extract_facts, 31 rows, run directly outside
+the loop after its own recheck showed the code fix hadn't propagated to
+cached raw['facts'] — see "Loop self-corrections" below for why the loop
+missed this one itself). Content: firm-page Cycle Dates timeline no longer shows Applications
 Close before Open on hsbc/ubs/ms/jpm; Today funnel labelled
 "Applied › Interviewing" instead of raw DB stage keys; firm-detail
 eyebrow prints region/track labels instead of raw slugs (wording only —
@@ -243,6 +246,19 @@ on Today's rail). Design: feed card's three per-card controls reach the
   passed its tests, and still doesn't fire on any live row) found
   code-correct fixes invisible or inert live. Always live-recheck before
   filing as fixed.
+- Trusting a builder's own `fixed[].key` verbatim when writing recheck/
+  Record bookkeeping: round 12's classification builder reported
+  `{"key": "1", ...}` instead of the finding's real key
+  (study-stage-or-disjunction-mislabeled-as-wall). The recheck still
+  caught it live (still_reproduces: true), but the mismatched key meant
+  Record's own key-matching missed it — the main session had to notice
+  the gap by hand, re-verify (facts.py's fix WAS correct; only the
+  cached raw['facts']['study'] on 193 rows was stale), and backfill via
+  extract_facts directly. Fixed for next round: builders must echo the
+  ORIGINAL finding key verbatim in every fixed[]/skipped[] entry — do
+  not paraphrase or renumber it. If the Record step ever finds a
+  recheck entry whose key doesn't match any confirmed finding, treat
+  that as its own high-severity open lead, not a row to drop silently.
 
 ## Design benchmark standards (for the design lens)
 
