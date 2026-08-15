@@ -486,7 +486,41 @@ def test_a_stated_eligibility_stage_is_read():
     got = extract_study_stage(
         "Requirements: Final-year student or recent graduate in Computer "
         "Science.")
-    assert got["value"] == "Final year"
+    assert got["value"] == "Final year or recent graduate"
+
+
+def test_an_or_eligibility_disjunction_keeps_both_named_groups():
+    """Round 12 regression: extract_study_stage used to `return` on the
+    FIRST _STUDY_STAGE regex that matched anywhere in the text, so a
+    posting stating it welcomes BOTH groups ("current college student or
+    recent graduate" -- SIG id=8935) collapsed to whichever group's pattern
+    happened to run first in the list, silently dropping the other one. The
+    dropped-side direction alternated with which two stages were named, so
+    both directions are covered here: SIG's shape drops "current student"
+    without this fix (falls through to "recent graduate" alone), and the
+    PwC/IMC/Optiver/Carlyle shape below drops "recent graduate" (falls
+    through to "final year" alone). Confirmed live on 16 open rows across 6
+    firms."""
+    got = extract_study_stage(
+        "The ideal candidate for this role is a current college student "
+        "or recent graduate who is eager to gain hands-on experience.")
+    assert got["value"] == "Current student or recent graduate"
+
+    got = extract_study_stage(
+        "Requirements: final-year student or recent graduate in "
+        "Engineering.")
+    assert got["value"] == "Final year or recent graduate"
+
+
+def test_a_bare_current_student_mention_is_read():
+    """"Current student" only existed as half of the OR-disjunction shape
+    above until this round -- a posting stating it, alone, produced no chip
+    at all even though it is exactly the kind of stated eligibility fact
+    this module exists to surface."""
+    got = extract_study_stage(
+        "We are looking for a current student to join our summer "
+        "programme.")
+    assert got["value"] == "Current student"
 
 
 def test_recent_graduate_eligibility_statement_is_read():

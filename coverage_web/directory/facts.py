@@ -609,10 +609,41 @@ _STUDY_STAGE = (
     # "entering your final year of study" is as common as "final-year
     # student" and was falling through to the looser stage below it.
     (r"final[- ]year (?:student|of study)", "Final year"),
+    # A stage in its own right, not just noise ahead of "or recent
+    # graduate": SIG's own template states eligibility as "a current
+    # college student or recent graduate", and before this entry existed
+    # "current college student" matched nothing, so only the OR-detector
+    # below could recognise it — a bare, un-OR'd "current student" mention
+    # deserves the same chip a bare "final-year student" gets.
+    (r"current(?:\s+(?:college|university))?\s+student", "Current student"),
     (r"recent graduate", "Recent graduate"),
     (r"first[- ]year student", "First year"),
 )
 _STUDY_RX = [(re.compile(p, re.IGNORECASE), label) for p, label in _STUDY_STAGE]
+
+# A posting states an OR-eligibility disjunction ("current college student
+# OR recent graduate", "final-year student or recent graduate") far more
+# often than it states a single stage — SIG, PwC, IMC Trading, Optiver and
+# Carlyle all use exactly this shape to say they welcome BOTH groups. The
+# single-stage loop below used to `return` on the first regex that matched
+# anywhere in the text, so a disjunction always collapsed to whichever named
+# group's pattern happened to run first in _STUDY_STAGE, silently dropping
+# the other half of the posting's own eligibility statement — "current
+# college student or recent graduate" became just "Recent graduate", which
+# reads as excluding the current students the posting explicitly welcomes.
+# Confirmed live on 16 open rows across 6 firms (SIG ids 8935/9042/9017/9016,
+# PwC ids 15845/15423/15417/15408/10088/6570, IMC Trading id 2980, Optiver
+# ids 2798/2797/2796, Carlyle id 688).
+#
+# Checked ahead of the single-stage loop, and built from the SAME phrase
+# list, so a disjunction is recognised as one match spanning both named
+# groups rather than two independent single-stage matches racing each
+# other.
+_STUDY_PHRASE = "(?:%s)" % "|".join(p for p, _ in _STUDY_STAGE)
+_STUDY_OR = re.compile(
+    r"(%s)\s*(?:/|,)?\s*or\s*(%s)" % (_STUDY_PHRASE, _STUDY_PHRASE),
+    re.IGNORECASE,
+)
 
 # A study-stage phrase can name who is SPEAKING at an event rather than who
 # may apply to it — Bank of America's own insight-event template runs
@@ -638,7 +669,37 @@ _STUDY_SPEAKER_CONTEXT = re.compile(
 _STUDY_CONTEXT_WINDOW = 150
 
 
+def _study_label(phrase: str) -> str | None:
+    """Which _STUDY_STAGE label a phrase captured by _STUDY_OR belongs to.
+
+    The compound regex proves the SHAPE ("stage or stage") but, because both
+    halves share one alternation, not which alternative matched which side —
+    this re-tests the short captured span against each individual pattern to
+    find out.
+    """
+    stripped = phrase.strip()
+    for rx, label in _STUDY_RX:
+        if rx.fullmatch(stripped):
+            return label
+    return None
+
+
 def extract_study_stage(text: str) -> dict | None:
+    for m in _STUDY_OR.finditer(text):
+        window = text[max(0, m.start() - _STUDY_CONTEXT_WINDOW):m.start()]
+        if _STUDY_SPEAKER_CONTEXT.search(window):
+            continue
+        label_a, label_b = _study_label(m.group(1)), _study_label(m.group(2))
+        if not label_a or not label_b:
+            continue
+        if label_a == label_b:
+            value = label_a
+        else:
+            # Lower-cased mid-sentence, same as any second clause after
+            # "or" — the label vocabulary is Title Case only because each
+            # one can also stand alone as a chip's own leading word.
+            value = f"{label_a} or {label_b[0].lower()}{label_b[1:]}"
+        return {"value": value, "phrase": _sentence(text, m.start(), m.end())}
     for rx, label in _STUDY_RX:
         for m in rx.finditer(text):
             window = text[max(0, m.start() - _STUDY_CONTEXT_WINDOW):m.start()]
