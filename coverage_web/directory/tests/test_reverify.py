@@ -176,6 +176,47 @@ def test_reverify_selects_a_row_the_routine_scrape_keeps_falsely_fresh(monkeypat
 
 
 @pytest.mark.django_db
+def test_reverify_ids_reaches_a_row_the_queue_would_not_get_to_yet(monkeypatch):
+    """PINS THE FIX for bmo-associate-9446-deadline-drift-42-days: with
+    `deadline_checked_at` NULL catalog-wide (the field was just introduced —
+    nothing had ever run the deep check before), the default oldest-NULL
+    `--limit`-capped queue only reaches a handful of rows per run. A row a
+    live audit has already named and confirmed wrong should not have to wait
+    its turn — `--ids` bypasses the cutoff/`--limit` and checks exactly the
+    named row now, mirroring `enrich_postings --ids`.
+
+    Also proves `--ids` does NOT pull in an unrelated fresh row that would
+    never have been a queue candidate — it is a scoped backfill, not a
+    second general run."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    named = _opp(
+        firm, "https://bmo.wd3.myworkdayjobs.com/named",
+        days_old=0, deadline=date(2026, 7, 24), deadline_checked_days_old=None,
+    )
+    # A fresh, never-audited row that --limit's default ordering would also
+    # eventually reach — --ids must not sweep it in.
+    untouched = _opp(
+        firm, "https://bmo.wd3.myworkdayjobs.com/untouched",
+        days_old=0, deadline=date(2026, 5, 1), deadline_checked_days_old=None,
+    )
+
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-09-04"]),
+    )
+    call_command("reverify", ids=str(named.id))
+
+    named.refresh_from_db()
+    untouched.refresh_from_db()
+    assert named.deadline == date(2026, 9, 4)
+    assert named.deadline_checked_at is not None
+    assert untouched.deadline_checked_at is None  # not swept in by --ids
+
+    run = ScrapeRun.objects.get(connector="reverify")
+    assert run.stats["checked"] == 1
+
+
+@pytest.mark.django_db
 def test_reverify_dry_run_writes_nothing(monkeypatch):
     firm = Firm.objects.create(slug="acme", name="Acme")
     dead = _opp(firm, "https://x/dead")

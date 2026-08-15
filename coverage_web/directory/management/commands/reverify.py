@@ -4,6 +4,7 @@
     python manage.py reverify --limit 50
     python manage.py reverify --max-age-days 3
     python manage.py reverify --dry-run
+    python manage.py reverify --ids 9446,9579   # scoped, audit-named backfill
 
 This is the staleness layer's active half. `scrape` refreshes every posting a
 board still returns, and its closed-detection catches postings that vanish
@@ -51,6 +52,16 @@ signal. The card's "Verified N Days Ago" pill therefore never lies.
 Volume: capped at --limit rows per run (default 200), oldest first, fetched
 through a small thread pool — the same politeness posture as fetch_many.
 Each run is recorded in scrape_runs (connector="reverify").
+
+`--ids` is a targeted backfill for rows a specific audit already named —
+mirrors `enrich_postings --ids` exactly, and exists for the same reason:
+`deadline_checked_at` was NULL catalog-wide the moment it was introduced
+(nothing had ever run the deep check before), so a routine scheduled pass
+reaches the oldest-NULL rows in `--limit`-sized batches over many runs. A
+row a live audit has already named and confirmed wrong (e.g. a stale
+deadline sitting on-screen next to the firm's own current one) should not
+wait its turn in that queue — `--ids` bypasses the staleness cutoff and
+`--limit` entirely and checks exactly the named rows, now.
 """
 
 from __future__ import annotations
@@ -93,16 +104,29 @@ class Command(BaseCommand):
         parser.add_argument("--workers", type=int, default=8)
         parser.add_argument("--dry-run", action="store_true",
                             help="Verify and report, but write nothing.")
+        parser.add_argument("--ids", type=str, default="",
+                            help="Comma-separated Opportunity ids to force-recheck "
+                                 "immediately, bypassing the staleness cutoff and "
+                                 "--limit entirely — a scoped backfill for rows a "
+                                 "specific audit already named, not a general run.")
 
     def handle(self, *args, **opts):
         now = timezone.now()
         cutoff = now - timedelta(days=opts["max_age_days"])
 
-        candidates = list(
-            Opportunity.objects.filter(status="open")
-            .filter(Q(deadline_checked_at__isnull=True) | Q(deadline_checked_at__lt=cutoff))
-            .order_by(F("deadline_checked_at").asc(nulls_first=True))[: opts["limit"]]
-        )
+        # An explicit --ids list is a targeted backfill for rows already named
+        # by an audit — it bypasses the staleness cutoff and --limit on
+        # purpose, since the whole point is rechecking THESE rows now rather
+        # than waiting for them to reach the front of the oldest-NULL queue.
+        ids = [int(x) for x in opts["ids"].split(",") if x.strip()]
+        if ids:
+            candidates = list(Opportunity.objects.filter(id__in=ids).order_by("id"))
+        else:
+            candidates = list(
+                Opportunity.objects.filter(status="open")
+                .filter(Q(deadline_checked_at__isnull=True) | Q(deadline_checked_at__lt=cutoff))
+                .order_by(F("deadline_checked_at").asc(nulls_first=True))[: opts["limit"]]
+            )
         if not candidates:
             self.stdout.write("Nothing stale enough to re-check.")
             return
