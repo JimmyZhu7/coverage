@@ -45,16 +45,22 @@ def _feed_css() -> str:
     return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
 
 
-def _hover_guarded_blocks(css: str) -> list[str]:
-    """Every `@media (hover: hover) { ... }` body in the stylesheet."""
+def _blocks(css: str, opener: re.Pattern[str]) -> list[str]:
+    """Every `@media ... { ... }` body whose prelude `opener` matches, brace
+    counted so a nested rule inside it does not truncate the match."""
     out = []
-    for m in _HOVER_BLOCK_RE.finditer(css):
+    for m in opener.finditer(css):
         depth, i = 1, m.end()
         while depth and i < len(css):
             depth += (css[i] == "{") - (css[i] == "}")
             i += 1
         out.append(css[m.end():i - 1])
     return out
+
+
+def _hover_guarded_blocks(css: str) -> list[str]:
+    """Every `@media (hover: hover) { ... }` body in the stylesheet."""
+    return _blocks(css, _HOVER_BLOCK_RE)
 
 
 def _rules(css: str) -> list[tuple[str, str]]:
@@ -154,3 +160,124 @@ def test_save_and_its_opposite_are_not_zero_gap_siblings():
         "`.track` needs a gap so the dismiss control cannot begin where the "
         f"Save pill ends; found {track[0].strip()!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Size, not just visibility. The tests above stop a control being invisible
+# and tappable; these stop it being visible and untappable.
+#
+# Measured at 375x812 with `(pointer: coarse)` and `(hover: none)` both true,
+# the feed's three per-card controls were .track-btn 60.7x19, .track-hide
+# 61.6x19 and .meta-read 42x16, while /app/ on the same run measured its own
+# buttons at 44px because crm/_styles.html floors them there. A fingertip
+# covers ~44px; 19px is a control you aim at and miss, and for "Not for me"
+# the thing you hit on the way past is Save.
+# ---------------------------------------------------------------------------
+
+_COARSE_BLOCK_RE = re.compile(r"@media\s*\(\s*pointer:\s*coarse\s*\)\s*\{")
+
+# Every control drawn on a role card, and where its rule lives. .meta-read is
+# a shared component in the static sheet — the feed, the firm page and My
+# Applications all draw it — so a fix made only in the feed's inline styles
+# would leave two of the three pages at 16px.
+CARD_CONTROLS = ["track-btn", "track-hide", "track-chip", "meta-read"]
+
+TOUCH_FLOOR = 44
+
+
+def _shared_css() -> str:
+    """The static stylesheet as shipped, comments stripped."""
+    from django.contrib.staticfiles import finders
+
+    path = finders.find("css/coverage.css")
+    assert path, "css/coverage.css is not on the static path"
+    with open(path, encoding="utf-8") as fh:
+        return re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
+
+
+def _all_feed_css() -> str:
+    """Everything the browser applies to a role card: the page's inline
+    styles plus the shared stylesheet it links."""
+    return _feed_css() + "\n" + _shared_css()
+
+
+def _coarse_rules(css: str) -> list[tuple[str, str]]:
+    return [r for block in _blocks(css, _COARSE_BLOCK_RE) for r in _rules(block)]
+
+
+def _declared_px(rules, selector: str, prop: str) -> float | None:
+    for sel, body in rules:
+        if selector not in {s.strip() for s in sel.split(",")}:
+            continue
+        # `contain-intrinsic-size` carries an `auto` keyword before its length.
+        m = re.search(rf"(?<!-){prop}:\s*(?:auto\s+)?(-?\d+(?:\.\d+)?)px", body)
+        if m:
+            return float(m.group(1))
+    return None
+
+
+@pytest.mark.parametrize("cls", CARD_CONTROLS)
+def test_a_card_control_clears_the_touch_floor_where_the_pointer_is_a_finger(cls):
+    """A coarse pointer cannot aim at a 19px pill. Each control the card draws
+    has to declare the same 44px floor the rest of the app keeps, and it has
+    to declare it behind `(pointer: coarse)` so the dense cursor sizing
+    survives on desktop."""
+    rules = _coarse_rules(_all_feed_css())
+    got = _declared_px(rules, f".{cls}", "min-height")
+    assert got is not None, (
+        f".{cls} declares no min-height inside `@media (pointer: coarse)`. On "
+        "a phone it renders at its cursor size, which is under half the 44px "
+        "floor /app/, Settings and the account pages all keep."
+    )
+    assert got >= TOUCH_FLOOR, (
+        f".{cls} floors at {got}px on touch, under the {TOUCH_FLOOR}px a "
+        "fingertip covers."
+    )
+
+
+def test_growing_the_controls_re_derived_the_card_instead_of_stretching_it():
+    """`.rolecard` is a fixed height with `overflow: hidden`, so a taller
+    control inside a reserved row does not push the card out — it gets cut
+    off. Whatever the touch rows gain, the card total has to gain too."""
+    css = _all_feed_css()
+    base, coarse = _rules(css), _coarse_rules(css)
+
+    grown = 0.0
+    for row in (".rolecard-top", ".rolecard-meta"):
+        was, now = _declared_px(base, row, "height"), _declared_px(coarse, row, "height")
+        assert was is not None, f"{row} no longer reserves a height"
+        assert now is not None and now >= TOUCH_FLOOR, (
+            f"{row} holds a {TOUCH_FLOOR}px control on touch but still reserves "
+            f"{now}px. The card clips the overflow."
+        )
+        grown += now - was
+
+    was = _declared_px(base, ".rolecard", "height")
+    now = _declared_px(coarse, ".rolecard", "height")
+    assert was is not None, "the role card no longer pins a height"
+    assert now is not None, (
+        "the touch rows grew but `.rolecard` kept its cursor-sized height, so "
+        "the bottom of every card is cut off."
+    )
+    assert now - was >= grown, (
+        f"the touch rows gained {grown}px and the card gained only {now - was}px."
+    )
+    intrinsic = _declared_px(coarse, ".rolecard", "contain-intrinsic-size")
+    assert intrinsic == now, (
+        "`contain-intrinsic-size` is the placeholder for the ~1,500 cards "
+        f"skipped by `content-visibility: auto`; it says {intrinsic}px while "
+        f"the card is {now}px, so the scrollbar jumps as cards paint."
+    )
+
+
+def test_the_two_opposite_verbs_hold_a_fingers_distance_apart_on_touch():
+    """6px is a cursor's margin of error. Two 44px targets that mean opposite
+    things need more air between them than that, or the growth just makes the
+    wrong one easier to hit."""
+    rules = _coarse_rules(_all_feed_css())
+    gap = _declared_px(rules, ".track", "gap")
+    assert gap is not None and gap >= 8, (
+        "`.track` keeps its 6px cursor gap on touch; Save and \"Not for me\" "
+        f"are 44px targets that far apart (found {gap})."
+    )
+

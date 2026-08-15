@@ -1057,4 +1057,67 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      other pages silently lose — the exact bug that left My Applications
      with chips but no way to read the posting behind them. */
 
+  /* ======================================================================
+     TOUCH — the card's controls are sized for a finger, not a cursor.
+
+     A mouse resolves a pixel; a fingertip covers about 44 of them, which is
+     why /app/, Settings and the account pages all floor their controls at
+     44px. The feed never did. Measured at 375x812 with a coarse pointer, its
+     three per-card controls were `.track-btn` 60.7x19, `.track-hide` 61.6x19
+     and `.meta-read` 42x16 — and Save and "Not for me" are opposite verbs
+     sitting 6px apart, so the miss for a 19px-tall dismiss is not a no-op,
+     it is the other verb. (Reversible from the hidden list on My
+     Applications, but the card vanishes with no warning.)
+
+     Scoped to `(pointer: coarse)` rather than a width, because the thing
+     that needs the room is the finger, not the narrow screen: a touchscreen
+     tablet at 1024px needs it and a 380px-wide desktop window does not.
+
+     THE CARD ARITHMETIC IS RE-DERIVED, NOT STRETCHED. `.rolecard` is a fixed
+     168px with `overflow: hidden`, so growing a control inside a reserved
+     22px row would have clipped it — the exact failure the block comment
+     above the card warns about. Touch gets its own total:
+
+       12 top padding + 44 top row + 5 + 40 title + 5 + 18 sub + 5 + 17 facts
+       + 5 + 44 meta row + 12 bottom padding + 3 fuse + 2 borders
+       + 2 rounding = 214.
+
+     That is +46px a card, roughly one card per column of scroll. The cards
+     still all measure the same, which is the invariant that matters.
+     ====================================================================== */
+  @media (pointer: coarse) {
+    .rolecard { height: 214px; contain-intrinsic-size: auto 214px; }
+    .rolecard-top { height: 44px; }
+    .rolecard-meta { height: 44px; }
+    /* 6px between two opposite verbs is a hover-era gap. It grows with the
+       targets it separates — not far, because the row has no width to spare
+       (see the chip note below), but the dead band is now wider than the
+       jitter in a thumb press. */
+    .track { gap: 8px; }
+    /* Height only. The type scale is not the defect and the row has no width
+       to spare: bumping these two from 11px to 12px cost 14px across the
+       pair, which was enough to start ellipsising the role chip beside them
+       at 375px. */
+    .track-btn { min-height: 44px; padding: 0 12px 0 10px; }
+    .track-hide { min-height: 44px; padding: 0 8px; }
+    /* The fourth control in this slot. A card at a funnel stage swaps Save
+       for a link to My Applications, so a card the student has already acted
+       on is exactly where a too-small target costs the most. */
+    .track-chip { min-height: 44px; padding: 0 12px; }
+    /* The wider controls take their width from somewhere, and the top row is
+       the one slot on the card with two things competing for it. The chip
+       gives way, not the buttons: it labels what the title already says,
+       while they are the only two verbs on the card. `.rolecard-top-right`
+       is `flex: none`, so without this the row overflows into the card's
+       `overflow: hidden` and the far end of "Not for me" is simply cut off.
+
+       This also fixes a miss that predates the bigger controls: at 375px,
+       cards carrying the longest label ("Insight Programme · 2026", 167px
+       natural) ALREADY overflowed their top row by up to 24px and clipped it
+       mid-word. Zero rows overflow now at 320, 375, 390 or 820; the longest
+       chips ellipsise instead, which at least says that they were cut. */
+    .role-mini { flex: 0 1 auto; min-width: 0; overflow: hidden;
+      text-overflow: ellipsis; }
+  }
+
 </style>

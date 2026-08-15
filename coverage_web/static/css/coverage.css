@@ -1443,6 +1443,16 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   padding: 1px 8px; font-size: var(--fs-nano); font-family: var(--font-mono);
   cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
 .meta-read:hover { border-color: var(--accent-line); color: var(--accent-ink); }
+/* 42x16 is a cursor target. On a finger it is a quarter of the 44px floor the
+   rest of the app keeps, and this button is the only way into the posting
+   text on all three pages that render it. The override lives beside the
+   component rather than in the feed's inline styles, because the firm page
+   and My Applications draw the same button and would not have inherited it.
+   The feed's fixed-height card reserves a 44px meta row to hold this; the
+   other two pages lay the row out from its content, so it just grows. */
+@media (pointer: coarse) {
+  .meta-read { min-height: 44px; padding: 0 12px; }
+}
 
 .drawer { border: 0; padding: 0; border-radius: var(--r-panel);
   width: min(680px, 92vw); max-height: 84vh; overflow: hidden;
