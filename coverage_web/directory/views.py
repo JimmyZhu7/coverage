@@ -2441,6 +2441,13 @@ def _lens_item(uo, *, today):
     o = uo.opportunity
     stage = uo.applied_status or "saved"
     days_left = (o.deadline - today).days if o.deadline else None
+    # Same split the feed's item builder uses above (see the "Rolling is a
+    # CLAIM" comment ~line 1338): "Rolling" is only earned for postings whose
+    # own text states rolling review; every other undated row is neutral,
+    # not "reviewed as they arrive". Without this, the lens's static note
+    # asserted the earned claim about every undated row, including the ones
+    # that never said it.
+    rolling_facts = (((o.raw or {}).get("facts") or {}).get("rolling") or {})
     return {
         "id": o.id,
         "firm_name": o.firm.name,
@@ -2453,6 +2460,8 @@ def _lens_item(uo, *, today):
         "reported": deadline_provenance(o),
         "days_left": days_left,
         "urgency": _urgency_band(days_left),
+        "rolling_stated": bool(rolling_facts),
+        "rolling_why": rolling_facts.get("phrase", ""),
         # The same chips the feed and the firm page carry. This is the page a
         # student reads when deciding what to do THIS WEEK, and it was the one
         # surface that knew nothing about sponsorship, pay or a language wall.
@@ -2645,7 +2654,14 @@ def my_applications(request):
             "key": "rolling",
             "label": "Rolling",
             "items": rolling,
-            "note": "No posted deadline. Reviewed as they arrive, so apply early.",
+            # "Reviewed as they arrive, so apply early" used to be stated for
+            # every row here, the same invented claim the feed retracted
+            # (views.py's feed item builder, ~line 1338: most undated roles
+            # never say how they're reviewed). Rows whose own posting states
+            # rolling review are marked "Rolling" individually below
+            # (r.rolling_stated); this note now only says what is true of
+            # the whole bucket.
+            "note": "No posted deadline. Rows marked “Rolling” say so themselves; the rest just never stated a date.",
             "empty_state": True,
         },
     ]
