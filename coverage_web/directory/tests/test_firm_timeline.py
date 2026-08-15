@@ -130,3 +130,89 @@ def test_a_region_suffix_still_names_the_market_when_the_row_has_no_region(clien
     _date(firm, cycle="sa2028_hk", region="")
     body = _page(client, firm)
     assert "SA 2028 · hk" in body
+
+
+# ---------------------------------------------------------------------------
+# 3. A cycle may not close before it opens
+#
+# Live on /firms/hsbc/, /firms/ubs/, /firms/ms/ and /firms/jpm/: a dated
+# `app_close` and a `seed:historical-pattern` `app_open` estimated ten to
+# thirteen months LATER, printing the identical scope "SA 2028 · hk" because
+# the two rows store two spellings of one cycle ("SA 2028" and "sa2028_hk")
+# that `cycle_label` collapses into one. Sorted by date the close lands first,
+# so HSBC's page asserted the HK cycle opens ~Sep 2027 while listing a role
+# under that same cycle closing in 76 days.
+# ---------------------------------------------------------------------------
+def test_an_estimated_opening_after_a_close_in_the_same_scope_is_dropped(client):
+    """The live hsbc shape exactly: a stored `SA 2028` close, a stored
+    `sa2028_hk` estimated open, one printed scope."""
+    firm = _firm("hsbc", "HSBC")
+    _date(firm, cycle="SA 2028", region="hk", event_kind="app_close",
+          date=dt.date(2026, 10, 30), precision="", confidence=1.0,
+          source_url="https://apply.careers.hsbc.com/emergingtalent/job/1365767957/")
+    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_open",
+          date=dt.date(2027, 9, 1), source_url="seed:historical-pattern")
+    body = _page(client, firm)
+    assert "Oct 30, 2026" in body           # the dated close survives
+    assert "~ Sep 2027" not in body         # the contradicted estimate does not
+    assert body.count("SA 2028 · hk") == 1
+
+
+def test_the_rumored_close_shape_is_covered_too(client):
+    """ubs, ms and jpm carry a RUMORED close, not a confirmed one. The
+    estimate is contradicted either way — one is a date on file for this
+    cycle and market, the other is a guess about it."""
+    firm = _firm("ubs", "UBS")
+    _date(firm, cycle="SA 2028", region="hk", event_kind="app_close",
+          date=dt.date(2026, 8, 3), precision="", confidence=0.3)
+    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_open",
+          date=dt.date(2027, 9, 1), source_url="seed:historical-pattern")
+    body = _page(client, firm)
+    assert "Aug 3, 2026" in body
+    assert "~ Sep 2027" not in body
+
+
+def test_an_estimated_opening_survives_when_nothing_contradicts_it(client):
+    """gs holds the same `sa2028_hk` estimate with no HK close on file. No
+    contradiction, so there is nothing to suppress."""
+    firm = _firm()
+    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_open",
+          date=dt.date(2027, 9, 1), source_url="seed:historical-pattern")
+    body = _page(client, firm)
+    assert "~ Sep 2027" in body
+
+
+def test_a_close_in_a_different_market_does_not_suppress_the_estimate(client):
+    """Scope is cycle AND market. A US deadline says nothing about when the
+    Hong Kong cycle opens, and must not silence it."""
+    firm = _firm()
+    _date(firm, cycle="SA 2028", region="us", event_kind="app_close",
+          date=dt.date(2026, 10, 30), precision="", confidence=1.0)
+    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_open",
+          date=dt.date(2027, 9, 1))
+    body = _page(client, firm)
+    assert "~ Sep 2027" in body
+
+
+def test_an_opening_before_its_close_is_a_coherent_cycle_and_stays(client):
+    """The ordinary shape — opens, then closes — must be untouched."""
+    firm = _firm()
+    _date(firm, cycle="SA 2028", region="us", event_kind="app_open",
+          date=dt.date(2026, 3, 1))
+    _date(firm, cycle="SA 2028", region="us", event_kind="app_close",
+          date=dt.date(2026, 10, 30), precision="", confidence=1.0)
+    body = _page(client, firm)
+    assert "~ Mar 2026" in body
+    assert "Oct 30, 2026" in body
+
+
+def test_a_confirmed_opening_after_a_close_is_left_visible(client):
+    """Two hard dates that disagree is a data conflict, not an over-eager
+    estimate. Hiding it would hide the bug."""
+    firm = _firm()
+    _date(firm, cycle="SA 2028", region="us", event_kind="app_close",
+          date=dt.date(2026, 10, 30), precision="", confidence=1.0)
+    _date(firm, cycle="SA 2028", region="us", event_kind="app_open",
+          date=dt.date(2027, 9, 1), precision="", confidence=1.0)
+    body = _page(client, firm)
+    assert "Sep 1, 2027" in body

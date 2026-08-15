@@ -553,6 +553,9 @@ def _firm_date_row(fd, *, today):
         "region": fd.region or cycle_region(fd.cycle),
         "event_kind": fd.event_kind,
         "event_label": EVENT_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " ").capitalize()),
+        # The raw date rides along beside its rendered text so the timeline can
+        # compare rows to each other — see `_drop_contradicted_openings`.
+        "date": d,
         "date_text": date_text,
         "precision": prec,
         "confidence": confidence_marker(fd.confidence),
@@ -561,9 +564,62 @@ def _firm_date_row(fd, *, today):
     }
 
 
+# An estimated OPENING is only worth printing while nothing on the same page
+# contradicts it. Four firms (hsbc, jpm, ms, ubs) carried both a dated
+# `app_close` in Aug-Oct 2026 and a `seed:historical-pattern` `app_open` of
+# "~ Sep 2027" — and because `cycle_label` drops the region suffix, the stored
+# `SA 2028` and `sa2028_hk` rows print the SAME scope, "SA 2028 · hk". Sorted
+# by date the close lands first, so /firms/hsbc/ said the HK cycle closes on
+# Oct 30 2026 and opens ten months LATER, while listing a role under that
+# cycle closing in 76 days.
+#
+# The two rows come from two incompatible conventions: the seeds date a
+# HK intake that opens the September before its summer, the human `SA 2028`
+# rows hang off postings that are live now. Nothing on the row can tell a
+# reader which convention it follows, so the page asserts both.
+#
+# Suppressing the ESTIMATE rather than the dated close is the only direction
+# that loses nothing: an estimate of when a cycle will open is a guess, and a
+# deadline already on file for that same cycle and market is evidence the
+# guess is wrong. A CONFIRMED opening after a close is left alone on purpose —
+# that is a genuine data conflict, and hiding it would hide the bug.
+def _cycle_scope(row) -> tuple[str, str]:
+    """What the timeline PRINTS as a row's scope — cycle label plus market.
+
+    Keyed off the rendered strings, not the stored `cycle`, because the
+    contradiction a reader sees is between two rows that read identically.
+    """
+    return (row["cycle"], row["region"])
+
+
+def _drop_contradicted_openings(rows: list[dict]) -> list[dict]:
+    """Drop a rumored `app_open` that a dated `app_close` in the same printed
+    scope already places in the past."""
+    closes: dict[tuple[str, str], object] = {}
+    for row in rows:
+        if row["event_kind"] == "app_close" and row["date"] is not None:
+            scope = _cycle_scope(row)
+            if scope not in closes or row["date"] < closes[scope]:
+                closes[scope] = row["date"]
+
+    keep = []
+    for row in rows:
+        close = closes.get(_cycle_scope(row))
+        contradicted = (
+            row["event_kind"] == "app_open"
+            and row["state"] == "rumored"
+            and row["date"] is not None
+            and close is not None
+            and row["date"] > close
+        )
+        if not contradicted:
+            keep.append(row)
+    return keep
+
+
 def _timeline(firm, *, today):
     rows = firm.firm_dates.all().order_by(F("date").asc(nulls_last=True), "cycle", "event_kind")
-    return [_firm_date_row(fd, today=today) for fd in rows]
+    return _drop_contradicted_openings([_firm_date_row(fd, today=today) for fd in rows])
 
 
 # ---------------------------------------------------------------------------
