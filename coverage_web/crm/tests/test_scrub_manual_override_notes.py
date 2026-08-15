@@ -86,6 +86,33 @@ def test_apply_with_matching_default_id_rewrites_the_note(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_touch_358s_replacement_is_a_real_rewrite_not_a_no_op():
+    """PINS the fix: the first DEFAULT_REPLACEMENTS entry ever written for
+    touch #358 restated the exact ops-voice text already stored in the live
+    DB verbatim — a live dry-run printed "already matches; skipped" and
+    --apply would have changed nothing. The replacement must now actually
+    differ from the pre-fix live text, and must drop the internal
+    vocabulary ("email sync", "re-threaded") that survived
+    crm.views._display_note's prefix-strip."""
+    from crm.management.commands.scrub_manual_override_notes import (
+        DEFAULT_REPLACEMENTS,
+    )
+
+    live_text_before_this_fix = (
+        "manual override: thread_state=chat_done — Correction: an email "
+        "sync mistakenly logged a duplicate scheduled-chat notification "
+        "from a re-threaded email conversation about this same, "
+        "already-completed call. Restoring the correct status."
+    )
+    replacement = DEFAULT_REPLACEMENTS[358]
+
+    assert replacement != live_text_before_this_fix
+    assert "email sync" not in replacement
+    assert "re-threaded" not in replacement
+    assert "capture_gmail" not in replacement
+
+
+@pytest.mark.django_db
 def test_an_id_with_no_replacement_text_is_left_alone():
     user = _user()
     contact = Contact.all_objects.create(user=user, name="Someone Else")

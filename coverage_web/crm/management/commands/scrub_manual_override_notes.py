@@ -45,11 +45,21 @@ from crm.models import Touch
 # overrides for any future one-off finding so this command doesn't need to
 # be rewritten each time a similar leak turns up.
 DEFAULT_REPLACEMENTS: dict[int, str] = {
+    # The FIRST replacement written for this row (before this change) was a
+    # no-op: it restated the exact ops-voice text already in the DB
+    # verbatim, so a live dry-run of this command printed "already matches;
+    # skipped" and --apply would have changed nothing. "an email sync",
+    # "re-threaded email conversation", and "scheduled-chat notification"
+    # are all internal engineering vocabulary that survived the prefix-strip
+    # fix (crm/views.py's _display_note) because that fix only ever touched
+    # the machine "manual override: col=val —" prefix, never the
+    # human-authored sentence after it. This rewrite states the same fact
+    # in the words a student reading their own History would use.
     358: (
-        "manual override: thread_state=chat_done — Correction: an email "
-        "sync mistakenly logged a duplicate scheduled-chat notification "
-        "from a re-threaded email conversation about this same, "
-        "already-completed call. Restoring the correct status."
+        "manual override: thread_state=chat_done — Correction: a reply on "
+        "this email thread was briefly logged as a new scheduled chat. "
+        "That call had already happened, so the status is corrected back "
+        "to done."
     ),
     353: (
         "manual override: warmth=advocate, thread_state=advocate — "
