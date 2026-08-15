@@ -165,12 +165,15 @@ on Today's rail). Design: feed card's three per-card controls reach the
 - sig-sponsorship-fact-lost-in-fold-tiebreak, unmerged (high): fix
   433497c, same branch/blocker as above. Live repro still holds:
   /firms/sig/?role=all shows 0 hits for jobs/11084 (sponsorship=yes).
-- bmo-deadline migration + backfill pending (high): code fix (column
-  deadline_checked_at, migration 0007, query fix) is on main, but the
-  migration hasn't run against the shared DB and Opportunity ids
-  9579/9504 aren't backfilled — still show stale deadlines live.
-  Follow-up once safe: `manage.py migrate`, then one-time
-  `manage.py reverify --max-age-days 0 --limit <catalog size>`.
+- reverify's full-board backfill still pending (medium, not high — the
+  two named example rows are fixed): migration 0007 ran and
+  Opportunity ids 9579/9504 were corrected via a scoped verify()+save()
+  pass (deadline_checked_at didn't exist before this round, so it's
+  NULL on the whole catalog, not just these two — a full board-wide
+  `manage.py reverify` pass would be the real fix, but that's hundreds
+  of live external fetches across every open row, not a scoped
+  backfill). Worth running once, deliberately, not folded into a
+  future round's auto-backfill.
 - today-deadlines-rail-counts-openings (high): Today's right-rail
   "Deadlines" panel lists cycle openings and paints them urgent-red — the
   same conflation 3167462 removed from the calendar this round, unfixed
