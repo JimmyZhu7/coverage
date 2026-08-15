@@ -180,7 +180,7 @@
       pinned by test_the_programme_year_hint_ships_verbatim.
       {% endcomment %}
       <label><span class="f-cap">Programme Year</span>
-        <select name="year" id="f-year" aria-describedby="year-hint">{% include "directory/_facet_options.html" with options=year_facet current=selected.year %}</select>
+        <select name="year" id="f-year">{% include "directory/_facet_options.html" with options=year_facet current=selected.year %}</select>
       </label>
 
       {% comment %}
@@ -247,22 +247,6 @@
         </div>
       </label>
 
-      {% comment %}
-      The Programme Year hint. The sentence is a tested honesty contract and
-      ships verbatim: `cohort` is the intake year printed in the posting, not
-      the year the student graduates, and without this the Year control tells
-      ~4,000 roles' worth of lies.
-
-      ALWAYS in the DOM, not always on screen. It is a definition, not a
-      status — it teaches once and then costs a permanent line at the head of
-      the results, where it was stacking with the hidden-count disclosures
-      into a wall of grey the eye writes off wholesale. It reveals itself when
-      the control it explains is in play: focused, or already carrying a
-      choice. `aria-describedby` on #f-year is unaffected either way, so a
-      screen reader hears it whenever the select is reached, and browsers
-      without `:has()` simply always show it (fail-open: the honest state).
-      {% endcomment %}
-      <small class="filter-hint{% if selected.year %} is-live{% endif %}" id="year-hint">Intake year in the posting. Not a graduation year.</small>
     </details>
 
     <noscript><button type="submit">Apply</button></noscript>

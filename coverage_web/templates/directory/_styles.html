@@ -293,32 +293,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     padding-left: 6px; }
   .variant-fold .rolecard { margin-top: 6px; }
 
-  /* The bar's single footnote — the Programme Year honesty sentence, tied to
-     #f-year via aria-describedby. Full row, so it never rags the controls;
-     lowercase and quiet, because it is a caveat, not a control. */
-  /* order: 9 sends the footnote below everything INCLUDING the Clear link,
-     which sits after it in the DOM (Clear must stay outside the <details>;
-     the hint must stay inside it). Safe precisely because the hint is not
-     focusable — visual order and focus order cannot disagree over it. Under
-     640px the details is block layout and `order` is simply ignored. */
-  .filter-hint { flex: 1 1 100%; order: 9; margin: 2px 0 0;
-    font-size: var(--fs-micro); color: var(--ink-3);
-    text-transform: none; letter-spacing: 0; font-weight: var(--w-reg);
-    line-height: 1.35; }
-  /* Shown when the control it explains is in play, hidden otherwise. Written
-     as a `:has()` rule guarded by @supports so that a browser without it
-     keeps the old always-on behaviour rather than hiding a sentence that
-     prevents a real misreading. `visibility` + a collapsed height, never
-     `display: none`: the row must not reflow as you tab through the bar. */
-  @supports selector(.filters:has(*)) {
-    .filter-hint { visibility: hidden; height: 0; margin: 0; overflow: hidden;
-      transition: opacity var(--t-fast); opacity: 0; }
-    .filter-hint.is-live,
-    .filters:has(#f-year:focus) .filter-hint,
-    .filters:has(#f-year:hover) .filter-hint {
-      visibility: visible; height: auto; margin: 2px 0 0; opacity: 1; }
-  }
-
   .filters-clear { font-size: var(--fs-s); align-self: center; padding: 6px 14px;
     border-radius: 999px; }
   .filters-clear:hover { background: var(--accent-soft); text-decoration: none; }
@@ -985,11 +959,8 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        half option, and its label is the longest text in the control. */
     .filters .seg-optin { grid-column: 1 / -1; width: 100%; }
 
-    /* Stacked, full width, and each label keeps its own sub-hint — the
-       Programme Year sentence travels with its control into the disclosure
-       rather than being dropped at narrow widths. */
+    /* Stacked, full width at narrow widths. */
     .filters-more > label { width: 100%; margin-bottom: var(--s3); }
-    .filter-hint { max-width: none; }
     /* Search never hides and never shares a row at this width. Qualified to
        clear `.filters label`'s `flex: 1 1 46%` just above. */
     .filters .filters-search { flex: 1 1 100%; }

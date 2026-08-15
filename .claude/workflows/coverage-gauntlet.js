@@ -19,9 +19,11 @@ const STATE_PATH = '.claude/gauntlet/STATE.md'
 
 // Model policy (founder's standing choice): design-judgment lenses on the
 // stronger model, mechanical/data work on the cheaper one. Overridable per
-// run via args without editing this file.
+// run via args without editing this file. Founder's standing choice
+// (2026-08-15): everything on sonnet, including the design-judgment
+// lenses — bump designModel per-run via args if a round warrants it.
 const EXEC = (args && args.execModel) || 'sonnet'
-const DESIGN = (args && args.designModel) || 'opus'
+const DESIGN = (args && args.designModel) || 'sonnet'
 const FETCH_BUDGET = (args && args.fetchBudget) || 15
 const VERIFY_CAP = 12
 

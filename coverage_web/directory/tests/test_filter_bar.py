@@ -313,16 +313,6 @@ def test_an_optin_mode_hides_nothing_so_says_nothing(client, bar):
 # Load-bearing strings and live-region wiring.
 # ---------------------------------------------------------------------------
 
-def test_the_programme_year_hint_ships_verbatim(client, bar):
-    """The sentence that stops the Year control telling ~4,000 roles' worth of
-    lies: `cohort` is the intake year printed in the posting, not the year the
-    student graduates. It travels inside the mobile disclosure too, so it is
-    present at every breakpoint — there is one copy and this is it."""
-    body = _get(client).content.decode()
-    assert "Programme Year" in body
-    assert "Intake year in the posting. Not a graduation year." in body
-
-
 def test_the_open_roles_figure_is_a_live_region(client, bar):
     """The results swap silently for a screen-reader user, so the headline
     count re-announces itself. One figure, not the whole strip."""

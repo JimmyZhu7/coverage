@@ -163,9 +163,11 @@ def test_year_filter_does_not_imply_a_class_year(client, feed):
     assert 'class="class-chip"' in _get(client, year="2028").content.decode()
 
     # The control itself is labelled for the programme year, never "Class".
+    # (The old explainer sentence under the control — "Intake year in the
+    # posting. Not a graduation year." — was removed at the founder's
+    # request 2026-08-15; the label alone carries the distinction now.)
     html = _get(client).content.decode()
     assert "Programme Year" in html
-    assert "Not a graduation year." in html
 
 
 # ---------------------------------------------------------------------------
