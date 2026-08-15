@@ -77,17 +77,57 @@ def test_an_archived_person_is_reported_never_resurrected(run, user):
 
 
 def test_a_chat_logs_a_real_touch_through_the_ratchet(run, user):
-    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "chatted": True}])
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "chat_status": "completed"}])
     c = Contact.objects.for_user(user).get(name="Ada Lovelace")
     assert c.warmth == "chatted"
     assert c.thread_state == "chat_done"
     assert Touch.objects.for_user(user).filter(contact=c, kind="chat").exists()
 
 
+def test_a_booked_chat_is_scheduled_not_had(run, user):
+    """"Let's do Tuesday at noon" is a chat that has not happened yet.
+
+    It gets its own rung: `chat_scheduled` leaves warmth at `replied` and
+    parks the thread at `chat_scheduled`. Calling it a chat would fire the
+    thank-you cadence for a conversation still in the future."""
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "chat_status": "scheduled"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    assert c.warmth == "replied"
+    assert c.thread_state == "chat_scheduled"
+    kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
+    assert kinds == ["chat_scheduled"]
+
+
 def test_a_reply_logs_a_reply_not_a_chat(run, user):
     run([{"name": "Ada Lovelace", "email": "ada@gs.com", "replied": True}])
     c = Contact.objects.for_user(user).get(name="Ada Lovelace")
     assert c.warmth == "replied"
+
+
+def test_a_warm_email_reply_alone_never_counts_as_a_chat(run, user):
+    """The Ellen Chung case, fixed 2026-08-15.
+
+    The findings contract used to carry a boolean `chatted`, defined only as
+    "a real conversation happened" — loose enough that a friendly two-way
+    email satisfied it. On 2026-08-12 a discovery run marked Ellen Chung
+    `chatted` on evidence that was, in full, "Thanks for the email, filled
+    out the form!" on an ICC alumni-panel thread. No call, no meeting. That
+    set warmth='chatted'/thread_state='chat_done', so Today nagged for a
+    debrief of a conversation that never happened — and no later automated
+    run could undo it, because `capture_worklist` excludes `chatted` and
+    `advocate` from every re-check. A human had to fix it by hand.
+
+    A reply with no `chat_status` is a reply, however warm it reads.
+    """
+    run([{"name": "Ellen Chung", "email": "ellen@icc.example",
+          "replied": True,
+          "evidence": "Thanks for the email, filled out the form! Would love "
+                      "to help with the ICC alumni panel — so glad you reached out"}])
+    c = Contact.objects.for_user(user).get(name="Ellen Chung")
+    assert c.warmth == "replied", "a warm email reply is still just a reply"
+    assert c.thread_state != "chat_done"
+    kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
+    assert kinds == ["reply_received"], "never kind='chat'"
 
 
 def test_no_evidence_means_no_touch_and_no_warmth(run, user):
@@ -164,8 +204,8 @@ def test_outreach_you_already_sent_is_logged_as_a_touch(run, user):
 
     Discovery would find a thread where Jimmy had emailed someone who never
     wrote back, create the contact, and write "Follow-up outreach sent … no
-    reply yet" into its notes — while logging no touch, because only
-    `replied`/`chatted` counted. Zero touches means the cadence engine's
+    reply yet" into its notes — while logging no touch, because only a
+    reply or a chat counted. Zero touches means the cadence engine's
     never-contacted branch fires, so Today said "Added but never contacted.
     Send the first note." about a person whose own notes said otherwise.
     Observed on live data 2026-08-05 and reported by the owner.
@@ -182,7 +222,7 @@ def test_the_evidence_ladder_takes_the_strongest_signal(run, user):
     """A thread can show all three. A chat outranks a reply outranks outreach
     — the same order the touch ratchet uses everywhere else."""
     run([{"name": "Ada Lovelace", "email": "ada@gs.com",
-          "outreach_sent": True, "replied": True, "chatted": True}])
+          "outreach_sent": True, "replied": True, "chat_status": "completed"}])
     c = Contact.objects.for_user(user).get(name="Ada Lovelace")
     kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
     assert kinds == ["chat"]

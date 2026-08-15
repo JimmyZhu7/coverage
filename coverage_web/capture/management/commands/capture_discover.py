@@ -31,15 +31,28 @@ WHAT IT REFUSES TO DO
 FINDINGS SHAPE
 --------------
 A JSON array of `{"name", "email", "role_guess", "firm", "outreach_sent",
-"replied", "chatted", "evidence"}`. `firm` is an optional Coverage slug; an
-unknown one is kept as free text rather than dropped, because
+"replied", "chat_status", "evidence"}`. `firm` is an optional Coverage slug;
+an unknown one is kept as free text rather than dropped, because
 `Contact.firm_text` exists precisely so capture never blocks on directory
 coverage.
 
-The three evidence flags are a ladder, and at least one of them should be
-true for anyone worth creating: you cannot discover a stranger. If none is
-set the contact is still created (someone met at an event and added by hand
-is real) but stays cold with no touches.
+`chat_status` is three-way — the same contract `capture_gmail` already asks
+for, so both doors into the ratchet describe a conversation the same way:
+
+- `"completed"` — the conversation ALREADY HAPPENED (a call, a coffee chat,
+  a meeting). This is the only value that makes someone `chatted`.
+- `"scheduled"` — a chat has been set up but has not happened yet. "Let's do
+  Tuesday at noon" is scheduled, not completed.
+- `"none"` — no chat either way. This is the default when the key is
+  omitted, and it is what a warm email reply on its own earns, however
+  enthusiastic the reply reads.
+
+The evidence signals are a ladder, and at least one of them should be
+present for anyone worth creating: you cannot discover a stranger. Strongest
+first: `chat_status == "completed"`, then `chat_status == "scheduled"`, then
+`replied`, then `outreach_sent`. If none is set the contact is still created
+(someone met at an event and added by hand is real) but stays cold with no
+touches.
 """
 
 from __future__ import annotations
@@ -176,9 +189,26 @@ class Command(BaseCommand):
             # live data 2026-08-05 (Jason Law, Christine Lee — both from the
             # ICC alumni panel thread) and reported by the owner.
             #
-            # Ordering is the ladder's, strongest evidence first: a chat
-            # outranks a reply outranks outreach.
-            kind = ("chat" if person.get("chatted")
+            # `chat_status` is three-way for the same reason `capture_gmail`
+            # asks for three: a boolean "chatted" flag defined as "a real
+            # conversation happened" is loose enough that a warm two-way
+            # EMAIL reply satisfies it. On 2026-08-12 a discovery run marked
+            # Ellen Chung `chatted` on the strength of "Thanks for the email,
+            # filled out the form!" — no call, no meeting — which set
+            # warmth='chatted'/thread_state='chat_done', nagged Today for a
+            # debrief of a chat that never happened, and was UNRECOVERABLE by
+            # any later run: `capture_worklist` drops anyone at `chatted` or
+            # `advocate` from every future re-check, so the bad mark sits
+            # there until a human fixes it by hand. A scheduled-but-not-yet-
+            # held chat has the same failure mode in reverse, which is why it
+            # gets its own rung rather than collapsing into "chat".
+            #
+            # Ordering is the ladder's, strongest evidence first: a chat that
+            # happened outranks one that is merely booked, outranks a reply,
+            # outranks outreach.
+            chat_status = str(person.get("chat_status", "none") or "none").strip().lower()
+            kind = ("chat" if chat_status == "completed"
+                    else "chat_scheduled" if chat_status == "scheduled"
                     else "reply_received" if person.get("replied")
                     else "outreach" if person.get("outreach_sent") else None)
             if kind:
