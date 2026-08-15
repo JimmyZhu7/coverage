@@ -61,6 +61,22 @@ _CAL = calmod.Calendar(firstweekday=0)
 # have already had.
 _RAIL_BACK, _RAIL_FORWARD = 6, 17
 
+# The kinds the grid colours and the legend counts, in legend order. "opening"
+# is a fourth because a date you cannot miss is not a deadline — see
+# `_firm_date_kind` and layer 3.
+CAL_KINDS = ("chat", "event", "deadline", "opening")
+
+# Which FirmDate events are openings. Keyed off `event_kind` rather than a
+# substring match on the label, so a future event whose name happens to
+# contain "open" does not silently join them.
+_OPENING_EVENTS = frozenset({"app_open", "insight_open"})
+
+
+def _firm_date_kind(event_kind: str) -> str:
+    """A FirmDate's calendar kind. Openings are their own kind; everything
+    else on the firm-dates vocabulary is a date you can MISS."""
+    return "opening" if event_kind in _OPENING_EVENTS else "deadline"
+
 
 def _month_bounds(year: int, month: int):
     first = date(year, month, 1)
@@ -108,13 +124,24 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             "editable": True,
         })
 
-    # Layer 3 — confirmed firm deadlines, read-only.
+    # Layer 3 — confirmed firm dates, read-only. Deadlines AND openings: this
+    # loop used to stamp `kind: "deadline"` on every FirmDate regardless of
+    # its `event_kind`, and the month tally counts by kind, so August 2026's
+    # legend read "6 deadlines" when one of the six was Goldman Sachs
+    # applications OPEN on the 15th. The row's own text said "applications
+    # open" while the count above it called it a deadline, and it wore the
+    # deadline-coloured left border to match.
+    #
+    # An opening is the opposite kind of date: nothing is missed by ignoring
+    # it, and it is the day a thing becomes possible. `_firm_date_kind` reads
+    # the event, so `insight_open` is covered by the same rule rather than
+    # waiting to be found in a month where one falls.
     for fd in (FirmDate.objects.filter(date__gte=first, date__lte=last, confidence=1.0)
                .select_related("firm")):
         label = FIRM_DATE_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " "))
         buckets.setdefault(fd.date, []).append({
             "id": None,
-            "kind": "deadline",
+            "kind": _firm_date_kind(fd.event_kind),
             "source": "directory",
             "title": f"{fd.firm.name} · {label}",
             "description": "",
@@ -364,7 +391,7 @@ def _month_context(user, year: int, month: int, today: date) -> dict:
         "today": today,
         "counts": {
             kind: sum(1 for evs in buckets.values() for e in evs if e["kind"] == kind)
-            for kind in ("chat", "event", "deadline")
+            for kind in CAL_KINDS
         },
         "weekday_names": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
     }
