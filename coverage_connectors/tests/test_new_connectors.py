@@ -264,6 +264,57 @@ def test_sitemap_fetch_filters_path_and_derives_titles(monkeypatch):
     assert result.opportunities[1].location == ""
 
 
+_SITEMAP_XML_WITH_POSTAL_SUFFIXES = """<?xml version="1.0"?>
+<urlset>
+  <url><loc>https://apply.careers.hsbc.com/emergingtalent/job/New-York-Investment-Banking-Graduate-NY-10001/1368939957/</loc></url>
+  <url><loc>https://apply.careers.hsbc.com/emergingtalent/job/London-Corporate-and-Institutional-Banking-Graduate-Insight-Programme-E14-5HQ/1367637057/</loc></url>
+  <url><loc>https://apply.careers.hsbc.com/emergingtalent/job/Singapore-Investment-Banking-HSBC-Infrastructure-Finance-Internship-018983/1365767157/</loc></url>
+  <url><loc>https://apply.careers.hsbc.com/emergingtalent/job/Central-Investment-Banking-Graduate-Hong/1365764257/</loc></url>
+</urlset>"""
+
+
+def test_sitemap_splits_a_recognized_trailing_postal_code_into_location(monkeypatch):
+    """Fixes the live defect on opportunity 17423: the slug's trailing
+    postal code used to ride along inside the title unstripped ("New York
+    Investment Banking Graduate NY 10001") while location stayed blank.
+    Recognized US "<STATE> <ZIP>" and UK postcode shapes now move out of
+    the title into location — copied verbatim from the same slug tokens,
+    not inferred."""
+    monkeypatch.setattr(sitemap_mod, "fetch_text",
+                        lambda url, **kw: _SITEMAP_XML_WITH_POSTAL_SUFFIXES)
+    result = fetch(SitemapBoard(firm="HSBC",
+                                sitemap_url="https://apply.careers.hsbc.com/sitemap.xml",
+                                path_filter="/emergingtalent/job/"))
+    assert result.ok
+    by_title = {o.title: o for o in result.opportunities}
+
+    ny = by_title["New York Investment Banking Graduate"]
+    assert ny.location == "NY 10001"
+
+    london = by_title["London Corporate and Institutional Banking Graduate Insight Programme"]
+    assert london.location == "E14 5HQ"
+
+
+def test_sitemap_leaves_ambiguous_trailing_tokens_alone(monkeypatch):
+    """Bare numeric codes with no letter component ("018983") and truncated
+    slug fragments ("Hong", from "...-Hong-Kong" truncated) are NOT
+    postal-code shaped — stripping either would be a guess, not a read, so
+    both the title and the blank location stay exactly as the slug states
+    them."""
+    monkeypatch.setattr(sitemap_mod, "fetch_text",
+                        lambda url, **kw: _SITEMAP_XML_WITH_POSTAL_SUFFIXES)
+    result = fetch(SitemapBoard(firm="HSBC",
+                                sitemap_url="https://apply.careers.hsbc.com/sitemap.xml",
+                                path_filter="/emergingtalent/job/"))
+    by_title = {o.title: o for o in result.opportunities}
+
+    sg = by_title["Singapore Investment Banking HSBC Infrastructure Finance Internship 018983"]
+    assert sg.location == ""
+
+    hk = by_title["Central Investment Banking Graduate Hong"]
+    assert hk.location == ""
+
+
 def test_sitemap_verify_rereads_the_sitemap(monkeypatch):
     monkeypatch.setattr(sitemap_mod, "fetch_text", lambda url, **kw: _SITEMAP_XML)
     fetch(HSBC)  # registers the host -> sitemap mapping
