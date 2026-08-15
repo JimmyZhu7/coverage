@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 from analytics.models import UserOpportunity
@@ -87,3 +88,46 @@ def test_track_ignores_external_next_redirect(client):
     assert resp.status_code == 302
     assert "evil.example" not in resp["Location"]
     assert resp["Location"].endswith(reverse("my_applications"))
+
+
+def test_save_button_targets_closest_track_not_the_shared_id():
+    """Every "Picked for you" role is also rendered a second time under its
+    own firm's column (see _results.html), so `id="track-{{ r.id }}"` is NOT
+    unique in the DOM on that page — both copies render it. If the Save
+    button's hx-target were the bare id selector `#track-{{ r.id }}`, htmx's
+    querySelector-style lookup would always resolve to the FIRST matching
+    node in document order (the Picked-for-you copy, since that column
+    renders first) — so clicking the button on the second, firm-column copy
+    would swap the untouched first copy instead, leaving the actually-clicked
+    button visually unchanged while a different card silently flips to
+    "Saved". The fix is a self-scoped target, `closest .track`, mirroring the
+    "Not for me" button's own `closest .rolecard` — verified here directly on
+    the rendered partial, independent of the duplicate id it protects
+    against."""
+    html = render_to_string(
+        "directory/_track_control.html", {"r": {"id": 999, "track_status": None}}
+    )
+    assert 'hx-target="closest .track"' in html
+    assert 'hx-target="#track-999"' not in html
+
+    html_saved = render_to_string(
+        "directory/_track_control.html", {"r": {"id": 999, "track_status": "saved"}}
+    )
+    assert 'hx-target="closest .track"' in html_saved
+    assert 'hx-target="#track-999"' not in html_saved
+
+
+def test_duplicate_track_ids_no_longer_matter_for_targeting():
+    """Directly reproduces the collision: render the SAME opportunity twice
+    (as _results.html does for a picked role) and confirm both copies still
+    share an id — that duplication is inherent to the deliberate
+    dual-listing and is not being removed — but neither copy's hx-target
+    depends on that id being unique."""
+    ctx = {"r": {"id": 4242, "track_status": None}}
+    first = render_to_string("directory/_track_control.html", ctx)
+    second = render_to_string("directory/_track_control.html", ctx)
+
+    assert 'id="track-4242"' in first and 'id="track-4242"' in second
+    for rendered in (first, second):
+        assert "hx-target=\"closest .track\"" in rendered
+        assert "#track-4242" not in rendered
