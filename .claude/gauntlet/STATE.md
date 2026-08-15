@@ -9,11 +9,11 @@ history holds the full story.
 
 ## Round counter
 
-next_round: 13
+next_round: 14
 (Rounds 1-10 were data/content/layout sweeps; round 11 was the dedicated
 visual-design round; round 12 mixed data/classification/content/design
-fixes and added the loop's first integration-critic pass. All ran
-2026-08-14/15.)
+fixes and added the loop's first integration-critic pass; round 13 mixed
+deadline/dedup/status/content/design fixes. All ran 2026-08-14/15/16.)
 
 ## Objective (standing)
 
@@ -63,9 +63,11 @@ re-run for data), not when its tests pass.
 - coverage_web/directory/applications.py, coverage_web/directory/dupes.py,
   coverage_web/directory/management/commands/dedupe_opportunities.py
   (uncommitted edits sitting on main from a parallel session — still
-  present as of round 12's close). This is also what blocked
-  worktree-wf_b418567e-46b-25's two dedup fixes (f9d148e, 433497c) from
-  merging this round; merge that branch once this carve-out clears.
+  present as of round 13's close, unchanged since round 12). This is
+  still what blocks worktree-wf_b418567e-46b-25's two dedup fixes
+  (f9d148e, 433497c) from merging — confirmed round 13 too
+  (`git merge-base --is-ancestor` on both: neither is an ancestor of
+  HEAD); merge that branch once this carve-out clears.
 Remove entries from this list when their fixes appear in git log (or the
 uncommitted edits are simply gone from `git status`).
 
@@ -119,6 +121,36 @@ applications-open milestone as a deadline (calendar only — see open lead
 on Today's rail). Design: feed card's three per-card controls reach the
 44px touch floor (card only — see open lead on the rest of the page).
 
+Round 13: reverify gains a scoped `--ids` backfill flag and now keys
+staleness on deadline_checked_at (migration applies cleanly, dry-run vs.
+BMO's live Workday endpoint confirmed correct, 9/9 tests pass, merged to
+main) — but the actual write-mode run for opportunity #9446 (or any other
+stale row) was never executed from this worktree, deliberately, because
+its workday.py connector diverges 269 lines from main's; see open leads
+for the live-data gap this leaves. Dedup: Save/Saved button now targets
+`closest .track` instead of an id selector, so the duplicate
+`id="track-{{r.id}}"` shared between a role's "Picked for you" and
+firm-column copies (real, confirmed) can no longer make a click swap the
+wrong card's DOM; the duplicate id itself is kept, now documented as an
+inert labeling hook only. Status: the role-description drawer
+(/opportunities/<id>/read/) now checks Opportunity.status — a
+status="closed" row gets an honest "This posting is closed" caution and a
+demoted "View the closed posting" link instead of the live-open caution
+and CTA. Content: sitemap connector splits a recognized trailing US
+state+ZIP or UK postcode off HSBC titles into location (narrow pattern,
+"never guess" rule intact for anything ambiguous — code fix merged,
+covers 4 of 23 empty-location HSBC rows, dry-run confirmed correct, see
+open leads for the pending --apply); My Applications' "Rolling" lens no
+longer claims undated roles are "reviewed as they arrive" (matches the
+feed's own retraction); firm page's "Warmest here:" line no longer
+renders when it just restates the contact list's own first row; Settings'
+"pe" track label now matches the Opportunities filter's "Private Equity /
+Credit" (Corporate Strategy's separate structural gap is unrelated, still
+open). Design: the JS-injected custom-select caret (.csel-caret, every
+progressively-enhanced <select> in the product) converges on
+stroke-width 1.5, closing the one outlier round 11's icon sweep missed
+because it's built via string concatenation, not a static inline <svg>.
+
 ## Refuted / dead ends — do not re-litigate
 
 - Word-order dedup folding on the live feed: NO safe corroborating signal
@@ -165,34 +197,60 @@ on Today's rail). Design: feed card's three per-card controls reach the
 - sig-sponsorship-fact-lost-in-fold-tiebreak, unmerged (high): fix
   433497c, same branch/blocker as above. Live repro still holds:
   /firms/sig/?role=all shows 0 hits for jobs/11084 (sponsorship=yes).
-- reverify's full-board backfill still pending (medium, not high — the
-  two named example rows are fixed): migration 0007 ran and
-  Opportunity ids 9579/9504 were corrected via a scoped verify()+save()
-  pass (deadline_checked_at didn't exist before this round, so it's
-  NULL on the whole catalog, not just these two — a full board-wide
-  `manage.py reverify` pass would be the real fix, but that's hundreds
-  of live external fetches across every open row, not a scoped
-  backfill). Worth running once, deliberately, not folded into a
-  future round's auto-backfill.
-- today-deadlines-rail-counts-openings (high): Today's right-rail
-  "Deadlines" panel lists cycle openings and paints them urgent-red — the
-  same conflation 3167462 removed from the calendar this round, unfixed
-  on this surface.
+- reverify-write-mode-backfill-pending (medium; was "reverify's
+  full-board backfill still pending", now narrower): the mechanism is
+  code-complete (`manage.py reverify --ids <id>` merged, dry-run vs.
+  BMO's live Workday endpoint confirmed correct, migration graph
+  reconciled with main) but no write-mode run has actually happened —
+  Opportunity #9446 (BMO/Associate/Mississauga) still shows the header
+  badge vs. body-text self-contradiction live on
+  /opportunities/9446/read/ (DB deadline stuck at 2026-07-24 vs. the
+  firm's live-stated 2026-09-04), and deadline_checked_at is still NULL
+  catalog-wide since it didn't exist before round 12. Run
+  `manage.py reverify --ids 9446 --apply` (and eventually a deliberate
+  full-board pass) from a checkout with current connector code — not
+  from a stale worktree, per this round's disclosed skip.
+- today-deadlines-rail-counts-openings (high): still unfixed — this
+  round's builder confirmed the worktree predates the feature entirely
+  (crm/today.py, crm/calendar_views.py, crm/utils.py, and the rail's
+  _cockpit.html markup don't exist there) and instead worked out the
+  exact fix for direct application to main: move _OPENING_EVENTS /
+  _firm_date_kind() into crm/utils.py so today.py and calendar_views.py
+  share one definition; add "kind" to _next_deadlines' row dict and gate
+  "urgent" on kind == "deadline" so an opening can't earn the red
+  is-urgent treatment; add an `is-opening` dot class in _cockpit.html and
+  a matching `.activity-dot.is-opening { background: var(--ok) }` rule in
+  _styles.html.
 - firm-eyebrow-two-market-seed (high): e8a8616 relabelled the slugs but
   Firm.regions/tracks is still a us/hk-only seed while the same firm
   pages list roles in London/Paris/Tokyo/Singapore/The Hague — the
   eyebrow's underlying claim, not just its wording, is wrong.
-- myapps-rolling-claim-retracted-elsewhere (medium): My Applications'
-  "Rolling" bucket still asserts "Reviewed as they arrive" — the exact
-  claim the feed retracted this round (retraction is in the feed
-  template's own comment).
+- contact-history-manual-override-debug-note (medium): confirmed live —
+  manual-override history entries still leak an internal debug note.
+  Round 1-10's fix only stripped the raw `column=value` audit prefix
+  (the "worse half"); a follow-on rewrite (scrub_manual_override_notes,
+  commit e97d7ae, pre-existing on main) was proposed for the remaining
+  jargon-laden notes but was never wired in anywhere live — and per this
+  round's confirmation, would not actually fix the problem even if it
+  were.
+- settings-corp-strat-track-structurally-unreachable (medium; split out
+  of the now-fixed settings-track-vocabulary-second-copy): "Corporate
+  Strategy" isn't just mislabeled, it's unreachable under any query — all
+  9 firms tagged tracks=['corp-strat'] have zero live Opportunity rows,
+  so the (sound) hide-zero-count facet rule permanently hides it. Data-
+  coverage gap (no live postings sourced for those 9 firms under this
+  track), not a content fix — needs real connector coverage, not a copy
+  change.
+- network-open-count-drifts-from-opportunities-and-firm-detail (medium,
+  integration finding): Network's per-firm "OPEN" role count silently
+  disagrees with the same firm's count on the Opportunities firm-card
+  carousel and on the firm's own detail page, for several firms at once,
+  live, same session — while other firms agree exactly across all three,
+  ruling out a uniform intentional scope difference.
 - no-deadline-three-phrasings (medium): the null-deadline rename to
   "No date posted" landed in the feed template only; the shared helper
   other surfaces call still returns the old string, so one role reads
   three different ways across surfaces.
-- settings-track-vocabulary-second-copy (medium): Settings hardcodes a
-  second track vocabulary that disagrees with the Opportunities filter on
-  the same slug ("Private Equity" vs. "Private Equity / Credit").
 - touch-floor-stopped-at-the-card (medium): round 12's 44px fix reached
   only the role card; Opportunities' filter console and escape-hatch
   links on the same page are still 14-34px on a coarse pointer.
@@ -206,10 +264,13 @@ on Today's rail). Design: feed card's three per-card controls reach the
   This Device" row has no `for=` wiring to its label, unlike "Weekly
   Email Digest" right above it (301x24 hit area) — effectively untappable
   by its visible label.
-- hsbc-sitemap-title-location (medium): all 23 sitemap-sourced HSBC rows
-  render with an empty location; at least one title still carries a raw
-  location + US ZIP glued on ("New York Investment Banking Graduate NY
-  10001").
+- hsbc-sitemap-title-location (medium, narrowed): code fix merged this
+  round (_split_trailing_postal_code, US state+ZIP or UK postcode only,
+  "never guess" rule intact for anything ambiguous) and a dry-run backfill
+  command confirms it correctly covers 4 of the 23 empty-location HSBC
+  rows (ids 17423, 4743, 1617, 1618) — --apply not yet run. The remaining
+  ~19 rows are genuinely ambiguous slugs (bare numeric codes, truncated
+  fragments) and stay empty by design, not a bug.
 - landing-monogram-contrast (rounds 11+12, low): BlackRock's "BL" badge
   measures 4.32:1 at 11px bold against the product's 4.5:1 floor — a
   fixed-lightness hue picker is the mechanism.
@@ -226,9 +287,6 @@ on Today's rail). Design: feed card's three per-card controls reach the
 - transcript-phrase-is-application-form-chrome (low): the "Transcript"
   fact chip's hover-evidence phrase is sourced from Greenhouse
   application-form field labels, not the posting's own prose.
-- warmest-here-restates-first-list-row (low): the firm page's "Warmest
-  here:" line verbatim-repeats the first row of the warmth-sorted contact
-  list rendered immediately beneath it.
 - stale-display-type-tokens (low): --fs-hero (34px) and its top-of-scale
   neighbor are annotated for surfaces they don't render on; zero live
   usages.
@@ -262,6 +320,15 @@ on Today's rail). Design: feed card's three per-card controls reach the
   not paraphrase or renumber it. If the Record step ever finds a
   recheck entry whose key doesn't match any confirmed finding, treat
   that as its own high-severity open lead, not a row to drop silently.
+  Recurred in round 13 in a milder form: the recheck key
+  "reverify-ids-scoped-backfill-mechanism" (an internal mechanism name
+  cited inside a fix-skip disclosure) didn't match the confirmed
+  finding's own key (bmo-associate-9446-deadline-drift-42-days) — this
+  time traceable because the disclosure explicitly cross-referenced it
+  ("see fixed[] key reverify-ids-scoped-backfill-mechanism"), but Record
+  still had to do that tracing by hand rather than a straight key match.
+  Same rule applies going forward: never assume an unmatched recheck key
+  means nothing to record.
 
 ## Design benchmark standards (for the design lens)
 
