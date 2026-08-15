@@ -5,7 +5,7 @@ No live network: the command module's `verify` import is monkeypatched."""
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from django.core.management import call_command
@@ -17,19 +17,38 @@ from directory.management.commands import reverify as reverify_mod
 from directory.models import Firm, Opportunity, ScrapeRun
 
 
-def _opp(firm, url, *, days_old=10):
+_UNSET = object()
+
+
+def _opp(firm, url, *, days_old=10, deadline=None, deadline_checked_days_old=_UNSET):
+    """`deadline_checked_days_old` defaults to mirroring `days_old` — both
+    fields age together, the pre-split shape existing callers assume. Pass
+    `None` explicitly to build the shape the routine `scrape` pass actually
+    produces: `last_checked` bumped fresh by every list-refetch while
+    `deadline_checked_at` stays NULL, because only `reverify`'s own
+    detail-level check ever moves it."""
     ts = timezone.now() - timedelta(days=days_old)
+    if deadline_checked_days_old is _UNSET:
+        deadline_checked_ts = ts
+    elif deadline_checked_days_old is None:
+        deadline_checked_ts = None
+    else:
+        deadline_checked_ts = timezone.now() - timedelta(days=deadline_checked_days_old)
     o = Opportunity.objects.create(
-        firm=firm, url=url, title="Summer Analyst", bucket="internship", status="open"
+        firm=firm, url=url, title="Summer Analyst", bucket="internship", status="open",
+        deadline=deadline, deadline_precision="day" if deadline else "",
     )
-    Opportunity.objects.filter(pk=o.pk).update(last_checked=ts, last_verified=ts)
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_checked=ts, last_verified=ts, deadline_checked_at=deadline_checked_ts,
+    )
     o.refresh_from_db()
     return o
 
 
-def _result(url, verdict):
+def _result(url, verdict, deadline_dates=None):
     return VerificationResult(
-        provider="greenhouse", url=url, result=verdict, evidence="test", deadline_dates=[]
+        provider="greenhouse", url=url, result=verdict, evidence="test",
+        deadline_dates=deadline_dates or [],
     )
 
 
@@ -84,6 +103,117 @@ def test_reverify_verdicts_update_rows_honestly(monkeypatch):
     assert run.stats["verified_open"] == 1
     assert run.stats["unreachable"] == 1
     assert run.stats["needs_verification"] == 1
+
+
+@pytest.mark.django_db
+def test_reverify_refreshes_a_stale_deadline_on_verified_open(monkeypatch):
+    """PINS A FIXED BUG: a BMO/Workday row whose deadline was frozen at
+    first-ingest (2026-05-24, long past) gets re-confirmed as verified-open
+    every reverify pass without the stale deadline ever moving, because the
+    old code only ever wrote last_checked/last_verified on that verdict. A
+    provider's verify endpoint that reports a fresh deadline_dates entry
+    must be allowed to correct it."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    stale = _opp(firm, "https://bmo.wd3.myworkdayjobs.com/x", deadline=date(2026, 5, 24))
+
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-08-30"]),
+    )
+    call_command("reverify")
+
+    stale.refresh_from_db()
+    assert stale.deadline == date(2026, 8, 30)
+    assert stale.deadline_precision == "day"
+    assert stale.status == "open"
+
+
+@pytest.mark.django_db
+def test_reverify_leaves_deadline_alone_when_the_provider_states_none(monkeypatch):
+    """The honesty contract extends to deadline: a provider whose verify
+    endpoint reports no deadline_dates (Workday tenants with no stated
+    deadline, Lever, an unreachable/undecidable check) must not clear or
+    guess at an existing stored deadline."""
+    firm = Firm.objects.create(slug="acme", name="Acme")
+    dated = _opp(firm, "https://x/no-signal", deadline=date(2026, 5, 24))
+
+    monkeypatch.setattr(reverify_mod, "verify", lambda url: _result(url, "verified-open"))
+    call_command("reverify")
+
+    dated.refresh_from_db()
+    assert dated.deadline == date(2026, 5, 24)
+
+
+@pytest.mark.django_db
+def test_reverify_selects_a_row_the_routine_scrape_keeps_falsely_fresh(monkeypatch):
+    """PINS THE STARVATION BUG: a BMO/Workday row's `last_checked` is bumped
+    to today by every routine `scrape` pass (list endpoint, no deadline
+    field) even though its `deadline` was frozen at first ingest and never
+    actually re-examined. A candidate query keyed on `last_checked` would
+    skip this row forever — it always looks freshly checked — so `reverify`
+    would never reach the one posting whose deadline needs correcting. The
+    fix: candidate selection keys on `deadline_checked_at`, which only this
+    command's own detail-level check moves, so a row with a stale deadline
+    stays a candidate no matter how often the list scrape re-touches it."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    starved = _opp(
+        firm, "https://bmo.wd3.myworkdayjobs.com/x",
+        days_old=0,  # last_checked = today, exactly like today's routine scrape
+        deadline=date(2026, 5, 28),
+        deadline_checked_days_old=None,  # never deep-checked
+    )
+
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-09-07"]),
+    )
+    call_command("reverify")
+
+    starved.refresh_from_db()
+    assert starved.deadline == date(2026, 9, 7)
+    assert starved.deadline_checked_at is not None
+    assert (timezone.now() - starved.deadline_checked_at).total_seconds() < 5
+
+
+@pytest.mark.django_db
+def test_reverify_ids_reaches_a_row_the_queue_would_not_get_to_yet(monkeypatch):
+    """PINS THE FIX for bmo-associate-9446-deadline-drift-42-days: with
+    `deadline_checked_at` NULL catalog-wide (the field was just introduced —
+    nothing had ever run the deep check before), the default oldest-NULL
+    `--limit`-capped queue only reaches a handful of rows per run. A row a
+    live audit has already named and confirmed wrong should not have to wait
+    its turn — `--ids` bypasses the cutoff/`--limit` and checks exactly the
+    named row now, mirroring `enrich_postings --ids`.
+
+    Also proves `--ids` does NOT pull in an unrelated fresh row that would
+    never have been a queue candidate — it is a scoped backfill, not a
+    second general run."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    named = _opp(
+        firm, "https://bmo.wd3.myworkdayjobs.com/named",
+        days_old=0, deadline=date(2026, 7, 24), deadline_checked_days_old=None,
+    )
+    # A fresh, never-audited row that --limit's default ordering would also
+    # eventually reach — --ids must not sweep it in.
+    untouched = _opp(
+        firm, "https://bmo.wd3.myworkdayjobs.com/untouched",
+        days_old=0, deadline=date(2026, 5, 1), deadline_checked_days_old=None,
+    )
+
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-09-04"]),
+    )
+    call_command("reverify", ids=str(named.id))
+
+    named.refresh_from_db()
+    untouched.refresh_from_db()
+    assert named.deadline == date(2026, 9, 4)
+    assert named.deadline_checked_at is not None
+    assert untouched.deadline_checked_at is None  # not swept in by --ids
+
+    run = ScrapeRun.objects.get(connector="reverify")
+    assert run.stats["checked"] == 1
 
 
 @pytest.mark.django_db

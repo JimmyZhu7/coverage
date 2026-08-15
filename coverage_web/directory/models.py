@@ -72,6 +72,15 @@ class Opportunity(models.Model):
     first_seen = models.DateTimeField(auto_now_add=True)
     last_verified = models.DateTimeField(null=True, blank=True)
     last_checked = models.DateTimeField(null=True, blank=True)
+    # When `reverify` last asked the provider's own verify endpoint about
+    # THIS row, regardless of verdict. Deliberately separate from
+    # `last_checked`, which the routine `scrape` list-refetch also bumps on
+    # every successful pass for every provider -- including ones whose list
+    # endpoint carries no deadline field at all (Workday's `fetch()`, by its
+    # own docstring). A firm scraped often would never go `last_checked`-
+    # stale, so a staleness query keyed on it would starve those rows
+    # forever. Only `reverify`'s own detail-level check moves this field.
+    deadline_checked_at = models.DateTimeField(null=True, blank=True)
     # When this posting was last observed to CLOSE (open -> closed), cleared
     # again on reopen, so `status == "closed"` iff this is set. The scraper
     # had been flipping rows closed daily and recording nothing — every cycle
