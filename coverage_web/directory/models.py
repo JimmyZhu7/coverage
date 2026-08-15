@@ -88,6 +88,21 @@ class Opportunity(models.Model):
     first_seen = models.DateTimeField(auto_now_add=True)
     last_verified = models.DateTimeField(null=True, blank=True)
     last_checked = models.DateTimeField(null=True, blank=True)
+    # When a DETAIL-level check last happened for this row — the kind that
+    # can actually see a fresh deadline (`reverify`'s provider verify() call).
+    # Deliberately separate from `last_checked`, which the routine `scrape`
+    # list-refetch also bumps on every successful pass even for providers
+    # whose list endpoint carries no deadline field at all (Workday's
+    # `fetch()` docstring says so explicitly). Without the split, a firm
+    # scraped on a tighter cadence than reverify's `--max-age-days` cutoff
+    # never goes `last_checked`-stale, so reverify (which walks rows ordered
+    # by staleness) never selects it as a candidate even though its
+    # `deadline` was frozen at first ingest and never revisited — the
+    # posting can sit weeks past its real deadline while `last_verified`
+    # reads as today. NULL means "never deep-checked" and is treated as the
+    # oldest possible value so brand-new and never-reverified rows surface
+    # first.
+    deadline_checked_at = models.DateTimeField(null=True, blank=True)
     # When this posting was last observed to CLOSE (open -> closed), cleared
     # again on reopen, so `status == "closed"` iff this is set. The scraper
     # had been flipping rows closed daily and recording nothing — every cycle
