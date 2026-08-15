@@ -368,8 +368,20 @@ def test_follow_up_lane_sorts_longest_silent_first(client):
         thread_state="no_reply",
     )
     from crm.models import Touch
+    # Both offsets are CALENDAR days; the follow-up threshold
+    # (`followup_after_business_days`, 6) is in BUSINESS days, and the two
+    # diverge by weekday. 8 calendar days is 6 business days Mon-Fri but only
+    # 5 on Sat/Sun — below the window — so an 8 here made this test pass five
+    # days a week and fail on the weekend (seen on Sat 2026-08-15, with the
+    # whole Follow Up lane empty rather than merely misordered). 10 is the
+    # smallest offset that clears 6 business days on EVERY weekday, and still
+    # sits under the 10-business-day park window, so this test measures the
+    # ordering it is named for rather than the day it runs on. Same fix, same
+    # reason as test_today.test_within_a_class_the_longest_silent_goes_first;
+    # the arithmetic itself is pinned by
+    # test_cadence.test_ten_calendar_days_is_the_weekday_proof_followup_offset.
     Touch.all_objects.create(user=user, contact=barely, kind="outreach",
-                             channel="email", ts=tz.now() - timedelta(days=8))
+                             channel="email", ts=tz.now() - timedelta(days=10))
     Touch.all_objects.create(user=user, contact=long_overdue, kind="outreach",
                              channel="email", ts=tz.now() - timedelta(days=40))
 

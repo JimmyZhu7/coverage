@@ -504,6 +504,66 @@ def test_followup_default_clears_a_full_calendar_week():
     assert (date(2026, 7, 21) - date(2026, 7, 13)).days == 8
 
 
+def test_ten_calendar_days_is_the_weekday_proof_followup_offset():
+    """A cold contact silent for 10 CALENDAR days is due a follow-up on every
+    day of the week; at 8 or 9 it is not.
+
+    This is the arithmetic every web-layer test rests on and the one nobody
+    can see from the fixture. Those tests run against the real wall clock —
+    `crm.today._build_actions` reads `timezone.now()` and has no `as_of` seam
+    — so they express staleness as a calendar-day offset while the engine
+    measures it in business days. The gap is not constant: a fixed calendar
+    offset buys FEWER business days when the span swallows an extra weekend,
+    which is exactly what happens when the suite runs on a Saturday or Sunday.
+    An 8-day offset is 6 business days Mon-Fri and 5 on Sat/Sun, so a fixture
+    built on 8 silently stops being overdue two days in seven, and the test
+    above it fails for a reason that has nothing to do with what it asserts
+    (twice now: test_today on Sat 2026-08-01, test_coverage_gaps on Sat
+    2026-08-15).
+
+    10 is the fix because a 10-day span is one full week plus 3 days, so it
+    contains 2, 3, or 4 weekend days and therefore never fewer than 6 business
+    days, whatever weekday it ends on. 9 can still land on 5. Asserted here,
+    once, over a full week of as-of days, so a fixture author can take the
+    number on trust and a future change to `followup_after_business_days`
+    breaks THIS test — which explains itself — rather than a distant one about
+    lane ordering.
+    """
+    # A full week of as-of days, so no weekday alignment goes unchecked.
+    week = [AS_OF + timedelta(days=i) for i in range(7)]
+    fires_on: dict[int, list[str]] = {}
+    for days_ago in (8, 9, 10):
+        for as_of in week:
+            c = contact(1)
+            touches = [touch(1, "outreach", as_of - timedelta(days=days_ago))]
+            actions = cadence.due_actions([c], touches, [], as_of=as_of, firms=FIRMS)
+            if "follow_up" in kinds_for(actions, 1):
+                fires_on.setdefault(days_ago, []).append(as_of.strftime("%a"))
+
+    assert fires_on[10] == ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"], (
+        "10 calendar days must be overdue on every day of the week — that is "
+        f"the whole reason fixtures use it; got {fires_on[10]}"
+    )
+    # The two that are NOT safe, and precisely where each one drops out. An
+    # 8-day fixture is quietly a weekday-only fixture; 9 survives Saturday and
+    # dies on Sunday. Spelled out rather than merely "< 7" so a future change
+    # to the window shows up as a specific, readable diff.
+    assert sorted(fires_on[8]) == sorted(["Wed", "Thu", "Fri", "Mon", "Tue"]), (
+        f"8 calendar days must miss BOTH weekend days; got {fires_on[8]}"
+    )
+    assert "Sun" not in fires_on[9] and len(fires_on[9]) == 6, (
+        f"9 calendar days must miss Sunday and nothing else; got {fires_on[9]}"
+    )
+
+    # And the span arithmetic the paragraph above argues from, checked
+    # directly rather than inferred from the branch behaviour.
+    worst = min(
+        cadence.business_days_since(d - timedelta(days=10), d)
+        for d in (date(2026, 7, 20) + timedelta(days=i) for i in range(7))
+    )
+    assert worst == 6, f"10 calendar days must never buy fewer than 6 business days, got {worst}"
+
+
 # --------------------------------------------------------------------------
 # Backward planner: tasks_from_change.
 # --------------------------------------------------------------------------
