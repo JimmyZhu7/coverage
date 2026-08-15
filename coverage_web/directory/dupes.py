@@ -331,9 +331,24 @@ def _survivor_rank(row: Any, sticky_ids: frozenset) -> tuple:
        actionable fact the card carries.
     3. A copy with a location, over one without. Same reason, weaker fact —
        tal.net's second pool routinely drops the city its first pool states.
-    4. The one seen first. It is the row that has been on the board longest,
+    4. A copy with a STATED sponsorship ("yes" or "no"), over one that reads
+       "unknown". views._role_facts only ever renders a sponsorship chip for
+       "yes"/"no" — "unknown" draws no chip at all — so when the tie survives
+       rules 1-3 on an unstated field, picking the "unknown" copy silently
+       erases a fact the OTHER copy actually carried. Confirmed live at SIG:
+       'Quantitative Systematic Trading Internship - PhD: Summer 2027' had
+       id 9100 (sponsorship=unknown) and id 9102 (sponsorship=yes, iCIMS job
+       11084) tied on every earlier rule, and the old order fell through to
+       "seen first" and kept the unknown copy — job 11084's confirmed
+       sponsorship=yes then appeared nowhere on the rendered page. Same
+       pattern on 'Quantitative Research Internship - PhD: Summer 2027' (kept
+       9066/unknown over 9068/yes). This rule only breaks a tie among
+       genuinely identical postings; two copies that STATE different answers
+       ("yes" vs "no") are a data conflict the deadline-style veto would need
+       to catch, not something this ranking should paper over by picking one.
+    5. The one seen first. It is the row that has been on the board longest,
        so it is the one any link or memory points at.
-    5. Lowest id, purely so the result is total and never depends on input
+    6. Lowest id, purely so the result is total and never depends on input
        order.
     """
     first_seen = getattr(row, "first_seen", None)
@@ -341,6 +356,7 @@ def _survivor_rank(row: Any, sticky_ids: frozenset) -> tuple:
         0 if getattr(row, "id", None) in sticky_ids else 1,
         0 if getattr(row, "deadline", None) else 1,
         0 if (getattr(row, "location", "") or "").strip() else 1,
+        0 if (getattr(row, "sponsorship", "") or "") in ("yes", "no") else 1,
         (0, first_seen) if first_seen is not None else (1, None),
         getattr(row, "id", 0) or 0,
     )

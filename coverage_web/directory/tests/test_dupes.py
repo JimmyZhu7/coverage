@@ -270,7 +270,7 @@ class _Row:
     function over rows, not over the ORM."""
 
     def __init__(self, id, firm_id=1, title="Summer Analyst", location="London",
-                 deadline=None, first_seen=None, cohort=""):
+                 deadline=None, first_seen=None, cohort="", sponsorship=""):
         self.id = id
         self.firm_id = firm_id
         self.title = title
@@ -278,6 +278,7 @@ class _Row:
         self.deadline = deadline
         self.first_seen = first_seen or datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
         self.cohort = cohort
+        self.sponsorship = sponsorship
 
 
 class TestNormalizeLabel:
@@ -670,6 +671,32 @@ class TestFoldDuplicates:
         assert folded == 1
         assert kept[0].id == 2
 
+    def test_stated_sponsorship_beats_unknown(self):
+        """Confirmed live at SIG: 'Quantitative Systematic Trading Internship
+        - PhD: Summer 2027' had id 9100 (sponsorship=unknown) and id 9102
+        (sponsorship=yes, iCIMS job 11084) tied on every earlier rule, so the
+        old ranking fell straight to 'seen first' and kept the unknown copy —
+        job 11084's confirmed sponsorship=yes fact then rendered nowhere on
+        the page, because views._role_facts only emits a chip for 'yes'/'no',
+        never 'unknown'."""
+        kept, folded = fold_duplicates([
+            _Row(9100, sponsorship="unknown",
+                 first_seen=datetime(2026, 1, 1, tzinfo=dt_timezone.utc)),
+            _Row(9102, sponsorship="yes",
+                 first_seen=datetime(2026, 1, 2, tzinfo=dt_timezone.utc)),
+        ])
+        assert folded == 1
+        assert [r.id for r in kept] == [9102]
+
+    def test_stated_no_sponsorship_also_beats_unknown(self):
+        """'Does not sponsor' is as actionable a stated fact as 'sponsors' —
+        both must outrank an unstated 'unknown'."""
+        kept, _ = fold_duplicates([
+            _Row(1, sponsorship="unknown"),
+            _Row(2, sponsorship="no"),
+        ])
+        assert kept[0].id == 2
+
     def test_older_first_seen_wins_when_otherwise_equal(self):
         older = _Row(1, first_seen=datetime(2026, 1, 1, tzinfo=dt_timezone.utc))
         newer = _Row(2, first_seen=datetime(2026, 6, 1, tzinfo=dt_timezone.utc))
@@ -816,3 +843,26 @@ class TestFirmDetailFoldsDuplicates:
         assert body.count("Global Investment Research") == 2
         assert "170880_GS_CAMPUS" in body
         assert "150658_GS_CAMPUS" in body
+
+    def test_sponsorship_yes_survives_the_fold_over_unknown(self, client):
+        """The sponsorship tie-break in `_survivor_rank`: reproduces the
+        confirmed live SIG shape (iCIMS jobs 10821/unknown and 11084/yes for
+        the identical PhD internship title, no deadline, no distinguishing
+        location) and asserts the rendered card carries the sponsorship=yes
+        job id rather than silently discarding it in favor of 'unknown'."""
+        firm = Firm.objects.create(slug="sig", name="SIG", status="active")
+        Opportunity.objects.create(
+            firm=firm, title="Quantitative Systematic Trading Internship - PhD: Summer 2027",
+            location="", bucket="internship", status="open", sponsorship="unknown",
+            url="https://careers-sig.icims.com/jobs/10821/x/job",
+        )
+        Opportunity.objects.create(
+            firm=firm, title="Quantitative Systematic Trading Internship - PhD: Summer 2027",
+            location="", bucket="internship", status="open", sponsorship="yes",
+            url="https://careers-sig.icims.com/jobs/11084/x/job",
+        )
+
+        res = client.get("/firms/sig/?role=all")
+        body = res.content.decode()
+        assert "jobs/11084" in body
+        assert "jobs/10821" not in body

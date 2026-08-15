@@ -3181,8 +3181,9 @@ def _tracked_rows(user):
     If a student tracked both duplicate addresses at different funnel stages
     (applied on one, still saved on the other), the stage with real progress
     is the one worth keeping — fold_duplicates' own tie-break (deadline, then
-    location, then first_seen, then id) knows nothing about funnel stage, so
-    the progressed opportunity is marked sticky to win the fold."""
+    location, then sponsorship, then first_seen, then id) knows nothing about
+    funnel stage, so the progressed opportunity is marked sticky to win the
+    fold."""
     from analytics.models import UserOpportunity
 
     rows = list(
