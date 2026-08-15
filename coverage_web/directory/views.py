@@ -42,6 +42,7 @@ from crm.models import Contact, UserFirm
 from directory.classify import (
     BUCKET_LABELS, ENTRY_LEVEL, INSIGHT, INTERNSHIP, OTHER, REGION_LABELS,
     REGION_ORDER, TARGET_BUCKETS, derive_class_year,
+    TRACK_LABELS as _TRACK_LABELS_BASE,
 )
 # The one definition of "closing soon" — see deadlines.py for why it isn't
 # spelled out at each call site (and for the crm/views.py follow-up).
@@ -96,18 +97,18 @@ FIRM_CATEGORIES = {
 }
 
 # Human labels for the firms.yaml track slugs. Raw slugs ("ib", "corp-strat")
-# read as internal shorthand; the filter is public-facing.
+# read as internal shorthand; the filter is public-facing. The six
+# preference-eligible tracks are classify.TRACK_LABELS — the SAME dict
+# accounts/forms.py's Settings checkboxes read — so the two pages can never
+# disagree about a slug's label again (they used to: Settings said "Private
+# Equity", this filter said "Private Equity / Credit", both for "pe").
 TRACK_LABELS = {
-    "ib": "Investment Banking",
-    "st": "Sales & Trading",
-    "pe": "Private Equity / Credit",
-    "am": "Asset Management",
-    "consulting": "Consulting",
-    "corp-strat": "Corporate Strategy",
+    **_TRACK_LABELS_BASE,
     # MLT and SEO Career, the two firms on this track, are not employers —
     # they are access programmes that place students INTO the firms above.
     # The slug had no label at all, which is why /firms/mlt/ printed the bare
-    # word PIPELINE where every other firm printed a desk.
+    # word PIPELINE where every other firm printed a desk. Not a preference
+    # option (classify.TRACKED_TRACKS excludes it) — display-only here.
     "pipeline": "Career Access Programme",
 }
 

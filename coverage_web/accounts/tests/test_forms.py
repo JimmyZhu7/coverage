@@ -9,8 +9,10 @@ from __future__ import annotations
 import pytest
 from django.contrib.auth import get_user_model
 
-from accounts.forms import REGION_CHOICES, ProfileForm
-from directory.classify import REGION_LABELS, TRACKED_REGIONS
+from accounts.forms import REGION_CHOICES, TRACK_CHOICES, ProfileForm
+from directory.classify import (
+    REGION_LABELS, TRACKED_REGIONS, TRACK_LABELS, TRACKED_TRACKS,
+)
 from directory.recommend import cycle_choices
 
 User = get_user_model()
@@ -44,6 +46,30 @@ def test_a_student_can_now_state_a_preference_for_every_feed_market():
     couldn't state a preference for while REGION_CHOICES was hk/us-only."""
     codes = {code for code, _ in REGION_CHOICES}
     assert {"eu", "sg", "cn", "jp"} <= codes
+
+
+# ---------------------------------------------------------------------------
+# TRACK_CHOICES must be the SAME vocabulary directory/views.py's Opportunities
+# track filter uses (classify.TRACK_LABELS), not an independently hardcoded
+# copy. Settings used to call the "pe" slug "Private Equity" while the filter
+# called it "Private Equity / Credit" — same slug, two labels, on two pages a
+# student reads back to back.
+# ---------------------------------------------------------------------------
+
+def test_track_choices_matches_the_filters_vocabulary():
+    assert [code for code, _ in TRACK_CHOICES] == list(TRACKED_TRACKS)
+    assert len(TRACK_CHOICES) == 6
+    for code, label in TRACK_CHOICES:
+        assert label == TRACK_LABELS[code]
+
+
+def test_track_choices_calls_pe_private_equity_credit_not_just_private_equity():
+    """The firms actually tagged "pe" (Apollo, Ares, Blue Owl, Golub Capital,
+    HPS, Oaktree, Sixth Street among them) include credit shops, not just
+    buyout funds — the fuller label is the accurate one, and it must be the
+    SAME label the Opportunities filter shows for the identical slug."""
+    labels = dict(TRACK_CHOICES)
+    assert labels["pe"] == "Private Equity / Credit"
 
 
 # ---------------------------------------------------------------------------
