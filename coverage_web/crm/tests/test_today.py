@@ -27,6 +27,7 @@ from crm.views import (
     TODAY_PLAN_MIN,
     _cockpit_context,
     _daily_cap,
+    _dashboard_context,
     _workdays_left,
 )
 from directory.models import Firm, FirmDate
@@ -882,6 +883,63 @@ def test_an_empty_funnel_says_so_in_words_rather_than_drawing_zeroes(client):
     body = _login_and_get(client, user)
     assert "Nothing submitted yet." in body
     assert "0 › 0 › 0" not in body
+
+
+# ---------------------------------------------------------------------------
+# The funnel names its stages the way the rest of the product does.
+#
+# Live, /app/ read "2 › 0 › 0" under "Submitted › Interview › Offer" while
+# /opportunities/mine/ showed "2 Applied · 0 Interviewing" for the identical
+# rows — same field, same value, same count, two vocabularies. The ribbon's
+# label was a hardcoded literal spelling the raw `applied_status` keys.
+# ---------------------------------------------------------------------------
+def _tracked(user, status):
+    from analytics.models import UserOpportunity
+    from directory.models import Opportunity
+
+    firm = Firm.objects.get_or_create(slug="ec", defaults={"name": "Evercore"})[0]
+    opp = Opportunity.objects.create(
+        firm=firm, url=f"https://example.test/{status}", title=f"SA {status}",
+        bucket="internship", status="open",
+    )
+    UserOpportunity.all_objects.create(
+        user=user, opportunity=opp, applied_status=status)
+
+
+def test_the_funnel_label_uses_the_products_stage_names(client):
+    """A populated funnel, so the label actually renders."""
+    user = _user(weekly_touch_goal=14)
+    _tracked(user, "submitted")
+    body = _login_and_get(client, user)
+    assert "Applied › Interviewing › Offer" in body
+    assert "Submitted › Interview › Offer" not in body
+
+
+def test_the_funnel_label_is_read_from_the_one_stage_vocabulary(client):
+    """Not merely re-spelled: the label is BUILT from `_STAGE_LABELS`, the
+    same map My Applications' stage tiles and the feed's track pill read, so
+    renaming a stage there renames it here and the two cannot drift apart."""
+    from directory.views import _FUNNEL_STATES, _STAGE_LABELS
+
+    user = _user(weekly_touch_goal=14)
+    _tracked(user, "submitted")
+    expected = " › ".join(_STAGE_LABELS[s] for s in _FUNNEL_STATES)
+
+    ctx = _dashboard_context(user)
+    assert ctx["dash"]["funnel_label"] == expected
+    assert expected in _login_and_get(client, user)
+
+
+def test_the_funnel_counts_still_match_the_stage_the_label_names(client):
+    """The wording changed; the arithmetic must not. Two submitted rows have
+    to reach the ribbon as 2, the number My Applications' Applied tile shows
+    for the same user."""
+    user = _user(weekly_touch_goal=14)
+    _tracked(user, "submitted")
+    _tracked(user, "interview")
+    ctx = _dashboard_context(user)
+    assert ctx["dash"]["funnel"] == {"submitted": 1, "interview": 1, "offer": 0}
+    assert "1 › 1 › 0" in _login_and_get(client, user)
 
 
 # ---------------------------------------------------------------------------

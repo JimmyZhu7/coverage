@@ -132,7 +132,14 @@
       {% if dash.funnel.submitted or dash.funnel.interview or dash.funnel.offer %}
         <span class="ribbon-stat ribbon-funnel kin-reveal" style="--i: 3">
           <span class="ribbon-num">{{ dash.funnel.submitted }} › {{ dash.funnel.interview }} › {{ dash.funnel.offer }}</span>
-          <span class="ribbon-lbl">Submitted › Interview › Offer</span>
+          {% comment %}
+          The stage names come from directory.views._STAGE_LABELS, not from
+          this template. Hardcoded here they read "Submitted › Interview ›
+          Offer" — the raw `applied_status` spellings — while My Applications,
+          its stage dropdown and the feed's track pill all called the same two
+          rows "Applied" and "Interviewing". One vocabulary, one place.
+          {% endcomment %}
+          <span class="ribbon-lbl">{{ dash.funnel_label }}</span>
         </span>
       {% else %}
         <span class="ribbon-stat ribbon-funnel is-empty kin-reveal" style="--i: 3">
