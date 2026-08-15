@@ -4,12 +4,21 @@ One role card's track control, swapped in place via htmx. `r` needs `id` and
 inherited from the hx-headers on the .firmcols ancestor. The funnel stages are
 shown as a read-only chip here — they're advanced on the My Applications page,
 so a stray feed click can't un-apply someone.
+
+Every role in "Picked for you" is also rendered again under its own firm
+column (see _results.html), so this partial can render twice for the same
+`r.id` on one page load. `id="track-{{ r.id }}"` is therefore NOT unique in
+the DOM — kept only as a labeling hook, never as an htmx target. Both
+Save/Saved buttons below target `closest .track` (self-scoped, like the
+"Not for me" button's `closest .rolecard`) so a click always swaps the card
+it was actually clicked on, not whichever same-id copy happens to be first
+in document order.
 {% endcomment %}
 <span class="track" id="track-{{ r.id }}">
   {% if r.track_status is None %}
     <button type="button" class="track-btn"
             hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "saved"}'
-            hx-target="#track-{{ r.id }}" hx-swap="outerHTML"
+            hx-target="closest .track" hx-swap="outerHTML"
             title="Save this role">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11.5l-3.5 2 .9-3.9L2.5 6.9l4-.35L8 3l1.5 3.55 4 .35-2.9 2.7.9 3.9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       Save
@@ -24,7 +33,7 @@ so a stray feed click can't un-apply someone.
   {% elif r.track_status == "saved" %}
     <button type="button" class="track-btn is-saved"
             hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "clear"}'
-            hx-target="#track-{{ r.id }}" hx-swap="outerHTML"
+            hx-target="closest .track" hx-swap="outerHTML"
             title="Remove from saved">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11.5l-3.5 2 .9-3.9L2.5 6.9l4-.35L8 3l1.5 3.55 4 .35-2.9 2.7.9 3.9z" fill="currentColor"/></svg>
       Saved
