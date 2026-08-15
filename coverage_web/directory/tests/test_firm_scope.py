@@ -144,3 +144,103 @@ def test_a_genuinely_empty_firm_still_reads_as_empty(client):
     firm = _firm(slug="ms", name="Morgan Stanley")
     body = _page(client, firm)
     assert "Nothing open right now." in body
+
+
+# ---------------------------------------------------------------------------
+# 6. The eyebrow speaks the product's vocabulary, not firms.yaml's
+#
+# Live, the line above the firm's name joined the raw slug arrays under
+# .pagehead-eyebrow's `text-transform: uppercase`: /firms/hsbc/ "HK · IB",
+# /firms/bofa/ "US · IB, ST", /firms/alibaba/ "CORP-STRAT", /firms/mlt/
+# "US · PIPELINE". The Opportunities facets spell the same concepts "Hong
+# Kong", "Investment Banking", "Corporate Strategy" from the very same maps.
+# ---------------------------------------------------------------------------
+def _eyebrow(client, firm):
+    """The eyebrow as a READER sees it — entities resolved, tags stripped."""
+    import html
+    import re
+    m = re.search(r'<p class="pagehead-eyebrow">(.*?)</p>',
+                  _page(client, firm), re.S)
+    if not m:
+        return None
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).split())
+
+
+def test_the_eyebrow_labels_both_halves(client):
+    firm = _firm(slug="hsbc", name="HSBC")
+    firm.regions, firm.tracks = ["hk"], ["ib"]
+    firm.save()
+    assert _eyebrow(client, firm) == "Hong Kong · Investment Banking"
+
+
+def test_a_multi_track_firm_labels_every_track(client):
+    """bofa's live shape. `st` was the mildest instance and still had three
+    spellings in the codebase — TRACK_LABELS "Sales &amp; Trading",
+    _CYCLE_TRACKS "S&amp;T", and this page's bare ST."""
+    firm = _firm(slug="bofa", name="Bank of America")
+    firm.regions, firm.tracks = ["us"], ["ib", "st"]
+    firm.save()
+    assert _eyebrow(client, firm) == (
+        "United States · Investment Banking, Sales & Trading")
+
+
+def test_the_hyphenated_slug_is_the_worst_case_and_is_covered(client):
+    """`corp-strat` reads as neither a word nor an abbreviation."""
+    firm = _firm(slug="alibaba", name="Alibaba")
+    firm.regions, firm.tracks = ["hk"], ["corp-strat"]
+    firm.save()
+    assert _eyebrow(client, firm) == "Hong Kong · Corporate Strategy"
+
+
+def test_the_track_that_had_no_label_at_all_now_has_one(client):
+    """`pipeline` (mlt, seo-career) was absent from TRACK_LABELS, so applying
+    the existing maps and nothing else would have left PIPELINE rendering."""
+    firm = _firm(slug="mlt", name="MLT")
+    firm.regions, firm.tracks = ["us"], ["pipeline"]
+    firm.save()
+    eyebrow = _eyebrow(client, firm)
+    assert eyebrow == "United States · Career Access Programme"
+    assert "pipeline" not in eyebrow.lower()
+
+
+def test_a_region_less_firm_renders_the_track_half_alone(client):
+    """39 of 119 firms carry no region. The separator must not strand."""
+    firm = _firm(slug="akuna", name="Akuna Capital")
+    firm.regions, firm.tracks = [], ["st"]
+    firm.save()
+    assert _eyebrow(client, firm) == "Sales & Trading"
+
+
+def test_a_firm_with_neither_renders_an_empty_eyebrow(client):
+    firm = _firm(slug="none", name="Nowhere LLP")
+    assert _eyebrow(client, firm) == ""
+
+
+def test_every_slug_the_live_data_holds_has_a_label(client):
+    """The guard that stops this regressing: a track or region added to
+    firms.yaml without a label would silently print raw again, exactly as
+    `pipeline` did. Asserted over the real vocabularies, so adding a slug to
+    either map's domain without a label fails here."""
+    from directory.classify import REGION_LABELS
+    from directory.views import TRACK_LABELS
+
+    for slug in ("hk", "us"):
+        assert slug in REGION_LABELS
+    for slug in ("ib", "st", "am", "pe", "corp-strat", "consulting", "pipeline"):
+        assert TRACK_LABELS.get(slug), f"track {slug!r} has no human label"
+
+
+def test_the_eyebrow_reads_the_same_maps_the_feed_facets_do(client):
+    """Not a parallel copy of the words: the page renders the map's values."""
+    from directory.views import TRACK_LABELS
+
+    firm = _firm(slug="gs", name="Goldman Sachs")
+    firm.regions, firm.tracks = ["us", "hk"], ["ib", "st"]
+    firm.save()
+    eyebrow = _eyebrow(client, firm)
+    assert TRACK_LABELS["ib"] in eyebrow and TRACK_LABELS["st"] in eyebrow
+    # Hong Kong first: the stored array order is arbitrary, so each half is
+    # ordered the way its own facet lists it — REGION_ORDER for markets,
+    # alphabetical by label for tracks.
+    assert eyebrow == (
+        "Hong Kong, United States · Investment Banking, Sales & Trading")

@@ -104,7 +104,33 @@ TRACK_LABELS = {
     "am": "Asset Management",
     "consulting": "Consulting",
     "corp-strat": "Corporate Strategy",
+    # MLT and SEO Career, the two firms on this track, are not employers —
+    # they are access programmes that place students INTO the firms above.
+    # The slug had no label at all, which is why /firms/mlt/ printed the bare
+    # word PIPELINE where every other firm printed a desk.
+    "pipeline": "Career Access Programme",
 }
+
+
+def _labelled(slugs, labels: dict[str, str], *, by_label: bool = False) -> list[str]:
+    """Raw slugs through a label map, deduped, in that facet's own order.
+
+    `by_label` picks WHICH order, because the two facets do not share one:
+    `_region_facet` walks REGION_ORDER (hk before us), `_track_facet` sorts
+    alphabetically by label. A firm's stored array order is arbitrary, so
+    matching each facet is what makes the eyebrow and the filter agree.
+
+    Falls back to the slug when the map has no entry, so a track added to
+    firms.yaml before its label lands degrades to the old behaviour rather
+    than vanishing — but every slug the live data holds IS mapped, and
+    `test_firm_scope` fails the build if a new one is not.
+    """
+    unique = list(dict.fromkeys(s for s in (slugs or []) if s))
+    if by_label:
+        return sorted((labels.get(s, s) for s in unique), key=str.casefold)
+    order = {key: i for i, key in enumerate(labels)}
+    unique.sort(key=lambda s: (order.get(s, len(order)), s))
+    return [labels.get(s, s) for s in unique]
 
 # EVENT_LABELS (the firm_dates event vocabulary) now lives in
 # directory/timeline.py, shared between the firm-detail table and the
@@ -2623,6 +2649,16 @@ def firm_detail(request, slug):
     cards = [_card(o, now=now, today=today) for o in opps]
     context = {
         "firm": firm,
+        # The eyebrow used to `join` firm.regions and firm.tracks raw, under a
+        # `text-transform: uppercase`, so /firms/hsbc/ said "HK · IB" and
+        # /firms/alibaba/ said "CORP-STRAT" — a hyphenated internal slug that
+        # does not read as an abbreviation of anything. `pipeline` had no
+        # label in TRACK_LABELS at all. Meanwhile the Opportunities facets,
+        # built from the same two maps, spell them "Hong Kong" and "Corporate
+        # Strategy". views.py:98 already states the position: raw slugs read
+        # as internal shorthand and this page is public-facing.
+        "eyebrow_regions": _labelled(firm.regions, REGION_LABELS),
+        "eyebrow_tracks": _labelled(firm.tracks, TRACK_LABELS, by_label=True),
         "cards": cards,
         "timeline": _timeline(firm, today=today),
         "total": len(cards),
