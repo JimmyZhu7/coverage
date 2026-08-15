@@ -10,12 +10,27 @@ board still returns, and its closed-detection catches postings that vanish
 from a *successfully fetched* board — but a posting can also die in ways a
 list fetch never shows (URL 404s while the board hides it, a board that has
 rotated away, a firm whose fetch keeps failing). `reverify` walks the open
-rows whose `last_checked` is oldest and asks the provider's own
-verify endpoint, one URL at a time:
+rows whose `deadline_checked_at` is oldest (NULL first) and asks the
+provider's own verify endpoint, one URL at a time:
 
-- "verified-open"       -> stamp last_verified + last_checked (fresh again),
-                           and refresh `deadline` from the verify result's
-                           own `deadline_dates` when it reports one -- a
+`deadline_checked_at`, not `last_checked`, drives candidate selection —
+deliberately. `scrape`'s routine list-refetch bumps `last_checked` on every
+successful pass for EVERY provider, including ones whose list endpoint
+carries no deadline field at all (Workday's `fetch()`, by its own
+docstring). A firm scraped more often than this command's `--max-age-days`
+cutoff would therefore never go `last_checked`-stale, so a candidate query
+keyed on it would starve those rows forever — `reverify` running on a
+schedule would still never reach the one posting whose `deadline` has sat
+frozen since first ingest while `last_verified` reads as today. Only this
+command's own detail-level check moves `deadline_checked_at`, so the cutoff
+means what it says.
+
+Every branch below stamps `last_checked` + `deadline_checked_at` — a check
+happened this pass either way, and both fields exist to mean exactly that.
+
+- "verified-open"       -> also stamp last_verified (fresh again), and
+                           refresh `deadline` from the verify result's own
+                           `deadline_dates` when it reports one -- a
                            provider's verify endpoint is read fresh every
                            pass, so it is the one place a stale `deadline`
                            (set once at first ingest, never revisited by
@@ -23,12 +38,12 @@ verify endpoint, one URL at a time:
                            whose list API carries no deadline field, e.g.
                            Workday) gets to be corrected once the firm bakes
                            an updated one into the posting.
-- "closed"              -> status="closed" (with last_checked)
-- "unreachable"         -> stamp last_checked only — an error is never
-                           evidence of life OR death (same rule as ingest's
-                           failed-board guard)
-- "needs-verification"  -> stamp last_checked only; the URL doesn't carry
-                           enough to decide deterministically
+- "closed"              -> status="closed"
+- "unreachable"         -> nothing else — an error is never evidence of
+                           life OR death (same rule as ingest's failed-board
+                           guard)
+- "needs-verification"  -> nothing else; the URL doesn't carry enough to
+                           decide deterministically
 
 The honesty contract: `last_verified` moves ONLY on a positive liveness
 signal. The card's "Verified N Days Ago" pill therefore never lies.
@@ -44,6 +59,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand
+from django.db.models import F, Q
 from django.utils import timezone
 
 from coverage_connectors import verify
@@ -84,8 +100,8 @@ class Command(BaseCommand):
 
         candidates = list(
             Opportunity.objects.filter(status="open")
-            .filter(last_checked__lt=cutoff)
-            .order_by("last_checked")[: opts["limit"]]
+            .filter(Q(deadline_checked_at__isnull=True) | Q(deadline_checked_at__lt=cutoff))
+            .order_by(F("deadline_checked_at").asc(nulls_first=True))[: opts["limit"]]
         )
         if not candidates:
             self.stdout.write("Nothing stale enough to re-check.")
@@ -112,9 +128,16 @@ class Command(BaseCommand):
             if opts["dry_run"]:
                 continue
             opp.last_checked = now
+            # A detail-level check happened this pass regardless of verdict —
+            # this is the ONLY thing that should ever move this field (see
+            # module docstring). Stamping it unconditionally here is what
+            # lets a genuinely-unreachable or undecidable row age out of the
+            # next run's candidates too, instead of being retried forever.
+            opp.deadline_checked_at = now
+            update_fields = ["last_checked", "deadline_checked_at"]
             if verdict == "verified-open":
                 opp.last_verified = now
-                update_fields = ["last_checked", "last_verified"]
+                update_fields.append("last_verified")
                 fresh = _fresh_deadline(result.deadline_dates) if result is not None else None
                 if fresh is not None and fresh != opp.deadline:
                     opp.deadline = fresh
@@ -124,11 +147,11 @@ class Command(BaseCommand):
             elif verdict == "closed":
                 opp.status = "closed"
                 opp.closed_at = now
-                opp.save(update_fields=["last_checked", "status", "closed_at"])
+                opp.save(update_fields=update_fields + ["status", "closed_at"])
             else:
                 # unreachable / needs-verification: we looked, we can't say —
                 # last_verified deliberately does NOT move.
-                opp.save(update_fields=["last_checked"])
+                opp.save(update_fields=update_fields)
 
         run.finished = timezone.now()
         run.stats = stats
