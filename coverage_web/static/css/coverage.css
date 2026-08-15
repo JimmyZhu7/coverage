@@ -1519,6 +1519,12 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   border: 1px solid var(--stale-l); border-radius: 8px;
   background: var(--stale-s); color: var(--stale-t);
   font-size: var(--fs-xs); font-weight: var(--w-med); }
+/* Closed is not "can't currently vouch for this" (the amber .drawer-caution
+   above) — it's a confirmed fact, so it gets the --danger tokens the rest of
+   the product already uses for definite bad news (.deadline.past, .fact-wall)
+   rather than the "uncertain" amber. */
+.drawer-caution.is-closed { border-color: var(--danger-line);
+  background: var(--danger-soft); color: var(--danger); }
 /* Sticky, so the way out is always on screen in a 4,000-character read.
    The negative side margins pull it to the scroller's edges (the scroller
    has horizontal padding) and the shadow separates it from the text it
@@ -1529,6 +1535,12 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   background: var(--accent); color: var(--on-accent); font-weight: var(--w-med);
   font-size: var(--fs-s); box-shadow: 0 -8px 16px -8px rgba(23, 23, 23, 0.35); }
 .drawer-apply:hover { text-decoration: none; background: var(--accent-ink); }
+/* A closed posting isn't a call to action anymore, so it drops the vivid
+   accent CTA styling for a quiet, secondary link — still reachable for
+   reference, but it no longer reads as "apply here". */
+.drawer-apply.is-closed { background: var(--surface); color: var(--ink-2);
+  border: 1px solid var(--line-strong); box-shadow: none; }
+.drawer-apply.is-closed:hover { background: var(--surface); color: var(--ink); }
 
 /* ---- 15. htmx niceties ----------------------------------------------------- */
 #cov-results { transition: opacity var(--t-fast); }

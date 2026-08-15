@@ -836,6 +836,25 @@ def test_unconfirmed_note_fires_when_the_latest_check_ran_ahead_of_confirmation(
 
 
 @pytest.mark.django_db
+def test_unconfirmed_note_is_empty_once_status_is_actually_closed():
+    """A row whose `status` has been flipped to "closed" has closed_at set
+    precisely because a check DID confirm closure (models.py's comment on
+    `closed_at`) — the exact opposite of this note's premise ("status stays
+    open because absence isn't proof of closure"). Same last_checked >
+    last_verified shape as id=6788 above, but status='closed' this time:
+    the note must go silent, not repeat "it still shows as open because we
+    also can't confirm it closed" for a row the DB itself marks closed."""
+    firm = Firm.objects.create(slug="td-closed", name="TD Securities")
+    o = Opportunity.objects.create(
+        firm=firm, url="https://td.wd3.myworkdayjobs.com/job/closed",
+        title="Banking Associate", bucket="internship", status="closed")
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=NOW - timedelta(days=1), last_checked=NOW, closed_at=NOW)
+    o.refresh_from_db()
+    assert _unconfirmed_note(o) == {}
+
+
+@pytest.mark.django_db
 def test_the_feed_card_marks_a_title_link_it_cannot_currently_vouch_for(client):
     """The card's title link is the primary discovery surface — a student
     can leave Coverage from it without ever opening the Read drawer or

@@ -1115,7 +1115,19 @@ def _unconfirmed_note(o) -> dict:
     unable to say — reverify.py's own docstring describes a "Verified N
     Days Ago" pill that "never lies", but no template ever rendered it. This
     is that pill's honest complement: it speaks only when the evidence is
-    genuinely thinner than "open" implies."""
+    genuinely thinner than "open" implies.
+
+    Returns {} for `status == "closed"` rows on purpose: this note's whole
+    premise is that `status` stays "open" here because absence from a
+    provider's search isn't proof of closure (see the docstring above).
+    That premise is false once `status` has actually been flipped to
+    "closed" — `closed_at` is set precisely because a check DID confirm
+    closure (see `closed_at`'s comment in models.py) — so there is no
+    "can't confirm either way" gap left to describe. A closed row needs an
+    honest closed message, not this one; see `_role_drawer.html`'s own
+    `{% if o.status == 'closed' %}` branch."""
+    if o.status == "closed":
+        return {}
     if not o.last_checked or not o.last_verified or o.last_checked <= o.last_verified:
         return {}
     return {

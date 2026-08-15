@@ -49,18 +49,35 @@ last and unmissable — this drawer is for deciding, not for applying.
   </div>
 {% endif %}
 
-{% if unconfirmed %}
+{% if o.status == 'closed' %}
   {% comment %}
-  The apply link is unmissable by design (see the opening comment above) —
-  which is exactly why it must not render with unqualified confidence when
-  our own evidence is thinner than that. `status` stays "open" here on
-  purpose (absence from a provider's own search is not proof of closure —
-  see oracle.py's verify() docstring), so this names the gap in what we know
-  instead of a status the data doesn't support. See `_unconfirmed_note` in
-  views.py.
+  My Applications wires this drawer to every tracked row regardless of its
+  own status (see 'Read the posting' in my_applications.html) — a student
+  can still be "Saved"/"Applied" on a role the firm has since closed. That
+  is the one case the apply link and its caution must not treat like an
+  "unconfirmed" row: `status == "closed"` means a check DID confirm the
+  posting is gone (see `closed_at` in models.py), so this says so plainly
+  instead of claiming "it still shows as open because we can't confirm it
+  closed" — which would be false here. See `_unconfirmed_note` in views.py.
   {% endcomment %}
-  <p class="drawer-caution">{{ unconfirmed.label }}. {{ unconfirmed.why }}</p>
+  <p class="drawer-caution is-closed">This posting is closed{% if o.closed_at %}, confirmed {{ o.closed_at|timesince }} ago{% endif %}. It's no longer accepting applications.</p>
+  <a class="drawer-apply is-closed" href="{{ o.url }}" target="_blank" rel="nofollow noopener">
+    View the closed posting on {{ firm.name|smart_title }} ↗
+  </a>
+{% else %}
+  {% if unconfirmed %}
+    {% comment %}
+    The apply link is unmissable by design (see the opening comment above) —
+    which is exactly why it must not render with unqualified confidence when
+    our own evidence is thinner than that. `status` stays "open" here on
+    purpose (absence from a provider's own search is not proof of closure —
+    see oracle.py's verify() docstring), so this names the gap in what we know
+    instead of a status the data doesn't support. See `_unconfirmed_note` in
+    views.py.
+    {% endcomment %}
+    <p class="drawer-caution">{{ unconfirmed.label }}. {{ unconfirmed.why }}</p>
+  {% endif %}
+  <a class="drawer-apply" href="{{ o.url }}" target="_blank" rel="nofollow noopener">
+    Open the application on {{ firm.name|smart_title }} ↗
+  </a>
 {% endif %}
-<a class="drawer-apply" href="{{ o.url }}" target="_blank" rel="nofollow noopener">
-  Open the application on {{ firm.name|smart_title }} ↗
-</a>
