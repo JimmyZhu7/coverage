@@ -17,7 +17,9 @@ on actually holding the text.
 <article class="frow">
   <div class="frow-main">
     <p class="frow-title">
-      <a href="{{ card.url }}" rel="nofollow noopener" target="_blank">{{ card.title|smart_title }}</a>
+      <a href="{{ card.url }}" rel="nofollow noopener" target="_blank"
+         {% if card.unconfirmed %}class="is-unconfirmed" title="{{ card.unconfirmed.why }}"{% endif %}
+         >{{ card.title|smart_title }}{% if card.unconfirmed %}<span class="vh"> ({{ card.unconfirmed.label }})</span>{% endif %}</a>
       {% if card.cohort %}<span class="frow-cohort" title="{{ card.cohort }} programme year">{{ card.cohort }}</span>{% endif %}
     </p>
     <p class="frow-meta">

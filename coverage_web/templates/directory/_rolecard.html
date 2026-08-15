@@ -29,7 +29,18 @@ without cutting text off.
   {% comment %}h3, not h4: the page's only h1 is its title and the firm
   column headers are h2-level, so h4 skipped a level — the heading outline a
   screen-reader user navigates by should read 1→2→3, not 1→4.{% endcomment %}
-  <h3 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a></h3>
+  {% comment %}
+  This link is where a student actually leaves Coverage — the fixed-height
+  card has no spare row to spend on a caution, so the mark rides on the
+  element it qualifies instead of costing new layout: a dotted underline
+  (same visual device `is-reported` already uses below) plus a `title` for
+  sighted hover, and — because `title` alone is not an accessible carrier,
+  the same rule the deadline mark states two rows down — a `.vh` span that
+  costs zero visible width. See `_unconfirmed_note` in views.py.
+  {% endcomment %}
+  <h3 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener"
+      {% if r.unconfirmed %}class="is-unconfirmed" title="{{ r.unconfirmed.why }}"{% endif %}
+      >{{ r.title|smart_title }}{% if r.unconfirmed %}<span class="vh"> ({{ r.unconfirmed.label }})</span>{% endif %}</a></h3>
 
   {% comment %}
   Always rendered, even when empty, so the meta row below sits at

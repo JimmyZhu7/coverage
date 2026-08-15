@@ -16,8 +16,8 @@ from django.utils import timezone
 
 from directory.models import Firm, Opportunity
 from directory.views import (
-    _FRESH_DAYS, REGION_NONE, _fresh_label, _sponsorship_tag, _urgency_feed,
-    _urgency_item,
+    _FRESH_DAYS, REGION_NONE, _fresh_label, _sponsorship_tag, _unconfirmed_note,
+    _urgency_feed, _urgency_item,
 )
 
 TODAY = timezone.localdate()
@@ -775,3 +775,125 @@ def test_no_verdict_is_rendered_as_struck_through_text():
     css = (_pl.Path(__file__).resolve().parents[2] / "static" / "css" / "coverage.css").read_text()
     for m in re.finditer(r"([^{}]*)\{([^}]*text-decoration:[^;}]*line-through[^;}]*)[;}]", css):
         assert False, f"line-through on {m.group(1).strip()!r}"
+
+
+# ---------------------------------------------------------------------------
+# "Not recently confirmed live" — status=open must not read as unqualified
+# confidence when our own last check of the URL couldn't reconfirm it.
+#
+# Opportunity id=6788 (J.P. Morgan, oracle source) was live, DB-confirmed:
+# status='open', last_checked=last_verified=2026-08-14 (a genuine
+# verified-open reading that day), and the Oracle posting itself now serves
+# "This job is no longer available." A live re-check the next day returned
+# oracle.py's "needs-verification" (the requisition no longer surfaces via
+# keyword search) — which, correctly, does not flip `status`, because
+# absence-from-search is not proof of closure (see oracle.py's documented
+# false JPM-4731 closure). But the feed card and the drawer's apply link
+# rendered with zero acknowledgement that our last check couldn't reconfirm
+# it — status='open' read as full confidence the data didn't support.
+# `last_checked` running ahead of `last_verified` is exactly that gap, and
+# it is real data every open row already carries (see ingest.py / reverify.py).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_unconfirmed_note_is_empty_on_a_clean_confirmation():
+    """The common case — last_checked caught up with a positive last_verified
+    reading (the two stamped equal, as every fresh ingest/verified-open pass
+    does) — must say nothing. This is ~all of the 15k+ open rows on live
+    data; a note here would be noise on every card."""
+    firm = Firm.objects.create(slug="citi", name="Citi")
+    o = _opp(firm, "https://citi.com/clean")
+    Opportunity.objects.filter(pk=o.pk).update(last_checked=NOW, last_verified=NOW)
+    o.refresh_from_db()
+    assert _unconfirmed_note(o) == {}
+
+
+@pytest.mark.django_db
+def test_unconfirmed_note_is_empty_with_no_check_history():
+    """A row that has never been checked (both timestamps null) has nothing
+    to compare — silence, not a false alarm."""
+    firm = Firm.objects.create(slug="citi2", name="Citi 2")
+    o = _opp(firm, "https://citi.com/never-checked")
+    assert o.last_checked is None and o.last_verified is None
+    assert _unconfirmed_note(o) == {}
+
+
+@pytest.mark.django_db
+def test_unconfirmed_note_fires_when_the_latest_check_ran_ahead_of_confirmation():
+    """The id=6788 shape: an earlier check confirmed it live, a LATER check
+    ran and could not — needs-verification or unreachable, never `closed`
+    for this exact reason (see oracle.py). `last_checked` moves past
+    `last_verified` and stays there; that gap is the honest signal."""
+    firm = Firm.objects.create(slug="jpm-oracle", name="J.P. Morgan")
+    o = _opp(firm, "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210763228")
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=NOW - timedelta(days=1), last_checked=NOW)
+    o.refresh_from_db()
+    note = _unconfirmed_note(o)
+    assert note["label"] == "Not recently confirmed live"
+    assert "status" not in note["label"].lower()  # names the gap, not a status claim
+    assert o.status == "open"  # the note supplements "open"; it never overrides it
+
+
+@pytest.mark.django_db
+def test_the_feed_card_marks_a_title_link_it_cannot_currently_vouch_for(client):
+    """The card's title link is the primary discovery surface — a student
+    can leave Coverage from it without ever opening the Read drawer or
+    reaching a separate Apply button. It must carry the caution, not just
+    the drawer behind it."""
+    firm = Firm.objects.create(slug="jpm", name="J.P. Morgan")
+    o = _opp(firm, "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210763228")
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=NOW - timedelta(days=1), last_checked=NOW)
+
+    body = client.get("/opportunities/").content.decode()
+    assert "is-unconfirmed" in body
+    # Not sighted-only: a `title` attribute alone is not an accessible
+    # carrier (same rule the deadline provenance mark follows elsewhere on
+    # this page).
+    assert "(Not recently confirmed live)" in body
+
+
+@pytest.mark.django_db
+def test_a_freshly_confirmed_card_wears_no_caution(client):
+    """Negative case, with the page's own inline <style> stripped first — the
+    CSS rule for `.is-unconfirmed` ships on every page load regardless of
+    whether any card uses it, so a bare substring check would pass either
+    way (same trap `test_a_provider_stated_deadline_carries_no_mark` guards
+    against for `is-reported`)."""
+    firm = Firm.objects.create(slug="citi3", name="Citi 3")
+    o = _opp(firm, "https://citi.com/fresh")
+    Opportunity.objects.filter(pk=o.pk).update(last_checked=NOW, last_verified=NOW)
+
+    body = re.sub(r"<style.*?</style>", "",
+                  client.get("/opportunities/").content.decode(), flags=re.S)
+    assert "Summer Analyst" in body
+    assert "is-unconfirmed" not in body
+
+
+@pytest.mark.django_db
+def test_the_drawer_names_the_gap_instead_of_an_unqualified_apply_link(client):
+    """The drawer's apply link is deliberately sticky and unmissable (see
+    _role_drawer.html) — exactly why it must not render with unqualified
+    confidence when the last check of this URL could not reconfirm it."""
+    firm = Firm.objects.create(slug="jpm2", name="J.P. Morgan")
+    o = _opp(firm, "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210763228")
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=NOW - timedelta(days=1), last_checked=NOW)
+
+    body = client.get(reverse("role_description", args=[o.id])).content.decode()
+    assert "drawer-caution" in body
+    assert "Not recently confirmed live" in body
+    # status stays open; the drawer says so honestly rather than inventing a
+    # closure the data doesn't support.
+    assert "Open the application on" in body
+
+
+@pytest.mark.django_db
+def test_the_drawer_stays_silent_for_a_freshly_confirmed_role(client):
+    firm = Firm.objects.create(slug="citi4", name="Citi 4")
+    o = _opp(firm, "https://citi.com/fresh-drawer")
+    Opportunity.objects.filter(pk=o.pk).update(last_checked=NOW, last_verified=NOW)
+
+    body = client.get(reverse("role_description", args=[o.id])).content.decode()
+    assert "drawer-caution" not in body

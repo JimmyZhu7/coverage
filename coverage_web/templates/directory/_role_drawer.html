@@ -49,6 +49,18 @@ last and unmissable — this drawer is for deciding, not for applying.
   </div>
 {% endif %}
 
+{% if unconfirmed %}
+  {% comment %}
+  The apply link is unmissable by design (see the opening comment above) —
+  which is exactly why it must not render with unqualified confidence when
+  our own evidence is thinner than that. `status` stays "open" here on
+  purpose (absence from a provider's own search is not proof of closure —
+  see oracle.py's verify() docstring), so this names the gap in what we know
+  instead of a status the data doesn't support. See `_unconfirmed_note` in
+  views.py.
+  {% endcomment %}
+  <p class="drawer-caution">{{ unconfirmed.label }}. {{ unconfirmed.why }}</p>
+{% endif %}
 <a class="drawer-apply" href="{{ o.url }}" target="_blank" rel="nofollow noopener">
   Open the application on {{ firm.name|smart_title }} ↗
 </a>
