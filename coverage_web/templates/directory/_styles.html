@@ -562,6 +562,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     line-height: 1.3; }
   .frow-title a { color: var(--ink); }
   .frow-title a:hover { color: var(--accent-ink); }
+  /* Same "can't currently vouch for this" mark the feed card's title wears
+     (see .rolecard-title a.is-unconfirmed) — our last check of this URL
+     couldn't reconfirm it's live. */
+  .frow-title a.is-unconfirmed { color: var(--stale-t);
+    border-bottom: 1px dotted var(--stale-t); cursor: help; }
+  .frow-title a.is-unconfirmed:hover { color: var(--stale-t); }
   .frow-cohort { font-family: var(--font-mono); font-size: var(--fs-micro);
     color: var(--ink-3); margin-left: 6px; }
   .frow-meta { margin: 2px 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
@@ -820,6 +826,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     -webkit-box-orient: vertical; overflow: hidden;
     transition: color var(--t-fast); }
   .rolecard-title a:hover { color: var(--accent-ink); }
+  /* Our last check of this URL couldn't reconfirm it's live (see
+     `_unconfirmed_note` in views.py) — the same dotted-underline device
+     `.meta-status.is-reported` uses for "read from prose, not a field",
+     reused here for "we can't currently vouch for this link". Costs no
+     layout: it rides the title link the card already reserves height for,
+     rather than a new row a fixed-height card has no room for. */
+  .rolecard-title a.is-unconfirmed { color: var(--stale-t);
+    text-decoration: underline dotted currentColor; text-underline-offset: 3px; }
+  .rolecard-title a.is-unconfirmed:hover { color: var(--stale-t); }
   /* Reserved slot 3 — class year (when stated) + location on one line. The row
      renders even when BOTH are absent (87 of 879 roles have no location at
      all), because an empty-but-reserved row is what keeps the meta row below

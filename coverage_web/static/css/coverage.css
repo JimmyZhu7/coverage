@@ -1499,6 +1499,16 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   color: var(--ink-2); }
 .drawer-body p { margin: 0 0 var(--s3); }
 .drawer-note, .drawer-empty p { color: var(--ink-3); font-size: var(--fs-xs); }
+/* Sits directly above the apply link, which is deliberately sticky and
+   unmissable (see .drawer-apply below) — the one place on the drawer that
+   must not read with unqualified confidence when our last check of the URL
+   couldn't reconfirm it. Same amber "can't currently vouch for this"
+   tokens as .pill.stale, not --danger: we don't know this posting closed,
+   only that we can't currently confirm it didn't. */
+.drawer-caution { margin: var(--s3) 0 0; padding: var(--s2) var(--s3);
+  border: 1px solid var(--stale-l); border-radius: 8px;
+  background: var(--stale-s); color: var(--stale-t);
+  font-size: var(--fs-xs); font-weight: var(--w-med); }
 /* Sticky, so the way out is always on screen in a 4,000-character read.
    The negative side margins pull it to the scroller's edges (the scroller
    has horizontal padding) and the shadow separates it from the text it

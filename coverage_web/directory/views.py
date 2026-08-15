@@ -271,6 +271,9 @@ def _card(opp, *, now, today):
         # markup, which is how it spent a release showing strictly less about
         # a role than the feed did about the same row.
         "facts": _fact_chips(opp),
+        # {} on a clean confirmation; a label+why when our last check of this
+        # URL could not reconfirm it — see `_unconfirmed_note`.
+        "unconfirmed": _unconfirmed_note(opp),
     }
 
 
@@ -967,6 +970,38 @@ def _fresh_label(seen_days: int | None) -> str:
     return f"First seen {seen_days}d ago"
 
 
+def _unconfirmed_note(o) -> dict:
+    """Whether Coverage's own most recent check of this posting actually
+    reconfirmed it is live, as something a template can render honestly. {}
+    when it did (or there is nothing to compare — every open row carries
+    both timestamps from ingest, so in practice this is only {} on a clean
+    confirmation).
+
+    `last_checked` moves on every check outcome; `last_verified` moves ONLY
+    on a positive liveness signal (ingest's own list-presence stamp, or a
+    connector's `verify()` returning "verified-open" — see reverify.py and,
+    for the sharpest example, oracle.py's `verify()` docstring). When a
+    row's latest check did NOT reconfirm it, `last_checked` runs ahead of
+    `last_verified` and `status` is deliberately left at "open" — absence
+    from a provider's search is not proof of closure (oracle.py documents
+    the false JPM-4731 closure this guards against). That caution is
+    correct for the DATA, but it left the card and the apply link reading
+    identically whether the last check found the posting alive or came back
+    unable to say — reverify.py's own docstring describes a "Verified N
+    Days Ago" pill that "never lies", but no template ever rendered it. This
+    is that pill's honest complement: it speaks only when the evidence is
+    genuinely thinner than "open" implies."""
+    if not o.last_checked or not o.last_verified or o.last_checked <= o.last_verified:
+        return {}
+    return {
+        "label": "Not recently confirmed live",
+        "why": ("Our last check of this posting could not confirm it is "
+                "still live. It still shows as open because we also can't "
+                "confirm it closed — verify on the firm's own site before "
+                "relying on this link."),
+    }
+
+
 # The chips a feed card can carry, in the order a student needs them. Order is
 # a judgement about attention, not about how confident the extraction is: if a
 # role will not sponsor you, that is the one fact that can end the decision
@@ -1157,6 +1192,9 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
         # the template, so the card never offers a drawer that would come back
         # empty.
         "has_text": bool((o.raw or {}).get("detail_text")),
+        # {} on a clean confirmation; a label+why when our last check of this
+        # URL could not reconfirm it — see `_unconfirmed_note`.
+        "unconfirmed": _unconfirmed_note(o),
     }
     # Three states, not two. "Rolling" must mean "no posted deadline" (it is
     # tested that way at my_applications, views.py's `rolling` lens above) —
@@ -2117,6 +2155,10 @@ def role_description(request, pk):
         # checked it" and then declined to say when that was — the one honesty
         # sentence on the panel with no number in it.
         "checked_ago": timesince(opp.last_checked, depth=1) if opp.last_checked else "",
+        # {} on a clean confirmation; a label+why when our last check of this
+        # URL could not reconfirm it, so the apply link doesn't render with
+        # unqualified confidence — see `_unconfirmed_note`.
+        "unconfirmed": _unconfirmed_note(opp),
         "facts": [{"label": label, **facts[kind]}
                   for kind, label in _FACT_LABELS if kind in facts],
     })

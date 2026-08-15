@@ -144,3 +144,38 @@ def test_a_genuinely_empty_firm_still_reads_as_empty(client):
     firm = _firm(slug="ms", name="Morgan Stanley")
     body = _page(client, firm)
     assert "Nothing open right now." in body
+
+
+# ---------------------------------------------------------------------------
+# 6. A row whose last check couldn't reconfirm it live is marked here too —
+# firm_detail's own row is the second surface (besides the feed card) a
+# student can leave Coverage from without opening the drawer.
+# ---------------------------------------------------------------------------
+def test_a_row_our_last_check_could_not_reconfirm_is_marked(client):
+    import re
+    from django.utils import timezone
+    from datetime import timedelta
+
+    firm = _firm(slug="hsbc", name="HSBC")
+    o = _opp(firm, 1, bucket="internship", title="Unconfirmed Analyst")
+    now = timezone.now()
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=now - timedelta(days=1), last_checked=now)
+
+    body = _page(client, firm)
+    assert "is-unconfirmed" in body
+    assert "(Not recently confirmed live)" in body
+
+
+def test_a_freshly_confirmed_row_wears_no_caution(client):
+    import re
+    from django.utils import timezone
+
+    firm = _firm(slug="hsbc2", name="HSBC 2")
+    o = _opp(firm, 1, bucket="internship", title="Confirmed Analyst")
+    now = timezone.now()
+    Opportunity.objects.filter(pk=o.pk).update(last_verified=now, last_checked=now)
+
+    body = re.sub(r"<style.*?</style>", "", _page(client, firm), flags=re.S)
+    assert "Confirmed Analyst" in body
+    assert "is-unconfirmed" not in body
