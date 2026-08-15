@@ -382,14 +382,33 @@ def fold_duplicates(
     the whole point — two requisitions with the same title genuinely can close
     on different days.
 
-    THE VETO: a cluster holding two or more DIFFERENT stated deadlines is left
-    completely alone. Identical title and city with different act-by dates is
-    the signature of a repeating series rather than a duplicate — Bank of
-    America runs "Quantitative Strategies & Data Group | Recruitment" on both
-    2026-08-18 and 2026-09-09, and BOCI posts several — and hiding either would
-    cost the student a date they can still make. A cluster where only SOME
-    copies state a deadline still folds, keeping the dated copy: that is one
-    posting recorded twice at different completeness, not two events.
+    THE DEADLINE VETO: a cluster holding two or more DIFFERENT stated
+    deadlines is left completely alone. Identical title and city with
+    different act-by dates is the signature of a repeating series rather than
+    a duplicate — Bank of America runs "Quantitative Strategies & Data Group |
+    Recruitment" on both 2026-08-18 and 2026-09-09, and BOCI posts several —
+    and hiding either would cost the student a date they can still make. A
+    cluster where only SOME copies state a deadline still folds, keeping the
+    dated copy: that is one posting recorded twice at different completeness,
+    not two events.
+
+    THE COHORT VETO: a cluster holding two or more DIFFERENT stated `cohort`
+    (programme/intake year) values is likewise left alone. `by_role`/
+    `_cluster_by_location` group purely on firm + normalized title + place,
+    none of which mention the admissions cycle a posting runs — so a firm
+    reposting the identical title+location for its NEXT cohort, with neither
+    copy stating a deadline, used to fold straight down to one survivor and
+    the newer cohort vanished from every fold_duplicates-consuming page, not
+    just from behind a fold-count badge. Confirmed live at Goldman Sachs: four
+    London/Paris pairs (e.g. role IDs 170880/150658 "Global Investment
+    Research — Macro Research, Economics — Seasonal/Off-cycle Internship",
+    London) share firm+title+location byte-for-byte, both sides deadline=None,
+    cohort=2027 vs cohort=2026 — and the 2027 copy was silently dropped in
+    favor of the older 2026 one on Browse Openings, the firm page, My
+    Applications and the calendar alike. As with the deadline veto, a cluster
+    where only SOME copies state a cohort still folds (a blank cohort is a
+    posting that didn't say, not a competing claim) — only two or more
+    DIFFERING non-blank cohorts block the fold.
     """
     sticky = frozenset(sticky_ids)
     rows = list(rows)
@@ -410,9 +429,11 @@ def fold_duplicates(
             if len(cluster) == 1:
                 keep.add(id(cluster[0]))
                 continue
-            stated = {d for d in (getattr(m, "deadline", None) for m in cluster)
-                      if d is not None}
-            if len(stated) > 1:
+            stated_deadlines = {d for d in (getattr(m, "deadline", None) for m in cluster)
+                                 if d is not None}
+            stated_cohorts = {c for c in (getattr(m, "cohort", "") or "" for m in cluster)
+                               if c}
+            if len(stated_deadlines) > 1 or len(stated_cohorts) > 1:
                 keep.update(id(m) for m in cluster)
                 continue
             winner = min(cluster, key=lambda m: _survivor_rank(m, sticky))

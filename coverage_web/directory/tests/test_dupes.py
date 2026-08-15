@@ -270,13 +270,14 @@ class _Row:
     function over rows, not over the ORM."""
 
     def __init__(self, id, firm_id=1, title="Summer Analyst", location="London",
-                 deadline=None, first_seen=None):
+                 deadline=None, first_seen=None, cohort=""):
         self.id = id
         self.firm_id = firm_id
         self.title = title
         self.location = location
         self.deadline = deadline
         self.first_seen = first_seen or datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
+        self.cohort = cohort
 
 
 class TestNormalizeLabel:
@@ -622,6 +623,40 @@ class TestFoldDuplicates:
         assert folded == 1
         assert [r.id for r in kept] == [2]
 
+    def test_two_stated_cohorts_veto_the_fold(self):
+        """Confirmed live at Goldman Sachs: role IDs 170880 (cohort=2027) and
+        150658 (cohort=2026) share firm+title+location byte-for-byte, both
+        deadline=None, so nothing else in `fold_duplicates` distinguishes the
+        pair — until the cohort veto fires. A firm reposting the identical
+        title+location for its NEXT admissions cohort is two real postings,
+        not one recorded twice; folding one away silently deleted the newer
+        cohort from every fold_duplicates-consuming page, not just from
+        behind a fold-count badge."""
+        kept, folded = fold_duplicates([
+            _Row(1, cohort="2026"),
+            _Row(2, cohort="2027"),
+        ])
+        assert folded == 0
+        assert len(kept) == 2
+
+    def test_one_stated_cohort_still_folds(self):
+        """A blank cohort is a posting that didn't say, not a competing
+        claim — exactly the deadline veto's own asymmetric case. (Which copy
+        survives is governed by `_survivor_rank`'s other rules, not this
+        test — only the fold count is the veto's own concern.)"""
+        kept, folded = fold_duplicates([_Row(1), _Row(2, cohort="2027")])
+        assert folded == 1
+        assert len(kept) == 1
+
+    def test_three_copies_with_two_cohorts_are_all_kept(self):
+        kept, folded = fold_duplicates([
+            _Row(1, cohort="2026"),
+            _Row(2, cohort="2026"),
+            _Row(3, cohort="2027"),
+        ])
+        assert folded == 0
+        assert len(kept) == 3
+
     # ---- the tiebreak, in its documented order
 
     def test_deadline_beats_no_deadline(self):
@@ -753,3 +788,31 @@ class TestFirmDetailFoldsDuplicates:
         body = res.content.decode()
         assert body.count("Graduate Programme") == 2
         assert '<span class="scrub-count">2</span>' in body
+
+    def test_a_new_admissions_cohort_still_shows_both_postings(self, client):
+        """The cohort veto in fold_duplicates: a firm reposting the identical
+        title+location for its NEXT admissions cohort, with neither copy
+        stating a deadline, is two real postings — reproduces the confirmed
+        live Goldman Sachs shape exactly (role IDs 170880/150658, London,
+        cohort 2027 vs 2026, both deadline=None)."""
+        firm = Firm.objects.create(slug="gs", name="Goldman Sachs", status="active")
+        Opportunity.objects.create(
+            firm=firm,
+            title="Global Investment Research — Macro Research, Economics — "
+                  "Seasonal/Off-cycle Internship",
+            location="London", bucket="internship", status="open", cohort="2026",
+            url="https://higher.gs.com/roles/150658_GS_CAMPUS",
+        )
+        Opportunity.objects.create(
+            firm=firm,
+            title="Global Investment Research — Macro Research, Economics — "
+                  "Seasonal/Off-cycle Internship",
+            location="London", bucket="internship", status="open", cohort="2027",
+            url="https://higher.gs.com/roles/170880_GS_CAMPUS",
+        )
+
+        res = client.get("/firms/gs/?role=all")
+        body = res.content.decode()
+        assert body.count("Global Investment Research") == 2
+        assert "170880_GS_CAMPUS" in body
+        assert "150658_GS_CAMPUS" in body
