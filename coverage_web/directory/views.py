@@ -104,7 +104,33 @@ TRACK_LABELS = {
     "am": "Asset Management",
     "consulting": "Consulting",
     "corp-strat": "Corporate Strategy",
+    # MLT and SEO Career, the two firms on this track, are not employers —
+    # they are access programmes that place students INTO the firms above.
+    # The slug had no label at all, which is why /firms/mlt/ printed the bare
+    # word PIPELINE where every other firm printed a desk.
+    "pipeline": "Career Access Programme",
 }
+
+
+def _labelled(slugs, labels: dict[str, str], *, by_label: bool = False) -> list[str]:
+    """Raw slugs through a label map, deduped, in that facet's own order.
+
+    `by_label` picks WHICH order, because the two facets do not share one:
+    `_region_facet` walks REGION_ORDER (hk before us), `_track_facet` sorts
+    alphabetically by label. A firm's stored array order is arbitrary, so
+    matching each facet is what makes the eyebrow and the filter agree.
+
+    Falls back to the slug when the map has no entry, so a track added to
+    firms.yaml before its label lands degrades to the old behaviour rather
+    than vanishing — but every slug the live data holds IS mapped, and
+    `test_firm_scope` fails the build if a new one is not.
+    """
+    unique = list(dict.fromkeys(s for s in (slugs or []) if s))
+    if by_label:
+        return sorted((labels.get(s, s) for s in unique), key=str.casefold)
+    order = {key: i for i, key in enumerate(labels)}
+    unique.sort(key=lambda s: (order.get(s, len(order)), s))
+    return [labels.get(s, s) for s in unique]
 
 # EVENT_LABELS (the firm_dates event vocabulary) now lives in
 # directory/timeline.py, shared between the firm-detail table and the
@@ -232,6 +258,46 @@ def _sponsorship_tag(opp) -> dict | None:
     return None
 
 
+# Where a role IS, resolved once for every surface that prints it.
+#
+# The firm page and the feed disagreed about the same empty `location`. The
+# firm row printed the literal "Location not listed" (19 times on /firms/hsbc/,
+# 21 on /firms/bofa/); the feed card omitted the span entirely (51 of 666 cards
+# rendered an empty `.rolecard-sub`). One role read location-unknown on one
+# page and location-silent on the other.
+#
+# "Location not listed" was also the wrong claim on its own page. Every one of
+# HSBC's 19 campus rows names its city inside its own TITLE — "New York
+# Investment Banking Graduate NY 10001" above the words "Location not listed"
+# — and `_card` already carried `opp.region`, so the page held the market and
+# said it did not.
+#
+# So: the city when the posting gave one, the market when it gave only that,
+# and silence when it gave neither. Silence rather than a sentence, because
+# the feed's quiet cards were the honest half of the disagreement.
+#
+# `other` is deliberately NOT a fallback. It means "somewhere outside the six
+# markets we track", which is a filter bucket, not a place — printing "Other
+# Markets" where a reader expects a city states nothing and looks like a bug.
+# `global` IS one: Bank of America's virtual recruitment events and KKR's
+# talent community are placeless BY DESIGN, and "Global / Virtual" is the fact.
+_PLACE_FALLBACK = {r: REGION_LABELS[r] for r in REGION_LABELS if r != "other"}
+
+_PLACE_WHY = ("The posting did not state a city. This is the market it was "
+              "filed under.")
+
+
+def _place(opp) -> dict:
+    """One role's place, and how well we know it. `text` may be "" — a caller
+    that prints something for an empty `text` is re-introducing the defect."""
+    if opp.location:
+        return {"text": opp.location, "exact": True, "why": ""}
+    market = _PLACE_FALLBACK.get(opp.region or "", "")
+    if market:
+        return {"text": market, "exact": False, "why": _PLACE_WHY}
+    return {"text": "", "exact": False, "why": ""}
+
+
 def _card(opp, *, now, today):
     """Bundle one opportunity into a template-ready card. Tags are the
     student-facing trio: firm category, stated class year, sponsorship."""
@@ -254,6 +320,9 @@ def _card(opp, *, now, today):
         "firm_slug": opp.firm.slug,
         "title": opp.title,
         "location": opp.location,
+        # What the row PRINTS — see `_place`. `location` above stays raw for
+        # callers that need the stated string itself.
+        "place": _place(opp),
         "url": opp.url,
         "region": opp.region,
         "role": {"value": bucket, "label": BUCKET_LABELS.get(bucket, bucket)},
@@ -556,6 +625,9 @@ def _firm_date_row(fd, *, today):
         "region": fd.region or cycle_region(fd.cycle),
         "event_kind": fd.event_kind,
         "event_label": EVENT_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " ").capitalize()),
+        # The raw date rides along beside its rendered text so the timeline can
+        # compare rows to each other — see `_drop_contradicted_openings`.
+        "date": d,
         "date_text": date_text,
         "precision": prec,
         "confidence": confidence_marker(fd.confidence),
@@ -564,9 +636,62 @@ def _firm_date_row(fd, *, today):
     }
 
 
+# An estimated OPENING is only worth printing while nothing on the same page
+# contradicts it. Four firms (hsbc, jpm, ms, ubs) carried both a dated
+# `app_close` in Aug-Oct 2026 and a `seed:historical-pattern` `app_open` of
+# "~ Sep 2027" — and because `cycle_label` drops the region suffix, the stored
+# `SA 2028` and `sa2028_hk` rows print the SAME scope, "SA 2028 · hk". Sorted
+# by date the close lands first, so /firms/hsbc/ said the HK cycle closes on
+# Oct 30 2026 and opens ten months LATER, while listing a role under that
+# cycle closing in 76 days.
+#
+# The two rows come from two incompatible conventions: the seeds date a
+# HK intake that opens the September before its summer, the human `SA 2028`
+# rows hang off postings that are live now. Nothing on the row can tell a
+# reader which convention it follows, so the page asserts both.
+#
+# Suppressing the ESTIMATE rather than the dated close is the only direction
+# that loses nothing: an estimate of when a cycle will open is a guess, and a
+# deadline already on file for that same cycle and market is evidence the
+# guess is wrong. A CONFIRMED opening after a close is left alone on purpose —
+# that is a genuine data conflict, and hiding it would hide the bug.
+def _cycle_scope(row) -> tuple[str, str]:
+    """What the timeline PRINTS as a row's scope — cycle label plus market.
+
+    Keyed off the rendered strings, not the stored `cycle`, because the
+    contradiction a reader sees is between two rows that read identically.
+    """
+    return (row["cycle"], row["region"])
+
+
+def _drop_contradicted_openings(rows: list[dict]) -> list[dict]:
+    """Drop a rumored `app_open` that a dated `app_close` in the same printed
+    scope already places in the past."""
+    closes: dict[tuple[str, str], object] = {}
+    for row in rows:
+        if row["event_kind"] == "app_close" and row["date"] is not None:
+            scope = _cycle_scope(row)
+            if scope not in closes or row["date"] < closes[scope]:
+                closes[scope] = row["date"]
+
+    keep = []
+    for row in rows:
+        close = closes.get(_cycle_scope(row))
+        contradicted = (
+            row["event_kind"] == "app_open"
+            and row["state"] == "rumored"
+            and row["date"] is not None
+            and close is not None
+            and row["date"] > close
+        )
+        if not contradicted:
+            keep.append(row)
+    return keep
+
+
 def _timeline(firm, *, today):
     rows = firm.firm_dates.all().order_by(F("date").asc(nulls_last=True), "cycle", "event_kind")
-    return [_firm_date_row(fd, today=today) for fd in rows]
+    return _drop_contradicted_openings([_firm_date_row(fd, today=today) for fd in rows])
 
 
 # ---------------------------------------------------------------------------
@@ -1174,6 +1299,9 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
         "title": o.title,
         "url": o.url,
         "location": o.location,
+        # Same resolver the firm page reads — see `_place`. The two surfaces
+        # used to disagree about a blank `location`, this is where they stop.
+        "place": _place(o),
         "bucket": bucket,
         "bucket_label": BUCKET_LABELS.get(bucket, bucket),
         # Programme/intake year — rendered next to the role type, never as a
@@ -2609,6 +2737,16 @@ def firm_detail(request, slug):
     cards = [_card(o, now=now, today=today) for o in opps]
     context = {
         "firm": firm,
+        # The eyebrow used to `join` firm.regions and firm.tracks raw, under a
+        # `text-transform: uppercase`, so /firms/hsbc/ said "HK · IB" and
+        # /firms/alibaba/ said "CORP-STRAT" — a hyphenated internal slug that
+        # does not read as an abbreviation of anything. `pipeline` had no
+        # label in TRACK_LABELS at all. Meanwhile the Opportunities facets,
+        # built from the same two maps, spell them "Hong Kong" and "Corporate
+        # Strategy". views.py:98 already states the position: raw slugs read
+        # as internal shorthand and this page is public-facing.
+        "eyebrow_regions": _labelled(firm.regions, REGION_LABELS),
+        "eyebrow_tracks": _labelled(firm.tracks, TRACK_LABELS, by_label=True),
         "cards": cards,
         "timeline": _timeline(firm, today=today),
         "total": len(cards),

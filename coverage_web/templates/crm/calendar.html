@@ -41,6 +41,9 @@
   .cal-key-chat::before { background: var(--w-chatted-bar); }
   .cal-key-event::before { background: var(--accent); }
   .cal-key-deadline::before { background: var(--stale-t); }
+  /* An opening is the one kind of date on this grid that is good news, so it
+     takes --ok rather than the deadline warning colour it used to borrow. */
+  .cal-key-opening::before { background: var(--ok); }
   .cal-key b { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     color: var(--ink); }
 
@@ -291,6 +294,7 @@
   .cal-ev-chat { border-left-color: var(--w-chatted-bar); }
   .cal-ev-event { border-left-color: var(--accent); }
   .cal-ev-deadline { border-left-color: var(--stale-t); }
+  .cal-ev-opening { border-left-color: var(--ok); }
   /* A tracked role's own closing date. Same deadline family, but it is YOUR
      row and it opens the posting, so it carries the accent bar and an arrow.
      Colour alone never distinguishes it: the arrow is the affordance. */
@@ -382,7 +386,7 @@
   characters and two rows while every other page's sub is one row of ~55. It
   says the thing the eyebrow cannot — where the entries come from.
   {% endcomment %}
-  {% include "_pagehead.html" with eyebrow="Chats, events, deadlines" title="Calendar" sub="Your mail, your hand, and the roles you track." %}
+  {% include "_pagehead.html" with eyebrow="Chats, events, deadlines, openings" title="Calendar" sub="Your mail, your hand, and the roles you track." %}
 
   <div class="cal-bar">
     <h2 class="cal-month">{{ month_label }}</h2>
@@ -400,6 +404,13 @@
       <span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> chat{{ counts.chat|pluralize }}</span>
       <span class="cal-key cal-key-event"><b>{{ counts.event }}</b> event{{ counts.event|pluralize }}</span>
       <span class="cal-key cal-key-deadline"><b>{{ counts.deadline }}</b> deadline{{ counts.deadline|pluralize }}</span>
+      {% comment %}
+      Openings count separately because they are the opposite kind of date:
+      nothing is missed by ignoring one. August 2026 read "6 deadlines" when
+      the sixth was Goldman Sachs applications OPEN on the 15th — the row's
+      own text said so while the tally above it disagreed.
+      {% endcomment %}
+      <span class="cal-key cal-key-opening"><b>{{ counts.opening }}</b> opening{{ counts.opening|pluralize }}</span>
     </p>
   </div>
 

@@ -22,9 +22,19 @@ on actually holding the text.
          >{{ card.title|smart_title }}{% if card.unconfirmed %}<span class="vh"> ({{ card.unconfirmed.label }})</span>{% endif %}</a>
       {% if card.cohort %}<span class="frow-cohort" title="{{ card.cohort }} programme year">{{ card.cohort }}</span>{% endif %}
     </p>
-    <p class="frow-meta">
-      {% if card.location %}{{ card.location|smart_location }}{% else %}Location not listed{% endif %}
-    </p>
+    {% comment %}
+    The place, from views._place — the same resolver the feed's rolecard
+    reads. This line used to print the literal "Location not listed" whenever
+    `location` was blank, 19 times on /firms/hsbc/ and 21 on /firms/bofa/,
+    while the feed card silently omitted its location span for the very same
+    rows. Worse on its own page: every one of HSBC's 19 campus rows names its
+    city inside its own title, so "New York Investment Banking Graduate NY
+    10001" sat directly above the words "Location not listed".
+    {% endcomment %}
+    {% if card.place.text %}
+      <p class="frow-meta{% if not card.place.exact %} is-market{% endif %}"
+         {% if card.place.why %}title="{{ card.place.why }}"{% endif %}>{{ card.place.text|smart_location }}</p>
+    {% endif %}
     {% if card.facts or card.tags %}
       <div class="frow-chips">
         {% for f in card.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}

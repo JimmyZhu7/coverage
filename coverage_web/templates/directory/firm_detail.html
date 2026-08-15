@@ -10,10 +10,19 @@
   <p class="subnav"><a href="{% url 'opportunities' %}">← Opportunities</a></p>
   <header class="pagehead">
     <div class="pagehead-text">
+      {% comment %}
+      Markets and desks in the words the rest of the product uses. These
+      used to be `firm.regions|join` and `firm.tracks|join` — the raw
+      firms.yaml slugs — under .pagehead-eyebrow's uppercase, so the line
+      above a firm's name read "HK · IB", "US · IB, ST", "CORP-STRAT" or, on
+      the two firms whose track had no label at all, "PIPELINE". The labels
+      come from views.py, from the same REGION_LABELS and TRACK_LABELS the
+      Opportunities facets read, so the two surfaces cannot drift.
+      {% endcomment %}
       <p class="pagehead-eyebrow">
-        {% if firm.regions %}{{ firm.regions|join:", " }}{% endif %}
-        {% if firm.regions and firm.tracks %} · {% endif %}
-        {% if firm.tracks %}{{ firm.tracks|join:", " }}{% endif %}
+        {% if eyebrow_regions %}{{ eyebrow_regions|join:", " }}{% endif %}
+        {% if eyebrow_regions and eyebrow_tracks %} · {% endif %}
+        {% if eyebrow_tracks %}{{ eyebrow_tracks|join:", " }}{% endif %}
       </p>
       <h1 class="pagehead-title">{{ firm.name|smart_title }}</h1>
     </div>

@@ -804,3 +804,92 @@ def test_the_progressed_duplicate_wins_on_the_calendar(logged_in, client):
               for e in cell["events"] if e["source"] == "tracked"]
     assert len(events) == 1
     assert events[0]["stage"] == "submitted"
+
+
+# ---------------------------------------------------------------------------
+# An opening is not a deadline
+#
+# Live on August 2026: the legend read "1 chat · 0 events · 6 deadlines" while
+# one of the six rows was "Goldman Sachs · applications open" on the 15th. The
+# layer-3 loop stamped kind="deadline" on every FirmDate regardless of its
+# `event_kind`, and the tally counts by kind — so the row's own text and the
+# count above it disagreed, and the opening wore the deadline-coloured border
+# to match.
+# ---------------------------------------------------------------------------
+def _firm_date(event_kind, day=15, *, slug="gs", name="Goldman Sachs"):
+    firm = Firm.objects.get_or_create(slug=slug, defaults={"name": name})[0]
+    today = timezone.localdate()
+    return FirmDate.objects.create(
+        firm=firm, cycle="SA 2028", region="us", event_kind=event_kind,
+        date=today.replace(day=day), confidence=1.0)
+
+
+def _month(client):
+    today = timezone.localdate()
+    return client.get(reverse("crm:calendar"),
+                      {"y": today.year, "m": today.month})
+
+
+def test_an_applications_open_row_is_not_counted_as_a_deadline(client, logged_in):
+    """The live August 2026 row, exactly."""
+    _firm_date("app_open")
+    resp = _month(client)
+    assert resp.context["counts"]["deadline"] == 0
+    assert resp.context["counts"]["opening"] == 1
+    body = resp.content.decode()
+    assert "<b>0</b> deadlines" in body
+    assert "<b>1</b> opening" in body and "<b>1</b> openings" not in body
+
+
+def test_an_insight_open_row_is_covered_by_the_same_rule(client, logged_in):
+    """`insight_open` would have miscounted the same way in any month one
+    fell in. Keyed off event_kind, so it never had to be found first."""
+    _firm_date("insight_open")
+    assert _month(client).context["counts"] == {
+        "chat": 0, "event": 0, "deadline": 0, "opening": 1}
+
+
+@pytest.mark.parametrize("event_kind", ["app_close", "insight_deadline"])
+def test_the_dates_you_can_actually_miss_are_still_deadlines(client, logged_in, event_kind):
+    _firm_date(event_kind)
+    counts = _month(client).context["counts"]
+    assert counts["deadline"] == 1 and counts["opening"] == 0
+
+
+def test_a_mixed_month_splits_the_tally_instead_of_lumping_it(client, logged_in):
+    """August 2026's real shape: closes, an insight deadline, and one
+    opening. The honest reading is 3 deadlines and 1 opening, not 4."""
+    _firm_date("app_close", day=1, slug="mlt", name="MLT")
+    _firm_date("app_close", day=2, slug="apollo", name="Apollo")
+    _firm_date("insight_deadline", day=6, slug="ms", name="Morgan Stanley")
+    _firm_date("app_open", day=15)
+    counts = _month(client).context["counts"]
+    assert counts["deadline"] == 3
+    assert counts["opening"] == 1
+
+
+def test_the_opening_no_longer_wears_the_deadline_colour(client, logged_in):
+    """The row carried .cal-ev-deadline, so it was red-barred as well as
+    miscounted. Matched as a class attribute — the page inlines its own
+    stylesheet, which names both classes in rules."""
+    _firm_date("app_open")
+    body = _month(client).content.decode()
+    assert re.search(r'class="cal-ev cal-ev-opening[^"]*"[^>]*'
+                     r'title="Goldman Sachs · applications open"', body)
+    assert not re.search(r'class="cal-ev cal-ev-deadline[^"]*"[^>]*'
+                         r'title="Goldman Sachs · applications open"', body)
+
+
+def test_the_page_head_lists_what_the_page_now_counts(client, logged_in):
+    assert "Chats, events, deadlines, openings" in _month(client).content.decode()
+
+
+def test_an_opening_still_reaches_the_subscribed_feed_without_an_alarm(client, logged_in):
+    """The ICS export alarms only on dates you can miss. Reclassifying must
+    not drop the opening from the feed, nor start alarming on it."""
+    _firm_date("app_open")
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert "SUMMARY:Goldman Sachs · applications open" in body
+    assert "BEGIN:VALARM" not in body

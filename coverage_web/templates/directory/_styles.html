@@ -571,6 +571,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .frow-cohort { font-family: var(--font-mono); font-size: var(--fs-micro);
     color: var(--ink-3); margin-left: 6px; }
   .frow-meta { margin: 2px 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+  /* A place we resolved from the row's REGION rather than read off the
+     posting — "United States", not "New York, NY". Same dotted-underline
+     affordance .is-reported uses for a fact whose provenance is in its title,
+     so a market-level place is distinguishable from a stated one without
+     hovering, and the reason is one hover away. */
+  .frow-meta.is-market, .rolecard-loc.is-market {
+    text-decoration: underline dotted currentColor;
+    text-underline-offset: 2px; cursor: help; }
   .frow-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
   .frow-side { display: flex; align-items: center; gap: var(--s3); flex: none; }
   .frow-deadline { font-family: var(--font-mono); font-size: var(--fs-xs);

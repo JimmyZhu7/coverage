@@ -1103,7 +1103,17 @@ def _dashboard_context(user) -> dict:
     # Opportunities-page count it feeds; crm.today borrows the same function
     # rather than re-deriving the contract, so the two pages can never
     # disagree about what "names your year" means.
-    from directory.views import _eligibility_profile, _eligible_unsaved_count
+    # `_STAGE_LABELS` for the same reason: directory.views owns the one
+    # vocabulary for what a pipeline stage is CALLED, and the ribbon's funnel
+    # label used to be a hardcoded literal that spelled two of them the way
+    # the database does — "Submitted › Interview › Offer" against the
+    # "Applied"/"Interviewing" every other surface shows for the identical
+    # rows. Reading the label instead of restating it is what stops it
+    # drifting again.
+    from directory.views import (
+        _FUNNEL_STATES, _STAGE_LABELS, _eligibility_profile,
+        _eligible_unsaved_count,
+    )
 
     elig_profile = _eligibility_profile(user)
     eligible_unsaved = (
@@ -1113,10 +1123,10 @@ def _dashboard_context(user) -> dict:
 
     uo = UserOpportunity.objects.for_user(user)
     funnel = {
-        "submitted": uo.filter(applied_status__iexact="submitted").count(),
-        "interview": uo.filter(applied_status__iexact="interview").count(),
-        "offer": uo.filter(applied_status__iexact="offer").count(),
+        state: uo.filter(applied_status__iexact=state).count()
+        for state in _FUNNEL_STATES
     }
+    funnel_label = " › ".join(_STAGE_LABELS[state] for state in _FUNNEL_STATES)
 
     return {
         "dash": {
@@ -1130,6 +1140,7 @@ def _dashboard_context(user) -> dict:
             # happened.
             "has_year": bool(elig_profile and elig_profile.get("class_year")),
             "funnel": funnel,
+            "funnel_label": funnel_label,
         },
     }
 
