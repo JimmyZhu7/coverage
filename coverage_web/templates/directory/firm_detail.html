@@ -45,7 +45,12 @@
         {% if my_advocates %}<span class="fd-adv">{{ my_advocates }} advocate{{ my_advocates|pluralize }}</span>{% endif %}
       </h2>
       {% if my_contacts %}
-        {% if my_next %}
+        {% if my_next and not my_next_restates_top_row %}
+          {% comment %}Only rendered when "Warmest here" names someone other
+          than whoever the list right below already puts first — otherwise
+          the two lines say the same name and role twice, adjacently (see
+          _my_network_at's my_next_restates_top_row comment in views.py).
+          {% endcomment %}
           <p class="fd-next">Warmest here:
             <a href="{% url 'crm:contact_detail' my_next.id %}">{{ my_next.name|smart_title }}</a>{% if my_next.role %} · {{ my_next.role|smart_title }}{% endif %}
           </p>

@@ -2811,14 +2811,26 @@ def _my_network_at(user, firm, *, today) -> dict:
         }
         for c in rows
     ]
+    # The one person worth opening first: warmest, and among equals the one
+    # who has waited longest to hear from you. Both this pick and the list
+    # below start from the SAME warmth-tier-first ordering (`rows.sort`
+    # above), so whenever the top tier holds exactly one person, `my_next`
+    # and `my_contacts[0]` are that same person — "Warmest here: James Bai"
+    # directly above a list whose first row is James Bai again. `my_next`
+    # only earns its own line when it names someone other than whoever the
+    # list already puts first; otherwise the callout is a restatement, not
+    # new information, and stays off the page.
+    my_next = max(
+        people,
+        key=lambda p: (-_WARMTH_RANK.get(p["c"].warmth, 9), p["days_since"] or 0),
+    )["c"] if people else None
+    my_next_restates_top_row = bool(
+        my_next and people and my_next.id == people[0]["c"].id
+    )
     return {
         "my_contacts": people,
         "my_total": len(people),
         "my_advocates": sum(1 for c in rows if c.warmth == "advocate"),
-        # The one person worth opening first: warmest, and among equals the
-        # one who has waited longest to hear from you.
-        "my_next": max(
-            people,
-            key=lambda p: (-_WARMTH_RANK.get(p["c"].warmth, 9), p["days_since"] or 0),
-        )["c"] if people else None,
+        "my_next": my_next,
+        "my_next_restates_top_row": my_next_restates_top_row,
     }
