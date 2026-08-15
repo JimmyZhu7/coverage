@@ -205,6 +205,47 @@ def test_the_residue_lenses_stay_off_the_page_when_they_hold_nothing(client, pip
 
 
 @pytest.mark.django_db
+def test_rolling_lens_only_claims_reviewed_as_they_arrive_where_stated(client, db):
+    """The feed retracted "Rolling ... reviewed as they arrive" as a blanket
+    claim about every undated role (see test_feed_honesty.py's matching
+    test) — most of the ~600 undated roles never say anything about how
+    they're reviewed. My Applications' Rolling lens used to make that exact
+    claim about its whole bucket regardless of what any individual posting
+    said. It must now say "Rolling" (with the posting's own evidence) only
+    for the row that stated it, and the neutral "No date posted" for the row
+    that did not."""
+    firm = Firm.objects.create(name="Evercore", slug="evercore")
+    silent = Opportunity.objects.create(
+        firm=firm, url="https://x/silent", title="Silent Analyst",
+        bucket="internship", status="open", deadline=None,
+    )
+    stated = Opportunity.objects.create(
+        firm=firm, url="https://x/stated", title="Stated Analyst",
+        bucket="internship", status="open", deadline=None,
+        raw={"facts": {"rolling": {"value": "Rolling",
+                                   "phrase": "reviewed on a rolling basis"}}},
+    )
+    user = _user()
+    for o in (silent, stated):
+        UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+    lenses = {lens["key"]: lens for lens in resp.context["lenses"]}
+    by_title = {i["title"]: i for i in lenses["rolling"]["items"]}
+
+    assert by_title["Silent Analyst"]["rolling_stated"] is False
+    assert by_title["Stated Analyst"]["rolling_stated"] is True
+    assert by_title["Stated Analyst"]["rolling_why"] == "reviewed on a rolling basis"
+
+    body = resp.content.decode()
+    assert "reviewed on a rolling basis" in body
+    assert "No date posted" in body
+    assert "Reviewed as they arrive" not in body, (
+        "the retracted blanket claim must not survive on this surface either")
+
+
+@pytest.mark.django_db
 def test_an_empty_lens_offers_a_way_out(client, db):
     """Empty states get a message AND an action. A student tracking only
     rolling roles sees an empty Closing Soon, and it must not be a blank

@@ -26,7 +26,9 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 from PIL import Image, ImageOps
 
 from coverage_domain.cadence import CADENCE_DEFAULTS
-from directory.classify import REGION_LABELS, TRACKED_REGIONS
+from directory.classify import (
+    REGION_LABELS, TRACKED_REGIONS, TRACK_LABELS, TRACKED_TRACKS,
+)
 from directory.recommend import cycle_choices
 
 # Same rule for both of these as for the ranges below: import the value from
@@ -58,13 +60,14 @@ REGION_CHOICES: list[tuple[str, str]] = [
     (code, REGION_LABELS[code]) for code in TRACKED_REGIONS
 ]
 
+# Sourced from classify.TRACKED_TRACKS/TRACK_LABELS — the SAME vocabulary
+# directory/views.py's Opportunities track filter reads — rather than a
+# second, independently-hardcoded copy. The two used to drift: this list
+# called "pe" "Private Equity" while the filter called it "Private Equity /
+# Credit" (the firms actually tagged "pe" include credit shops, so that is
+# the accurate label a student sees both places now).
 TRACK_CHOICES: list[tuple[str, str]] = [
-    ("ib", "Investment Banking"),
-    ("st", "Sales & Trading"),
-    ("pe", "Private Equity"),
-    ("am", "Asset Management"),
-    ("consulting", "Consulting"),
-    ("corp-strat", "Corporate Strategy"),
+    (code, TRACK_LABELS[code]) for code in TRACKED_TRACKS
 ]
 
 # Class year (graduation year) options, anchored to the current year so the

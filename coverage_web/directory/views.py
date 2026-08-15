@@ -42,6 +42,7 @@ from crm.models import Contact, UserFirm
 from directory.classify import (
     BUCKET_LABELS, ENTRY_LEVEL, INSIGHT, INTERNSHIP, OTHER, REGION_LABELS,
     REGION_ORDER, TARGET_BUCKETS, derive_class_year,
+    TRACK_LABELS as _TRACK_LABELS_BASE,
 )
 # The one definition of "closing soon" — see deadlines.py for why it isn't
 # spelled out at each call site (and for the crm/views.py follow-up).
@@ -96,18 +97,18 @@ FIRM_CATEGORIES = {
 }
 
 # Human labels for the firms.yaml track slugs. Raw slugs ("ib", "corp-strat")
-# read as internal shorthand; the filter is public-facing.
+# read as internal shorthand; the filter is public-facing. The six
+# preference-eligible tracks are classify.TRACK_LABELS — the SAME dict
+# accounts/forms.py's Settings checkboxes read — so the two pages can never
+# disagree about a slug's label again (they used to: Settings said "Private
+# Equity", this filter said "Private Equity / Credit", both for "pe").
 TRACK_LABELS = {
-    "ib": "Investment Banking",
-    "st": "Sales & Trading",
-    "pe": "Private Equity / Credit",
-    "am": "Asset Management",
-    "consulting": "Consulting",
-    "corp-strat": "Corporate Strategy",
+    **_TRACK_LABELS_BASE,
     # MLT and SEO Career, the two firms on this track, are not employers —
     # they are access programmes that place students INTO the firms above.
     # The slug had no label at all, which is why /firms/mlt/ printed the bare
-    # word PIPELINE where every other firm printed a desk.
+    # word PIPELINE where every other firm printed a desk. Not a preference
+    # option (classify.TRACKED_TRACKS excludes it) — display-only here.
     "pipeline": "Career Access Programme",
 }
 
@@ -2453,6 +2454,13 @@ def _lens_item(uo, *, today):
     o = uo.opportunity
     stage = uo.applied_status or "saved"
     days_left = (o.deadline - today).days if o.deadline else None
+    # Same split the feed's item builder uses above (see the "Rolling is a
+    # CLAIM" comment ~line 1338): "Rolling" is only earned for postings whose
+    # own text states rolling review; every other undated row is neutral,
+    # not "reviewed as they arrive". Without this, the lens's static note
+    # asserted the earned claim about every undated row, including the ones
+    # that never said it.
+    rolling_facts = (((o.raw or {}).get("facts") or {}).get("rolling") or {})
     return {
         "id": o.id,
         "firm_name": o.firm.name,
@@ -2465,6 +2473,8 @@ def _lens_item(uo, *, today):
         "reported": deadline_provenance(o),
         "days_left": days_left,
         "urgency": _urgency_band(days_left),
+        "rolling_stated": bool(rolling_facts),
+        "rolling_why": rolling_facts.get("phrase", ""),
         # The same chips the feed and the firm page carry. This is the page a
         # student reads when deciding what to do THIS WEEK, and it was the one
         # surface that knew nothing about sponsorship, pay or a language wall.
@@ -2657,7 +2667,14 @@ def my_applications(request):
             "key": "rolling",
             "label": "Rolling",
             "items": rolling,
-            "note": "No posted deadline. Reviewed as they arrive, so apply early.",
+            # "Reviewed as they arrive, so apply early" used to be stated for
+            # every row here, the same invented claim the feed retracted
+            # (views.py's feed item builder, ~line 1338: most undated roles
+            # never say how they're reviewed). Rows whose own posting states
+            # rolling review are marked "Rolling" individually below
+            # (r.rolling_stated); this note now only says what is true of
+            # the whole bucket.
+            "note": "No posted deadline. Rows marked “Rolling” say so themselves; the rest just never stated a date.",
             "empty_state": True,
         },
     ]
@@ -2806,14 +2823,26 @@ def _my_network_at(user, firm, *, today) -> dict:
         }
         for c in rows
     ]
+    # The one person worth opening first: warmest, and among equals the one
+    # who has waited longest to hear from you. Both this pick and the list
+    # below start from the SAME warmth-tier-first ordering (`rows.sort`
+    # above), so whenever the top tier holds exactly one person, `my_next`
+    # and `my_contacts[0]` are that same person — "Warmest here: James Bai"
+    # directly above a list whose first row is James Bai again. `my_next`
+    # only earns its own line when it names someone other than whoever the
+    # list already puts first; otherwise the callout is a restatement, not
+    # new information, and stays off the page.
+    my_next = max(
+        people,
+        key=lambda p: (-_WARMTH_RANK.get(p["c"].warmth, 9), p["days_since"] or 0),
+    )["c"] if people else None
+    my_next_restates_top_row = bool(
+        my_next and people and my_next.id == people[0]["c"].id
+    )
     return {
         "my_contacts": people,
         "my_total": len(people),
         "my_advocates": sum(1 for c in rows if c.warmth == "advocate"),
-        # The one person worth opening first: warmest, and among equals the
-        # one who has waited longest to hear from you.
-        "my_next": max(
-            people,
-            key=lambda p: (-_WARMTH_RANK.get(p["c"].warmth, 9), p["days_since"] or 0),
-        )["c"] if people else None,
+        "my_next": my_next,
+        "my_next_restates_top_row": my_next_restates_top_row,
     }

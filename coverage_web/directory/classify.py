@@ -102,6 +102,25 @@ TRACKED_REGIONS = ("hk", "us", "sg", "eu", "cn", "jp")
 # stops "Other Markets" appearing in Settings as somewhere to want to work.
 REGION_ORDER = TRACKED_REGIONS + ("other", "global")
 
+# Human labels for the firms.yaml track slugs, and the same six-way
+# vocabulary a student can state a preference for. Single source of truth
+# for the same reason REGION_LABELS/TRACKED_REGIONS are above it:
+# accounts/forms.py's Settings checkboxes and directory/views.py's
+# Opportunities filter used to hardcode this vocabulary separately and
+# drifted — Settings offered "Private Equity", the filter called the same
+# slug "Private Equity / Credit" (the firms actually tagged "pe" include
+# credit shops: Apollo, Ares, Blue Owl, Golub Capital, HPS, Oaktree, Sixth
+# Street, not just buyout funds, so the fuller label is the accurate one).
+TRACK_LABELS = {
+    "ib": "Investment Banking",
+    "st": "Sales & Trading",
+    "pe": "Private Equity / Credit",
+    "am": "Asset Management",
+    "consulting": "Consulting",
+    "corp-strat": "Corporate Strategy",
+}
+TRACKED_TRACKS = ("ib", "st", "pe", "am", "consulting", "corp-strat")
+
 # Checked in order; the first matching market wins. Keys are lowercase
 # substrings (city / country / region tokens).
 _REGION_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (

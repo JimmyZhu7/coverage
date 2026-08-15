@@ -13,6 +13,11 @@ Honesty limits of this source, stated up front:
 
 - The TITLE is reconstructed from the URL slug (sitemaps carry no titles),
   and slugs truncate long titles. What we show is what the URL says.
+- LOCATION stays blank unless the slug's trailing tokens are recognizably a
+  postal code (a US "<STATE> <ZIP>" pair or a UK postcode) — see
+  `_split_trailing_postal_code`. That is a relocation of slug text already
+  being shown, not an inference: nothing about WHERE a posting is gets
+  guessed from a bare city name or a truncated slug fragment.
 - There is no per-posting verify: the underlying page is a JS shell that
   returns 200 regardless, so `verify()` re-reads the sitemap — a URL still
   listed is verified-open; a URL missing from its own sitemap is closed.
@@ -31,6 +36,45 @@ name = "sitemap"
 
 _LOC_RE = re.compile(r"<loc>([^<]+)</loc>")
 _SLUG_RE = re.compile(r"/job/([^/]+)/\d+/?$")
+
+# A trailing postal code glued onto the reconstructed title by the slug
+# itself — e.g. ".../New-York-Investment-Banking-Graduate-NY-10001/..." ->
+# "New York Investment Banking Graduate NY 10001". This is NOT the "never
+# infer a location from the slug" rule being broken: nothing is guessed
+# here, the postal code is copied verbatim from the same slug tokens that
+# were already being rendered as title text, just relocated to the field
+# that's actually for a location. Two recognized shapes only — deliberately
+# narrow, so an ordinary two-letter word followed by a number never
+# misfires:
+#   US:  "<STATE> <5-digit ZIP>"   e.g. "NY 10001"
+#   UK:  "<outward> <inward>"      e.g. "E14 5HQ", "S1 4NB" (postcode format)
+# Left alone on purpose: bare numeric codes with no letter component
+# ("018983", "01 117439") and truncated slug fragments ("Hong", "Kowl") —
+# both are genuinely ambiguous and stripping them would be a guess, not a
+# read.
+_US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC",
+}
+_US_ZIP_SUFFIX_RE = re.compile(r"^(.*\S)\s+([A-Z]{2})\s+(\d{5})$")
+_UK_POSTCODE_SUFFIX_RE = re.compile(
+    r"^(.*\S)\s+([A-Z]{1,2}\d[A-Z0-9]?\s+\d[A-Z]{2})$"
+)
+
+
+def _split_trailing_postal_code(title: str) -> tuple[str, str]:
+    """(title, location) with a recognized trailing postal code moved from
+    the title into location. `("", title)` unchanged if nothing matches."""
+    m = _US_ZIP_SUFFIX_RE.match(title)
+    if m and m.group(2) in _US_STATES:
+        return m.group(1), f"{m.group(2)} {m.group(3)}"
+    m = _UK_POSTCODE_SUFFIX_RE.match(title)
+    if m:
+        return m.group(1), m.group(2)
+    return title, ""
 
 # Known sitemap URLs per host, for verify()'s re-read. Registered by the
 # board catalog at import time via `register_sitemap`, so verify(url) can
@@ -52,15 +96,20 @@ def _rows(xml: str, path_filter: str) -> list[dict]:
             continue
         slug = urllib.parse.unquote(m.group(1))
         title = re.sub(r"\s+", " ", slug.replace("-", " ")).strip()
+        # Move a recognized trailing postal code (see
+        # _split_trailing_postal_code above) out of the title and into
+        # location. Everything else about this source's location honesty is
+        # unchanged: no city name is ever guessed from the slug (a "Hong"
+        # token is never expanded to "Hong Kong" here) — `models.py`'s
+        # `Opportunity.location` is documented as "nothing here is
+        # inferred, guessed, or filled in", and a bare postal code with no
+        # matched pattern stays blank, same as every other field this
+        # source doesn't have.
+        title, location = _split_trailing_postal_code(title)
         rows.append({
             "url": loc,
             "title": title,
-            # NEVER inferred from the slug (a "Hong" token used to stamp
-            # "Hong Kong" here) — `models.py`'s `Opportunity.location` is
-            # documented as "nothing here is inferred, guessed, or filled
-            # in"; a sitemap carries no location field, so the honest answer
-            # is blank, same as every other field this source doesn't have.
-            "location": "",
+            "location": location,
         })
     return rows
 
