@@ -258,6 +258,46 @@ def _sponsorship_tag(opp) -> dict | None:
     return None
 
 
+# Where a role IS, resolved once for every surface that prints it.
+#
+# The firm page and the feed disagreed about the same empty `location`. The
+# firm row printed the literal "Location not listed" (19 times on /firms/hsbc/,
+# 21 on /firms/bofa/); the feed card omitted the span entirely (51 of 666 cards
+# rendered an empty `.rolecard-sub`). One role read location-unknown on one
+# page and location-silent on the other.
+#
+# "Location not listed" was also the wrong claim on its own page. Every one of
+# HSBC's 19 campus rows names its city inside its own TITLE — "New York
+# Investment Banking Graduate NY 10001" above the words "Location not listed"
+# — and `_card` already carried `opp.region`, so the page held the market and
+# said it did not.
+#
+# So: the city when the posting gave one, the market when it gave only that,
+# and silence when it gave neither. Silence rather than a sentence, because
+# the feed's quiet cards were the honest half of the disagreement.
+#
+# `other` is deliberately NOT a fallback. It means "somewhere outside the six
+# markets we track", which is a filter bucket, not a place — printing "Other
+# Markets" where a reader expects a city states nothing and looks like a bug.
+# `global` IS one: Bank of America's virtual recruitment events and KKR's
+# talent community are placeless BY DESIGN, and "Global / Virtual" is the fact.
+_PLACE_FALLBACK = {r: REGION_LABELS[r] for r in REGION_LABELS if r != "other"}
+
+_PLACE_WHY = ("The posting did not state a city. This is the market it was "
+              "filed under.")
+
+
+def _place(opp) -> dict:
+    """One role's place, and how well we know it. `text` may be "" — a caller
+    that prints something for an empty `text` is re-introducing the defect."""
+    if opp.location:
+        return {"text": opp.location, "exact": True, "why": ""}
+    market = _PLACE_FALLBACK.get(opp.region or "", "")
+    if market:
+        return {"text": market, "exact": False, "why": _PLACE_WHY}
+    return {"text": "", "exact": False, "why": ""}
+
+
 def _card(opp, *, now, today):
     """Bundle one opportunity into a template-ready card. Tags are the
     student-facing trio: firm category, stated class year, sponsorship."""
@@ -280,6 +320,9 @@ def _card(opp, *, now, today):
         "firm_slug": opp.firm.slug,
         "title": opp.title,
         "location": opp.location,
+        # What the row PRINTS — see `_place`. `location` above stays raw for
+        # callers that need the stated string itself.
+        "place": _place(opp),
         "url": opp.url,
         "region": opp.region,
         "role": {"value": bucket, "label": BUCKET_LABELS.get(bucket, bucket)},
@@ -1221,6 +1264,9 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
         "title": o.title,
         "url": o.url,
         "location": o.location,
+        # Same resolver the firm page reads — see `_place`. The two surfaces
+        # used to disagree about a blank `location`, this is where they stop.
+        "place": _place(o),
         "bucket": bucket,
         "bucket_label": BUCKET_LABELS.get(bucket, bucket),
         # Programme/intake year — rendered next to the role type, never as a

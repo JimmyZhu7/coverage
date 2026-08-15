@@ -49,7 +49,15 @@ without cutting text off.
     {% endcomment %}
     {% if r.show_firm %}<span class="rolecard-firm">{{ r.firm_name|smart_title }}</span>{% endif %}
     {% if r.class_year %}<span class="class-chip" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
-    {% if r.location %}<span class="rolecard-loc">{{ r.location|smart_location }}</span>{% endif %}
+    {% comment %}
+    `r.place`, not `r.location` — views._place, shared with the firm page's
+    row. This card was the silent half of a disagreement: it dropped the span
+    for a blank location while /firms/<slug>/ printed "Location not listed"
+    for the identical role. The resolver also fills the 51 cards that rendered
+    an entirely empty `.rolecard-sub` but whose region we do hold.
+    {% endcomment %}
+    {% if r.place.text %}<span class="rolecard-loc{% if not r.place.exact %} is-market{% endif %}"
+      {% if r.place.why %}title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}</span>{% endif %}
   </div>
 
   {% comment %}
