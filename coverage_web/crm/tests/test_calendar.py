@@ -196,8 +196,8 @@ def test_only_confirmed_deadlines_reach_the_calendar(client, logged_in):
                             date=today.replace(day=16), confidence=0.3)
 
     body = client.get(reverse("crm:calendar")).content.decode()
-    assert "applications close" in body
-    assert "applications open" not in body
+    assert "Applications close" in body
+    assert "Applications open" not in body
 
 
 def test_the_month_can_be_paged_and_a_bad_month_falls_back_to_today(client, logged_in):
@@ -238,9 +238,9 @@ def test_a_bad_submission_still_reports_the_months_real_counts(client, logged_in
     # One deadline, singular. The negative guard is load-bearing: the
     # singular string is a substring of the plural one, so the positive
     # assertion alone still passes against the old hard-coded "s".
-    assert "<b>1</b> deadline" in body
-    assert "<b>1</b> deadlines" not in body
-    assert "<b>0</b> chats" in body and "<b>0</b> events" in body
+    assert "<b>1</b> Deadline" in body
+    assert "<b>1</b> Deadlines" not in body
+    assert "<b>0</b> Chats" in body and "<b>0</b> Events" in body
 
 
 def test_clicking_a_day_prefills_that_date_and_opens_the_form(client, logged_in):
@@ -278,7 +278,7 @@ def test_a_firm_deadline_offers_no_remove_button(client, logged_in):
                             event_kind="app_close",
                             date=timezone.localdate().replace(day=15), confidence=1.0)
     body = client.get(reverse("crm:calendar")).content.decode()
-    assert "applications close" in body
+    assert "Applications close" in body
     assert "Remove" not in body
 
 
@@ -520,8 +520,8 @@ def test_the_feed_serves_events_and_confirmed_deadlines(client, user):
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
     assert "BEGIN:VCALENDAR" in body
     assert "Chat with Ada Lovelace" in body
-    assert "applications close" in body
-    assert "applications open" not in body, "rumours stay off the feed too"
+    assert "Applications close" in body
+    assert "Applications open" not in body, "rumours stay off the feed too"
 
 
 def test_a_wrong_token_is_a_404_not_an_empty_calendar(client, user):
@@ -628,7 +628,7 @@ def test_a_date_that_opens_something_gets_no_alarm(client, user):
                             date=timezone.localdate() + timedelta(days=9),
                             confidence=1.0)
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
-    assert "applications open" in body
+    assert "Applications open" in body
     assert "BEGIN:VALARM" not in body, "nothing is lost by reading an opening late"
 
 
@@ -837,8 +837,8 @@ def test_an_applications_open_row_is_not_counted_as_a_deadline(client, logged_in
     assert resp.context["counts"]["deadline"] == 0
     assert resp.context["counts"]["opening"] == 1
     body = resp.content.decode()
-    assert "<b>0</b> deadlines" in body
-    assert "<b>1</b> opening" in body and "<b>1</b> openings" not in body
+    assert "<b>0</b> Deadlines" in body
+    assert "<b>1</b> Opening" in body and "<b>1</b> Openings" not in body
 
 
 def test_an_insight_open_row_is_covered_by_the_same_rule(client, logged_in):
@@ -875,9 +875,9 @@ def test_the_opening_no_longer_wears_the_deadline_colour(client, logged_in):
     _firm_date("app_open")
     body = _month(client).content.decode()
     assert re.search(r'class="cal-ev cal-ev-opening[^"]*"[^>]*'
-                     r'title="Goldman Sachs · applications open"', body)
+                     r'title="Goldman Sachs · Applications open"', body)
     assert not re.search(r'class="cal-ev cal-ev-deadline[^"]*"[^>]*'
-                         r'title="Goldman Sachs · applications open"', body)
+                         r'title="Goldman Sachs · Applications open"', body)
 
 
 def test_the_page_head_lists_what_the_page_now_counts(client, logged_in):
@@ -891,5 +891,5 @@ def test_an_opening_still_reaches_the_subscribed_feed_without_an_alarm(client, l
     body = client.get(
         reverse("crm:calendar_ics", args=[logged_in.calendar_token])
     ).content.decode()
-    assert "SUMMARY:Goldman Sachs · applications open" in body
+    assert "SUMMARY:Goldman Sachs · Applications open" in body
     assert "BEGIN:VALARM" not in body

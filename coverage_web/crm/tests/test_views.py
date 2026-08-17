@@ -858,7 +858,7 @@ def test_the_fit_scores_timeline_axis_names_the_event_in_words(client):
     client.force_login(user)
     body = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
     assert "app_close" not in body
-    assert "applications close in 77d" in body
+    assert "Applications close in 77d" in body
 
 
 @pytest.mark.django_db

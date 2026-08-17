@@ -332,12 +332,44 @@
           'stroke-linecap="round" stroke-linejoin="round"/></svg>');
         wrap.appendChild(btn);
 
+        // One floating box (`panel`) holds everything that used to be just
+        // `menu`, so the search input (added below) and the scrolling list
+        // sit in the same positioned/animated container instead of the
+        // search box needing its own copy of the menu's absolute-position
+        // math. `menu` itself goes back to being a plain in-flow list.
+        var panel = document.createElement("div");
+        panel.className = "csel-panel";
+        panel.hidden = true;
+        wrap.appendChild(panel);
+
+        // A select with only a handful of options reads fine as a plain
+        // list — the timezone picker is the one place this stopped being
+        // true. It carries ~600 raw IANA zone names ("Africa/Abidjan",
+        // "Africa/Accra", ...) below a short curated list, and a NATIVE
+        // select handles that fine because typing jumps to a match. The
+        // enhanced listbox below has no such behaviour — it was a static
+        // scroll of 600 rows with nothing to narrow it. The threshold is
+        // arbitrary but generous: nothing else on the site has this many
+        // options today, so nothing else is affected by adding a filter.
+        var SEARCH_THRESHOLD = 12;
+        var search = null;
+        if (sel.options.length > SEARCH_THRESHOLD) {
+          var searchWrap = document.createElement("div");
+          searchWrap.className = "csel-search-wrap";
+          search = document.createElement("input");
+          search.type = "text";
+          search.className = "csel-search";
+          search.placeholder = "Filter…";
+          search.setAttribute("aria-label", "Filter options");
+          searchWrap.appendChild(search);
+          panel.appendChild(searchWrap);
+        }
+
         var menu = document.createElement("ul");
         menu.className = "csel-menu";
         menu.id = listId;
         menu.setAttribute("role", "listbox");
-        menu.hidden = true;
-        wrap.appendChild(menu);
+        panel.appendChild(menu);
 
         var opts = [], active = -1;
         function syncLabel() {
@@ -354,38 +386,72 @@
             li.setAttribute("role", "option");
             li.setAttribute("aria-selected", o.selected ? "true" : "false");
             li.textContent = o.textContent;
+            li.dataset.matchText = o.textContent.toLowerCase();
             li.addEventListener("click", function () { choose(i); });
             menu.appendChild(li);
             opts.push(li);
           });
+        }
+        // Visible options only — a filtered-out row must never be reachable
+        // by arrow keys, or the highlight silently lands on something the
+        // user can't see moving.
+        function visibleOpts() {
+          return opts.filter(function (li) { return !li.classList.contains("is-csel-hidden"); });
+        }
+        function filter() {
+          if (!search) return;
+          var q = search.value.trim().toLowerCase();
+          opts.forEach(function (li) {
+            // A CLASS, not the `hidden` attribute: `.csel-opt` sets its own
+            // `display: flex`, an AUTHOR rule that beats the user-agent's
+            // `[hidden] { display: none }` regardless of specificity — the
+            // exact trap `.is-csearch-hidden` exists to dodge elsewhere in
+            // this app. `hidden` here would toggle the attribute and change
+            // nothing on screen.
+            li.classList.toggle("is-csel-hidden", q !== "" && li.dataset.matchText.indexOf(q) === -1);
+          });
+          var vis = visibleOpts();
+          menu.classList.toggle("csel-menu-empty", q !== "" && vis.length === 0);
+          active = vis.length ? opts.indexOf(vis[0]) : -1;
+          highlight();
         }
         function highlight() {
           opts.forEach(function (li, i) { li.classList.toggle("is-active", i === active); });
           if (opts[active]) {
             btn.setAttribute("aria-activedescendant", opts[active].id);
             opts[active].scrollIntoView({ block: "nearest" });
+          } else {
+            btn.removeAttribute("aria-activedescendant");
           }
         }
         function open() {
           build();
-          menu.hidden = false;
+          panel.hidden = false;
           wrap.dataset.open = "true";
           btn.setAttribute("aria-expanded", "true");
-          window.covKeepInViewport(menu);
+          window.covKeepInViewport(panel);
           window.addEventListener("resize", onResize);
           active = sel.selectedIndex < 0 ? 0 : sel.selectedIndex;
           highlight();
           document.addEventListener("click", onDoc, true);
+          if (search) {
+            search.value = "";
+            menu.classList.remove("csel-menu-empty");
+            // Deferred: focusing synchronously, in the same click that
+            // opened the menu, raced Safari's own focus-on-click handling
+            // and the caret never appeared until a second click.
+            setTimeout(function () { search.focus(); }, 0);
+          }
         }
         function close() {
-          menu.hidden = true;
+          panel.hidden = true;
           wrap.dataset.open = "false";
           btn.setAttribute("aria-expanded", "false");
           btn.removeAttribute("aria-activedescendant");
           document.removeEventListener("click", onDoc, true);
           window.removeEventListener("resize", onResize);
         }
-        function onResize() { window.covKeepInViewport(menu); }
+        function onResize() { window.covKeepInViewport(panel); }
         function onDoc(e) { if (!wrap.contains(e.target)) close(); }
         function choose(i) {
           if (sel.selectedIndex !== i) {
@@ -396,24 +462,148 @@
           close();
           btn.focus();
         }
-        btn.addEventListener("click", function () { menu.hidden ? open() : close(); });
+        function moveActive(dir) {
+          var vis = visibleOpts();
+          if (!vis.length) return;
+          var pos = vis.indexOf(opts[active]);
+          pos = pos < 0 ? (dir > 0 ? 0 : vis.length - 1) : Math.min(vis.length - 1, Math.max(0, pos + dir));
+          active = opts.indexOf(vis[pos]);
+          highlight();
+        }
+        btn.addEventListener("click", function () { panel.hidden ? open() : close(); });
+        if (search) {
+          search.addEventListener("input", filter);
+          search.addEventListener("keydown", function (e) {
+            if (e.key === "Escape") {
+              if (search.value) { e.preventDefault(); e.stopPropagation(); search.value = ""; filter(); }
+              return;
+            }
+            if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); moveActive(1); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); moveActive(-1); }
+            else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (active > -1) choose(active); }
+          });
+        }
         wrap.addEventListener("keydown", function (e) {
-          if (menu.hidden) {
+          if (panel.hidden) {
             if (["ArrowDown", "ArrowUp", "Enter", " "].indexOf(e.key) > -1) { e.preventDefault(); open(); }
             return;
           }
           if (e.key === "Escape") { e.preventDefault(); close(); btn.focus(); }
-          else if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(opts.length - 1, active + 1); highlight(); }
-          else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(0, active - 1); highlight(); }
-          else if (e.key === "Home") { e.preventDefault(); active = 0; highlight(); }
-          else if (e.key === "End") { e.preventDefault(); active = opts.length - 1; highlight(); }
-          else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (active > -1) choose(active); }
+          else if (e.key === "ArrowDown") { e.preventDefault(); moveActive(1); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); moveActive(-1); }
+          else if (e.key === "Home" && e.target !== search) { e.preventDefault(); var first = visibleOpts()[0]; if (first) { active = opts.indexOf(first); highlight(); } }
+          else if (e.key === "End" && e.target !== search) { e.preventDefault(); var vis = visibleOpts(); if (vis.length) { active = opts.indexOf(vis[vis.length - 1]); highlight(); } }
+          else if (e.key === "Enter" || e.key === " ") {
+            if (e.target === search) return; // handled by the search listener above
+            e.preventDefault(); if (active > -1) choose(active);
+          }
         });
         sel.addEventListener("change", syncLabel);
         syncLabel();
       }
       function enhanceAll(root) {
         (root || document).querySelectorAll("select:not([multiple]):not(.csel-native)").forEach(enhance);
+      }
+      if (document.readyState !== "loading") enhanceAll();
+      else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });
+      document.body.addEventListener("htmx:afterSettle", function (e) { enhanceAll(e.target); });
+    })();
+  </script>
+
+  {% comment %}
+  .kin-reveal's one-shot entrance animation (coverage.css) never releases the
+  stacking context it creates. A CSS animation that touches transform/opacity
+  forces its element into its own stacking context for as long as the
+  animation is "current" — and with `animation-fill-mode: both` and no
+  iteration count, a finished animation stays current forever, computing a
+  transform of `matrix(1,0,0,1,0,0)` rather than reverting to the keyword
+  `none`. Every `.kin-reveal` card was measured still creating that context
+  well after its 520ms animation visibly finished.
+
+  Consequence, reproduced live on a contact page: the Log Touch card's
+  Channel dropdown (a `.csel-menu`, z-index 60) opened, and its lower half —
+  which overlaps the History card sitting right below — rendered BEHIND that
+  History card instead of on top of it. z-index 60 only wins fights inside
+  its own card's now-permanent stacking context; the next card over is a
+  separate one, painted on top wholesale because it is later in the DOM.
+  `.kin-reveal` sits on every card-style container sitewide (Settings,
+  Network, Today, Opportunities, the contact page), so this is not
+  contact-page-specific — anywhere a popover sits near the bottom edge of a
+  `.kin-reveal` box with another one below it, the same thing happens.
+
+  Fix: once each entrance animation finishes, drop `animation` entirely so
+  the element stops being a stacking-context source and returns to normal
+  flow. Delegated on `document` (animationend bubbles) so it covers every
+  `.kin-reveal` element already on the page AND every one an htmx swap
+  inserts later, with no separate re-scan needed.
+  {% endcomment %}
+  <script>
+    document.addEventListener("animationend", function (e) {
+      if (e.animationName === "rise-in" && e.target.classList.contains("kin-reveal")) {
+        e.target.style.animation = "none";
+      }
+    });
+  </script>
+
+  {% comment %}
+  Number-input stepper. Same progressive-enhancement shape as the `.csel`
+  enhancer above: the real `<input type="number">` stays exactly what it
+  was (keyboard, validation, min/max/step, and the POST contract are all
+  still the native input's) and only gets two drawn buttons beside it,
+  because CSS alone can restyle the native spin button's box in Chrome but
+  not redraw its glyph, and the result still reads as raw OS chrome next
+  to a page where every other control is hand-drawn.
+
+  `stepUp`/`stepDown` are native — they already respect `min`/`max`/`step`
+  and clamp instead of throwing at a boundary — but they don't fire any
+  event on their own, which the Cadence rails and the Weekly Pace ring
+  both need: both redraw on `input` (see their own listeners), so a click
+  that only moved `.value` would update the number in the box while the
+  diagram beside it sat frozen on the old one.
+  {% endcomment %}
+  <script>
+    (function () {
+      function enhance(input) {
+        if (input.dataset.numStepDone) return;
+        input.dataset.numStepDone = "1";
+        var wrap = document.createElement("span");
+        wrap.className = "num-stepper";
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(input);
+
+        var arrow = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" ' +
+          'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+          'stroke-linejoin="round"/></svg>';
+        var up = document.createElement("button");
+        up.type = "button"; up.className = "num-step num-step-up"; up.tabIndex = -1;
+        up.setAttribute("aria-label", "Increase");
+        up.innerHTML = arrow;
+        up.style.transform = "rotate(180deg)";
+        var down = document.createElement("button");
+        down.type = "button"; down.className = "num-step num-step-down"; down.tabIndex = -1;
+        down.setAttribute("aria-label", "Decrease");
+        down.innerHTML = arrow;
+        wrap.appendChild(up);
+        wrap.appendChild(down);
+
+        function step(dir) {
+          if (input.disabled || input.readOnly) return;
+          var before = input.value;
+          try { dir > 0 ? input.stepUp() : input.stepDown(); } catch (e) { return; }
+          if (input.value !== before) {
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+        // mousedown, not click: click fires after the input has already
+        // lost focus to the button, which is one extra tab stop away from
+        // where the student was typing. Preventing default on mousedown
+        // keeps focus (and the caret) on the input the whole time.
+        up.addEventListener("mousedown", function (e) { e.preventDefault(); step(1); });
+        down.addEventListener("mousedown", function (e) { e.preventDefault(); step(-1); });
+      }
+      function enhanceAll(root) {
+        (root || document).querySelectorAll('input[type="number"]').forEach(enhance);
       }
       if (document.readyState !== "loading") enhanceAll();
       else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });

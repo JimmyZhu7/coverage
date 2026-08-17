@@ -559,7 +559,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   loses the truncation fight to a long title; the role above already
   gives ground via `min-width: 0`, so the city is what survives.
   {% endcomment %}
-  .newat-loc { flex: none; color: var(--ink-3); white-space: nowrap; }
+  /* `flex: none` keeps location full-width when the role beside it has
+     something to give up (see the comment above) — but a role that's
+     BLANK leaves no buffer at all, and a scraped listing with several
+     locations joined by semicolons ("Newport Beach, CA USA, United States
+     of America; Austin, TX USA, United States of America") then had
+     nothing stopping it from running straight off the card. Its own cap
+     and ellipsis make it degrade the same way the role does, independent
+     of whether the role exists. */
+  .newat-loc { flex: none; max-width: 55%; color: var(--ink-3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .newat-loc::before { content: "·"; margin-right: 8px; }
   @media (max-width: 700px) { .newat-list { columns: 1; } }
 
@@ -712,7 +721,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      flex row and neither had ever set align-items to anything but the
      default. */
   .csearch-bar { display: flex; align-items: center; gap: var(--s3); margin: var(--s3) 0 var(--s4); }
-  .csearch-field { position: relative; flex: 1 1 260px; display: flex; align-items: center; }
+  /* `.csearch-field` is a `<label>` used as an icon+input wrapper, not a
+     caption above a field — but the generic `label { margin: var(--s4) 0
+     var(--s1) }` rule still applied to it (16px top / 4px bottom), an
+     asymmetric margin the `.csel` sort control next to it doesn't share.
+     `align-items: center` centers each flex item's OWN margin box, so the
+     search field's content sat 6px lower than the sort button's even
+     though both are 41px tall — reset to 0 so both share the same
+     zero-margin box and actually land on one line. */
+  .csearch-field { position: relative; flex: 1 1 260px; display: flex; align-items: center; margin: 0; }
   .csearch-field svg { position: absolute; left: 13px; color: var(--ink-3); pointer-events: none; }
   .csearch-field input { padding-left: 34px; }
   /* Native search inputs grow a clear-x on their own; nothing else here needs it. */

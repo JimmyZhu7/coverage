@@ -249,7 +249,19 @@ on every quick action so all of it stays in sync.
             <li class="newat-row">
               <span class="activity-dot in"></span>
               <a class="newat-firm" href="{% url 'directory:firm_detail' r.slug %}">{{ r.firm|smart_title }}</a>
-              <span class="newat-role">{{ r.title|smart_title|truncatechars:52 }}</span>
+              {% comment %}
+              120, not 52: the CSS already truncates this responsively
+              (.newat-role's own text-overflow: ellipsis, sized to the
+              actual column), so the character cap only needs to guard
+              against a pathologically long scraped title, not do the real
+              truncation itself. At 52 it was cutting BEFORE the part that
+              tells two roles apart — "2026 Find Your Fit – Early Career
+              Programs in China" is itself ~52 characters, so a Shanghai
+              Jiao Tong posting and a Fudan posting (two real, distinct
+              JPMorgan requisitions, different URLs) both landed at the
+              exact same truncated string and read as one row repeated.
+              {% endcomment %}
+              <span class="newat-role">{{ r.title|smart_title|truncatechars:120 }}</span>
               {% if r.location %}<span class="newat-loc">{{ r.location|smart_location }}</span>{% endif %}
             </li>
           {% endfor %}

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
+{% load textstyle %}
 
 {% block title %}Settings · Coverage{% endblock %}
 
@@ -121,7 +122,16 @@
   .set-num input { width: 88px; margin: 0; text-align: right;
     font-variant-numeric: tabular-nums; }
   .set-num .set-unit { color: var(--ink-3); font-size: var(--fs-s); white-space: nowrap; }
-  .set-default { color: var(--ink-3); font-size: var(--fs-xs); white-space: nowrap; }
+  /* Its own line, not a trailing clause the description's last sentence
+     runs into — dropped the repeated unit too (already stated once, right
+     next to the input, one line up): the description explains what the
+     knob does, this states only the number it resets to if cleared.
+     Accent-colored and tabular, like the other live numbers on this page
+     (.set-row-value): it is a value, not more prose, and grey-on-grey let
+     it disappear into the sentence above it. */
+  .set-default { display: block; margin-top: 4px; color: var(--accent-ink);
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-weight: var(--w-med); font-size: var(--fs-xs); white-space: nowrap; }
   /* Two knobs to a row (Cadence only, so far). Seven full-width .set-rows
      put seven near-identical spinners in a 700px column, each one label and
      one number marooned at opposite edges of the card with a rule between —
@@ -129,15 +139,22 @@
      auto-fit rather than a media query: the pair collapses to one column
      whenever the card cannot give both 320px, which is the actual condition,
      and so it survives the sidebar appearing at 820px as well as a phone. */
+  /* No top padding: the only place this grid is used, it follows straight
+     after .cad-viz's own margin-bottom (24px) — the two stacked into a
+     36px gap under the diagram before this grid's own content started,
+     nearly double every other gap on this page. Bottom padding stays, for
+     the run-up to the Save button. */
   .set-grid-2 { display: grid; align-items: start;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: var(--s5); padding: var(--s3) 0 var(--s2); }
-  /* Label and number on ONE line, description underneath across the whole
-     field. Stacking label / description / control instead — the profile
-     grid's shape — measured no shorter than the seven full-width rows it
-     replaced: two columns halve the count but pushing the input below the
-     text puts the height straight back. A setting and its value belong on
-     the same line anyway; the prose is the footnote.
+    gap: var(--s5); padding: 0 0 var(--s2); }
+  /* Label and description stacked as one left-hand block, the control
+     riding beside the whole block rather than just its first line — the
+     same label-and-description-together read as every other settings row
+     on this page (.set-row-main), applied to a two-up grid instead of a
+     full-width one.
+     Named areas, not source order: the control stays SECOND in the DOM
+     (between label and description) so tab order still reaches the input
+     before its own explanation, while visually it sits beside both.
      minmax(0, 1fr) on the text column so a long label wraps instead of
      squeezing the input, which must never shrink below its 88px.
      The control track is a FIXED 12rem, not auto. On auto it sized to each
@@ -145,11 +162,15 @@
      days" the seven inputs landed at seven different offsets — only their
      right edges lined up, and a bordered box is the thing the eye tracks.
      12rem clears the widest pairing (88px input + gap + 82px of "business
-     days" = 178px) so every input starts on the same line down the column. */
+     days" = 178px) so every input starts at the same x down the column. */
   .set-field { display: grid; grid-template-columns: minmax(0, 1fr) 12rem;
-    align-items: center; column-gap: var(--s3); }
-  .set-field > .set-row-control { justify-self: start; }
-  .set-field > .set-row-desc, .set-field > .set-row-err { grid-column: 1 / -1; }
+    grid-template-areas: "label control" "desc control" "err err";
+    column-gap: var(--s3); }
+  .set-field > .set-row-label { grid-area: label; }
+  .set-field > .set-row-control { grid-area: control; justify-self: start;
+    align-self: center; }
+  .set-field > .set-row-desc { grid-area: desc; }
+  .set-field > .set-row-err { grid-area: err; }
   /* An odd knob count leaves the last field alone on its row, and it STAYS in
      one cell rather than spanning both. Spanning looked tidier in the
      abstract and was worse in fact: the control track is pinned to the right
@@ -183,8 +204,11 @@
     .set-grid-2 { gap: var(--s4); }
     /* Same reason .set-row stacks: a 12rem control reserved beside the label
        leaves a phone about 130px of label, and "Pre-Deadline Re-Ping" does
-       not fit in 130px. Label, then input, then the prose. */
-    .set-field { grid-template-columns: minmax(0, 1fr); }
+       not fit in 130px. Label, then input, then the prose — the desktop
+       areas collapse to one column in that same order. */
+    .set-field { grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "label" "control" "desc" "err"; }
+    .set-field > .set-row-control { justify-self: start; }
     /* A phone gives the track about 200px, and three labels reading name AND
        number do not fit in 200px — they overlapped each other outright. The
        number is the part to drop: the live sentence directly under the rail
@@ -308,13 +332,14 @@
   .cad-mark.is-raised .cad-lab { bottom: 35px; }
   .cad-rail.is-stacked { margin-top: 50px; }
   .cad-rail { transition: margin-top 200ms var(--t-ease, ease-out); }
-  /* The two markers pinned to the ends of their rail (Note at 0%, Closes at
-     100%) hang their label INWARD instead of centring it on the dot. Centred,
-     half of each one sat out past the end of the track, and the label of the
-     nearest moving marker had that much less room before it collided —
-     visible as soon as a short follow-up window pulls Follow-up back toward
-     day 0. Only these two are safe to anchor: they never move. */
-  .cad-mark-note .cad-lab { left: -2px; right: auto; }
+  /* The markers pinned to the ends of a rail (Note and Touch at 0%, Closes
+     at 100%) hang their label INWARD instead of centring it on the dot.
+     Centred, half of each one sat out past the end of the track, and the
+     label of the nearest moving marker had that much less room before it
+     collided — visible as soon as a short follow-up window pulls Follow-up
+     back toward day 0. Only these are safe to anchor: they never move. */
+  .cad-mark-note .cad-lab, .cad-mark-touch .cad-lab,
+  .cad-mark-reping .cad-lab { left: -2px; right: auto; }
   .cad-mark-close .cad-lab { right: -2px; left: auto; }
   .cad-lab b { font-size: 10px; font-weight: var(--w-med);
     letter-spacing: 0.02em; color: var(--ink-2); }
@@ -395,6 +420,89 @@
   .theme-opt + .theme-opt { border-left: 1px solid var(--line); }
   .theme-opt:hover { background: var(--accent-soft); color: var(--accent-ink); }
   .theme-opt.is-on { background: var(--accent); color: var(--on-accent); }
+
+  /* ---- Target Firms: the tier board, editable from Settings -----------
+     Same drag-to-retier mechanism the Network page's board already uses
+     (same endpoint, same event shape) — a firm dragged here and a firm
+     dragged there write through one code path, so the two boards can
+     never disagree about a person's tier. What Settings adds is what the
+     Network board can't do: START and STOP tracking a firm at all. */
+  /* One firm's whole row, at one-per-row, is the shape the Network board
+     avoided on purpose (see .tier-grid's own note: "bounded (~2 rows) so
+     a tier with many firms doesn't stretch the whole panel") — a first
+     pass here missed that and put 69 firms in 69 full-width rows across
+     three side-by-side columns, taller than the rest of Settings
+     combined. Same fix as Network's: firms are TAGS, not cards, so they
+     wrap several to a row, and each tier is a fixed peek height with its
+     own scrollbar rather than growing the page. Stacked sections instead
+     of 3 side-by-side columns for the same reason — a 190px-wide column
+     of chips wraps at most one or two per row and buys nothing. */
+  .tf-board { display: flex; flex-direction: column; gap: var(--s3);
+    margin: var(--s3) 0 var(--s5); }
+  .tf-col { background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong); border-radius: var(--r-panel);
+    padding: var(--s3) var(--s4);
+    transition: border-color var(--t-fast), background-color var(--t-fast); }
+  /* Escalating emphasis, not a severity colour (the Coverage Gaps strip's
+     tier borders mean "how urgent" — reusing that red/amber/grey here
+     would say something is WRONG with Tier 1, when it's simply the most
+     important section). Accent scales down tier by tier instead. */
+  .tf-col[data-tier="1"] { border-left-color: var(--accent); }
+  .tf-col[data-tier="2"] { border-left-color: var(--accent-line); }
+  .tf-col[data-tier="3"] { border-left-color: var(--line-strong); }
+  .tf-col.drop-hot { background: var(--accent-soft); border-color: var(--accent-line); }
+  .tf-col-title { display: flex; align-items: center; gap: var(--s2);
+    margin: 0 0 var(--s2); font-family: var(--font-mono); font-size: var(--fs-xs);
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+  .tf-col-count { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  /* ~3 rows before it scrolls internally, same "bounded peek, not an
+     unbounded list" contract as .tier-grid and .tf-results below. */
+  .tf-chips { display: flex; flex-wrap: wrap; align-content: flex-start;
+    gap: var(--s2); max-height: 152px; overflow-y: auto; padding-right: 4px;
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .tf-chips::-webkit-scrollbar { width: 8px; }
+  .tf-chips::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+  .tf-chip { flex: none; display: flex; align-items: center;
+    gap: 6px; max-width: 220px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--paper); cursor: grab;
+    font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink);
+    box-shadow: var(--shadow-1); animation: chip-check 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: border-color var(--t-fast), box-shadow var(--t-med), opacity var(--t-med), transform var(--t-med); }
+  .tf-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tf-chip:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
+  .tf-chip.dragging { opacity: 0.5; cursor: grabbing; }
+  .tf-chip.is-leaving { opacity: 0; transform: scale(0.85); }
+  .tf-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
+    color: var(--ink-3); font-size: 14px; line-height: 1; cursor: pointer;
+    transition: background-color var(--t-fast), color var(--t-fast); }
+  .tf-chip-x:hover { background: var(--danger-soft); color: var(--danger); }
+  .tf-empty { margin: 0; color: var(--ink-3); font-size: var(--fs-xs); font-style: italic; }
+
+  .tf-add label { display: block; margin: 0 0 var(--s2); }
+  .tf-add input[type="text"] { max-width: 26rem; }
+  .tf-results { display: flex; flex-direction: column; gap: 2px; margin-top: var(--s3);
+    max-height: 260px; overflow-y: auto; border: 1px solid var(--line);
+    border-radius: var(--r-panel); padding: var(--s1); }
+  .tf-result { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s3); padding: 6px 10px; border-radius: var(--r-ctl);
+    font-size: var(--fs-s); color: var(--ink-2); }
+  .tf-result:hover { background: var(--accent-soft); }
+  .tf-result.is-hidden { display: none; }
+  .tf-add-btns { flex: none; display: flex; gap: 6px; }
+  .tf-add-btn { border: 1px solid var(--line); background: var(--surface);
+    color: var(--ink-2); border-radius: 999px; padding: 3px 11px;
+    font-family: var(--font-mono); font-size: 11px; font-weight: var(--w-med);
+    cursor: pointer; transition: border-color var(--t-fast), background-color var(--t-fast),
+      color var(--t-fast), transform var(--t-fast); }
+  .tf-add-btn:hover { border-color: var(--accent); background: var(--accent-soft);
+    color: var(--accent-ink); transform: translateY(-1px); }
+  .tf-add-btn:active { transform: translateY(0) scale(0.96); }
+  .tf-empty-search { margin: var(--s2) 0 0; color: var(--ink-3); font-size: var(--fs-s); font-style: italic; }
+  @media (prefers-reduced-motion: reduce) {
+    .tf-chip { animation: none; }
+    .tf-add-btn:hover { transform: none; }
+  }
 </style>
 {% endblock %}
 
@@ -432,6 +540,8 @@
       <a href="#profile" class="is-active" aria-current="true">Profile</a>
       <a href="#work-auth">Work Authorization</a>
       <a href="#appearance">Appearance</a>
+      <p class="settings-nav-group">Your Firms</p>
+      <a href="#firms">Target Firms</a>
       <p class="settings-nav-group">How Coverage Paces You</p>
       <a href="#cadence">Cadence</a>
       <a href="#pace">Weekly Pace</a>
@@ -519,8 +629,209 @@
         </div>
       </section>
 
+      {# ---- Target Firms ---- #}
+      <section class="set-card kin-reveal" id="firms" style="--i:3"
+               aria-labelledby="firms-h">
+        <div class="set-head">
+          <h2 id="firms-h">Target Firms</h2>
+          <p>Who You're Recruiting For, By Tier</p>
+        </div>
+        <div class="set-body">
+          {% comment %}
+          The Network board already lets you DRAG a tracked firm between
+          tiers, but has no way to start or stop tracking one — the board
+          only ever renders firms that already have a `UserFirm` row. This
+          is that missing other half, in the one place a student actually
+          goes to change a setting rather than work their queue. Both
+          write through `crm:set_firm_tier` (now get-or-create, see its
+          docstring), so a drag here and a drag on Network can never
+          disagree about what a firm's tier means.
+          {% endcomment %}
+          <p class="field-hint">Drag a firm to change its tier. Higher tiers get more attention from Coverage.</p>
+          <div class="tf-board" id="tf-board" data-tf-board>
+            {% for col in firm_tiers %}
+              <div class="tf-col" data-tier="{{ col.tier }}">
+                <h3 class="tf-col-title">Tier {{ col.tier }}
+                  <span class="tf-col-count" data-tf-count>{{ col.firms|length }}</span></h3>
+                <div class="tf-chips" data-tf-chips>
+                  {% for f in col.firms %}
+                    <div class="tf-chip" draggable="true" data-firm="{{ f.id }}" data-firm-name="{{ f.name|lower }}">
+                      <span>{{ f.name|smart_title }}</span>
+                      <button type="button" class="tf-chip-x" data-tf-remove="{{ f.id }}"
+                              aria-label="Stop tracking {{ f.name|smart_title }}">×</button>
+                    </div>
+                  {% endfor %}
+                </div>
+                <p class="tf-empty"{% if col.firms %} hidden{% endif %}>Drop a firm here.</p>
+              </div>
+            {% endfor %}
+          </div>
+
+          <label for="tf-search">Add a Firm</label>
+          <input type="text" id="tf-search" placeholder="Search firms…" autocomplete="off">
+          <div class="tf-results" id="tf-results">
+            {% for f in untracked_firms %}
+              <div class="tf-result" data-firm="{{ f.id }}" data-firm-name="{{ f.name|lower }}">
+                <span>{{ f.name|smart_title }}</span>
+                <span class="tf-add-btns">
+                  <button type="button" class="tf-add-btn" data-tf-add="{{ f.id }}" data-tf-tier="1">Tier 1</button>
+                  <button type="button" class="tf-add-btn" data-tf-add="{{ f.id }}" data-tf-tier="2">Tier 2</button>
+                  <button type="button" class="tf-add-btn" data-tf-add="{{ f.id }}" data-tf-tier="3">Tier 3</button>
+                </span>
+              </div>
+            {% empty %}
+              <p class="tf-empty-search">Every firm in the directory is already on one of your tiers.</p>
+            {% endfor %}
+          </div>
+          <p class="tf-empty-search" data-tf-no-results hidden>No firms match that search.</p>
+        </div>
+      </section>
+      <script>
+      (function () {
+        var board = document.querySelector("[data-tf-board]");
+        if (!board) return;
+        var results = document.getElementById("tf-results");
+        var search = document.getElementById("tf-search");
+        var noResults = document.querySelector("[data-tf-no-results]");
+        var csrf = "{{ csrf_token }}";
+        var tierUrl = "{% url 'crm:set_firm_tier' %}";
+        var removeUrl = "{% url 'crm:remove_target_firm' %}";
+
+        function post(url, params) {
+          return fetch(url, {
+            method: "POST",
+            headers: { "X-CSRFToken": csrf, "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams(params).toString(),
+          });
+        }
+        function colFor(tier) { return board.querySelector('.tf-col[data-tier="' + tier + '"]'); }
+        function syncEmpty(col) {
+          var empty = col.querySelector(".tf-empty");
+          var count = col.querySelectorAll(".tf-chip").length;
+          if (empty) empty.hidden = count > 0;
+          col.querySelector("[data-tf-count]").textContent = count;
+        }
+
+        // ---- Remove: stop tracking a firm, and hand it back to the
+        // add-a-firm search list rather than just deleting it from view —
+        // it stayed a real firm in the directory, only the tracking ended.
+        function addResultRow(firmId, name) {
+          if (results.querySelector('[data-firm="' + firmId + '"]')) return;
+          var row = document.createElement("div");
+          row.className = "tf-result";
+          row.dataset.firm = firmId;
+          row.dataset.firmName = name.toLowerCase();
+          row.innerHTML =
+            '<span></span><span class="tf-add-btns">' +
+            '<button type="button" class="tf-add-btn" data-tf-add="' + firmId + '" data-tf-tier="1">Tier 1</button>' +
+            '<button type="button" class="tf-add-btn" data-tf-add="' + firmId + '" data-tf-tier="2">Tier 2</button>' +
+            '<button type="button" class="tf-add-btn" data-tf-add="' + firmId + '" data-tf-tier="3">Tier 3</button></span>';
+          row.querySelector("span").textContent = name; // textContent, not innerHTML — the name is untrusted-ish user-directory data
+          results.querySelectorAll(".tf-empty-search").forEach(function (p) { p.remove(); });
+          results.appendChild(row);
+          bindAdd(row);
+          filterResults();
+        }
+        function removeChip(chip) {
+          var firmId = chip.dataset.firm;
+          var name = chip.querySelector("span").textContent;
+          var col = chip.closest(".tf-col");
+          post(removeUrl, { firm: firmId }).then(function (resp) {
+            if (!resp.ok) return;
+            chip.classList.add("is-leaving");
+            setTimeout(function () {
+              chip.remove();
+              syncEmpty(col);
+              addResultRow(firmId, name);
+            }, 160);
+          });
+        }
+        board.addEventListener("click", function (e) {
+          var btn = e.target.closest("[data-tf-remove]");
+          if (btn) removeChip(btn.closest(".tf-chip"));
+        });
+
+        // ---- Add: post firm+tier, then build the chip in place rather
+        // than reloading — a full-page reload here would also reset the
+        // scroll position away from the section the student is mid-edit
+        // on, on a page with a dozen other sections above this one. ----
+        function buildChip(firmId, name) {
+          var chip = document.createElement("div");
+          chip.className = "tf-chip";
+          chip.draggable = true;
+          chip.dataset.firm = firmId;
+          chip.dataset.firmName = name.toLowerCase();
+          chip.innerHTML = '<span></span><button type="button" class="tf-chip-x" ' +
+            'data-tf-remove="' + firmId + '" aria-label="Stop tracking ' + name.replace(/"/g, "&quot;") + '">×</button>';
+          chip.querySelector("span").textContent = name;
+          bindDrag(chip);
+          return chip;
+        }
+        function bindAdd(row) {
+          row.querySelectorAll("[data-tf-add]").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+              var firmId = btn.dataset.tfAdd, tier = btn.dataset.tfTier;
+              var name = row.querySelector("span").textContent;
+              post(tierUrl, { firm: firmId, tier: tier }).then(function (resp) {
+                if (!resp.ok) return;
+                var col = colFor(tier);
+                col.querySelector("[data-tf-chips]").appendChild(buildChip(firmId, name));
+                syncEmpty(col);
+                row.remove();
+              });
+            });
+          });
+        }
+        results.querySelectorAll(".tf-result").forEach(bindAdd);
+
+        // ---- Search: same live-filter pattern the onboarding firm picker
+        // uses, but toggling a CLASS rather than the `hidden` attribute —
+        // `.tf-result` sets its own `display: flex`, an author rule that
+        // beats the user-agent's `[hidden] { display: none }` regardless
+        // of specificity, so `hidden` here would silently do nothing. ----
+        function filterResults() {
+          var q = search.value.trim().toLowerCase();
+          var any = false;
+          results.querySelectorAll(".tf-result").forEach(function (row) {
+            var match = !q || row.dataset.firmName.indexOf(q) > -1;
+            row.classList.toggle("is-hidden", !match);
+            if (match) any = true;
+          });
+          noResults.hidden = !q || any || results.children.length === 0;
+        }
+        if (search) search.addEventListener("input", filterResults);
+
+        // ---- Drag-and-drop between tiers: identical mechanism to the
+        // Network board's (same endpoint, same event shape) so the two
+        // never learn to disagree about what a drag means. ----
+        function bindDrag(chip) {
+          chip.addEventListener("dragstart", function () { dragged = chip; chip.classList.add("dragging"); });
+          chip.addEventListener("dragend", function () { chip.classList.remove("dragging"); });
+        }
+        var dragged = null;
+        board.querySelectorAll(".tf-chip").forEach(bindDrag);
+        board.querySelectorAll(".tf-col").forEach(function (col) {
+          col.addEventListener("dragover", function (e) { e.preventDefault(); col.classList.add("drop-hot"); });
+          col.addEventListener("dragleave", function () { col.classList.remove("drop-hot"); });
+          col.addEventListener("drop", function (e) {
+            e.preventDefault();
+            col.classList.remove("drop-hot");
+            if (!dragged) return;
+            var fromCol = dragged.closest(".tf-col");
+            if (fromCol === col) return;
+            post(tierUrl, { firm: dragged.dataset.firm, tier: col.dataset.tier }).then(function (resp) {
+              if (!resp.ok) return;
+              col.querySelector("[data-tf-chips]").appendChild(dragged);
+              syncEmpty(fromCol);
+              syncEmpty(col);
+            });
+          });
+        });
+      })();
+      </script>
+
       {# ---- Work Authorization ---- #}
-      <section class="set-card kin-reveal" id="work-auth" style="--i:3"
+      <section class="set-card kin-reveal" id="work-auth" style="--i:4"
                aria-labelledby="work-auth-h">
         <div class="set-head">
           <h2 id="work-auth-h">Work Authorization</h2>
@@ -547,7 +858,7 @@
       </section>
 
       {# ---- Cadence ---- #}
-      <section class="set-card kin-reveal" id="cadence" style="--i:4"
+      <section class="set-card kin-reveal" id="cadence" style="--i:5"
                aria-labelledby="cadence-h">
         <div class="set-head">
           <h2 id="cadence-h">Cadence</h2>
@@ -570,7 +881,7 @@
               <p class="cad-rail-title">A cold contact's life</p>
               <div class="cad-rail" aria-hidden="true">
                 <span class="cad-fill"></span>
-                <span class="cad-mark cad-mark-note" style="--x: 0%"><span class="cad-lab"><b>Note</b><u>day 0</u></span></span>
+                <span class="cad-mark cad-mark-note" style="--x: 0%"><span class="cad-lab"><b>Note</b><u>Day 0</u></span></span>
                 <span class="cad-mark cad-mark-followup"><span class="cad-lab"><b>Follow-up</b><u></u></span></span>
                 <span class="cad-mark cad-mark-park"><span class="cad-lab"><b>Park</b><u></u></span></span>
               </div>
@@ -580,6 +891,15 @@
               <p class="cad-rail-title">Keeping warm people warm</p>
               <div class="cad-rail cad-rail-weeks" aria-hidden="true">
                 <span class="cad-fill"></span>
+                {% comment %}
+                This rail's real Day 0, added so it reads the same way the
+                cold-contact rail does: both clocks below (Chatted, Advocate)
+                count elapsed time SINCE a touch, so "Touch" pinned at 0% is
+                the one honest origin they share — not fabricated, it is
+                exactly where .cad-fill already started before this marker
+                existed to say so.
+                {% endcomment %}
+                <span class="cad-mark cad-mark-touch" style="--x: 0%"><span class="cad-lab"><b>Touch</b><u>Day 0</u></span></span>
                 <span class="cad-mark cad-mark-chatted"><span class="cad-lab"><b>Chatted</b><u></u></span></span>
                 <span class="cad-mark cad-mark-advocate"><span class="cad-lab"><b>Advocate</b><u></u></span></span>
               </div>
@@ -590,7 +910,7 @@
               <div class="cad-rail cad-rail-deadline" aria-hidden="true">
                 <span class="cad-fill"></span>
                 <span class="cad-mark cad-mark-reping"><span class="cad-lab"><b>Re-ping</b><u></u></span></span>
-                <span class="cad-mark cad-mark-close" style="--x: 100%"><span class="cad-lab"><b>Closes</b><u>day 0</u></span></span>
+                <span class="cad-mark cad-mark-close" style="--x: 100%"><span class="cad-lab"><b>Closes</b><u>Day 0</u></span></span>
               </div>
               <p class="cad-sentence" id="cad-deadline-sentence" aria-live="off"></p>
             </div>
@@ -616,10 +936,10 @@
                 <div class="set-field">
                   <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
                   <div class="set-row-control set-num">
-                    {{ row.field }}<span class="set-unit">{{ row.unit }}</span>
+                    {{ row.field }}<span class="set-unit">{{ row.unit|title }}</span>
                   </div>
                   <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
-                    <span class="set-default">Default: {{ row.default }} {{ row.unit }}.</span></div>
+                    <span class="set-default">Default: {{ row.default }}</span></div>
                   {% if row.field.errors %}
                     <div class="set-row-err" id="{{ row.field.auto_id }}-err">{{ row.field.errors }}</div>
                   {% endif %}
@@ -632,7 +952,7 @@
       </section>
 
       {# ---- Weekly Pace ---- #}
-      <section class="set-card kin-reveal" id="pace" style="--i:5"
+      <section class="set-card kin-reveal" id="pace" style="--i:6"
                aria-labelledby="pace-h">
         <div class="set-head">
           <h2 id="pace-h">Weekly Pace</h2>
@@ -677,7 +997,7 @@
                   <div class="set-row-err" id="{{ pace_form.weekly_touch_goal.auto_id }}-err">{{ pace_form.weekly_touch_goal.errors }}</div>
                 {% endif %}
                 <div class="pace-inline">
-                  <span class="set-num">{{ pace_form.weekly_touch_goal }}<span class="set-unit">a week</span></span>
+                  <span class="set-num">{{ pace_form.weekly_touch_goal }}<span class="set-unit">A Week</span></span>
                   <p class="pace-read" id="pace-read"></p>
                 </div>
               </div>
@@ -700,7 +1020,7 @@
       "for this account" are genuinely different scopes and collapsing them
       would misstate one or the other.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="notifications" style="--i:6"
+      <section class="set-card kin-reveal" id="notifications" style="--i:7"
                aria-labelledby="notifications-h">
         <div class="set-head">
           <h2 id="notifications-h">Notifications</h2>
@@ -748,7 +1068,7 @@
       <script src="{% static 'js/push-subscribe.js' %}" defer></script>
 
       {# ---- Email Capture ---- #}
-      <section class="set-card kin-reveal" id="capture" style="--i:7"
+      <section class="set-card kin-reveal" id="capture" style="--i:8"
                aria-labelledby="capture-h">
         <div class="set-head">
           <h2 id="capture-h">Email Capture</h2>
@@ -834,7 +1154,7 @@
       {% endcomment %}
 
       {# ---- Sign-In & Security ---- #}
-      <section class="set-card kin-reveal" id="security" style="--i:8"
+      <section class="set-card kin-reveal" id="security" style="--i:9"
                aria-labelledby="security-h">
         <div class="set-head">
           <h2 id="security-h">Sign-In &amp; Security</h2>
@@ -915,7 +1235,7 @@
       </section>
 
       {# ---- Your Data ---- #}
-      <section class="set-card kin-reveal" id="data" style="--i:9"
+      <section class="set-card kin-reveal" id="data" style="--i:10"
                aria-labelledby="data-h">
         <div class="set-head">
           <h2 id="data-h">Your Data</h2>
@@ -964,7 +1284,7 @@
       </section>
 
       {# ---- Legal ---- #}
-      <section class="set-card kin-reveal" id="legal" style="--i:10"
+      <section class="set-card kin-reveal" id="legal" style="--i:11"
                aria-labelledby="legal-h">
         <div class="set-head">
           <h2 id="legal-h">Legal</h2>
@@ -995,7 +1315,7 @@
       bury the capture rotation where nobody would look for it.
       {% endcomment %}
       {# ---- Danger Zone ---- #}
-      <section class="set-card is-danger kin-reveal" id="danger" style="--i:11"
+      <section class="set-card is-danger kin-reveal" id="danger" style="--i:12"
                aria-labelledby="danger-h">
         <div class="set-head">
           <h2 id="danger-h">Danger Zone</h2>
@@ -1113,9 +1433,12 @@
           var lab = m.querySelector(".cad-lab");
           var lw = lab.getBoundingClientRect().width;
           var cx = (parseFloat(m.style.getPropertyValue("--x")) || 0) / 100 * w;
-          // Note and Closes hang their label inward (see the CSS); everyone
-          // else centres theirs on the dot.
-          var left = m.classList.contains("cad-mark-note") ? cx
+          // The three left-edge markers (Note, Touch, Re-ping) and the one
+          // right-edge marker (Closes) hang their label inward (see the CSS);
+          // everyone else centres theirs on the dot.
+          var left = (m.classList.contains("cad-mark-note")
+                      || m.classList.contains("cad-mark-touch")
+                      || m.classList.contains("cad-mark-reping")) ? cx
                    : m.classList.contains("cad-mark-close") ? cx - lw
                    : cx - lw / 2;
           return { el: m, left: left, right: left + lw };
@@ -1168,8 +1491,8 @@
       var scale = end * 1.15 || 1;
       var fu = viz.querySelector(".cad-mark-followup");
       fu.classList.toggle("is-off", touches <= 1);
-      setMark(".cad-mark-followup", Math.round(100 * f / scale), "day " + f);
-      setMark(".cad-mark-park", Math.round(100 * end / scale), "day " + end);
+      setMark(".cad-mark-followup", Math.round(100 * f / scale), "Day " + f);
+      setMark(".cad-mark-park", Math.round(100 * end / scale), "Day " + end);
       setFill(".cad-rail", 0, Math.round(100 * (touches > 1 ? f : end) / scale));
       document.getElementById("cad-cold-sentence").textContent =
         touches > 1
@@ -1187,10 +1510,20 @@
         "Someone you've chatted with goes quiet for " + chat +
         " weeks: circle back. An advocate: every " + adv + " weeks.";
 
-      // Deadline rail: right edge is the close; re-ping sits reping days out.
-      var dScale = Math.max(reping * 1.4, 30);
-      setMark(".cad-mark-reping", Math.round(100 * (1 - reping / dScale)), "−" + reping + "d");
-      setFill(".cad-rail-deadline", Math.round(100 * (1 - reping / dScale)), 100);
+      // Deadline rail: the rail IS the re-ping window — Re-ping pinned to the
+      // left edge, Closes to the right, the whole track filled.
+      //
+      // It used to draw a wider scale (1.4x the window, min 30 days) with
+      // Re-ping floating somewhere in the middle, which left the rail's first
+      // ~50% as empty track with no label above it — the one rail out of three
+      // whose leftmost label wasn't at the left edge. Every rail now starts at
+      // its own FIRST ACTION (Note, Touch, Re-ping), which is what made the
+      // other two line up in the first place.
+      //
+      // The value still reads live off the label, and the dot no longer needs
+      // to slide because the rail's whole span now means "the re-ping window".
+      setMark(".cad-mark-reping", 0, "−" + reping + "d");
+      setFill(".cad-rail-deadline", 0, 100);
       document.getElementById("cad-deadline-sentence").textContent =
         "Warm contacts at a firm get re-pinged " + reping +
         " days before its confirmed deadline.";

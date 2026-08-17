@@ -401,16 +401,16 @@
     <a class="cal-today-link" title="Live-updating feed for Apple/Google Calendar"
        href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe</a>
     <p class="cal-legend">
-      <span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> chat{{ counts.chat|pluralize }}</span>
-      <span class="cal-key cal-key-event"><b>{{ counts.event }}</b> event{{ counts.event|pluralize }}</span>
-      <span class="cal-key cal-key-deadline"><b>{{ counts.deadline }}</b> deadline{{ counts.deadline|pluralize }}</span>
+      <span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> Chat{{ counts.chat|pluralize }}</span>
+      <span class="cal-key cal-key-event"><b>{{ counts.event }}</b> Event{{ counts.event|pluralize }}</span>
+      <span class="cal-key cal-key-deadline"><b>{{ counts.deadline }}</b> Deadline{{ counts.deadline|pluralize }}</span>
       {% comment %}
       Openings count separately because they are the opposite kind of date:
       nothing is missed by ignoring one. August 2026 read "6 deadlines" when
       the sixth was Goldman Sachs applications OPEN on the 15th — the row's
       own text said so while the tally above it disagreed.
       {% endcomment %}
-      <span class="cal-key cal-key-opening"><b>{{ counts.opening }}</b> opening{{ counts.opening|pluralize }}</span>
+      <span class="cal-key cal-key-opening"><b>{{ counts.opening }}</b> Opening{{ counts.opening|pluralize }}</span>
     </p>
   </div>
 

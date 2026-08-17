@@ -39,8 +39,11 @@ urlpatterns = [
     path("contacts/bulk/", views.contacts_bulk, name="contacts_bulk"),
     path("contacts/<int:pk>/archive/", views.contact_archive, name="contact_archive"),
     path("contacts/<int:pk>/unarchive/", views.contact_unarchive, name="contact_unarchive"),
-    # Drag-and-drop tier changes from the Network board (POST firm+tier).
+    # Drag-and-drop tier changes from the Network board, and Settings'
+    # Target Firms add/retier controls (POST firm+tier).
     path("firms/tier/", views.set_firm_tier, name="set_firm_tier"),
+    # Settings' Target Firms remove control (POST firm).
+    path("firms/remove/", views.remove_target_firm, name="remove_target_firm"),
     path("contacts/<int:pk>/", views.contact_detail, name="contact_detail"),
     path("contacts/<int:pk>/edit/", views.contact_edit, name="contact_edit"),
     # htmx: log a touch, re-render the live panel with visible warmth movement.

@@ -25,6 +25,7 @@ from analytics.models import UserOpportunity
 from coverage_domain import cadence
 from coverage_domain.pipeline import CHANNELS, MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS
 from directory.classify import TARGET_BUCKETS
+from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
 
 from . import debrief as debrief_svc, services
@@ -687,11 +688,18 @@ def _new_at_your_firms(user, limit=5) -> dict:
                   firm_id__in=[f for f in firm_ids if f not in debut],
                   first_seen__gte=since)
           .select_related("firm").order_by("-first_seen"))
+    # The same repeat-listing problem the Opportunities feed already solves
+    # (directory.dupes.fold_duplicates): a board scraped twice in one week
+    # posts the same requisition twice, and this card showed both — J.P.
+    # Morgan's Shanghai "Find Your Fit" appearing back to back in a 5-role
+    # list is a copy, not two roles. Folded before counting too, so "321"
+    # isn't itself inflated by the same duplicates the list then hides.
+    rows, _folded = fold_duplicates(qs)
     return {
-        "count": qs.count(),
+        "count": len(rows),
         "roles": [{"title": o.title, "firm": o.firm.name, "id": o.id,
                    "url": o.url, "slug": o.firm.slug, "location": o.location}
-                  for o in qs[:limit]],
+                  for o in rows[:limit]],
     }
 
 

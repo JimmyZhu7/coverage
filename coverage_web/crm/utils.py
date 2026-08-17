@@ -141,10 +141,10 @@ def _clock(at) -> str:
 
 
 FIRM_DATE_LABELS = {
-    "app_open": "applications open",
-    "app_close": "applications close",
-    "insight_open": "insight programme opens",
-    "insight_deadline": "insight deadline",
+    "app_open": "Applications open",
+    "app_close": "Applications close",
+    "insight_open": "Insight programme opens",
+    "insight_deadline": "Insight deadline",
 }
 
 

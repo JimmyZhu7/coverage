@@ -661,6 +661,12 @@ main { min-height: 60vh; }
     white-space: nowrap; border: 0;
   }
   .chipset > div > div > label {
+    /* The generic `label { margin: var(--s4) 0 var(--s1) }` rule (16px top,
+       4px bottom) still applies here — this selector never overrode margin,
+       just display/padding/etc. — and stacks with flex-wrap's own row gap:
+       4px + 16px + 8px gap measured as a 28px gap between wrapped rows,
+       3.5x the 8px every other chipset spacing uses. */
+    margin: 0;
     display: inline-flex; align-items: center; gap: var(--s2);
     padding: 7px 15px 7px 11px; cursor: pointer; user-select: none;
     border: 1px solid var(--line); border-radius: 999px;
@@ -783,8 +789,13 @@ main { min-height: 60vh; }
   .wa-row:has(> div > div:nth-child(3) :checked) .wa-region { color: var(--ink-3); }
 }
 
+/* One sentence, not a paragraph — 62ch is a readability cap for long-form
+   prose, and at that width this ~99-character sentence wrapped to two
+   lines with 300+px of unused card width still to its right. Bounded by
+   the matrix's own width instead, so it wraps only where the viewport
+   actually requires it. */
 .wa-note { margin: var(--s2) 0 0; font-size: var(--fs-xs); color: var(--ink-3);
-  line-height: 1.5; max-width: 62ch; }
+  line-height: 1.5; max-width: 100%; }
 
 /* Wide screens show the full wording; the abbreviation waits its turn.
    Declared BEFORE the media query on purpose — both rules are specificity
@@ -1012,6 +1023,19 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
 }
 
 /* ---- 7. Forms ------------------------------------------------------------- */
+/* Form controls do NOT inherit font-family — every browser hands `<button>`,
+   `<input>`, `<select>` and `<textarea>` its own UA font instead, and the
+   page's font only reaches them if a rule says so explicitly. The block
+   below does that for text inputs, and `.btn` does it via its `font:`
+   shorthand — but a bare `<button class="something">` that sets only
+   font-size/weight silently renders in Arial. Measured on the live feed:
+   682 `.track-btn` Save buttons (one per card) plus `.drawer-x` were doing
+   exactly that, sitting a few pixels from Instrument Sans text.
+   An element-selector base rule (0,0,1) is the right shape for this: it
+   loses to every class rule, so nothing that already states a family is
+   touched, and anything that forgets one lands on the page font rather
+   than on Arial. */
+button, input, select, textarea { font-family: inherit; }
 label { display: block; font-weight: var(--w-med); font-size: var(--fs-s); margin: var(--s4) 0 var(--s1); }
 /* Every text-entry type, not a subset. The list used to stop at `file`, so
    input[type=url] (Contact.linkedin), [type=date] (the calendar's `day`,
@@ -1044,10 +1068,42 @@ select {
   background-repeat: no-repeat; background-position: right 14px center; background-size: 14px;
   padding-right: 38px; cursor: pointer;
 }
+/* The same soft glow `.csel-btn`/`.cmulti-btn`/`.csel-search` already use on
+   focus — a bare 2px outline flush against the 1px border reads as one
+   thick, hard-edged ring; the added shadow softens that into the same
+   focus language the custom controls already carry, so a plain text input
+   and an enhanced select don't visibly belong to two different systems. */
 input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--accent); }
+
+/* Number inputs — hide the native spinner (OS-drawn, square-cornered, the
+   one raw browser widget left on a page where every other control is
+   hand-styled) and draw a matching pair of chevron buttons instead. See
+   `.num-stepper` in base.html for the JS that wires them up: they must
+   dispatch real `input`/`change` events, not just move the value, because
+   the Cadence rails and the Weekly Pace ring both redraw on `input`. */
+input[type="number"] { -moz-appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.num-stepper { position: relative; display: inline-flex; min-width: 0; }
+.num-stepper input[type="number"] { padding-right: 26px; }
+.num-step { position: absolute; right: 1px; width: 20px; height: calc(50% - 1px);
+  display: flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--ink-3); cursor: pointer;
+  transition: background-color var(--t-fast), color var(--t-fast); }
+.num-step svg { width: 9px; height: 9px; pointer-events: none; }
+.num-step-up { top: 1px; }
+.num-step-down { bottom: 1px; }
+.num-step:hover { background: var(--accent-soft); color: var(--accent-ink); }
+.num-step:active { background: var(--accent-soft); }
+/* No explicit `color:` here (it would just repeat the default state's
+   `--ink-3`) — same reason `.btn:disabled` is opacity-only: pairing opacity
+   with a text-affecting color property double-dims the actual contrast
+   below what the token audit measured it at. */
+.num-step:disabled { opacity: 0.35; cursor: default; background: transparent; }
 ::placeholder { color: var(--ink-3); }
 .errorlist { color: var(--danger); font-size: var(--fs-s); margin: var(--s1) 0; padding-left: 1rem; }
 form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
@@ -1091,9 +1147,34 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
    is one thought and reads better as one or two full-width lines. */
 .avatar-hint { margin: 0; max-width: 68ch; }
 .avatar-hint.is-bad { color: var(--danger); }
-.avatar-remove { display: inline-flex; align-items: center; gap: var(--s1);
-  font-weight: var(--w-reg); margin: 0; width: auto; color: var(--ink-2); font-size: var(--fs-s); }
-.avatar-remove input { width: auto; }
+.avatar-remove { display: inline-flex; align-items: center; gap: var(--s2);
+  font-weight: var(--w-reg); margin: 0; width: auto; color: var(--ink-2);
+  font-size: var(--fs-s); cursor: pointer; }
+/* Every other checkbox in the app gets a drawn control (the chipset ring,
+   the work-auth dots, the filter bar's fit toggle) — this one relied on
+   nothing but the browser default, which on most platforms is a plain
+   square with no relationship to the app's palette. `appearance: none`
+   plus the same tick glyph the chipset chips use keeps the checkmark
+   consistent everywhere it appears; `--danger` on the checked state
+   (not `--accent`) is deliberate — checking this box deletes the photo,
+   and that is a different kind of "on" than selecting a filter chip. */
+.avatar-remove input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 16px; height: 16px; margin: 0; flex: none;
+  border: 1.5px solid var(--line-strong); border-radius: 4px;
+  background: var(--surface); cursor: pointer;
+  transition: background-color var(--t-fast), border-color var(--t-fast);
+}
+.avatar-remove input[type="checkbox"]:hover { border-color: var(--danger); }
+.avatar-remove input[type="checkbox"]:checked {
+  background-color: var(--danger); border-color: var(--danger);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: center; background-size: 11px 11px;
+}
+.avatar-remove input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.avatar-remove:has(input:checked) { color: var(--danger); font-weight: var(--w-med); }
 form p label { margin-top: var(--s3); }
 ul.checkboxselectmultiple label,
 .firm-list label {
@@ -1320,8 +1401,25 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    Every chip's `title` is the sentence it was extracted from; see
    directory/facts.py for why a chip that cannot show its evidence does not
    ship. -------------------------------------------------------------- */
+/* Pill, not a 4px rounded rectangle. Every other chip on a role card —
+   `.role-mini`, `.class-chip`, `.track-btn`, `.track-chip`, `.meta-read` —
+   is a 999px pill, so a square-ish fact chip two rows below the role pill
+   read as a second design system on one 168px card. The MONO FACE STAYS:
+   `.meta-read` is already mono-in-a-pill on this same card, so the
+   combination is house style, and the `24ch` budget below was measured
+   against this font — swapping it for the UI face would silently make that
+   number mean something else, which is the exact regression the comment
+   inside this rule was written twice to prevent.
+   PADDING STAYS AT 6px, and that is a measurement, not a preference. The
+   radius is free — at this chip's ~19px height a 999px radius clamps to
+   9.5px whatever the padding is, so the pill reads as a pill either way —
+   but the horizontal padding is charged to the one row on the site where
+   chips compete for a fixed width (`.rolecard-facts`, see its note). Taken
+   to 8px to match `.meta-read`, truncated chips on the default feed went
+   from 18 to 60 out of 376; even 7px costs 58. The row has no slack, and
+   this card's standing rule is that the box gives way, not the text. */
 .fact-chip { display: inline-block; flex: none; vertical-align: middle;
-  border-radius: 4px; padding: 1px 6px; font-family: var(--font-mono);
+  border-radius: 999px; padding: 1px 6px; font-family: var(--font-mono);
   font-size: var(--fs-nano); line-height: 15px; letter-spacing: -0.01em;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
   /* The cap is a budget for the LABEL, so it has to be written as one. Twice
@@ -1739,29 +1837,54 @@ select:focus-visible, input:focus-visible {
   box-shadow: var(--shadow-1); padding: 10px 18px; font-size: var(--fs-s); min-width: 10rem; }
 .filters .csel-btn:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
 
-.csel-menu { position: absolute; top: calc(100% + 6px); left: 0; min-width: 100%;
-  max-height: 320px; overflow-y: auto; z-index: 60; margin: 0; list-style: none;
-  text-transform: none; letter-spacing: normal;
+/* The floating box. Used to be `.csel-menu` itself; split out once the
+   filter input (large selects only — see base.html's SEARCH_THRESHOLD)
+   needed to sit in the SAME positioned/animated box above a now-plain,
+   in-flow, independently-scrolling `.csel-menu` — putting the search box
+   in its own absolutely-positioned sibling would have needed a second
+   copy of this box's position math, and the two would drift the moment
+   one changed without the other. */
+.csel-panel { position: absolute; top: calc(100% + 6px); left: 0; min-width: 100%;
+  z-index: 60; display: flex; flex-direction: column; max-height: 320px;
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--r-panel); box-shadow: var(--shadow-2); padding: var(--s1);
-  transform-origin: top; animation: csel-open 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  border-radius: var(--r-panel); box-shadow: var(--shadow-2);
+  transform-origin: top; animation: csel-open 140ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+/* `display: flex` above is an AUTHOR rule and beats the user-agent's
+   `[hidden] { display: none }` regardless of specificity — same trap
+   `.is-csearch-hidden` exists to dodge elsewhere in this file. Without
+   this, `panel.hidden = true` would change nothing on screen. */
+.csel-panel[hidden] { display: none; }
+.csel-search-wrap { flex: none; padding: var(--s1); border-bottom: 1px solid var(--line); }
+.csel-search { display: block; width: 100%; box-sizing: border-box;
+  border: 1px solid var(--line); border-radius: var(--r-ctl);
+  padding: 6px 10px; font-size: var(--fs-s); font-weight: var(--w-reg);
+  text-transform: none; letter-spacing: normal;
+  background: var(--paper); color: var(--ink); }
+.csel-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.csel-menu { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0;
+  list-style: none; padding: var(--s1);
+  text-transform: none; letter-spacing: normal;
   scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .csel-menu::-webkit-scrollbar { width: 8px; }
 .csel-menu::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
-.csel-menu[hidden] { display: none; }
+.csel-menu-empty::after { content: "No matches"; display: block;
+  padding: 8px 12px; color: var(--ink-3); font-size: var(--fs-s); font-style: italic; }
 @keyframes csel-open { from { opacity: 0; transform: translateY(-4px) scale(0.98); }
   to { opacity: 1; transform: none; } }
 .csel-opt { display: flex; align-items: center; gap: var(--s2);
   padding: 8px 12px; border-radius: var(--r-ctl); cursor: pointer;
   font-size: var(--fs-s); color: var(--ink); white-space: nowrap;
   transition: background-color var(--t-fast), color var(--t-fast); }
+/* A class, not `hidden` — see the panel note above; `.csel-opt` sets its
+   own `display: flex` for the same reason. */
+.csel-opt.is-csel-hidden { display: none; }
 .csel-opt::before { content: ""; width: 13px; flex: none; font-weight: var(--w-bold);
   color: var(--accent); text-align: center; }
 .csel-opt[aria-selected="true"]::before { content: "\2713"; }
 .csel-opt[aria-selected="true"] { font-weight: var(--w-med); }
 .csel-opt:hover, .csel-opt.is-active { background: var(--accent-soft); color: var(--accent-ink); }
 @media (prefers-reduced-motion: reduce) {
-  .csel-menu { animation: none; }
+  .csel-panel { animation: none; }
   .csel-caret { transition: none; }
 }
 

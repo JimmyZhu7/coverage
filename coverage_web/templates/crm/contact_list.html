@@ -11,10 +11,16 @@
   {% include "_pagehead.html" with eyebrow="Your relationships" title="Network" sub="Everyone you know at each firm, how warm they are, and who's next." action_url=add_contact_url action_label="＋ Add Contact" %}
   <nav class="subnav scope-tabs standalone">
     <a href="{% url 'crm:contact_list' %}"{% if not scope %} aria-current="page"{% endif %}>All</a>
-    <a href="?scope=hk"{% if scope == 'hk' %} aria-current="page"{% endif %}>Hong Kong</a>
-    <a href="?scope=us"{% if scope == 'us' %} aria-current="page"{% endif %}>United States</a>
-    <a href="?scope=sg"{% if scope == 'sg' %} aria-current="page"{% endif %}>Singapore</a>
-    <a href="?scope=eu"{% if scope == 'eu' %} aria-current="page"{% endif %}>Europe</a>
+    {% comment %}
+    Narrowed to Settings > Profile's "Regions of Interest" (crm/views.py's
+    `region_scopes`) — a student recruiting only HK/US doesn't carry
+    Singapore and Europe tabs forever. Nobody has stated a preference yet
+    shows every tab, same "silence never hides" rule the Opportunities
+    filters already follow.
+    {% endcomment %}
+    {% for r in region_scopes %}
+      <a href="?scope={{ r.code }}"{% if scope == r.code %} aria-current="page"{% endif %}>{{ r.label }}</a>
+    {% endfor %}
     <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School</a>
     {# Not a scope — a separate list. Archived contacts are excluded from every #}
     {# board query, so this is the only way back to them. #}
@@ -54,7 +60,13 @@
           {% if g.lever %}
             <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Work {{ g.lever.name|smart_title }}</a>
           {% else %}
-            <a class="btn gap-act" href="{% url 'crm:contact_new' %}?firm={{ g.slug }}">＋ Add a contact</a>
+            {% comment %}Visible text trimmed to "Add" — six of these sit in
+            a row and "+ Add a contact" repeated six times was the row's
+            only sentence. `aria-label` keeps the firm name for anyone
+            tabbing through, since the card's own name is no longer part
+            of what the link itself says.{% endcomment %}
+            <a class="btn gap-act" href="{% url 'crm:contact_new' %}?firm={{ g.slug }}"
+               aria-label="Add a contact at {{ g.name|smart_title }}">Add</a>
           {% endif %}
         </div>
       {% endfor %}
@@ -258,7 +270,10 @@
       {# Empty sections start collapsed so they don't take up the board. #}
       <details class="warmth-section" data-group{% if section.cards %} open{% endif %}>
         <summary class="net-group-head">
-          <span>{% if section.key != "school" %}<i class="dot dot-{% if section.key == 'no_reply' %}cold{% else %}{{ section.key }}{% endif %}"></i> {% endif %}{{ section.label }}</span>
+          {% comment %}Every section is a warmth bucket now — School scope
+          used to have a fifth kind of section (grouped by university, no
+          dot) here, which is what this conditional was guarding against.{% endcomment %}
+          <span><i class="dot dot-{% if section.key == 'no_reply' %}cold{% else %}{{ section.key }}{% endif %}"></i> {{ section.label }}</span>
           <span class="scrub-count" data-group-count>{{ section.cards|length }}</span>
         </summary>
         {% if section.cards %}

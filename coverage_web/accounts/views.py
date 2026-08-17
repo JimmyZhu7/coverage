@@ -175,6 +175,47 @@ def _firm_picker_context(user) -> dict:
     }
 
 
+# The three tiers shown as columns, in display order. Untiered UserFirm rows
+# (tier=None — the Network board's own overflow bucket for a card dragged off
+# without a home) are deliberately absent from this list: Settings' board is
+# scoped to firms that are actually ON one of the three tiers, and a firm with
+# no tier at all is one drag away on Network, not a fourth column here.
+TARGET_FIRM_TIERS = (1, 2, 3)
+
+
+def _target_firms_context(user) -> dict:
+    """Firms grouped by tier for the editable board, plus every firm the
+    user ISN'T tracking yet, for the add-a-firm search. Both queries key off
+    the same `UserFirm` rows so the two halves of the section can never
+    show a firm as simultaneously trackable and already-tracked."""
+    tracked = list(
+        UserFirm.objects.for_user(user)
+        .filter(tier__in=TARGET_FIRM_TIERS)
+        .select_related("firm")
+        .order_by("tier", "firm__name")
+    )
+    by_tier: dict[int, list] = {tier: [] for tier in TARGET_FIRM_TIERS}
+    tracked_ids = set()
+    for uf in tracked:
+        by_tier[uf.tier].append(uf.firm)
+        tracked_ids.add(uf.firm_id)
+    # Untracked means no UserFirm row AT ALL, tiered or not — a firm sitting
+    # in the Network board's untiered overflow already has a row and must
+    # not also offer itself as "add me", which would create a second row
+    # violating the (user, firm) uniqueness constraint the instant tried.
+    all_tracked_ids = set(
+        UserFirm.objects.for_user(user).values_list("firm_id", flat=True)
+    )
+    return {
+        "firm_tiers": [
+            {"tier": tier, "firms": by_tier[tier]} for tier in TARGET_FIRM_TIERS
+        ],
+        "untracked_firms": list(
+            Firm.objects.exclude(id__in=all_tracked_ids).order_by("name")
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # CSV import  (/welcome/import/)
 # ---------------------------------------------------------------------------
@@ -327,6 +368,7 @@ def settings_view(request):
             "vapid_public_key": django_settings.VAPID_PUBLIC_KEY,
             "push_subscribed": PushSubscription.objects.for_user(request.user).exists(),
             **_security_context(request.user),
+            **_target_firms_context(request.user),
         },
     )
 

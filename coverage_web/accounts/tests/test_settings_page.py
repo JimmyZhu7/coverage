@@ -60,7 +60,13 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
     assert sections == {
         # Appearance sits under "You" because a theme is a fact about how
         # this person reads, not about how the engine behaves.
-        "profile", "work-auth", "appearance", "cadence", "pace",
+        "profile", "work-auth", "appearance",
+        # Target Firms: the same tier-editing "Your Firms" group the
+        # Network board's drag-and-drop already writes through
+        # (crm:set_firm_tier) — Settings adds the missing start/stop-
+        # tracking half the board itself has no control for.
+        "firms",
+        "cadence", "pace",
         # Notifications: Push Alerts (device state) and the weekly digest
         # opt-out (account preference), one card — see settings.html's
         # comment on that block for why they share a card but not a save

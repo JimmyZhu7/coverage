@@ -34,7 +34,7 @@ from analytics.models import UserOpportunity
 from coverage_domain import cadence, scoring
 from coverage_domain.pipeline import CHANNELS, MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS
 from crm.forms import ChatDebriefForm, ContactForm
-from directory.classify import TARGET_BUCKETS
+from directory.classify import REGION_LABELS, TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
 
 from . import ai_brief, coverage, debrief as debrief_svc, services
@@ -200,6 +200,13 @@ _WARMTH_SECTIONS = [
     ("advocate", "Advocates"),
     ("no_reply", "Emailed, No Reply"),
 ]
+
+# The Network board's region scope tabs, in display order. A subset of
+# directory.classify.TRACKED_REGIONS ("cn"/"jp" have no scope tab yet — no
+# board has ever asked for one) — kept as its own tuple, not a slice of
+# TRACKED_REGIONS, so a future market added there doesn't silently grow a
+# board tab nobody designed the layout for.
+NETWORK_SCOPE_REGIONS = ("hk", "us", "sg", "eu")
 
 # Warmest-first tie-break for "who to work next at this firm" — chatted
 # beats replied beats cold, an advocate is never a candidate (there's
@@ -367,17 +374,30 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     scope = request.GET.get("scope", "").strip().lower()
     if scope == "school":
         contacts = [c for c in contacts if c.school or c.school_affiliation]
-    elif scope in ("us", "hk", "sg", "eu"):
+    elif scope in NETWORK_SCOPE_REGIONS:
         contacts = [c for c in contacts if _in_scope(c, scope)]
     # How many of the shown contacts are here on a guess rather than a set
     # region. Rendered as a one-line caveat under the Contacts header so a
     # region tab never silently passes off "unknown" as "confirmed".
     unconfirmed_total = (
         sum(1 for c in contacts if not c.region)
-        if scope in ("us", "hk", "sg", "eu")
+        if scope in NETWORK_SCOPE_REGIONS
         else 0
     )
     scoped_ids = {c.id for c in contacts}
+
+    # Region tabs, narrowed to the student's own Settings > Profile
+    # "Regions of Interest" — a student recruiting only HK/US doesn't need
+    # Singapore and Europe tabs sitting in the nav forever. `user.regions`
+    # empty means the question has never been ANSWERED, not "interested in
+    # nothing" — silence still shows every tab, same as an unset filter
+    # elsewhere on this site never hides data, it just can't narrow it yet.
+    interested_regions = set(user.regions or [])
+    region_scopes = [
+        {"code": code, "label": REGION_LABELS[code]}
+        for code in NETWORK_SCOPE_REGIONS
+        if not interested_regions or code in interested_regions
+    ]
 
     # --- Contacts Needing Action (left column) -------------------------
     actions = [a for a in actions if a["contact"]["id"] in scoped_ids]
@@ -490,7 +510,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     tier_sections = []
     for tier, label in ((1, "Tier 1"), (2, "Tier 2"), (3, "Tier 3"), (None, "Unranked")):
         cards = [firm_card(uf) for uf in user_firms if uf.tier == tier]
-        if scope in ("us", "hk", "sg", "eu"):
+        if scope in NETWORK_SCOPE_REGIONS:
             # CORRECT AS-IS — deliberately still `firm.regions`, and NOT the
             # per-contact rule above. A firm genuinely does span regions:
             # Goldman really recruits in both Hong Kong and the US, so it
@@ -551,45 +571,36 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         g["lever"] = _pick_lever(by_firm_contacts.get(g["firm_id"], []))
 
     # --- Full contact cards ---------------------------------------------
-    # Warmth sections normally; in School scope the sections ARE the
-    # universities — each section header is the person's school.
+    # Warmth sections, same four as every other scope — School used to
+    # group by university instead, but with almost every School-scope
+    # contact sharing the student's own school (that's the point of the
+    # scope), the school-name header was doing no work: one giant "SCHOOL"
+    # bucket with no way to scan it by priority. Warmth is what every other
+    # tab already uses to answer "who do I work next", and School gains
+    # nothing by being the one scope that answers a different question.
     tiers_by_firm = {uf.firm_id: uf.tier for uf in user_firms}
     sections = []
-    if scope == "school":
-        by_school: dict[str, list] = {}
-        for c in contacts:
-            by_school.setdefault((c.school or "School").upper(), []).append(c)
-        for name in sorted(by_school):
-            sections.append({
-                "key": "school",
-                "label": name,
-                "cards": [
-                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today,
-                                  capture_addr=capture_addr, cadence=cadence_overrides)
-                    for c in by_school[name]
-                ],
-            })
-    else:
-        for key, label in _WARMTH_SECTIONS:
-            if key == "no_reply":
-                members = [c for c in contacts if c.warmth == "cold" and c.touch_count]
-            else:
-                members = [c for c in contacts if c.warmth == key]
-            sections.append({
-                "key": key,
-                "label": label,
-                "cards": [
-                    _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today,
-                                  capture_addr=capture_addr, cadence=cadence_overrides)
-                    for c in members
-                ],
-            })
+    for key, label in _WARMTH_SECTIONS:
+        if key == "no_reply":
+            members = [c for c in contacts if c.warmth == "cold" and c.touch_count]
+        else:
+            members = [c for c in contacts if c.warmth == key]
+        sections.append({
+            "key": key,
+            "label": label,
+            "cards": [
+                _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today,
+                              capture_addr=capture_addr, cadence=cadence_overrides)
+                for c in members
+            ],
+        })
 
     return render(
         request,
         "crm/contact_list.html",
         {
             "scope": scope,
+            "region_scopes": region_scopes,
             "gaps": gaps,
             "adv_target": adv_target,
             "action_groups": action_groups,
@@ -608,17 +619,50 @@ def contact_list(request: HttpRequest) -> HttpResponse:
 def set_firm_tier(request: HttpRequest) -> HttpResponse:
     """Drag-and-drop target: move one of the user's firms to a new tier.
     Tier drives the cadence engine's prioritization (firm_meta in
-    `_build_actions`), so a drag literally reorders tomorrow's queue."""
+    `_build_actions`), so a drag literally reorders tomorrow's queue.
+
+    Also the write side of Settings' "Target Firms" add flow: a firm the
+    user isn't tracking yet has no `UserFirm` row for `.filter().update()`
+    to find, so posting a firm they've never seen before used to 404
+    silently. `get_or_create` makes the same one endpoint serve both
+    "move an existing firm" (drag, or the Settings tier buttons) and "start
+    tracking this firm at this tier" (Settings' add-a-firm search) — one
+    code path instead of two nearly-identical ones that could drift.
+    """
     try:
         firm_id = int(request.POST.get("firm", ""))
     except ValueError:
         return HttpResponse(status=400)
     tier_raw = request.POST.get("tier", "")
     tier = int(tier_raw) if tier_raw in ("1", "2", "3") else None
-    updated = UserFirm.objects.for_user(request.user).filter(firm_id=firm_id).update(tier=tier)
-    if not updated:
+    if not Firm.objects.filter(id=firm_id).exists():
         return HttpResponse(status=404)
+    UserFirm.all_objects.update_or_create(
+        user=request.user, firm_id=firm_id,
+        defaults={"tier": tier},
+        create_defaults={"tier": tier, "status": "target"},
+    )
     record_event("firm_tier_set", user=request.user)
+    return HttpResponse(status=204)
+
+
+@login_required
+@require_POST
+def remove_target_firm(request: HttpRequest) -> HttpResponse:
+    """Stop tracking a firm entirely — Settings' per-firm remove control.
+    Deletes the `UserFirm` row outright rather than clearing its tier:
+    tier=None already means something else (drag a card off the board with
+    no tier assigned), and conflating the two would make "untiered" and
+    "removed" indistinguishable on screen. Contacts already logged at this
+    firm are untouched — this is a target-list edit, not a data deletion."""
+    try:
+        firm_id = int(request.POST.get("firm", ""))
+    except ValueError:
+        return HttpResponse(status=400)
+    deleted, _ = UserFirm.objects.for_user(request.user).filter(firm_id=firm_id).delete()
+    if not deleted:
+        return HttpResponse(status=404)
+    record_event("firm_target_removed", user=request.user)
     return HttpResponse(status=204)
 
 

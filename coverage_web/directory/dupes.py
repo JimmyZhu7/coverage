@@ -128,6 +128,42 @@ def provider_identity(url: str) -> tuple[str, ...] | None:
     return None
 
 
+def collapse_by_identity(rows: Iterable[Any], *, sticky_ids: Iterable[int] = ()) -> list[Any]:
+    """One row per real posting, preserving input order.
+
+    Rows the provider itself identifies as the same posting (`provider_identity`
+    agreeing) collapse to a single representative; a row with no provider
+    identity is always its own group, because None means "this url is the only
+    handle we have", not "these are the same".
+
+    This is the Class A collapse applied to a list already in memory, for
+    callers that have to REASON over the rows rather than render them —
+    `fold_duplicates` is the display-time sibling and deliberately also folds
+    Class B lookalikes, which a reasoner must NOT do: two same-titled
+    requisitions with no shared id may genuinely be two jobs, and collapsing
+    them would answer a question the data cannot answer. Here nothing is
+    guessed at, so the collapse is safe anywhere.
+
+    Written for `applications.match_application`, which refused to mark a
+    confirmation applied because two rows scored identically — they were the
+    same tal.net posting listed under two candidate pools, so "2 roles match
+    that title about equally well" named a choice that did not exist (observed
+    2026-08-15 on Bank of America's Campus Insight Forum, opp 14594).
+    """
+    sticky = frozenset(sticky_ids)
+    rows = list(rows)
+
+    groups: dict[Any, list[Any]] = {}
+    for row in rows:
+        identity = provider_identity(getattr(row, "url", "") or "")
+        key = identity if identity is not None else ("__row__", id(row))
+        groups.setdefault(key, []).append(row)
+
+    keep = {id(min(members, key=lambda m: _survivor_rank(m, sticky)))
+            for members in groups.values()}
+    return [r for r in rows if id(r) in keep]
+
+
 def identity_fragment(identity: Sequence[str]) -> str:
     """A substring that MUST appear in any URL carrying `identity`, for
     narrowing a database lookup before the exact check.

@@ -1,36 +1,43 @@
-"""dedupe_opportunities — report the duplicate rows already in the table.
+"""dedupe_opportunities — report, and optionally merge, duplicate rows.
 
     python manage.py dedupe_opportunities              # report only (default)
-    python manage.py dedupe_opportunities --apply      # refuses; see below
+    python manage.py dedupe_opportunities --apply      # merge IDENTITY groups
 
-REPORT ONLY, ON PURPOSE. `--dry-run` is the default and `--apply` is not
-implemented: this command exists so the size and shape of the existing mess can
-be read off the live data before anyone decides what to do about it, and
-merging rows is not a decision code should make on its own.
+Output is grouped by mechanism, and the two are never treated alike:
 
-The two fixes already shipped alongside this command handle the problem going
-forward and for the reader, without touching a single stored row:
-
-  * `directory.dupes.provider_identity`, used by ingest, stops NEW duplicate
-    rows being created when a provider re-addresses a posting it already gave
-    us (tal.net's second candidate pool, an edited iCIMS slug, a Workday
-    posting whose multi-city url picked a different city this run).
-  * `directory.dupes.fold_duplicates`, used by the Opportunities feed, hides
-    the copies that are already stored, with a count and an undo link.
-
-So nothing here is urgent. What this reports is historical residue, and the
-open question it answers is whether that residue is worth a one-off merge at
-all — a merge would have to decide which requisition's `closed_at`, `first_seen`
-and tracking rows survive, and for the Class B cases (two genuinely separate
-requisitions with the same title) the honest answer is that neither should.
-
-Output is grouped by mechanism so the two are never confused:
-
-  IDENTITY   Same posting, two addresses. A merge here is defensible: one of
-             the two urls is simply an older way of naming the same thing.
+  IDENTITY   Same posting, two addresses — the provider's own id says so.
+             `--apply` merges these.
   LOOKALIKE  Same firm, title and location, no shared provider id. These may
              be one job filed twice or several real openings, and only the
-             employer knows which. A merge here would be a guess.
+             employer knows which. A merge here would be a guess, so `--apply`
+             never touches them, at any volume, with any flag.
+
+WHY --apply EXISTS NOW. It did not, originally, on the reasoning that "merging
+rows is a decision, not a chore" — correct for LOOKALIKE and wrong for
+IDENTITY, where the provider has already made the decision and the residue is
+not inert. `provider_identity` (in ingest) stopped NEW duplicates on
+2026-08-14, and `fold_duplicates` hides stored copies from the feed, but
+neither cleans up what was already stored and neither helps a caller that
+REASONS over rows instead of rendering them. On 2026-08-15
+`capture_applications` refused a Bank of America confirmation as "2 roles match
+that title about equally well" when both rows were tal.net opp 14594 under
+candidate pools `pl/1` and `pl/2` — one posting, a choice that did not exist,
+and a submitted application the board went on showing as untracked. The matcher
+now collapses identity copies itself (`dupes.collapse_by_identity`), so that
+particular caller is safe whatever the table holds; this command exists to stop
+the table holding it.
+
+WHAT A MERGE PRESERVES. The survivor is chosen by `dupes._survivor_rank`, the
+same order the feed already uses to decide which copy a student sees, with
+every row anyone tracks treated as sticky. Onto it are folded: the earliest
+`first_seen` (the row has been on the board since its oldest copy), the most
+recent verification, a stated deadline or location over a missing one, and
+`open` over `closed` — a posting one url still serves is live, and the closed
+copy is the artifact of the duplicate, not evidence of a death. Tracking rows
+move across; where a user tracks both copies the two are combined, keeping the
+furthest-along `applied_status`, the earliest `applied_at`, and the union of
+`interview_dates`, so a merge can never walk a pipeline backwards. Losing rows
+are then deleted.
 """
 
 from __future__ import annotations

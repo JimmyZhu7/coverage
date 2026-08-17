@@ -437,12 +437,12 @@ def test_compose_flags_a_ready_draft_and_stays_quiet_otherwise(client):
     _touch(user, c, "outreach", days_ago=20)
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
-    assert "draft ready" not in body, "the common case earns no badge"
+    assert "Draft ready" not in body, "the common case earns no badge"
     assert "no draft" not in body, "and no badge for its negation either"
 
     c.opener = "Hi there, I'm a sophomore at USC..."
     c.save(update_fields=["opener"])
-    assert "draft ready" in client.get(reverse("crm:week")).content.decode()
+    assert "Draft ready" in client.get(reverse("crm:week")).content.decode()
 
 
 def test_the_firm_slot_only_says_alum_for_an_actual_alum(client):
@@ -961,7 +961,7 @@ def test_deadlines_are_named_not_just_counted(client):
     assert ctx["deadlines"][0]["urgent"] is True
 
     body = _login_and_get(client, user)
-    assert "insight deadline" in body
+    assert "Insight deadline" in body
 
 
 def test_an_unconfirmed_date_never_reaches_the_rail():
@@ -1060,7 +1060,7 @@ def test_a_chat_today_gets_a_prep_card_with_what_you_learned_last_time(client):
     assert prep["contact"].name == "Ada Lovelace"
     assert "TMT desk" in prep["learned"]
     assert prep["firm_date_days"] == 9
-    assert prep["firm_date_label"] == "applications close"
+    assert prep["firm_date_label"] == "Applications close"
 
     body = _login_and_get(client, user)
     assert "Chat today" in body

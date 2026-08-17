@@ -523,8 +523,8 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
     "followup_after_business_days": (
         "First Follow-Up",
         "business days",
-        "How long a cold contact sits without a reply before Coverage asks you "
-        "to follow up the first time.",
+        "How long a cold contact sits without a reply before Coverage asks "
+        "you to follow up.",
     ),
     "park_after_business_days": (
         "Park After",
@@ -535,9 +535,9 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
     "max_cold_touches": (
         "Max Cold Touches",
         "touches",
-        "How many times you'll reach out to someone who has never replied, "
-        "before Coverage parks them. Capped at 2: one note, one follow-up, "
-        "never a second follow-up.",
+        "How many times you'll reach out to someone who's never replied, "
+        "before Coverage parks them. Capped at 2 — one note, one "
+        "follow-up, never a second.",
     ),
     "advocate_touch_min_weeks": (
         "Advocate Check-In",
@@ -680,9 +680,8 @@ class CadenceForm(SectionForm):
             "field": self["advocate_target"],
             "unit": "advocates",
             "description": (
-                "Advocates at a firm before Coverage calls that firm covered. "
-                "Feeds the gap ladder on Network and the network axis of your "
-                "firm fit score."
+                "Advocates at a firm before Coverage calls it covered. Feeds "
+                "the gap ladder on Network and your firm fit score."
             ),
             "default": DEFAULT_ADVOCATE_TARGET,
         })

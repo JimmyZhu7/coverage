@@ -26,6 +26,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .dupes import collapse_by_identity
+
 # Words that carry no distinguishing signal between two postings at the same
 # firm. "Summer Analyst Program 2027" and "Summer Analyst Programme 2027" are
 # the same role; "Investment Banking" vs "Global Markets" is what separates
@@ -132,8 +134,19 @@ def match_application(candidates, title: str, *, tracked_ids=()) -> Match:
     function never queries). `tracked_ids` are the ids the user already has
     on their board — a role they saved is far likelier to be the one they
     then applied to, so it breaks a tie the title alone cannot.
+
+    Copies of ONE posting are collapsed before anything is scored. A provider
+    that re-addresses a posting (tal.net listing it in a second candidate pool,
+    an edited iCIMS slug, a Workday url that picked a different city) hands us
+    two rows whose titles are byte-identical, so they score identically, so the
+    tie-break below refuses and calls it two roles to choose between. It is one
+    role, and the student is told to set by hand something the matcher could
+    have known — observed 2026-08-15, Bank of America Campus Insight Forum
+    stored under tal.net pools `pl/1` and `pl/2`. Only the provider-id collapse
+    is applied here, never the display-time lookalike fold: two same-titled rows
+    with no shared id really may be two jobs.
     """
-    candidates = list(candidates)
+    candidates = collapse_by_identity(candidates, sticky_ids=tracked_ids)
     if not candidates:
         return Match(None, "no open role at this firm to match")
 

@@ -237,7 +237,12 @@ def test_the_viewport_clamp_helper_exists_and_both_dropdowns_call_it():
     assert "window.covKeepInViewport = function" in base
     # The single-select dropdowns (Year / Region / Track / Sponsorship) share
     # the helper — they are narrower and overflow less often, not never.
-    assert base.count("covKeepInViewport(menu)") >= 2, "csel must call the clamp"
+    # Called on the floating PANEL, not the `<ul>` menu inside it — a large
+    # select's optional search input lives in that same panel, above the
+    # menu, and only clamping the menu would leave the search box (and the
+    # panel's own border) hanging off the edge of the screen it was
+    # supposed to be clamped inside of.
+    assert base.count("covKeepInViewport(panel)") >= 2, "csel must call the clamp"
     assert "covKeepInViewport(menu)" in _OPPS.read_text(), "Companies must call it"
 
 
