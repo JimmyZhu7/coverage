@@ -67,7 +67,7 @@ from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS
 from crm.views import _display_note
 from directory.classify import TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
-from directory.views import _apply_region_filter
+from directory.views import _apply_region_filter, _STAGE_LABELS
 
 # Every untrusted string is cut to this before it reaches the model. Notes and
 # posting titles are the two that actually run long; the cap applies to all of
@@ -697,6 +697,31 @@ def _track_opportunity(user, args) -> dict:
             "opportunity_id": opp.id,
             "title": _s(opp.title, 160),
             "firm": _s(opp.firm.name, 120),
+        }
+
+    # Already past "saved" — submitted / interview / offer / closed. Saving on
+    # top of that would blank the funnel state the student set themselves, so
+    # the write is refused and the model is told why. This is the same guard
+    # `templates/directory/_track_control.html` makes structurally, by
+    # rendering a read-only chip instead of a Save button once a role is in
+    # the funnel "so a stray feed click can't un-apply someone" — a stray tool
+    # call is the same mistake arriving through a different door.
+    if existing is not None and existing.applied_status:
+        stage = existing.applied_status
+        return {
+            "saved": False,
+            "already_tracked": True,
+            "opportunity_id": opp.id,
+            "title": _s(opp.title, 160),
+            "firm": _s(opp.firm.name, 120),
+            "current_status": stage,
+            "current_status_label": _STAGE_LABELS.get(stage, stage),
+            "instruction": (
+                "This role is already further along than saved, so nothing was "
+                "changed. Tell the student where it stands rather than saying "
+                "you saved it. Funnel stages are theirs to move, on the My "
+                "Applications page."
+            ),
         }
 
     if existing is None:

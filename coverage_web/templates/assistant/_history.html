@@ -1,0 +1,86 @@
+{% comment %}
+The whole sidebar list: folders (each collapsible, each pairing a name with
+its own conversations) above the unfiled chats. Swapped as a whole after any
+history-changing action — rename, delete, move, or a folder create/rename/
+delete — so a rename's new position (ChatConversation.Meta.ordering =
+"-updated") and a move's new grouping always land in the same round trip.
+{% endcomment %}
+<div class="as-history-list" id="as-history">
+  {% for group in folders %}
+    {% comment %}
+    The kebab button, its menu, and the rename input all sit OUTSIDE
+    <summary> — as its siblings, positioned over the header band by CSS
+    instead of inside it. <summary>'s native behaviour is "anything clicked
+    inside me toggles the details open/closed", which would fire on every
+    click meant for these controls; being siblings means none of that
+    click-handling code has to fight the browser's own toggle.
+    {% endcomment %}
+    <details class="as-folder" data-folder open>
+      <summary class="as-folder-head">
+        <svg class="as-folder-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1 1.4H12.5A1.5 1.5 0 0 1 14 5.9v5.6A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7z"
+                stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+        </svg>
+        <span class="as-folder-name">{{ group.folder.name }}</span>
+        <span class="as-folder-count">{{ group.conversations|length }}</span>
+      </summary>
+
+      <button type="button" class="as-history-kebab as-folder-kebab" data-menu-toggle
+              aria-haspopup="true" aria-expanded="false" aria-label="Folder options">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <circle cx="8" cy="3" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="8" cy="13" r="1.3"/>
+        </svg>
+      </button>
+      <form id="as-folder-{{ group.folder.id }}">
+        {% csrf_token %}
+        <input type="hidden" name="folder" value="{{ group.folder.id }}">
+        <input type="hidden" name="current" value="{{ conversation.id }}">
+      </form>
+      <div class="as-history-menu as-folder-menu" data-menu hidden role="menu">
+        <button type="button" class="as-menu-item" data-rename-folder role="menuitem">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M11 2.5l2.5 2.5L5 13.5l-3 .5.5-3L11 2.5z" stroke="currentColor"
+                  stroke-width="1.3" stroke-linejoin="round"/>
+          </svg>
+          Rename
+        </button>
+        <div class="as-menu-divider"></div>
+        <form method="post" action="{% url 'assistant:folder_delete' %}"
+              onsubmit="return confirm('Delete this folder? Chats inside stay — they just stop being grouped.');">
+          {% csrf_token %}
+          <input type="hidden" name="folder" value="{{ group.folder.id }}">
+          <input type="hidden" name="current" value="{{ conversation.id }}">
+          <button type="submit" class="as-menu-item as-menu-item-danger" role="menuitem">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3.5 4.5h9M6.5 4.5V3a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1.5M5 4.5l.6 8.4a1 1 0 0 0 1 .93h2.8a1 1 0 0 0 1-.93l.6-8.4"
+                    stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Delete
+          </button>
+        </form>
+      </div>
+      <input type="text" name="name" value="{{ group.folder.name }}" maxlength="100"
+             class="as-history-input as-folder-rename-input" aria-label="Folder name"
+             form="as-folder-{{ group.folder.id }}" data-rename-folder-input
+             hx-post="{% url 'assistant:folder_rename' %}" hx-include="#as-folder-{{ group.folder.id }}"
+             hx-target="#as-history" hx-swap="outerHTML"
+             hx-trigger="blur changed, keyup[key=='Enter'] changed">
+
+      <div class="as-folder-body">
+        {% for c in group.conversations %}
+          {% include "assistant/_history_row.html" %}
+        {% empty %}
+          <p class="as-history-empty">Nothing here yet — move a chat in.</p>
+        {% endfor %}
+      </div>
+    </details>
+  {% endfor %}
+
+  {% if unfiled %}
+    <div class="as-history-unfiled">
+      {% for c in unfiled %}{% include "assistant/_history_row.html" %}{% endfor %}
+    </div>
+  {% elif not folders %}
+    <p class="as-history-empty">No chats yet.</p>
+  {% endif %}
+</div>

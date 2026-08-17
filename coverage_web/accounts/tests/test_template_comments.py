@@ -43,6 +43,9 @@ PATHS = [
     "/app/calendar/",
     "/app/contacts/",
     "/opportunities/",
+    # Caught exactly this leak live in _thread.html's composer form — a
+    # multi-line `{# #}` inside the <form> tag rendered as bogus attributes.
+    "/assistant/",
 ]
 
 

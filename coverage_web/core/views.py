@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from urllib.parse import quote
 
 from django.conf import settings
@@ -7,6 +8,7 @@ from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
+from assistant import plans
 from directory.classify import TARGET_BUCKETS, TRACKED_REGIONS
 from directory.models import Firm, Opportunity
 
@@ -66,6 +68,11 @@ def pricing(request):
             "read_count": campus.exclude(raw__detail_text=None).count(),
             "sponsorship_count": campus.exclude(
                 sponsorship__in=["", "unknown"]).count(),
+            # Same rule as the counts above — the advisor's per-plan caps are
+            # read from the one place that defines them (assistant/plans.py),
+            # never typed into the template.
+            "advisor_free_cap": plans.limits_for(SimpleNamespace(plan="free")).daily_cap,
+            "advisor_pro_cap": plans.limits_for(SimpleNamespace(plan="pro")).daily_cap,
         },
     )
 

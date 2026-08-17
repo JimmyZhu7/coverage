@@ -384,6 +384,32 @@ def test_track_opportunity_save_is_idempotent(user, opportunity):
     assert UserOpportunity.objects.for_user(user).filter(opportunity=opportunity).count() == 1
 
 
+def test_track_opportunity_save_never_downgrades_a_funnel_row(user, opportunity):
+    """"Save it" on a role the student is already interviewing for must not
+    blank the stage back out. The Opportunities feed guards this structurally
+    — a funnel row renders a read-only chip, not a Save button — and the tool
+    has to hold the same line, because "yeah save that one" said about a role
+    the model didn't check is exactly how the state would be lost."""
+    row = UserOpportunity(user=user, opportunity=opportunity, applied_status="interview")
+    row.save()
+
+    result, is_error = _call(
+        user, "track_opportunity", {"opportunity_id": opportunity.id, "status": "saved"}
+    )
+
+    row.refresh_from_db()
+    assert row.applied_status == "interview"
+    assert row.dismissed is False
+    # And the model is told, rather than being left to report a save that
+    # didn't happen.
+    assert not is_error
+    assert result["saved"] is False
+    assert result["already_tracked"] is True
+    assert result["current_status"] == "interview"
+    assert result["current_status_label"] == "Interviewing"
+    assert "further along" in result["instruction"]
+
+
 def test_track_opportunity_refuses_any_other_status(user, opportunity):
     """`saved`/`clear` only — the funnel states stay the student's to set."""
     result, is_error = _call(

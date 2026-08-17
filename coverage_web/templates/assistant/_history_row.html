@@ -1,0 +1,90 @@
+{% comment %}
+One conversation row — shared by every context it can appear in (a folder's
+own list, or the unfiled list at the bottom of _history.html). Needs `c` (the
+row's own conversation), `conversation` (whichever one the PAGE is open on,
+for the is-current highlight) and `all_folders` (the menu's "Move to"
+options) from the including template's context.
+
+One "⋯" opens one floating menu — Rename / Move to (a folder) / Delete —
+the ChatGPT/Claude shape. An earlier version put three permanently-there
+hover icons directly on the row plus a native <select> for the move
+control; besides being visually cramped on a 248px column, the <select>
+collided with base.html's sitewide select-enhancer (every plain <select> on
+the page gets wrapped into a styled dropdown automatically), which rendered
+it as a second, ALWAYS-VISIBLE "No folder ▾" control sitting on top of the
+row instead of the hidden-until-clicked control it was meant to be. Plain
+buttons in a menu sidestep that entirely — nothing here is a <select>.
+{% endcomment %}
+<div class="as-history-row{% if conversation and c.id == conversation.id %} is-current{% endif %}">
+  <a class="as-history-link" href="{% url 'assistant:chat_conversation' c.id %}">
+    <span class="as-history-title">{{ c.title|default:"New chat" }}</span>
+    <span class="as-history-date">{{ c.updated|date:"M j" }}</span>
+  </a>
+
+  <button type="button" class="as-history-kebab" data-menu-toggle
+          aria-haspopup="true" aria-expanded="false" aria-label="Chat options">
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <circle cx="8" cy="3" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="8" cy="13" r="1.3"/>
+    </svg>
+  </button>
+
+  {% comment %}
+  The conversation id + csrf token every action below shares, kept in ONE
+  form so the menu's buttons (outside it, referencing it by id) and the
+  delete form (its own, since it needs a real submit + confirm()) don't
+  each carry their own duplicate hidden fields.
+  {% endcomment %}
+  <form id="as-hist-{{ c.id }}">{% csrf_token %}<input type="hidden" name="conversation" value="{{ c.id }}"></form>
+
+  <div class="as-history-menu" data-menu hidden role="menu">
+    <button type="button" class="as-menu-item" data-rename role="menuitem">
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M11 2.5l2.5 2.5L5 13.5l-3 .5.5-3L11 2.5z" stroke="currentColor"
+              stroke-width="1.3" stroke-linejoin="round"/>
+      </svg>
+      Rename
+    </button>
+    {% if all_folders %}
+      <div class="as-menu-divider"></div>
+      <p class="as-menu-label">Move to</p>
+      <button type="button" class="as-menu-item{% if not c.folder_id %} is-selected{% endif %}" role="menuitemradio"
+              {% if not c.folder_id %}aria-checked="true"{% endif %}
+              hx-post="{% url 'assistant:move' %}" hx-include="#as-hist-{{ c.id }}" hx-vals='{"folder": ""}'
+              hx-target="#as-history" hx-swap="outerHTML">
+        No folder
+      </button>
+      {% for f in all_folders %}
+        <button type="button" class="as-menu-item{% if c.folder_id == f.id %} is-selected{% endif %}" role="menuitemradio"
+                {% if c.folder_id == f.id %}aria-checked="true"{% endif %}
+                hx-post="{% url 'assistant:move' %}" hx-include="#as-hist-{{ c.id }}" hx-vals='{"folder": "{{ f.id }}"}'
+                hx-target="#as-history" hx-swap="outerHTML">
+          {{ f.name }}
+        </button>
+      {% endfor %}
+    {% endif %}
+    <div class="as-menu-divider"></div>
+    <form method="post" action="{% url 'assistant:delete' %}"
+          onsubmit="return confirm('Delete this chat? This can\'t be undone.');">
+      {% csrf_token %}
+      <input type="hidden" name="conversation" value="{{ c.id }}">
+      <input type="hidden" name="current" value="{{ conversation.id }}">
+      <button type="submit" class="as-menu-item as-menu-item-danger" role="menuitem">
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M3.5 4.5h9M6.5 4.5V3a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1.5M5 4.5l.6 8.4a1 1 0 0 0 1 .93h2.8a1 1 0 0 0 1-.93l.6-8.4"
+                stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Delete
+      </button>
+    </form>
+  </div>
+
+  {% comment %}The rename input itself — shown in place of the link/kebab
+  when "Rename" is picked from the menu above, same overlay shape as
+  before this rewrite.{% endcomment %}
+  <input type="text" name="title" value="{{ c.title }}" placeholder="New chat"
+         maxlength="255" class="as-history-input" aria-label="Chat title"
+         form="as-hist-{{ c.id }}" data-rename-input
+         hx-post="{% url 'assistant:rename' %}" hx-include="#as-hist-{{ c.id }}"
+         hx-target="#as-history" hx-swap="outerHTML"
+         hx-trigger="blur changed, keyup[key=='Enter'] changed">
+</div>

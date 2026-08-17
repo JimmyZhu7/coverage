@@ -3,41 +3,98 @@ The whole thread plus the composer, swapped as one unit by htmx after every
 send (hx-swap="outerHTML" on #as-thread). One fragment rather than two means
 the textarea is cleared, the send button re-enabled, and the new turns
 rendered in a single exchange with no client-side state to keep in step.
+
+Layout: #as-thread is itself the flex column that fills the chat shell
+(as-shell in chat.html) — the log (or empty state) is the flexible, scrolling
+region and the composer is the fixed region below it. That split is what
+holds the composer in place while a long conversation scrolls underneath it,
+same shape as every AI chat surface a student has already used.
 {% endcomment %}
 <div id="as-thread" class="as-thread">
   {% if rows %}
-    <div class="as-log">
+    <div class="as-log" id="as-log">
       {% for row in rows %}{% include "assistant/_message.html" %}{% endfor %}
     </div>
   {% else %}
     <div class="as-empty">
+      <span class="as-empty-mark" aria-hidden="true">{% include "_logo.html" %}</span>
       <p class="as-empty-lead">Ask about your own campaign — who to chase, where to spend the week, what closes next.</p>
-      <ul class="as-starters">
-        {% for s in starters %}<li>{{ s }}</li>{% endfor %}
-      </ul>
+      <div class="as-starters">
+        {% for s in starters %}
+          <button type="button" class="as-starter">{{ s }}</button>
+        {% endfor %}
+      </div>
     </div>
   {% endif %}
 
+  {% comment %}
+  Double-send is the obvious way to spend twice; the composer locks itself
+  for the round trip rather than relying on the student not pressing Send
+  again while the dots are up.
+  {% endcomment %}
   <form class="as-composer"
         hx-post="{% url 'assistant:send' %}"
         hx-target="#as-thread"
         hx-swap="outerHTML"
-        {# Double-send is the obvious way to spend twice; the composer locks
-           itself for the round trip rather than relying on the student not
-           pressing Send again while the dots are up. #}
+        hx-encoding="multipart/form-data"
         hx-disabled-elt="find button, find textarea"
         hx-indicator="#as-typing">
     {% csrf_token %}
-    <label class="as-label" for="as-input">Your message</label>
-    <textarea id="as-input" name="message" rows="2" maxlength="{{ max_chars }}"
-              placeholder="Where should I spend this week?"
-              {% if not configured %}disabled{% endif %}></textarea>
+    {% comment %}
+    Which conversation a send belongs to. Without this, every send would
+    silently go to whatever conversation is newest — wrong the moment the
+    history panel can open an OLDER one and reply there.
+    {% endcomment %}
+    <input type="hidden" name="conversation" value="{{ conversation.id }}">
+    <div class="as-composer-inner">
+      {% comment %}
+      Chips for files picked but not yet sent. Empty and hidden until
+      chat.html's JS puts something in it — see that file's "Attachments"
+      section for why client-side re-validation is deliberately thin (type/
+      count only): the server (assistant/attachments.py) is the one place
+      size limits are actually enforced, and a rejected file becomes a
+      normal notice in the thread rather than a blocked upload dialog.
+      {% endcomment %}
+      <div class="as-attach-chips" id="as-attach-chips" hidden></div>
+      <label class="as-label" for="as-input">Your message</label>
+      <textarea id="as-input" name="message" rows="1" maxlength="{{ max_chars }}"
+                placeholder="Message Coverage…"
+                {% if not configured %}disabled{% endif %}></textarea>
+    </div>
     <div class="as-actions">
       <span id="as-typing" class="htmx-indicator as-typing" aria-live="polite">
         <span class="as-dot"></span><span class="as-dot"></span><span class="as-dot"></span>
         <span class="as-typing-text">Thinking…</span>
       </span>
-      <button class="btn btn-primary" type="submit"{% if not configured %} disabled{% endif %}>Send</button>
+      <input type="file" id="as-file-input" name="file" multiple hidden
+             accept="{{ attach_accept }}"
+             {% if not configured %}disabled{% endif %}>
+      <button type="button" class="as-attach-btn" id="as-attach-btn" aria-label="Attach files"
+              {% if not configured %}disabled{% endif %}>
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M11 5.5v5a3 3 0 0 1-6 0v-6a2 2 0 0 1 4 0v5.5a1 1 0 0 1-2 0V5.5"
+                stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </button>
+      {% comment %}
+      Dictation. Hidden until chat.html's JS confirms the browser actually
+      offers SpeechRecognition — never rendered as a dead button on the
+      browsers that don't.
+      {% endcomment %}
+      <button type="button" class="as-mic" id="as-mic" aria-label="Dictate your message" hidden
+              {% if not configured %}disabled{% endif %}>
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <rect x="6" y="1.5" width="4" height="7" rx="2" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" stroke="currentColor"
+                stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button class="as-send" type="submit" aria-label="Send message"{% if not configured %} disabled{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M10 15.5V4.5M10 4.5L4.5 10M10 4.5L15.5 10" stroke="currentColor"
+                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
     </div>
   </form>
 </div>

@@ -91,7 +91,20 @@
   <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
   {% block head %}{% endblock %}
 </head>
-<body>
+{% comment %}
+body_class: empty on every page except the ones that need it — the block
+renders the WHOLE ` class="..."` attribute, not just a value, so a page that
+doesn't override it still renders a bare `<body>` with nothing appended.
+(directory/tests/test_a11y.py's skip-link test looks for the literal string
+"<body>", so this isn't just tidiness — a stray `class=""` broke it.) Talk to
+Coverage is the first user — its chat shell is a fixed-height "app screen",
+and the marketing footer peeking in under the fold read as debris leaking
+onto an AI interface rather than as the rest of the site. Hiding it is a CSS
+concern scoped to that one page's own {% block head %}, not a layout change
+here; this block only exists so that page's stylesheet has something to
+select on.
+{% endcomment %}
+<body{% block body_class %}{% endblock %}>
   {% comment %}
   Skip link, first in the tab order. The feed carries ~3,000 focusable
   elements; without this a keyboard user reaching the roles has to traverse

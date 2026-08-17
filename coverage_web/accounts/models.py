@@ -196,6 +196,17 @@ class User(AbstractUser):
     # not an empty checkbox nobody finds. Settings' Notifications card is the
     # one place this is set; the digest command's queryset excludes it.
     weekly_digest_opt_out = models.BooleanField(default=False)
+    # Which plan this account is on. Today the ONLY thing that reads it is
+    # the advisor page (assistant/plans.py: which model answers, how many
+    # messages a day) — the pricing page's Pro list is otherwise still "in
+    # the works". No billing sets this yet: there is no payment processor in
+    # the codebase, so for now it is flipped by hand in admin (the founder's
+    # own account for dogfooding, a beta tester's as a favour). When Stripe
+    # arrives, its webhook writes this field and nothing downstream changes.
+    PLAN_FREE = "free"
+    PLAN_PRO = "pro"
+    PLAN_CHOICES = [(PLAN_FREE, "Free"), (PLAN_PRO, "Pro")]
+    plan = models.CharField(max_length=16, choices=PLAN_CHOICES, default=PLAN_FREE)
     onboarded_at = models.DateTimeField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)

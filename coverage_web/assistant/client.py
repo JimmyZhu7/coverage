@@ -40,11 +40,40 @@ def is_configured() -> bool:
 def get_client():
     """A configured `anthropic.Anthropic`. Imported lazily so the package is
     only touched when a real call is about to be made — the app must boot,
-    and the whole test suite must run, with the key unset."""
+    and the whole test suite must run, with the key unset.
+
+    `trust_env=False` plus an explicit `proxy=`, rather than letting httpx
+    scan the environment itself: httpx's own env-var resolution picks
+    `ALL_PROXY` for an `https://` request unless `HTTPS_PROXY` is set with
+    exactly matching case, and on this dev machine that variable holds a
+    `socks5://` URL — turning every call into an `ImportError` (httpx wants
+    the `socks` extra for that) before a single byte left the machine. The
+    plain `http://` proxy in `HTTP_PROXY`/`HTTPS_PROXY` is what actually
+    reaches Anthropic (confirmed with curl: direct connection to
+    api.anthropic.com is network-blocked from here — a 403 with no
+    Anthropic-shaped body — and only works when routed through that proxy).
+    So: read the http(s) proxy explicitly, ignore `ALL_PROXY`/SOCKS
+    entirely, and disable httpx's own scan so it can't silently fall back to
+    the thing that crashes. Where no proxy env var is set (production),
+    `proxy` is `None` and this is a plain direct client, identical to
+    passing nothing."""
+    import os
+
     import anthropic
+    import httpx
+
+    proxy = (
+        os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("http_proxy")
+    )
 
     return anthropic.Anthropic(
         api_key=getattr(settings, "ANTHROPIC_API_KEY", ""),
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=1,
+        http_client=httpx.Client(
+            proxy=proxy, trust_env=False, timeout=REQUEST_TIMEOUT_SECONDS
+        ),
     )

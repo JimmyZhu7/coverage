@@ -1,17 +1,39 @@
+{% load assistant_extras %}
 {% comment %}
 One turn in the thread. `row` is a dict built by assistant.views._thread_rows:
 role, text, tools (human labels for the lookups behind an answer), notice
-(non-empty only for a message Coverage wrote about itself).
+(non-empty only for a message Coverage wrote about itself), attachments
+(user turns only — filenames of any image/document blocks it carried).
 {% endcomment %}
-<article class="as-msg as-msg--{{ row.role }}{% if row.notice %} as-msg--notice{% endif %}">
-  <p class="as-who">{% if row.role == 'user' %}You{% else %}Coverage{% endif %}</p>
-  <div class="as-body">{{ row.text|linebreaksbr }}</div>
-  {% if row.tools %}
-    {% comment %}
-    The evidence line. The pitch of this page is that the advice is built on
-    the student's own data, so the answer says which of their data it read —
-    the same instinct as the deadline chips carrying their provenance.
-    {% endcomment %}
-    <p class="as-evidence">Read {% for t in row.tools %}{{ t }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+<article class="as-msg as-msg--{{ row.role }}{% if row.notice %} as-msg--notice{% endif %} kin-reveal">
+  {% if row.role == 'assistant' %}
+    <span class="as-avatar" aria-hidden="true">{% include "_logo.html" %}</span>
   {% endif %}
+  <div class="as-turn">
+    <p class="as-who">{% if row.role == 'user' %}You{% else %}Coverage{% endif %}</p>
+    <div class="as-bubble">
+      {% if row.attachments %}
+        <div class="as-attachments">
+          {% for name in row.attachments %}
+            <span class="as-attachment-chip">
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M11 5.5v5a3 3 0 0 1-6 0v-6a2 2 0 0 1 4 0v5.5a1 1 0 0 1-2 0V5.5"
+                      stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              {{ name }}
+            </span>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if row.text %}<div class="as-body">{{ row.text|chat_format }}</div>{% endif %}
+      {% if row.tools %}
+        {% comment %}
+        The evidence line. The pitch of this page is that the advice is built on
+        the student's own data, so the answer says which of their data it read —
+        the same instinct as the deadline chips carrying their provenance.
+        {% endcomment %}
+        <p class="as-evidence">Read {% for t in row.tools %}{{ t }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+      {% endif %}
+    </div>
+  </div>
 </article>

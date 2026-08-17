@@ -20,12 +20,13 @@ class UserAdmin(DjangoUserAdmin):
         "school",
         "class_year",
         "target_cycle",
+        "plan",
         "is_staff",
         "is_active",
         "onboarded_at",
         "created",
     )
-    list_filter = ("is_staff", "is_active", "is_superuser", "school", "target_cycle")
+    list_filter = ("plan", "is_staff", "is_active", "is_superuser", "school", "target_cycle")
     search_fields = ("email", "name", "school", "capture_slug")
     readonly_fields = ("created", "last_login", "date_joined", "capture_slug")
 
@@ -63,6 +64,19 @@ class UserAdmin(DjangoUserAdmin):
                     '{"us": "citizen", "hk": "sponsorship"}. cadence_params '
                     "only honors the keys in crm.views.TUNABLE_CADENCE_PARAMS; "
                     "anything else is ignored at read time."
+                ),
+            },
+        ),
+        (
+            # No billing writes this yet (no payment processor in the
+            # codebase) — admin IS the billing system for now. Only the
+            # advisor page reads it: assistant/plans.py.
+            "Plan",
+            {
+                "fields": ("plan",),
+                "description": (
+                    "Free: Haiku, 15 advisor messages a day. Pro: Sonnet, 60 a day. "
+                    "Set by hand until Stripe exists."
                 ),
             },
         ),

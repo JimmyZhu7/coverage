@@ -267,8 +267,14 @@
     {% endif %}
     {% include "crm/_contact_search.html" with target="net-contacts" %}
     {% for section in sections %}
-      {# Empty sections start collapsed so they don't take up the board. #}
-      <details class="warmth-section" data-group{% if section.cards %} open{% endif %}>
+      {% comment %}
+      Replied/Chatted/Advocates are small and worth seeing at a glance, so
+      they open by default like every other section here always has.
+      Emailed-No-Reply is the one that's routinely 90+ cards deep and
+      genuinely does swamp the board — that one alone defaults collapsed.
+      Empty sections stay collapsed regardless (nothing to show).
+      {% endcomment %}
+      <details class="warmth-section" data-group{% if section.cards and section.key != "no_reply" %} open{% endif %}>
         <summary class="net-group-head">
           {% comment %}Every section is a warmth bucket now — School scope
           used to have a fifth kind of section (grouped by university, no

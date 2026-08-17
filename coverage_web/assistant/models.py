@@ -31,12 +31,41 @@ from django.db import models
 from coverage_web.tenancy import PrivateModel
 
 
+class ChatFolder(PrivateModel):
+    """A student's own grouping of chats — "BofA prep", "General strategy" —
+    nothing more than a name and an owner. Deleting one never deletes the
+    chats in it (see ChatConversation.folder's on_delete=SET_NULL): a folder
+    is organisation, not a container a conversation's existence depends on."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "assistant_folders"
+        ordering = ["name", "id"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class ChatConversation(PrivateModel):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    # Free text, currently seeded from the first thing the student typed.
-    # There is no conversation list UI yet; this exists so one is possible
-    # without a migration.
+    # Free text. Seeded from the first thing the student typed the instant
+    # the turn starts (has to exist synchronously for the sidebar), then
+    # usually overwritten by a short model-written title once that first
+    # turn actually finishes — see agent._retitle_if_first_message. Never
+    # regenerated after that: a rename (assistant.views.rename_conversation)
+    # is the student overriding it on purpose, and a later turn has no
+    # business quietly undoing that.
     title = models.CharField(max_length=255, blank=True, default="")
+    # NULL = "not in a folder", the default and the common case — most
+    # students will never make one. SET_NULL, not CASCADE: deleting a folder
+    # is tidying up an organisational label, not a reason to destroy
+    # conversations that happen to be in it.
+    folder = models.ForeignKey(
+        ChatFolder, on_delete=models.SET_NULL, null=True, blank=True, related_name="conversations"
+    )
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
@@ -89,6 +118,18 @@ class ChatMessage(PrivateModel):
             for b in self.blocks()
             if isinstance(b, dict) and b.get("type") == "text" and (b.get("text") or "").strip()
         )
+
+    @property
+    def attachment_names(self) -> list[str]:
+        """Filenames of any image/document blocks in this turn — `_filename`
+        is this app's own bookkeeping (assistant/attachments.py), stripped
+        before the block ever reaches the model, but kept here in storage
+        precisely so the thread can still say what was attached."""
+        return [
+            b["_filename"]
+            for b in self.blocks()
+            if isinstance(b, dict) and b.get("type") in ("image", "document") and b.get("_filename")
+        ]
 
     @property
     def tool_names(self) -> list[str]:

@@ -97,18 +97,32 @@ ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 # ---------------------------------------------------------------------------
 # "Talk to Coverage" — the advisor page (assistant/).
 #
-# The model behind the agent loop. Sonnet rather than Haiku deliberately: this
-# is multi-step reasoning over a student's real CRM with eight tools available
-# and advice as the output, which is exactly the job the cheaper tier is worst
-# at. Overridable by env so the tier can be changed without a deploy of code.
-ASSISTANT_MODEL = env("ASSISTANT_MODEL", default="claude-sonnet-5")
-
-# Messages one user may send per day. A spend ceiling, not a product opinion:
-# each message can fan out to several tool round-trips, and this page is the
-# only surface in the app where a single click costs an unbounded-ish amount.
-# 60 is far past a real day's use (the founder's heaviest dogfood day was
-# nowhere near it) and well short of a runaway loop or a bored afternoon.
-ASSISTANT_DAILY_MESSAGE_CAP = env.int("ASSISTANT_DAILY_MESSAGE_CAP", default=60)
+# Two tiers, keyed by accounts.User.plan (assistant/plans.py reads these).
+#
+# The model is the real product difference between the tiers. This page is
+# multi-step reasoning over a student's actual CRM with eight tools and
+# judgement as the output — exactly the job the cheaper tier is worst at, so
+# Free (Haiku) gives a genuinely useful but shallower advisor, more inclined
+# to summarise the data back than to weigh which firm is worth the week, and
+# Pro (Sonnet) gives the real thing. That gap is honest and observable, which
+# is what makes it a reason to pay rather than a feature gate.
+#
+# The daily cap is a spend ceiling, not a product opinion: each message can
+# fan out to several tool round-trips, and this is the only surface where one
+# click costs an unbounded-ish amount. Free's is deliberately low; Pro's (60)
+# is far past a real day's use and well short of a runaway loop.
+#
+# All four overridable by env so a tier can be retuned without a deploy.
+ASSISTANT_PLANS = {
+    "free": {
+        "model": env("ASSISTANT_FREE_MODEL", default="claude-haiku-4-5-20251001"),
+        "daily_cap": env.int("ASSISTANT_FREE_DAILY_CAP", default=15),
+    },
+    "pro": {
+        "model": env("ASSISTANT_PRO_MODEL", default="claude-sonnet-5"),
+        "daily_cap": env.int("ASSISTANT_PRO_DAILY_CAP", default=60),
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Web Push (deadline alerts — accounts.push, send_deadline_push_alerts).

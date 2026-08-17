@@ -85,6 +85,73 @@ class FakeClient:
         return self.messages.requests
 
 
+class FakeStreamContext:
+    """What `client.messages.stream(...)` returns, shaped for `with ... as
+    stream:`. `text_stream` yields the scripted chunks; `get_final_message()`
+    returns the same kind of object `.create()` would have — stream_turn
+    reads both, same as the real SDK's stream manager."""
+
+    def __init__(self, chunks, final):
+        self.chunks = chunks
+        self.final = final
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    @property
+    def text_stream(self):
+        return iter(self.chunks)
+
+    def get_final_message(self):
+        return self.final
+
+
+class FakeStreamingMessages:
+    def __init__(self, script, title_script=None):
+        # Each scripted round is (chunks: list[str], final: response) or an
+        # Exception to raise instead of streaming anything.
+        self.script = list(script)
+        # `.create()` is only ever called for one thing on this fake:
+        # agent._ai_title's post-turn retitle. None means "nothing
+        # scripted" — every real test that doesn't care about titling
+        # leaves this unset, and the resulting AssertionError is exactly
+        # what _ai_title's own try/except is built to swallow.
+        self.title_script = list(title_script) if title_script is not None else None
+        self.requests = []
+        self.title_requests = []
+
+    def stream(self, **kwargs):
+        self.requests.append(kwargs)
+        if not self.script:
+            raise AssertionError("the loop asked for more rounds than were scripted")
+        item = self.script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        chunks, final = item
+        return FakeStreamContext(chunks, final)
+
+    def create(self, **kwargs):
+        self.title_requests.append(kwargs)
+        if not self.title_script:
+            raise AssertionError("no title response was scripted")
+        item = self.title_script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class FakeStreamingClient:
+    def __init__(self, script, title_script=None):
+        self.messages = FakeStreamingMessages(script, title_script)
+
+    @property
+    def requests(self):
+        return self.messages.requests
+
+
 @pytest.fixture
 def user():
     return User.objects.create_user(
@@ -246,9 +313,18 @@ def test_the_conversation_tool_call_cap_refuses_further_lookups(user, conversati
     assert "tool-call limit" in blocked["content"]
 
 
-@override_settings(ASSISTANT_DAILY_MESSAGE_CAP=2)
+_TWO_A_DAY = {
+    "free": {"model": "test-free-model", "daily_cap": 2},
+    "pro": {"model": "test-pro-model", "daily_cap": 5},
+}
+
+
+@override_settings(ASSISTANT_PLANS=_TWO_A_DAY)
 def test_the_daily_message_cap_is_a_plain_notice_not_an_error(user, conversation):
-    script = [_response([_text("ok")], "end_turn") for _ in range(2)]
+    # 3, not 2: the first of the two real turns also triggers one retitle
+    # call (see the "AI-generated titles" section below) — same client,
+    # same flat script, one more item to get through it.
+    script = [_response([_text("ok")], "end_turn") for _ in range(3)]
     client = FakeClient(script)
 
     assert agent.run_turn(user, conversation, "one", client=client).ok
@@ -260,9 +336,77 @@ def test_the_daily_message_cap_is_a_plain_notice_not_an_error(user, conversation
     assert third.reason == "capped"
     assert third.reply.notice == ChatMessage.NOTICE_CAPPED
     assert "2 messages today" in third.reply.text
+    # A Free student is told what Pro changes; the notice names the plan.
+    assert "Free plan" in third.reply.text
+    assert "Pro raises the limit" in third.reply.text
     # The student's third question is still in the thread — they can see what
     # they asked when the cap resets.
     assert _turns(user, conversation)[-2].text == "three"
+
+
+# ---------------------------------------------------------------------------
+# Plans: Free and Pro differ in model and cap, and nothing else
+# ---------------------------------------------------------------------------
+@override_settings(ASSISTANT_PLANS=_TWO_A_DAY)
+def test_a_free_student_is_answered_by_the_free_tier_model(user, conversation):
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+
+    agent.run_turn(user, conversation, "hi", client=client)
+
+    assert client.requests[0]["model"] == "test-free-model"
+
+
+@override_settings(ASSISTANT_PLANS=_TWO_A_DAY)
+def test_a_pro_student_is_answered_by_the_pro_tier_model(user, conversation):
+    user.plan = User.PLAN_PRO
+    user.save(update_fields=["plan"])
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+
+    agent.run_turn(user, conversation, "hi", client=client)
+
+    assert client.requests[0]["model"] == "test-pro-model"
+
+
+@override_settings(ASSISTANT_PLANS=_TWO_A_DAY)
+def test_a_pro_student_gets_the_pro_cap_and_no_upsell_line(user, conversation):
+    user.plan = User.PLAN_PRO
+    user.save(update_fields=["plan"])
+    # 6, not 5: q0 is the first message and also triggers one retitle call.
+    client = FakeClient([_response([_text("ok")], "end_turn") for _ in range(6)])
+    for i in range(5):
+        assert agent.run_turn(user, conversation, f"q{i}", client=client).ok
+
+    sixth = agent.run_turn(user, conversation, "q5", client=FakeClient([]))
+
+    assert sixth.reason == "capped"
+    assert "5 messages today" in sixth.reply.text
+    assert "Pro plan" in sixth.reply.text
+    assert "raises the limit" not in sixth.reply.text
+
+
+@override_settings(ASSISTANT_PLANS=_TWO_A_DAY)
+def test_an_unknown_plan_value_degrades_to_free_rather_than_erroring(user, conversation):
+    """The field is written by admin now and a billing webhook later; a typo
+    in either must cost the student quality, not their advisor."""
+    user.plan = "platinum"
+    user.save(update_fields=["plan"])
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+
+    result = agent.run_turn(user, conversation, "hi", client=client)
+
+    assert result.ok
+    assert client.requests[0]["model"] == "test-free-model"
+
+
+def test_the_shipped_defaults_are_haiku_for_free_and_sonnet_for_pro():
+    """Pin the actual product decision, independent of the fake plans above."""
+    from assistant import plans
+
+    free = plans.limits_for(SimpleNamespace(plan="free"))
+    pro = plans.limits_for(SimpleNamespace(plan="pro"))
+    assert free.model.startswith("claude-haiku")
+    assert pro.model.startswith("claude-sonnet")
+    assert free.daily_cap < pro.daily_cap
 
 
 def test_an_api_failure_is_a_message_in_the_thread_never_a_500(user, conversation):
@@ -420,3 +564,235 @@ def test_an_empty_message_does_nothing(user, conversation):
 
     assert not result.ok
     assert _turns(user, conversation) == []
+
+
+# ---------------------------------------------------------------------------
+# Streaming: the same contract as run_turn, as events instead of one result
+# ---------------------------------------------------------------------------
+def test_a_plain_streamed_answer_yields_its_chunks_then_done(user, conversation):
+    client = FakeStreamingClient(
+        [(["Chase ", "Morgan ", "Stanley."], _response([_text("Chase Morgan Stanley.")], "end_turn"))]
+    )
+
+    events = list(agent.stream_turn(user, conversation, "Where should I spend this week?", client=client))
+
+    assert [e["type"] for e in events] == ["delta", "delta", "delta", "done"]
+    assert "".join(e["text"] for e in events[:-1]) == "Chase Morgan Stanley."
+    assert events[-1]["tools"] == []
+    # Persisted exactly like the non-streaming loop: one user turn, one
+    # assistant turn — a replayed conversation cannot tell how it was sent.
+    turns = _turns(user, conversation)
+    assert [t.role for t in turns] == ["user", "assistant"]
+    assert turns[-1].text == "Chase Morgan Stanley."
+
+
+def test_a_streamed_tool_round_announces_the_lookup_before_running_it(user, conversation, contact):
+    client = FakeStreamingClient(
+        [
+            ([], _response([_tool_use("search_contacts", {"query": "jane"})], "tool_use")),
+            (["Jane is cold."], _response([_text("Jane is cold.")], "end_turn")),
+        ]
+    )
+
+    events = list(agent.stream_turn(user, conversation, "What's going on with Jane?", client=client))
+
+    assert events[0] == {"type": "tool", "label": "your contacts"}
+    assert events[-1] == {"type": "done", "tools": ["your contacts"]}
+    turns = _turns(user, conversation)
+    assert [t.role for t in turns] == ["user", "assistant", "user", "assistant"]
+
+
+def test_a_streamed_write_is_never_announced_as_a_reading_hint(user, conversation):
+    firm = Firm.objects.create(slug="stream-w", name="Stream Bank")
+    from directory.models import Opportunity
+
+    opp = Opportunity.objects.create(
+        firm=firm, title="Analyst", bucket="internship", status="open",
+        url="https://stream-w.example/1",
+    )
+    client = FakeStreamingClient(
+        [
+            (
+                [],
+                _response(
+                    [_tool_use("track_opportunity", {"opportunity_id": opp.id, "status": "saved"})],
+                    "tool_use",
+                ),
+            ),
+            (["Saved."], _response([_text("Saved.")], "end_turn")),
+        ]
+    )
+
+    events = list(agent.stream_turn(user, conversation, "save that one", client=client))
+
+    assert not any(e["type"] == "tool" for e in events)
+    assert events[-1]["tools"] == ["saved a role"]
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_streaming_with_no_api_key_yields_one_unconfigured_notice(user, conversation):
+    events = list(agent.stream_turn(user, conversation, "hi"))
+
+    assert events == [
+        {
+            "type": "notice",
+            "kind": "unconfigured",
+            "text": "Talk to Coverage isn't switched on yet — it needs an Anthropic API "
+            "key set on the server. Everything else in Coverage works as normal.",
+        }
+    ]
+    assert _turns(user, conversation)[-1].notice == ChatMessage.NOTICE_UNCONFIGURED
+
+
+@override_settings(ASSISTANT_PLANS={"free": {"model": "m", "daily_cap": 1}, "pro": {"model": "m", "daily_cap": 5}})
+def test_streaming_the_daily_cap_is_one_terminal_notice_event(user, conversation):
+    first = list(agent.stream_turn(user, conversation, "one", client=FakeStreamingClient([([], _response([_text("ok")], "end_turn"))])))
+    assert first[-1]["type"] == "done"
+
+    second = list(agent.stream_turn(user, conversation, "two", client=FakeStreamingClient([])))
+
+    assert len(second) == 1
+    assert second[0]["type"] == "notice"
+    assert second[0]["kind"] == "capped"
+    assert "1 messages today" in second[0]["text"]
+
+
+def test_a_streaming_api_failure_yields_one_failed_notice_never_raises(user, conversation):
+    client = FakeStreamingClient([RuntimeError("connection reset")])
+
+    events = list(agent.stream_turn(user, conversation, "hello", client=client))
+
+    assert events == [
+        {
+            "type": "notice",
+            "kind": "failed",
+            "text": "I couldn't reach the model just then. Try that again in a moment.",
+        }
+    ]
+    assert _turns(user, conversation)[0].text == "hello"
+
+
+def test_streaming_the_round_cap_still_stops_a_model_that_never_stops_calling_tools(user, conversation):
+    script = [([], _response([_tool_use("get_today_queue", {})], "tool_use", msg_id=f"m{i}")) for i in range(agent.MAX_ROUNDS)]
+    client = FakeStreamingClient(script)
+
+    events = list(agent.stream_turn(user, conversation, "keep going", client=client))
+
+    assert events[-1]["type"] == "notice"
+    assert events[-1]["kind"] == "failed"
+    assert "went round in circles" in events[-1]["text"]
+
+
+def test_streaming_an_empty_message_yields_nothing(user, conversation):
+    events = list(agent.stream_turn(user, conversation, "   ", client=FakeStreamingClient([])))
+
+    assert events == []
+    assert _turns(user, conversation) == []
+
+
+def test_a_streamed_conversation_replays_correctly_for_a_later_non_streamed_turn(user, conversation, contact):
+    """The whole point of persisting identically: a conversation doesn't
+    have to pick one transport for its whole life."""
+    stream_client = FakeStreamingClient(
+        [([], _response([_tool_use("search_contacts", {"query": "jane"})], "tool_use")),
+         (["Cold."], _response([_text("Cold.")], "end_turn"))]
+    )
+    list(agent.stream_turn(user, conversation, "status on Jane?", client=stream_client))
+
+    plain_client = FakeClient([_response([_text("Two calls to make.")], "end_turn")])
+    agent.run_turn(user, conversation, "and today?", client=plain_client)
+
+    replayed = plain_client.requests[0]["messages"]
+    roles = [m["role"] for m in replayed]
+    assert roles == ["user", "assistant", "user", "assistant", "user"]
+
+
+# ---------------------------------------------------------------------------
+# AI-generated titles — the first-message-only retitle, both transports
+# ---------------------------------------------------------------------------
+def test_a_successful_first_turn_is_retitled_by_the_model(user, conversation):
+    client = FakeClient(
+        [
+            _response([_text("Chase Morgan Stanley this week.")], "end_turn"),
+            _response([_text("Where to spend the week")], "end_turn"),  # the title call
+        ]
+    )
+
+    agent.run_turn(user, conversation, "Where should I spend this week?", client=client)
+
+    conversation.refresh_from_db()
+    assert conversation.title == "Where to spend the week"
+
+
+def test_a_second_turn_is_never_retitled(user, conversation):
+    conversation.title = "Already named"
+    conversation.save()
+    client = FakeClient(
+        [
+            _response([_text("Sure.")], "end_turn"),
+            _response([_text("Should never be read")], "end_turn"),
+        ]
+    )
+
+    agent.run_turn(user, conversation, "another question", client=client)
+
+    conversation.refresh_from_db()
+    assert conversation.title == "Already named"
+    # Only ONE request went out — the answer. The extra scripted response
+    # for a title call was never touched.
+    assert len(client.requests) == 1
+
+
+def test_a_failed_title_call_leaves_the_truncated_fallback_in_place(user, conversation):
+    client = FakeClient(
+        [
+            _response([_text("Sure.")], "end_turn"),
+            RuntimeError("network hiccup"),
+        ]
+    )
+
+    agent.run_turn(user, conversation, "Where should I spend this week?", client=client)
+
+    conversation.refresh_from_db()
+    assert conversation.title == "Where should I spend this week?"
+
+
+def test_titling_never_happens_after_an_unconfigured_or_capped_or_failed_turn(user, conversation):
+    """The retitle call sits right at the ok=True return — a turn that
+    never gets that far (capped, unconfigured, a mid-loop API failure)
+    must never spend a second call trying to name a conversation whose
+    real answer never arrived."""
+    client = FakeClient([RuntimeError("down")])
+
+    agent.run_turn(user, conversation, "hello", client=client)
+
+    conversation.refresh_from_db()
+    assert conversation.title == "hello"  # the plain truncated fallback, nothing fancier
+    assert len(client.requests) == 1  # just the one failed attempt at an answer
+
+
+def test_a_successful_streamed_first_turn_is_also_retitled(user, conversation):
+    client = FakeStreamingClient(
+        [(["Chase Morgan Stanley."], _response([_text("Chase Morgan Stanley.")], "end_turn"))],
+        title_script=[_response([_text("Where to spend the week")], "end_turn")],
+    )
+
+    list(agent.stream_turn(user, conversation, "Where should I spend this week?", client=client))
+
+    conversation.refresh_from_db()
+    assert conversation.title == "Where to spend the week"
+
+
+def test_a_streamed_second_turn_is_never_retitled(user, conversation):
+    conversation.title = "Already named"
+    conversation.save()
+    client = FakeStreamingClient(
+        [(["ok"], _response([_text("ok")], "end_turn"))],
+        title_script=[_response([_text("Should never be read")], "end_turn")],
+    )
+
+    list(agent.stream_turn(user, conversation, "another question", client=client))
+
+    conversation.refresh_from_db()
+    assert conversation.title == "Already named"
+    assert client.messages.title_requests == []
