@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "crm",  # private zone: user_firms, contacts, touches, capture_events, tasks
     "analytics",  # private zone: user_opportunities, fit_scores, product_events, imports
     "capture",  # inbound-email capture pipeline (no models; uses crm.CaptureEvent)
+    "assistant",  # private zone: "Talk to Coverage" — the advisor page's conversations
 ]
 
 # Shared secret the inbound-email webhook uses to authenticate provider POSTs
@@ -92,6 +93,22 @@ SITE_URL = env("SITE_URL", default="http://localhost:8000")
 # nothing set. Costs real money per call once set; see ai_extract.py's
 # module docstring before turning this on in production.
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
+
+# ---------------------------------------------------------------------------
+# "Talk to Coverage" — the advisor page (assistant/).
+#
+# The model behind the agent loop. Sonnet rather than Haiku deliberately: this
+# is multi-step reasoning over a student's real CRM with eight tools available
+# and advice as the output, which is exactly the job the cheaper tier is worst
+# at. Overridable by env so the tier can be changed without a deploy of code.
+ASSISTANT_MODEL = env("ASSISTANT_MODEL", default="claude-sonnet-5")
+
+# Messages one user may send per day. A spend ceiling, not a product opinion:
+# each message can fan out to several tool round-trips, and this page is the
+# only surface in the app where a single click costs an unbounded-ish amount.
+# 60 is far past a real day's use (the founder's heaviest dogfood day was
+# nowhere near it) and well short of a runaway loop or a bored afternoon.
+ASSISTANT_DAILY_MESSAGE_CAP = env.int("ASSISTANT_DAILY_MESSAGE_CAP", default=60)
 
 # ---------------------------------------------------------------------------
 # Web Push (deadline alerts — accounts.push, send_deadline_push_alerts).

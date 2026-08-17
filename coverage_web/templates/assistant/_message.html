@@ -1,0 +1,17 @@
+{% comment %}
+One turn in the thread. `row` is a dict built by assistant.views._thread_rows:
+role, text, tools (human labels for the lookups behind an answer), notice
+(non-empty only for a message Coverage wrote about itself).
+{% endcomment %}
+<article class="as-msg as-msg--{{ row.role }}{% if row.notice %} as-msg--notice{% endif %}">
+  <p class="as-who">{% if row.role == 'user' %}You{% else %}Coverage{% endif %}</p>
+  <div class="as-body">{{ row.text|linebreaksbr }}</div>
+  {% if row.tools %}
+    {% comment %}
+    The evidence line. The pitch of this page is that the advice is built on
+    the student's own data, so the answer says which of their data it read —
+    the same instinct as the deadline chips carrying their provenance.
+    {% endcomment %}
+    <p class="as-evidence">Read {% for t in row.tools %}{{ t }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+  {% endif %}
+</article>

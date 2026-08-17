@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Talk to Coverage · Coverage{% endblock %}
+
+{% block head %}
+{% comment %}
+Page-scoped styles, same pattern as crm/_styles.html and directory/_styles.html:
+only existing tokens, no new colour, no gradient, no shadow this app doesn't
+already use. A chat page is the easiest place in a product to drift into
+somebody else's visual language; this one is meant to read as the same ledger
+as Today and Network, with the student's turns as the only tinted thing on it.
+{% endcomment %}
+<style>
+  .as-page { display: flex; flex-direction: column; gap: var(--s4); }
+
+  .as-note { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); }
+
+  .as-thread { display: flex; flex-direction: column; gap: var(--s4); }
+
+  .as-log { display: flex; flex-direction: column; gap: var(--s4); }
+
+  .as-msg { max-width: 68ch; }
+  .as-msg--user { align-self: flex-end; background: var(--accent-soft);
+    border: 1px solid var(--accent-line); border-radius: var(--r-panel);
+    padding: var(--s3) var(--s4); }
+  .as-msg--assistant { align-self: flex-start; }
+  /* A notice is Coverage talking about itself (not configured, cap reached),
+     so it is deliberately quieter than an answer rather than louder. */
+  .as-msg--notice .as-body { color: var(--ink-2); font-style: italic; }
+
+  .as-who { margin: 0 0 var(--s1); font-family: var(--font-mono);
+    font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-3); }
+  .as-body { font-size: var(--fs-m); line-height: 1.62; overflow-wrap: anywhere; }
+  .as-evidence { margin: var(--s2) 0 0; font-family: var(--font-mono);
+    font-size: var(--fs-xs); color: var(--ink-3); }
+
+  .as-empty { border: 1px dashed var(--line-strong); border-radius: var(--r-panel);
+    padding: var(--s5); background: var(--surface); }
+  .as-empty-lead { margin: 0 0 var(--s3); color: var(--ink-2); font-size: var(--fs-s); }
+  .as-starters { margin: 0; padding: 0; list-style: none; display: flex;
+    flex-direction: column; gap: var(--s2); }
+  .as-starters li { font-size: var(--fs-s); color: var(--ink-2);
+    border-left: 2px solid var(--line-strong); padding-left: var(--s3); }
+
+  .as-composer { position: sticky; bottom: 0; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--r-panel);
+    padding: var(--s3); box-shadow: var(--shadow-1); display: flex;
+    flex-direction: column; gap: var(--s2); }
+  .as-label { position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap; }
+  .as-composer textarea { width: 100%; resize: vertical; min-height: 56px;
+    font-family: var(--font-ui); font-size: var(--fs-m); }
+  .as-actions { display: flex; align-items: center; justify-content: flex-end;
+    gap: var(--s3); }
+
+  /* Typing dots. htmx toggles .htmx-request on the indicator, which is what
+     reveals this; the animation is the only motion on the page. */
+  .as-typing { display: inline-flex; align-items: center; gap: 5px;
+    margin-right: auto; color: var(--ink-3); font-size: var(--fs-xs); }
+  .as-typing-text { font-family: var(--font-mono); }
+  .as-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-3);
+    animation: as-blink 1.2s infinite ease-in-out both; }
+  .as-dot:nth-child(2) { animation-delay: 0.16s; }
+  .as-dot:nth-child(3) { animation-delay: 0.32s; }
+  @keyframes as-blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .as-dot { animation: none; } }
+
+  .as-off { border: 1px solid var(--line); background: var(--accent-soft);
+    border-radius: var(--r-ctl); padding: var(--s3) var(--s4);
+    font-size: var(--fs-s); color: var(--ink-2); margin: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page page--narrow as-page">
+  {% include "_pagehead.html" with eyebrow="Your advisor" title="Talk to Coverage" sub="Ask about your own campaign. It reads your contacts, your firms and your deadlines before it answers." %}
+
+  {% if not configured %}
+    <p class="as-off">This page needs an Anthropic API key on the server. Until one is set, it stays switched off — nothing else in Coverage is affected.</p>
+  {% endif %}
+
+  {% comment %}
+  The same label crm/_contact_ai_brief.html carries, for the same reason: this
+  is drafted by a model reading your data, and a student about to act on
+  "email him today" should be reminded whose judgement that is.
+  {% endcomment %}
+  <p class="as-note">AI-drafted from your own Coverage data. Check it before you rely on it. It can log a touch or save a role; everything else you do on the page itself.</p>
+
+  {% include "assistant/_thread.html" %}
+
+  <form method="post" action="{% url 'assistant:new' %}">
+    {% csrf_token %}
+    <button class="btn" type="submit">Start a new chat</button>
+  </form>
+</div>
+{% endblock %}

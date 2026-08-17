@@ -1,0 +1,43 @@
+{% comment %}
+The whole thread plus the composer, swapped as one unit by htmx after every
+send (hx-swap="outerHTML" on #as-thread). One fragment rather than two means
+the textarea is cleared, the send button re-enabled, and the new turns
+rendered in a single exchange with no client-side state to keep in step.
+{% endcomment %}
+<div id="as-thread" class="as-thread">
+  {% if rows %}
+    <div class="as-log">
+      {% for row in rows %}{% include "assistant/_message.html" %}{% endfor %}
+    </div>
+  {% else %}
+    <div class="as-empty">
+      <p class="as-empty-lead">Ask about your own campaign — who to chase, where to spend the week, what closes next.</p>
+      <ul class="as-starters">
+        {% for s in starters %}<li>{{ s }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <form class="as-composer"
+        hx-post="{% url 'assistant:send' %}"
+        hx-target="#as-thread"
+        hx-swap="outerHTML"
+        {# Double-send is the obvious way to spend twice; the composer locks
+           itself for the round trip rather than relying on the student not
+           pressing Send again while the dots are up. #}
+        hx-disabled-elt="find button, find textarea"
+        hx-indicator="#as-typing">
+    {% csrf_token %}
+    <label class="as-label" for="as-input">Your message</label>
+    <textarea id="as-input" name="message" rows="2" maxlength="{{ max_chars }}"
+              placeholder="Where should I spend this week?"
+              {% if not configured %}disabled{% endif %}></textarea>
+    <div class="as-actions">
+      <span id="as-typing" class="htmx-indicator as-typing" aria-live="polite">
+        <span class="as-dot"></span><span class="as-dot"></span><span class="as-dot"></span>
+        <span class="as-typing-text">Thinking…</span>
+      </span>
+      <button class="btn btn-primary" type="submit"{% if not configured %} disabled{% endif %}>Send</button>
+    </div>
+  </form>
+</div>

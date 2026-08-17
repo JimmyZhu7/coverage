@@ -44,6 +44,9 @@ urlpatterns = [
     path("privacy/", RedirectView.as_view(pattern_name="accounts:privacy", permanent=True)),
     path("terms/", RedirectView.as_view(pattern_name="accounts:terms", permanent=True)),
     path("capture/", include("capture.urls")),       # inbound-email webhook + capture settings
+    # "Talk to Coverage": the advisor page, reasoning over the signed-in
+    # student's own CRM through a tool loop (assistant/agent.py).
+    path("assistant/", include("assistant.urls")),
     # The founder dashboard: staff-only reader over the ProductEvent rows
     # every action has been writing since the cutover.
     path("instrument/", analytics_views.dashboard, name="instrument"),

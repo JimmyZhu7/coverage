@@ -158,6 +158,13 @@ class Touch(PrivateModel):
         ("manual", "Manual"),
         ("capture", "Capture"),
         ("import", "Import"),
+        # Logged by the advisor page's agent loop on the student's say-so
+        # (assistant/tools.py). Its own value rather than "manual" so a touch
+        # a model wrote is permanently distinguishable from one the student
+        # clicked — the same posture as "capture", and the only way a later
+        # audit of "what did the assistant actually do to my CRM" can be a
+        # query rather than a guess.
+        ("assistant", "Assistant"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)

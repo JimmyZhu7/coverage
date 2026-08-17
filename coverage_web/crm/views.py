@@ -980,11 +980,13 @@ _STATE_IMPLIES_WARMTH = {
 
 # Machine bookkeeping prefixes on touch notes. `[gmail:<thread>]` is the
 # sync's idempotency marker (how a re-scanned thread knows it is already
-# logged) and `[capture:<event>]` is the BCC pipeline's provenance pointer.
-# Both are load-bearing IN THE DATABASE and meaningless ON THE PAGE — the
-# owner's words: "the user doesn't learn anything". Stripped at display,
-# never at rest; the export still carries them raw.
-_NOTE_MARKER = re.compile(r"^\[(?:gmail|capture):[^\]]*\]\s*")
+# logged), `[capture:<event>]` is the BCC pipeline's provenance pointer, and
+# `[assistant:<message>]` points a touch the advisor page logged back at the
+# exact model turn that logged it (assistant/tools.py). All three are
+# load-bearing IN THE DATABASE and meaningless ON THE PAGE — the owner's
+# words: "the user doesn't learn anything". Stripped at display, never at
+# rest; the export still carries them raw.
+_NOTE_MARKER = re.compile(r"^\[(?:gmail|capture|assistant):[^\]]*\]\s*")
 
 # `services.set_contact_state`'s audit trail (pipeline.py's `set_state`)
 # writes every manual-override touch's note as "manual override:
