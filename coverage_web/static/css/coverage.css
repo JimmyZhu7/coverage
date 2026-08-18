@@ -355,8 +355,23 @@
 /* ---- 2. Reset + base ----------------------------------------------------- */
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+/* The full-height app shell. Without min-height + the flex column below,
+   body's height was purely whatever its content added up to — Settings
+   (many form sections) rendered ~7000px tall while Calendar (a single
+   grid) rendered ~1500px, so navigating between pages read as the whole
+   app shrinking and growing rather than one steady frame with different
+   amounts of content in it. On a short page the footer used to sit right
+   under the content, wherever that happened to end, with the raw <html>
+   background showing below it rather than --paper — now `main`'s flex:1
+   (below) pushes the footer to the bottom of the viewport at minimum, and
+   a page with more content than one screen simply scrolls further, same
+   as before. This is the one shared shell every page already extends, so
+   it fixes all of them at once rather than needing a per-template change. */
 body {
   margin: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
   background: var(--paper);
   color: var(--ink);
   font: var(--w-reg) var(--fs-m)/var(--lh-body) var(--font-ui);
@@ -435,7 +450,10 @@ main:focus { outline: none; }
 .site-user-avatar-fallback { display: inline-flex; align-items: center; justify-content: center;
   color: var(--accent-ink); font-weight: var(--w-bold); font-size: 11px; }
 
-main { min-height: 60vh; }
+/* Grows to fill whatever the header + footer don't use, inside body's flex
+   column above — the actual mechanism behind "every page is at least one
+   full viewport," not the min-height:60vh guess this replaces. */
+main { flex: 1 0 auto; }
 /* Full page width is the default across the whole site. Only forms, auth,
    legal, and onboarding opt down to `--narrow`, where a full-bleed measure
    would hurt readability. `--wide`/`--full` remain as explicit aliases so
