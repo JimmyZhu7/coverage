@@ -1079,6 +1079,22 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border-radius: var(--r-panel); background: var(--accent-soft); }
   .setup-nudge-text { color: var(--accent-ink); font-size: var(--fs-s); }
 
+  /* The daily brief. Same accent-soft card language as .setup-nudge — this
+     is the same "advisor speaking" register — but it carries the mark
+     instead of a bold lead-in, since the sentence itself is the content. */
+  .daily-brief { display: flex; align-items: flex-start; gap: var(--s3);
+    margin-bottom: var(--s4); padding: var(--s3) var(--s4);
+    border: 1px solid var(--accent-line); border-radius: var(--r-panel);
+    background: var(--accent-soft); }
+  .daily-brief-icon { flex: none; width: 20px; height: 20px; margin-top: 2px;
+    color: var(--accent); }
+  .daily-brief-icon svg { width: 100%; height: 100%; }
+  .daily-brief-text { flex: 1; margin: 0; color: var(--accent-ink);
+    font-size: var(--fs-m); line-height: 1.5; }
+  .daily-brief-link { flex: none; align-self: center; color: var(--accent-ink);
+    font-size: var(--fs-s); font-weight: 600; white-space: nowrap; }
+  .daily-brief-link:hover { text-decoration: underline; }
+
   /* The staleness ring — a conic sweep around the avatar that fills as the
      contact's keep-warm clock runs down (--stale is 0-100, from views.py).
      Grey-to-danger by consumption, drawn as a 2.5px halo behind the circle.

@@ -25,6 +25,7 @@ from django.utils import timezone
 
 from analytics.models import UserOpportunity
 from assistant import tools
+from assistant.models import AdvisorMemory
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
 from directory.models import Firm, FirmDate, Opportunity
 
@@ -488,3 +489,31 @@ def test_an_unknown_tool_is_an_error_result_never_an_exception(user):
     result, is_error = _call(user, "delete_everything", {})
     assert is_error
     assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# remember
+# ---------------------------------------------------------------------------
+def test_remember_saves_a_fact(user):
+    result, is_error = _call(user, "remember", {"fact": "Ruled out PE roles."})
+
+    assert not is_error
+    assert result["remembered"] == "Ruled out PE roles."
+    assert list(AdvisorMemory.objects.for_user(user).values_list("text", flat=True)) == ["Ruled out PE roles."]
+
+
+def test_remember_with_no_fact_is_an_error(user):
+    result, is_error = _call(user, "remember", {})
+    assert is_error
+    assert AdvisorMemory.objects.for_user(user).count() == 0
+
+
+def test_remember_refuses_past_the_cap_without_silently_dropping_anything(user):
+    for i in range(tools.MAX_MEMORIES):
+        AdvisorMemory(user=user, text=f"fact {i}").save()
+
+    result, is_error = _call(user, "remember", {"fact": "one too many"})
+
+    assert is_error
+    assert AdvisorMemory.objects.for_user(user).count() == tools.MAX_MEMORIES  # nothing evicted
+    assert "one too many" not in AdvisorMemory.objects.for_user(user).values_list("text", flat=True)

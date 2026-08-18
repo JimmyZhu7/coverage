@@ -277,6 +277,28 @@ materials.
   .as-confirm-actions { display: flex; justify-content: flex-end; gap: var(--s2); }
   @media (prefers-reduced-motion: reduce) { .as-confirm { animation: none; } }
 
+  /* ---- Memory dialog: same shell as .as-confirm, wider and left-aligned
+     since it holds a list rather than one sentence and two buttons. ---- */
+  .as-memory-dialog { width: min(420px, calc(100vw - 32px)); text-align: left; }
+  .as-memory-head { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s3); margin-bottom: var(--s2); }
+  .as-memory-dialog-title { margin: 0; font: var(--w-bold) var(--fs-l)/1.2 var(--font-display); }
+  .as-memory-sub { margin: 0 0 var(--s4); font-size: var(--fs-s); color: var(--ink-3); }
+  .as-memory-list { display: flex; flex-direction: column; gap: 2px;
+    max-height: 40vh; overflow-y: auto; margin: 0 -8px; }
+  .as-memory-empty { margin: 0; padding: var(--s3) 8px; color: var(--ink-3); font-size: var(--fs-s); }
+  .as-memory-row { display: flex; align-items: center; gap: var(--s2);
+    padding: 9px 8px; border-radius: var(--r-ctl); }
+  .as-memory-row:hover { background: var(--accent-soft); }
+  .as-memory-text { flex: 1; min-width: 0; font-size: var(--fs-s); color: var(--ink); }
+  .as-memory-forget { flex: none; width: 24px; height: 24px; border-radius: 50%; border: none;
+    background: transparent; color: var(--ink-3); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; opacity: 0;
+    transition: opacity var(--t-fast), color var(--t-fast), background-color var(--t-fast); }
+  .as-memory-row:hover .as-memory-forget { opacity: 1; }
+  .as-memory-forget:hover { color: var(--danger); background: var(--surface); }
+  .as-memory-forget svg { width: 12px; height: 12px; }
+
   /* ---- Composer: a pill that grows, an icon send button, like every AI
      chat surface a student has already used — drawn in the site's own
      radii and shadow rather than borrowed chrome. ---- */
@@ -397,6 +419,14 @@ materials.
             <path d="M8 6.5v4M6 8.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </button>
+        <button type="button" class="as-new-folder-btn" id="as-memory-btn" aria-label="What Coverage remembers" title="What Coverage remembers">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M6 2.5a2.5 2.5 0 0 0-2.5 2.5c0 .3.03.58.1.85A2.5 2.5 0 0 0 2.5 8.2c0 .93.5 1.74 1.25 2.18a2.3 2.3 0 0 0-.05.47A2.5 2.5 0 0 0 6.2 13.3 2 2 0 0 0 8 14.5V4.5A2 2 0 0 0 6 2.5z"
+                  stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M10 2.5a2.5 2.5 0 0 1 2.5 2.5c0 .3-.03.58-.1.85a2.5 2.5 0 0 1 1.1 2.35c0 .93-.5 1.74-1.25 2.18.03.15.05.31.05.47A2.5 2.5 0 0 1 9.8 13.3 2 2 0 0 1 8 14.5V4.5a2 2 0 0 1 2-2z"
+                  stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
       {% comment %}
       Hidden until the button above reveals it — the create form for a new
@@ -459,6 +489,26 @@ how the asking looks.
     <button type="button" class="btn" id="as-confirm-cancel">Cancel</button>
     <button type="button" class="btn btn-danger" id="as-confirm-ok">Delete</button>
   </div>
+</dialog>
+
+{% comment %}
+What Coverage remembers — facts saved via the `remember` tool (agent.py),
+carried into every conversation's preamble regardless of which chat or
+folder it's in. Rendered once here with the page's own `memories` context;
+a forget swaps just #as-memory-list, same shape as every other list on
+this page.
+{% endcomment %}
+<dialog class="as-confirm as-memory-dialog" id="as-memory">
+  <div class="as-memory-head">
+    <h2 class="as-memory-dialog-title">What Coverage remembers</h2>
+    <button type="button" class="as-sidebar-close" id="as-memory-close" aria-label="Close">
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+  <p class="as-memory-sub">Facts it's picked up across your chats — not your CRM data, just things worth carrying forward.</p>
+  {% include "assistant/_memories.html" %}
 </dialog>
 
 {% comment %}
@@ -712,6 +762,21 @@ element by the next turn.
           folderCreateInput.value = "";
           folderCreateForm.hidden = true;
         }
+      });
+    }
+
+    // 6b2. The memory dialog: plain open/close, no confirm() involved — a
+    // <dialog> the same way as everything else on this page, its list
+    // already server-rendered (see chat() in views.py), refreshed in place
+    // by each forget button's own htmx swap.
+    var memoryBtn = document.getElementById("as-memory-btn");
+    var memoryDialog = document.getElementById("as-memory");
+    var memoryClose = document.getElementById("as-memory-close");
+    if (memoryBtn && memoryDialog) {
+      memoryBtn.addEventListener("click", function () { memoryDialog.showModal(); });
+      if (memoryClose) memoryClose.addEventListener("click", function () { memoryDialog.close(); });
+      memoryDialog.addEventListener("click", function (e) {
+        if (e.target === memoryDialog) memoryDialog.close();
       });
     }
 

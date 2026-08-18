@@ -529,6 +529,34 @@ def test_the_preamble_rides_on_the_first_user_turn(user, conversation):
     assert first_turn["content"][1]["text"] == "hi"
 
 
+def test_remembered_facts_ride_the_preamble_regardless_of_which_conversation(user):
+    """The whole point of AdvisorMemory: a fact saved in one conversation
+    must be visible in a completely different, brand-new one — the one
+    thing per-conversation threads can't do on their own."""
+    from assistant.models import AdvisorMemory, ChatConversation
+
+    AdvisorMemory(user=user, text="Ruled out PE roles.").save()
+    AdvisorMemory(user=user, text="Needs sponsorship in the US.").save()
+    other_conversation = ChatConversation(user=user)
+    other_conversation.save()
+
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+    agent.run_turn(user, other_conversation, "hi, first time in this chat", client=client)
+
+    preamble = client.requests[0]["messages"][0]["content"][0]["text"]
+    assert "Ruled out PE roles." in preamble
+    assert "Needs sponsorship in the US." in preamble
+
+
+def test_with_no_remembered_facts_the_preamble_says_nothing_about_memory(user, conversation):
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+
+    agent.run_turn(user, conversation, "hi", client=client)
+
+    preamble = client.requests[0]["messages"][0]["content"][0]["text"]
+    assert "Remembered" not in preamble
+
+
 def test_replay_never_opens_on_an_orphaned_tool_result(user, conversation):
     """Slicing the last N turns can cut between a tool_use and its answer; the
     window has to be trimmed forward or the API rejects the request."""

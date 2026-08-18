@@ -22,4 +22,5 @@ urlpatterns = [
     path("folders/new/", views.create_folder, name="folder_new"),
     path("folders/rename/", views.rename_folder, name="folder_rename"),
     path("folders/delete/", views.delete_folder, name="folder_delete"),
+    path("memories/forget/", views.forget_memory, name="forget_memory"),
 ]

@@ -1413,3 +1413,87 @@ def test_new_at_firms_widget_renders_both_locations_in_the_page(client):
     body = _login_and_get(client, user)
     assert "London" in body
     assert "Birmingham" in body
+
+
+# ---------------------------------------------------------------------------
+# The daily brief: generated once per day, only on the full page load, never
+# on the htmx partial refresh that shares _cockpit_context with week().
+# ---------------------------------------------------------------------------
+def test_the_daily_brief_renders_on_the_full_page(client, monkeypatch):
+    import assistant.brief
+
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    _touch(user, c, "outreach", days_ago=20)
+
+    monkeypatch.setattr(
+        assistant.brief, "get_or_build", lambda u, actions, **kw: "Reach out to Ada today, her deadline is close."
+    )
+    body = _login_and_get(client, user)
+    assert "Reach out to Ada today, her deadline is close." in body
+
+
+def test_no_brief_card_when_there_is_nothing_to_say(client, monkeypatch):
+    import assistant.brief
+
+    user = _user(weekly_touch_goal=14)
+    monkeypatch.setattr(assistant.brief, "get_or_build", lambda u, actions, **kw: None)
+
+    body = _login_and_get(client, user)
+    assert '<p class="daily-brief-text">' not in body
+
+
+def test_the_brief_receives_the_full_uncapped_queue_not_just_the_planned_slice(client, monkeypatch):
+    """_cockpit_context caps `planned` to the daily cap, but the brief should
+    see every action in the queue so it can pick the single most urgent one
+    even when that person didn't make today's capped plan."""
+    import assistant.brief
+
+    user = _user(weekly_touch_goal=14)
+    for i in range(30):
+        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        _touch(user, c, "outreach", days_ago=20)
+
+    seen = {}
+
+    def fake_get_or_build(u, actions, **kw):
+        seen["count"] = len(actions)
+        return "stub brief"
+
+    monkeypatch.setattr(assistant.brief, "get_or_build", fake_get_or_build)
+    client.force_login(user)
+    ctx = client.get(reverse("crm:week")).context
+
+    assert seen["count"] == ctx["queue_total"] == 30
+
+
+def test_the_htmx_partial_refresh_never_calls_the_brief(client, monkeypatch):
+    """today_park_all/today_act share _cockpit_context with week(), but only
+    week() (the full page load) may spend a real model call on a brief —
+    firing one as a side effect of parking a contact would be a surprise
+    bill for an unrelated click."""
+    import assistant.brief
+
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    _touch(user, c, "outreach", days_ago=20)
+
+    def fail_if_called(*a, **kw):
+        raise AssertionError("the partial refresh must never generate a brief")
+
+    monkeypatch.setattr(assistant.brief, "get_or_build", fail_if_called)
+    client.force_login(user)
+    resp = client.post(reverse("crm:today_park_all"))
+    assert resp.status_code == 200
+
+
+def test_the_brief_never_leaks_into_the_partial_cockpit_template(client, monkeypatch):
+    """Even if a brief happens to exist for today, the htmx partial must not
+    render it — that card belongs to the full page only."""
+    from assistant.models import DailyBrief
+
+    user = _user(weekly_touch_goal=14)
+    DailyBrief(user=user, date=timezone.localdate(), text="Should not appear here.").save()
+    client.force_login(user)
+    resp = client.post(reverse("crm:today_park_all"))
+    assert "Should not appear here." not in resp.content.decode()

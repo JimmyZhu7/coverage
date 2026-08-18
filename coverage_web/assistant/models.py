@@ -147,3 +147,54 @@ class ChatMessage(PrivateModel):
         return bool(blocks) and all(
             isinstance(b, dict) and b.get("type") == "tool_result" for b in blocks
         )
+
+
+class AdvisorMemory(PrivateModel):
+    """One durable fact the model chose to carry forward — "targeting HK
+    over US", "ruled out PE" — via the `remember` tool (assistant/tools.py).
+    The one thing conversations, being siloed per-thread, could not do on
+    their own: a fact told to the model in one chat is otherwise invisible
+    to it in every other one, including a brand new one in a different
+    folder. Injected into every conversation's preamble
+    (agent.build_preamble), never sent as a tool result — this is
+    background the model always has, not something it looked up.
+
+    A safe write, same posture as log_touch/track_opportunity: capped
+    (assistant.tools.MAX_MEMORIES) so it cannot grow into an unbounded
+    context tax, and the student can forget any one of them from the Talk
+    page itself — no confirm-card machinery, because getting this wrong
+    costs nothing more than the model re-learning it next time it's true."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    text = models.CharField(max_length=200)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "assistant_memories"
+        ordering = ["-created", "-id"]
+
+    def __str__(self) -> str:
+        return self.text
+
+
+class DailyBrief(PrivateModel):
+    """One advisor-written paragraph, generated at most once per student
+    per calendar day and cached here — see assistant/brief.py. Surfaced at
+    the top of the Today page (crm/week.html), the one habit loop this
+    feature otherwise lacks: everything else on Talk to Coverage requires
+    the student to remember to open it."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    date = models.DateField()
+    text = models.CharField(max_length=600)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "assistant_daily_briefs"
+        ordering = ["-date"]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "date"], name="uniq_daily_brief_user_date"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} @ {self.date}"

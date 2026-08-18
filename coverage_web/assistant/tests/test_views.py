@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.urls import reverse
 
-from assistant.models import ChatConversation, ChatFolder, ChatMessage
+from assistant.models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
 
 User = get_user_model()
 
@@ -521,3 +521,46 @@ def test_a_message_with_only_an_oversized_attachment_and_no_text_is_still_a_clea
     # notice explaining why nothing went out.
     turns = list(ChatMessage.objects.for_user(user))
     assert [t.role for t in turns] == ["assistant"]
+
+
+# ---------------------------------------------------------------------------
+# Memory
+# ---------------------------------------------------------------------------
+def test_the_page_shows_remembered_facts(signed_in, user):
+    AdvisorMemory(user=user, text="Ruled out PE roles.").save()
+
+    body = signed_in.get(reverse("assistant:chat")).content.decode()
+
+    assert "Ruled out PE roles." in body
+
+
+def test_forgetting_a_fact_deletes_it_and_returns_the_updated_list(signed_in, user):
+    memory = AdvisorMemory(user=user, text="Ruled out PE roles.")
+    memory.save()
+    keep = AdvisorMemory(user=user, text="Needs sponsorship in the US.")
+    keep.save()
+
+    response = signed_in.post(reverse("assistant:forget_memory"), {"memory": memory.id})
+
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert "Ruled out PE roles." not in body
+    assert "Needs sponsorship in the US." in body
+    assert not AdvisorMemory.objects.for_user(user).filter(pk=memory.id).exists()
+    assert AdvisorMemory.objects.for_user(user).filter(pk=keep.id).exists()
+
+
+def test_forgetting_another_students_memory_404s(client, user):
+    other = User.objects.create_user(email="memory-other@example.com", password="pw12345!")
+    theirs = AdvisorMemory(user=other, text="Not yours to forget.")
+    theirs.save()
+
+    client.force_login(user)
+    response = client.post(reverse("assistant:forget_memory"), {"memory": theirs.id})
+
+    assert response.status_code == 404
+    assert AdvisorMemory.objects.for_user(other).filter(pk=theirs.id).exists()
+
+
+def test_forget_memory_rejects_a_get(signed_in):
+    assert signed_in.get(reverse("assistant:forget_memory")).status_code == 405

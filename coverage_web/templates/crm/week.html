@@ -65,6 +65,21 @@
     </div>
   {% endif %}
 
+  {% if daily_brief %}
+    {% comment %}
+    Generated at most once per calendar day (assistant.brief.get_or_build) —
+    the one habit loop Talk to Coverage otherwise lacks: everything else
+    about it requires remembering to go open it, and this is already on the
+    page opened every morning. Silent when it's dark (no key set) or there
+    was nothing worth saying today — never an empty card, never an error.
+    {% endcomment %}
+    <div class="daily-brief kin-reveal">
+      <span class="daily-brief-icon" aria-hidden="true">{% include "_logo.html" %}</span>
+      <p class="daily-brief-text">{{ daily_brief }}</p>
+      <a class="daily-brief-link" href="{% url 'assistant:chat' %}">Talk about it →</a>
+    </div>
+  {% endif %}
+
   {% comment %}
   The directory stats. They led the page once, then spent a stretch at its
   foot after a hero plus four stat cards ate the whole fold — the queue is

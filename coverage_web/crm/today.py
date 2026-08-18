@@ -939,6 +939,13 @@ def _cockpit_context(user) -> dict:
         "waiting": _waiting_on_reply(user, busy_ids),
         "activity": activity,
         "contact_count": len(contacts),
+        # The raw, uncapped queue — carried through only so week() (the full
+        # page view, below) can hand it to the daily brief. Deliberately NOT
+        # used by _cockpit.html itself: that template is also rendered by
+        # crm.views' htmx partial refresh (e.g. after dismissing a debrief),
+        # and generating a brief is a real LLM call that has no business
+        # firing as a side effect of an unrelated card action.
+        "_actions_for_brief": actions,
     }
 
 
@@ -948,10 +955,21 @@ def week(request: HttpRequest) -> HttpResponse:
     remainder, and a rail carrying the weekly pace ring, the chats already on
     the calendar, and recent activity. The commodity layer (directory stats)
     sits BELOW the queue — Today is the relationship page."""
+    cockpit = _cockpit_context(request.user)
+    # See _cockpit_context's own comment on _actions_for_brief: this is the
+    # one place (the full page load, never the htmx partial refresh) where
+    # generating a brief is appropriate. assistant.brief never imports
+    # anything from crm — this app already imports FROM assistant
+    # (assistant.tools reads crm.today._build_actions), so the reverse
+    # import has to stay one-directional or the two apps import each other.
+    from assistant.brief import get_or_build as get_daily_brief
+
+    daily_brief = get_daily_brief(request.user, cockpit.pop("_actions_for_brief"))
     return render(
         request,
         "crm/week.html",
-        {**_cockpit_context(request.user), **_dashboard_context(request.user),
+        {**cockpit, **_dashboard_context(request.user),
+         "daily_brief": daily_brief,
          # Signup lands on the /welcome/ wizard, but nothing ever looked at
          # whether it was FINISHED: close the tab at step one and every later
          # login lands here, on an empty queue over an unpersonalized feed,

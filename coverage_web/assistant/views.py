@@ -31,7 +31,7 @@ from django.views.decorators.http import require_POST
 from . import agent
 from . import attachments as attachments_mod
 from .client import is_configured
-from .models import ChatConversation, ChatFolder, ChatMessage
+from .models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
 
 # What the student can type in one go. Long enough for a real situation
 # ("I have two chats at Goldman and nothing at Morgan Stanley, plus..."),
@@ -177,7 +177,12 @@ def _posted_conversation_id(request: HttpRequest) -> int | None:
 @login_required
 def chat(request: HttpRequest, conversation_id: int | None = None) -> HttpResponse:
     conversation = _current_conversation(request.user, conversation_id)
-    return render(request, "assistant/chat.html", _context(request, conversation))
+    context = _context(request, conversation)
+    # Only the full page renders the memory dialog — _thread.html (send/
+    # stream's own response) never reads this, so it stays out of the
+    # shared _context() rather than costing every send an unused query.
+    context["memories"] = AdvisorMemory.objects.for_user(request.user)
+    return render(request, "assistant/chat.html", context)
 
 
 @login_required
@@ -378,3 +383,20 @@ def delete_conversation(request: HttpRequest) -> HttpResponse:
     ):
         return redirect("assistant:chat_conversation", conversation_id=current_id)
     return redirect("assistant:chat")
+
+
+@login_required
+@require_POST
+def forget_memory(request: HttpRequest) -> HttpResponse:
+    """Delete one remembered fact. No confirm() here, unlike a chat/folder
+    delete — this is one sentence the model can re-learn in thirty seconds
+    if it turns out to still be true, not a conversation's worth of
+    history; the asymmetry in AdvisorMemory's own docstring is why this
+    write skips it and delete_conversation doesn't."""
+    memory = get_object_or_404(
+        AdvisorMemory.objects.for_user(request.user), pk=_posted_int(request, "memory") or 0
+    )
+    memory.delete()
+    return render(
+        request, "assistant/_memories.html", {"memories": AdvisorMemory.objects.for_user(request.user)}
+    )

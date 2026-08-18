@@ -1,0 +1,26 @@
+{% comment %}
+The memory dialog's list, swapped as a whole after a "forget" — same
+pattern as _history.html, just a much simpler row (no rename, no move,
+nothing to click through to; forgetting is the only action there is).
+{% endcomment %}
+<div class="as-memory-list" id="as-memory-list">
+  {% if memories %}
+    {% for m in memories %}
+      <div class="as-memory-row">
+        <span class="as-memory-text">{{ m.text }}</span>
+        <form method="post" action="{% url 'assistant:forget_memory' %}" hx-post="{% url 'assistant:forget_memory' %}"
+              hx-target="#as-memory-list" hx-swap="outerHTML">
+          {% csrf_token %}
+          <input type="hidden" name="memory" value="{{ m.id }}">
+          <button type="submit" class="as-memory-forget" aria-label="Forget this">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="as-memory-empty">Nothing yet — it remembers things as they come up in conversation, the way you'd mention something worth knowing next time.</p>
+  {% endif %}
+</div>

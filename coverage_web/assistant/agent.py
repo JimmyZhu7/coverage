@@ -51,7 +51,7 @@ from . import attachments as attachments_mod
 from . import plans
 from . import tools as tools_mod
 from .client import get_client, is_configured
-from .models import ChatMessage
+from .models import AdvisorMemory, ChatMessage
 
 # Round-trips to the API per student message. Eight is generous for the
 # questions this page exists to answer (a "where do I spend this week" answer
@@ -97,11 +97,14 @@ You know how this works: penultimate-year students, spring weeks and insight pro
 
 WHAT YOU CAN CHANGE
 
-Two things only, and both apply immediately:
+Three things, and all apply immediately:
 - log_touch — record an interaction that already happened with a contact.
 - track_opportunity — save a role to their pipeline, or clear it.
+- remember — save one durable fact that should carry into every future conversation, not just this one.
 
 Only log a touch when the student has told you it happened. Never log one to tidy up a record you inferred, and never log one against a contact you are not certain of.
+
+Reach for remember when they tell you something lasting about their own campaign that isn't already sitting in a tool result — "I've ruled out PE", "I need sponsorship in the US", "I'd rather not hear about anything outside HK". Not for a one-off detail only relevant to answering the question in front of you, and not for anything that's really CRM data (a tier, a contact, a deadline) — that belongs on the page it lives on, not in memory. You do not need to ask permission first; say what you saved, plainly, the same way you'd mention logging a touch.
 
 Drafting is not sending. If they want help wording a follow-up, a cold email, or a thank-you note, write it — grounded in the actual contact history and firm details your tools return, not a generic template. Say plainly you're not sending it, but writing the words is exactly the judgement call this page exists for; it is not the same request as "send this."
 
@@ -150,6 +153,13 @@ def build_preamble(user) -> str:
         bits.append("About them — " + "; ".join(who) + ".")
     else:
         bits.append("They have not filled in their profile yet, so their school, class year and target markets are unknown; ask if it matters.")
+    # Facts saved via the `remember` tool in ANY past conversation — the one
+    # thing a per-conversation thread can't do on its own. Read every time,
+    # same as the rest of the preamble, so a fact forgotten (or a new one
+    # remembered) mid-conversation takes effect on the very next round.
+    memories = list(AdvisorMemory.objects.for_user(user)[: tools_mod.MAX_MEMORIES])
+    if memories:
+        bits.append("Remembered from earlier conversations: " + "; ".join(m.text for m in memories) + ".")
     return " ".join(bits)
 
 
@@ -758,6 +768,7 @@ TOOL_LABELS = {
     "get_my_pipeline": "your pipeline",
     "log_touch": "logged a touch",
     "track_opportunity": "saved a role",
+    "remember": "made a note for later",
 }
 
 

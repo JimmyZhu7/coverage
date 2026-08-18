@@ -31,6 +31,7 @@ from django.utils import timezone
 
 from analytics.models import UserOpportunity
 from assistant import tools
+from assistant.models import AdvisorMemory
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
 from directory.models import Firm, Opportunity
 
@@ -264,3 +265,19 @@ def test_search_opportunities_never_leaks_another_student_s_dismissals(bob, alic
     result, _ = _call(bob, "search_opportunities", {})
 
     assert [r["opportunity_id"] for r in result["roles"]] == [opportunity.id]
+
+
+def test_remembering_a_fact_never_reaches_another_students_cap_or_list(alice, bob):
+    """Alice's own memories must not count against Bob's MAX_MEMORIES cap,
+    and Bob's remember() must never write to Alice's list — the only thing
+    scoping AdvisorMemory to the right student is the `user` argument
+    execute() closes over, exactly the shape of bug this file exists to
+    catch everywhere else."""
+    for i in range(tools.MAX_MEMORIES):
+        AdvisorMemory(user=alice, text=f"alice fact {i}").save()
+
+    result, is_error = _call(bob, "remember", {"fact": "bob's own fact"})
+
+    assert not is_error
+    assert AdvisorMemory.objects.for_user(bob).count() == 1
+    assert AdvisorMemory.objects.for_user(alice).count() == tools.MAX_MEMORIES

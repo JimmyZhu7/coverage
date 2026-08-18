@@ -20,13 +20,15 @@ before the pk lookup. Every read AND write tool is tested for exactly that.
 
 WHAT THE MODEL MAY DO
 ---------------------
-Reads are free. Writes are exactly two — `log_touch` and `track_opportunity`
-(`saved`/`clear` only) — chosen because both are cheap, both are reversible
-in one click on a page the student already knows, and neither sends anything
-to another human. Nothing here emails anyone, edits a note, archives a
-contact, or changes a setting. That is a product decision, not an oversight:
-an advisor that can quietly rewrite your CRM is a different, scarier product,
-and the confirm-card machinery it would need is not built. When the student
+Reads are free. Writes are exactly three — `log_touch`, `track_opportunity`
+(`saved`/`clear` only), and `remember` — chosen because each is cheap,
+reversible in one click somewhere the student already knows (the CRM page
+itself, or the Talk page's own memory list), and none of them sends
+anything to another human. Nothing here emails anyone, edits a note,
+archives a contact, or changes a setting. That is a product decision, not
+an oversight: an advisor that can quietly rewrite your CRM is a different,
+scarier product, and the confirm-card machinery it would need is not built.
+When the student
 asks for something outside these two, the system prompt tells the model to
 say so plainly and name the page they'd do it on.
 
@@ -68,6 +70,8 @@ from crm.views import _display_note
 from directory.classify import TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
 from directory.views import _apply_region_filter, _STAGE_LABELS
+
+from .models import AdvisorMemory
 
 # Every untrusted string is cut to this before it reaches the model. Notes and
 # posting titles are the two that actually run long; the cap applies to all of
@@ -310,11 +314,36 @@ TOOL_SCHEMAS: list[dict] = [
             ["opportunity_id", "status"],
         ),
     },
+    {
+        "name": "remember",
+        "description": (
+            "Save one short, durable fact about the student that should "
+            "carry into every FUTURE conversation, not just this one — a "
+            "preference ('targeting HK over US'), a decision ('ruled out "
+            "PE'), a constraint ('needs sponsorship in the US'). Not for "
+            "anything already trackable in their CRM data (a firm tier, a "
+            "contact, a deadline — those belong on the Network or "
+            "Opportunities page, not here) and not for something true only "
+            "of this one conversation."
+        ),
+        "strict": True,
+        "input_schema": _schema(
+            {"fact": {"type": "string", "description": "One short sentence, e.g. 'Not pursuing PE roles.'"}},
+            ["fact"],
+        ),
+    },
 ]
 
 # Which tools write. Used for instrumentation and for the caps the loop
 # enforces — nothing about a write is decided by the model.
-WRITE_TOOLS = frozenset({"log_touch", "track_opportunity"})
+WRITE_TOOLS = frozenset({"log_touch", "track_opportunity", "remember"})
+
+# Same reasoning as every other row cap in this module (DEFAULT_ROWS/
+# MAX_ROWS below): a handful of durable facts is the realistic case, and a
+# cap this generous only ever binds if something has gone wrong — at which
+# point the tool's own error tells the model to ask the student what to
+# drop, rather than silently evicting the oldest one it never asked about.
+MAX_MEMORIES = 20
 
 
 # ---------------------------------------------------------------------------
@@ -803,6 +832,24 @@ def _track_opportunity(user, args) -> dict:
     }
 
 
+def _remember(user, args) -> dict:
+    """Store one durable fact — read back into every future conversation's
+    preamble (agent.build_preamble), not returned as a tool result the
+    student would have to notice. See AdvisorMemory's own docstring for
+    why this is a safe, uncapped-confirmation write like log_touch."""
+    text = _s(args.get("fact"), 200)
+    if not text:
+        raise ToolError("fact is required")
+    if AdvisorMemory.objects.for_user(user).count() >= MAX_MEMORIES:
+        raise ToolError(
+            f"Already remembering {MAX_MEMORIES} things, the most this page keeps. "
+            "Ask the student which one to forget on the Talk page, or just answer "
+            "this one without remembering it."
+        )
+    AdvisorMemory(user=user, text=text).save()
+    return {"remembered": text}
+
+
 _HANDLERS = {
     "get_today_queue": _get_today_queue,
     "search_contacts": _search_contacts,
@@ -813,6 +860,7 @@ _HANDLERS = {
     "get_calendar": _get_calendar,
     "get_my_pipeline": _get_my_pipeline,
     "track_opportunity": _track_opportunity,
+    "remember": _remember,
 }
 
 
