@@ -234,12 +234,30 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
 
     # Same repeat-listing problem the Opportunities feed already solves: a
     # board scraped twice in one week posts the same requisition twice.
-    # Folded before capping, over a slightly wider slice than `limit` so a
-    # run of duplicates doesn't leave the capped result short.
-    rows, _folded = fold_duplicates(list(qs[: limit * 4]))
+    # Folded before capping, over a slice much wider than `limit` — `* 8`,
+    # not `* 4` — because the per-firm dedup below needs enough ROWS to
+    # find `limit` DISTINCT firms even when one firm's own posting batch
+    # (a single campus recruiting push can be a dozen reqs) fills the front
+    # of the newest-first ordering. A narrower slice would let one firm's
+    # batch crowd every other firm's news out of the window before dedup
+    # ever gets a chance to run.
+    rows, _folded = fold_duplicates(list(qs[: limit * 8]))
 
+    # ONE PER FIRM. A firm's own campus recruiting team routinely posts a
+    # whole batch of reqs the same week — CICC alone can post three roles
+    # in one run — and without this, that single batch fills every slot
+    # the snapshot has, which reads as "CICC, CICC, CICC" instead of
+    # naming the breadth of what's actually moving. The signal this event
+    # type exists to carry is WHICH firms have news, not how many reqs any
+    # one of them opened; a student who wants the full list already has it
+    # on the Opportunities feed for that firm. Kept to the most recent
+    # posting per firm (`rows` is already newest-first).
+    seen_firms: set[int] = set()
     events = []
-    for o in rows[:limit]:
+    for o in rows:
+        if o.firm_id in seen_firms:
+            continue
+        seen_firms.add(o.firm_id)
         events.append({
             "kind": "new_role_at_known_firm",
             "opportunity_id": o.id,
@@ -249,6 +267,8 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
             "location": o.location,
             "first_seen": o.first_seen,
         })
+        if len(events) >= limit:
+            break
     return events
 
 

@@ -265,6 +265,41 @@ def test_a_new_role_at_an_unknown_firm_is_not_reported():
     assert result["new_role_at_known_firm"] == []
 
 
+def test_one_firms_posting_batch_does_not_crowd_out_every_other_firm():
+    """Measured live: a single firm (CICC) posted three campus roles in one
+    scrape, and all three of the Today page's card slots filled with the
+    SAME firm — three cards that said nothing about the breadth of what
+    actually moved. This event type exists to name WHICH firms have news,
+    not to enumerate one firm's whole batch, so the result must cap at one
+    posting per firm regardless of how many any single firm opened."""
+    user = _user()
+    busy_firm = _firm(name="CICC", slug="cicc")
+    quiet_firm_a = _firm(name="Bank Alpha", slug="bank-alpha")
+    quiet_firm_b = _firm(name="Bank Beta", slug="bank-beta")
+    old = timezone.now() - timedelta(days=60)
+    now = timezone.now()
+
+    for firm in (busy_firm, quiet_firm_a, quiet_firm_b):
+        _opp(firm, url=f"https://example.com/{firm.slug}/old", first_seen=old)
+        UserFirm(user=user, firm=firm, tier=1).save()
+
+    # The busy firm alone posts three roles in the window.
+    busy_opps = [
+        _opp(busy_firm, title=f"CICC Role {i}", url=f"https://example.com/cicc/new-{i}", first_seen=now)
+        for i in range(3)
+    ]
+    quiet_a = _opp(quiet_firm_a, title="Alpha Role", url="https://example.com/bank-alpha/new", first_seen=now)
+    quiet_b = _opp(quiet_firm_b, title="Beta Role", url="https://example.com/bank-beta/new", first_seen=now)
+
+    result = situation.build_situation(user)
+
+    firms_reported = [e["firm"] for e in result["new_role_at_known_firm"]]
+    assert firms_reported.count("CICC") == 1, "one firm's batch must not eat every slot"
+    assert "Bank Alpha" in firms_reported
+    assert "Bank Beta" in firms_reported
+    assert len(firms_reported) == len(set(firms_reported)), "every firm reported at most once"
+
+
 def test_a_boards_debut_week_does_not_flood_the_new_role_event():
     """A firm whose FIRST posting is itself inside the window just joined
     Coverage — every role it has would read as "new" for a reason that has
