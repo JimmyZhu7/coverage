@@ -250,5 +250,8 @@ def test_lens_rows_show_the_stage_they_are_counted_in(client, board, tracked):
                 "Saved", "Applied", "Interviewing", "Offer", "Done",
             }
     body = resp.content.decode()
-    assert "same roles seen by deadline, not extra" in body
+    # 2026 redesign shortened the intro; "sorted by deadline instead of
+    # stage" replaced the old "same roles seen by deadline, not extra ones"
+    # sentence, but the overlap claim still has to be ON the page somewhere.
+    assert "sorted by deadline instead of stage" in body
     assert f"of {resp.context['live_total']} live" in body

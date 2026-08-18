@@ -2388,6 +2388,7 @@ def track_opportunity(request, pk):
     `status=clear` removes the row; any of _TRACK_STATES upserts it. Returns
     the re-rendered control for an htmx swap."""
     from analytics.models import UserOpportunity
+    from django.shortcuts import resolve_url
 
     opp = get_object_or_404(Opportunity, pk=pk)
     status = (request.POST.get("status") or "saved").strip().lower()
@@ -2426,16 +2427,28 @@ def track_opportunity(request, pk):
         uo.save(update_fields=["applied_status", "applied_at", "dismissed"])
         record_event("opportunity_tracked", user=request.user, status=status)
 
-    # The feed swaps just the one card's control (htmx); the My Applications
-    # page posts a plain form and wants a redirect back to itself.
+    # Three callers, three response shapes:
+    #  - the feed swaps just the one card's control;
+    #  - My Applications' own forms swap the whole funnel+lenses+stages
+    #    partial, because a status change MOVES a row between sections
+    #    rather than just changing it in place (see `_apps_body.html`'s own
+    #    docstring) — distinguished from the feed by the `next` field only
+    #    those forms send, not by guessing from the target;
+    #  - anyone with JS off (or any other same-site caller) gets the
+    #    original full-page redirect.
+    is_my_applications = request.POST.get("next", "").rstrip("/").endswith(
+        resolve_url("my_applications").rstrip("/")
+    )
     if request.headers.get("HX-Request"):
+        if is_my_applications:
+            return render(request, "directory/_apps_body.html", _my_applications_context(request))
         if status == "dismiss":
             # The card's own target is `closest .rolecard`, so an empty body
             # removes the row from the feed. Anything else here would leave a
             # control behind on a card the user just said was not for them.
             return HttpResponse("")
         return _track_control(request, opp)
-    from django.shortcuts import redirect, resolve_url
+    from django.shortcuts import redirect
     from django.utils.http import url_has_allowed_host_and_scheme
 
     # Only allow a same-site `next`; never bounce to an attacker-supplied host.
@@ -2615,8 +2628,7 @@ def _tracked_rows(user):
     return [uo for uo, opp in zip(rows, opps) if id(opp) in kept]
 
 
-@login_required
-def my_applications(request):
+def _my_applications_context(request):
     """The user's tracked roles: one funnel partition, plus two deadline
     lenses over the live rows.
 
@@ -2645,7 +2657,13 @@ def my_applications(request):
     counting down to a deadline it no longer had. Those rows are moved, never
     dropped: a tracked role is the student's own record, and deleting one they
     may have actually applied to would be a far worse bug than the one being
-    fixed here. They stay in their funnel stage too, marked there as well."""
+    fixed here. They stay in their funnel stage too, marked there as well.
+
+    RETURNS A CONTEXT DICT, not a response — split out of `my_applications`
+    so `track_opportunity` can rebuild the same context after a status
+    change and re-render `directory/_apps_body.html` for an htmx swap,
+    without a second, drifting copy of this query logic. `my_applications`
+    itself is now a thin wrapper: call this, render the full page."""
     today = timezone.localdate()
     rows = _tracked_rows(request.user)
 
@@ -2740,28 +2758,32 @@ def my_applications(request):
             "key": "posting_closed",
             "label": "Posting Closed",
             "items": shut,
-            "note": "The firm took these down. They stay on your list; they just aren't live.",
+            # Kept short on purpose — see the template's own note on why the
+            # lens band cut its prose (2026 redesign: "cleaner, less words").
+            # Each row still carries the fuller sentence itself, via
+            # `_posting_closed_note`, for the student reading that one row.
+            "note": "Taken down by the firm. Stays on your list.",
             "empty_state": False,
         },
         {
             "key": "passed",
             "label": "Deadline Passed",
             "items": passed,
-            "note": "The posted date has gone by. Check the posting before you count on it.",
+            "note": "The posted date has gone by.",
             "empty_state": False,
         },
         {
             "key": "closing",
             "label": "Closing Soon",
             "items": closing,
-            "note": f"Deadline inside the next {CLOSING_SOON_DAYS} days.",
+            "note": f"Within {CLOSING_SOON_DAYS} days.",
             "empty_state": True,
         },
         {
             "key": "later",
             "label": "Further Out",
             "items": later,
-            "note": f"Dated, but more than {CLOSING_SOON_DAYS} days away. Not urgent yet.",
+            "note": f"More than {CLOSING_SOON_DAYS} days away.",
             "empty_state": False,
         },
         {
@@ -2775,7 +2797,7 @@ def my_applications(request):
             # rolling review are marked "Rolling" individually below
             # (r.rolling_stated); this note now only says what is true of
             # the whole bucket.
-            "note": "No posted deadline. Rows marked “Rolling” say so themselves; the rest just never stated a date.",
+            "note": "No posted deadline.",
             "empty_state": True,
         },
     ]
@@ -2791,14 +2813,21 @@ def my_applications(request):
         .select_related("opportunity", "opportunity__firm")
         .order_by("opportunity__firm__name", "opportunity__title")
     )
-    return render(request, "directory/my_applications.html", {
+    return {
         "stages": stages,
         "lenses": lenses,
         "total": len(rows),
         "live_total": len(live),
         "closing_soon_days": CLOSING_SOON_DAYS,
         "hidden": hidden,
-    })
+    }
+
+
+@login_required
+def my_applications(request):
+    """The full My Applications page. See `_my_applications_context` for
+    everything about what it shows; this is just the render."""
+    return render(request, "directory/my_applications.html", _my_applications_context(request))
 
 
 def firm_detail(request, slug):

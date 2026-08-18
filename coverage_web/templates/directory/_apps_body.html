@@ -1,0 +1,270 @@
+{% load textstyle %}
+{% comment %}
+The funnel rail, the "By deadline" lens band, and the five stage sections —
+everything on My Applications whose shape depends on `stages`/`lenses`, in
+one partial with one wrapping id (`apps-body`).
+
+WHY THIS IS ITS OWN FILE. Changing a role's stage (the Saved/Applied/…
+dropdown in a stage card's footer, below) moves that role out of one stage
+section and the lens band both — a countdown row can jump from "Closing
+Soon" to gone, a funnel bar can grow or shrink, all from one click. A
+single-row htmx swap cannot express that: the row doesn't just change, it
+MOVES to a different part of the page. So `track_opportunity` re-renders
+this whole partial and swaps it in as one unit (`hx-target="#apps-body"
+hx-swap="outerHTML"` on the two forms below), which is also what makes the
+status change and the Remove button no longer take a full page reload to
+show their result — see `directory/views.py::track_opportunity`'s
+`HX-Request` branch, and `_my_applications_context` (the context builder
+this partial and the full-page view both call, so they can never drift).
+{% endcomment %}
+<div id="apps-body">
+{% if total %}
+  {% comment %}
+  The funnel rail: all five stages, sized by how many roles each holds, each
+  one a jump link to its section. Empty stages stay on the rail showing 0 —
+  hiding them made a five-stage pipeline look like a three-stage one.
+  {% endcomment %}
+  <nav class="apps-funnel" aria-label="Pipeline stages">
+    {% for stage in stages %}
+      {% if stage.count %}
+        <a class="apps-fseg" href="#stage-{{ stage.key }}">
+          <span class="apps-fseg-n">{{ stage.count }}</span>
+          <span class="apps-fseg-l">{{ stage.label }}</span>
+          <span class="apps-fseg-bar"><i style="width: {{ stage.pct }}%"></i></span>
+        </a>
+      {% else %}
+        <span class="apps-fseg is-empty" title="Nothing at this stage yet.">
+          <span class="apps-fseg-n">0</span>
+          <span class="apps-fseg-l">{{ stage.label }}</span>
+          <span class="apps-fseg-bar"></span>
+        </span>
+      {% endif %}
+    {% endfor %}
+  </nav>
+
+  {% comment %}
+  The lens band. It renders the SAME rows as the funnel below, cut by
+  deadline instead of by stage, and it says so three ways rather than leaving
+  the student to work out why a role appears twice: the eyebrow calls it a
+  cross-section, each lens count is written as a fraction of the live total,
+  and every row's stage pill is a link down to the section that row is
+  actually counted in. The only authoritative total on the page is the
+  funnel's.
+  {% endcomment %}
+  <section class="apps-lenses" aria-labelledby="lenses-h">
+    <p class="apps-lenses-eyebrow">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="6.2" cy="8" r="4.3"/><circle cx="9.8" cy="8" r="4.3"/></svg>
+      Cross-section, not extra roles
+    </p>
+    <h2 class="apps-lenses-h" id="lenses-h">By deadline</h2>
+    {% comment %}
+    Cut from three sentences to one (2026 redesign, "cleaner, less words").
+    The eyebrow above already says "cross-section, not extra roles"; each
+    stage pill below is itself the proof, one click away — restating both
+    in prose here was the same claim made three times on one screen.
+    {% endcomment %}
+    <p class="apps-lenses-intro">The same <strong>{{ live_total }} live role{{ live_total|pluralize }}</strong>, sorted by deadline instead of stage.</p>
+    {% comment %}
+    Every live row lands in exactly one lens, so the fractions sum to the
+    denominator. They did not before: the band ran Closing Soon + Rolling
+    only, and a live role dated further out than the window (or already past
+    it) appeared in neither while still being counted in "of N live" — a
+    subtraction the page invited and never answered. Lenses that carry no
+    coaching copy when empty (`empty_state` false) stay off the page rather
+    than adding a permanent "0 of 12" band.
+    {% endcomment %}
+    {% for lens in lenses %}
+      {% if lens.items or lens.empty_state %}
+      <div class="apps-lens">
+        <h3>{{ lens.label }}
+          <span class="apps-lens-frac">{{ lens.items|length }} of {{ live_total }} live</span>
+        </h3>
+        <p class="apps-lens-note">{{ lens.note }}</p>
+        {% if lens.items %}
+          <ul class="apps-lens-list">
+            {% for r in lens.items %}
+              {% comment %}
+              Staggered rise-in, capped by `.kin-reveal` itself (site-wide
+              utility) — the same cascade every card grid on the product
+              already uses, not a bespoke animation. `--i` resets per lens
+              rather than running the whole page's row count, so a student
+              scrolling straight to "Rolling" still sees its own rows
+              arrive in sequence instead of already-settled.
+              {% endcomment %}
+              <li class="apps-lens-row kin-reveal u-{{ r.urgency.key }}{% if r.posting_closed %} is-shut{% endif %}" style="--i: {{ forloop.counter0 }}">
+                <span class="lens-when{% if not r.deadline.posted and not r.posting_closed %} lens-rolling{% endif %}{% if r.posting_closed %} lens-shut{% endif %}">
+                  {% if r.posting_closed %}
+                    {% comment %}The firm took this posting down, so the
+                    countdown beside it is the one number on the row that
+                    means nothing now. It is replaced rather than dressed:
+                    "closes in 3 days" on a dead posting is the exact lie
+                    this page used to tell.{% endcomment %}
+                    <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M3.8 3.8l8.4 8.4" stroke-linecap="round"/></svg>
+                    <span>Closed</span>
+                  {% elif r.deadline.posted %}
+                    {% if r.urgency.key == 'now' %}
+                      <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 2.2 15 14H1L8 2.2Z" stroke-linejoin="round"/><path d="M8 6.6v3.1" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".85" fill="currentColor" stroke="none"/></svg>
+                    {% else %}
+                      <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.4 1.4" stroke-linecap="round"/></svg>
+                    {% endif %}
+                    <span{% if r.reported %} class="is-reported" title="{{ r.reported.why }}"{% endif %}>{{ r.deadline.countdown|capfirst }}{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
+                  {% elif r.rolling_stated %}
+                    {% comment %}The posting's own words say rolling
+                    review — same earned-label rule the feed uses
+                    (_rolecard.html's rolling_stated branch), evidence on
+                    the title. Everything else in this bucket gets the
+                    neutral reading below instead.{% endcomment %}
+                    <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 10.4a3.1 3.1 0 1 1 3.1-3.1 3.1 3.1 0 1 0 3.1 3.1 3.1 3.1 0 1 1 3.1-3.1" stroke-linecap="round"/></svg>
+                    <span title="{{ r.rolling_why }}">Rolling</span>
+                  {% else %}
+                    <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 10.4a3.1 3.1 0 1 1 3.1-3.1 3.1 3.1 0 1 0 3.1 3.1 3.1 3.1 0 1 1 3.1-3.1" stroke-linecap="round"/></svg>
+                    No date posted
+                  {% endif %}
+                </span>
+                <span class="lens-role">
+                  <a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a>
+                  <span class="lens-firm">{{ r.firm_name|smart_title }}{% if r.location %} · {{ r.location|smart_location }}{% endif %}</span>
+                  {% comment %}Same sentence the role drawer shows for the
+                  same fact one click away, and it changes with the stage:
+                  a posting closing after you applied leaves your
+                  application standing, which is a different piece of news
+                  from a posting closing on one you only saved.{% endcomment %}
+                  {% if r.posting_closed %}<span class="lens-shut-note">{{ r.posting_closed.note }}</span>{% endif %}
+                  {% comment %}What the posting states about applying, same
+                  chips as the feed and the firm page. This page is where a
+                  student decides what to do this week, and it knew none of
+                  it.{% endcomment %}
+                  {% if r.facts %}<span class="lens-facts">{% for f in r.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}</span>{% endif %}
+                  {% if r.has_text %}<button type="button" class="meta-read lens-read" data-role-read data-role-id="{{ r.id }}"
+                          hx-get="{% url 'role_description' r.id %}"
+                          hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>{% endif %}
+                </span>
+                <a class="lens-stage" href="#stage-{{ r.stage }}"
+                   title="Counted once, under {{ r.stage_label }} below. This row is that same role.">
+                  <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 3v10M4.2 9.2 8 13l3.8-3.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  {{ r.stage_label }}
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="apps-lens-empty">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.9v3.6" stroke-linecap="round"/><circle cx="8" cy="11.1" r=".85" fill="currentColor" stroke="none"/></svg>
+            {% if lens.key == 'closing' %}
+              <span>Nothing you're tracking closes in the next {{ closing_soon_days }} days.
+                <a href="{% url 'opportunities' %}">Find roles that do</a>.</span>
+            {% else %}
+              <span>Every role you're tracking has a posted deadline, so none of them are rolling.
+                <a href="{% url 'opportunities' %}">Browse openings</a>.</span>
+            {% endif %}
+          </p>
+        {% endif %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  </section>
+
+  {% for stage in stages %}
+    {% if stage.items %}
+      <section class="apps-stage stage-{{ stage.key }}" id="stage-{{ stage.key }}">
+        <h2>{{ stage.label }} <span class="scrub-count">{{ stage.count }}</span></h2>
+        <div class="apps-grid">
+          {% for uo in stage.items %}
+            <article class="apps-card">
+              <span class="apps-firm">{{ uo.firm_name|smart_title }}</span>
+              <h3 class="apps-title"><a href="{{ uo.url }}" target="_blank" rel="nofollow noopener">{{ uo.title|smart_title }}</a></h3>
+              {% comment %}City variants share a title; the location is the
+              only thing telling two saves apart.{% endcomment %}
+              {% if uo.location %}<span class="apps-loc">{{ uo.location|smart_location }}</span>{% endif %}
+              {% if stage.key == 'closed' %}<span class="apps-done-mark">Done, no longer live</span>{% endif %}
+              {% comment %}Two different "closed" can be true of one card and
+              they are marked separately on purpose. Above: the student put
+              this in Done themselves. Below: the firm took the posting down,
+              which the scraper saw and no surface here ever said. A row can
+              carry both, one, or neither.{% endcomment %}
+              {% if uo.posting_closed %}<span class="apps-shut-mark">{{ uo.posting_closed.note }}</span>{% endif %}
+
+              {% comment %}
+              When it closes, and what the posting states about applying.
+              These sections knew neither: a role could be sitting in Saved
+              with a deadline nine days out and say nothing about it, while
+              the lens band above showed exactly that for the same row.
+              {% endcomment %}
+              {% comment %}`not uo.posting_closed`: a countdown on a posting
+              the firm has already pulled is a live-sounding number attached
+              to nothing. The closed sentence above replaces it.{% endcomment %}
+              {% if uo.deadline.posted and not uo.posting_closed %}
+                <span class="apps-when{% if uo.deadline.past %} is-past{% endif %}{% if uo.reported %} is-reported{% endif %}"
+                      {% if uo.reported %}title="{{ uo.reported.why }}"{% endif %}>{{ uo.deadline.countdown|capfirst }}{% if uo.reported %}<span class="vh"> ({{ uo.reported.label }})</span>{% endif %}</span>
+              {% endif %}
+              {% if uo.facts %}
+                <div class="apps-facts">
+                  {% for f in uo.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
+                </div>
+              {% endif %}
+              {% comment %}Read the posting here, from the copy we hold —
+              the same drawer as the feed and the firm page. This is the
+              page where a student decides what to do this week, and it
+              was the one role-listing surface that could not open the
+              posting behind the decision.{% endcomment %}
+              {% if uo.has_text %}
+                <button type="button" class="meta-read apps-read" data-role-read data-role-id="{{ uo.id }}"
+                        hx-get="{% url 'role_description' uo.id %}"
+                        hx-target="#role-drawer-body" hx-swap="innerHTML">Read the posting</button>
+              {% endif %}
+              <div class="apps-foot">
+                {% comment %}
+                Both forms below post to `track_opportunity` exactly as
+                before (method/action stay, so a no-JS load still works) but
+                now also carry `hx-post`/`hx-target="#apps-body"`
+                `hx-swap="outerHTML"` — htmx intercepts the form's native
+                `submit` event and swaps this whole partial in place instead
+                of letting the browser navigate. The one thing that made
+                that not just work already: `this.form.submit()` calls the
+                DOM method directly, which does NOT fire a `submit` event
+                (a real, long-standing browser quirk), so htmx never saw it
+                and the browser fell through to a full navigation —
+                `requestSubmit()` is the form-submission call that DOES
+                fire the event.
+                {% endcomment %}
+                <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}"
+                      hx-post="{% url 'track_opportunity' uo.opportunity_id %}"
+                      hx-target="#apps-body" hx-swap="outerHTML">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{% url 'my_applications' %}">
+                  <select name="status" onchange="this.form.requestSubmit()" aria-label="Stage">
+                    <option value="saved"{% if stage.key == 'saved' %} selected{% endif %}>Saved</option>
+                    <option value="submitted"{% if stage.key == 'submitted' %} selected{% endif %}>Applied</option>
+                    <option value="interview"{% if stage.key == 'interview' %} selected{% endif %}>Interviewing</option>
+                    <option value="offer"{% if stage.key == 'offer' %} selected{% endif %}>Offer</option>
+                    {% comment %}"Done" = the terminal state: withdrawn,
+                    rejected, accepted elsewhere, or the posting closed. It
+                    is not "Offer" — see _TRACK_STATES in directory/views.py
+                    for why the two can't be the same value.{% endcomment %}
+                    <option value="closed"{% if stage.key == 'closed' %} selected{% endif %}>Done</option>
+                  </select>
+                </form>
+                <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}"
+                      hx-post="{% url 'track_opportunity' uo.opportunity_id %}"
+                      hx-target="#apps-body" hx-swap="outerHTML">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{% url 'my_applications' %}">
+                  <input type="hidden" name="status" value="clear">
+                  <button type="submit" class="btn apps-remove">Remove</button>
+                </form>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+  {% endfor %}
+{% else %}
+  <div class="empty">
+    <h2>No roles saved yet.</h2>
+    <p>Two ways in: star a role in the feed to keep it here, or just apply.
+      Coverage reads the confirmation email and marks it applied for you.
+      <a href="{% url 'opportunities' %}">Browse openings</a>.</p>
+  </div>
+{% endif %}
+</div>

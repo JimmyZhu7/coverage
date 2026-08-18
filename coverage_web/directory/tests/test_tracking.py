@@ -75,6 +75,60 @@ def test_track_is_per_user(client):
 
 
 @pytest.mark.django_db
+def test_my_applications_status_change_swaps_in_place_instead_of_redirecting(client):
+    """Regression: My Applications' stage dropdown and Remove button used to
+    be a plain `<form method="post">` with no `hx-*` attributes, so every
+    status change was a full page reload — reported live as "why does the
+    page refresh when I change status". `hx-post` on the form plus
+    `HX-Request` on the request must now return the re-rendered
+    `_apps_body.html` partial (200, same content type as the full page's
+    body), not a redirect."""
+    user = _user()
+    o = _opp()
+    client.force_login(user)
+    client.post(reverse("track_opportunity", args=[o.id]), {"status": "saved"})
+
+    resp = client.post(
+        reverse("track_opportunity", args=[o.id]),
+        {"status": "submitted", "next": reverse("my_applications")},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert resp.status_code == 200, "must swap in place, not redirect"
+    body = resp.content.decode()
+    assert '<div id="apps-body">' in body
+    assert "<html" not in body.lower(), "a partial, not the full page"
+    # The row actually moved stage — the reason a single-row swap can't work
+    # here, and the reason this test posts a real status change rather than
+    # asserting on markup alone.
+    assert 'id="stage-submitted"' in body
+    uo = UserOpportunity.objects.for_user(user).get(opportunity=o)
+    assert uo.applied_status == "submitted"
+
+
+@pytest.mark.django_db
+def test_the_feed_still_gets_its_own_single_control_swap(client):
+    """The `next` field is what tells `track_opportunity` which of the two
+    htmx callers is asking — the feed's card control never sends one, and
+    must keep getting `_track_control.html`, not the My Applications
+    partial, after this change."""
+    user = _user()
+    o = _opp()
+    client.force_login(user)
+
+    resp = client.post(
+        reverse("track_opportunity", args=[o.id]),
+        {"status": "saved"},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert 'id="apps-body"' not in body
+    assert f'id="track-{o.id}"' in body
+
+
+@pytest.mark.django_db
 def test_track_ignores_external_next_redirect(client):
     """A non-HX POST with an attacker-controlled `next` must not open-redirect
     off-site; it falls back to My Applications."""
