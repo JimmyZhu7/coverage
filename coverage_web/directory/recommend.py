@@ -359,7 +359,10 @@ class Profile:
     """The signed-in student, flattened to the five things scoring reads."""
 
     class_year: int | None = None
-    target_cycle: str = ""
+    #: One or more `cycle_choices()` labels — a student can be recruiting for
+    #: more than one programme at once (e.g. an Insight week this year AND
+    #: next year's SA cycle), so this is plural, not a single string.
+    target_cycles: tuple[str, ...] = ()
     school: str = ""
     regions: tuple[str, ...] = ()
     tracks: tuple[str, ...] = ()
@@ -384,7 +387,7 @@ class Profile:
         nothing — a signed-in user with an empty survey gets the same honest
         "we don't know you yet" state as a signed-out one."""
         return not any((
-            self.class_year, self.target_cycle.strip(), self.school.strip(),
+            self.class_year, self.target_cycles, self.school.strip(),
             self.regions, self.tracks, self.firm_tiers, self.warm_firms,
         ))
 
@@ -393,7 +396,9 @@ class Profile:
                   warm_firms: Mapping[int, str] | None = None) -> "Profile":
         return cls(
             class_year=_int_or_none(getattr(user, "class_year", None)),
-            target_cycle=getattr(user, "target_cycle", "") or "",
+            target_cycles=tuple(
+                v.strip() for v in (getattr(user, "target_cycles", None) or []) if v and v.strip()
+            ),
             school=getattr(user, "school", "") or "",
             regions=tuple(r.lower() for r in (getattr(user, "regions", None) or [])),
             tracks=tuple(getattr(user, "tracks", None) or []),
@@ -570,17 +575,26 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
                     "class",
                 ))
 
-    cycle = parse_target_cycle(profile.target_cycle)
-    if cycle is not None and cohort is not None:
-        bucket, year = cycle
-        if c.bucket == bucket and cohort == year:
-            points += W_CYCLE
-            reasons.append(Reason(
-                profile.target_cycle.strip(),
-                f"This is a {year} {c.bucket.replace('_', ' ')} — the "
-                f"{profile.target_cycle.strip()} cycle you're recruiting for.",
-                "class",
-            ))
+    # Bonus applies ONCE even when several of the student's selected cycles
+    # would match (recruiting for both an Insight week and next year's SA
+    # cycle doesn't make one particular SA posting twice as relevant) — the
+    # first matching label, in the student's own selection order, is what
+    # the reason chip names.
+    if cohort is not None:
+        for raw in profile.target_cycles:
+            cycle = parse_target_cycle(raw)
+            if cycle is None:
+                continue
+            bucket, year = cycle
+            if c.bucket == bucket and cohort == year:
+                points += W_CYCLE
+                reasons.append(Reason(
+                    raw.strip(),
+                    f"This is a {year} {c.bucket.replace('_', ' ')} — the "
+                    f"{raw.strip()} cycle you're recruiting for.",
+                    "class",
+                ))
+                break
     return points, reasons
 
 

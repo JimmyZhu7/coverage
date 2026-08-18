@@ -37,7 +37,7 @@ from .test_tracking import _user
 # Jimmy's real profile shape, which is what the feature was specified against.
 JIMMY = Profile(
     class_year=2029,
-    target_cycle="SA 2028",
+    target_cycles=("SA 2028",),
     school="USC Marshall",
     regions=("us", "hk"),
     tracks=("ib", "st", "pe"),
@@ -214,13 +214,38 @@ def test_the_named_target_cycle_adds_on_top_of_the_class_fit():
     """"SA 2028" and "graduating 2029" are two different statements that happen
     to agree; both should count."""
     with_cycle = _score(JIMMY, cohort="2028", bucket="internship")
-    without = _score(replace(JIMMY, target_cycle=""), cohort="2028", bucket="internship")
+    without = _score(replace(JIMMY, target_cycles=()), cohort="2028", bucket="internship")
     assert with_cycle > without
 
     # And the cycle only fires on the right KIND of programme: a 2028
     # entry-level role is not the SA 2028 cycle.
     assert "SA 2028" not in _reasons(JIMMY, cohort="2028", bucket="entry_level")
     assert "SA 2028" in _reasons(JIMMY, cohort="2028", bucket="internship")
+
+
+def test_a_second_named_cycle_scores_a_role_the_first_cycle_does_not_match():
+    """A student recruiting for two programmes at once (regression for
+    plural `target_cycles`): a 2027 Insight posting should get the same
+    bonus a 2028 SA posting gets, from the SAME profile."""
+    both = replace(JIMMY, target_cycles=("SA 2028", "2027 Spring Week / Insight"))
+    assert _score(both, cohort="2028", bucket="internship") > _score(
+        replace(JIMMY, target_cycles=()), cohort="2028", bucket="internship"
+    )
+    assert _score(both, cohort="2027", bucket="insight") > _score(
+        replace(JIMMY, target_cycles=()), cohort="2027", bucket="insight"
+    )
+    assert "2027 Spring Week / Insight" in _reasons(both, cohort="2027", bucket="insight")
+
+
+def test_matching_two_named_cycles_at_once_does_not_double_the_bonus():
+    """Regression: the bonus must apply once per candidate, not once per
+    selected cycle that happens to match — recruiting for both an Insight
+    week and an SA cycle doesn't make one SA posting count twice."""
+    single = replace(JIMMY, target_cycles=("SA 2028",))
+    doubled = replace(JIMMY, target_cycles=("SA 2028", "SA 2028"))
+    assert _score(single, cohort="2028", bucket="internship") == _score(
+        doubled, cohort="2028", bucket="internship"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +308,7 @@ def test_class_fit_moves_the_ranking():
 def test_every_axis_is_independent():
     """Each axis on its own produces a non-zero score with no help from the
     others — nothing here is decorative."""
-    bare = Profile(class_year=2029, target_cycle="SA 2028", school="USC Marshall",
+    bare = Profile(class_year=2029, target_cycles=("SA 2028",), school="USC Marshall",
                    regions=("us",), tracks=("ib",), firm_tiers={1: 1})
     assert _score(bare, firm_id=1) > 0                     # tier
     assert _score(bare, firm_tracks=("ib",)) > 0           # track
@@ -421,7 +446,7 @@ def test_a_signed_in_user_with_no_survey_gets_the_same_honest_state(client, live
 def test_a_profiled_user_gets_scored_cards_with_visible_reasons(client, live_board):
     user = _user()
     user.class_year = 2029
-    user.target_cycle = "SA 2028"
+    user.target_cycles = ["SA 2028"]
     user.school = "USC Marshall"
     user.regions = ["us", "hk"]
     user.tracks = ["ib"]

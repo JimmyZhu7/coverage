@@ -19,14 +19,17 @@ class UserAdmin(DjangoUserAdmin):
         "name",
         "school",
         "class_year",
-        "target_cycle",
+        "target_cycles",
         "plan",
         "is_staff",
         "is_active",
         "onboarded_at",
         "created",
     )
-    list_filter = ("plan", "is_staff", "is_active", "is_superuser", "school", "target_cycle")
+    # `target_cycles` (an ArrayField, like regions/tracks below) dropped from
+    # list_filter: Django's stock filter needs discrete Field choices, not a
+    # Postgres array — the same reason regions/tracks were never in here.
+    list_filter = ("plan", "is_staff", "is_active", "is_superuser", "school")
     search_fields = ("email", "name", "school", "capture_slug")
     readonly_fields = ("created", "last_login", "date_joined", "capture_slug")
 
@@ -41,7 +44,7 @@ class UserAdmin(DjangoUserAdmin):
                     "last_name",
                     "school",
                     "class_year",
-                    "target_cycle",
+                    "target_cycles",
                     "regions",
                     "tracks",
                     "assets",

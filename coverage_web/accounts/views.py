@@ -323,7 +323,7 @@ def settings_view(request):
         # `ProfileForm(request.POST, ...)` unconditionally: every ProfileForm
         # field is `required=False`, so an EMPTY POST validated, and its
         # `apply_to` blanked all six profile fields (name/school/class_year/
-        # target_cycle/regions/tracks) with no error and no confirmation.
+        # target_cycles/regions/tracks) with no error and no confirmation.
         # Requiring the explicit marker turns an unrecognised POST into a
         # no-op re-render instead of a silent profile wipe.
         pass

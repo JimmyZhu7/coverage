@@ -1,6 +1,6 @@
 """Tests for accounts/forms.py's vocabulary fixes: the region list sourced
 from the same six-market vocabulary the Opportunities feed uses (B4), and
-`ProfileForm.target_cycle`'s per-instance, never-silently-losing choices
+`ProfileForm.target_cycles`'s per-instance, never-silently-losing choices
 (B1's form side + B3).
 """
 
@@ -73,49 +73,70 @@ def test_track_choices_calls_pe_private_equity_credit_not_just_private_equity():
 
 
 # ---------------------------------------------------------------------------
-# B1 (form side) — the dropdown's own vocabulary must be exactly what
+# B1 (form side) — the checkbox group's own vocabulary must be exactly what
 # `parse_target_cycle` reads, because they're now the same source function.
+# The leading ("", "Select a cycle") placeholder is dropped: it made sense as
+# a <select>'s default option, not as a checkbox.
 # ---------------------------------------------------------------------------
 
-def test_profile_form_target_cycle_choices_match_cycle_choices(user):
+def test_profile_form_target_cycles_choices_match_cycle_choices(user):
     form = ProfileForm.from_user(user)
-    assert list(form.fields["target_cycle"].choices) == cycle_choices()
+    assert list(form.fields["target_cycles"].choices) == [
+        (v, label) for v, label in cycle_choices() if v
+    ]
 
 
 # ---------------------------------------------------------------------------
-# B3 — a stored value the current choices no longer list must not vanish
-# silently: it must round-trip back into the rendered <select>, disabled,
-# rather than being dropped with no trace.
+# B3 — stored values the current choices no longer list must not vanish
+# silently: each must round-trip back into the rendered checkbox group,
+# checked. Deliberately NOT disabled, unlike the old single-select's stale
+# option: a disabled checkbox is dropped from the submitted form data
+# entirely (unlike a <select>'s already-selected disabled option, which still
+# posts), so disabling it here would recreate the exact silent-clear bug this
+# machinery exists to prevent.
 # ---------------------------------------------------------------------------
 
-def test_a_stale_stored_cycle_value_appears_disabled_not_dropped(user):
-    user.target_cycle = "sa2028_ib"  # matches nothing this dropdown has ever offered
-    user.save(update_fields=["target_cycle"])
+def test_a_stale_stored_cycle_value_appears_checked_not_dropped(user):
+    user.target_cycles = ["sa2028_ib"]  # matches nothing this checkbox group has ever offered
+    user.save(update_fields=["target_cycles"])
 
     form = ProfileForm.from_user(user)
-    values = [v for v, _ in form.fields["target_cycle"].choices]
-    assert "sa2028_ib" in values                 # visible, not silently dropped
-    rendered = str(form["target_cycle"])
+    values = [v for v, _ in form.fields["target_cycles"].choices]
+    assert "sa2028_ib" in values                  # visible, not silently dropped
+    rendered = str(form["target_cycles"])
     assert 'value="sa2028_ib"' in rendered
-    assert "disabled" in rendered                # and marked as no longer offered
+    assert "checked" in rendered                  # pre-checked, so a no-op save keeps it
+    assert "no longer offered" in rendered         # and visibly marked as such
+    assert "disabled" not in rendered              # never disabled — see docstring above
 
 
 def test_a_current_stored_cycle_value_is_not_marked_stale(user):
     current = cycle_choices()[1][0]  # any real, currently-offered choice
-    user.target_cycle = current
-    user.save(update_fields=["target_cycle"])
+    user.target_cycles = [current]
+    user.save(update_fields=["target_cycles"])
 
     form = ProfileForm.from_user(user)
-    values = [v for v, _ in form.fields["target_cycle"].choices]
-    assert values.count(current) == 1            # not duplicated as a "stale" entry
-    rendered = str(form["target_cycle"])
+    values = [v for v, _ in form.fields["target_cycles"].choices]
+    assert values.count(current) == 1             # not duplicated as a "stale" entry
+    rendered = str(form["target_cycles"])
     assert f'value="{current}"' in rendered
-    # No disabled option at all when nothing is stale.
-    assert "disabled" not in rendered
+    assert "no longer offered" not in rendered
 
 
-def test_a_blank_target_cycle_is_never_treated_as_stale(user):
+def test_a_blank_target_cycles_is_never_treated_as_stale(user):
     """The common case — nobody has picked a cycle yet — must not trigger
-    the disabled-stale-option machinery."""
+    the stale-value machinery."""
     form = ProfileForm.from_user(user)
-    assert "disabled" not in str(form["target_cycle"])
+    assert "no longer offered" not in str(form["target_cycles"])
+
+
+def test_multiple_stored_cycles_all_round_trip_checked(user):
+    """A student recruiting for two programmes at once must see BOTH boxes
+    checked, not just the first."""
+    a, b = cycle_choices()[1][0], cycle_choices()[2][0]
+    user.target_cycles = [a, b]
+    user.save(update_fields=["target_cycles"])
+
+    form = ProfileForm.from_user(user)
+    rendered = str(form["target_cycles"])
+    assert rendered.count("checked") == 2

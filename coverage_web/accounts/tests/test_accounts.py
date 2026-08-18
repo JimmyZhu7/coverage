@@ -72,8 +72,8 @@ def test_onboarding_profile_step_saves_and_advances(client, user):
             "school": "State U",
             "class_year": "2028",
             # Must be one of forms.CYCLE_CHOICES — the cycle field is a strict
-            # dropdown now, not free text.
-            "target_cycle": "2027 Summer Internship",
+            # checkbox group now, not free text.
+            "target_cycles": ["2027 Summer Internship"],
             "regions": ["us", "hk"],
             "tracks": ["ib", "pe"],
         },
@@ -85,7 +85,7 @@ def test_onboarding_profile_step_saves_and_advances(client, user):
     user.refresh_from_db()
     assert user.school == "State U"
     assert user.class_year == 2028
-    assert user.target_cycle == "2027 Summer Internship"
+    assert user.target_cycles == ["2027 Summer Internship"]
     assert set(user.regions) == {"us", "hk"}
     assert set(user.tracks) == {"ib", "pe"}
 
@@ -355,7 +355,7 @@ def test_settings_htmx_save_returns_partial(client, user):
     resp = client.post(
         reverse("accounts:settings"),
         {"section": "profile", "school": "HX School", "class_year": "2028",
-         "target_cycle": "", "regions": ["us"], "tracks": ["ib"]},
+         "target_cycles": [], "regions": ["us"], "tracks": ["ib"]},
         HTTP_HX_REQUEST="true",
     )
     assert resp.status_code == 200
@@ -371,7 +371,7 @@ def test_settings_saves_profile(client, user):
     resp = client.post(
         reverse("accounts:settings"),
         {"section": "profile", "school": "New School", "class_year": "2029",
-         "target_cycle": "", "regions": ["hk"], "tracks": ["consulting"]},
+         "target_cycles": [], "regions": ["hk"], "tracks": ["consulting"]},
     )
     assert resp.status_code in (200, 302)
     user.refresh_from_db()

@@ -127,7 +127,7 @@ def test_the_page_does_not_even_ship_the_script_when_not_following(client, stude
 # The Settings control is the switch between those two worlds
 # ---------------------------------------------------------------------------
 def _profile_post(**over):
-    data = {"name": "", "school": "", "class_year": "", "target_cycle": "",
+    data = {"name": "", "school": "", "class_year": "", "target_cycles": [],
             "regions": [], "tracks": [], "timezone": AUTO_TIMEZONE}
     data.update(over)
     return data

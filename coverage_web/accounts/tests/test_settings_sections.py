@@ -546,7 +546,7 @@ def test_profile_save_still_works_alongside_the_new_sections(client, logged_in):
     resp = client.post(
         reverse(SETTINGS),
         {"section": "profile", "school": "Still Works U", "class_year": "2029",
-         "target_cycle": "", "regions": ["us"], "tracks": ["ib"]},
+         "target_cycles": [], "regions": ["us"], "tracks": ["ib"]},
     )
     assert resp.status_code == 302
     logged_in.refresh_from_db()
@@ -563,7 +563,7 @@ def test_unknown_section_value_is_a_noop_not_a_profile_fallthrough(client, logge
     resp = client.post(
         reverse(SETTINGS),
         {"section": "not-a-section", "school": "Fallthrough U",
-         "class_year": "", "target_cycle": "", "regions": [], "tracks": []},
+         "class_year": "", "target_cycles": [], "regions": [], "tracks": []},
     )
     assert resp.status_code == 200
     logged_in.refresh_from_db()

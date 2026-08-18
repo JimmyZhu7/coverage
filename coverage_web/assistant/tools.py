@@ -167,7 +167,7 @@ SETTINGS_FIELDS: tuple[str, ...] = (
     "name",
     "school",
     "class_year",
-    "target_cycle",
+    "target_cycles",
     "regions",
     "tracks",
     "timezone",
@@ -181,7 +181,7 @@ SETTINGS_FIELDS: tuple[str, ...] = (
 # The fields that do NOT apply on the first call. See the module docstring:
 # each of these changes something the student would not see change, so the
 # tool refuses once and makes the model say out loud what it is about to do.
-SETTINGS_IMPORTANT = frozenset({"timezone", "regions", "tracks"})
+SETTINGS_IMPORTANT = frozenset({"timezone", "regions", "tracks", "target_cycles"})
 
 # What the model must tell the student BEFORE asking them to confirm. Written
 # in the student's terms, not the column's — "what day your queue thinks it
@@ -201,6 +201,11 @@ _IMPORTANT_EFFECTS = {
         "this REPLACES your whole list of target tracks, so any track not in "
         "the new value is dropped, and the Opportunities feed and your firm "
         "recommendations follow it"
+    ),
+    "target_cycles": (
+        "this REPLACES your whole list of target recruiting cycles, so any "
+        "cycle not in the new value is dropped, and the Opportunities feed "
+        "stops boosting postings for a cycle you remove"
     ),
 }
 
@@ -575,12 +580,15 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "update_settings",
         "description": (
             "Change one field of the student's own settings — profile, "
-            "target markets and tracks, timezone, work authorization, "
-            "cadence tuning, weekly pace, email digest. One field per call. "
-            "`value` is always a string: a number for numeric fields, "
-            "true/false for the digest, a comma-separated list for regions "
-            "and tracks (which REPLACE the whole list), and an empty string "
-            "to clear a field back to its default. Some fields are "
+            "target markets, tracks and recruiting cycles, timezone, work "
+            "authorization, cadence tuning, weekly pace, email digest. One "
+            "field per call. `value` is always a string: a number for "
+            "numeric fields, true/false for the digest, a comma-separated "
+            "list for regions, tracks and target_cycles (which REPLACE the "
+            "whole list — target_cycles values are the exact labels "
+            "'<year> Summer Internship'/'<year> Full-Time / Graduate'/'<year> "
+            "Spring Week / Insight'/'Off-Cycle / Immediate'), and an empty "
+            "string to clear a field back to its default. Some fields are "
             "important enough that the first call deliberately changes "
             "nothing and tells you to check with the student first — read "
             "that error and follow it rather than retrying."
@@ -1452,10 +1460,19 @@ def _int_setting(raw, field: str, low: int, high: int) -> int:
     return value
 
 
-def _csv_setting(raw, field: str, allowed: frozenset[str]) -> list[str]:
+def _csv_setting(raw, field: str, allowed: frozenset[str], *, lower: bool = True) -> list[str]:
+    """Comma-separated list -> deduped, validated tokens.
+
+    `lower=False` for `target_cycles`: unlike regions/tracks' short lowercase
+    codes ("hk", "ib"), a cycle value IS its own display label
+    ("2028 Summer Internship") — lowercasing it would validate fine against a
+    lowercased `allowed` set but store a value nothing else in the product
+    (the settings page, `cycle_choices()`, the scorer's `parse_target_cycle`)
+    would ever recognise back."""
     tokens, seen = [], set()
     for part in str(raw or "").split(","):
-        token = part.strip().lower()
+        token = part.strip()
+        token = token.lower() if lower else token
         if not token or token in seen:
             continue
         if token not in allowed:
@@ -1490,7 +1507,7 @@ def _setting_display(user, field: str) -> str:
         return str((user.work_authorization or {}).get(code, "") or "")
     if field == "weekly_digest_enabled":
         return "false" if user.weekly_digest_opt_out else "true"
-    if field in ("regions", "tracks"):
+    if field in ("regions", "tracks", "target_cycles"):
         return ", ".join(getattr(user, field, None) or [])
     if field == "timezone":
         return "auto" if user.timezone_auto else (user.timezone or "")
@@ -1517,13 +1534,13 @@ def _apply_setting(user, field: str, raw) -> None:
             user.class_year = year
         user.save(update_fields=["class_year"])
 
-    elif field == "target_cycle":
-        value = str(raw or "").strip()
-        known = {code for code, _ in cycle_choices() if code}
-        if value and value not in known:
-            raise ToolError(f"target_cycle must be one of {sorted(known)}.")
-        user.target_cycle = value
-        user.save(update_fields=["target_cycle"])
+    elif field == "target_cycles":
+        # Computed per call, not cached at module level: `cycle_choices()`
+        # anchors to the current year, and this tool can live in a
+        # long-running worker process the same as `ProfileForm.__init__`.
+        known = frozenset(code for code, _ in cycle_choices() if code)
+        user.target_cycles = _csv_setting(raw, "target cycle", known, lower=False)
+        user.save(update_fields=["target_cycles"])
 
     elif field == "regions":
         user.regions = _csv_setting(raw, "region", _PROFILE_REGIONS)

@@ -396,20 +396,36 @@ def _reason_key(r):
 
 
 def _cycle_not_open_note(profile, open_qs) -> str:
-    """One honest sentence when the student's own target cycle has no live
-    postings at all, else "". Checked against the whole open campus board,
-    not the picks: "your cycle is not open yet" must mean the BOARD lacks
-    it, never that six other roles merely outscored it."""
-    cycle = parse_target_cycle(getattr(profile, "target_cycle", "") or "")
-    if cycle is None:
+    """One honest sentence when NONE of the student's target cycles has any
+    live postings, else "". Checked against the whole open campus board, not
+    the picks: "your cycle is not open yet" must mean the BOARD lacks it,
+    never that six other roles merely outscored it.
+
+    A student can name more than one cycle now (see `Profile.target_cycles`),
+    so this only fires when EVERY parseable one is closed — the moment any
+    one of them has live postings, there's nothing to warn about."""
+    parsed = [
+        (raw.strip(), parse_target_cycle(raw))
+        for raw in getattr(profile, "target_cycles", None) or []
+    ]
+    parsed = [(label, cycle) for label, cycle in parsed if cycle is not None]
+    if not parsed:
         return ""
-    bucket, year = cycle
-    if open_qs.filter(bucket=bucket, cohort=str(year)).exists():
+    closed_labels = [
+        label for label, (bucket, year) in parsed
+        if not open_qs.filter(bucket=bucket, cohort=str(year)).exists()
+    ]
+    if len(closed_labels) < len(parsed):
         return ""
-    label = (profile.target_cycle or "").strip()
+    if len(closed_labels) == 1:
+        names = closed_labels[0]
+    elif len(closed_labels) == 2:
+        names = f"{closed_labels[0]} and {closed_labels[1]}"
+    else:
+        names = ", ".join(closed_labels[:-1]) + f", and {closed_labels[-1]}"
     # No em dash: house copy style. Two short sentences read cleaner here
     # anyway.
-    return (f"{label} postings haven't opened yet. "
+    return (f"{names} postings haven't opened yet. "
             f"These are today's closest fits.")
 
 

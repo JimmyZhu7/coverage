@@ -436,7 +436,7 @@ FIT_SCORE_EXPORT_COLUMNS = [
 IMPORT_EXPORT_COLUMNS = ["created", "kind", "filename", "row_stats"]
 PRODUCT_EVENT_EXPORT_COLUMNS = ["ts", "event", "props"]
 PROFILE_EXPORT_COLUMNS = [
-    "email", "name", "school", "class_year", "target_cycle", "regions",
+    "email", "name", "school", "class_year", "target_cycles", "regions",
     "tracks", "work_authorization", "angles", "advocate_target",
     "cadence_params", "weekly_touch_goal", "timezone", "language",
     "capture_address", "joined", "onboarded_at",
@@ -653,7 +653,7 @@ def profile_csv(user) -> str:
             user.name,
             user.school,
             user.class_year if user.class_year else "",
-            user.target_cycle,
+            _json_cell(list(user.target_cycles or [])),
             _json_cell(list(user.regions or [])),
             _json_cell(list(user.tracks or [])),
             _json_cell(user.work_authorization),

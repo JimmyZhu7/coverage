@@ -177,8 +177,8 @@ from directory.views import _cycle_not_open_note
 
 
 class _P:
-    def __init__(self, cycle):
-        self.target_cycle = cycle
+    def __init__(self, *cycles):
+        self.target_cycles = [c for c in cycles if c]
 
 
 @pytest.mark.django_db
@@ -208,3 +208,29 @@ def test_an_unparseable_cycle_yields_no_note():
     qs = Opportunity.objects.filter(status="open")
     assert _cycle_not_open_note(_P(""), qs) == ""
     assert _cycle_not_open_note(_P("whenever works"), qs) == ""
+
+
+@pytest.mark.django_db
+def test_the_note_names_every_closed_cycle_when_none_are_open():
+    """A student recruiting for two programmes at once must hear about BOTH
+    if neither has opened — not just whichever one happened to be checked
+    first."""
+    qs = Opportunity.objects.filter(status="open")
+    note = _cycle_not_open_note(_P("2028 Summer Internship", "2027 Spring Week / Insight"), qs)
+    assert "2028 Summer Internship" in note
+    assert "2027 Spring Week / Insight" in note
+    assert "and" in note
+
+
+@pytest.mark.django_db
+def test_the_note_stays_silent_once_any_one_named_cycle_is_open():
+    """The moment ONE of the student's several target cycles has live
+    postings, there is nothing to warn about — even if the other one is
+    still closed."""
+    f = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    Opportunity.objects.create(firm=f, url="https://x/3", status="open",
+                               bucket="internship", cohort="2028",
+                               title="2028 Summer Analyst")
+    qs = Opportunity.objects.filter(status="open")
+    note = _cycle_not_open_note(_P("2028 Summer Internship", "2027 Spring Week / Insight"), qs)
+    assert note == ""

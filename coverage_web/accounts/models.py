@@ -120,7 +120,15 @@ class User(AbstractUser):
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     school = models.CharField(max_length=255, blank=True, default="")
     class_year = models.PositiveSmallIntegerField(null=True, blank=True)
-    target_cycle = models.CharField(max_length=32, blank=True, default="")
+    # Which programme(s) the student is recruiting for RIGHT NOW — plural on
+    # purpose: an underclassman routinely runs both a Spring Week/Insight
+    # cycle and next year's SA cycle at once, and a single-select here forced
+    # a choice the student wasn't actually making. Same ArrayField shape as
+    # `regions`/`tracks` below, values are `directory.recommend.cycle_choices`
+    # labels (e.g. "2028 Summer Internship").
+    target_cycles = ArrayField(
+        models.CharField(max_length=32), default=list, blank=True
+    )
     regions = ArrayField(
         models.CharField(max_length=64), default=list, blank=True
     )

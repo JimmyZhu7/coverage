@@ -63,16 +63,16 @@ replacement for one.
   </div>
 </div>
 
-<label for="id_target_cycle">Target Recruiting Cycle</label>
-{{ form.target_cycle }}
-{{ form.target_cycle.errors }}
-
 {% comment %}
-These two stay bare <label>s with no `for`: CheckboxSelectMultiple renders its
-own <label> per checkbox, so there is no single control to point at, and the
-styling for a group heading lives on the element. Every SINGLE control on this
-page does get a real `for` — see the a11y note in settings.html.
+These three stay bare <label>s with no `for`: CheckboxSelectMultiple renders
+its own <label> per checkbox, so there is no single control to point at, and
+the styling for a group heading lives on the element. Every SINGLE control on
+this page does get a real `for` — see the a11y note in settings.html.
 {% endcomment %}
+<label>Target Recruiting Cycle</label>
+<div class="chipset">{{ form.target_cycles }}</div>
+{{ form.target_cycles.errors }}
+
 <label>Regions of Interest</label>
 <div class="chipset">{{ form.regions }}</div>
 {{ form.regions.errors }}

@@ -82,7 +82,7 @@ CLASS_YEAR_CHOICES: list[tuple[str, str]] = [("", "Select graduation year")] + [
 # one place this vocabulary is built — this module-level binding is kept only
 # for the couple of call sites that still import CYCLE_CHOICES/
 # CYCLE_SUGGESTIONS directly (accounts.views' onboarding context, currently
-# unused by any template). `ProfileForm.target_cycle` itself does NOT read
+# unused by any template). `ProfileForm.target_cycles` itself does NOT read
 # this binding: see `ProfileForm.__init__`, which recomputes choices per
 # instance so a long-lived worker process never serves a stale year — the
 # same staleness this module-level constant is still subject to.
@@ -184,6 +184,8 @@ class _StaleValueSelect(forms.Select):
         return option
 
 
+
+
 class ProfileForm(forms.Form):
     """Step 1 of onboarding, and the editable core of /welcome/settings/."""
 
@@ -214,10 +216,10 @@ class ProfileForm(forms.Form):
         required=False,
         widget=forms.Select,
     )
-    target_cycle = forms.ChoiceField(
-        choices=CYCLE_CHOICES,
+    target_cycles = forms.MultipleChoiceField(
+        choices=[],  # set per instance in __init__, same reason as below
         required=False,
-        widget=forms.Select,
+        widget=forms.CheckboxSelectMultiple,
     )
     regions = forms.MultipleChoiceField(
         choices=REGION_CHOICES,
@@ -237,27 +239,32 @@ class ProfileForm(forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["timezone"].choices = timezone_choices()
-        # `target_cycle`'s choices are recomputed HERE, per instance, rather
-        # than left at the class-level `CYCLE_CHOICES` binding above: that
-        # binding is a module-level constant frozen at import (`_YEAR =
-        # date.today().year`, evaluated once), so a long-lived worker process
-        # would keep serving whatever year it started in.
-        choices = cycle_choices()
-        # A stored value the current choices no longer list — e.g. a past
-        # year that rolled off the window, or the live `demo@coverage.local`
-        # row's `target_cycle='sa2028_ib'`, which matches nothing this
-        # dropdown has ever offered — must not vanish without a trace.
-        # Django's Select renders an unlisted value as nothing selected, so
-        # the student would see a blank "Select a cycle" and the next save
-        # would silently clear the field for good. Appending the value back
-        # in, disabled, keeps the loss visible instead.
-        current = (self.initial.get("target_cycle") or "").strip()
+        # `target_cycles`' choices are recomputed HERE, per instance, rather
+        # than left at a module-level binding: `cycle_choices()` anchors to
+        # `date.today().year`, evaluated once if cached at import, so a
+        # long-lived worker process would keep serving whatever year it
+        # started in. The leading ("", "Select a cycle") placeholder makes no
+        # sense for a checkbox group, so it's dropped here.
+        choices = [(v, label) for v, label in cycle_choices() if v]
+        # Stored values the current choices no longer list — e.g. a past year
+        # that rolled off the window, or a row saved before this year's
+        # vocabulary shifted — must not vanish without a trace. A checkbox for
+        # an unlisted value simply wouldn't render at all, so the student
+        # would see fewer cycles checked than they actually saved, and the
+        # next save would silently drop the rest. Appended back in, checked,
+        # labeled as no-longer-offered — and deliberately left ENABLED, not
+        # disabled: unlike a <select> option (whose disabled state doesn't
+        # stop an already-selected option from posting), a disabled checkbox
+        # is dropped from the submitted form data entirely, which would
+        # recreate the exact silent-clear bug this exists to avoid. Enabled
+        # also means the student can untick it on purpose if they're done
+        # with that cycle, which a locked control couldn't offer anyway.
+        current = [v.strip() for v in (self.initial.get("target_cycles") or []) if v.strip()]
         known_values = {value for value, _ in choices}
-        stale = current if current and current not in known_values else ""
+        stale = [v for v in current if v not in known_values]
         if stale:
-            choices = choices + [(stale, f"{stale} (no longer offered)")]
-            self.fields["target_cycle"].widget = _StaleValueSelect(disabled_value=stale)
-        self.fields["target_cycle"].choices = choices
+            choices = choices + [(v, f"{v} (no longer offered)") for v in stale]
+        self.fields["target_cycles"].choices = choices
 
     def clean_avatar(self):
         """Validate and NORMALISE the upload: never store what was handed to us.
@@ -335,12 +342,12 @@ class ProfileForm(forms.Form):
                 "name": user.name,
                 "school": user.school,
                 "class_year": user.class_year,
-                "target_cycle": user.target_cycle,
+                "target_cycles": list(user.target_cycles or []),
                 "regions": list(user.regions or []),
                 "tracks": list(user.tracks or []),
                 # A stored zone the host's tzdata no longer carries would
                 # render as nothing selected — the same silent-clear the
-                # `target_cycle` stale-value widget exists to prevent. Here the
+                # `target_cycles` stale-value handling exists to prevent. Here the
                 # fix is simpler because the vocabulary is huge and stable:
                 # show it only if it is still real, and let the honest "Not
                 # set" option speak for the rest.
@@ -373,12 +380,12 @@ class ProfileForm(forms.Form):
         """Persist validated values back onto the user row. Call only after
         `is_valid()`."""
         cd = self.cleaned_data
-        update_fields = ["name", "school", "class_year", "target_cycle",
+        update_fields = ["name", "school", "class_year", "target_cycles",
                          "regions", "tracks", "timezone", "timezone_auto"]
         user.name = cd["name"]
         user.school = cd["school"]
         user.class_year = cd["class_year"]
-        user.target_cycle = cd["target_cycle"]
+        user.target_cycles = cd["target_cycles"]
         user.regions = cd["regions"]
         user.tracks = cd["tracks"]
         # AUTO turns following back on and leaves `timezone` alone: whatever

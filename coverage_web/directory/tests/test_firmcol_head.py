@@ -80,7 +80,7 @@ def feed_with_both_columns(db):
         email="head@example.com", password="x" * 14
     )
     user.class_year = 2029
-    user.target_cycle = "SA 2028"
+    user.target_cycles = ["SA 2028"]
     user.school = "USC Marshall"
     user.regions = ["us", "hk"]
     user.tracks = ["ib"]
