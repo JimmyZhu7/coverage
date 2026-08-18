@@ -81,6 +81,71 @@ services:
         sync: false
       - key: VAPID_CLAIM_EMAIL
         sync: false
+      # Gmail Live (docs/gmail-live-setup.md) — blank = the Settings page
+      # shows nothing new and gmail_watch_renew/gmail_pubsub_listen both
+      # no-op. A SEPARATE OAuth client from GOOGLE_OAUTH_CLIENT_ID above —
+      # see that key's comment; do not reuse the login client here.
+      - key: GMAIL_LIVE_CLIENT_ID
+        sync: false
+      - key: GMAIL_LIVE_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_LIVE_PUBSUB_TOPIC
+        sync: false
+      - key: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+        sync: false
+      - key: GMAIL_LIVE_TOKEN_KEY
+        sync: false
+
+  # ---- Gmail Live real-time listener (long-running, not a cron) ---------
+  # Pulls Pub/Sub notifications and syncs the mailbox the moment Gmail
+  # flags a change. A worker, not a cron job, because it has to stay
+  # attached to receive notifications as they happen — see
+  # capture/gmail_live.py's module docstring.
+  - type: worker
+    name: coverage-gmail-live
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py gmail_pubsub_listen"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: DJANGO_SECRET_KEY
+      - key: DJANGO_ALLOWED_HOSTS
+        value: localhost # no HTTP served here; any value satisfies settings import
+      - key: GMAIL_LIVE_CLIENT_ID
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_CLIENT_ID
+      - key: GMAIL_LIVE_CLIENT_SECRET
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_CLIENT_SECRET
+      - key: GMAIL_LIVE_PUBSUB_TOPIC
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_PUBSUB_TOPIC
+      - key: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+      - key: GMAIL_LIVE_TOKEN_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_TOKEN_KEY
 
   # ---- Freshness pass every 6 hours (scrape + reclassify + reverify) -----
   # Four passes a day keeps deadlines honest across US and Asia hours.
@@ -154,3 +219,53 @@ services:
         sync: false
       - key: VAPID_CLAIM_EMAIL
         sync: false # contact address for VAPID's "sub" claim, no "mailto:" prefix
+
+  # ---- Gmail Live watch renewal, once a day -----------------------------
+  # Google's users.watch() registration expires after 7 days regardless of
+  # activity — this keeps it alive. gmail_live.is_configured() no-ops the
+  # whole command until GMAIL_LIVE_* is set, same posture as VAPID above.
+  - type: cron
+    name: coverage-gmail-watch-renew
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 5 * * *" # 05:00 UTC — clear of the scrape's 00/06/12/18 marks
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py gmail_watch_renew"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: DJANGO_SECRET_KEY
+      - key: DJANGO_ALLOWED_HOSTS
+        value: localhost
+      - key: GMAIL_LIVE_CLIENT_ID
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_CLIENT_ID
+      - key: GMAIL_LIVE_CLIENT_SECRET
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_CLIENT_SECRET
+      - key: GMAIL_LIVE_PUBSUB_TOPIC
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_PUBSUB_TOPIC
+      - key: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+      - key: GMAIL_LIVE_TOKEN_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: GMAIL_LIVE_TOKEN_KEY

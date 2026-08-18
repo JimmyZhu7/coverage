@@ -67,7 +67,8 @@ INSTALLED_APPS = [
     "directory",  # shared zone: firms, opportunities, firm_dates, ...
     "crm",  # private zone: user_firms, contacts, touches, capture_events, tasks
     "analytics",  # private zone: user_opportunities, fit_scores, product_events, imports
-    "capture",  # inbound-email capture pipeline (no models; uses crm.CaptureEvent)
+    "capture",  # inbound-email capture pipeline (crm.CaptureEvent) + Gmail
+                # Live's GmailConnection (capture/models.py)
     "assistant",  # private zone: "Talk to Coverage" — the advisor page's conversations
 ]
 
@@ -364,3 +365,42 @@ ENABLED_SOCIAL_PROVIDERS = [
     p for p in ("google", "apple", "microsoft", "linkedin_oauth2")
     if SOCIALACCOUNT_PROVIDERS.get(p, {}).get("APP", {}).get("client_id")
 ]
+
+# ---------------------------------------------------------------------------
+# Gmail Live (docs/build-plan.md §5's "v2" — see capture/gmail_live.py).
+#
+# DELIBERATELY A SEPARATE OAUTH CLIENT from `SOCIALACCOUNT_PROVIDERS["google"]`
+# above. §3's rule is absolute: the sign-in client must never carry a
+# `gmail.*` scope, so a Google verification stall on THIS client can never
+# break the ability to log in. Create a second OAuth client in the Google
+# Cloud Console for this — do not point it at the login client's credentials.
+#
+# All four values are blank by default, which is the feature's actual
+# off-switch: `gmail_live.is_configured()` gates every entry point on all four
+# being set, so an unconfigured deploy exposes no connect button and runs no
+# watch/poll commands, rather than 500ing on a missing credential.
+# ---------------------------------------------------------------------------
+GMAIL_LIVE_CLIENT_ID = env("GMAIL_LIVE_CLIENT_ID", default="")
+GMAIL_LIVE_CLIENT_SECRET = env("GMAIL_LIVE_CLIENT_SECRET", default="")
+# The Pub/Sub topic `users.watch()` publishes change notifications to, as
+# "projects/<project>/topics/<topic>" — created once by hand in Cloud Console
+# (see docs/gmail-live-setup.md), not managed by this app.
+GMAIL_LIVE_PUBSUB_TOPIC = env("GMAIL_LIVE_PUBSUB_TOPIC", default="")
+# A PULL subscription on that topic, "projects/<project>/subscriptions/<sub>".
+# Pull, not push: a push subscription needs a public HTTPS endpoint, which
+# means "deploy Coverage" becomes a precondition. Pull means
+# `gmail_pubsub_listen` can run against this project long before that.
+GMAIL_LIVE_PUBSUB_SUBSCRIPTION = env("GMAIL_LIVE_PUBSUB_SUBSCRIPTION", default="")
+# Fernet key encrypting `GmailConnection.refresh_token_encrypted` at rest.
+# Generate once with `Fernet.generate_key()` and never rotate it casually —
+# rotating without re-encrypting every row first makes every stored refresh
+# token unreadable, which reads to a user as "Coverage silently disconnected
+# my Gmail."
+GMAIL_LIVE_TOKEN_KEY = env("GMAIL_LIVE_TOKEN_KEY", default="")
+# Requested at connect time. Kept to exactly what capture/gmail_live.py's
+# deterministic classifiers read (headers, an .ics attachment's own fields,
+# a short snippet for bounce-pattern matching) — narrower than full message
+# bodies, which matters both for the privacy story and because a narrower
+# scope is the easier one to justify if this ever goes through Google's
+# verification (see the CASA discussion in build-plan.md's risk register).
+GMAIL_LIVE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]

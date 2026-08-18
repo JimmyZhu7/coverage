@@ -32,10 +32,17 @@ RUN uv run --package coverage-web playwright install --with-deps chromium
 # 2) App code.
 COPY . .
 
-# 3) Collect static into STATIC_ROOT for WhiteNoise. A dummy SECRET_KEY lets
-#    the management command run at build time without real secrets; ALLOWED_HOSTS
-#    is unused by collectstatic. Nothing here reaches a request path.
+# 3) Collect static into STATIC_ROOT for WhiteNoise. Dummy values for every
+#    setting production.py requires with no fallback (SECRET_KEY,
+#    ALLOWED_HOSTS, and CAPTURE_INBOUND_SECRET — the webhook secret was
+#    deliberately given no default there; see that module's comment) let the
+#    management command run at build time without real secrets. None of
+#    these three are used for anything at build time; ALLOWED_HOSTS is
+#    unused by collectstatic and CAPTURE_INBOUND_SECRET is only read at
+#    request time by the inbound-email view. Nothing here reaches a request
+#    path.
 RUN DJANGO_SECRET_KEY=build-only DJANGO_ALLOWED_HOSTS=localhost \
+    CAPTURE_INBOUND_SECRET=build-only \
     uv run --package coverage-web python coverage_web/manage.py collectstatic --noinput
 
 EXPOSE 8000

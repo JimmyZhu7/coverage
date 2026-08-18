@@ -40,6 +40,21 @@ dependencies = [
     # to a student. Imported lazily (assistant/client.py) so an unset
     # ANTHROPIC_API_KEY still boots the app and passes the suite.
     "anthropic>=0.122.0",
+    # Gmail Live (docs/build-plan.md §5's "v2" — real Gmail API access via a
+    # SEPARATE incremental-consent OAuth client, never the login one; see
+    # capture/gmail_live.py). google-auth-oauthlib drives the consent-code
+    # exchange, google-api-python-client calls users.watch/history.list/
+    # messages.get, google-cloud-pubsub pulls the change notifications (a
+    # PULL subscription, deliberately, so this works before Coverage has a
+    # public HTTPS endpoint deployed).
+    "google-auth>=2.35",
+    "google-auth-oauthlib>=1.2",
+    "google-api-python-client>=2.149",
+    "google-cloud-pubsub>=2.23",
+    # Refresh tokens are bearer credentials to someone's mailbox — encrypted
+    # at rest with Fernet rather than stored plain, the same "use the
+    # well-tested library, don't hand-roll crypto" call as pywebpush above.
+    "cryptography>=43.0",
 ]
 
 # Application, not a library anyone imports — don't build/install it as a

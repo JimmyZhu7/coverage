@@ -1144,6 +1144,57 @@
         </div>
       </section>
 
+      {% if gmail_live.available %}
+      {% comment %}
+      docs/build-plan.md §5's "v2" — a real Gmail connection, separate from
+      the BCC address above. Only rendered when GMAIL_LIVE_* is configured
+      (gmail_live.is_configured()); an unconfigured deploy shows nothing
+      here rather than a dead-end connect button.
+      {% endcomment %}
+      <section class="set-card kin-reveal" id="gmail-live" style="--i:8.5"
+               aria-labelledby="gmail-live-h">
+        <div class="set-head">
+          <h2 id="gmail-live-h">Gmail Live</h2>
+          <p>Real-time reply and bounce detection, straight from your inbox.</p>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Status</span>
+              <div class="set-row-desc">
+                {% if gmail_live.connected %}
+                  {% if gmail_live.status == "revoked" %}
+                    <strong>Access was revoked</strong> — reconnect below.
+                  {% else %}
+                    Connected as {{ gmail_live.gmail_address }}.
+                    {% if gmail_live.last_notification_at %}
+                      Last update {{ gmail_live.last_notification_at|timesince }} ago.
+                    {% else %}
+                      No activity seen yet.
+                    {% endif %}
+                  {% endif %}
+                {% else %}
+                  Not connected. Coverage only reads mail to detect bounces,
+                  replies, and calendar invites — no message bodies are stored.
+                {% endif %}
+              </div>
+            </div>
+            <div class="set-row-control">
+              {% if gmail_live.connected %}
+                <form method="post" action="{% url 'capture:gmail_disconnect' %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn">Disconnect</button>
+                </form>
+              {% endif %}
+              <a class="btn" href="{% url 'capture:gmail_connect' %}">
+                {% if gmail_live.connected %}Reconnect{% else %}Connect Gmail{% endif %}
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+      {% endif %}
+
       {% comment %}
       There is no Language section here any more. `User.language` was written
       by this page and read by nothing — no LocaleMiddleware, no catalogs, no

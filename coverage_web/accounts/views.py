@@ -24,6 +24,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from analytics.events import record_event
+from capture import gmail_live
+from capture.models import GmailConnection
 from capture.services import capture_health
 from crm.models import Contact, UserFirm
 from directory.models import Firm
@@ -266,6 +268,26 @@ def _cycle_months():
     return cycle_months()
 
 
+def _gmail_live_context(user) -> dict:
+    """Small enough to compute on every settings render, same as
+    `capture_health` above it — the point is the same: a connection that
+    quietly went `revoked` should be visible on the page a student would
+    actually check, not discoverable only by the sync silently doing
+    nothing."""
+    if not gmail_live.is_configured():
+        return {"available": False}
+    connection = GmailConnection.all_objects.filter(user=user).first()
+    if connection is None:
+        return {"available": True, "connected": False}
+    return {
+        "available": True,
+        "connected": True,
+        "gmail_address": connection.gmail_address,
+        "status": connection.status,
+        "last_notification_at": connection.last_notification_at,
+    }
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def settings_view(request):
@@ -349,6 +371,7 @@ def settings_view(request):
             # is that a student whose BCC has silently stopped working finds
             # out on the page they'd actually check (risk register #3).
             "capture": capture_health(request.user),
+            "gmail_live": _gmail_live_context(request.user),
             "target_firm_count": UserFirm.objects.for_user(request.user).count(),
             "contact_count": contact_count,
             # Split out rather than folded in: "Contacts: 137" counted archived
