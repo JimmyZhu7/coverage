@@ -447,6 +447,17 @@ main:focus { outline: none; }
 .site-user:hover { color: var(--ink-2); text-decoration: none; }
 .site-user-avatar { width: 22px; height: 22px; border-radius: 50%; flex: none; object-fit: cover;
   background: var(--accent-soft); }
+/* The bug this fixes, live: the `onerror` fallback (base.html) toggles
+   `hidden` on this fallback span, but `hidden` is a UA-stylesheet default
+   (`display: none`, ordinary specificity) — `.site-user-avatar-fallback`'s
+   OWN `display: inline-flex` below is author CSS on the same element and
+   wins regardless of the attribute, so the initials badge rendered
+   ALONGSIDE a perfectly-loaded photo, permanently, whether `hidden` was
+   set or not. `.site-user-avatar[hidden]` (this span carries both classes)
+   has higher specificity than `.site-user-avatar-fallback` alone and
+   correctly wins — same fix `.avatar-preview[hidden]` already applies for
+   the Settings page's own avatar preview, just missing here. */
+.site-user-avatar[hidden] { display: none; }
 .site-user-avatar-fallback { display: inline-flex; align-items: center; justify-content: center;
   color: var(--accent-ink); font-weight: var(--w-bold); font-size: 11px; }
 
