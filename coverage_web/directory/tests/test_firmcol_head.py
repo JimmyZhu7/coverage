@@ -109,6 +109,63 @@ def test_the_logo_tile_keeps_its_own_centring():
     assert "align-self: center" in _rule(_feed_css(), ".firmcol-logo")
 
 
+def test_the_picked_columns_shared_reasons_are_one_nowrap_line_not_wrapping_pills():
+    """Measured live at 1440px: the Picked header rendered its two shared
+    reasons as `.why-chip` pills (89px + 169px in a 236px stats row), which
+    wrapped to a second line and made that header 122px against every firm
+    column's 92px — pushing all of Picked's cards 30px below the row they
+    sit in. The reasons now render as one `.firmcol-why` text line in the
+    same voice as a firm's "TIER 1 · 56 CLOSING", which must be forbidden
+    from wrapping and must ellipsise instead, with the full sentences kept
+    in the tooltip."""
+    css = _feed_css()
+    rule = _rule(css, ".firmcol-why")
+    assert "white-space: nowrap" in rule, rule
+    assert "text-overflow: ellipsis" in rule, rule
+    assert "overflow: hidden" in rule, rule
+    assert "min-width: 0" in rule, "a flex child can't shrink below its content without this"
+    assert ".why-chip" not in css, "the wrapping pills are gone from the header for good"
+
+
+def test_the_picked_column_renders_shared_reasons_in_the_firmcol_why_line(db):
+    """Two picks that share a cohort AND a bucket AND a tier: the shared
+    reasons must land inside `.firmcol-why` (with each full sentence in its
+    `title`), never as `.why-chip` pills."""
+    from django.contrib.auth import get_user_model
+
+    from crm.models import UserFirm
+    from directory.models import Firm, Opportunity
+
+    alpha = Firm.objects.create(slug="alpha", name="Alpha Partners", tracks=["ib"])
+    beta = Firm.objects.create(slug="beta", name="Beta Securities", tracks=["ib"])
+    for firm, n in ((alpha, 1), (beta, 2)):
+        Opportunity.objects.create(
+            firm=firm, url=f"https://x.test/{n}", title="2028 Summer Analyst Programme",
+            bucket="internship", cohort="2028", status="open", region="us",
+            location="New York",
+        )
+    user = get_user_model().objects.create_user(email="why@example.com", password="x" * 14)
+    user.class_year = 2029
+    user.target_cycles = ["2028 Summer Internship"]
+    user.school = "USC Marshall"
+    user.regions = ["us"]
+    user.tracks = ["ib"]
+    user.save()
+    UserFirm.all_objects.create(user=user, firm=alpha, tier=1)
+    UserFirm.all_objects.create(user=user, firm=beta, tier=1)
+
+    client = Client()
+    client.force_login(user)
+    html = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    picked = re.search(r'<article class="firmcol firmcol--picked.*?</header>', html, re.S)
+    assert picked, "the Picked column should render for a profiled student with picks"
+    head = picked.group(0)
+    assert 'class="firmcol-why"' in head, head
+    assert "why-chip" not in head
+    assert "2028 Summer Internship" in head
+    assert 'title="' in head, "the full sentences must survive in the tooltip"
+
+
 def test_the_picked_column_really_does_render_a_shorter_id_stack(feed_with_both_columns):
     """The condition that made centring fail, asserted on real markup.
 

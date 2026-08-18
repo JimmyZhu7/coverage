@@ -370,28 +370,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* Roles inside a block. The hairline between them is what says "two roles",
      and the indent gives the firm head something to be the head OF. */
 
-  /* The "why". Wraps freely — the whole point is that every reason the scorer
-     used is visible, so nothing here may truncate the list. */
-  /* 11px, not 10px: these carry the scoring rationale and were the smallest
-     type on the page. --ink-2 on --paper measures 8.0:1; the tier and track
-     variants are checked against their own tinted backgrounds below. */
-  .why-chip { font-size: var(--fs-micro); font-weight: var(--w-med); letter-spacing: 0.03em;
-    padding: 2px 8px; border-radius: 999px; white-space: nowrap;
-    border: 1px solid var(--line-strong); background: var(--paper); color: var(--ink-2);
-    cursor: help; }
-  /* --accent-ink #163a5b on --accent-soft #e9eef4 = 9.7:1 */
-  .why-chip.why-tier { border-color: var(--accent-line); background: var(--accent-soft);
-    color: var(--accent-ink); }
-  /* --ok #2f6a45 on --ok-soft #e6f0e9 = 5.6:1 */
-  .why-chip.why-track { border-color: var(--ok-line); background: var(--ok-soft);
-    color: var(--ok); }
-  /* The network reason — the one chip about the reader's own relationships.
-     Same green family as track (it is good news) but dashed, matching the
-     product's standing rule that anything derived from the user's own data
-     rather than the posting's text is tellable apart at a glance. */
-  .why-chip.why-network { border: 1px dashed var(--ok-line); background: transparent;
-    color: var(--ok); }
-
   /* Rolling is green AND wears a different glyph AND says the word — never
      colour alone (ux: color-not-only, High). */
 
@@ -681,6 +659,19 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .fc-stat { display: inline-flex; align-items: center; gap: var(--s2); }
   .fc-stat::before { content: "·"; color: var(--ink-3); }
   .fc-closing { color: var(--stale-t); font-weight: var(--w-med); }
+  /* Picked-for-you's third line: the reasons every pick shares, in the same
+     voice and on the same single line as a firm's "TIER 1 · 56 CLOSING". It
+     must never wrap — a second line here is what put this header 30px taller
+     than its neighbours — so it shrinks and ellipsises instead, and the
+     `title` carries every full sentence for anyone who wants the rest. */
+  .firmcol-why { display: block; min-width: 0; flex: 1 1 auto; overflow: hidden;
+    white-space: nowrap; text-overflow: ellipsis; cursor: help; }
+  .firmcol-why > strong { font-weight: var(--w-bold); color: var(--ink-2); }
+  /* Plain inline here, not the row's inline-flex: an atomic inline box can't
+     be split by text-overflow, so the ellipsis would drop a whole reason the
+     moment it didn't fit rather than showing as much of it as does. */
+  .firmcol-why > .fc-stat { display: inline; margin-left: var(--s2); }
+  .firmcol-why > .fc-stat::before { margin-right: var(--s2); }
 
   /* The scroll window: standardized role cards, a permanent thin scrollbar. */
   /* Scrolling shadows, so a half-visible card reads as "more below" instead of

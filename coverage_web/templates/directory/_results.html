@@ -166,8 +166,18 @@ exactly the moment it had something to say.
             hears as a missing level.{% endcomment %}
             <h2 class="firmcol-h"><span class="firmcol-name" id="pickcol-h">Picked for you</span></h2>
             <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% else %}None match this filter{% endif %}</span>
+            {% comment %}
+            The shared "why", as ONE text line in the firm columns' own third-
+            line voice ("TIER 1 · 56 CLOSING"), not a row of pills. Pills wrapped
+            the moment two reasons showed ("2027 INTAKE" + "2027 SUMMER
+            INTERNSHIP" is 266px against a 236px row), and a wrapped stats row
+            made this header 122px against its neighbours' 92px, pushing every
+            card in this column 30px below the row it is trying to join. One
+            line, ellipsised past the edge, with every full sentence in the
+            tooltip — nothing lost, nothing staggered.
+            {% endcomment %}
             <div class="firmcol-stats">
-              {% for r in pick_cluster.reasons %}<span class="why-chip why-{{ r.kind }}" title="{{ r.detail }}">{{ r.text }}</span>{% endfor %}
+              {% if pick_cluster.reasons %}<span class="firmcol-why" title="{% for r in pick_cluster.reasons %}{{ r.detail }}{% if not forloop.last %} {% endif %}{% endfor %}">{% for r in pick_cluster.reasons %}{% if forloop.first %}<strong>{{ r.text }}</strong>{% else %}<span class="fc-stat">{{ r.text }}</span>{% endif %}{% endfor %}</span>{% endif %}
             </div>
             {% comment %}The early-cycle student's reframe: their stored
             target cycle has ZERO live postings (that recruiting has not
