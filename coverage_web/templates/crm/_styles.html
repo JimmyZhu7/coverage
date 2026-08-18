@@ -602,6 +602,17 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .gap-name { font-weight: var(--w-bold); font-size: var(--fs-s); line-height: 1.25;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden; }
+  /* The one thing that tells two TIED cards apart: same tier and same gap
+     state score identically on purpose (that is the formula being honest,
+     not a bug), so "No contacts · 0/2 advocates · exp 12" alone used to
+     repeat six times over. Open role count doesn't feed the score, but it
+     answers the different, real question "which of these do I open
+     first" — colours borrowed from `.pill.fc-open` below (not firm-card-
+     scoped, so this doesn't duplicate the palette), sized down to this
+     card's own rhythm the way `.firm-card-badges .pill` is sized for its
+     card just below. */
+  .gap-badges { display: flex; gap: var(--s1); margin: 1px 0; }
+  .gap-badges .pill { font-size: 10px; padding: 2px var(--s2); line-height: 1.5; }
   .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
   /* The one number worth showing without a hover: not the whole formula
      (tier weight × gap points + bonus — that still lives in the card's

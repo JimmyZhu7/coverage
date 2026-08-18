@@ -569,6 +569,16 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         firm = firms_by_id.get(g["firm_id"])
         g["slug"] = firm.slug if firm else ""
         g["lever"] = _pick_lever(by_firm_contacts.get(g["firm_id"], []))
+        # Same reuse `firm_card`'s own comment describes, in the other
+        # direction: `open_by_firm` is already computed above for the full
+        # 69-firm board, at zero extra cost to attach here too. It exists on
+        # the strip because the exposure score alone left every no-contact
+        # Tier 1 firm reading identically ("No contacts · 0/2 advocates ·
+        # exp 12", six times over) — real, but not a reason to open ONE of
+        # them before another. Open role count is: a Tier 1 firm hiring
+        # right now is a firm worth a contact TODAY, in a way the formula
+        # itself has no term for.
+        g["open"] = open_by_firm.get(g["firm_id"], 0)
 
     # --- Full contact cards ---------------------------------------------
     # Warmth sections, same four as every other scope — School used to

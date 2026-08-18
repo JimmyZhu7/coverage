@@ -27,8 +27,17 @@ TODAY = date(2026, 7, 25)
 
 def _gap_strip(body: str) -> str:
     """Just the Coverage Gaps section — the rest of the Network page also
-    names every firm, so a whole-body search proves nothing about ranking."""
-    start = body.index("Coverage Gaps")
+    names every firm, so a whole-body search proves nothing about ranking.
+
+    Anchored on the rendered `<h2>`, not the bare words "Coverage Gaps":
+    the page's own inlined `<style>` block (`crm/_styles.html`) has a CSS
+    comment naming the same section ("Coverage Gaps strip: where you are
+    least covered..."), earlier in the document than the real heading. A
+    bare `body.index("Coverage Gaps")` anchored there instead, which cost
+    every membership check (`"x" in gap_strip`) nothing — the CSS block was
+    just extra haystack — but silently broke the first assertion to COUNT
+    occurrences, since CSS text landed inside the slice too."""
+    start = body.index('<h2 class="strip-title">Coverage Gaps')
     return body[start : body.index("Contacts Needing Action", start)]
 
 
@@ -337,6 +346,40 @@ def test_the_gap_strip_shows_its_score_without_a_hover(client):
     assert "exp 12" in gap_block
     # The full breakdown still rides along in the hover tooltip.
     assert "= exposure 12" in gap_block
+
+
+@pytest.mark.django_db
+def test_tied_gap_cards_carry_a_real_open_role_count_to_tell_them_apart(client):
+    """Two Tier 1 firms with no contacts are genuinely TIED on exposure (both
+    score 12) — the redesign's whole point is that a real, non-formula signal
+    still tells them apart on the card: which one is actually hiring right
+    now. Reuses `open_by_firm`, already computed for the full board, so this
+    costs the strip nothing extra."""
+    from directory.models import Opportunity
+
+    user = User.objects.create_user(email="open@example.com", password="x")
+    hiring = Firm.objects.create(slug="hiring-co", name="Hiring Co")
+    quiet = Firm.objects.create(slug="quiet-co", name="Quiet Co")
+    UserFirm.all_objects.create(user=user, firm=hiring, tier=1)
+    UserFirm.all_objects.create(user=user, firm=quiet, tier=1)
+    for n in range(3):
+        Opportunity.objects.create(
+            firm=hiring, url=f"https://x/{n}", title=f"Summer Analyst {n}",
+            bucket="internship", status="open",
+        )
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+    gap_block = _gap_strip(body)
+
+    # Both tied at exposure 12 (Tier 1 × no_contacts = 3 × 4)...
+    assert gap_block.count("exp 12") == 2
+    # ...but only the firm that's actually hiring gets the badge, and it
+    # names the real count, not a guess.
+    hiring_card = gap_block[gap_block.index("Hiring Co"):gap_block.index("Quiet Co")]
+    quiet_card = gap_block[gap_block.index("Quiet Co"):]
+    assert '<span class="pill fc-open">3 Open</span>' in hiring_card
+    assert "pill fc-open" not in quiet_card
 
 
 # ---------------------------------------------------------------------------

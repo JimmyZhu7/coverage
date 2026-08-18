@@ -48,6 +48,21 @@
           </div>
           <div class="gap-name">{{ g.name|smart_title }}</div>
           {% comment %}
+          Same-tier, same-gap-state firms are genuinely TIED on the ranking
+          formula — that's honest, not a display bug — but tied cards used
+          to read as literally identical text ("No contacts · 0/2 advocates
+          · exp 12" six times over), which answers "how did the algorithm
+          rank these" without answering "which one do I actually open
+          first". Open role count is that second answer: it doesn't feed
+          the formula, but it's real, it varies firm to firm even among
+          ties, and it's the same `.pill.fc-open` badge the full board uses
+          below — one vocabulary for "this firm is hiring right now",
+          not a second one invented for this strip.
+          {% endcomment %}
+          {% if g.open %}
+            <div class="gap-badges"><span class="pill fc-open">{{ g.open }} Open</span></div>
+          {% endif %}
+          {% comment %}
           The state and the score share one line rather than two: the tier
           is already the border colour, so restating "T1 ×3" in a second
           sentence under the state line was the same fact printed three
