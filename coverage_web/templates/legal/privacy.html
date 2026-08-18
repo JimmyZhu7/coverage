@@ -1,5 +1,38 @@
 {% extends "base.html" %}
 
+{% comment %}
+================================================================================
+DRAFT. NOT REVIEWED BY A LAWYER.
+
+This page was written from the codebase, not from a template, so every factual
+claim in it traces to real code. That makes it accurate. It does not make it
+legally sufficient. Have a qualified attorney review this before Coverage holds
+data for any student other than the founder.
+
+PLACEHOLDERS TO FILL IN BEFORE THIS IS A REAL POLICY
+  [LEGAL ENTITY NAME]        the entity that actually operates Coverage
+  [REGISTERED ADDRESS]       its registered business address
+  [PRIVACY CONTACT EMAIL]    a monitored inbox for privacy requests
+  [JURISDICTION]             where the entity is established, for the
+                             "international transfers" section
+
+OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
+  - Effective date below says 19 August 2026. Update it on every publish.
+  - Breach notification: the stated 72-hour window is a commitment, not a
+    legal finding. Confirm it is one you can actually meet before shipping.
+  - Minimum age is stated as 16. Under-13 users would pull COPPA into scope
+    and under-16 in parts of the EU needs a guardian basis. Confirm 16 is the
+    number you want, and that signup actually enforces it (it does not today).
+  - Hosting region: render.yaml pins no `region:`, so the services land in
+    Render's default region. Confirm the real region in the Render dashboard
+    and correct "Where your data lives" if it is not the US.
+  - The export ZIP does not currently include Talk to Coverage conversations,
+    advisor memories, or calendar events. "Your rights" says so plainly rather
+    than overclaiming, but the honest fix is to add them to
+    accounts/services.py EXPORT_FILES.
+================================================================================
+{% endcomment %}
+
 {% block title %}Privacy · Coverage{% endblock %}
 
 {% block content %}
@@ -7,34 +40,98 @@
   <h1>Privacy</h1>
   <p class="lede">Exactly what Coverage stores, what it does with it, and what it never does.</p>
 
-  <h2>What we capture</h2>
-  <p>Coverage keeps a private record of your recruiting outreach so you don't have to. That record comes from three places, all of which you control:</p>
+  <p class="muted">Last updated 19 August 2026.</p>
+
+  <h2>The short version</h2>
   <ul>
-    <li><strong>Mail you choose to send us.</strong> When you BCC your capture address on an email, or forward a reply to it, we read that message (its headers and its body) to log the interaction against the right contact. That is the only mail we ever see. We do not connect to your inbox, and we cannot read anything you don't BCC or forward.</li>
-    <li><strong>Contacts you add or import.</strong> Names, emails, firms, roles, and your own notes and angles.</li>
-    <li><strong>What you do in the app.</strong> Which pages and actions you use, so we can tell whether the product is actually working. No email contents go into this.</li>
+    <li>Your CRM is yours. No other user can see it, and we do not sell it.</li>
+    <li>We share data with four kinds of company: the one that hosts the database, the one that signs you in, the one that answers when you use the AI advisor, and the ones that send mail and catch crashes. All four are named below.</li>
+    <li>You can export everything and delete everything yourself, right now, without asking us.</li>
   </ul>
 
+  <h2>Who runs Coverage</h2>
+  <p>Coverage is operated by [LEGAL ENTITY NAME], [REGISTERED ADDRESS]. For anything on this page, including a request about your data, write to [PRIVACY CONTACT EMAIL].</p>
+
+  <h2>What we collect</h2>
+  <p>Four buckets. Nothing outside them.</p>
+  <ul>
+    <li><strong>Your account.</strong> Email address, and either a password (stored only as a one-way hash, never in readable form) or the identity your sign-in provider hands us. Plus what you tell us about yourself in Settings: name, school, class year, recruiting cycle, target regions and tracks, work authorization, timezone, and an optional profile picture.</li>
+    <li><strong>Your CRM.</strong> Contacts (names, email addresses, firms, roles, your notes and angles), logged touches, tasks, target firms and the tier you gave each, roles you are tracking, interview dates, calendar events, chat debriefs, fit scores, and the CSVs you import.</li>
+    <li><strong>Your use of the product.</strong> Which pages and actions you use, as an event name and a small set of properties. This is how we tell whether the product actually works. No email bodies go into it.</li>
+    <li><strong>Your AI conversations, if you use them.</strong> If you use Talk to Coverage, the conversation is stored on your account so it is still there tomorrow, along with any facts the advisor was told to remember and any files you attached to a message.</li>
+  </ul>
+
+  <h2>Where mail comes in</h2>
+  <p>Coverage logs your recruiting mail only through a path you switch on yourself, and it is not on by default.</p>
+  <ul>
+    <li><strong>A Gmail account you connect.</strong> If Gmail Live is enabled on this deployment and you complete Google's consent screen, Coverage reads your Gmail with Google's read-only scope in order to log recruiting touches automatically. Be clear about what that means: we do read your mailbox. Read the next paragraph before you connect it.</li>
+  </ul>
+  <p>On the Gmail path we store a Google refresh token, encrypted at rest, plus the mailbox address and a position marker so we know where we last read. We do not store your messages. What lands in your CRM is the structured result: who the message was from, whether it was a reply or a bounce, any meeting time we found in a calendar invite, and a short piece of evidence text of up to 300 characters, which is normally the subject line or Gmail's own preview snippet. That evidence text is stored on the touch so you can see why Coverage logged what it logged.</p>
+  <p>You can disconnect Gmail at any time from Settings, which deletes the stored token. You can also revoke Coverage's access directly in your Google account at any time, and that revocation wins.</p>
+
   <h2>What we use it for</h2>
-  <p>One thing: running your own CRM for you, which means logging touches, moving a contact's warmth, and building your weekly list and fit scores. Your data works for you and no one else.</p>
+  <p>One thing: running your own CRM for you. Logging touches, moving a contact's warmth, building your weekly list and your fit scores, and answering you when you ask the advisor a question. Your data works for you and no one else.</p>
+  <p>We do not use your CRM to train any AI model, ours or anybody else's, and we do not authorise our providers to do so either.</p>
 
   <h2>What we never do</h2>
   <ul>
-    <li>We do not sell your data, and we don't share it with advertisers.</li>
-    <li>No other user can see your contacts, your touches, or who you're talking to. Ever. Your private data is scoped to your account at the database level.</li>
-    <li>The only thing your activity contributes to anyone else is an aggregate, anonymous count: whether mail to a firm's domain tends to bounce. That's a number, never an address, and it can't be traced back to you.</li>
-    <li>We don't put email bodies in our logs.</li>
+    <li>We do not sell your data, and we do not share it with advertisers or data brokers.</li>
+    <li>No other user can see your contacts, your touches, or who you are talking to. Ever. Private data is scoped to your account at the database level: every private table carries your user id, and querying one without a tenant scope raises an error rather than returning somebody else's rows.</li>
+    <li>The only thing your activity contributes to anyone else is an aggregate, anonymous count: whether mail to a firm's domain tends to bounce. That is a number, never an address, and it cannot be traced back to you.</li>
+    <li>We do not put email bodies in our logs.</li>
+    <li>We do not run third-party advertising or analytics scripts. Coverage loads no code from anyone else's servers.</li>
   </ul>
 
+  <h2>Who we share data with</h2>
+  <p>These are the only companies that touch your data, and only for the job named. There is no other list.</p>
+  <ul>
+    <li><strong>Render</strong> hosts the app and the Postgres database. Everything you store in Coverage sits there.</li>
+    <li><strong>Anthropic</strong> answers when an AI feature runs. This only happens when you set one off: sending a message in Talk to Coverage, generating a coffee-chat brief, or generating a relationship summary on a contact. What leaves the app for that request is the relevant slice of your own CRM, which can include contact names, firms, roles, your private notes, and your logged interactions. Contact email addresses are deliberately excluded: the advisor is told only whether a contact has an email on file, never what it is. If you attach a file to an advisor message, that file goes too. If no Anthropic key is configured on the deployment, every AI feature is dark and nothing is sent.</li>
+    <li><strong>Google</strong> receives a sign-in request if you sign in with Google, and serves your mail if you connect Gmail. The sign-in path asks for identity only and can never read mail. Gmail Live is a separate, second consent with its own credentials, and turning it down does not affect your ability to log in.</li>
+    <li><strong>Your other sign-in provider,</strong> if the deployment offers Apple, Microsoft or LinkedIn and you choose one. Same identity-only scopes, same rule: no mailbox access.</li>
+    <li><strong>An email provider,</strong> when one is configured, to deliver transactional mail such as password resets and deadline digests. It sees the address the mail is going to and what is in that mail.</li>
+    <li><strong>A push service,</strong> if you turn on deadline alerts. Your browser's own push endpoint delivers the notification.</li>
+    <li><strong>Sentry,</strong> if error monitoring is configured on the deployment, to report crashes. It is configured not to send personal information with those reports.</li>
+  </ul>
+  <p>We may also disclose data where the law actually requires it, or to protect someone's safety. If that ever happens and we are permitted to tell you, we will.</p>
+
+  <h2>Cookies and sessions</h2>
+  <p>Coverage sets two cookies. One keeps you signed in. One carries the token that stops other sites forging requests as you. Both are marked secure on the live site. That is the entire list. No advertising cookies, no tracking pixels, no third-party cookies, which is also why you are not reading a consent banner right now.</p>
+
   <h2>Retention</h2>
-  <p>Raw captured email (the original message) is kept for at most 30 days, then discarded. The structured result (the contact and the logged touch, which is your CRM) stays until you delete it.</p>
+  <p>Your CRM stays until you delete it, either row by row or by deleting your account. Nothing expires on its own while your account is open.</p>
+  <p>On the Gmail path we store no messages at all, only the structured result described above.</p>
+  <p>When you delete your account, deletion is immediate and is a hard delete, not a flag. See below.</p>
 
   <h2>Security</h2>
-  <p>Traffic is encrypted in transit (TLS) and data is encrypted at rest. Your capture address uses an unguessable random token, so it can't be discovered by trying variations of your name.</p>
+  <p>Traffic is encrypted in transit with TLS, and HTTPS is forced on the live site. Passwords are stored as one-way hashes. A connected Gmail refresh token is encrypted at rest with a key held outside the database. Tenant isolation is enforced in the data layer rather than by convention, and is covered by tests.</p>
+  <p>No system is perfectly secure, and we are not going to pretend otherwise. We do not guarantee that Coverage cannot be breached. We do commit to the paragraph below if it happens.</p>
 
-  <h2>Your data is portable, and deletion is yours to run</h2>
-  <p>You can <a href="{% url 'accounts:export' %}">export everything</a> as CSV at any time: one ZIP, one file per table, your contacts (archived ones flagged, not dropped), touches, target firms and tiers, tracked applications and interview dates, tasks, chat debriefs, capture events, fit scores, imports, your own usage events, and your profile row. The export page lists every file and names the three things it leaves out: your password (we hold only a one-way hash), the raw original of captured email (discarded within 30 days, see Retention above), and shared directory data, which isn't yours.</p>
-  <p>You can also <a href="{% url 'accounts:delete' %}">delete your account and all of its data</a> yourself, immediately, with no email to support and no waiting period.</p>
+  <h2>If there is a breach</h2>
+  <p>If personal data is exposed in a way likely to put you at risk, we will tell affected users directly, by email, without undue delay and in any case within 72 hours of confirming it, and we will notify any regulator the law requires us to notify. The notice will say what happened, what data was involved, and what you should do. We will not wait until we have a complete story to tell you there is a problem.</p>
+
+  <h2>Your rights</h2>
+  <p>You do not have to file a request to exercise most of these. The tools are in the product.</p>
+  <ul>
+    <li><strong>Access and portability.</strong> <a href="{% url 'accounts:export' %}">Export everything</a> as one ZIP of CSVs, one file per table. The export page lists every file it contains and names what it leaves out, so you can check the claim rather than trust it. Two things are not in the ZIP today: your Talk to Coverage conversations and your calendar events. Ask us and we will send them to you.</li>
+    <li><strong>Correction.</strong> Every field you can see, you can edit, in Settings or on the record itself.</li>
+    <li><strong>Deletion.</strong> <a href="{% url 'accounts:delete' %}">Delete your account and all of its data</a> yourself, immediately. No email to support, no waiting period, no cooling-off window during which we quietly keep it.</li>
+    <li><strong>Objection and restriction.</strong> Write to [PRIVACY CONTACT EMAIL]. If you would rather not use a feature, every optional data flow on this page has an off switch, and the off switch is the default.</li>
+  </ul>
+  <p>If you are in the EU, the UK, or California, you also have these rights under your own law, including the right to complain to your data protection authority and, in California, the right not to be discriminated against for exercising them. We do not sell or share personal information as those laws define it. We are describing the rights we honour, not claiming a certification we have not been through.</p>
+  <p>We answer rights requests within 30 days. We will not charge you for one.</p>
+
+  <h2>Age</h2>
+  <p>Coverage is built for university students and is not intended for children. You need to be at least 16 to use it. We do not knowingly collect data from anyone under 16, and if we learn we have, we delete the account and its data rather than asking for proof.</p>
+
+  <h2>Where your data lives</h2>
+  <p>Coverage runs on Render, and the database and application servers sit in Render's United States region. If you are outside the United States, using Coverage means your data is processed there. Our AI provider and sign-in providers may also process requests outside [JURISDICTION]. Where the law requires a transfer safeguard, we rely on our providers' standard contractual clauses.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>We may update this page as the product changes. The date at the top is the version you are reading. If a change materially affects what we collect or who we send it to, we will tell you in the app or by email before it takes effect, rather than changing the page and hoping you do not look. Continuing to use Coverage after that means you accept the new version.</p>
+
+  <h2>Contact</h2>
+  <p>Questions, requests, or something on this page that does not match what you see the product doing: [PRIVACY CONTACT EMAIL]. The last one is the most useful thing you can send us.</p>
 
   <p class="muted"><a href="{% url 'accounts:terms' %}">Terms</a></p>
 </div>

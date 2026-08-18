@@ -1,29 +1,148 @@
 {% extends "base.html" %}
 
+{% comment %}
+================================================================================
+DRAFT. NOT REVIEWED BY A LAWYER.
+
+Written from the codebase and from ordinary consumer-SaaS practice, not from a
+template. Have a qualified attorney review it before Coverage is used by any
+student other than the founder. The liability, indemnity and dispute-resolution
+sections in particular are the ones a lawyer will want to rewrite for the
+actual entity and jurisdiction.
+
+PLACEHOLDERS TO FILL IN BEFORE THESE ARE REAL TERMS
+  [LEGAL ENTITY NAME]        the entity that actually operates Coverage
+  [REGISTERED ADDRESS]       its registered business address
+  [CONTACT EMAIL]            a monitored inbox for notices about these terms
+  [Governing law / jurisdiction -- TODO: confirm with counsel]
+                             appears in "Governing law and disputes". Do not
+                             guess this. It drives the arbitration section, the
+                             consumer-law carve-outs, and whether the liability
+                             cap below is even enforceable.
+  [ARBITRATION VENUE / FORUM -- TODO: confirm with counsel]
+                             same section. Only fill in if counsel actually
+                             wants arbitration; small-claims-only is a
+                             legitimate alternative for a product this size.
+
+OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
+  - Effective date says 19 August 2026. Update it on every publish.
+  - The liability cap is written as the greater of fees paid in the last
+    twelve months and US$100. Confirm the currency and the number, and note
+    that a zero-revenue free product makes "fees paid" a cap of US$100 in
+    practice.
+  - Warranty disclaimer and liability cap are set out in their own sections
+    rather than in capital letters. Some jurisdictions require a disclaimer to
+    be conspicuous. Counsel may want these capitalised or boxed.
+  - Minimum age is stated as 16, matching the Privacy page. Signup does not
+    enforce it today. Either add an age gate or accept that this is a
+    representation, not a control.
+  - Paid plans: the pricing page shows Pro/Team/Enterprise as TBD and no
+    payment processing exists in the codebase. The "Plans and payment" section
+    below says the product is free today. Rewrite it the moment billing ships.
+  - Scraped opportunity data: the IP section claims the compiled board as
+    Coverage's. That claim is normal for a database of facts, but the
+    underlying postings belong to the firms. Worth a look from counsel if the
+    board ever becomes a paid product.
+================================================================================
+{% endcomment %}
+
 {% block title %}Terms · Coverage{% endblock %}
 
 {% block content %}
 <div class="page page--narrow legal">
   <h1>Terms</h1>
-  <p class="lede">The short, honest version.</p>
+  <p class="lede">The short, honest version. It is longer than it used to be, because some of this has to be said properly.</p>
+
+  <p class="muted">Last updated 19 August 2026. These terms are an agreement between you and [LEGAL ENTITY NAME], [REGISTERED ADDRESS], which operates Coverage. Using Coverage means you accept them.</p>
 
   <h2>What Coverage is</h2>
-  <p>Coverage is two things: a free, shared feed of recruiting opportunities and deadlines that we scrape and verify centrally, and a private CRM for tracking your own outreach. The feed is a convenience. We work to keep it accurate and we label how confident and how fresh each date is, but you're responsible for confirming a deadline before you rely on it.</p>
+  <p>Coverage is two things. A free, shared feed of recruiting opportunities and deadlines that we gather and verify centrally. And a private CRM for tracking your own outreach, with optional AI features layered on top.</p>
+  <p>The feed is a convenience, not a system of record. We work to keep it accurate and we label how confident and how fresh each date is, but you are responsible for confirming a deadline at the source before you rely on it. A missed application is your loss and we cannot make it good.</p>
+
+  <h2>Who can use it</h2>
+  <p>You need to be at least 16, and able to enter a binding agreement where you live. Coverage is built for university students and people recruiting into finance and adjacent industries. If you are using it on behalf of a school or an employer, you are confirming you have the authority to accept these terms for them.</p>
 
   <h2>Your account</h2>
-  <p>You sign in with a social provider, or an email address and password. Keep your login to yourself; you're responsible for activity under your account. Don't upload data you don't have the right to hold, and don't use Coverage to harass anyone or to break the law.</p>
+  <p>Sign in with a supported provider, or with an email address and a password. Keep your login to yourself. You are responsible for what happens under your account, including anything someone else does with your credentials. Tell us at [CONTACT EMAIL] if you think your account has been taken.</p>
+  <p>Give us a real email address and keep it current. It is how we reach you about your account, and it is how you get back in if you lose your password.</p>
 
-  <h2>Your data belongs to you</h2>
-  <p>The contacts and touches you put into Coverage are yours. You can <a href="{% url 'accounts:export' %}">export them</a> whenever you like, and you can <a href="{% url 'accounts:delete' %}">delete your account and everything in it</a> yourself, immediately. We don't hold your data hostage.</p>
+  <h2>What you may not do</h2>
+  <p>Specifically, and not as a general vibe:</p>
+  <ul>
+    <li>Do not upload personal data about other people that you have no right to hold. Your own outreach and the replies to it are fine. A scraped list of somebody's alumni database is not.</li>
+    <li>Do not use Coverage to send, organise, or track harassment, spam, bulk unsolicited mail, or anything unlawful.</li>
+    <li>Do not scrape, crawl, or bulk-extract the opportunity feed, or use automated means to pull data out of Coverage. One student's own export is not bulk extraction. A script walking the board is.</li>
+    <li>Do not resell, redistribute, or republish the opportunity data as a product of your own.</li>
+    <li>Do not try to reach another user's data, probe for vulnerabilities, or work around rate limits, plan limits, or access controls. If you find a security hole, tell us at [CONTACT EMAIL] and we will thank you properly.</li>
+    <li>Do not impersonate anyone, including us, and do not misrepresent who you are to a contact you found through Coverage.</li>
+    <li>Do not reverse engineer the software, or use it to build a competing product.</li>
+    <li>Do not upload malware, or content that infringes someone else's rights.</li>
+  </ul>
+  <p>If you break these rules we may suspend or close your account. For anything that puts other users or the service at risk, we may do it without warning.</p>
 
-  <h2>What we ask of you around capture</h2>
-  <p>The capture address logs the mail you BCC or forward to it. Only send us mail you're entitled to: your own outreach and the replies to it. See the <a href="{% url 'accounts:privacy' %}">Privacy page</a> for exactly what we do with it.</p>
+  <h2>Mail capture</h2>
+  <p>Coverage logs mail only through a path you switch on. Connecting a Gmail account lets Coverage read that mailbox to log touches automatically, under a separate consent you can revoke at any time in your Google account.</p>
+  <p>Only connect a mailbox you are entitled to connect: your own outreach and the replies to it. The <a href="{% url 'accounts:privacy' %}">Privacy page</a> sets out exactly what we do with what we read.</p>
 
-  <h2>No warranty, and limits</h2>
-  <p>Coverage is provided as-is, without warranties. Dates can be wrong; connectors can break. We do our best and we flag staleness honestly, but we're not liable for a missed deadline or an outreach decision you made using the app. Confirm anything that matters at the source.</p>
+  <h2>Who owns what</h2>
+  <p><strong>Your data is yours.</strong> The contacts, notes, touches, tasks, debriefs and conversations you put into Coverage belong to you. We claim no ownership of them. You give us the narrow licence we need to actually run the product: to store your data, process it, back it up, and send the relevant parts to the providers named in the <a href="{% url 'accounts:privacy' %}">Privacy page</a> when you use a feature that needs them. That licence exists to operate Coverage for you and for nothing else, and it ends when your data is deleted.</p>
+  <p><strong>Coverage is ours.</strong> The software, the design, the name, the logo, and the compiled opportunity board, including how it is structured, classified, verified, scored and kept fresh, belong to [LEGAL ENTITY NAME] or our licensors. The underlying job postings belong to the firms that published them. What we claim is the compilation and everything we built around it, not the facts themselves. You get a personal, non-exclusive, non-transferable, revocable licence to use Coverage for your own recruiting. You do not get to copy the board, license it on, or take it with you.</p>
+  <p><strong>AI output.</strong> What an AI feature writes for you is yours to use. We make no claim to it. Be aware that models can produce similar text for different people, so we cannot promise it is unique to you.</p>
+  <p><strong>Feedback.</strong> If you send us an idea for the product, we can use it without owing you anything. Do not send us anything confidential as feedback.</p>
 
-  <h2>Changes</h2>
-  <p>We may update these terms as the product grows. If we change something that materially affects you, we'll say so rather than bury it.</p>
+  <h2>AI features</h2>
+  <p>Talk to Coverage, coffee-chat briefs, and contact summaries are drafted by a language model. Treat them as a first draft written by something that does not know your situation as well as you do. They can be confidently wrong about a date, a firm, a person, or a next step. Check anything that matters before you act on it.</p>
+  <p>The advisor can also change your CRM when you ask it to, for example logging a touch or adding a contact. Those writes are labelled as coming from the advisor so you can always tell them apart from your own. You are still responsible for what your CRM says.</p>
+  <p>Nothing Coverage produces is career, legal, immigration, visa, or financial advice. Work authorization in particular is a question for your university's international office or a qualified lawyer, not for us.</p>
+
+  <h2>Plans and payment</h2>
+  <p>Coverage is free today, and everything described on the pricing page as free stays free for what is listed there. Paid plans are not live. There is no billing in the product and we take no payment details.</p>
+  <p>If that changes, we will publish the price and the terms before anything is charged, and we will not move a feature you already rely on behind a paywall without telling you first.</p>
+
+  <h2>Availability and changes to the service</h2>
+  <p>We may change, add, or remove features, and we may take the service down for maintenance. We will give notice of a material change where we reasonably can. Data connectors break, boards move, firms redesign their career sites. We do not promise the service will be uninterrupted, and we do not promise any particular feature will exist forever.</p>
+  <p>If we shut Coverage down entirely, we will give you reasonable notice and a window to export your data before it goes.</p>
+
+  <h2>No warranty</h2>
+  <p>Coverage is provided as-is and as-available, without warranty of any kind. To the fullest extent the law allows, we disclaim all warranties, express or implied, including implied warranties of merchantability, fitness for a particular purpose, title, accuracy, and non-infringement.</p>
+  <p>In plain terms: we do not warrant that the opportunity data is accurate, complete, or current. We do not warrant that a deadline shown in Coverage is the real deadline. We do not warrant that mail capture will log every message, that AI output is correct, or that the service will be free of errors or interruptions. Confirm anything that matters at the source.</p>
+  <p>Some jurisdictions do not allow the exclusion of certain warranties, so parts of this section may not apply to you.</p>
+
+  <h2>Limitation of liability</h2>
+  <p>To the fullest extent the law allows, [LEGAL ENTITY NAME] is not liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or for lost profits, lost opportunities, lost offers, lost data, or reputational harm, arising out of or relating to your use of Coverage. This applies whether the claim is in contract, tort, or anything else, and whether or not we were told the damage was possible.</p>
+  <p>Our total liability for all claims relating to Coverage is capped at the greater of the amount you paid us for Coverage in the twelve months before the claim arose, and US$100.</p>
+  <p>Nothing here limits liability that cannot lawfully be limited, including liability for death or personal injury caused by negligence, or for fraud or fraudulent misrepresentation. Some jurisdictions do not allow some of these limits, so parts of this section may not apply to you.</p>
+  <p>This section and the one above it allocate risk between us, and they are part of why Coverage can be offered for free.</p>
+
+  <h2>Indemnity</h2>
+  <p>You agree to indemnify and hold harmless [LEGAL ENTITY NAME] and the people who work on it against claims, damages, losses, and reasonable legal costs arising from your breach of these terms, your misuse of Coverage, data you uploaded that you had no right to hold, or your infringement of somebody else's rights. We will tell you promptly about any such claim and you get to control the defence, provided you do not settle in a way that admits fault on our behalf or imposes an obligation on us without our agreement.</p>
+
+  <h2>Ending it</h2>
+  <p><strong>You can leave whenever you like.</strong> <a href="{% url 'accounts:export' %}">Export everything</a> first if you want it, then <a href="{% url 'accounts:delete' %}">delete your account and everything in it</a> yourself, immediately. Deletion is a hard delete of your private data, not a flag on a row we keep. We do not hold your data hostage and there is no retention period you have to sit through.</p>
+  <p><strong>We can close an account too.</strong> We may suspend or terminate your access if you break these terms, if we are required to by law, or if keeping the account open puts other users or the service at risk. Where we reasonably can, we will tell you first and give you a chance to export. Where the reason is serious abuse or a legal requirement, we may act immediately.</p>
+  <p>If we close your account for a reason other than serious abuse, you get at least 30 days to export before your data is deleted. If we close it for serious abuse, we may delete immediately. Either way, we do not keep and use the data of an account we closed. Backups roll off on their normal cycle.</p>
+  <p>Sections that by their nature should survive the end of this agreement do: ownership, no warranty, limitation of liability, indemnity, and governing law.</p>
+
+  <h2>Changes to these terms</h2>
+  <p>We may update these terms as the product grows. The date at the top tells you which version you are reading. If a change materially affects you, we will say so in the app or by email before it takes effect, rather than bury it. If you keep using Coverage after that, you accept the new version. If you do not, delete your account, and you owe us nothing.</p>
+
+  <h2>Governing law and disputes</h2>
+  <p>These terms are governed by [Governing law / jurisdiction -- TODO: confirm with counsel], without regard to conflict-of-laws rules. Any dispute will be brought in [ARBITRATION VENUE / FORUM -- TODO: confirm with counsel], and you and we each submit to that forum.</p>
+  <p>If you are a consumer, nothing here takes away the protection of the mandatory consumer law of the country you live in, or your right to bring a claim in your local courts where that law gives you one.</p>
+  <p>Before either of us files anything, write to [CONTACT EMAIL] and describe the problem. Most things that look like a dispute are a bug or a misunderstanding, and we would rather fix it than argue about it.</p>
+
+  <h2>The rest</h2>
+  <ul>
+    <li><strong>Severability.</strong> If a court finds part of these terms unenforceable, that part is trimmed to the minimum that works, or removed, and everything else stays in force.</li>
+    <li><strong>No waiver.</strong> If we do not enforce something straight away, we have not given up the right to enforce it later.</li>
+    <li><strong>Assignment.</strong> You may not transfer your account or these terms to someone else. We may transfer them to a successor if Coverage is sold or reorganised, and we will tell you if that happens.</li>
+    <li><strong>No agency.</strong> These terms do not make either of us the other's partner, employee, or agent.</li>
+    <li><strong>Entire agreement.</strong> These terms and the <a href="{% url 'accounts:privacy' %}">Privacy page</a> are the whole agreement between you and us about Coverage, and they replace anything said earlier.</li>
+    <li><strong>Notices.</strong> We reach you at the email on your account. You reach us at [CONTACT EMAIL].</li>
+  </ul>
+
+  <h2>Contact</h2>
+  <p>Anything about these terms, including the parts you think are unfair: [CONTACT EMAIL].</p>
 
   <p class="muted"><a href="{% url 'accounts:privacy' %}">Privacy</a></p>
 </div>
