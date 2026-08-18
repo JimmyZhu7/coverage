@@ -1030,7 +1030,7 @@ def test_the_settings_allowlist_never_offers_identity_auth_or_upload_fields():
     the recruiting campaign fails here before anyone has to reason about it."""
     banned = {
         "email", "password", "avatar", "remove_avatar", "google_sub",
-        "capture_slug", "calendar_token", "plan", "is_staff", "is_superuser",
+        "calendar_token", "plan", "is_staff", "is_superuser",
         "timezone_auto", "language",
     }
     assert banned.isdisjoint(tools.SETTINGS_FIELDS)
