@@ -695,12 +695,25 @@ def _new_at_your_firms(user, limit=5) -> dict:
     # list is a copy, not two roles. Folded before counting too, so "321"
     # isn't itself inflated by the same duplicates the list then hides.
     rows, _folded = fold_duplicates(qs)
-    return {
-        "count": len(rows),
-        "roles": [{"title": o.title, "firm": o.firm.name, "id": o.id,
-                   "url": o.url, "slug": o.firm.slug, "location": o.location}
-                  for o in rows[:limit]],
-    }
+
+    # ONE PER FIRM in the displayed list — `count` stays the true total.
+    # A firm's own campus recruiting team routinely posts a whole batch of
+    # reqs the same week (CICC alone posted three in one run), and without
+    # this the batch fills every slot the card has, reading as "CICC, CICC,
+    # CICC" instead of naming the breadth of what's actually moving. Same
+    # fix as `assistant.situation._new_role_events` for the identical trap.
+    seen_firms: set[int] = set()
+    roles = []
+    for o in rows:
+        if o.firm_id in seen_firms:
+            continue
+        seen_firms.add(o.firm_id)
+        roles.append({"title": o.title, "firm": o.firm.name, "id": o.id,
+                      "url": o.url, "slug": o.firm.slug, "location": o.location})
+        if len(roles) >= limit:
+            break
+
+    return {"count": len(rows), "roles": roles}
 
 
 def _next_deadlines(user, today, limit=4) -> list[dict]:

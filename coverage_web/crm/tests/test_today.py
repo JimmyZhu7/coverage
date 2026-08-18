@@ -1341,15 +1341,19 @@ def test_debrief_and_today_agree_on_days_ago_for_the_same_chat():
 
 # ---------------------------------------------------------------------------
 # "New at your firms" must not let two genuinely different postings read as
-# one exact duplicate.
+# one exact duplicate, and must not let one firm's own posting batch crowd
+# every other firm's news out of the widget.
 # ---------------------------------------------------------------------------
-def test_new_at_firms_carries_location_so_same_title_rows_are_told_apart():
+def test_new_at_firms_folds_duplicates_but_not_two_real_distinct_postings():
     """Reproduces the live bug: Goldman Sachs posted the same campus title
     ("Internal Audit — Summer Analyst") in both London and Birmingham on the
-    same day. Both are real, distinct rows with distinct URLs, but the widget
-    built its row dict from `o.title`/`o.firm.name` only, so the two entries
-    rendered byte-for-byte identical text with nothing to tell them apart.
-    `o.location` was sitting right there on the queryset, unused.
+    same day. Both are real, distinct rows with distinct URLs, and
+    `fold_duplicates` must not collapse them into one on title alone — the
+    widget's `count` (328-style total) would silently undercount every time
+    a firm reused a title across offices. The ONE row this firm gets in the
+    capped `roles` list (see the per-firm cap test below) must also carry a
+    real, non-blank location — `o.location` was sitting right there on the
+    queryset, unused, when this bug first shipped.
     """
     from directory.models import Opportunity
 
@@ -1376,43 +1380,57 @@ def test_new_at_firms_carries_location_so_same_title_rows_are_told_apart():
         status="open", location="Birmingham",
         url="https://gs.com/careers/181880_gs_campus")
 
-    roles = _cockpit_context(user)["new_at_firms"]["roles"]
-    same_title = [r for r in roles if r["title"] == "Internal Audit — Summer Analyst"]
-    assert len(same_title) == 2, "both distinct postings must reach the widget"
-    assert {r["location"] for r in same_title} == {"London", "Birmingham"}, (
-        "the two rows must carry their real, DIFFERENT locations, not go "
-        "unlabeled and read as one duplicate"
+    result = _cockpit_context(user)["new_at_firms"]
+    assert result["count"] == 2, "two real distinct postings must not fold into one"
+    assert len(result["roles"]) == 1, "one firm still gets one slot in the capped list"
+    assert result["roles"][0]["location"] in {"London", "Birmingham"}, (
+        "the surfaced row must carry its real location, not go unlabeled"
     )
 
 
-def test_new_at_firms_widget_renders_both_locations_in_the_page(client):
-    """Same fixture, through the actual template: `_cockpit.html` must print
-    both cities, not just carry them in the context dict."""
+def test_new_at_firms_widget_caps_at_one_role_per_firm():
+    """Measured live: CICC posted three campus roles in one week and all
+    three of this widget's slots filled with the same firm, crowding out
+    Citi and RBC's own news. Same fix as
+    `assistant.situation._new_role_events` for the identical trap — this
+    widget's job is naming WHICH firms have news, not enumerating one
+    firm's whole batch; the full batch is still one click away via 'see
+    all'."""
     from directory.models import Opportunity
 
     user = _user(weekly_touch_goal=14)
-    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    UserFirm.all_objects.create(user=user, firm=firm)
+    busy = Firm.objects.create(slug="cicc", name="CICC")
+    quiet_a = Firm.objects.create(slug="citi", name="Citi")
+    quiet_b = Firm.objects.create(slug="rbc", name="RBC Capital Markets")
+    for firm in (busy, quiet_a, quiet_b):
+        UserFirm.all_objects.create(user=user, firm=firm)
+        anchor = Opportunity.objects.create(
+            firm=firm, title=f"Older Anchor Role at {firm.name}", bucket="internship",
+            status="open", location="New York",
+            url=f"https://example.com/{firm.slug}/anchor")
+        Opportunity.objects.filter(pk=anchor.pk).update(
+            first_seen=timezone.now() - timedelta(days=30))
 
-    anchor = Opportunity.objects.create(
-        firm=firm, title="Older Anchor Role", bucket="internship",
-        status="open", location="New York",
-        url="https://gs.com/careers/anchor")
-    Opportunity.objects.filter(pk=anchor.pk).update(
-        first_seen=timezone.now() - timedelta(days=30))
-
+    for i in range(3):
+        Opportunity.objects.create(
+            firm=busy, title=f"CICC Role {i}", bucket="internship",
+            status="open", location="Shanghai",
+            url=f"https://example.com/cicc/new-{i}")
     Opportunity.objects.create(
-        firm=firm, title="Internal Audit — Summer Analyst", bucket="internship",
-        status="open", location="London",
-        url="https://gs.com/careers/181882_gs_campus")
+        firm=quiet_a, title="Citi Role", bucket="internship",
+        status="open", location="Mumbai",
+        url="https://example.com/citi/new")
     Opportunity.objects.create(
-        firm=firm, title="Internal Audit — Summer Analyst", bucket="internship",
-        status="open", location="Birmingham",
-        url="https://gs.com/careers/181880_gs_campus")
+        firm=quiet_b, title="RBC Role", bucket="internship",
+        status="open", location="Toronto",
+        url="https://example.com/rbc/new")
 
-    body = _login_and_get(client, user)
-    assert "London" in body
-    assert "Birmingham" in body
+    roles = _cockpit_context(user)["new_at_firms"]["roles"]
+    firms_reported = [r["firm"] for r in roles]
+    assert firms_reported.count("CICC") == 1, "one firm's batch must not eat every slot"
+    assert "Citi" in firms_reported
+    assert "RBC Capital Markets" in firms_reported
+    assert len(firms_reported) == len(set(firms_reported)), "every firm reported at most once"
 
 
 # ---------------------------------------------------------------------------
