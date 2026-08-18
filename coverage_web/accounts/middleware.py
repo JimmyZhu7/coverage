@@ -31,36 +31,45 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.utils import timezone
 
 
+def activate_for_user(user) -> None:
+    """Activate `user.timezone` on the CURRENT THREAD, or fall back to the
+    project default. The one piece of zone-resolution logic `TimezoneMiddleware`
+    and `assistant.views.stream` both need — see the latter for why a second
+    caller exists at all.
+
+    Deactivating (rather than activating UTC explicitly) on the unset/bad-zone
+    path is deliberate: it returns Django to `settings.TIME_ZONE`, so if the
+    project default ever moves, the fallback follows it instead of being
+    pinned to a second, stale copy of the same decision. The stored value is
+    validated on write (`ProfileForm.clean_timezone`), but validated-on-write
+    is not the same as trustworthy-on-read: a value could predate the
+    validator, arrive from a fixture or the admin, or name a zone the host's
+    tzdata no longer carries. A bad one falls back to the project default
+    rather than 500-ing every page/turn the user touches.
+    """
+    name = ""
+    if user is not None and getattr(user, "is_authenticated", False):
+        name = (getattr(user, "timezone", "") or "").strip()
+    if name:
+        try:
+            timezone.activate(ZoneInfo(name))
+            return
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    timezone.deactivate()
+
+
 class TimezoneMiddleware:
     """Activate `request.user.timezone` for the duration of the request.
 
-    Deactivating (rather than activating UTC explicitly) on the unset path is
-    deliberate: it returns Django to `settings.TIME_ZONE`, so if the project
-    default ever moves the unset case follows it instead of being pinned to a
-    second, stale copy of the same decision.
-
-    The stored value is validated on write (`ProfileForm.clean_timezone`), but
-    validated-on-write is not the same as trustworthy-on-read: a value could
-    predate the validator, arrive from a fixture or the admin, or name a zone
-    the host's tzdata no longer carries. A bad one falls back to the project
-    default rather than 500-ing every page the user visits.
+    See `activate_for_user` for the resolution logic itself.
     """
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        name = ""
-        user = getattr(request, "user", None)
-        if user is not None and user.is_authenticated:
-            name = (getattr(user, "timezone", "") or "").strip()
-        if name:
-            try:
-                timezone.activate(ZoneInfo(name))
-            except (ZoneInfoNotFoundError, ValueError):
-                timezone.deactivate()
-        else:
-            timezone.deactivate()
+        activate_for_user(getattr(request, "user", None))
         try:
             return self.get_response(request)
         finally:

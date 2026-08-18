@@ -20,13 +20,14 @@ before the pk lookup. Every read AND write tool is tested for exactly that.
 
 WHAT THE MODEL MAY DO
 ---------------------
-Reads are free. Writes are exactly three — `log_touch`, `track_opportunity`
-(`saved`/`clear` only), and `remember` — chosen because each is cheap,
-reversible in one click somewhere the student already knows (the CRM page
-itself, or the Talk page's own memory list), and none of them sends
-anything to another human. Nothing here emails anyone, edits a note,
-archives a contact, or changes a setting. That is a product decision, not
-an oversight: an advisor that can quietly rewrite your CRM is a different,
+Reads are free. Writes are exactly four — `log_touch`, `track_opportunity`
+(`saved`/`clear` only), `remember`, and `add_calendar_event` — chosen
+because each is cheap, reversible in one click somewhere the student
+already knows (the CRM page itself, the Calendar page's own delete button,
+or the Talk page's own memory list), and none of them sends anything to
+another human. Nothing here emails anyone, edits a note, archives a
+contact, or changes a setting. That is a product decision, not an
+oversight: an advisor that can quietly rewrite your CRM is a different,
 scarier product, and the confirm-card machinery it would need is not built.
 When the student
 asks for something outside these two, the system prompt tells the model to
@@ -55,7 +56,8 @@ not a reversible-feeling mistake to a student, even though the row itself is.
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as dt_time
 
 from django.db import IntegrityError
 from django.utils import timezone
@@ -332,11 +334,47 @@ TOOL_SCHEMAS: list[dict] = [
             ["fact"],
         ),
     },
+    {
+        "name": "add_calendar_event",
+        "description": (
+            "Put one thing on the student's calendar — a coffee chat, a "
+            "superday, a flight, anything that has a date. Leave start_time "
+            "out for an all-day entry ('Superday on the 14th') rather than "
+            "inventing a clock time; give both start_time and end_time when "
+            "they state a range. Only call this when the student has "
+            "actually asked you to add or schedule something — never to "
+            "record a chat that already happened (that is log_touch) and "
+            "never on a guess about when something is."
+        ),
+        "strict": True,
+        "input_schema": _schema(
+            {
+                "title": {"type": "string", "description": "What to call it, e.g. 'Coffee with Priya', 'Superday', 'Flight to HK'."},
+                "date": {"type": "string", "description": "YYYY-MM-DD."},
+                "start_time": {
+                    "type": "string",
+                    "description": "HH:MM, 24-hour, in the student's own timezone. Omit entirely for an all-day entry.",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "HH:MM, 24-hour. Only meaningful together with start_time.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [k for k, _ in CalendarEvent.KIND_CHOICES],
+                    "description": "'chat' for a coffee chat, 'event' for anything else. Defaults to event.",
+                },
+                "contact_id": {"type": "integer", "description": "From search_contacts, if this is about someone specific."},
+                "location": {"type": "string", "description": "Zoom, their office, an address — whatever they gave."},
+            },
+            ["title", "date"],
+        ),
+    },
 ]
 
 # Which tools write. Used for instrumentation and for the caps the loop
 # enforces — nothing about a write is decided by the model.
-WRITE_TOOLS = frozenset({"log_touch", "track_opportunity", "remember"})
+WRITE_TOOLS = frozenset({"log_touch", "track_opportunity", "remember", "add_calendar_event"})
 
 # Same reasoning as every other row cap in this module (DEFAULT_ROWS/
 # MAX_ROWS below): a handful of durable facts is the realistic case, and a
@@ -850,6 +888,85 @@ def _remember(user, args) -> dict:
     return {"remembered": text}
 
 
+def _parse_clock(raw, field: str) -> dt_time | None:
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        return dt_time.fromisoformat(raw)
+    except ValueError:
+        raise ToolError(f"{field} must be HH:MM (24-hour).")
+
+
+def _add_calendar_event(user, args) -> dict:
+    """Add one row to `CalendarEvent`, the same 'day plus an optional clock
+    time' shape the student's own quick-add form uses
+    (`crm.forms.CalendarEventForm`) — a blank time means a genuine all-day
+    entry, never an invented one. An explicit end time is the one thing this
+    can do that the hand form still cannot (it has no end-time field at
+    all); everything else mirrors the form's own validation so a
+    model-added event and a hand-typed one behave identically."""
+    title = _s(args.get("title"), 255)
+    if not title:
+        raise ToolError("title is required.")
+
+    raw_date = (args.get("date") or "").strip()
+    try:
+        day = date.fromisoformat(raw_date)
+    except ValueError:
+        raise ToolError("date must be YYYY-MM-DD.")
+
+    start_time = _parse_clock(args.get("start_time"), "start_time")
+    end_time = _parse_clock(args.get("end_time"), "end_time")
+    if end_time and not start_time:
+        raise ToolError("end_time needs a start_time to be the end OF.")
+
+    # Interpreted in the student's own timezone, same as the hand form's
+    # clean() — TimezoneMiddleware has already activated it for this
+    # request, so "6pm" means 6pm where they are, not on the server.
+    tz = timezone.get_current_timezone()
+    starts_at = timezone.make_aware(datetime.combine(day, start_time or dt_time.min), tz)
+    ends_at = None
+    if end_time:
+        ends_at = timezone.make_aware(datetime.combine(day, end_time), tz)
+        if ends_at <= starts_at:
+            raise ToolError("end_time must be after start_time.")
+
+    kind = (args.get("kind") or CalendarEvent.KIND_EVENT).strip()
+    if kind not in dict(CalendarEvent.KIND_CHOICES):
+        raise ToolError(f"kind must be one of {sorted(dict(CalendarEvent.KIND_CHOICES))}.")
+
+    contact = None
+    contact_id = args.get("contact_id")
+    if contact_id:
+        contact = Contact.objects.for_user(user).filter(pk=contact_id).first()
+        if contact is None:
+            raise ToolError("No contact with that id in this student's network.")
+
+    event = CalendarEvent(
+        user=user,
+        title=title,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        all_day=start_time is None,
+        kind=kind,
+        source=CalendarEvent.SOURCE_MANUAL,
+        contact=contact,
+        location=_s(args.get("location"), 255),
+    )
+    event.save()
+
+    return {
+        "added": True,
+        "id": event.id,
+        "title": event.title,
+        "starts_at": timezone.localtime(event.starts_at).isoformat(),
+        "ends_at": timezone.localtime(event.ends_at).isoformat() if event.ends_at else None,
+        "all_day": event.all_day,
+        "kind": event.kind,
+    }
+
+
 _HANDLERS = {
     "get_today_queue": _get_today_queue,
     "search_contacts": _search_contacts,
@@ -861,6 +978,7 @@ _HANDLERS = {
     "get_my_pipeline": _get_my_pipeline,
     "track_opportunity": _track_opportunity,
     "remember": _remember,
+    "add_calendar_event": _add_calendar_event,
 }
 
 

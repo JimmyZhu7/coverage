@@ -162,6 +162,7 @@ _ID_TOOLS = [
     ("get_contact", "contact_id", "contact"),
     ("log_touch", "contact_id", "contact"),
     ("track_opportunity", "opportunity_id", "opportunity"),
+    ("add_calendar_event", "contact_id", "contact"),
 ]
 
 
@@ -174,6 +175,8 @@ def test_user_b_cannot_reach_user_a_s_row_by_id(bob, alices_world, tool_name, fi
         # An Opportunity is SHARED-zone (every student sees the board), so the
         # thing that must not leak is Alice's tracking row, not the posting.
         args |= {"status": "saved"}
+    if tool_name == "add_calendar_event":
+        args |= {"title": "Coffee", "date": "2026-08-20"}
 
     result, is_error = _call(bob, tool_name, args)
 

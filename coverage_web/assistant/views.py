@@ -27,8 +27,10 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from accounts.middleware import activate_for_user
 from coverage_domain.pipeline import CHANNELS, TOUCH_TRANSITIONS
 from crm import services
 from crm.models import Contact, Touch
@@ -322,21 +324,42 @@ def stream(request: HttpRequest) -> HttpResponse:
     blocks, errors = attachments_mod.blocks_for(request.FILES.getlist("file"))
 
     def frames():
-        if errors:
-            # Same shape as any other terminal notice (unconfigured, capped)
-            # — one frame, nothing streamed, no API call spent on a request
-            # that was never going to be sent.
-            reply = agent.reject_attachments(request.user, conversation, text, errors)
-            yield f"data: {json.dumps({'type': 'notice', 'kind': 'failed', 'text': reply.text})}\n\n"
-            return
-        for event in agent.stream_turn(request.user, conversation, text, attachment_blocks=blocks):
-            if event.get("type") == "done" and event.get("message_id"):
-                # The one thing the agent loop can't know and the browser
-                # can't derive: who each draft is for, and whether its touch
-                # is already on the record. Resolved here rather than in
-                # agent.py so the loop keeps its single job.
-                event = {**event, "drafts": _draft_segments(request.user, event["message_id"])}
-            yield f"data: {json.dumps(event)}\n\n"
+        # `TimezoneMiddleware` already activated request.user.timezone — but
+        # only for the SYNCHRONOUS part of the request/response cycle, which
+        # this generator is not part of. `StreamingHttpResponse` wraps it
+        # lazily: `stream()` returns almost immediately, the middleware's own
+        # `finally: timezone.deactivate()` runs right after, and only THEN
+        # does the WSGI server actually iterate this generator to produce a
+        # body — by which point the activation is already gone and every
+        # `timezone.localdate()`/`get_current_timezone()` call made by a tool
+        # mid-turn (the "what is today" the whole queue is built on, or a
+        # calendar event's own clock time) silently reads the server's UTC
+        # default instead of the student's real day. Measured live 2026-08-18:
+        # a 6-8pm entry added through chat landed on the calendar at 2am the
+        # NEXT day for an Asia/Shanghai student — 18:00 stored as UTC rather
+        # than converted from it. Re-activating here, on the thread that
+        # actually runs the tool loop, is the fix; deactivating in `finally`
+        # keeps a reused worker thread from leaking one student's zone into
+        # the next request it serves, same reasoning as the middleware itself.
+        activate_for_user(request.user)
+        try:
+            if errors:
+                # Same shape as any other terminal notice (unconfigured,
+                # capped) — one frame, nothing streamed, no API call spent on
+                # a request that was never going to be sent.
+                reply = agent.reject_attachments(request.user, conversation, text, errors)
+                yield f"data: {json.dumps({'type': 'notice', 'kind': 'failed', 'text': reply.text})}\n\n"
+                return
+            for event in agent.stream_turn(request.user, conversation, text, attachment_blocks=blocks):
+                if event.get("type") == "done" and event.get("message_id"):
+                    # The one thing the agent loop can't know and the browser
+                    # can't derive: who each draft is for, and whether its
+                    # touch is already on the record. Resolved here rather
+                    # than in agent.py so the loop keeps its single job.
+                    event = {**event, "drafts": _draft_segments(request.user, event["message_id"])}
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            timezone.deactivate()
 
     response = StreamingHttpResponse(frames(), content_type="text/event-stream")
     response["Cache-Control"] = "no-cache"

@@ -8,10 +8,13 @@ a traceback. Same posture as `crm.views.contact_ai_brief`.
 
 from __future__ import annotations
 
+from zoneinfo import ZoneInfo
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from assistant.models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
 from crm.models import Contact, Touch
@@ -309,6 +312,50 @@ def test_the_stream_endpoint_is_server_sent_events_and_still_persists_the_turn(s
 
     turns = list(ChatMessage.objects.for_user(user))
     assert [t.role for t in turns] == ["user", "assistant"]
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test")
+def test_a_tool_call_made_mid_stream_sees_the_students_own_timezone(client, monkeypatch):
+    """The bug, reproduced: `StreamingHttpResponse` is lazy, so `stream()`'s
+    generator body — including every tool call the model makes — actually
+    runs AFTER TimezoneMiddleware's own `finally: timezone.deactivate()` has
+    already fired, not during the request/response cycle the middleware
+    thinks it is protecting. Measured live: a "6-8pm today" calendar entry
+    for an Asia/Shanghai student landed at 2am the following day — 18:00
+    stored as a UTC wall-clock reading instead of converted from Shanghai
+    time. This test scripts the model into calling add_calendar_event with a
+    bare "18:00" and asserts the stored instant is 18:00 *Shanghai*, not
+    18:00 UTC — it must fail on the bug and pass on the fix."""
+    from assistant import agent
+    from assistant.tests.test_agent import FakeStreamingClient, _response, _text, _tool_use
+    from crm.models import CalendarEvent
+
+    user = User.objects.create_user(
+        email="shanghai@example.com", password="pw12345!", timezone="Asia/Shanghai",
+    )
+    client.force_login(user)
+
+    fake = FakeStreamingClient([
+        (
+            [],
+            _response(
+                [_tool_use("add_calendar_event", {"title": "Gym", "date": "2026-08-18", "start_time": "18:00"})],
+                "tool_use",
+            ),
+        ),
+        (["Done."], _response([_text("Done.")], "end_turn")),
+    ])
+    monkeypatch.setattr(agent, "get_client", lambda: fake)
+
+    response = client.post(reverse("assistant:stream"), {"message": "add gym at 6pm today"})
+    b"".join(response.streaming_content)  # the generator only runs once consumed
+
+    event = CalendarEvent.objects.for_user(user).get()
+    shanghai_wall_clock = timezone.localtime(event.starts_at, ZoneInfo("Asia/Shanghai"))
+    assert shanghai_wall_clock.strftime("%H:%M") == "18:00"
+    # The bug's own symptom, named directly: with the timezone lost, this
+    # would be 18:00 UTC, which reads back as 02:00 the NEXT day in Shanghai.
+    assert shanghai_wall_clock.date().isoformat() == "2026-08-18"
 
 
 def test_stream_rejects_a_get(signed_in):

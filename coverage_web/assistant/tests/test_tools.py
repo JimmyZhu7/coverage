@@ -517,3 +517,97 @@ def test_remember_refuses_past_the_cap_without_silently_dropping_anything(user):
     assert is_error
     assert AdvisorMemory.objects.for_user(user).count() == tools.MAX_MEMORIES  # nothing evicted
     assert "one too many" not in AdvisorMemory.objects.for_user(user).values_list("text", flat=True)
+
+
+# ---------------------------------------------------------------------------
+# add_calendar_event
+# ---------------------------------------------------------------------------
+def test_add_calendar_event_with_a_time_range(user):
+    result, is_error = _call(user, "add_calendar_event", {
+        "title": "Going to Gym", "date": "2026-08-18",
+        "start_time": "18:00", "end_time": "20:00",
+    })
+
+    assert not is_error
+    event = CalendarEvent.objects.for_user(user).get()
+    assert event.title == "Going to Gym"
+    assert event.all_day is False
+    assert event.kind == CalendarEvent.KIND_EVENT
+    assert event.source == CalendarEvent.SOURCE_MANUAL
+    assert timezone.localtime(event.starts_at).strftime("%H:%M") == "18:00"
+    assert timezone.localtime(event.ends_at).strftime("%H:%M") == "20:00"
+    assert result["all_day"] is False
+
+
+def test_add_calendar_event_with_no_time_is_all_day(user):
+    result, is_error = _call(user, "add_calendar_event", {
+        "title": "Superday", "date": "2026-09-01",
+    })
+
+    assert not is_error
+    event = CalendarEvent.objects.for_user(user).get()
+    assert event.all_day is True
+    # Local midnight, not an invented clock time.
+    assert timezone.localtime(event.starts_at).strftime("%H:%M") == "00:00"
+    assert event.ends_at is None
+
+
+def test_add_calendar_event_links_a_real_contact(user, contact):
+    result, is_error = _call(user, "add_calendar_event", {
+        "title": "Coffee with Jane", "date": "2026-08-20",
+        "start_time": "09:00", "kind": "chat", "contact_id": contact.id,
+    })
+
+    assert not is_error
+    event = CalendarEvent.objects.for_user(user).get()
+    assert event.contact_id == contact.id
+    assert event.kind == "chat"
+
+
+def test_add_calendar_event_rejects_another_students_contact(user, firm):
+    other = User.objects.create_user(email="other@example.com", password="x")
+    theirs = Contact(user=other, firm=firm, name="Not Yours")
+    theirs.save()
+
+    result, is_error = _call(user, "add_calendar_event", {
+        "title": "Coffee", "date": "2026-08-20", "contact_id": theirs.id,
+    })
+
+    assert is_error
+    assert CalendarEvent.objects.for_user(user).count() == 0
+
+
+def test_add_calendar_event_with_no_title_is_an_error(user):
+    result, is_error = _call(user, "add_calendar_event", {"date": "2026-08-20"})
+    assert is_error
+    assert CalendarEvent.objects.for_user(user).count() == 0
+
+
+def test_add_calendar_event_with_a_bad_date_is_an_error(user):
+    result, is_error = _call(user, "add_calendar_event", {"title": "X", "date": "not a date"})
+    assert is_error
+    assert CalendarEvent.objects.for_user(user).count() == 0
+
+
+def test_add_calendar_event_end_time_without_start_time_is_an_error(user):
+    result, is_error = _call(user, "add_calendar_event", {
+        "title": "X", "date": "2026-08-20", "end_time": "20:00",
+    })
+    assert is_error
+    assert CalendarEvent.objects.for_user(user).count() == 0
+
+
+def test_add_calendar_event_end_before_start_is_an_error(user):
+    result, is_error = _call(user, "add_calendar_event", {
+        "title": "X", "date": "2026-08-20", "start_time": "20:00", "end_time": "18:00",
+    })
+    assert is_error
+    assert CalendarEvent.objects.for_user(user).count() == 0
+
+
+def test_add_calendar_event_rejects_an_unknown_kind(user):
+    result, is_error = _call(user, "add_calendar_event", {
+        "title": "X", "date": "2026-08-20", "kind": "birthday",
+    })
+    assert is_error
+    assert CalendarEvent.objects.for_user(user).count() == 0

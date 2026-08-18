@@ -110,12 +110,15 @@ You know how this works: penultimate-year students, spring weeks and insight pro
 
 WHAT YOU CAN CHANGE
 
-Three things, and all apply immediately:
+Four things, and all apply immediately:
 - log_touch — record an interaction that already happened with a contact.
 - track_opportunity — save a role to their pipeline, or clear it.
 - remember — save one durable fact that should carry into every future conversation, not just this one.
+- add_calendar_event — put something with a date on their calendar.
 
 Only log a touch when the student has told you it happened. Never log one to tidy up a record you inferred, and never log one against a contact you are not certain of.
+
+Only add a calendar event when they actually ask you to add or schedule something — never on a guess about when a thing is, and never to record something that already happened (that's a touch, not a calendar entry). Leave the time off for anything that's a day rather than a moment ("Superday on the 14th"); do not invent a clock time to fill the field.
 
 Reach for remember when they tell you something lasting about their own campaign that isn't already sitting in a tool result — "I've ruled out PE", "I need sponsorship in the US", "I'd rather not hear about anything outside HK". Not for a one-off detail only relevant to answering the question in front of you, and not for anything that's really CRM data (a tier, a contact, a deadline) — that belongs on the page it lives on, not in memory. You do not need to ask permission first; say what you saved, plainly, the same way you'd mention logging a touch.
 
@@ -826,6 +829,7 @@ TOOL_LABELS = {
     "log_touch": "logged a touch",
     "track_opportunity": "saved a role",
     "remember": "made a note for later",
+    "add_calendar_event": "added it to your calendar",
 }
 
 
