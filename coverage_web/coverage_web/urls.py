@@ -2,10 +2,10 @@
 Root URL configuration for coverage_web.
 """
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.generic import RedirectView
+from django.views.static import serve as serve_static
 
 from analytics import views as analytics_views
 from core import views as core_views
@@ -53,7 +53,27 @@ urlpatterns = [
     path("", include("core.urls")),
 ]
 
-# Avatars, DEBUG only — see MEDIA_ROOT's comment in settings/base.py for why
-# production has no equivalent yet.
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Avatars. Measured live on Render: with this previously gated to
+# `if settings.DEBUG: urlpatterns += static(...)`, production had NO route
+# for /media/ at all — every avatar 404'd permanently and the nav showed a
+# broken-image icon instead of a photo. Not the ephemeral-storage risk
+# MEDIA_ROOT's comment (settings/base.py) warns about — a route that was
+# never wired up for prod at all. The obvious-looking fix, just dropping the
+# `if`, does NOT work: `django.conf.urls.static.static()` has its own
+# internal `if not settings.DEBUG: return []` (Django's own source), so it
+# silently no-ops in production regardless of any outer guard — this calls
+# `django.views.static.serve` directly instead, the same view `static()`
+# wraps, to actually bypass that. Django's own tutorial calls this view
+# "grossly inefficient and possibly insecure" at REAL scale, but this app is
+# pre-launch with a handful of users and no durable object storage yet — the
+# honest tradeoff today is "avatars work, and don't survive a redeploy"
+# versus "avatars never load at all". Swap this for a real MEDIA backend
+# (django-storages + S3-compatible storage) the same day that
+# ephemeral-redeploy loss stops being acceptable.
+urlpatterns += [
+    re_path(
+        r"^%s(?P<path>.*)$" % settings.MEDIA_URL.lstrip("/"),
+        serve_static,
+        {"document_root": settings.MEDIA_ROOT},
+    ),
+]

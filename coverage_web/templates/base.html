@@ -149,7 +149,18 @@ select on.
         {% if user.is_authenticated %}
           <a href="/welcome/#profile" class="site-user">
             {% if user.avatar %}
-              <img class="site-user-avatar" src="{{ user.avatar.url }}" alt="">
+              {% comment %}
+              `onerror` covers the case `{% if user.avatar %}` can't: the DB
+              row NAMES a file, but the file itself is 404 — measured live
+              on Render before production served /media/ at all (see
+              urls.py), and the same gap would reopen the moment ephemeral
+              storage loses a file on redeploy. Hides the broken <img> and
+              reveals the sibling initials span instead of a broken-image
+              icon in the nav.
+              {% endcomment %}
+              <img class="site-user-avatar" src="{{ user.avatar.url }}" alt=""
+                   onerror="this.hidden=true; this.nextElementSibling.hidden=false;">
+              <span class="site-user-avatar site-user-avatar-fallback" hidden>{{ user.name|default:user.email|first|upper }}</span>
             {% else %}
               <span class="site-user-avatar site-user-avatar-fallback">{{ user.name|default:user.email|first|upper }}</span>
             {% endif %}

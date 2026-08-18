@@ -17,7 +17,13 @@ replacement for one.
 <div class="avatar-field" data-avatar-field>
   <span class="avatar-preview-wrap">
     {% if user.avatar %}
-      <img class="avatar-preview" data-avatar-img src="{{ user.avatar.url }}" alt="Your profile photo">
+      {% comment %}
+      `onerror` covers a 404'd file behind a DB row that still names one —
+      same gap as the nav avatar (base.html), same fix: swap to the
+      initials fallback instead of showing a broken image.
+      {% endcomment %}
+      <img class="avatar-preview" data-avatar-img src="{{ user.avatar.url }}" alt="Your profile photo"
+           onerror="this.hidden=true; this.nextElementSibling.hidden=false;">
       <span class="avatar-preview avatar-preview-fallback" data-avatar-fallback hidden>{{ user.name|default:user.email|first|upper }}</span>
     {% else %}
       <img class="avatar-preview" data-avatar-img alt="Your profile photo" hidden>
