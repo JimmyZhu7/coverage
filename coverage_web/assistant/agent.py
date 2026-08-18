@@ -23,13 +23,26 @@ The MODEL is per-plan too, from the same place: Free answers on the cheap
 tier, Pro on the good one; that is the product difference between the plans,
 and this module never names a model itself.
 
-PROMPT CACHING. `cache_control: {"type": "ephemeral"}` sits on the last system
-block, so the system prompt plus the tool schemas — the large, identical
-prefix on every request — is cached. That only pays off if the prefix is
-BYTE-STABLE, which is why nothing per-user and nothing per-day is in it: the
-student's name, school, class year, regions, tracks and today's date all go
-into a preamble on the first USER turn instead. A date in the system prompt
-would silently invalidate every cached prefix at local midnight.
+PROMPT CACHING. `cache_control: {"type": "ephemeral", "ttl": "1h"}` sits on
+the last system block, so the system prompt plus the tool schemas — the
+large, identical prefix on every request — is cached. That only pays off if
+the prefix is BYTE-STABLE, which is why nothing per-user and nothing per-day
+is in it: the student's name, school, class year, regions, tracks and
+today's date all go into a preamble on the first USER turn instead. A date
+in the system prompt would silently invalidate every cached prefix at local
+midnight.
+
+`ttl: "1h"`, not the SDK default of 5 minutes. Measured live 2026-08-18: a
+single student checking in a few times across a day, not machine-gunning
+messages, means most real turns land well past a 5-minute gap from the last
+one — `cache_read_input_tokens: 0` / `cache_creation_input_tokens: 4708` on
+a turn sent almost three hours after the previous one, the full ~4.7k-token
+prefix reprocessed from nothing before a single output token could start.
+The 1-hour breakpoint costs more per write (2x base input tokens instead of
+1.25x) but is paid far less often for this usage shape, and every read
+inside the hour is the same 0.1x either way — a net win on both latency and
+spend for a mostly-idle-between-bursts pattern, which is the only pattern
+that exists right now.
 
 FAILURE POSTURE, inherited from `crm.ai_brief`: an API error is never a 500.
 The turn returns `ok=False` and the view writes a plain notice into the
@@ -187,7 +200,9 @@ def _system_blocks() -> list[dict]:
             "text": SYSTEM_PROMPT,
             # Last (and only) system block: the cache breakpoint covers the
             # system prompt AND the tool definitions that follow it.
-            "cache_control": {"type": "ephemeral"},
+            # ttl="1h", not the SDK default of 5m — see module docstring's
+            # PROMPT CACHING section for the measured cache-miss this fixes.
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }
     ]
 

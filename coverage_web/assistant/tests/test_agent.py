@@ -506,7 +506,7 @@ def test_the_system_prefix_is_cacheable_and_carries_nothing_per_user(user, conve
 
     request = client.requests[0]
     system = request["system"]
-    assert system[-1]["cache_control"] == {"type": "ephemeral"}
+    assert system[-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     blob = json.dumps(system)
     # Byte-stability is the whole point of the breakpoint: a name or a date in
     # here would invalidate every cached prefix.
