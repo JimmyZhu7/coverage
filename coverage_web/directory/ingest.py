@@ -151,7 +151,26 @@ class _FirmResolver:
     board whose firm isn't in the seed set (e.g. Palantir on Lever) still lands
     its postings under a freshly-created shared `Firm` rather than being
     dropped. The `scrape` command sets `board.firm` to the seeded `Firm.name`
-    exactly, so seeded firms always hit the name match and never fork."""
+    exactly, so seeded firms always hit the name match and never fork.
+
+    `Firm.name` carries no DB-level uniqueness (only `slug` does), so a name
+    collision IS possible — it happened live: a test fixture
+    (`test_feed_honesty.py`'s `Firm.objects.create(slug="td-closed",
+    name="TD Securities")`) was run directly against the dev DB on
+    2026-08-15 and minted a second "TD Securities" row alongside the seeded
+    one. Every scrape since then called `.filter(name__iexact=name).first()`
+    with NO explicit ordering on a queryset whose only ordering is
+    `Meta.ordering = ["name"]` — a no-op tiebreak between two rows with the
+    identical name — so which of the two rows a given run's postings landed
+    on was effectively undefined, and 1,338 open postings ended up split
+    across both, rendering as duplicate cards
+    (opportunities/?q=Rive+Sud). `.order_by("id")` makes the match
+    deterministic: every run resolves a name collision to the SAME row (the
+    oldest, i.e. lowest id — the one seeded/scraped first, not whichever
+    fixture or script created a later duplicate), so a name collision can no
+    longer widen. It does not merge the rows already split by past runs;
+    see `directory.firm_merge` and `manage.py merge_duplicate_firms` for
+    that half of the fix."""
 
     def __init__(self) -> None:
         self._cache: dict[str, Firm] = {}
@@ -161,10 +180,10 @@ class _FirmResolver:
         key = (name or "").strip().lower()
         if key in self._cache:
             return self._cache[key]
-        firm = Firm.objects.filter(name__iexact=name).first()
+        firm = Firm.objects.filter(name__iexact=name).order_by("id").first()
         if firm is None:
             slug = slugify(name) or "firm"
-            firm = Firm.objects.filter(slug=slug).first()
+            firm = Firm.objects.filter(slug=slug).order_by("id").first()
         if firm is None:
             slug = self._unique_slug(slugify(name) or "firm")
             firm = Firm.objects.create(slug=slug, name=name, status="active")

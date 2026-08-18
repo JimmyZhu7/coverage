@@ -260,6 +260,34 @@ def test_firm_resolved_to_existing_row_not_forked(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_firm_name_collision_resolves_to_the_same_row_every_run(monkeypatch):
+    """`Firm.name` carries no DB-level uniqueness — the live bug this guards:
+    two rows named "TD Securities" (ids 199/207) existed simultaneously
+    because a test fixture minted a second one directly against the dev DB,
+    and every scrape after that landed its postings on whichever row
+    `Firm.objects.filter(name__iexact=...).first()` happened to return with
+    no explicit ordering — undefined per-run, so 1,338 open postings ended
+    up split across both rows and rendered as duplicate cards.
+
+    Simulates the collision directly (bypassing the resolver, the same way
+    the real duplicate was minted) and asserts every subsequent scrape run
+    resolves to the SAME row — the lower id — rather than alternating."""
+    older = Firm.objects.create(slug="williamblair", name="William Blair")
+    newer = Firm.objects.create(slug="williamblair-dup", name="William Blair")
+    assert older.id < newer.id
+
+    for _ in range(3):
+        _patch(monkeypatch, [_result([_opp(U1)])])
+        ingest.ingest_boards([BOARD], label="greenhouse")
+
+    assert Firm.objects.count() == 2  # the collision itself is not merged here
+    assert Opportunity.objects.count() == 1
+    o = Opportunity.objects.get(url=U1)
+    assert o.firm_id == older.id  # always the older row, never `newer`
+    assert Opportunity.objects.filter(firm=newer).count() == 0
+
+
+@pytest.mark.django_db
 def test_null_deadline_stored_as_null(monkeypatch):
     _patch(monkeypatch, [_result([_opp(U1, deadline=None)])])
     ingest.ingest_boards([BOARD], label="greenhouse")
