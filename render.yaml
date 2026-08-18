@@ -121,31 +121,22 @@ services:
           envVarKey: DJANGO_SECRET_KEY
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost # no HTTP served here; any value satisfies settings import
+      # sync: false, NOT fromService — these start blank on coverage-web too
+      # (docs/gmail-live-setup.md hasn't been done yet on a first deploy),
+      # and fromService can't resolve a value that doesn't exist yet on the
+      # source service. Same reason coverage-push-alerts' VAPID_* keys below
+      # use sync: false instead of fromService. Set the same five values
+      # here as on coverage-web once you have them.
       - key: GMAIL_LIVE_CLIENT_ID
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_CLIENT_ID
+        sync: false
       - key: GMAIL_LIVE_CLIENT_SECRET
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_CLIENT_SECRET
+        sync: false
       - key: GMAIL_LIVE_PUBSUB_TOPIC
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_PUBSUB_TOPIC
+        sync: false
       - key: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+        sync: false
       - key: GMAIL_LIVE_TOKEN_KEY
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_TOKEN_KEY
+        sync: false
 
   # ---- Freshness pass every 6 hours (scrape + reclassify + reverify) -----
   # Four passes a day keeps deadlines honest across US and Asia hours.
@@ -244,28 +235,14 @@ services:
           envVarKey: DJANGO_SECRET_KEY
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost
+      # sync: false — see the identical comment on coverage-gmail-live above.
       - key: GMAIL_LIVE_CLIENT_ID
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_CLIENT_ID
+        sync: false
       - key: GMAIL_LIVE_CLIENT_SECRET
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_CLIENT_SECRET
+        sync: false
       - key: GMAIL_LIVE_PUBSUB_TOPIC
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_PUBSUB_TOPIC
+        sync: false
       - key: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+        sync: false
       - key: GMAIL_LIVE_TOKEN_KEY
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: GMAIL_LIVE_TOKEN_KEY
+        sync: false
