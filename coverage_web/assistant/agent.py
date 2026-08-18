@@ -108,6 +108,23 @@ Reach for remember when they tell you something lasting about their own campaign
 
 Drafting is not sending. If they want help wording a follow-up, a cold email, or a thank-you note, write it — grounded in the actual contact history and firm details your tools return, not a generic template. Say plainly you're not sending it, but writing the words is exactly the judgement call this page exists for; it is not the same request as "send this."
 
+When the draft is finished — a complete message they could paste and send as it stands — put it in a draft block:
+
+```draft contact=482 channel=email kind=follow_up
+Subject: Catching up on the summer analyst process
+
+Hi Yumna,
+...
+Best,
+Jimmy
+```
+
+The page renders that as a card with a Copy button and a one-click chip that logs the touch, so they can send it and record it without coming back to ask. `contact` is the real id from a search_contacts or get_contact result in THIS conversation — leave the whole key out if you haven't looked the person up, rather than guessing an id. `channel` is one of email, linkedin, coffee_chat, call, event, other. `kind` is what the message actually is: outreach for a first approach to someone new, follow_up for a check-in on a thread that already exists, thank_you after a chat they've had. Do not default everything to outreach. Include the Subject line for an email; drop it for a LinkedIn message or anything else that has none. Write the body exactly as they'd send it, so a straight copy is send-ready.
+
+Only a finished draft goes in the block. An outline, two alternative openers, or advice about what to say stays in ordinary prose — the card is for the thing they paste, and wrapping half an idea in it promises something that isn't there. Prose before and after the block is normal: say what you're doing, then the block, then anything about timing.
+
+The block changes how a draft is displayed, nothing else. It still isn't sending — Copy exists because sending stays theirs. And since the chip is right there on the card, don't end a draft by asking whether to log it.
+
 For anything else — actually sending a message, editing a note, changing a tier, moving a role to submitted, archiving someone, changing settings — say plainly that you can't do it from here, and name the page in Coverage where they can: Today for the queue, Network for contacts and tiers, Opportunities for roles and applications, Calendar for chats and dates, Settings for their profile and cadence.
 
 SAFETY
@@ -607,10 +624,13 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
       - "notice" {"kind": "unconfigured"|"capped"|"failed", "text": str} —
                  terminal. Exactly what run_turn would have returned as
                  ok=False, reason=kind, reply.text=text.
-      - "done"   {"tools": list[str]} — terminal success. `tools` is every
-                 read tool's human label, already deduplicated, in the shape
-                 assistant.views._tool_labels produces — the caller does not
-                 need that helper a second time.
+      - "done"   {"tools": list[str], "message_id": int} — terminal success.
+                 `tools` is every read tool's human label, already
+                 deduplicated, in the shape assistant.views._tool_labels
+                 produces — the caller does not need that helper a second
+                 time. `message_id` is the stored reply's own pk, which the
+                 view uses to attach draft-card metadata before forwarding
+                 the frame.
 
     Everything run_turn persists, this persists too, in the same order and
     under the same caps — a conversation that mixes streamed and
@@ -709,7 +729,11 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
         )
 
         if stop_reason != "tool_use":
-            yield {"type": "done", "tools": tool_labels(executed)}
+            # `message_id` is the stored row's pk, not the model's own id: it
+            # is what a draft card's log-touch chip posts back, and the view
+            # uses it to hang the resolved draft metadata off this same frame
+            # (assistant/views.py, `_draft_segments`).
+            yield {"type": "done", "tools": tool_labels(executed), "message_id": last_reply.id}
             # AFTER yielding "done", not before: the SSE connection stays
             # open for this one extra small call, which is invisible to the
             # student (the composer already re-enabled on "done") but means

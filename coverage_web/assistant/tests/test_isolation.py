@@ -27,11 +27,12 @@ from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 from django.utils import timezone
 
 from analytics.models import UserOpportunity
 from assistant import tools
-from assistant.models import AdvisorMemory
+from assistant.models import AdvisorMemory, ChatConversation, ChatMessage
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
 from directory.models import Firm, Opportunity
 
@@ -281,3 +282,65 @@ def test_remembering_a_fact_never_reaches_another_students_cap_or_list(alice, bo
     assert not is_error
     assert AdvisorMemory.objects.for_user(bob).count() == 1
     assert AdvisorMemory.objects.for_user(alice).count() == tools.MAX_MEMORIES
+
+
+# ---------------------------------------------------------------------------
+# 3. The draft card's one-click write
+#
+# `log_draft_touch` is the only write on this page that does NOT go through
+# `tools.execute()`, so the parametrized sweep above cannot reach it: the ids
+# arrive in a POST body straight from a browser instead of from a model's tool
+# arguments. Same guarantee, checked at the door it actually has.
+# ---------------------------------------------------------------------------
+def _alices_draft(alice, alices_world):
+    conversation = ChatConversation(user=alice, title="Alice's follow-ups")
+    conversation.save()
+    message = ChatMessage(
+        user=alice,
+        conversation=conversation,
+        role=ChatMessage.ROLE_ASSISTANT,
+        content=[
+            {
+                "type": "text",
+                "text": (
+                    f"```draft contact={alices_world['contact'].id} channel=email kind=follow_up\n"
+                    "Subject: Alice's draft\n\nHi.\n```"
+                ),
+            }
+        ],
+    )
+    message.save()
+    return message
+
+
+@pytest.mark.parametrize("borrowed", ["message", "contact", "both"])
+def test_bob_cannot_log_a_touch_from_alices_draft(client, alice, bob, alices_world, borrowed):
+    """Every combination of Alice's ids Bob could paste into the POST: her
+    message, her contact, or both. All 404, and none of them leave a touch on
+    her network."""
+    message = _alices_draft(alice, alices_world)
+    bobs_conversation = ChatConversation(user=bob)
+    bobs_conversation.save()
+    bobs_message = ChatMessage(
+        user=bob, conversation=bobs_conversation, role=ChatMessage.ROLE_ASSISTANT,
+        content=[{"type": "text", "text": "nothing drafted here"}],
+    )
+    bobs_message.save()
+    bobs_contact = Contact(user=bob, firm=alices_world["firm"], name="Bob's Banker")
+    bobs_contact.save()
+
+    client.force_login(bob)
+    response = client.post(
+        reverse("assistant:log_draft_touch"),
+        {
+            "message": message.id if borrowed in ("message", "both") else bobs_message.id,
+            "contact": alices_world["contact"].id if borrowed in ("contact", "both") else bobs_contact.id,
+            "channel": "email",
+            "kind": "follow_up",
+        },
+    )
+
+    assert response.status_code == 404
+    # Alice's contact keeps the one touch her own fixture gave her.
+    assert Touch.objects.for_user(alice).count() == 1
+    assert Touch.objects.for_user(bob).count() == 0

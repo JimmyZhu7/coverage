@@ -23,4 +23,7 @@ urlpatterns = [
     path("folders/rename/", views.rename_folder, name="folder_rename"),
     path("folders/delete/", views.delete_folder, name="folder_delete"),
     path("memories/forget/", views.forget_memory, name="forget_memory"),
+    # The draft card's one-click "Log touch" — a real CRM write, no model
+    # round trip, POST-only like every other write on this page.
+    path("log-draft-touch/", views.log_draft_touch, name="log_draft_touch"),
 ]

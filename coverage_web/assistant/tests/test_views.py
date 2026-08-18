@@ -14,6 +14,8 @@ from django.test import override_settings
 from django.urls import reverse
 
 from assistant.models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
+from crm.models import Contact, Touch
+from directory.models import Firm
 
 User = get_user_model()
 
@@ -564,3 +566,150 @@ def test_forgetting_another_students_memory_404s(client, user):
 
 def test_forget_memory_rejects_a_get(signed_in):
     assert signed_in.get(reverse("assistant:forget_memory")).status_code == 405
+
+
+# ---------------------------------------------------------------------------
+# The draft card's one-click "Log touch"
+#
+# The write itself is `crm.services.log_touch` — the same single audited path
+# the model's own log_touch tool and the CRM's own button already go through,
+# with the same `source="assistant"` and the same `[assistant:<id>]` note
+# marker. What is new, and what these cover, is everything AROUND that write:
+# who is allowed to ask for it, what happens when they ask twice, and what the
+# page shows afterwards.
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def draft_setup(user):
+    """A contact and an assistant reply that actually holds a draft for them
+    — the endpoint refuses to log against a message that doesn't."""
+    firm = Firm.objects.create(slug="draft-bank", name="Draft Bank")
+    contact = Contact(user=user, firm=firm, name="Yumna Rahman", role="Associate")
+    contact.save()
+    conversation = ChatConversation(user=user, title="Follow-ups")
+    conversation.save()
+    message = ChatMessage(
+        user=user,
+        conversation=conversation,
+        role=ChatMessage.ROLE_ASSISTANT,
+        content=[
+            {
+                "type": "text",
+                "text": (
+                    f"```draft contact={contact.id} channel=email kind=follow_up\n"
+                    "Subject: Catching up\n\nHi Yumna,\n\nBest,\nJimmy\n```"
+                ),
+            }
+        ],
+    )
+    message.save()
+    return {"contact": contact, "conversation": conversation, "message": message}
+
+
+def _log_draft(client, setup, **overrides):
+    payload = {
+        "message": setup["message"].id,
+        "contact": setup["contact"].id,
+        "channel": "email",
+        "kind": "follow_up",
+    }
+    payload.update(overrides)
+    return client.post(reverse("assistant:log_draft_touch"), payload)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_logging_a_drafted_touch_writes_it_to_the_crm_and_swaps_the_chip(signed_in, user, draft_setup):
+    """The whole point: the student sends the email in Gmail, comes back, and
+    records it in one click with no second trip through the model.
+
+    `transaction=True` for the same reason assistant/tests/test_tools.py's
+    write test needs it: `crm.services.log_touch` commits on its own psycopg
+    connection, outside Django's per-test transaction."""
+    response = _log_draft(signed_in, draft_setup)
+
+    assert response.status_code == 200
+    assert "Logged" in response.content.decode()
+
+    touches = list(Touch.objects.for_user(user))
+    assert len(touches) == 1
+    assert (touches[0].kind, touches[0].channel) == ("follow_up", "email")
+    # Same source and same marker as a touch the MODEL logged, so a later
+    # audit of "what did the advisor do to my network" reads both identically.
+    assert touches[0].source == "assistant"
+    assert touches[0].note == f"[assistant:{draft_setup['message'].id}]"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_logging_the_same_draft_twice_does_not_double_log_it(signed_in, user, draft_setup):
+    """A double-click and a retried request are both normal. The marker is
+    the identity, so the second POST is a no-op that still answers Logged."""
+    _log_draft(signed_in, draft_setup)
+    response = _log_draft(signed_in, draft_setup)
+
+    assert response.status_code == 200
+    assert "Logged" in response.content.decode()
+    assert Touch.objects.for_user(user).count() == 1
+
+
+def test_logging_a_drafted_touch_rejects_a_get(signed_in):
+    assert signed_in.get(reverse("assistant:log_draft_touch")).status_code == 405
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"channel": "carrier_pigeon"}, {"kind": "vibes"}, {"channel": ""}, {"kind": ""}],
+)
+def test_a_channel_or_kind_the_client_invented_is_a_400_not_a_write(signed_in, user, draft_setup, bad):
+    """The chip posts these, so they are client input, so they are checked
+    against the same enums crm.views.log_touch checks against."""
+    response = _log_draft(signed_in, draft_setup, **bad)
+
+    assert response.status_code == 400
+    assert Touch.objects.for_user(user).count() == 0
+
+
+def test_a_message_holding_no_draft_for_that_contact_is_a_400(signed_in, user, draft_setup):
+    """This endpoint is a shortcut for a write the page already offered on
+    screen, not a general-purpose "log anything" that happens to be POST."""
+    other = Contact(user=user, firm=draft_setup["contact"].firm, name="Someone Else")
+    other.save()
+
+    response = _log_draft(signed_in, draft_setup, contact=other.id)
+
+    assert response.status_code == 400
+    assert Touch.objects.for_user(user).count() == 0
+
+
+def test_logging_against_another_students_contact_404s(signed_in, user, draft_setup):
+    other_student = User.objects.create_user(email="draft-other@example.com", password="pw12345!")
+    theirs = Contact(user=other_student, firm=draft_setup["contact"].firm, name="Their Banker")
+    theirs.save()
+
+    response = _log_draft(signed_in, draft_setup, contact=theirs.id)
+
+    assert response.status_code == 404
+    assert Touch.objects.for_user(other_student).count() == 0
+
+
+def test_logging_against_another_students_message_404s(signed_in, user, draft_setup):
+    other_student = User.objects.create_user(email="draft-msg-other@example.com", password="pw12345!")
+    their_conversation = ChatConversation(user=other_student)
+    their_conversation.save()
+    their_message = ChatMessage(
+        user=other_student,
+        conversation=their_conversation,
+        role=ChatMessage.ROLE_ASSISTANT,
+        content=[{"type": "text", "text": "not yours"}],
+    )
+    their_message.save()
+
+    response = _log_draft(signed_in, draft_setup, message=their_message.id)
+
+    assert response.status_code == 404
+    assert Touch.objects.for_user(user).count() == 0
+
+
+def test_an_anonymous_visitor_cannot_log_a_drafted_touch(client):
+    response = client.post(reverse("assistant:log_draft_touch"))
+
+    assert response.status_code == 302
+    assert "/accounts/login/" in response["Location"]

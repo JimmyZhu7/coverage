@@ -1,0 +1,38 @@
+{% comment %}
+The log-touch chip, on its own so the endpoint can swap exactly this much
+back after a click (same shape as _memories.html answering forget_memory).
+
+Three states, and the middle one is the reason the card exists:
+  - not loggable — the model never named a contact, or named one this
+    student no longer has. Nothing renders; the card keeps just Copy.
+  - loggable — a real POST to a real CRM write, no model round trip.
+  - logged — already on the record, from a click OR from a previous page
+    load. Not a button any more, because there is nothing left to do.
+
+A plain <form> around the button, not a bare hx-post: this keeps working
+with JS off, exactly like every other write control on this page.
+{% endcomment %}
+{% if draft.logged %}
+  <span class="as-draft-chip is-logged">
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M3.5 8.5l3 3 6-6" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Logged
+  </span>
+{% elif draft.loggable %}
+  <form method="post" action="{% url 'assistant:log_draft_touch' %}"
+        hx-post="{% url 'assistant:log_draft_touch' %}" hx-target="this" hx-swap="outerHTML">
+    {% csrf_token %}
+    <input type="hidden" name="message" value="{{ draft.message_id }}">
+    <input type="hidden" name="contact" value="{{ draft.contact_id }}">
+    <input type="hidden" name="channel" value="{{ draft.channel }}">
+    <input type="hidden" name="kind" value="{{ draft.kind }}">
+    <button type="submit" class="as-draft-chip">
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      Log touch · {{ draft.contact_name }} · {{ draft.channel_label }}
+    </button>
+  </form>
+{% endif %}

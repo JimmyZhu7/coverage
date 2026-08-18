@@ -701,8 +701,10 @@ def test_a_streamed_tool_round_announces_the_lookup_before_running_it(user, conv
     events = list(agent.stream_turn(user, conversation, "What's going on with Jane?", client=client))
 
     assert events[0] == {"type": "tool", "label": "your contacts"}
-    assert events[-1] == {"type": "done", "tools": ["your contacts"]}
     turns = _turns(user, conversation)
+    # `message_id` is the stored reply's own pk — the view hangs draft-card
+    # metadata off this frame with it (assistant.views._draft_segments).
+    assert events[-1] == {"type": "done", "tools": ["your contacts"], "message_id": turns[-1].id}
     assert [t.role for t in turns] == ["user", "assistant", "user", "assistant"]
 
 
@@ -1079,3 +1081,46 @@ def test_the_latest_attachment_keeps_its_real_bytes(user, conversation):
     assert len(image_blocks) == 1
     assert image_blocks[0]["source"]["data"] == "BBBB"
     assert "_filename" not in image_blocks[0]  # stripped, but the real bytes stayed
+
+
+def test_the_prompt_teaches_the_draft_fence_and_when_not_to_use_it():
+    """A card can only appear if the model writes the fence, so the prompt is
+    half the feature. Pinned as content assertions on the string itself: the
+    syntax, the three keys, the kind distinction (the model's instinct is to
+    call every draft "outreach"), and — the part that decides whether the card
+    stays trustworthy — that half an idea never goes in one."""
+    prompt = agent.SYSTEM_PROMPT
+
+    assert "```draft contact=482 channel=email kind=follow_up" in prompt
+    assert "Subject:" in prompt
+    # The id has to be one it actually looked up, not one it invented.
+    assert "search_contacts or get_contact result in THIS conversation" in prompt
+    assert "leave the whole key out if you haven't looked the person up" in prompt
+    # Every channel and every kind the card can log, named.
+    for channel in ("email", "linkedin", "coffee_chat", "call", "event", "other"):
+        assert channel in prompt
+    assert "outreach for a first approach" in prompt
+    assert "follow_up for a check-in" in prompt
+    assert "thank_you after a chat" in prompt
+    assert "Do not default everything to outreach." in prompt
+    # Only a FINISHED draft, and the framing that was already there survives.
+    assert "Only a finished draft goes in the block." in prompt
+    assert "Drafting is not sending." in prompt
+    assert "It still isn't sending" in prompt
+    # The chat question the chip replaces.
+    assert "don't end a draft by asking whether to log it" in prompt
+
+
+def test_the_draft_fence_in_the_prompt_parses_with_the_real_parser():
+    """The example the model copies has to be one the page can actually read.
+    A drifted example is the one prompt bug no content assertion catches."""
+    from assistant import drafts
+
+    segments = drafts.split(agent.SYSTEM_PROMPT)
+    drafted = [s for s in segments if s["type"] == "draft"]
+
+    assert len(drafted) == 1
+    assert drafted[0]["contact_id"] == 482
+    assert drafted[0]["channel"] == "email"
+    assert drafted[0]["kind"] == "follow_up"
+    assert drafted[0]["subject"] == "Catching up on the summer analyst process"

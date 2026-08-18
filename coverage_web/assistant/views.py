@@ -24,12 +24,19 @@ from __future__ import annotations
 import json
 
 from django.contrib.auth.decorators import login_required
-from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
+from django.db.models import Q
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from coverage_domain.pipeline import CHANNELS, TOUCH_TRANSITIONS
+from crm import services
+from crm.models import Contact, Touch
+from crm.utils import CHANNEL_LABELS  # a list of (value, label) pairs, not a dict
+
 from . import agent
 from . import attachments as attachments_mod
+from . import drafts as drafts_mod
 from .client import is_configured
 from .models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
 
@@ -51,6 +58,10 @@ STARTERS = [
 # How many past chats the history panel lists. A personal advisor thread,
 # not a searchable archive — nothing here paginates past this.
 HISTORY_LIMIT = 50
+
+# The same channel wording the CRM's own touch controls use, so a chip that
+# says "Email" and a history row that says "Email" mean the one thing.
+_CHANNEL_LABELS = dict(CHANNEL_LABELS)
 
 
 def _current_conversation(user, conversation_id: int | None = None) -> ChatConversation:
@@ -108,12 +119,95 @@ def _thread_rows(user, conversation) -> list[dict]:
             {
                 "role": "assistant",
                 "text": text,
+                # The row's own primary key, not the model's message id: it is
+                # what the log-touch chip posts back, and what the
+                # `[assistant:<id>]` note marker is built from.
+                "message_id": message.id,
+                # Prose and finished drafts, in the order the model wrote them
+                # (assistant/drafts.py). A reply with no draft fence in it is
+                # exactly one prose segment, so the template has one path.
+                "segments": drafts_mod.split(text),
                 "tools": _tool_labels(pending_tools),
                 "notice": message.notice,
             }
         )
         pending_tools = []
+    _decorate_drafts(user, rows)
     return rows
+
+
+def _decorate_drafts(user, rows: list[dict]) -> None:
+    """Fill in what a draft card needs but the model never wrote: the
+    contact's real name, and whether this draft's touch is already logged.
+
+    TWO QUERIES FOR THE WHOLE THREAD, never one per message. The names come
+    from a single `pk__in` over every contact any draft in the thread names.
+    The logged state comes from a single OR of `[assistant:<id>]` substring
+    matches — one clause per assistant message that actually carries a
+    loggable draft, which in a real conversation is one or two, and which
+    returns only the touches that matched rather than a student's whole touch
+    history to be filtered in Python.
+
+    A draft whose contact has since been deleted (or was never this student's)
+    quietly loses its chip rather than 404ing the page: the words the model
+    wrote are still worth reading and copying.
+    """
+    pending = [
+        (row["message_id"], seg)
+        for row in rows
+        for seg in row.get("segments") or ()
+        if seg["type"] == "draft" and seg["contact_id"]
+    ]
+    if not pending:
+        return
+
+    names = dict(
+        Contact.objects.for_user(user)
+        .filter(pk__in={seg["contact_id"] for _, seg in pending})
+        .values_list("id", "name")
+    )
+
+    message_ids = {message_id for message_id, _ in pending}
+    marker_match = Q()
+    for message_id in message_ids:
+        marker_match |= Q(note__contains=drafts_mod.marker_for(message_id))
+    matched = list(Touch.objects.for_user(user).filter(marker_match).values_list("contact_id", "note"))
+    # Keyed by (message, contact), not by message alone: one reply can hold
+    # two drafts to two different people, and logging one of them must not
+    # quietly mark the other done. The marker carries only the message id, so
+    # the Touch's own contact is what separates them.
+    logged = {
+        (message_id, contact_id)
+        for message_id in message_ids
+        for contact_id, note in matched
+        if drafts_mod.marker_for(message_id) in (note or "")
+    }
+
+    for message_id, seg in pending:
+        seg["contact_name"] = names.get(seg["contact_id"], "")
+        # The chip writes a real Touch through the real ratchet, so it only
+        # appears when every field that write needs is known and valid.
+        seg["loggable"] = bool(seg["contact_name"] and seg["channel"] and seg["kind"])
+        seg["channel_label"] = _CHANNEL_LABELS.get(seg["channel"], seg["channel"])
+        seg["message_id"] = message_id
+        seg["logged"] = (message_id, seg["contact_id"]) in logged
+
+
+def _draft_segments(user, message_id) -> list[dict]:
+    """The decorated draft segments of one stored assistant message.
+
+    Only the STREAM path needs this. A streamed reply is drawn client-side
+    from tokens, so the browser has the draft's words but not the contact's
+    name or its logged state — this rides along on the terminal "done" frame
+    so the card the JS builds carries the same chip the server would have
+    rendered (see chat.html).
+    """
+    message = ChatMessage.objects.for_user(user).filter(pk=message_id).first()
+    if message is None or not message.text:
+        return []
+    row = {"message_id": message.id, "segments": drafts_mod.split(message.text)}
+    _decorate_drafts(user, [row])
+    return [seg for seg in row["segments"] if seg["type"] == "draft"]
 
 
 # The name -> label map lives in agent.py (agent.TOOL_LABELS), which also
@@ -236,6 +330,12 @@ def stream(request: HttpRequest) -> HttpResponse:
             yield f"data: {json.dumps({'type': 'notice', 'kind': 'failed', 'text': reply.text})}\n\n"
             return
         for event in agent.stream_turn(request.user, conversation, text, attachment_blocks=blocks):
+            if event.get("type") == "done" and event.get("message_id"):
+                # The one thing the agent loop can't know and the browser
+                # can't derive: who each draft is for, and whether its touch
+                # is already on the record. Resolved here rather than in
+                # agent.py so the loop keeps its single job.
+                event = {**event, "drafts": _draft_segments(request.user, event["message_id"])}
             yield f"data: {json.dumps(event)}\n\n"
 
     response = StreamingHttpResponse(frames(), content_type="text/event-stream")
@@ -383,6 +483,66 @@ def delete_conversation(request: HttpRequest) -> HttpResponse:
     ):
         return redirect("assistant:chat_conversation", conversation_id=current_id)
     return redirect("assistant:chat")
+
+
+@login_required
+@require_POST
+def log_draft_touch(request: HttpRequest) -> HttpResponse:
+    """Log the touch a drafted message would be, in one click, with no model
+    round trip at all.
+
+    This is the whole point of the draft card. The advisor used to END a draft
+    by ASKING ("want me to log this as a touch once you've sent it?"), which
+    is a question arriving twenty minutes before the moment it's about — the
+    student still has to switch to Gmail, paste, send, and come back, by which
+    time the question is three messages up the thread. The chip sits on the
+    draft instead and waits.
+
+    NOTHING HERE IS TAKEN ON TRUST. The message and the contact are both
+    fetched through `for_user`, so another student's ids 404 exactly like
+    everywhere else in this app. `kind` and `channel` are checked against the
+    same enums `crm.views.log_touch` and `assistant.tools._log_touch` check
+    against. And the message itself must actually CONTAIN a draft addressed to
+    that contact — the chip is a shortcut for a write the page already offered
+    on screen, not a general-purpose "log anything" endpoint that happens to
+    be POST-only.
+
+    IDEMPOTENT, because a double-click and a retried request are both normal.
+    The `[assistant:<message_id>]` marker is the identity: if a touch already
+    carries this draft's marker, the student gets the same "Logged" chip back
+    and the CRM gets nothing new. That marker is the same one the model's own
+    `log_touch` tool writes, so a later audit of "what did the advisor do to
+    my network" reads both paths identically.
+    """
+    message = get_object_or_404(
+        ChatMessage.objects.for_user(request.user), pk=_posted_int(request, "message") or 0
+    )
+    contact = get_object_or_404(
+        Contact.objects.for_user(request.user), pk=_posted_int(request, "contact") or 0
+    )
+    kind = (request.POST.get("kind") or "").strip()
+    channel = (request.POST.get("channel") or "").strip()
+    if kind not in TOUCH_TRANSITIONS or channel not in CHANNELS:
+        return HttpResponseBadRequest("Unknown interaction kind or channel.")
+
+    drafted_for = {
+        seg["contact_id"]
+        for seg in drafts_mod.split(message.text)
+        if seg["type"] == "draft" and seg["contact_id"]
+    }
+    if contact.id not in drafted_for:
+        return HttpResponseBadRequest("That message holds no draft for this contact.")
+
+    marker = drafts_mod.marker_for(message.id)
+    already = Touch.objects.for_user(request.user).filter(contact=contact, note__contains=marker).exists()
+    if not already:
+        services.log_touch(request.user.id, contact.id, kind, channel, marker, source="assistant")
+
+    return render(
+        request,
+        "assistant/_draft_chip.html",
+        {"draft": {"logged": True, "loggable": True, "contact_name": contact.name}},
+    )
 
 
 @login_required

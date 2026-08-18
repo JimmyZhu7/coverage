@@ -25,7 +25,22 @@ role, text, tools (human labels for the lookups behind an answer), notice
           {% endfor %}
         </div>
       {% endif %}
-      {% if row.text %}<div class="as-body">{{ row.text|chat_format }}</div>{% endif %}
+      {% comment %}
+      Assistant turns arrive pre-split into prose and finished drafts
+      (assistant.drafts.split). A reply with no draft fence in it is exactly
+      one prose segment, so this loop renders it byte-for-byte the way the
+      single `.as-body` div always did. User turns have no segments and never
+      get one: a student pasting a fence is pasting text, not writing a draft.
+      {% endcomment %}
+      {% if row.segments %}
+        {% for seg in row.segments %}
+          {% if seg.type == 'draft' %}
+            {% include "assistant/_draft_card.html" with draft=seg %}
+          {% elif seg.text %}
+            <div class="as-body">{{ seg.text|chat_format }}</div>
+          {% endif %}
+        {% endfor %}
+      {% elif row.text %}<div class="as-body">{{ row.text|chat_format }}</div>{% endif %}
       {% if row.tools %}
         {% comment %}
         The evidence line. The pitch of this page is that the advice is built on

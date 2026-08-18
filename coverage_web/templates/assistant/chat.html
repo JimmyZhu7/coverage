@@ -262,6 +262,38 @@ materials.
     font-size: var(--fs-xs); color: var(--ink-2); }
   .as-attachment-chip svg { flex: none; width: 13px; height: 13px; color: var(--ink-3); }
 
+  /* ---- Draft card: the one thing on this page a student takes somewhere
+     else, so it gets an edge you can see rather than dissolving into the
+     paragraph around it. Same accent-soft/hairline pair as .as-off and the
+     memory dialog, one step firmer because this holds words to be copied. ---- */
+  .as-draft { margin: var(--s3) 0; border: 1px solid var(--accent-line);
+    border-radius: var(--r-panel); background: var(--surface);
+    box-shadow: var(--shadow-1); overflow: hidden; }
+  .as-draft-subject { margin: 0; padding: var(--s3) var(--s4);
+    background: var(--accent-soft); border-bottom: 1px solid var(--accent-line);
+    font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink);
+    display: flex; align-items: baseline; gap: var(--s2); }
+  .as-draft-subject span { flex: none; font-family: var(--font-mono);
+    font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: var(--w-reg); color: var(--accent); }
+  /* No `white-space: pre-wrap` here on purpose: chat_format has already
+     turned every newline into a <br>, and pre-wrap would honour the source
+     newline as well and double every line break in the draft. */
+  .as-draft-body { padding: var(--s4); }
+  .as-draft-actions { display: flex; flex-wrap: wrap; gap: var(--s2);
+    padding: var(--s2) var(--s3); border-top: 1px solid var(--line); }
+  .as-draft-copy, .as-draft-chip { display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface);
+    padding: 5px 10px; font: var(--w-med) var(--fs-xs)/1 var(--font-ui); color: var(--ink-2);
+    cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast),
+      background-color var(--t-fast); }
+  .as-draft-copy svg, .as-draft-chip svg { flex: none; width: 13px; height: 13px; }
+  .as-draft-copy:hover, .as-draft-chip:hover { border-color: var(--accent-line);
+    background: var(--accent-soft); color: var(--ink); }
+  .as-draft-chip.is-logged { cursor: default; border-color: transparent;
+    background: transparent; color: var(--ink-3); }
+  .as-draft-chip.is-logged svg { color: var(--accent); }
+
   /* ---- Confirm dialog: replaces the browser's native confirm() for every
      destructive action on this page (delete a chat, delete a folder) — same
      native <dialog> shape as base.html's own Cmd-K palette (free focus trap
@@ -855,6 +887,68 @@ element by the next turn.
     });
     settle(shell);
 
+    // 6b. Draft cards — the Copy button, wired once by delegation so it
+    // covers both the server-rendered card (assistant/_draft_card.html) and
+    // the one §7's mirror builds mid-stream, with no re-hookup either way.
+    //
+    // The text comes off the RENDERED body, not a raw copy of the model's
+    // output stashed in a data attribute: by then the escaping step's
+    // entities (&amp;, &#x27;) are already decoded back into the characters
+    // a student expects to paste. The one thing rendering loses is the line
+    // breaks — chat_format turned them into <br> — so those get put back
+    // here, on a clone, leaving what is on screen untouched.
+    function draftPlainText(el) {
+      var clone = el.cloneNode(true);
+      var breaks = clone.querySelectorAll("br");
+      for (var i = 0; i < breaks.length; i++) {
+        breaks[i].replaceWith(document.createTextNode("\n"));
+      }
+      return clone.textContent.replace(/^\n+|\n+$/g, "");
+    }
+    // The Clipboard API needs a secure context AND a permission the browser
+    // can simply refuse (an embedded/sandboxed frame refuses it outright).
+    // Falling back to the deprecated execCommand path is not nostalgia: it is
+    // exactly the case execCommand still covers, and the alternative is a
+    // Copy button that silently does nothing on the one draft the student
+    // most wanted to paste.
+    function legacyCopy(text) {
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.top = "-1000px";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      var copied = false;
+      try { copied = document.execCommand("copy"); } catch (err) {}
+      document.body.removeChild(area);
+      return copied ? Promise.resolve() : Promise.reject(new Error("copy unavailable"));
+    }
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).catch(function () { return legacyCopy(text); });
+      }
+      return legacyCopy(text);
+    }
+    document.addEventListener("click", function (e) {
+      var button = e.target.closest ? e.target.closest(".as-draft-copy") : null;
+      if (!button) return;
+      var card = button.closest(".as-draft");
+      var body = card && card.querySelector(".as-draft-body");
+      if (!body) return;
+      copyText(draftPlainText(body)).then(function () {
+        var label = button.querySelector(".as-draft-copy-label");
+        if (!label || button.dataset.copied) return;
+        button.dataset.copied = "1";
+        label.textContent = "Copied";
+        setTimeout(function () {
+          label.textContent = "Copy";
+          delete button.dataset.copied;
+        }, 1600);
+      }).catch(function () { /* nowhere left to put it; saying so would not help */ });
+    });
+
     // 7. Streaming send — the actual "kinetic flow" request: the reply
     // grows into the page token by token instead of appearing all at once
     // once the dots stop.
@@ -904,6 +998,169 @@ element by the next turn.
           .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
           .replace(/\n/g, "<br>");
       }
+      // ---- Draft fences, client side ----
+      //
+      // A JS mirror of assistant/drafts.py, and it has to exist for the same
+      // reason chatFormat above does: a streamed reply is drawn from tokens
+      // here and NEVER re-fetched from the server, so without this a drafted
+      // email would sit in the thread as raw ```draft backticks until the
+      // next page load. Same delimiter, same optional Subject, same
+      // fail-soft on a fence with nothing in it. Keep the two in lockstep.
+      //
+      // The one thing this does that Python doesn't: a fence the model has
+      // OPENED but not yet closed is still mid-stream, so it renders as a
+      // card with no actions rather than as three stray backticks that
+      // resolve into a card a second later. Python never sees that state —
+      // by the time it parses, the message is finished.
+      var DRAFT_OPEN_RE = /^```draft[ \t]*([^\n]*)$/;
+      var DRAFT_CLOSE_RE = /^```[ \t]*$/;
+      var SUBJECT_RE = /^Subject:[ \t]*(.*)$/;
+
+      function draftFromLines(lines, open) {
+        var subject = "";
+        var match = lines.length ? SUBJECT_RE.exec(lines[0].trim()) : null;
+        if (match) {
+          subject = match[1].trim();
+          lines = lines.slice(1);
+          while (lines.length && !lines[0].trim()) lines.shift();
+        }
+        var body = lines.join("\n").replace(/^\n+|\n+$/g, "");
+        if (!body && !subject) return null;
+        return { type: "draft", subject: subject, body: body, open: !!open };
+      }
+
+      function splitDraftSegments(text) {
+        var lines = (text || "").split("\n");
+        var segments = [];
+        var prose = [];
+        var draft = null;
+        var raw = null; // the fence's own lines, verbatim, for the fail-soft path
+        function flushProse(force) {
+          var joined = prose.join("\n").replace(/^\n+|\n+$/g, "");
+          if (joined || force) segments.push({ type: "prose", text: joined });
+          prose = [];
+        }
+        function closeDraft(open, closer) {
+          var parsed = draftFromLines(draft, open);
+          if (parsed) { flushProse(false); segments.push(parsed); }
+          // An empty fence is not a draft: put its literal lines back into
+          // the prose run so nothing the model wrote disappears.
+          else { prose = prose.concat(raw); if (closer) prose.push(closer); }
+          draft = null;
+          raw = null;
+        }
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          if (draft === null) {
+            if (DRAFT_OPEN_RE.test(line)) { draft = []; raw = [line]; continue; }
+            prose.push(line);
+          } else if (DRAFT_CLOSE_RE.test(line)) {
+            closeDraft(false, line);
+          } else {
+            draft.push(line);
+            raw.push(line);
+          }
+        }
+        if (draft !== null) closeDraft(true, null);
+        flushProse(!segments.length);
+        return segments;
+      }
+
+      var COPY_ICON =
+        '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+        '<path d="M5.5 5.5V3.5h7v7h-2M3.5 5.5h7v7h-7z" stroke="currentColor" ' +
+        'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      var CHECK_ICON =
+        '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+        '<path d="M3.5 8.5l3 3 6-6" stroke="currentColor" stroke-width="1.5" ' +
+        'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      var PLUS_ICON =
+        '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+        '<path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.5" ' +
+        'stroke-linecap="round"/></svg>';
+      var LOG_TOUCH_URL = "{% url 'assistant:log_draft_touch' %}";
+
+      // The same three chip states assistant/_draft_chip.html renders, in the
+      // same markup — including the plain <form> wrapper, so htmx.process()
+      // below finds exactly what it would have found on a page load.
+      function chipMarkup(meta) {
+        if (!meta) return "";
+        if (meta.logged) {
+          return '<span class="as-draft-chip is-logged">' + CHECK_ICON + " Logged</span>";
+        }
+        if (!meta.loggable) return "";
+        return (
+          '<form method="post" action="' + LOG_TOUCH_URL + '" hx-post="' + LOG_TOUCH_URL +
+          '" hx-target="this" hx-swap="outerHTML">' +
+          '<input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">' +
+          '<input type="hidden" name="message" value="' + Number(meta.message_id) + '">' +
+          '<input type="hidden" name="contact" value="' + Number(meta.contact_id) + '">' +
+          '<input type="hidden" name="channel" value="' + escapeHtml(meta.channel) + '">' +
+          '<input type="hidden" name="kind" value="' + escapeHtml(meta.kind) + '">' +
+          '<button type="submit" class="as-draft-chip">' + PLUS_ICON + " Log touch · " +
+          escapeHtml(meta.contact_name) + " · " + escapeHtml(meta.channel_label) +
+          "</button></form>"
+        );
+      }
+
+      function buildDraftCard(seg, meta) {
+        var card = document.createElement("section");
+        card.className = "as-draft";
+        card.setAttribute("aria-label", "Drafted message");
+        if (seg.subject) {
+          var subject = document.createElement("p");
+          subject.className = "as-draft-subject";
+          var tag = document.createElement("span");
+          tag.textContent = "Subject";
+          subject.appendChild(tag);
+          subject.appendChild(document.createTextNode(seg.subject));
+          card.appendChild(subject);
+        }
+        var body = document.createElement("div");
+        body.className = "as-body as-draft-body";
+        body.innerHTML = chatFormat(seg.body);
+        card.appendChild(body);
+        // No actions on a draft that is still arriving: Copy would take half
+        // an email, and there is nothing to log yet.
+        if (seg.open) return card;
+        var actions = document.createElement("div");
+        actions.className = "as-draft-actions";
+        actions.innerHTML =
+          '<button type="button" class="as-draft-copy">' + COPY_ICON +
+          '<span class="as-draft-copy-label">Copy</span></button>' + chipMarkup(meta);
+        card.appendChild(actions);
+        // htmx only wires what it saw at load or at swap time; a node this
+        // script built itself has to be handed over explicitly.
+        if (window.htmx) window.htmx.process(actions);
+        return card;
+      }
+
+      // Redraw one assistant turn's bubble from everything received so far.
+      // The common reply has no fence in it at all, so that case keeps
+      // writing into the single `.as-body` div it always did — the rebuild
+      // path only runs for a turn that actually carries a draft.
+      function renderTurnBody(turn, text, meta) {
+        var segments = splitDraftSegments(text);
+        if (segments.length === 1 && segments[0].type === "prose" && turn.body.parentNode) {
+          turn.body.innerHTML = chatFormat(segments[0].text);
+          return;
+        }
+        turn.bubble.innerHTML = "";
+        var drafted = 0;
+        segments.forEach(function (seg) {
+          if (seg.type === "draft") {
+            turn.bubble.appendChild(buildDraftCard(seg, meta ? meta[drafted] : null));
+            drafted += 1;
+            return;
+          }
+          if (!seg.text) return;
+          var prose = document.createElement("div");
+          prose.className = "as-body";
+          prose.innerHTML = chatFormat(seg.text);
+          turn.bubble.appendChild(prose);
+        });
+      }
+
       function ensureLog() {
         var thread = document.getElementById("as-thread");
         var log = document.getElementById("as-log");
@@ -1032,7 +1289,7 @@ element by the next turn.
               log.appendChild(assistantTurn.el);
             }
             accumulated += event.text;
-            assistantTurn.body.innerHTML = chatFormat(accumulated);
+            renderTurnBody(assistantTurn, accumulated);
             scrollLogToEnd();
           } else if (event.type === "tool") {
             // Only while nothing visible has arrived yet — once real text
@@ -1043,11 +1300,17 @@ element by the next turn.
             noticeTurn.body.innerHTML = chatFormat(event.text);
             log.appendChild(noticeTurn.el);
             scrollLogToEnd();
-          } else if (event.type === "done" && assistantTurn && event.tools && event.tools.length) {
-            var evidence = document.createElement("p");
-            evidence.className = "as-evidence";
-            evidence.textContent = "Read " + event.tools.join(", ");
-            assistantTurn.bubble.appendChild(evidence);
+          } else if (event.type === "done" && assistantTurn) {
+            // The final redraw, and the only one that can finish a draft
+            // card: `drafts` carries what the tokens alone can't say — whose
+            // draft this is, and whether its touch is already on the record.
+            renderTurnBody(assistantTurn, accumulated, event.drafts);
+            if (event.tools && event.tools.length) {
+              var evidence = document.createElement("p");
+              evidence.className = "as-evidence";
+              evidence.textContent = "Read " + event.tools.join(", ");
+              assistantTurn.bubble.appendChild(evidence);
+            }
           }
         }
         function handleFrame(frame) {

@@ -1,0 +1,33 @@
+{% load assistant_extras %}
+{% comment %}
+One finished draft, lifted out of the chat bubble it used to be buried in.
+`draft` is a segment dict from assistant.drafts.split(), decorated by
+assistant.views._decorate_drafts: subject, body, contact_name, channel_label,
+loggable, logged.
+
+Why a card and not a paragraph: a draft is the one thing on this page the
+student takes somewhere else. It needs an edge you can see, a Subject that
+reads as a Subject, and its two actions sitting on it rather than offered as
+a sentence that scrolls away while they're in Gmail.
+
+Everything the model wrote goes through autoescaping (subject) or
+`chat_format` (body, which escapes first and only then layers markup) — this
+is untrusted output being rendered as HTML, and the ordering is the whole
+defence.
+{% endcomment %}
+<section class="as-draft" aria-label="Drafted message">
+  {% if draft.subject %}
+    <p class="as-draft-subject"><span>Subject</span>{{ draft.subject }}</p>
+  {% endif %}
+  <div class="as-body as-draft-body">{{ draft.body|chat_format }}</div>
+  <div class="as-draft-actions">
+    <button type="button" class="as-draft-copy">
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M5.5 5.5V3.5h7v7h-2M3.5 5.5h7v7h-7z" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="as-draft-copy-label">Copy</span>
+    </button>
+    {% include "assistant/_draft_chip.html" %}
+  </div>
+</section>
