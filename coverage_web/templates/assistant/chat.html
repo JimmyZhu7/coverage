@@ -362,9 +362,17 @@ materials.
      3px soft box-shadow halo — around just the textarea, sitting visibly
      inside the pill's rounded border: two competing rings, one a literal
      halo floating inside the other. Both properties have to be cleared, not
-     just outline; the halo in the bug report was the box-shadow half. */
-  .as-composer textarea:focus, .as-composer textarea:focus-visible {
-    outline: none; box-shadow: none; }
+     just outline; the halo in the bug report was the box-shadow half.
+
+     Same leak, hover instead of focus: coverage.css also has a sitewide
+     `textarea:hover` rule (border-color + box-shadow), and the textarea
+     here has no border-radius of its own — so on hover its square-cornered
+     shadow shows up floating inside the pill's rounded one, a "weird
+     transparent box" bleeding past the pill's own edge. Cleared the same
+     way, for the same reason. */
+  .as-composer textarea:focus, .as-composer textarea:focus-visible,
+  .as-composer textarea:hover {
+    outline: none; box-shadow: none; border-color: transparent; }
   .as-composer textarea::placeholder { color: var(--ink-3); }
   .as-composer textarea:disabled { color: var(--ink-3); }
 
