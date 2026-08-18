@@ -75,12 +75,22 @@
     was nothing worth saying today — never an empty card, never an error.
     {% endcomment %}
     <div class="daily-brief kin-reveal">
-      <div class="daily-brief-head">
-        <span class="daily-brief-icon" aria-hidden="true">{% include "_logo.html" %}</span>
-        <span class="daily-brief-eyebrow"><span class="live-dot"></span> Today's move</span>
+      <div class="daily-brief-body">
+        <div class="daily-brief-head">
+          <span class="daily-brief-icon" aria-hidden="true">{% include "_logo.html" %}</span>
+          <span class="daily-brief-eyebrow"><span class="live-dot"></span> Today's move</span>
+        </div>
+        <p class="daily-brief-text">{{ daily_brief|chat_format }}</p>
       </div>
-      <p class="daily-brief-text">{{ daily_brief|chat_format }}</p>
-      <a class="daily-brief-link" href="{% url 'assistant:chat' %}">Talk about it <span aria-hidden="true">→</span></a>
+      {% comment %}
+      A real button, not a bare link — on a wide screen the sentence caps
+      at a readable 68ch and leaves the rest of the row to fill. Giving that
+      space to a proper CTA (vertically centered against the whole card, the
+      "text left / action right" split every dashboard on this app already
+      uses for its own header row) means the extra width does something
+      instead of just being background past the last word.
+      {% endcomment %}
+      <a class="daily-brief-link btn" href="{% url 'assistant:chat' %}">Talk about it <span aria-hidden="true">→</span></a>
     </div>
   {% endif %}
 

@@ -1083,16 +1083,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      carrying this app's own kinetic language (kin-hero's diagonal sheen,
      the ribbon's live-dot) instead of sitting as a flat static box — this
      is the one card on the page that changes every day, so it is the one
-     that should visibly say so. Stacked top to bottom — mark, sentence,
-     action — rather than one crowded row, so a two-line brief doesn't fight
-     the CTA for space and the eyebrow reads before the sentence does. */
+     that should visibly say so.
+
+     Row layout, text left / action right — NOT stacked. The text column
+     caps at a readable 68ch (see .daily-brief-text), which on any screen
+     wider than that leaves real width still inside the card; a stacked
+     layout let that width just sit there as background past the last word.
+     Putting a proper button on the right, vertically centered against the
+     whole card, gives that space a job — the same "content left, action
+     right" split every list row and section header in this app already
+     uses, rather than a bare link that only reclaims one text-height's
+     worth of the row. */
   .daily-brief {
     position: relative; overflow: hidden;
+    display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap;
     margin-bottom: var(--s4); padding: var(--s4);
     border: 1px solid var(--accent-line); border-radius: var(--r-panel);
     background: linear-gradient(135deg, var(--surface) 0%, var(--accent-soft) 100%);
     box-shadow: var(--shadow-1);
   }
+  .daily-brief-body { position: relative; flex: 1; min-width: 260px; }
   /* The exact sheen .kin-hero uses, reused rather than reinvented — a slow
      diagonal highlight that crosses and rests off-screen, so it reads as
      this app's own signature "something live here" instead of a new motif
@@ -1121,11 +1131,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      bold. `chat_format` (assistant_extras) is what turns the model's
      **word** into this <strong> in the first place. */
   .daily-brief-text strong { color: var(--accent-ink); font-weight: var(--w-med); }
-  .daily-brief-link { position: relative; display: inline-flex; align-items: center;
-    gap: 4px; margin-top: var(--s3); color: var(--accent-ink);
-    font-size: var(--fs-s); font-weight: var(--w-med); white-space: nowrap; }
+  /* `.btn` (coverage.css) supplies the pill shape, padding and border — this
+     only adjusts it to sit inside the tinted card: accent ink instead of
+     the default border-strong/surface pairing, and flex:none so the parent
+     row's flex-grow lands entirely on .daily-brief-body, never squeezing
+     the button. */
+  .daily-brief-link { position: relative; flex: none;
+    border-color: var(--accent-line); background: var(--surface);
+    color: var(--accent-ink); }
+  .daily-brief-link:hover { border-color: var(--accent); color: var(--accent-ink); }
   .daily-brief-link span { display: inline-block; transition: transform var(--t-fast); }
-  .daily-brief-link:hover { text-decoration: underline; }
   .daily-brief-link:hover span { transform: translateX(2px); }
 
   /* The staleness ring — a conic sweep around the avatar that fills as the
