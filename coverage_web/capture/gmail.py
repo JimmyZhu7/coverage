@@ -61,8 +61,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
-from capture.providers import CaptureProvider, InteractionEvent
-from capture.services import AmbiguousContactError
+from capture.providers import AmbiguousContactError, CaptureProvider, InteractionEvent
 from crm import services as crm_services
 from crm.models import CalendarEvent, Contact, Touch
 from directory.models import EmailPatternStats
@@ -213,12 +212,12 @@ def _match_contact(user, finding: dict) -> Contact | None:
             return match
     name = (finding.get("name") or "").strip()
     if name:
-        from capture import extractors
+        from capture.providers import normalize_name
 
-        norm = extractors.normalize_name(name)
+        norm = normalize_name(name)
         matches = [
             contact for contact in scoped
-            if contact.name and extractors.normalize_name(contact.name) == norm
+            if contact.name and normalize_name(contact.name) == norm
         ]
         if len(matches) > 1:
             raise AmbiguousContactError(name, len(matches))

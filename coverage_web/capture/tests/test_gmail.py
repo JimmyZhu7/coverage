@@ -33,7 +33,7 @@ User = get_user_model()
 @pytest.fixture
 def student(db):
     return User.objects.create_user(
-        email="gmail-student@example.com", password="x", capture_slug="gmailslug1"
+        email="gmail-student@example.com", password="x"
     )
 
 
@@ -342,7 +342,7 @@ def test_dry_run_then_real_run_agree(student, contact):
 def test_touches_are_tenant_scoped(student, contact, db):
     """A finding must never reach another user's identically-named contact."""
     other = User.objects.create_user(
-        email="other@example.com", password="x", capture_slug="otherslug1"
+        email="other@example.com", password="x"
     )
     Contact.all_objects.create(
         user=other, name="Jane Banker", email="jane@bank.example", source="manual"

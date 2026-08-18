@@ -34,10 +34,6 @@ services:
         sync: false # e.g. coverage-web.onrender.com (+ your custom domain)
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
         sync: false # e.g. https://coverage-web.onrender.com
-      - key: CAPTURE_INBOUND_SECRET
-        generateValue: true
-      - key: CAPTURE_INBOUND_DOMAIN
-        sync: false # e.g. in.coverage.app (the domain whose MX points at Postmark)
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
@@ -119,15 +115,6 @@ services:
           type: web
           name: coverage-web
           envVarKey: DJANGO_SECRET_KEY
-      # Required by production.py at import time (no default — see that
-      # module's comment), so EVERY process that boots Django needs it, not
-      # just the ones that actually serve /capture/inbound/. Missing here
-      # crashes the worker before it gets anywhere near Pub/Sub.
-      - key: CAPTURE_INBOUND_SECRET
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: CAPTURE_INBOUND_SECRET
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost # no HTTP served here; any value satisfies settings import
       # sync: false, NOT fromService — these start blank on coverage-web too
@@ -171,11 +158,6 @@ services:
           type: web
           name: coverage-web
           envVarKey: DJANGO_SECRET_KEY
-      - key: CAPTURE_INBOUND_SECRET
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: CAPTURE_INBOUND_SECRET
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost # cron serves no HTTP; any value satisfies the settings import
 
@@ -206,11 +188,6 @@ services:
           type: web
           name: coverage-web
           envVarKey: DJANGO_SECRET_KEY
-      - key: CAPTURE_INBOUND_SECRET
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: CAPTURE_INBOUND_SECRET
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost
       - key: VAPID_PUBLIC_KEY
@@ -242,13 +219,6 @@ services:
           type: web
           name: coverage-web
           envVarKey: DJANGO_SECRET_KEY
-      # Required by production.py at import time — see the identical comment
-      # on coverage-gmail-live above.
-      - key: CAPTURE_INBOUND_SECRET
-        fromService:
-          type: web
-          name: coverage-web
-          envVarKey: CAPTURE_INBOUND_SECRET
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost
       # sync: false — see the identical comment on coverage-gmail-live above.

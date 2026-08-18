@@ -30,7 +30,6 @@ APP_PAGES = [
     "/app/contacts/",
     "/app/contacts/new/",
     "/app/contacts/archived/",
-    "/capture/health/",
     # Settings, not "/welcome/": that path is the ONBOARDING wizard for a user
     # who hasn't finished it, and only redirects here once `onboarded_at` is
     # set. The nav's "Settings" link points at /welcome/ precisely so a

@@ -21,7 +21,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
-from crm.models import CaptureEvent, Contact
+from crm.models import Contact
 
 User = get_user_model()
 
@@ -72,7 +72,7 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
         # comment on that block for why they share a card but not a save
         # path.
         "notifications",
-        "capture", "security", "data", "legal", "danger",
+        "security", "data", "legal", "danger",
     }
 
 
@@ -93,14 +93,14 @@ def test_the_rail_is_grouped(body):
     """Ten flat links was at the limit of scannable. The groups mirror what
     LinkedIn, Notion and Linear all converged on: who you are / how the
     product behaves / how you get in and what we hold."""
-    for group in ("You", "How Coverage Paces You", "Email Capture", "Account"):
+    for group in ("You", "How Coverage Paces You", "Account"):
         assert f'class="settings-nav-group">{group}<' in body
 
 
 def test_the_danger_zone_is_last_and_holds_exactly_one_action(body):
-    """Regenerate lives in Email Capture and sign-out-everywhere in Sign-In &
-    Security on purpose — both protect data rather than destroy an account,
-    and burying them here would hide the capture rotation where nobody looks."""
+    """Sign-out-everywhere lives in Sign-In & Security on purpose — it
+    protects access rather than destroying an account, and burying it here
+    would hide it where nobody looks."""
     sections = re.findall(r'<section class="set-card[^"]*" id="([a-z-]+)"', body)
     assert sections[-1] == "danger"
     danger = body.split('id="danger"', 1)[1]
@@ -154,41 +154,6 @@ def test_no_archived_note_when_there_is_nothing_archived(client, logged_in):
 
 
 # ---------------------------------------------------------------------------
-# Email Capture card
-# ---------------------------------------------------------------------------
-def test_the_capture_card_says_nothing_received_yet_rather_than_showing_a_zero(body):
-    """A student whose BCC has silently stopped working checks this page. An
-    empty-looking zero reads like a rendering bug; a sentence doesn't."""
-    assert "Nothing received yet" in body
-
-
-def test_the_capture_card_reports_real_activity(client, logged_in):
-    CaptureEvent.all_objects.create(
-        user=logged_in, provider="postmark", provider_ref="<a@b>",
-        received_at=timezone.now(), status="needs_review",
-    )
-    body = client.get(reverse(SETTINGS)).content.decode()
-    assert "Nothing received yet" not in body
-    assert "Last received" in body
-    assert "need" in body  # the needs_review nudge
-    assert reverse("capture:review") in body
-
-
-def test_the_capture_card_links_health_and_warns_about_the_secret(body):
-    assert reverse("capture:health") in body
-    assert "anyone who has it can log mail into your CRM" in body
-
-
-def test_the_capture_card_makes_no_gmail_or_sync_claim(body):
-    """deploy.md §4 gate: the address is an inbound mailbox you send TO. No
-    "connect", no "sync", no "Gmail" anywhere near it."""
-    card = body.split('id="capture"', 1)[1].split("</section>", 1)[0]
-    lowered = card.lower()
-    for banned in ("gmail", "sync", "connect your"):
-        assert banned not in lowered
-
-
-# ---------------------------------------------------------------------------
 # Accessibility (E)
 # ---------------------------------------------------------------------------
 def test_every_single_control_row_has_a_real_label_for(body):
@@ -228,7 +193,7 @@ def test_controls_are_described_by_their_explanation(body):
 
 
 def test_each_section_is_labelled_by_its_own_heading(body):
-    for section_id in ("profile", "cadence", "capture", "security", "data", "danger"):
+    for section_id in ("profile", "cadence", "security", "data", "danger"):
         assert f'aria-labelledby="{section_id}-h"' in body
         assert f'id="{section_id}-h"' in body
 
@@ -254,13 +219,7 @@ def test_an_error_flash_interrupts_rather_than_waits(client, logged_in):
 
 def test_destructive_controls_have_descriptive_accessible_names(body):
     assert 'aria-label="Delete account permanently"' in body
-    assert 'aria-label="Regenerate capture address"' in body
     assert 'aria-label="Sign out on all other devices"' in body
-
-
-def test_the_copy_button_announces_itself(body):
-    assert 'aria-label="Copy your capture address"' in body
-    assert 'aria-live="polite"' in body
 
 
 # ---------------------------------------------------------------------------
@@ -273,9 +232,6 @@ def test_the_rows_stack_on_a_narrow_screen(body):
     assert "flex-direction: column" in narrow
 
 
-def test_the_capture_address_can_wrap(body):
-    css = "\n".join(re.findall(r"<style>(.*?)</style>", body, re.S))
-    assert "overflow-wrap: anywhere" in css
 
 
 def test_rows_use_min_height_never_a_fixed_height(body):

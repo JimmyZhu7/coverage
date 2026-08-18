@@ -140,7 +140,7 @@ def _who_to_ping(user) -> tuple[list[dict], int]:
     truncated list, matching Today's own capped-lane convention."""
     from crm.today import _build_actions, _today_class, _today_sort_key
 
-    raw_actions, _contacts, _capture_addr = _build_actions(user)
+    raw_actions, _contacts = _build_actions(user)
     pingable = [a for a in raw_actions if _today_class(a) != 4]
     pingable.sort(key=_today_sort_key)
     shown = pingable[:MAX_ACTIONS]

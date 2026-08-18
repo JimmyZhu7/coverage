@@ -151,25 +151,6 @@ def test_today_park_sets_thread_state_and_writes_no_maintain_touch(client):
 
 
 # ---------------------------------------------------------------------------
-# 3. mailto compose carries the correct BCC (the user's capture address).
-# ---------------------------------------------------------------------------
-@pytest.mark.django_db
-def test_mailto_link_contains_capture_bcc(client):
-    user = _user()
-    contact = Contact.all_objects.create(
-        user=user, name="Jane Banker", email="jane@acme.com"
-    )
-    client.force_login(user)
-    resp = client.get(reverse("crm:contact_detail", args=[contact.id]))
-    assert resp.status_code == 200
-    body = resp.content.decode()
-
-    # bcc=u-<slug>@in.coverage.app, URL-encoded (@ -> %40).
-    expected = f"bcc=u-{user.capture_slug}%40in.coverage.app"
-    assert expected in body
-
-
-# ---------------------------------------------------------------------------
 # 5. Fit-score display: band + axes + reasoning, and score_viewed recorded.
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db
@@ -896,7 +877,7 @@ def test_the_swap_fragment_is_the_whole_grid(client):
     body = resp.content.decode()
     assert 'id="contact-live"' in body and "cd-grid" in body
     assert "Fit Score" in body, "the rail rides in the swap"
-    assert "Compose (BCC Capture)" in body, "so does the reach card"
+    assert "Compose" in body, "so does the reach card"
     assert "Logged" in body, "and the movement flag"
 
 

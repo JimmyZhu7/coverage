@@ -31,7 +31,7 @@ from django.utils import timezone
 
 from accounts import services
 from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
-from crm.models import CaptureEvent, ChatDebrief, Contact, Task, Touch, UserFirm
+from crm.models import ChatDebrief, Contact, Task, Touch, UserFirm
 from directory.models import Firm, Opportunity
 
 User = get_user_model()
@@ -98,12 +98,6 @@ def loaded(student, firm):
         user=student, contact=live, touch=touch,
         learned="Team is hiring two analysts", advocate_answer="yes",
     )
-    CaptureEvent.all_objects.create(
-        user=student, provider="postmark", provider_ref="<msg-1@test>",
-        direction="outbound", counterparty_email="live@test-bank.com",
-        counterparty_name="Live Person", occurred_at=timezone.now(),
-        received_at=timezone.now(), status="applied", signals={"kind": "outreach"},
-    )
     FitScore.all_objects.create(
         user=student, subject_type="contact", subject_id=live.id,
         composite=0.72, axes={"network": 0.5}, reasoning="Strong overlap",
@@ -145,7 +139,6 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
         "user_opportunities": "applications.csv",
         "tasks": "tasks.csv",
         "chat_debriefs": "chat_debriefs.csv",
-        "capture_events": "capture_events.csv",
         "fit_scores": "fit_scores.csv",
         "imports": "imports.csv",
         "product_events": "product_events.csv",
@@ -232,16 +225,6 @@ def test_debriefs_carry_what_the_chat_taught(student, loaded):
     row = _rows(_zip(student), "chat_debriefs.csv")[0]
     assert row["learned"] == "Team is hiring two analysts"
     assert row["advocate_answer"] == "yes"
-
-
-def test_capture_events_export_the_structured_record_only(student, loaded):
-    """No raw MIME: the original is a 30-day artifact per the privacy policy's
-    Retention section, and the durable record is the extraction."""
-    header = _zip(student).read("capture_events.csv").decode().splitlines()[0]
-    assert "raw_ref" not in header
-    row = _rows(_zip(student), "capture_events.csv")[0]
-    assert row["counterparty_email"] == "live@test-bank.com"
-    assert row["status"] == "applied"
 
 
 def test_fit_scores_resolve_their_subject_to_a_name(student, loaded):

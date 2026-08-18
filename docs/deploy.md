@@ -6,10 +6,9 @@ the platform steps differ. Nothing here is destructive; take it one section at a
 time.
 
 Prerequisites you create (Claude can't — they need your accounts/payment):
-a Render account, a domain you control (for the capture address), a Postmark
-account (inbound email), and a Google Cloud project (sign-in). Rough cost at
-this scale: Render web + Postgres ≈ low-tens of dollars/month; Postmark has a
-free inbound tier; Google OAuth and the domain are cheap/free.
+a Render account and a Google Cloud project (sign-in, and separately, Gmail Live
+if you want it). Rough cost at this scale: Render web + Postgres ≈ low-tens of
+dollars/month; Google OAuth is free.
 
 ---
 
@@ -18,7 +17,8 @@ free inbound tier; Google OAuth and the domain are cheap/free.
 1. Push this repo to GitHub (it already has a sensible `.gitignore`; the real
    `.env` is ignored — never commit it).
 2. Render → **New → Blueprint** → pick the repo. Render reads `render.yaml` and
-   proposes a **web service**, a **Postgres database**, and a **cron job**.
+   proposes a **web service**, a **Postgres database**, and several **cron
+   jobs/workers**.
 3. It will ask you to fill the `sync: false` env vars (they can't live in git).
    Set these on the **web service** — leave them blank for now where noted and
    come back after the later sections:
@@ -26,14 +26,14 @@ free inbound tier; Google OAuth and the domain are cheap/free.
      (add your custom domain too once you attach one, comma-separated).
    - `DJANGO_CSRF_TRUSTED_ORIGINS` = `https://coverage-web.onrender.com`
      (scheme included; add the custom domain's origin too).
-   - `CAPTURE_INBOUND_DOMAIN` = the subdomain you'll point at Postmark, e.g.
-     `in.coverage.app` (section 3).
-   - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (section 4).
+   - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (section 3).
+   - `GMAIL_LIVE_*` (five keys) — optional; leave blank until you want real-time
+     Gmail (section 4, `docs/gmail-live-setup.md`).
    - `APPLE_OAUTH_*`, `MICROSOFT_OAUTH_*`, `LINKEDIN_OAUTH_*` — optional; leave
      blank and those sign-in buttons show "Setup Needed" until you fill them.
    - `SENTRY_DSN` — optional; leave blank to disable.
-   - `DJANGO_SECRET_KEY` and `CAPTURE_INBOUND_SECRET` are `generateValue: true`
-     — Render creates and stores them; the cron shares the same values.
+   - `DJANGO_SECRET_KEY` is `generateValue: true` — Render creates and stores
+     it; the cron jobs and workers share the same value.
 4. Apply. Render builds the image, runs `collectstatic` at build time, runs
    `migrate` as the **preDeploy** step (once, before traffic — a failed
    migration blocks the release instead of half-applying), then starts gunicorn.
@@ -58,38 +58,41 @@ fails **or** when a pass ends with zero open roles, so turn on cron-failure
 notifications (Render → the cron service → Settings → Notifications) and a
 broken scrape emails you instead of silently serving stale deadlines.
 
-## 3. Inbound email — the capture address (Postmark)
+## 3. Google sign-in (login-only scopes)
 
-This is what makes the CRM real; it needs no Google review.
+The `coverage-gmail-oauth-setup` skill in this repo walks the Cloud Console
+clicks. The one rule that matters: **request only `openid`, `email`, `profile` —
+never a `gmail.*` scope.** Login OAuth is unrestricted; adding a Gmail scope
+would drag you into Google's restricted-scope verification (the CASA gate).
+Gmail Live (section 4) uses a *separate* consent flow for exactly this reason,
+so a verification stall on that client can never break sign-in.
 
-1. Pick a subdomain you'll dedicate to inbound, e.g. `in.coverage.app`, and set
-   `CAPTURE_INBOUND_DOMAIN` to it (section 1). It must be a subdomain you can set
-   MX records on.
-2. Postmark → add an **Inbound** stream. Postmark gives you an inbound address /
-   server and DNS records:
-   - **MX** record on `in.coverage.app` pointing at Postmark's inbound host.
-   - **SPF** and **DKIM** as Postmark instructs (so forwarded mail isn't
-     spam-foldered).
-3. Point Postmark's inbound webhook at:
-   `https://<your-host>/capture/inbound/?token=<CAPTURE_INBOUND_SECRET>`
-   (or set the `X-Capture-Token` header to the secret if the console allows —
-   preferred, keeps the secret out of access logs). Read the generated
-   `CAPTURE_INBOUND_SECRET` value from the web service's Environment tab.
-4. Test: from any mail client, send a message and BCC
-   `u-<your-capture-slug>@in.coverage.app` (your slug is shown in
-   `/welcome/` onboarding and `/capture/health/`). Within a minute
-   `/capture/health/` should show "last received" update and a touch should
-   appear on the matching contact.
+1. Cloud Console → APIs & Services → **OAuth consent screen** (External),
+   add your email as a test user while unverified.
+2. **Credentials → Create OAuth client → Web application.** Authorized redirect
+   URI: `https://<your-host>/accounts/google/login/callback/`.
+3. Put the client id/secret into `GOOGLE_OAUTH_CLIENT_ID` /
+   `GOOGLE_OAUTH_CLIENT_SECRET` on the web service; redeploy.
+4. Also add the Google **Social Application** in Django admin
+   (`/admin/socialaccount/socialapp/`) if allauth doesn't pick it up from env:
+   provider Google, the same client id/secret, and attach it to the site.
 
-Note: raw-MIME 30-day retention (build-plan §10) is **not** wired yet — the
-webhook keeps only Postmark's message id, not the raw body. Add a retention blob
-store before scaling if you want the raw source kept.
+## 4. Gmail Live — real-time reply/bounce/invite detection (optional)
 
-### 3b. The daily Gmail sync (founder only, no Google review needed)
+This is how Coverage's CRM actually fills itself in: connect a Gmail account
+and touches log themselves, no habit change required. Full walkthrough,
+including the Google Cloud Console clicks (a SEPARATE OAuth client from
+section 3 — never reuse it) and the Pub/Sub setup, lives in
+`docs/gmail-live-setup.md`. Skip this section entirely if you're not ready for
+it yet — the app runs fine without it; the Settings page simply shows nothing
+extra until `GMAIL_LIVE_*` is set.
 
-A second capture route, for a mailbox that is already being scanned outside
-Coverage. The existing daily job searches Gmail and emits *findings*; feed that
-same batch to Coverage and one nightly search serves both systems:
+### 4b. The daily Gmail sync (an older, still-useful path)
+
+A separate, simpler route: for a mailbox already being scanned outside
+Coverage by hand (an agent searching Gmail and emitting typed findings), apply
+that same batch here — one search serves both systems. This needs no Google
+review of its own; it just applies findings someone else already gathered.
 
 ```bash
 DAYS=$(manage.py capture_gmail --email you@example.com --window)   # size the search
@@ -102,34 +105,11 @@ Always `--dry-run` first when wiring up a new findings source: it runs every
 match, ratchet and dedup decision and writes nothing, and a mis-shaped batch
 that silently archives contacts as bounced is tedious to unpick.
 
-Nothing in this path talks to Google, so §4's `openid`/`email`/`profile` rule is
-untouched and the restricted-scope decision stays deferred.
-
-## 4. Google sign-in (login-only scopes)
-
-The `coverage-gmail-oauth-setup` skill in this repo walks the Cloud Console
-clicks. The one rule that matters: **request only `openid`, `email`, `profile` —
-never a `gmail.*` scope.** Login OAuth is unrestricted; adding a Gmail scope
-would drag you into Google's restricted-scope verification (the CASA gate). If
-you ever add real Gmail reading, it uses a *separate* consent flow so a stall
-can't break sign-in.
-
-1. Cloud Console → APIs & Services → **OAuth consent screen** (External),
-   add your email as a test user while unverified.
-2. **Credentials → Create OAuth client → Web application.** Authorized redirect
-   URI: `https://<your-host>/accounts/google/login/callback/`.
-3. Put the client id/secret into `GOOGLE_OAUTH_CLIENT_ID` /
-   `GOOGLE_OAUTH_CLIENT_SECRET` on the web service; redeploy.
-4. Also add the Google **Social Application** in Django admin
-   (`/admin/socialaccount/socialapp/`) if allauth doesn't pick it up from env:
-   provider Google, the same client id/secret, and attach it to the site.
-
 ## 5. Custom domain (optional, when ready)
 
 Attach your domain to the Render web service, add it to `DJANGO_ALLOWED_HOSTS`
-and `DJANGO_CSRF_TRUSTED_ORIGINS`, and update the Google redirect URI. Keep the
-inbound subdomain (`in.coverage.app`) separate — it belongs to Postmark's MX,
-not the web host.
+and `DJANGO_CSRF_TRUSTED_ORIGINS`, and update both Google redirect URIs
+(sign-in and, if connected, Gmail Live).
 
 ---
 
@@ -144,8 +124,7 @@ the recommended default; everything else is equivalent.
 
 ## What still isn't automated (by design)
 
-- Real Postmark DNS + the first webhook test (section 3) — needs your domain.
-- The Google OAuth client (section 4) — needs your Cloud project.
-- Raw-MIME retention, and the `firm_boards` DB table for ATS tokens (currently
-  in `directory/boards.py`) — noted in the build follow-ups, not blockers.
+- The Google OAuth clients (sections 3 and 4) — need your Cloud project.
+- The `firm_boards` DB table for ATS tokens (currently in
+  `directory/boards.py`) — noted in the build follow-ups, not a blocker.
 - Billing — deliberately out of v1.

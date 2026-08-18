@@ -99,11 +99,6 @@
   /* Every tappable control on this page clears 44px. */
   .set-row-control .btn, .set-save .btn { min-height: 44px; }
 
-  /* Capture address with an inline copy control. */
-  .set-copy { display: flex; gap: var(--s2); align-items: stretch; }
-  .set-copy .capture-addr { margin: 0; flex: 1; display: flex; align-items: center;
-    min-width: 0; overflow-wrap: anywhere; }
-  .set-copy .btn { flex: none; min-height: 44px; }
   .set-hint { color: var(--ink-3); font-size: var(--fs-s); margin: var(--s2) 0 0;
     max-width: 60ch; }
 
@@ -228,7 +223,6 @@
        Buttons only: a select or toggle at full width reads as a text field. */
     .set-row-control .btn { flex: 1 1 auto; text-align: center; justify-content: center; }
     .set-row-value { align-self: flex-start; }
-    .set-copy { flex-direction: column; }
   }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 
@@ -284,9 +278,8 @@
     transform: translateX(-100%); }
   .cad-rail.is-live .cad-fill::after { animation: cad-sheen 620ms ease-out; }
   @keyframes cad-sheen { to { transform: translateX(100%); } }
-  /* The idle pulse: one small dot crossing the coloured span on a slow loop,
-     the same device the capture flow uses on its pipes (see .cap-pipe). It
-     says the thing the static rail cannot — that this stretch is a clock
+  /* The idle pulse: one small dot crossing the coloured span on a slow loop.
+     It says the thing the static rail cannot — that this stretch is a clock
      that is running — and it says it on the span alone, so it never implies
      the engine is counting anywhere else. Ornament over a fact the sentence
      below already states outright, so it stops dead under reduced-motion
@@ -385,27 +378,6 @@
   .pace-read { font-size: var(--fs-s); color: var(--ink-2); max-width: 26rem; }
   .pace-read b { color: var(--accent-ink); }
   @media (prefers-reduced-motion: reduce) { .pace-ring-widget .pr-fill { transition: none; } }
-
-  /* ---- Capture flow: the mechanism nobody trusts, shown moving ----------
-     Three stations, two channels, a dot that travels them on a loop. The
-     dot is ornament over an already-stated fact (the hint sentence), so it
-     pauses under reduced-motion with nothing lost. */
-  .cap-flow { display: flex; align-items: center; gap: var(--s2);
-    margin: var(--s3) 0 var(--s2); flex-wrap: wrap; }
-  .cap-node { padding: 6px 12px; border: 1px solid var(--line);
-    border-radius: 999px; background: var(--surface); font-size: var(--fs-xs);
-    color: var(--ink-2); white-space: nowrap; }
-  .cap-node-you { border-color: var(--accent-line); color: var(--accent-ink); }
-  .cap-pipe { position: relative; flex: 1 1 40px; min-width: 40px; height: 2px;
-    background: var(--line); border-radius: 999px; overflow: visible; }
-  .cap-pipe::after { content: ""; position: absolute; top: 50%; left: 0;
-    width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
-    transform: translate(-50%, -50%);
-    animation: cap-travel 2.6s linear infinite; }
-  .cap-pipe + .cap-node + .cap-pipe::after { animation-delay: 1.3s; }
-  @keyframes cap-travel { from { left: 0; opacity: 0; } 12% { opacity: 1; }
-    88% { opacity: 1; } to { left: 100%; opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .cap-pipe::after { animation: none; opacity: 0; } }
 
   /* The theme picker: three segments, the chosen one filled. Buttons rather
      than radios because the state lives in localStorage, not in the form
@@ -547,8 +519,10 @@
       <a href="#pace">Weekly Pace</a>
       <p class="settings-nav-group">Notifications</p>
       <a href="#notifications">Notifications</a>
-      <p class="settings-nav-group">Email Capture</p>
-      <a href="#capture">Email Capture</a>
+      {% if gmail_live.available %}
+      <p class="settings-nav-group">Gmail Live</p>
+      <a href="#gmail-live">Gmail Live</a>
+      {% endif %}
       <p class="settings-nav-group">Account</p>
       <a href="#security">Sign-In &amp; Security</a>
       <a href="#data">Your Data</a>
@@ -1067,82 +1041,6 @@
       </section>
       <script src="{% static 'js/push-subscribe.js' %}" defer></script>
 
-      {# ---- Email Capture ---- #}
-      <section class="set-card kin-reveal" id="capture" style="--i:8"
-               aria-labelledby="capture-h">
-        <div class="set-head">
-          <h2 id="capture-h">Email Capture</h2>
-          <p>Your Private BCC Capture Address</p>
-        </div>
-        <div class="set-body">
-          <div class="set-row">
-            <div class="set-row-main" style="flex:1">
-              <span class="set-row-label">Your Capture Address</span>
-              <div class="set-copy" style="margin-top: var(--s2)">
-                <code class="capture-addr" id="capture-addr">{{ capture_address }}</code>
-                <button type="button" class="btn" id="copy-addr" data-copy="{{ capture_address }}"
-                        aria-label="Copy your capture address">Copy</button>
-              </div>
-              {% comment %}The loop, drawn: the reason students distrust BCC
-              capture is that nothing ever shows the path their mail takes.
-              Two hops, one travelling dot, and the words underneath still
-              say it for anyone the dot can't reach.{% endcomment %}
-              <div class="cap-flow" aria-hidden="true">
-                <span class="cap-node cap-node-you">Your outreach email</span>
-                <span class="cap-pipe"></span>
-                <span class="cap-node">BCC → your capture address</span>
-                <span class="cap-pipe"></span>
-                <span class="cap-node">The contact's timeline</span>
-              </div>
-              <p class="set-hint">BCC this on outreach, or forward replies to it. Treat it
-                like a private key: anyone who has it can log mail into your CRM.</p>
-              <p class="set-sr" id="copy-live" aria-live="polite"></p>
-            </div>
-          </div>
-
-          {% comment %}
-          Status row. /capture/health/ and /capture/review/ already existed but
-          were reachable only from the top nav — so when a student's BCC
-          silently stops working (risk register #3), the page they'd actually
-          check said nothing at all. "Nothing received yet" is stated as a
-          sentence rather than left as a zero that reads like a rendering bug.
-          {% endcomment %}
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">Status</span>
-              <div class="set-row-desc">
-                {% if capture.last_received %}
-                  Last received {{ capture.last_received|timesince }} ago.
-                  {{ capture.total }} message{{ capture.total|pluralize }} captured in total.
-                  {% if capture.counts.needs_review %}
-                    <strong>{{ capture.counts.needs_review }} need{{ capture.counts.needs_review|pluralize:"s," }} your review.</strong>
-                  {% endif %}
-                {% else %}
-                  Nothing received yet. Send yourself a test BCC to check the loop works.
-                {% endif %}
-              </div>
-            </div>
-            <div class="set-row-control">
-              {% if capture.counts.needs_review %}
-                <a class="btn" href="{% url 'capture:review' %}">Review {{ capture.counts.needs_review }}</a>
-              {% endif %}
-              <a class="btn" href="{% url 'capture:health' %}">Capture Health</a>
-            </div>
-          </div>
-
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">Regenerate Address</span>
-              <div class="set-row-desc">If anyone has seen your address, replace it. The old
-                one stops working immediately and can't be restored.</div>
-            </div>
-            <div class="set-row-control">
-              <a class="btn" href="{% url 'accounts:capture_regenerate' %}"
-                 aria-label="Regenerate capture address">Regenerate</a>
-            </div>
-          </div>
-        </div>
-      </section>
 
       {% if gmail_live.available %}
       {% comment %}
@@ -1323,7 +1221,7 @@
               <span class="set-row-label">Import &amp; Export</span>
               <div class="set-row-desc">Bring contacts in from a CSV, or download
                 everything Coverage holds on you as one ZIP of CSVs: contacts,
-                touches, firms, applications, tasks, debriefs, capture events, scores,
+                touches, firms, applications, tasks, debriefs, scores,
                 and your profile.</div>
             </div>
             <div class="set-row-control">
@@ -1359,11 +1257,10 @@
       </section>
 
       {% comment %}
-      Danger Zone stays last and stays ONE row. Regenerating the capture
-      address lives in Email Capture and signing out other devices lives in
-      Sign-In & Security, deliberately: both protect data rather than destroy
-      an account, and quarantining everything alarming in one bucket would
-      bury the capture rotation where nobody would look for it.
+      Danger Zone stays last and stays ONE row. Signing out other devices
+      lives in Sign-In & Security, deliberately: that protects access rather
+      than destroying an account, and quarantining everything alarming in
+      one bucket would bury it where nobody would look for it.
       {% endcomment %}
       {# ---- Danger Zone ---- #}
       <section class="set-card is-danger kin-reveal" id="danger" style="--i:12"
@@ -1662,24 +1559,6 @@
       drawRing();
     }
 
-    // Copy the capture address, with a quick "Copied" confirmation. The visual
-    // label swap is invisible to a screen reader, so the same fact also goes
-    // into an aria-live region.
-    var btn = document.getElementById("copy-addr");
-    var live = document.getElementById("copy-live");
-    if (btn && navigator.clipboard) {
-      btn.addEventListener("click", function () {
-        navigator.clipboard.writeText(btn.dataset.copy).then(function () {
-          var label = btn.textContent;
-          btn.textContent = "Copied";
-          if (live) live.textContent = "Capture address copied to your clipboard.";
-          setTimeout(function () {
-            btn.textContent = label;
-            if (live) live.textContent = "";
-          }, 1400);
-        });
-      });
-    }
     // Scroll-spy: light up the rail item whose section is in view.
     var links = Array.prototype.slice.call(document.querySelectorAll(".settings-nav a"));
     var sections = Array.prototype.slice.call(document.querySelectorAll(".set-card"));

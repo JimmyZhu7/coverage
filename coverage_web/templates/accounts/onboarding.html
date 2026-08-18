@@ -64,7 +64,7 @@
 
   {% elif step == "import" %}
     <h1>Bring Your Contacts In</h1>
-    <p class="lede">If you've been tracking outreach in a spreadsheet, import it now so your CRM starts full, not empty. You can also do this later.</p>
+    <p class="lede">If you've already got recruiting contacts — a spreadsheet, a running list, people you've been emailing for months — import them now. It's worth doing before you connect Gmail: Coverage can only fill in someone's email history once they're already a contact, so anyone imported now starts with their real history attached instead of at zero.</p>
     <div class="panel">
       <p>Upload a CSV of your contacts: names, emails, firms, roles, notes. We'll match firms to the directory where we can and skip anything you already have.</p>
       <div class="actions">
@@ -75,21 +75,6 @@
     <form method="post" action="{% url 'accounts:onboarding' %}?step=import">
       {% csrf_token %}
       <input type="hidden" name="step" value="import">
-      <div class="actions">
-        <button type="submit" class="btn btn-primary">Continue</button>
-      </div>
-    </form>
-
-  {% elif step == "capture" %}
-    <h1>Your Capture Address</h1>
-    <div class="panel">
-      <p class="capture-addr">{{ capture_address }}</p>
-      <p><strong>BCC this address on your outreach.</strong> Every email you send with it in the BCC line is logged against the right contact automatically. Forward replies to it too, and your warmth updates on their own.</p>
-      <p class="muted">Only mail you BCC or forward is ever seen.</p>
-    </div>
-    <form method="post" action="{% url 'accounts:onboarding' %}?step=capture">
-      {% csrf_token %}
-      <input type="hidden" name="step" value="capture">
       <div class="actions">
         <button type="submit" class="btn btn-primary">Finish Setup</button>
       </div>

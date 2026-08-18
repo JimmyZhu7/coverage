@@ -33,7 +33,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def user(django_user_model):
     return django_user_model.objects.create_user(
-        email="apps@example.com", password="x", capture_slug="appsslug123"
+        email="apps@example.com", password="x"
     )
 
 
@@ -201,7 +201,7 @@ def test_a_dry_run_writes_nothing(user, gs):
 
 def test_one_users_applications_never_reach_another(user, gs, django_user_model):
     other = django_user_model.objects.create_user(
-        email="other@example.com", password="x", capture_slug="otherapps1")
+        email="other@example.com", password="x")
     _opp(gs, "Investment Banking Summer Analyst 2027")
     _run(user, [{"firm": "gs", "title": "Investment Banking Summer Analyst 2027"}])
     assert UserOpportunity.objects.for_user(other).count() == 0

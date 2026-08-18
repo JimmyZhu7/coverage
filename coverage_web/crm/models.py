@@ -195,13 +195,6 @@ class Touch(PrivateModel):
     kind = models.CharField(max_length=64)
     note = models.TextField(null=True, blank=True)
     source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default="manual")
-    capture_event = models.ForeignKey(
-        "CaptureEvent",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="touches",
-    )
 
     class Meta(PrivateModel.Meta):
         db_table = "touches"
@@ -209,44 +202,6 @@ class Touch(PrivateModel):
 
     def __str__(self) -> str:
         return f"{self.kind} @ {self.ts:%Y-%m-%d %H:%M}"
-
-
-class CaptureEvent(PrivateModel):
-    STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("applied", "Applied"),
-        ("needs_review", "Needs review"),
-        ("ignored", "Ignored"),
-    ]
-    DIRECTION_CHOICES = [("outbound", "Outbound"), ("inbound", "Inbound")]
-
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    provider = models.CharField(max_length=32)
-    provider_ref = models.CharField(max_length=255)
-    direction = models.CharField(max_length=16, choices=DIRECTION_CHOICES, blank=True, default="")
-    counterparty_email = models.EmailField(blank=True, default="")
-    counterparty_name = models.CharField(max_length=255, blank=True, default="")
-    occurred_at = models.DateTimeField(null=True, blank=True)
-    received_at = models.DateTimeField(null=True, blank=True)
-    raw_ref = models.CharField(max_length=512, blank=True, default="")
-    signals = models.JSONField(default=dict, blank=True)
-    extraction_version = models.CharField(max_length=32, blank=True, default="")
-    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="pending")
-
-    class Meta(PrivateModel.Meta):
-        db_table = "capture_events"
-        constraints = [
-            # Load-bearing per the task brief: makes at-least-once webhook
-            # delivery idempotent.
-            models.UniqueConstraint(
-                fields=["user", "provider", "provider_ref"],
-                name="uniq_capture_events_user_provider_ref",
-            ),
-        ]
-        ordering = ["-received_at"]
-
-    def __str__(self) -> str:
-        return f"{self.provider}:{self.provider_ref}"
 
 
 class ChatDebrief(PrivateModel):

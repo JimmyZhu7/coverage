@@ -30,8 +30,8 @@ class UserAdmin(DjangoUserAdmin):
     # list_filter: Django's stock filter needs discrete Field choices, not a
     # Postgres array — the same reason regions/tracks were never in here.
     list_filter = ("plan", "is_staff", "is_active", "is_superuser", "school")
-    search_fields = ("email", "name", "school", "capture_slug")
-    readonly_fields = ("created", "last_login", "date_joined", "capture_slug")
+    search_fields = ("email", "name", "school")
+    readonly_fields = ("created", "last_login", "date_joined")
 
     fieldsets = (
         (None, {"fields": ("email", "password")}),
@@ -83,7 +83,7 @@ class UserAdmin(DjangoUserAdmin):
                 ),
             },
         ),
-        ("Capture", {"fields": ("capture_slug", "google_sub", "onboarded_at")}),
+        ("Account", {"fields": ("google_sub", "onboarded_at")}),
         (
             "Permissions",
             {

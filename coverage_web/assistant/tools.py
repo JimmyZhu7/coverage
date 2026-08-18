@@ -143,7 +143,7 @@ _CHANNEL_LABELS = dict(CHANNEL_LABELS)
 #   avatar,
 #   remove_avatar  — a file upload; there is no file in a chat turn.
 #   google_sub     — the auth link.
-#   password, capture_slug, calendar_token, plan, is_staff/is_superuser —
+#   password, calendar_token, plan, is_staff/is_superuser —
 #                    credentials, secrets and entitlements, none of which are
 #                    a recruiting preference.
 #   language       — the column exists but is READ BY NOTHING (see its own
@@ -647,7 +647,7 @@ def _get_today_queue(user, _args) -> dict:
     labels, and explains every row; re-deriving any of that here would let the
     advisor and the Today page disagree about the same student's week, which
     is worse than either being wrong on its own."""
-    actions, contacts, _addr = _build_actions(user)
+    actions, contacts = _build_actions(user)
     rows = []
     for a in actions[:MAX_ROWS]:
         c = a["contact"]

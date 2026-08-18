@@ -11,7 +11,7 @@ CRUD surface with no extra wiring, while application code reaching for
 
 from django.contrib import admin
 
-from .models import CaptureEvent, ChatDebrief, Contact, Task, Touch, UserFirm
+from .models import ChatDebrief, Contact, Task, Touch, UserFirm
 
 
 @admin.register(UserFirm)
@@ -49,19 +49,6 @@ class TouchAdmin(admin.ModelAdmin):
     date_hierarchy = "ts"
 
 
-@admin.register(CaptureEvent)
-class CaptureEventAdmin(admin.ModelAdmin):
-    list_display = (
-        "user",
-        "provider",
-        "provider_ref",
-        "direction",
-        "counterparty_email",
-        "status",
-        "received_at",
-    )
-    list_filter = ("provider", "direction", "status")
-    search_fields = ("user__email", "provider_ref", "counterparty_email", "counterparty_name")
 
 
 @admin.register(ChatDebrief)

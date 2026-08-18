@@ -16,11 +16,6 @@ urlpatterns = [
     path("export/", views.export, name="export"),
     # Consequential actions, each on its own confirm page — never a one-click
     # on the settings page itself. See views.py's shared-pattern note.
-    path(
-        "capture/regenerate/",
-        views.regenerate_capture_address,
-        name="capture_regenerate",
-    ),
     path("security/signout-all/", views.signout_other_sessions, name="signout_all"),
     path("delete/", views.delete_account, name="delete"),
     path("timezone/", views.timezone_detect, name="timezone_detect"),

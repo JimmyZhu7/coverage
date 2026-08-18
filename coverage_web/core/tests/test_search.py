@@ -13,7 +13,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def user(django_user_model):
     return django_user_model.objects.create_user(
-        email="palette@example.com", password="x", capture_slug="paletteslug"
+        email="palette@example.com", password="x"
     )
 
 
@@ -31,7 +31,7 @@ def test_search_spans_contacts_firms_and_roles(client, user):
 
 def test_another_tenants_contacts_never_appear(client, user, django_user_model):
     other = django_user_model.objects.create_user(
-        email="other@example.com", password="x", capture_slug="otherpal")
+        email="other@example.com", password="x")
     Contact.all_objects.create(user=other, name="Golda Private")
     client.force_login(user)
     assert client.get("/search/", {"q": "golda"}).json()["contacts"] == []

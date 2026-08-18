@@ -64,7 +64,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from capture.extractors import normalize_email, normalize_name
+from capture.providers import normalize_email, normalize_name
 from crm import services as crm_services
 from crm.models import Contact
 from directory.models import Firm

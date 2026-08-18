@@ -89,17 +89,6 @@ class UserManager(BaseUserManager):
         return self._create_user(email, password, **extra_fields)
 
 
-def _generate_capture_slug() -> str:
-    """A short, unguessable, URL-safe token — the `<slug>` half of the
-    per-user inbound capture address `u-<slug>@in.coverage.app` (§5).
-    Generated eagerly at user creation (see `User.save` below) so the
-    column is never blank in practice, even though the capture pipeline
-    itself is out of scope for this milestone (§4's "Build new"). §10
-    requires capture slugs to be unguessable — `secrets.token_urlsafe`
-    is the stdlib's CSPRNG-backed choice for exactly that."""
-    return secrets.token_urlsafe(9)  # 12 base64url chars, ~72 bits of entropy
-
-
 class User(AbstractUser):
     username = None
     email = models.EmailField("email address", unique=True)
@@ -187,16 +176,11 @@ class User(AbstractUser):
     # turns it off. Choosing "Detect automatically" turns it back on.
     timezone_auto = models.BooleanField(default=True)
     assets = models.JSONField(default=dict, blank=True)
-    # Unique but nullable: multiple NULLs are fine in Postgres, and every
-    # real user gets one assigned at creation time (see save() below), so
-    # in practice this is never blank — nullable only leaves room for a
-    # pre-slug-era row/import edge case rather than forcing a placeholder.
-    capture_slug = models.SlugField(max_length=32, unique=True, null=True, blank=True)
-    # Read-only key for the ICS calendar feed. Its own token, NOT the capture
-    # slug: the capture address can WRITE into the CRM, so it must never ride
-    # in a URL a calendar app stores and syncs through third-party servers.
-    # Leaking this one leaks a read-only calendar, and regenerating it (drop
-    # the value, save) revokes every stale subscription at once.
+    # Read-only key for the ICS calendar feed. Its own token — the retired
+    # BCC capture address used to be the reason this comment stressed "not
+    # that slug"; now it's simply this feed's own secret. Leaking this one
+    # leaks a read-only calendar, and regenerating it (drop the value, save)
+    # revokes every stale subscription at once.
     calendar_token = models.CharField(max_length=64, unique=True, null=True, blank=True)
     # Opts a user OUT of send_weekly_digest (crm/digest.py). Default False —
     # the digest already only sends when there's something real to report
@@ -228,8 +212,6 @@ class User(AbstractUser):
         return self.email
 
     def save(self, *args, **kwargs):
-        if not self.capture_slug:
-            self.capture_slug = _generate_capture_slug()
         if not self.calendar_token:
             import secrets
             self.calendar_token = secrets.token_urlsafe(24)

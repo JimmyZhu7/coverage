@@ -134,7 +134,7 @@ def test_compose_body_comes_from_the_opener(client):
 def test_mailto_helper_puts_the_body_it_is_given_in_the_query():
     """Unit-level guard on the helper itself, so the rule survives a caller
     being added somewhere the route tests above don't cover."""
-    url = crm_views._mailto("a@b.com", "bcc@c.com", body="hello there")
+    url = crm_views._mailto("a@b.com", body="hello there")
     assert "body=hello%20there" in url
     assert url.startswith("mailto:a%40b.com?")
 
@@ -382,7 +382,7 @@ def test_cadence_reping_uses_the_contacts_region_not_its_source(client):
             kind="chat", channel="coffee_chat",
         )
 
-    actions, _, _ = crm_views._build_actions(user)
+    actions, _ = crm_views._build_actions(user)
     by_name = {a["contact"]["name"]: a["action"] for a in actions}
     assert by_name.get("Hong Konger") == "reping"
     assert by_name.get("New Yorker") != "reping"
@@ -478,12 +478,12 @@ def test_user_cadence_params_change_the_queue():
         kind="outreach", channel="email",
     )
 
-    default_actions, _, _ = crm_views._build_actions(user)
+    default_actions, _ = crm_views._build_actions(user)
     assert "follow_up" not in {a["action"] for a in default_actions}
 
     user.cadence_params = {"followup_after_business_days": 1}
     user.save(update_fields=["cadence_params"])
-    tuned_actions, _, _ = crm_views._build_actions(user)
+    tuned_actions, _ = crm_views._build_actions(user)
     assert "follow_up" in {a["action"] for a in tuned_actions}
 
 
@@ -501,7 +501,7 @@ def test_ignored_cadence_override_leaves_the_default_in_place():
     )
     user.cadence_params = {"followup_after_business_days": 0}  # below the floor
     user.save(update_fields=["cadence_params"])
-    actions, _, _ = crm_views._build_actions(user)
+    actions, _ = crm_views._build_actions(user)
     assert "follow_up" not in {a["action"] for a in actions}
 
 

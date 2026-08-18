@@ -18,7 +18,7 @@ from django.utils import timezone
 
 from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
 from coverage_web.tenancy import TenantScopeError
-from crm.models import CaptureEvent, Contact, Task, Touch, UserFirm
+from crm.models import Contact, Task, Touch, UserFirm
 from directory.models import Firm, Opportunity
 
 User = get_user_model()
@@ -52,12 +52,6 @@ def _make_touch(user) -> Touch:
     )
 
 
-def _make_capture_event(user) -> CaptureEvent:
-    return CaptureEvent.all_objects.create(
-        user=user, provider="bcc", provider_ref=f"ref-{user.email}"
-    )
-
-
 def _make_task(user) -> Task:
     return Task.all_objects.create(user=user, title="Follow up")
 
@@ -85,7 +79,6 @@ def _make_import(user) -> Import:
 PRIVATE_MODELS = [
     pytest.param(Contact, _make_contact, id="Contact"),
     pytest.param(Touch, _make_touch, id="Touch"),
-    pytest.param(CaptureEvent, _make_capture_event, id="CaptureEvent"),
     pytest.param(Task, _make_task, id="Task"),
     pytest.param(FitScore, _make_fit_score, id="FitScore"),
     pytest.param(UserFirm, _make_user_firm, id="UserFirm"),

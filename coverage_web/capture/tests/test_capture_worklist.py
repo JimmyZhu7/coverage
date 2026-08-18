@@ -25,7 +25,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def user(django_user_model):
     return django_user_model.objects.create_user(
-        email="sync@example.com", password="x", capture_slug="syncslug123"
+        email="sync@example.com", password="x"
     )
 
 
@@ -85,7 +85,7 @@ def test_archived_people_are_not_re_checked(user):
 
 def test_only_your_own_contacts_are_listed(user, django_user_model):
     other = django_user_model.objects.create_user(
-        email="other@example.com", password="x", capture_slug="otherslug99")
+        email="other@example.com", password="x")
     Contact.all_objects.create(user=other, name="Theirs")
     Contact.all_objects.create(user=user, name="Mine")
     assert set(_run(user)) == {"Mine"}

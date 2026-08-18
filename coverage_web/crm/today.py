@@ -35,7 +35,6 @@ from .utils import (
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
     TOUCH_KIND_LABELS,
     CHANNEL_LABELS,
-    _capture_address,
     _clock,
     _confidence_label,
     _mailto,
@@ -130,7 +129,7 @@ def _build_actions(user):
     contacts/touches/tiers/firm-dates, run `cadence.due_actions`, and dress
     each action for display (label, prose reason, warmth, compose link,
     last-touch evidence, deadline chip).
-    Returns (actions, contacts, capture_address)."""
+    Returns (actions, contacts)."""
     now = timezone.now()
     today = timezone.localdate()
     # Deliberately NOT filtered on `snoozed_until` — see _SNOOZE_EXEMPT_ACTIONS.
@@ -237,7 +236,6 @@ def _build_actions(user):
     reping_days = int(merged["pre_deadline_reping_days"])
     closing = cadence._closing_soon(firm_dates, today, reping_days)
 
-    capture_addr = _capture_address(user)
     for a in actions:
         c = a["contact"]
         a["label"] = ACTION_LABELS.get(a["action"], a["action"])
@@ -254,7 +252,6 @@ def _build_actions(user):
         # doubles as the place outreach starts (§5).
         a["mailto"] = _mailto(
             c.get("email", ""),
-            capture_addr,
             body=(c.get("opener") or ""),
         )
         # A blank opener means Compose opens an EMPTY email. The card says so
@@ -292,7 +289,7 @@ def _build_actions(user):
             close = min(by_region.values()) if region is None else by_region.get(region)
         a["closes_on"] = close
 
-    return actions, contacts, capture_addr
+    return actions, contacts
 
 
 # Quick-action "Sent" → the touch kind it logs, per cadence action.
@@ -831,7 +828,7 @@ def _cockpit_context(user) -> dict:
     semantic lanes, an honest held-back remainder, a weekly pace figure, the
     chats that are already on the calendar, and a recent-activity feed."""
     today = timezone.localdate()
-    actions, contacts, _ = _build_actions(user)
+    actions, contacts = _build_actions(user)
     pace = _pace(user, today)
     cap = _daily_cap(pace["goal"], pace["done"], today)
 
@@ -1023,7 +1020,7 @@ def today_park_all(request: HttpRequest) -> HttpResponse:
     It re-derives the park list from the engine rather than trusting posted
     ids, so it can only ever park people the page was actually showing as
     parkable at the moment it was rendered."""
-    actions, _, _ = _build_actions(request.user)
+    actions, _ = _build_actions(request.user)
     park_ids = [a["contact"]["id"] for a in actions if a["action"] == "park"]
     for cid in park_ids:
         services.set_contact_state(

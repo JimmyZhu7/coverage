@@ -25,10 +25,10 @@ from django.utils import timezone
 
 from analytics.events import record_event
 from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
-from crm.models import CaptureEvent, ChatDebrief, Contact, Task, Touch, UserFirm
+from crm.models import ChatDebrief, Contact, Task, Touch, UserFirm
 from directory.models import Firm
 
-from .models import User, _generate_capture_slug
+from .models import User
 
 # The tier assigned to every firm a user picks during onboarding. The plan
 # (docs/build-plan.md §2) declares `user_firms.tier smallint` but leaves its
@@ -37,56 +37,6 @@ from .models import User, _generate_capture_slug
 # priority" promotion and tier 3+ for stretch/backup firms — and pairs with
 # status="target". Documented as a decision in the build report.
 DEFAULT_FIRM_TIER = 2
-
-
-# ---------------------------------------------------------------------------
-# Capture address
-# ---------------------------------------------------------------------------
-def capture_address(user) -> str:
-    """The per-user inbound capture address, `u-<slug>@<domain>` (§5).
-
-    Domain is read via `getattr` with the documented default so the app
-    works before `CAPTURE_INBOUND_DOMAIN` is set in any environment.
-    """
-    domain = getattr(settings, "CAPTURE_INBOUND_DOMAIN", "in.coverage.app")
-    return f"u-{user.capture_slug}@{domain}"
-
-
-def regenerate_capture_address(user) -> str:
-    """Give the user a brand-new capture slug and return the new address.
-
-    WHY THIS EXISTS: the capture address is a bearer secret. `capture/
-    services.resolve_user` routes inbound mail purely by the `u-<slug>` in the
-    recipient list, so anyone who learns the address — a forwarded thread, a
-    screenshot, a recipient hitting reply-all on a BCC'd chain — can post mail
-    that lands as capture events, pending contacts, and (through the
-    deterministic extractors) touches in a student's private CRM. Before this,
-    the only remedy was deleting the account.
-
-    WHY IT IS SAFE: nothing durable stores the rendered address. mailto links
-    are built per request, and `capture_events.provider_ref` is the sending
-    system's Message-ID, not the slug. An address whose slug no longer matches
-    any row simply fails to resolve (`resolve_user` returns None) and the mail
-    is dropped — it is not misrouted to another user, because the slug is
-    unique and CSPRNG-generated.
-
-    The retry loop is for the unique constraint, not for entropy:
-    `token_urlsafe(9)` is ~72 bits, so a collision is a theoretical event, but
-    "theoretical" is not "handled", and the failure mode without a retry is a
-    500 on a security control.
-    """
-    for _attempt in range(5):
-        candidate = _generate_capture_slug()
-        if User.objects.filter(capture_slug=candidate).exists():
-            continue
-        user.capture_slug = candidate
-        try:
-            user.save(update_fields=["capture_slug"])
-        except IntegrityError:
-            continue  # lost a race between the check and the write
-        record_event("capture_address_regenerated", user=user)
-        return capture_address(user)
-    raise RuntimeError("Could not allocate a unique capture slug after 5 tries.")
 
 
 def sign_out_other_sessions(user, *, keep_session_key: str | None = None) -> int:
@@ -417,14 +367,6 @@ APPLICATION_EXPORT_COLUMNS = [
     "applied_status", "applied_at", "interview_dates", "dismissed",
 ]
 TASK_EXPORT_COLUMNS = ["title", "why", "due", "kind", "firm", "status", "created"]
-# No raw MIME, no `raw_ref`: the stored original is a 30-day artifact (see
-# legal/privacy.html "Retention"), and the durable, meaningful record is the
-# structured event. `signals` is included because it is what the extractors
-# actually concluded, which is the part a student would want to check.
-CAPTURE_EVENT_EXPORT_COLUMNS = [
-    "occurred_at", "received_at", "provider", "direction",
-    "counterparty_name", "counterparty_email", "status", "signals",
-]
 DEBRIEF_EXPORT_COLUMNS = [
     "created", "contact", "learned", "intro_name", "intro_email",
     "tracked_date", "date_note", "advocate_answer", "promoted", "dismissed",
@@ -439,7 +381,7 @@ PROFILE_EXPORT_COLUMNS = [
     "email", "name", "school", "class_year", "target_cycles", "regions",
     "tracks", "work_authorization", "angles", "advocate_target",
     "cadence_params", "weekly_touch_goal", "timezone", "language",
-    "capture_address", "joined", "onboarded_at",
+    "joined", "onboarded_at",
 ]
 
 
@@ -555,21 +497,6 @@ def tasks_csv(user) -> str:
     )
 
 
-def capture_events_csv(user) -> str:
-    rows = CaptureEvent.objects.for_user(user)
-    return _csv(
-        CAPTURE_EVENT_EXPORT_COLUMNS,
-        (
-            [
-                _dt(e.occurred_at), _dt(e.received_at), e.provider, e.direction,
-                e.counterparty_name, e.counterparty_email, e.status,
-                _json_cell(e.signals),
-            ]
-            for e in rows
-        ),
-    )
-
-
 def chat_debriefs_csv(user) -> str:
     """What each coffee chat actually taught the student. Free text they wrote
     once and would have no other way to get back."""
@@ -663,7 +590,6 @@ def profile_csv(user) -> str:
             user.weekly_touch_goal if user.weekly_touch_goal else "",
             getattr(user, "timezone", "") or "",
             user.language,
-            capture_address(user),
             _dt(user.created),
             _dt(user.onboarded_at),
         ]],
@@ -684,8 +610,6 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("tasks.csv", tasks_csv, "Your tasks, open and done."),
     ("chat_debriefs.csv", chat_debriefs_csv,
      "What each coffee chat taught you, in your own words."),
-    ("capture_events.csv", capture_events_csv,
-     "Mail your capture address received. Structured record only, never raw email."),
     ("fit_scores.csv", fit_scores_csv,
      "Computed fit scores with the axes behind each one."),
     ("imports.csv", imports_csv, "Your CSV imports and what each one did."),
@@ -700,7 +624,6 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
 # rule D4: "everything" is only written when it is everything.
 EXPORT_EXCLUSIONS: list[str] = [
     "Your password (we only ever store a one-way hash of it).",
-    "The raw original of captured email, which is discarded within 30 days.",
     "Shared directory data — firms, roles, deadlines. It isn't yours; it's "
     "the same for every user.",
 ]
@@ -747,8 +670,8 @@ def export_zip(user) -> bytes:
 # Self-serve deletion (§10 — a real, hard-delete path)
 # ---------------------------------------------------------------------------
 # Children before parents so each per-model count is the rows that model
-# actually owns (touches are deleted before contacts/capture_events they
-# reference, so no cascade double-counts them).
+# actually owns (touches are deleted before contacts they reference, so no
+# cascade double-counts them).
 _DELETE_ORDER: list[tuple[str, type]] = [
     # `chat_debriefs` was already swept — it CASCADEs from both `touch` and
     # `contact` — but it was swept invisibly, so the returned counts (which the
@@ -762,7 +685,6 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     ("user_firms", UserFirm),
     ("user_opportunities", UserOpportunity),
     ("imports", Import),
-    ("capture_events", CaptureEvent),
     ("contacts", Contact),
     ("product_events", ProductEvent),
 ]

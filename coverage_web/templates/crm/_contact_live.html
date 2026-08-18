@@ -28,13 +28,12 @@ values.
     <div class="cd-card kin-reveal" style="--i:0">
       {% if contact.email %}
         <div class="cd-reach">
-          <a class="btn btn-primary" href="{{ mailto }}">Compose (BCC Capture)</a>
+          <a class="btn btn-primary" href="{{ mailto }}">Compose</a>
           <span class="cd-email">{{ contact.email }}</span>
           {% if contact.linkedin %}<a class="cd-li" href="{{ contact.linkedin }}">LinkedIn</a>{% endif %}
         </div>
-        <p class="cd-bcc">BCC <code class="addr">{{ capture_address }}</code> and this outreach logs itself.</p>
       {% else %}
-        <p class="cd-noemail">No email on file. <a href="{% url 'crm:contact_edit' contact.pk %}">Add one</a> to compose with BCC capture.</p>
+        <p class="cd-noemail">No email on file. <a href="{% url 'crm:contact_edit' contact.pk %}">Add one</a> to compose.</p>
         {% if contact.linkedin %}<p class="cd-bcc"><a href="{{ contact.linkedin }}">LinkedIn</a></p>{% endif %}
       {% endif %}
       {% if contact.angle %}

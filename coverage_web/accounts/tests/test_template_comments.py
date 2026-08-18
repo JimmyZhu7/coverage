@@ -53,7 +53,7 @@ PATHS = [
 def student():
     User = get_user_model()
     return User.objects.create_user(
-        email="comment-guard@example.com", password="x", capture_slug="cguardslug1"
+        email="comment-guard@example.com", password="x"
     )
 
 

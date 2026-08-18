@@ -34,7 +34,7 @@ DETECT = "accounts:timezone_detect"
 @pytest.fixture
 def student():
     return get_user_model().objects.create_user(
-        email="flyer@example.com", password="x", capture_slug="flyerslug1"
+        email="flyer@example.com", password="x"
     )
 
 

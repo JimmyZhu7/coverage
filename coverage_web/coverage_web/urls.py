@@ -43,7 +43,7 @@ urlpatterns = [
     path("favicon.ico", core_views.favicon, name="favicon"),
     path("privacy/", RedirectView.as_view(pattern_name="accounts:privacy", permanent=True)),
     path("terms/", RedirectView.as_view(pattern_name="accounts:terms", permanent=True)),
-    path("capture/", include("capture.urls")),       # inbound-email webhook + capture settings
+    path("capture/", include("capture.urls")),        # Gmail Live OAuth (connect/callback/disconnect)
     # "Talk to Coverage": the advisor page, reasoning over the signed-in
     # student's own CRM through a tool loop (assistant/agent.py).
     path("assistant/", include("assistant.urls")),

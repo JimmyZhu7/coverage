@@ -26,7 +26,6 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from analytics.events import record_event
 from capture import gmail_live
 from capture.models import GmailConnection
-from capture.services import capture_health
 from crm.models import Contact, UserFirm
 from directory.models import Firm
 
@@ -64,7 +63,7 @@ SECTION_FORMS = {
 # number they have never seen used. Tiering lives on the Network page, where
 # it is a drag between columns with the board visible; it did not need a
 # wizard step, and asking early is how a wizard gets abandoned.
-ONBOARDING_STEPS = ["profile", "work_auth", "firms", "import", "capture"]
+ONBOARDING_STEPS = ["profile", "work_auth", "firms", "import"]
 
 # Rail labels — the raw step keys don't all title-case into English
 # ("work_auth"), and the rail is the user's map of how much is left.
@@ -73,7 +72,6 @@ ONBOARDING_STEP_LABELS = {
     "work_auth": "Work",
     "firms": "Firms",
     "import": "Import",
-    "capture": "Capture",
 }
 
 
@@ -132,8 +130,9 @@ def onboarding(request):
             services.set_target_firms(request.user, request.POST.getlist("firms"))
             return redirect(_step_url(_next_step(step)))
         elif step == "import":
-            return redirect(_step_url(_next_step(step)))
-        elif step == "capture":
+            # Last step — finishes onboarding. The CSV upload itself posts to
+            # the separate import_contacts view; this step's own Continue
+            # just closes the wizard out.
             if request.user.onboarded_at is None:
                 request.user.onboarded_at = timezone.now()
                 request.user.save(update_fields=["onboarded_at"])
@@ -161,8 +160,6 @@ def onboarding(request):
     }
     if step == "firms":
         context.update(_firm_picker_context(request.user))
-    if step == "capture":
-        context["capture_address"] = services.capture_address(request.user)
     return render(request, "accounts/onboarding.html", context)
 
 
@@ -269,11 +266,10 @@ def _cycle_months():
 
 
 def _gmail_live_context(user) -> dict:
-    """Small enough to compute on every settings render, same as
-    `capture_health` above it — the point is the same: a connection that
-    quietly went `revoked` should be visible on the page a student would
-    actually check, not discoverable only by the sync silently doing
-    nothing."""
+    """Cheap enough to compute on every settings render — the point is that
+    a connection that quietly went `revoked` should be visible on the page a
+    student would actually check, not discoverable only by the sync silently
+    doing nothing."""
     if not gmail_live.is_configured():
         return {"available": False}
     connection = GmailConnection.all_objects.filter(user=user).first()
@@ -361,16 +357,10 @@ def settings_view(request):
             "form": form,
             "saved": saved,
             "cycle_suggestions": CYCLE_SUGGESTIONS,
-            "capture_address": services.capture_address(request.user),
             # The cycle band under the target-cycle picker — the directory's
             # own deadline density, so the subject of the picker is visible
             # while you pick.
             "cycle_months": _cycle_months(),
-            # `capture_health` is two aggregates over the user's own events —
-            # cheap enough to run on every settings render, and the whole point
-            # is that a student whose BCC has silently stopped working finds
-            # out on the page they'd actually check (risk register #3).
-            "capture": capture_health(request.user),
             "gmail_live": _gmail_live_context(request.user),
             "target_firm_count": UserFirm.objects.for_user(request.user).count(),
             "contact_count": contact_count,
@@ -484,25 +474,9 @@ def _csv_download(text: str, filename: str) -> HttpResponse:
 # no-JS path is the only path.
 #
 # Type-to-confirm is reserved for account deletion, where the blast radius is
-# total and permanent. Regenerating the capture address and signing out other
-# devices are each recoverable BY ACTION (re-save a mail filter, sign in
-# again), so a single honest confirm button is the right friction — more would
-# train people to click through it.
-@login_required
-@require_http_methods(["GET", "POST"])
-def regenerate_capture_address(request):
-    if request.method == "POST":
-        new_address = services.regenerate_capture_address(request.user)
-        messages.success(
-            request,
-            f"New capture address: {new_address}. The old one stops working now.",
-        )
-        return redirect(f"{reverse('accounts:settings')}#capture")
-    return render(
-        request,
-        "accounts/capture_regenerate.html",
-        {"capture_address": services.capture_address(request.user)},
-    )
+# total and permanent. Signing out other devices is recoverable BY ACTION
+# (sign in again), so a single honest confirm button is the right friction —
+# more would train people to click through it.
 
 
 @login_required

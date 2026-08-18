@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from accounts import services
 from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
-from crm.models import CaptureEvent, Contact, Task, Touch, UserFirm
+from crm.models import Contact, Task, Touch, UserFirm
 from directory.models import Firm, Opportunity
 
 User = get_user_model()
@@ -44,14 +44,6 @@ def firms(db):
         "jpm": Firm.objects.create(slug="jpmorgan", name="JPMorgan",
                                    regions=["us", "hk"], tracks=["ib"]),
     }
-
-
-# ---------------------------------------------------------------------------
-# capture address
-# ---------------------------------------------------------------------------
-def test_capture_address_format(user):
-    addr = services.capture_address(user)
-    assert addr == f"u-{user.capture_slug}@in.coverage.app"
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +111,11 @@ def test_onboarding_firms_step_is_idempotent_sync(client, user, firms):
     assert remaining == [firms["gs"].id]
 
 
-def test_onboarding_capture_step_sets_onboarded_at_and_records_event(client, user):
+def test_onboarding_import_step_sets_onboarded_at_and_records_event(client, user):
     client.force_login(user)
     assert user.onboarded_at is None
     resp = client.post(
-        reverse("accounts:onboarding") + "?step=capture", {"step": "capture"}
+        reverse("accounts:onboarding") + "?step=import", {"step": "import"}
     )
     assert resp.status_code == 302
     user.refresh_from_db()
@@ -131,13 +123,13 @@ def test_onboarding_capture_step_sets_onboarded_at_and_records_event(client, use
     assert ProductEvent.all_objects.filter(user=user, event="onboarded").exists()
 
 
-def test_onboarding_capture_step_is_not_double_counted(client, user):
+def test_onboarding_import_step_is_not_double_counted(client, user):
     client.force_login(user)
-    client.post(reverse("accounts:onboarding") + "?step=capture", {"step": "capture"})
+    client.post(reverse("accounts:onboarding") + "?step=import", {"step": "import"})
     user.refresh_from_db()
     stamp = user.onboarded_at
     # Hitting finish again must not move onboarded_at or re-emit the event.
-    client.post(reverse("accounts:onboarding") + "?step=capture", {"step": "capture"})
+    client.post(reverse("accounts:onboarding") + "?step=import", {"step": "import"})
     user.refresh_from_db()
     assert user.onboarded_at == stamp
     assert ProductEvent.all_objects.filter(user=user, event="onboarded").count() == 1
@@ -160,7 +152,7 @@ def test_bare_welcome_shows_wizard_for_new_user(client, user):
 
 def test_onboarding_all_steps_render(client, user, firms):
     client.force_login(user)
-    for step in ["profile", "work_auth", "firms", "survey", "assets", "import", "capture"]:
+    for step in ["profile", "work_auth", "firms", "import"]:
         resp = client.get(reverse("accounts:onboarding") + f"?step={step}")
         assert resp.status_code == 200
 
@@ -343,13 +335,6 @@ def test_export_landing_page_renders(client, user):
 # ---------------------------------------------------------------------------
 # settings
 # ---------------------------------------------------------------------------
-def test_settings_shows_capture_address(client, user):
-    client.force_login(user)
-    resp = client.get(reverse("accounts:settings"))
-    assert resp.status_code == 200
-    assert services.capture_address(user).encode() in resp.content
-
-
 def test_settings_htmx_save_returns_partial(client, user):
     client.force_login(user)
     resp = client.post(
@@ -419,7 +404,6 @@ def _populate_private_rows(u, firm, opportunity):
     contact = Contact.all_objects.create(user=u, name=f"C-{u.email}")
     Touch.all_objects.create(user=u, contact=contact, ts=timezone.now(), kind="outreach", channel="email")
     UserFirm.all_objects.create(user=u, firm=firm)
-    CaptureEvent.all_objects.create(user=u, provider="bcc", provider_ref=f"ref-{u.email}")
     Task.all_objects.create(user=u, title="Follow up")
     FitScore.all_objects.create(user=u, subject_type="contact", subject_id=contact.id)
     UserOpportunity.all_objects.create(user=u, opportunity=opportunity)
@@ -437,7 +421,7 @@ def test_delete_removes_all_of_a_users_private_data(db, user, other_user):
     counts = services.delete_user_and_data(user)
 
     # Every table reported at least the one row we created.
-    for label in ["touches", "contacts", "user_firms", "capture_events", "tasks",
+    for label in ["touches", "contacts", "user_firms", "tasks",
                   "fit_scores", "user_opportunities", "product_events", "imports"]:
         assert counts[label] >= 1, label
 
@@ -447,7 +431,6 @@ def test_delete_removes_all_of_a_users_private_data(db, user, other_user):
     assert not Contact.all_objects.filter(user_id=user_id).exists()
     assert not Touch.all_objects.filter(user_id=user_id).exists()
     assert not UserFirm.all_objects.filter(user_id=user_id).exists()
-    assert not CaptureEvent.all_objects.filter(user_id=user_id).exists()
     assert not Task.all_objects.filter(user_id=user_id).exists()
     assert not FitScore.all_objects.filter(user_id=user_id).exists()
     assert not UserOpportunity.all_objects.filter(user_id=user_id).exists()
@@ -468,7 +451,6 @@ def test_delete_does_not_touch_another_users_data(db, user, other_user):
     assert Contact.all_objects.filter(user=other_user).count() == 1
     assert Touch.all_objects.filter(user=other_user).count() == 1
     assert UserFirm.all_objects.filter(user=other_user).count() == 1
-    assert CaptureEvent.all_objects.filter(user=other_user).count() == 1
     assert Task.all_objects.filter(user=other_user).count() == 1
     assert FitScore.all_objects.filter(user=other_user).count() == 1
     assert UserOpportunity.all_objects.filter(user=other_user).count() == 1

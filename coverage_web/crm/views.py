@@ -71,7 +71,6 @@ from .utils import (  # noqa: F401
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
     TOUCH_KIND_LABELS,
     WARMTH_ORDER,
-    _capture_address,
     _clock,
     _confidence_label,
     _mailto,
@@ -302,7 +301,7 @@ def _stale_window_days(c, params) -> int:
     return max(round(merged["followup_after_business_days"] * 7 / 5), 1)
 
 
-def _contact_card(c, *, tier, today, capture_addr, cadence=None):
+def _contact_card(c, *, tier, today, cadence=None):
     """One full contact card (radar style): initials, pills, firm · role,
     note bullets in plain grammar, and days since the last touch."""
     parts = [p for p in (c.name or "").split() if p]
@@ -335,13 +334,10 @@ def _contact_card(c, *, tier, today, capture_addr, cadence=None):
         # a CSS substring hack that cannot tell 8% from 80%.
         "stale_tint": ("due" if stale >= 1.0 else
                        "warming" if stale >= 0.7 else "fresh"),
-        # Compose surface: same rule as every other mailto: on the site (§5)
-        # — BCC'd to the capture address, body from `opener` ONLY, never
-        # `angle` (that's the user's private note ABOUT the person, not a
-        # draft addressed TO them). Before this, the Network board's email
-        # link was a bare `mailto:` with no BCC, so a send started here was
-        # invisible to Coverage's capture pipeline.
-        "mailto": _mailto(c.email or "", capture_addr, body=(c.opener or "")),
+        # Compose surface: same rule as every other mailto: on the site —
+        # body from `opener` ONLY, never `angle` (that's the user's private
+        # note ABOUT the person, not a draft addressed TO them).
+        "mailto": _mailto(c.email or "", body=(c.opener or "")),
     }
 
 
@@ -359,7 +355,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     cadence_overrides = _cadence_params(request.user)
     user = request.user
     today = timezone.localdate()
-    actions, _, capture_addr = _build_actions(user)
+    actions, _ = _build_actions(user)
 
     contacts = list(
         Contact.objects.for_user(user)
@@ -600,7 +596,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "label": label,
             "cards": [
                 _contact_card(c, tier=tiers_by_firm.get(c.firm_id), today=today,
-                              capture_addr=capture_addr, cadence=cadence_overrides)
+                              cadence=cadence_overrides)
                 for c in members
             ],
         })
@@ -1198,10 +1194,7 @@ def _contact_live_context(
         # and it is only ever a DISPLAY fact: nothing here generates, because
         # generation is a deliberate POST (crm.views.contact_ai_summary).
         "summary_new_touches": ai_summary.touches_since_summary(contact, touches),
-        "mailto": _mailto(
-            contact.email, _capture_address(user), body=(contact.opener or "")
-        ),
-        "capture_address": _capture_address(user),
+        "mailto": _mailto(contact.email, body=(contact.opener or "")),
     }
 
 

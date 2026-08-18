@@ -22,7 +22,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def user(django_user_model):
     return django_user_model.objects.create_user(
-        email="board@example.com", password="x", capture_slug="boardslug1"
+        email="board@example.com", password="x"
     )
 
 
@@ -70,7 +70,7 @@ def test_archived_people_are_left_out(user):
 
 def test_one_users_contradiction_is_not_reported_to_another(user, django_user_model):
     other = django_user_model.objects.create_user(
-        email="other@example.com", password="x", capture_slug="otherslug1")
+        email="other@example.com", password="x")
     Contact.all_objects.create(user=other, name="Theirs", source="capture")
     assert health.discovered_but_untouched(user) == []
     assert [c.name for c in health.discovered_but_untouched(other)] == ["Theirs"]

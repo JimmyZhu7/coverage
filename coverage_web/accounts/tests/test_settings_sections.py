@@ -644,18 +644,18 @@ def test_onboarding_step_counter_covers_every_step(client, logged_in):
         resp = client.get(_step(step))
         assert resp.status_code == 200
         assert resp.context["step_number"] == i
-        assert resp.context["step_total"] == len(ONBOARDING_STEPS) == 5
+        assert resp.context["step_total"] == len(ONBOARDING_STEPS) == 4
 
 
 def test_onboarding_rail_labels_every_step_readably(client, logged_in):
     resp = client.get(_step("work_auth"))
     body = resp.content.decode()
-    for label in ("Profile", "Work", "Firms", "Import", "Capture"):
+    for label in ("Profile", "Work", "Firms", "Import"):
         assert f"<span>{label}</span>" in body
 
 
-def test_onboarding_still_finishes_at_capture(client, logged_in):
-    resp = client.post(_step("capture"), {"step": "capture"})
+def test_onboarding_still_finishes_at_import(client, logged_in):
+    resp = client.post(_step("import"), {"step": "import"})
     assert resp.status_code == 302
     assert resp["Location"] == "/app/"
     logged_in.refresh_from_db()

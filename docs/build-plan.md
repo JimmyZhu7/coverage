@@ -191,6 +191,17 @@ the `gender` column.
 
 ## 5. Email capture — the swappable component
 
+> **Status as of 2026-08-19 — read this before the section below.** The v1
+> BCC/forward path this section describes (the per-user capture address,
+> `InboundEmailProvider`, `capture/services.py`, the `capture_events` table,
+> the "v1.x" browser-extension idea) was **retired and removed from the
+> codebase**. The "v2" gate below — Gmail API access — shipped instead,
+> under the name **Gmail Live** (`capture/gmail_live.py`,
+> `docs/gmail-live-setup.md`), once the founder decided the CASA/verification
+> cost was worth paying to skip the BCC habit-change entirely. The rest of
+> this section is kept as the historical record of why v1 was designed the
+> way it was — accurate about the past, not about what ships today.
+
 **The interface is the `InteractionEvent`, and the seam is exactly where
 `gmail_enrich.apply_enrichment` already draws it** (`gmail_enrich.py:141-144`). The existing
 system proved the shape: mailbox reading happens *somewhere else*; a typed finding arrives; a

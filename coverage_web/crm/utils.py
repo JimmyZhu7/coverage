@@ -11,8 +11,6 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from django.conf import settings
-
 # ---------------------------------------------------------------------------
 # Persistence -> domain adapter.
 # ---------------------------------------------------------------------------
@@ -87,19 +85,15 @@ ACTION_LABELS: dict[str, str] = {
 }
 
 
-def _capture_address(user) -> str:
-    """The user's per-user inbound capture address, `u-<slug>@<domain>`
-    (docs/build-plan.md §5). Domain is settings-driven with the plan's
-    default so this works before the capture app ships its own config."""
-    domain = getattr(settings, "CAPTURE_INBOUND_DOMAIN", "in.coverage.app")
-    return f"u-{user.capture_slug}@{domain}"
+def _mailto(to_email: str, *, subject: str = "", body: str = "") -> str:
+    """A `mailto:` URL with `to` (and optional subject/body) prefilled —
+    composes start from Coverage so a contact's opener is one click away.
+    `quote_via=quote` keeps spaces as %20 and the `@` as %40, which every
+    mail client accepts.
 
-
-def _mailto(to_email: str, bcc: str, *, subject: str = "", body: str = "") -> str:
-    """A `mailto:` URL with `to` + `bcc` (and optional subject/body) prefilled
-    — the v1 capture surface (§5): composes start from Coverage so outreach is
-    BCC'd to the capture address without any Gmail API access. `quote_via=quote`
-    keeps spaces as %20 and the `@` as %40, which every mail client accepts.
+    A `bcc` parameter used to live here too, pointed at the user's BCC
+    capture address (docs/build-plan.md §5's v1) — retired 2026-08-19 now
+    that Gmail Live reads sent mail directly, no BCC habit required.
 
     PRIVACY: `body` is addressed TO the contact, so only `Contact.opener` — the
     field that exists to be a draft email — may be passed here. `Contact.angle`
@@ -108,8 +102,6 @@ def _mailto(to_email: str, bcc: str, *, subject: str = "", body: str = "") -> st
     Compose pre-filled an email to someone containing the user's assessment of
     them. Pinned by test_angle_never_leaks_into_mailto."""
     params: list[tuple[str, str]] = []
-    if bcc:
-        params.append(("bcc", bcc))
     if subject:
         params.append(("subject", subject))
     if body:

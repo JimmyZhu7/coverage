@@ -65,20 +65,14 @@ INSTALLED_APPS = [
     # docs/build-plan.md §2's multi-tenant data model, split by zone:
     "accounts",  # the custom User model (private zone's `users` table)
     "directory",  # shared zone: firms, opportunities, firm_dates, ...
-    "crm",  # private zone: user_firms, contacts, touches, capture_events, tasks
+    "crm",  # private zone: user_firms, contacts, touches, tasks
     "analytics",  # private zone: user_opportunities, fit_scores, product_events, imports
-    "capture",  # inbound-email capture pipeline (crm.CaptureEvent) + Gmail
-                # Live's GmailConnection (capture/models.py)
+    "capture",  # Gmail Live's GmailConnection (capture/models.py) + apply
+                # layer (capture/gmail.py) — the BCC/forward v1 pipeline this
+                # app used to also hold was retired 2026-08-19
+
     "assistant",  # private zone: "Talk to Coverage" — the advisor page's conversations
 ]
-
-# Shared secret the inbound-email webhook uses to authenticate provider POSTs
-# (build-plan.md §5). Placeholder locally; the PaaS/Postmark sets the real value.
-CAPTURE_INBOUND_SECRET = env("CAPTURE_INBOUND_SECRET", default="local-dev-capture-secret")
-
-# The domain of each user's capture address (u-<slug>@<domain>). Must match the
-# domain whose inbound MX points at Postmark. Placeholder until DNS is set up.
-CAPTURE_INBOUND_DOMAIN = env("CAPTURE_INBOUND_DOMAIN", default="in.coverage.app")
 
 # The scheme+host the app is reachable at, for links that have to be built
 # outside a request (no `request.build_absolute_uri` to lean on) — today,
