@@ -844,6 +844,41 @@ def test_a_title_wrapped_in_markdown_bold_is_unwrapped(user, conversation):
     assert conversation.title == "Identifying Coverage Gaps"
 
 
+def test_the_title_prompt_forbids_naming_the_speakers(user, conversation):
+    """Measured live: with the excerpt labelled "Student:"/"Advisor:", Haiku
+    described the labelled exchange rather than naming its subject — two
+    sidebar rows read "Student asks about ...". The prompt has to ban that
+    outright AND stop handing the model speaker nouns to copy."""
+    client = FakeClient(
+        [
+            _response([_text("Some answer.")], "end_turn"),
+            _response([_text("Sponsorship rules for interns")], "end_turn"),
+        ]
+    )
+
+    agent.run_turn(user, conversation, "What do you see in this?", client=client)
+
+    prompt = client.requests[1]["messages"][0]["content"]
+    assert "Never mention or refer to the people talking" in prompt
+    assert "'Student asks about X'" in prompt  # spelled out as the thing NOT to do
+    # The transcript markers are neutral: no speaker label for a title to echo.
+    assert "Student:" not in prompt
+    assert "Advisor:" not in prompt
+    assert "First message: What do you see in this?" in prompt
+    assert "Reply: Some answer." in prompt
+    # A contentless opener ("What do you see in this?" — an image with no
+    # question) got echoed verbatim as a title; the reply is where the
+    # substance lives in that case.
+    assert "take the title from what the reply is actually about" in prompt
+    # And the constraints that were already earning their keep.
+    assert "4-6 word" in prompt
+    assert "no trailing punctuation" in prompt
+    assert "not a generic label" in prompt
+
+    conversation.refresh_from_db()
+    assert conversation.title == "Sponsorship rules for interns"
+
+
 def test_a_second_turn_is_never_retitled(user, conversation):
     conversation.title = "Already named"
     conversation.save()

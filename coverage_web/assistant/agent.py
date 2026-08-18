@@ -355,11 +355,29 @@ def _ai_title(client, user_text: str, assistant_text: str) -> str | None:
                 {
                     "role": "user",
                     "content": (
-                        "Write a short title (4-6 words, plain text only — no "
-                        "quotes, no markdown bold/italic/backticks, no trailing "
-                        "punctuation) for this chat, based on what it's actually "
-                        "about — not a generic label like 'Recruiting question'.\n\n"
-                        f"Student: {user_text[:500]}\n\nAdvisor: {assistant_text[:500]}"
+                        # The speakers used to be labelled "Student:" and
+                        # "Advisor:", and Haiku dutifully described the labelled
+                        # exchange instead of naming its subject — the founder's
+                        # own sidebar showed "Student asks about unr..." twice.
+                        # Neutral markers plus an explicit ban on naming anyone
+                        # is what stops that.
+                        "Write a 4-6 word title naming the SUBJECT of the "
+                        "exchange below.\n\n"
+                        "Rules:\n"
+                        "- Name the subject matter itself, the way you would "
+                        "label a document. Never mention or refer to the people "
+                        "talking: no 'Student', 'Advisor', 'User', 'they', and "
+                        "no phrasings like 'Student asks about X', 'User "
+                        "question on X' or 'Advice on X'.\n"
+                        "- If the first message is vague or has no content of "
+                        "its own (e.g. 'What do you see in this?', 'thoughts?'), "
+                        "take the title from what the reply is actually about.\n"
+                        "- Be specific to this exchange, not a generic label "
+                        "like 'Recruiting question'.\n"
+                        "- Plain text only: no quotes, no markdown "
+                        "bold/italic/backticks, no trailing punctuation.\n\n"
+                        f"First message: {user_text[:500]}\n\n"
+                        f"Reply: {assistant_text[:500]}"
                     ),
                 }
             ],
