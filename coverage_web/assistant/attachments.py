@@ -145,3 +145,23 @@ def strip_private_fields(blocks: list[dict]) -> list[dict]:
             block = {k: v for k, v in block.items() if not k.startswith("_")}
         cleaned.append(block)
     return cleaned
+
+
+def stub_old_blocks(blocks: list[dict]) -> list[dict]:
+    """Replace an image/document block with a lightweight text stand-in —
+    the filename, nothing else. `agent._api_messages` calls this on every
+    turn EXCEPT the most recent one that carried an attachment: without it,
+    a PDF attached early in a long-lived conversation (a folder is exactly
+    the standing invitation to keep one alive for weeks) gets re-sent, and
+    re-billed per page, on every later turn for as long as it sits inside
+    the replay window. Once the model has actually answered a question
+    about an attachment, the conversation rarely needs the original bytes
+    again — the text of what it said about it is already in the transcript.
+    """
+    stubbed = []
+    for block in blocks:
+        if isinstance(block, dict) and block.get("type") in ("image", "document") and block.get("_filename"):
+            stubbed.append({"type": "text", "text": f"[{block['_filename']} was attached earlier in this conversation.]"})
+        else:
+            stubbed.append(block)
+    return stubbed

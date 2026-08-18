@@ -46,7 +46,7 @@ delete — so a rename's new position (ChatConversation.Meta.ordering =
         </button>
         <div class="as-menu-divider"></div>
         <form method="post" action="{% url 'assistant:folder_delete' %}"
-              onsubmit="return confirm('Delete this folder? Chats inside stay — they just stop being grouped.');">
+              data-confirm="Delete this folder? Chats inside stay — they just stop being grouped.">
           {% csrf_token %}
           <input type="hidden" name="folder" value="{{ group.folder.id }}">
           <input type="hidden" name="current" value="{{ conversation.id }}">

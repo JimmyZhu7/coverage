@@ -1,7 +1,7 @@
 """Happy-path behaviour for every tool the advisor can call.
 
 Tenant isolation for the same set lives in `test_isolation.py` — that is the
-security test and it is parametrized over all nine tools; this file is about
+security test and it is parametrized over every tool; this file is about
 whether each one returns the right SHAPE and the right facts.
 
 Nothing here touches the network: no test in this package constructs an
@@ -271,6 +271,44 @@ def test_get_firm_by_slug_and_unknown_firm_is_an_error_not_a_crash(user, firm):
     missing, is_error = _call(user, "get_firm", {"name_or_slug": "nowhere plc"})
     assert is_error
     assert "error" in missing
+
+
+def test_get_my_firms_reports_every_tiered_firm_with_coverage_at_each(user, firm):
+    other_firm = Firm.objects.create(slug="south-bank", name="South Bank")
+    untiered_firm = Firm.objects.create(slug="untiered", name="Untiered Co")
+    UserFirm(user=user, firm=firm, tier=1).save()
+    UserFirm(user=user, firm=other_firm, tier=2).save()
+    UserFirm(user=user, firm=untiered_firm, tier=None).save()  # not a target — no tier set
+    Contact(user=user, firm=firm, name="Cold One", warmth="cold").save()
+    Contact(user=user, firm=firm, name="Warm One", warmth="advocate").save()
+    Opportunity.objects.create(
+        firm=firm, title="SA", bucket="internship", status="open", url="https://x.example/1"
+    )
+    Opportunity.objects.create(
+        firm=firm, title="Closed role", bucket="internship", status="closed", url="https://x.example/2"
+    )
+
+    result, is_error = _call(user, "get_my_firms")
+
+    assert not is_error
+    firms = {f["firm"]: f for f in result["firms"]}
+    assert set(firms) == {"North Bank", "South Bank"}  # the untiered firm is not a target
+    assert firms["North Bank"]["tier"] == 1
+    assert firms["North Bank"]["contact_count"] == 2
+    assert firms["North Bank"]["warmest_contact"] == "advocate"
+    assert firms["North Bank"]["open_roles"] == 1  # the closed role does not count
+    assert firms["South Bank"]["contact_count"] == 0
+    assert firms["South Bank"]["warmest_contact"] is None
+    # Tier order, not alphabetical — the student's own priority.
+    assert [f["firm"] for f in result["firms"]] == ["North Bank", "South Bank"]
+
+
+def test_get_my_firms_with_no_targets_is_a_plain_empty_result(user):
+    result, is_error = _call(user, "get_my_firms")
+
+    assert not is_error
+    assert result["firms"] == []
+    assert "note" in result
 
 
 def test_get_calendar_returns_upcoming_events_only(user, contact):

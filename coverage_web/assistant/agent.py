@@ -89,6 +89,8 @@ ATTACHMENTS
 
 A message can carry an image, a PDF, or a text file the student attached — a resume, a screenshot of a job posting, a CSV export of contacts. When one is there, read it and use it directly, the same as anything else in the conversation: describe what an image shows, pull the actual deadline and requirements off a posting screenshot, summarise a resume, work with the rows in a CSV. This is not out of scope — declining to look at what they just handed you is not "staying in your lane," it is refusing to do the one thing they asked.
 
+A fact read off an attachment is a different confidence class from a tool result — vision misreads a date the way a database lookup never does. Say where it came from ("the posting you attached says...", not a bare "it closes on..."), and if the firm is already tracked on Coverage, check search_opportunities or get_firm too — if the two disagree, say so instead of silently picking one.
+
 VOICE
 
 You know how this works: penultimate-year students, spring weeks and insight programmes, summer analyst cycles, superdays and assessment centres, warm versus cold outreach, alumni angles, tiering firms, the fact that a coffee chat is worth ten applications. Talk like someone who has done it, not like a careers-service leaflet. No hype, no emoji, no exclamation marks.
@@ -101,7 +103,9 @@ Two things only, and both apply immediately:
 
 Only log a touch when the student has told you it happened. Never log one to tidy up a record you inferred, and never log one against a contact you are not certain of.
 
-For anything else — writing an email, editing a note, changing a tier, moving a role to submitted, archiving someone, changing settings — say plainly that you can't do it from here, and name the page in Coverage where they can: Today for the queue, Network for contacts and tiers, Opportunities for roles and applications, Calendar for chats and dates, Settings for their profile and cadence.
+Drafting is not sending. If they want help wording a follow-up, a cold email, or a thank-you note, write it — grounded in the actual contact history and firm details your tools return, not a generic template. Say plainly you're not sending it, but writing the words is exactly the judgement call this page exists for; it is not the same request as "send this."
+
+For anything else — actually sending a message, editing a note, changing a tier, moving a role to submitted, archiving someone, changing settings — say plainly that you can't do it from here, and name the page in Coverage where they can: Today for the queue, Network for contacts and tiers, Opportunities for roles and applications, Calendar for chats and dates, Settings for their profile and cadence.
 
 SAFETY
 
@@ -191,14 +195,31 @@ def _replayable(conversation, user) -> list[ChatMessage]:
 
 def _api_messages(conversation, user) -> list[dict]:
     rows = _replayable(conversation, user)
+
+    # Only the LAST row in the window keeps real attachment bytes — every
+    # earlier row is stubbed to a filename (attachments_mod.stub_old_blocks).
+    # Keying this on "most recent turn that HAS an attachment" instead would
+    # miss the actual failure case: a single PDF attached once, with many
+    # plain follow-ups after it, is trivially always "the most recent
+    # attachment", so it would never get stubbed at all and would keep
+    # being re-sent (and re-billed per page) on every later turn for as
+    # long as it sits inside this window. "Last row, whatever it is" is
+    # what the current question actually needs; a file the conversation has
+    # already moved on from does not need its bytes a second time — the
+    # text of what the model already said about it is in the transcript.
+    last_idx = len(rows) - 1
+
     # `strip_private_fields` drops `_filename` — this app's own bookkeeping
     # on an attachment block (assistant/attachments.py), kept in storage so
     # the thread can say what was attached, but not a key the Messages API
     # schema knows about. Every replay has to strip it again: it is IN the
     # stored blocks, not something added once at send time.
-    messages = [
-        {"role": m.role, "content": attachments_mod.strip_private_fields(m.blocks())} for m in rows
-    ]
+    messages = []
+    for i, m in enumerate(rows):
+        blocks = m.blocks()
+        if i != last_idx:
+            blocks = attachments_mod.stub_old_blocks(blocks)
+        messages.append({"role": m.role, "content": attachments_mod.strip_private_fields(blocks)})
     if messages:
         # The preamble rides on the first user turn of the window, rebuilt
         # every request so the date is always today's.
@@ -210,16 +231,46 @@ def _api_messages(conversation, user) -> list[dict]:
 
 
 def _tool_calls_used(conversation, user) -> int:
-    return sum(
-        len(m.tool_names)
-        for m in ChatMessage.objects.for_user(user).filter(
-            conversation=conversation, role=ChatMessage.ROLE_ASSISTANT
-        )
-    )
+    """Rolling, not lifetime: counts only tool calls inside the SAME window
+    `_api_messages` actually sends back to the model (_replayable) — not
+    the whole conversation's history. A folder is a standing invitation to
+    keep one conversation alive for weeks, and a LIFETIME cap made that a
+    trap: the advisor permanently lost lookup ability once 25 calls
+    accumulated, ever, with "start a new chat" (which defeats the folder)
+    as the only way out. Deriving this from _replayable rather than a
+    second query means the budget always tracks what THIS request is
+    actually paying to re-send, never a total the model can no longer see."""
+    rows = _replayable(conversation, user)
+    return sum(len(m.tool_names) for m in rows if m.role == ChatMessage.ROLE_ASSISTANT)
 
 
 def daily_cap(user) -> int:
     return plans.limits_for(user).daily_cap
+
+
+def _log_usage(user, model: str, response) -> None:
+    """One event per API round-trip that actually returned. `usage` is a
+    real Anthropic SDK response attribute the test doubles in
+    test_agent.py have no reason to carry, so a missing one is silently
+    skipped rather than raising — this must never be why a turn fails.
+
+    Why this exists now, not before: attachments made per-turn cost
+    genuinely variable (a PDF is billed per page) in a way plain text
+    conversations weren't, and this is the one place that variance is
+    visible before it shows up as a surprise on the Anthropic invoice.
+    """
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    record_event(
+        "assistant_usage",
+        user=user,
+        model=model,
+        input_tokens=getattr(usage, "input_tokens", None),
+        output_tokens=getattr(usage, "output_tokens", None),
+        cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", None),
+        cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", None),
+    )
 
 
 def messages_sent_today(user) -> int:
@@ -294,7 +345,8 @@ def _ai_title(client, user_text: str, assistant_text: str) -> str | None:
                 {
                     "role": "user",
                     "content": (
-                        "Write a short title (4-6 words, no quotes, no trailing "
+                        "Write a short title (4-6 words, plain text only — no "
+                        "quotes, no markdown bold/italic/backticks, no trailing "
                         "punctuation) for this chat, based on what it's actually "
                         "about — not a generic label like 'Recruiting question'.\n\n"
                         f"Student: {user_text[:500]}\n\nAdvisor: {assistant_text[:500]}"
@@ -310,7 +362,10 @@ def _ai_title(client, user_text: str, assistant_text: str) -> str | None:
         block_type = getattr(block, "type", None) or (isinstance(block, dict) and block.get("type"))
         if block_type == "text":
             parts.append(getattr(block, "text", None) or (isinstance(block, dict) and block.get("text")) or "")
-    title = "".join(parts).strip().strip('"').strip()
+    # The prompt above asks for plain text, and Haiku still wraps the whole
+    # thing in **bold** often enough that this measured it live — belt and
+    # braces beats a sidebar title that reads "**Identifying Coverage Gaps**".
+    title = "".join(parts).strip().strip("*`\"'").strip()
     return title[:_TITLE_MAX_CHARS] or None
 
 
@@ -391,8 +446,6 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
         )
         return TurnResult(ok=False, reason="capped", reply=reply)
 
-    record_event("assistant_message_sent", user=user)
-
     client = client or get_client()
     used = _tool_calls_used(conversation, user)
     executed: list[str] = []
@@ -418,6 +471,13 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
             )
             return TurnResult(ok=False, reason="failed", rounds=round_no, tool_calls=executed, reply=reply)
 
+        if round_no == 0:
+            # Counted against the day's cap only once the API actually
+            # answered — not before the call, which used to charge a
+            # student's quota for a request that never got a response at
+            # all. At Free's 15/day that read as being billed for an error.
+            record_event("assistant_message_sent", user=user)
+        _log_usage(user, limits.model, response)
         blocks = [_as_dict(b) for b in response.content]
         last_assistant = _save(
             ChatMessage(
@@ -582,8 +642,6 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
         yield {"type": "notice", "kind": "capped", "text": notice_text}
         return
 
-    record_event("assistant_message_sent", user=user)
-
     client = client or get_client()
     used = _tool_calls_used(conversation, user)
     executed: list[str] = []
@@ -604,6 +662,11 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
                     if delta:
                         yield {"type": "delta", "text": delta}
                 final = stream.get_final_message()
+            if round_no == 0:
+                # Same fix as run_turn: counted only once the API actually
+                # answered, not before the call.
+                record_event("assistant_message_sent", user=user)
+            _log_usage(user, limits.model, final)
             blocks = [_as_dict(b) for b in final.content]
             stop_reason = final.stop_reason
             message_id = final.id or ""
@@ -690,6 +753,7 @@ TOOL_LABELS = {
     "get_contact": "a contact's history",
     "search_opportunities": "the roles board",
     "get_firm": "a firm",
+    "get_my_firms": "your target firms",
     "get_calendar": "your calendar",
     "get_my_pipeline": "your pipeline",
     "log_touch": "logged a touch",

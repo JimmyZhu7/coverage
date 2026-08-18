@@ -236,6 +236,18 @@ TOOL_SCHEMAS: list[dict] = [
         ),
     },
     {
+        "name": "get_my_firms",
+        "description": (
+            "Every firm the student has tiered as a target, grouped by "
+            "tier, with contact count, warmest relationship, and open role "
+            "count at each. The portfolio view — get_firm answers 'what's "
+            "my position at X' for one firm; this answers 'across my "
+            "targets, where am I thinnest' for all of them at once."
+        ),
+        "strict": True,
+        "input_schema": _schema({}),
+    },
+    {
         "name": "get_calendar",
         "description": (
             "Coffee chats and events on the student's calendar, soonest first. "
@@ -574,6 +586,50 @@ def _get_firm(user, args) -> dict:
     }
 
 
+def _get_my_firms(user, _args) -> dict:
+    """The portfolio view `get_firm` can't give: every tiered target at
+    once, cheap enough to read in full because it's counts, not rows. A
+    student asking "how am I doing at my top firms" previously forced the
+    model to call get_firm once per firm it happened to guess at — this
+    answers it in one call, for firms it would otherwise never think to ask
+    about at all."""
+    rows = list(
+        UserFirm.objects.for_user(user)
+        .filter(tier__isnull=False)
+        .select_related("firm")
+        .order_by("tier", "firm__name")[: MAX_ROWS * 3]
+    )
+    if not rows:
+        return {"firms": [], "note": "No target firms tiered yet — set tiers on the Network page."}
+
+    firm_ids = [r.firm_id for r in rows]
+    contacts_by_firm: dict[int, list[Contact]] = {}
+    for c in Contact.objects.for_user(user).filter(archived=False, firm_id__in=firm_ids):
+        contacts_by_firm.setdefault(c.firm_id, []).append(c)
+
+    open_counts: dict[int, int] = {}
+    for o in Opportunity.objects.filter(
+        firm_id__in=firm_ids, status="open", bucket__in=TARGET_BUCKETS
+    ).values_list("firm_id", flat=True):
+        open_counts[o] = open_counts.get(o, 0) + 1
+
+    warmth_rank = {"advocate": 0, "chatted": 1, "replied": 2, "cold": 3}
+    firms = []
+    for r in rows[: MAX_ROWS * 2]:
+        contacts = sorted(contacts_by_firm.get(r.firm_id, []), key=lambda c: warmth_rank.get(c.warmth, 9))
+        firms.append(
+            {
+                "firm": _s(r.firm.name, 120),
+                "slug": r.firm.slug,
+                "tier": r.tier,
+                "contact_count": len(contacts),
+                "warmest_contact": contacts[0].warmth if contacts else None,
+                "open_roles": open_counts.get(r.firm_id, 0),
+            }
+        )
+    return {"firms": firms}
+
+
 def _get_calendar(user, args) -> dict:
     days = args.get("days_ahead")
     days = days if isinstance(days, int) and 1 <= days <= 180 else 14
@@ -753,6 +809,7 @@ _HANDLERS = {
     "get_contact": _get_contact,
     "search_opportunities": _search_opportunities,
     "get_firm": _get_firm,
+    "get_my_firms": _get_my_firms,
     "get_calendar": _get_calendar,
     "get_my_pipeline": _get_my_pipeline,
     "track_opportunity": _track_opportunity,

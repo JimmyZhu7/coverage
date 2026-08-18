@@ -262,6 +262,21 @@ materials.
     font-size: var(--fs-xs); color: var(--ink-2); }
   .as-attachment-chip svg { flex: none; width: 13px; height: 13px; color: var(--ink-3); }
 
+  /* ---- Confirm dialog: replaces the browser's native confirm() for every
+     destructive action on this page (delete a chat, delete a folder) — same
+     native <dialog> shape as base.html's own Cmd-K palette (free focus trap
+     and Escape-to-close), styled in the site's own tokens instead of
+     whatever the OS draws for a bare confirm(). ---- */
+  .as-confirm { width: min(360px, calc(100vw - 32px)); border: 1px solid var(--line);
+    border-radius: var(--r-panel); padding: var(--s5); background: var(--surface);
+    box-shadow: 0 24px 64px rgba(15, 27, 42, 0.22); margin: auto;
+    animation: csel-open 140ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
+  .as-confirm::backdrop { background: rgba(15, 27, 42, 0.32); }
+  .as-confirm-text { margin: 0 0 var(--s4); font-size: var(--fs-m); color: var(--ink);
+    line-height: 1.5; }
+  .as-confirm-actions { display: flex; justify-content: flex-end; gap: var(--s2); }
+  @media (prefers-reduced-motion: reduce) { .as-confirm { animation: none; } }
+
   /* ---- Composer: a pill that grows, an icon send button, like every AI
      chat surface a student has already used — drawn in the site's own
      radii and shadow rather than borrowed chrome. ---- */
@@ -432,6 +447,19 @@ materials.
     </div>
   </div>
 </div>
+
+{% comment %}
+The confirm dialog every destructive action on this page shares — chat.html's
+JS opens it and resolves true/false; nothing here decides WHEN to ask, only
+how the asking looks.
+{% endcomment %}
+<dialog class="as-confirm" id="as-confirm">
+  <p class="as-confirm-text" id="as-confirm-text"></p>
+  <div class="as-confirm-actions">
+    <button type="button" class="btn" id="as-confirm-cancel">Cancel</button>
+    <button type="button" class="btn btn-danger" id="as-confirm-ok">Delete</button>
+  </div>
+</dialog>
 
 {% comment %}
 Behaviours that make this read as a chat surface rather than a form that
@@ -684,6 +712,57 @@ element by the next turn.
           folderCreateInput.value = "";
           folderCreateForm.hidden = true;
         }
+      });
+    }
+
+    // 6c. The confirm dialog every destructive action shares. A form marks
+    // itself with `data-confirm="<message>"` instead of the browser's own
+    // confirm() (which cannot be styled at all — every OS draws its own,
+    // and none of them look like Coverage). Delegated on `document` so it
+    // covers both delete-conversation and delete-folder forms without
+    // wiring either one by hand, and any future one for free.
+    var confirmDialog = document.getElementById("as-confirm");
+    var confirmText = document.getElementById("as-confirm-text");
+    var confirmOk = document.getElementById("as-confirm-ok");
+    var confirmCancel = document.getElementById("as-confirm-cancel");
+    function askConfirm(message) {
+      return new Promise(function (resolve) {
+        confirmText.textContent = message;
+        confirmDialog.showModal();
+        function settle(result) {
+          confirmDialog.close();
+          confirmOk.removeEventListener("click", onOk);
+          confirmCancel.removeEventListener("click", onCancel);
+          confirmDialog.removeEventListener("cancel", onCancel);
+          resolve(result);
+        }
+        function onOk() { settle(true); }
+        // Cancel button AND the dialog's native "cancel" event (Escape, or
+        // clicking the ::backdrop) both mean the same thing here.
+        function onCancel() { settle(false); }
+        confirmOk.addEventListener("click", onOk);
+        confirmCancel.addEventListener("click", onCancel);
+        confirmDialog.addEventListener("cancel", onCancel);
+      });
+    }
+    if (confirmDialog) {
+      document.addEventListener("submit", function (e) {
+        var message = e.target.dataset ? e.target.dataset.confirm : null;
+        if (!message) return;
+        e.preventDefault();
+        askConfirm(message).then(function (ok) {
+          // .submit() (not .requestSubmit()) deliberately: it does not
+          // re-fire the "submit" event at all, so this can't loop back
+          // into this same listener a second time.
+          if (ok) e.target.submit();
+        });
+      });
+      // Clicking the ::backdrop closes a native <dialog> only via Escape by
+      // default — a click outside the box does nothing unless wired up,
+      // and every other dialog on this site (the Cmd-K palette) already
+      // treats a backdrop click as "never mind".
+      confirmDialog.addEventListener("click", function (e) {
+        if (e.target === confirmDialog) confirmDialog.dispatchEvent(new Event("cancel"));
       });
     }
 

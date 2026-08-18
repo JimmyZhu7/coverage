@@ -57,8 +57,15 @@ def _tool_use(name, tool_input, block_id="toolu_1"):
     return Block(type="tool_use", id=block_id, name=name, input=tool_input)
 
 
-def _response(blocks, stop_reason, msg_id="msg_1"):
-    return SimpleNamespace(id=msg_id, content=blocks, stop_reason=stop_reason)
+def _response(blocks, stop_reason, msg_id="msg_1", usage=None):
+    return SimpleNamespace(id=msg_id, content=blocks, stop_reason=stop_reason, usage=usage)
+
+
+def _usage(input_tokens=100, output_tokens=50):
+    return SimpleNamespace(
+        input_tokens=input_tokens, output_tokens=output_tokens,
+        cache_creation_input_tokens=0, cache_read_input_tokens=0,
+    )
 
 
 class FakeMessages:
@@ -279,23 +286,37 @@ def test_the_round_cap_stops_a_model_that_never_stops_calling_tools(user, conver
 def test_the_conversation_tool_call_cap_refuses_further_lookups(user, conversation, contact):
     """Past the cap the loop does not execute the tool; it answers the model
     with an error result telling it to wrap up, so the student still gets a
-    reply built on what was already fetched."""
-    # Burn the budget with previously-persisted assistant turns.
-    for i in range(agent.MAX_TOOL_CALLS):
-        m = ChatMessage(
+    reply built on what was already fetched.
+
+    Burned 5 tool calls per round (5 rounds), not one-per-round: the cap is
+    now rolling over the SAME window replay uses (agent._replayable /
+    REPLAY_TURNS), so a one-call-per-round burn would need 50 rows for 25
+    calls — mostly outside a 30-row window, and the cap would never fire at
+    all. Bundling several tool calls into one round is also just what a
+    real multi-part question looks like, not a contrived shape."""
+    ChatMessage(
+        user=user, conversation=conversation, role=ChatMessage.ROLE_USER,
+        content=[{"type": "text", "text": "earlier question"}],
+    ).save()
+    for round_i in range(5):
+        ChatMessage(
             user=user,
             conversation=conversation,
             role=ChatMessage.ROLE_ASSISTANT,
-            content=[{"type": "tool_use", "id": f"toolu_{i}", "name": "get_today_queue", "input": {}}],
-        )
-        m.save()
-        r = ChatMessage(
+            content=[
+                {"type": "tool_use", "id": f"toolu_{round_i}_{j}", "name": "get_today_queue", "input": {}}
+                for j in range(5)
+            ],
+        ).save()
+        ChatMessage(
             user=user,
             conversation=conversation,
             role=ChatMessage.ROLE_USER,
-            content=[{"type": "tool_result", "tool_use_id": f"toolu_{i}", "content": "{}"}],
-        )
-        r.save()
+            content=[
+                {"type": "tool_result", "tool_use_id": f"toolu_{round_i}_{j}", "content": "{}"}
+                for j in range(5)
+            ],
+        ).save()
 
     client = FakeClient(
         [
@@ -311,6 +332,61 @@ def test_the_conversation_tool_call_cap_refuses_further_lookups(user, conversati
     blocked = _turns(user, conversation)[-2].blocks()[0]
     assert blocked["is_error"] is True
     assert "tool-call limit" in blocked["content"]
+
+
+def test_the_tool_call_cap_is_rolling_not_lifetime(user, conversation, contact):
+    """The whole point of the change: a folder is a standing invitation to
+    keep one conversation alive for weeks, and a LIFETIME cap made that a
+    trap — once MAX_TOOL_CALLS accumulated, ever, the advisor permanently
+    lost lookup ability, with "start a new chat" (which defeats the
+    folder) as the only way out. Old tool calls that have aged out of the
+    replay window must not count against a NEW question."""
+    ChatMessage(
+        user=user, conversation=conversation, role=ChatMessage.ROLE_USER,
+        content=[{"type": "text", "text": "an old question, weeks ago"}],
+    ).save()
+    for round_i in range(5):
+        ChatMessage(
+            user=user,
+            conversation=conversation,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content=[
+                {"type": "tool_use", "id": f"toolu_old_{round_i}_{j}", "name": "get_today_queue", "input": {}}
+                for j in range(5)
+            ],
+        ).save()
+        ChatMessage(
+            user=user,
+            conversation=conversation,
+            role=ChatMessage.ROLE_USER,
+            content=[
+                {"type": "tool_result", "tool_use_id": f"toolu_old_{round_i}_{j}", "content": "{}"}
+                for j in range(5)
+            ],
+        ).save()
+    # 30 plain-text filler turns (REPLAY_TURNS) push every one of the rows
+    # above outside the window _tool_calls_used and _api_messages both use.
+    for i in range(agent.REPLAY_TURNS // 2):
+        ChatMessage(
+            user=user, conversation=conversation, role=ChatMessage.ROLE_USER,
+            content=[{"type": "text", "text": f"filler question {i}"}],
+        ).save()
+        ChatMessage(
+            user=user, conversation=conversation, role=ChatMessage.ROLE_ASSISTANT,
+            content=[{"type": "text", "text": f"filler answer {i}"}],
+        ).save()
+
+    client = FakeClient(
+        [
+            _response([_tool_use("search_contacts", {"query": "jane"})], "tool_use"),
+            _response([_text("Found her.")], "end_turn"),
+        ]
+    )
+
+    result = agent.run_turn(user, conversation, "a new question, much later", client=client)
+
+    assert result.ok
+    assert result.tool_calls == ["search_contacts"]  # actually executed — the old burn did not count
 
 
 _TWO_A_DAY = {
@@ -724,6 +800,22 @@ def test_a_successful_first_turn_is_retitled_by_the_model(user, conversation):
     assert conversation.title == "Where to spend the week"
 
 
+def test_a_title_wrapped_in_markdown_bold_is_unwrapped(user, conversation):
+    """Measured live: Haiku wraps the whole title in **bold** often enough
+    that the sidebar showed "**Identifying Coverage Gaps**" literally."""
+    client = FakeClient(
+        [
+            _response([_text("Some answer.")], "end_turn"),
+            _response([_text("**Identifying Coverage Gaps**")], "end_turn"),
+        ]
+    )
+
+    agent.run_turn(user, conversation, "Where am I thinnest?", client=client)
+
+    conversation.refresh_from_db()
+    assert conversation.title == "Identifying Coverage Gaps"
+
+
 def test_a_second_turn_is_never_retitled(user, conversation):
     conversation.title = "Already named"
     conversation.save()
@@ -796,3 +888,131 @@ def test_a_streamed_second_turn_is_never_retitled(user, conversation):
     conversation.refresh_from_db()
     assert conversation.title == "Already named"
     assert client.messages.title_requests == []
+
+
+# ---------------------------------------------------------------------------
+# Token-usage logging
+# ---------------------------------------------------------------------------
+def test_a_successful_turn_logs_its_token_usage(user, conversation):
+    client = FakeClient([_response([_text("ok")], "end_turn", usage=_usage(input_tokens=321, output_tokens=45))])
+
+    agent.run_turn(user, conversation, "hi", client=client)
+
+    events = list(ProductEvent.objects.for_user(user).filter(event="assistant_usage"))
+    assert len(events) == 1
+    assert events[0].props["input_tokens"] == 321
+    assert events[0].props["output_tokens"] == 45
+    assert "model" in events[0].props
+
+
+def test_a_response_with_no_usage_attribute_logs_nothing_and_does_not_error(user, conversation):
+    """The FakeClient in these tests, and real SDK responses shaped slightly
+    differently than expected, must never make logging itself the reason a
+    turn fails."""
+    client = FakeClient([_response([_text("ok")], "end_turn")])  # usage=None by default
+
+    result = agent.run_turn(user, conversation, "hi", client=client)
+
+    assert result.ok
+    assert ProductEvent.objects.for_user(user).filter(event="assistant_usage").count() == 0
+
+
+def test_a_streamed_turn_also_logs_usage(user, conversation):
+    client = FakeStreamingClient(
+        [(["ok"], _response([_text("ok")], "end_turn", usage=_usage(input_tokens=200, output_tokens=30)))]
+    )
+
+    list(agent.stream_turn(user, conversation, "hi", client=client))
+
+    events = list(ProductEvent.objects.for_user(user).filter(event="assistant_usage"))
+    assert len(events) == 1
+    assert events[0].props["output_tokens"] == 30
+
+
+# ---------------------------------------------------------------------------
+# A failed turn must not spend the day's quota
+# ---------------------------------------------------------------------------
+def test_a_turn_that_never_reaches_the_model_does_not_count_against_the_daily_cap(user, conversation):
+    """Before this fix, assistant_message_sent fired BEFORE the API call —
+    a network hiccup on the very first round still burned one of the
+    day's messages. At Free's low cap that reads as being charged for an
+    error."""
+    client = FakeClient([RuntimeError("connection reset")])
+
+    result = agent.run_turn(user, conversation, "hello", client=client)
+
+    assert not result.ok
+    assert result.reason == "failed"
+    assert agent.messages_sent_today(user) == 0
+
+
+def test_a_successful_turn_does_count_against_the_daily_cap(user, conversation):
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+
+    agent.run_turn(user, conversation, "hello", client=client)
+
+    assert agent.messages_sent_today(user) == 1
+
+
+def test_a_streamed_turn_that_never_reaches_the_model_does_not_count_against_the_daily_cap(user, conversation):
+    client = FakeStreamingClient([RuntimeError("connection reset")])
+
+    list(agent.stream_turn(user, conversation, "hello", client=client))
+
+    assert agent.messages_sent_today(user) == 0
+
+
+# ---------------------------------------------------------------------------
+# Attachments: replay stub for anything but the most recent one
+# ---------------------------------------------------------------------------
+def test_only_the_most_recent_attachment_is_replayed_in_full(user, conversation):
+    """A PDF/image attached early in a long-lived conversation must not be
+    re-sent (and re-billed per page, for a PDF) on every later turn — see
+    assistant.attachments.stub_old_blocks. Only the latest attachment-
+    bearing turn keeps its real bytes; older ones become a filename stub."""
+    old_image_block = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
+        "_filename": "old.png",
+    }
+    ChatMessage(
+        user=user, conversation=conversation, role=ChatMessage.ROLE_USER,
+        content=[old_image_block, {"type": "text", "text": "what's this?"}],
+    ).save()
+    ChatMessage(
+        user=user, conversation=conversation, role=ChatMessage.ROLE_ASSISTANT,
+        content=[{"type": "text", "text": "An old screenshot."}],
+    ).save()
+
+    client = FakeClient([_response([_text("Sure.")], "end_turn")])
+    agent.run_turn(user, conversation, "and this one?", client=client)
+
+    replayed = client.requests[0]["messages"]
+    old_turn_content = replayed[0]["content"]
+    # The preamble text block rides in front of it (see _api_messages) —
+    # the stub is whichever block is NOT the preamble and NOT the question.
+    stub_blocks = [b for b in old_turn_content if b.get("type") == "text" and "old.png" in b.get("text", "")]
+    assert len(stub_blocks) == 1
+    assert "was attached earlier" in stub_blocks[0]["text"]
+    # And the real payload is gone — no "source"/base64 data anywhere in
+    # what got sent to the model for that turn.
+    assert not any("source" in b for b in old_turn_content)
+
+
+def test_the_latest_attachment_keeps_its_real_bytes(user, conversation):
+    """The image on THIS turn — not an earlier one — is exactly the case
+    stubbing must never touch: the student is asking about it right now."""
+    new_image_block = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "BBBB"},
+        "_filename": "new.png",
+    }
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+    agent.run_turn(user, conversation, "what's this?", client=client, attachment_blocks=[new_image_block])
+
+    replayed = client.requests[0]["messages"]
+    last_turn_content = replayed[-1]["content"]
+    image_blocks = [b for b in last_turn_content if b.get("type") == "image"]
+    assert len(image_blocks) == 1
+    assert image_blocks[0]["source"]["data"] == "BBBB"
+    assert "_filename" not in image_blocks[0]  # stripped, but the real bytes stayed

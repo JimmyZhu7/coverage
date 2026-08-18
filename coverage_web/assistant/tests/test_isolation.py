@@ -204,6 +204,17 @@ def test_user_b_s_calendar_is_empty(bob, alices_world):
     assert calendar["events"] == []
 
 
+def test_user_b_s_target_firms_are_empty_not_alices(bob, alices_world):
+    """Alice tiered North Bank in the fixture; Bob has tiered nothing.
+    get_my_firms takes no id at all — the only thing scoping its result to
+    the right student is the `user` closure, so this is exactly the shape
+    of bug (a forgotten `.for_user()`) the rest of this file exists to
+    catch."""
+    result, is_error = _call(bob, "get_my_firms", {})
+    assert not is_error
+    assert result["firms"] == []
+
+
 def test_user_b_s_pipeline_is_empty(bob, alices_world):
     pipeline, is_error = _call(bob, "get_my_pipeline", {})
     assert not is_error

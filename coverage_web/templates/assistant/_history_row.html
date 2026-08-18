@@ -64,7 +64,7 @@ buttons in a menu sidestep that entirely — nothing here is a <select>.
     {% endif %}
     <div class="as-menu-divider"></div>
     <form method="post" action="{% url 'assistant:delete' %}"
-          onsubmit="return confirm('Delete this chat? This can\'t be undone.');">
+          data-confirm="Delete this chat? This can't be undone.">
       {% csrf_token %}
       <input type="hidden" name="conversation" value="{{ c.id }}">
       <input type="hidden" name="current" value="{{ conversation.id }}">
