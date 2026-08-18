@@ -524,6 +524,28 @@ _PAY_BLOCK_SPAN = 500
 # unrelated prose further away.
 _CURRENCY = re.compile(r"\b(USD|CAD|GBP|EUR|AUD|SGD|HKD|BMD|NZD|CHF|JPY)\b")
 
+# Some boards run a posting's own text straight into a footer block listing
+# OTHER open roles ("Open positions HR Business Partner (12-month contract)
+# Sydney Experienced..."), with no period or newline separating it from the
+# posting's own prose -- so _sentence's boundary search runs straight through
+# into it. Confirmed live: Optiver id=2815 ("Graduate FPGA Engineer (2027
+# Start - Chicago)") correctly extracts $200k as its own stated base salary
+# (the sentence right before the match reads "This is a good-faith estimate
+# of the base pay scale for this position") but the returned phrase ran on
+# past it into "Open positions HR Business Partner (12-month contract)
+# Sydney Experienced...", three unrelated Sydney roles that have nothing to
+# do with this posting or its pay. The value is unaffected; only the quoted
+# evidence needs trimming at the footer's own boundary.
+_OTHER_POSTINGS_FOOTER = re.compile(r"\bOpen positions\b", re.IGNORECASE)
+
+
+def _trim_footer(phrase: str) -> str:
+    m = _OTHER_POSTINGS_FOOTER.search(phrase)
+    if not m or m.start() == 0:
+        return phrase
+    trimmed = phrase[:m.start()].rstrip()
+    return trimmed if trimmed else phrase
+
 
 def extract_pay(text: str) -> dict | None:
     candidates = []
@@ -571,7 +593,7 @@ def extract_pay(text: str) -> dict | None:
     return {"value": value, "low": low, "high": high,
             "unit": "hour" if hourly else "year",
             "currency": currency,
-            "phrase": _sentence(text, span_start, span_end)}
+            "phrase": _trim_footer(_sentence(text, span_start, span_end))}
 
 
 # --- Rolling review --------------------------------------------------------
