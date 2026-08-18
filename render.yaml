@@ -232,3 +232,43 @@ services:
         sync: false
       - key: GMAIL_LIVE_TOKEN_KEY
         sync: false
+
+  # ---- Gmail Live first-connect backfill, every 15 minutes --------------
+  # A tight tick because a newly-connected user should not sit at "queued"
+  # for hours, but each run costs almost nothing when idle — the very first
+  # thing it does is `SELECT ... WHERE backfill_status IN (pending, failed)`,
+  # and at this app's scale (a handful of users) that's empty on nearly
+  # every one of the 96 runs/day. See capture/management/commands/
+  # gmail_backfill.py for what actually happens on the rare run that finds
+  # something.
+  - type: cron
+    name: coverage-gmail-backfill
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "*/15 * * * *"
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py gmail_backfill"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: DJANGO_SECRET_KEY
+      - key: DJANGO_ALLOWED_HOSTS
+        value: localhost
+      # sync: false — see the identical comment on coverage-gmail-live above.
+      - key: GMAIL_LIVE_CLIENT_ID
+        sync: false
+      - key: GMAIL_LIVE_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_LIVE_PUBSUB_TOPIC
+        sync: false
+      - key: GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+        sync: false
+      - key: GMAIL_LIVE_TOKEN_KEY
+        sync: false

@@ -156,7 +156,9 @@ class GmailFindingsProvider(CaptureProvider):
 
     name = "gmail"
 
-    def build_event(self, finding: dict, user, touch_kind: str) -> InteractionEvent:
+    def build_event(
+        self, finding: dict, user, touch_kind: str, *, occurred_at=None
+    ) -> InteractionEvent:
         thread_id = (finding.get("thread_id") or "").strip()
         email = (finding.get("email") or "").strip()
         # Dedup key: the thread + the stage within it. Without a thread id
@@ -173,7 +175,11 @@ class GmailFindingsProvider(CaptureProvider):
             direction="inbound" if touch_kind != "outreach" else "outbound",
             counterparty_email=email,
             counterparty_name=(finding.get("name") or "").strip(),
-            occurred_at=timezone.now(),
+            # `occurred_at` is when the finding's underlying message actually
+            # happened, if the caller knows (the backfill command does; the
+            # daily agent-run sync doesn't supply one and gets "now", exactly
+            # its old behavior). See `_finding_occurred_at` for the clamp.
+            occurred_at=occurred_at or timezone.now(),
             raw_ref=f"gmail-thread:{thread_id}" if thread_id else "",
             signals={
                 "replied": bool(finding.get("replied")),
@@ -239,16 +245,51 @@ def thread_stage_rank(user, contact: Contact, thread_id: str) -> int:
     return max((THREAD_STAGE_RANK.get(kind, 0) for kind in kinds), default=0)
 
 
-def _logged_recently(user, contact: Contact, kind: str) -> bool:
+def _logged_recently(user, contact: Contact, kind: str, *, reference=None) -> bool:
     """Fallback dedup for findings carrying no thread_id (see module docstring).
     Unlike the original's local-naive-vs-UTC hazard, both sides here are aware
-    datetimes, so the window is exactly seven days."""
-    cutoff = timezone.now() - timedelta(days=NO_THREAD_DEDUP_DAYS)
+    datetimes, so the window is exactly seven days.
+
+    `reference` is the finding's OWN time, not necessarily now — the backfill
+    command applies findings months old, and "was there a same-kind touch
+    within 7 days of NOW" is the wrong question for one of those (it would
+    either never match, missing a real duplicate, or match against something
+    that happened months apart). Defaults to now, which reproduces the
+    original behavior exactly for the daily sync's undated findings. The
+    window is symmetric around `reference` rather than a plain look-back:
+    "recent" has to mean near the finding's own time in EITHER direction, or
+    a live touch from today would look like a duplicate of a backfill
+    finding from six months ago just because both are ">= cutoff" of a
+    now-anchored window.
+    """
+    ref = reference or timezone.now()
+    window = timedelta(days=NO_THREAD_DEDUP_DAYS)
     return (
         Touch.objects.for_user(user)
-        .filter(contact=contact, kind=kind, ts__gte=cutoff)
+        .filter(contact=contact, kind=kind, ts__gte=ref - window, ts__lte=ref + window)
         .exists()
     )
+
+
+def _finding_occurred_at(finding: dict):
+    """The finding's own `occurred_at`, clamped to never exceed now — see
+    `crm.services.log_touch`'s docstring: "Callers are responsible for
+    clamping a forwarded/synced timestamp to not exceed 'now'... this
+    function does not second-guess what it's given." Returns None (meaning
+    "right now", `log_touch`'s own default) when the finding carries no
+    parseable timestamp — every finding the daily agent-run sync has ever
+    produced has no `occurred_at` field at all, and must keep behaving
+    exactly as it always has.
+    """
+    raw = (finding.get("occurred_at") or "").strip()
+    if not raw:
+        return None
+    when = parse_datetime(raw)
+    if when is None:
+        return None
+    if timezone.is_naive(when):
+        when = timezone.make_aware(when, timezone.utc)
+    return min(when, timezone.now())
 
 
 def _append_note(contact: Contact, line: str) -> None:
@@ -436,6 +477,11 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
             result.details.append(f"{name}: no matching contact in Coverage — skipped")
             continue
 
+        # When this finding's underlying message actually happened — None
+        # for the daily sync's findings (no such field), a real past instant
+        # for the backfill command's. See `_finding_occurred_at`.
+        finding_time = _finding_occurred_at(finding)
+
         # Bounced: the address does not exist. Clear the ADDRESS, keep the
         # PERSON.
         #
@@ -535,10 +581,13 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                 result.skipped_already_logged += 1
             else:
                 if not dry_run:
-                    event = provider.build_event(finding, user, "outreach")
+                    event = provider.build_event(
+                        finding, user, "outreach", occurred_at=finding_time
+                    )
                     crm_services.log_touch(
                         user.id, contact.id, "outreach", TOUCH_CHANNEL,
                         note=f"{marker}{evidence}".strip() or None,
+                        now=finding_time,
                         source="capture",
                     )
                     _record(user, contact, event)
@@ -561,7 +610,7 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                     f"{name}: {kind} not logged — this thread is already at '{prior}' ({reason})"
                 )
                 continue
-        elif _logged_recently(user, contact, kind):
+        elif _logged_recently(user, contact, kind, reference=finding_time):
             result.skipped_already_logged += 1
             result.details.append(
                 f"{name}: {kind} logged within the last {NO_THREAD_DEDUP_DAYS} days and this "
@@ -571,10 +620,11 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
 
         updates = {}
         if not dry_run:
-            event = provider.build_event(finding, user, kind)
+            event = provider.build_event(finding, user, kind, occurred_at=finding_time)
             updates = crm_services.log_touch(
                 user.id, contact.id, kind, TOUCH_CHANNEL,
                 note=f"{marker}{evidence}".strip() or None,
+                now=finding_time,
                 source="capture",
             )
             _record(user, contact, event, warmth_changed=bool(updates))

@@ -98,6 +98,19 @@ below just no-op.
    - `python manage.py gmail_watch_renew` — run this one daily (cron is
      fine). Google's `watch()` registration expires every 7 days regardless
      of activity; this keeps it alive.
+   - `python manage.py gmail_backfill` — run this one every 10-15 minutes
+     (cron). It's the one-time historical pass for each newly-connected
+     mailbox: `connect_gmail()` marks a fresh connection
+     `backfill_status="pending"` the moment the live watch is registered,
+     and this command is what fills in the past for it — per-contact Gmail
+     search over existing contacts only, so it can never invent a new
+     contact from old mail. See `capture/gmail_live.py::backfill_connection`
+     and `capture/management/commands/gmail_backfill.py` for the full
+     window logic (365 days for a contact with zero touches, a 90-day-capped
+     7-day-overlap window for one already touched). Most ticks find nothing
+     pending and no-op instantly. Use `--dry-run` to see what a run would do
+     without writing anything — worth doing once against your own mailbox
+     before trusting it against a student's.
 
 ## What this does and doesn't cover
 
@@ -111,4 +124,8 @@ that's deliberate rather than a gap to close later.
 
 It also does not create new contacts from someone Coverage has never seen —
 same division of labor as the daily sync's Step 1 (`capture_gmail`) vs.
-Step 2 (`capture_discover`); this build only covers the Step 1 half.
+Step 2 (`capture_discover`); this build only covers the Step 1 half. The
+one-time backfill (`gmail_backfill`, above) inherits the same rule: it only
+searches mail for contacts already in the CRM, which is also why onboarding
+now tells a new student to import their existing contacts before connecting
+Gmail — a contact Coverage has never heard of has no history to backfill.

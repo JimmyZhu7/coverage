@@ -59,6 +59,28 @@ class GmailConnection(PrivateModel):
     connected_at = models.DateTimeField(auto_now_add=True)
     last_notification_at = models.DateTimeField(null=True, blank=True)
 
+    BACKFILL_CHOICES = [
+        ("none", "Not started"),
+        # Set by connect_gmail() right after register_watch() — live coverage
+        # starts immediately either way; this just marks that a one-time
+        # historical pass is owed. The next gmail_backfill tick picks it up.
+        ("pending", "Queued"),
+        ("running", "Running"),
+        ("done", "Done"),
+        # Distinct from "pending" so a reconnect after a revoked grant does
+        # NOT silently skip the historical pass a failed run never finished —
+        # see gmail_backfill.py's retry selection.
+        ("failed", "Failed — will retry"),
+    ]
+    backfill_status = models.CharField(
+        max_length=16, choices=BACKFILL_CHOICES, default="none"
+    )
+    backfill_completed_at = models.DateTimeField(null=True, blank=True)
+    # The SyncResult.as_stats() dict from the run that finished (or most
+    # recently failed) — same shape capture_gmail's Import row stores, so a
+    # human reading either has one shape to learn.
+    backfill_stats = models.JSONField(default=dict, blank=True)
+
     class Meta(PrivateModel.Meta):
         db_table = "gmail_connections"
 

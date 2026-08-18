@@ -54,7 +54,7 @@ from email.utils import parseaddr
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.utils import timezone
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
@@ -64,6 +64,17 @@ from googleapiclient.errors import HttpError
 
 from capture.gmail import apply_findings
 from capture.models import GmailConnection
+from crm.models import Contact, Touch
+
+# First-connect backfill (see backfill_connection): 365 days for a contact
+# with zero prior touches, matching the daily sync's own capture_worklist
+# precedent — a narrow window can't distinguish "never contacted" from
+# "contacted before this contact was added to Coverage." A touched contact
+# only needs back to last_touch (plus a week of overlap), capped so one
+# very old contact can't turn the whole backfill into a full-mailbox scan.
+BACKFILL_ZERO_TOUCH_DAYS = 365
+BACKFILL_TOUCHED_WINDOW_DAYS = 90
+BACKFILL_OVERLAP_DAYS = 7
 
 GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
 GMAIL_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
@@ -191,6 +202,13 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
     gmail = build("gmail", "v1", credentials=creds)
     profile = gmail.users().getProfile(userId="me").execute()
 
+    # A completed backfill must not re-run just because the user
+    # disconnected and reconnected the same mailbox — but a reconnect after
+    # a REVOKED grant (backfill_status left at whatever it was, possibly
+    # "failed" mid-run) should still get one. Only "done" is sticky.
+    existing = GmailConnection.all_objects.filter(user=user).first()
+    backfill_status = "done" if existing and existing.backfill_status == "done" else "pending"
+
     connection, _ = GmailConnection.objects.update_or_create(
         user=user,
         defaults={
@@ -198,6 +216,7 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
             "refresh_token_encrypted": encrypt_token(creds.refresh_token),
             "history_id": str(profile["historyId"]),
             "status": "active",
+            "backfill_status": backfill_status,
         },
     )
     register_watch(connection)
@@ -443,6 +462,22 @@ def _bounce_recipient(message: dict, own_email: str) -> str | None:
     return None
 
 
+def _message_occurred_at(message: dict) -> str | None:
+    """Gmail's own `internalDate` (epoch milliseconds, as a string — the
+    API's actual format) as an ISO 8601 string, or None if absent/garbled.
+    This is what makes a real message time flow through to `log_touch`
+    instead of "whenever the sync happened to run" — load-bearing for the
+    backfill command, which applies findings months after they occurred."""
+    raw = message.get("internalDate")
+    if not raw:
+        return None
+    try:
+        millis = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(millis / 1000, tz=dt_timezone.utc).isoformat()
+
+
 def _classify_message(own_email: str, message: dict) -> dict | None:
     """One Gmail message -> one finding dict in `GmailFindingsProvider`'s
     shape, or None if there's nothing worth reporting (e.g. a message from
@@ -453,6 +488,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
     subject = _header(message, "Subject")
     thread_id = message.get("threadId", "")
     ics_dt, ics_summary = _extract_ics_schedule(message)
+    occurred_at = _message_occurred_at(message)
 
     is_outbound = from_addr.lower() == own_email.lower()
 
@@ -474,6 +510,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
                 else f"Sent: {subject}"
             ),
             "thread_id": thread_id,
+            "occurred_at": occurred_at,
         }
 
     if _looks_like_bounce(message, from_addr, subject):
@@ -491,6 +528,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             "chat_scheduled_at": None,
             "evidence": f"Bounced: {subject}",
             "thread_id": thread_id,
+            "occurred_at": occurred_at,
         }
 
     if not from_addr:
@@ -510,4 +548,131 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             else message.get("snippet", "")[:300]
         ),
         "thread_id": thread_id,
+        "occurred_at": occurred_at,
     }
+
+
+# ---------------------------------------------------------------------------
+# First-connect historical backfill
+# ---------------------------------------------------------------------------
+#
+# Deliberately mirrors capture_gmail (Step 1 of the daily sync) rather than
+# capture_discover (Step 2): this fills in history for contacts ALREADY in
+# Coverage and never creates new ones. Per-contact search is what makes that
+# the free choice, not just the cautious one — a search scoped to
+# `from:X OR to:X` can only ever return mail involving someone already
+# tracked, so there is no scan-the-whole-mailbox cost to weigh against
+# "could this discover someone new" (it can't, by construction).
+#
+# Runs as a scheduled command (gmail_backfill), never inline in the OAuth
+# callback — a year of history is a multi-minute job, and connect_gmail's
+# redirect must stay instant. See that command for the scheduling contract.
+
+def _suppress_stale_bounces(findings: list[dict]) -> list[dict]:
+    """Drop a bounce finding for an address that a LATER finding in this
+    same batch proves is actually deliverable. Only the historical scan can
+    see both sides of this at once — the live path only ever sees "right
+    now," so it has nothing to compare a bounce against. Without this, a
+    contact who bounced once in March and has been replying since June
+    would have their working address cleared by the backfill applying the
+    March bounce after the fact.
+    """
+    latest_good_by_email: dict[str, str] = {}
+    for finding in findings:
+        if finding.get("replied") or finding.get("chat_status") in ("scheduled", "completed"):
+            email = (finding.get("email") or "").lower()
+            ts = finding.get("occurred_at") or ""
+            if email and ts > latest_good_by_email.get(email, ""):
+                latest_good_by_email[email] = ts
+
+    kept = []
+    for finding in findings:
+        if finding.get("bounced"):
+            email = (finding.get("email") or "").lower()
+            bounce_ts = finding.get("occurred_at") or ""
+            later_proof = latest_good_by_email.get(email, "")
+            if later_proof and later_proof > bounce_ts:
+                continue
+        kept.append(finding)
+    return kept
+
+
+def _backfill_window_start(last_touch, *, now) -> "datetime":
+    if last_touch is None:
+        return now - timedelta(days=BACKFILL_ZERO_TOUCH_DAYS)
+    floor = now - timedelta(days=BACKFILL_TOUCHED_WINDOW_DAYS)
+    return max(last_touch - timedelta(days=BACKFILL_OVERLAP_DAYS), floor)
+
+
+def backfill_connection(connection: GmailConnection, *, dry_run: bool = False):
+    """The one-time historical pass for a newly-connected mailbox. Searches
+    per-contact (see module note above), classifies every message found
+    with the SAME deterministic `_classify_message` the live path uses, then
+    funnels everything through one `apply_findings` call — the identical
+    ratchet/dedup contract the daily sync and the live listener both already
+    rely on, so a message the live watcher already logged today is simply
+    ratcheted away rather than double-counted.
+
+    Findings are sorted ascending by `occurred_at` before applying, so the
+    ladder climbs in the order things actually happened rather than
+    whatever order the per-contact searches returned them in.
+    """
+    gmail = _gmail_client(connection)
+    user = connection.user
+    own_email = connection.gmail_address.lower()
+    now = timezone.now()
+
+    contacts = list(
+        Contact.objects.for_user(user).filter(archived=False).exclude(email="")
+    )
+    last_touch_by_contact = dict(
+        Touch.objects.for_user(user)
+        .values("contact_id")
+        .annotate(last_ts=Max("ts"))
+        .values_list("contact_id", "last_ts")
+    )
+
+    message_ids: set[str] = set()
+    for contact in contacts:
+        email = (contact.email or "").strip().lower()
+        if not email or email == own_email:
+            continue
+        window_start = _backfill_window_start(
+            last_touch_by_contact.get(contact.id), now=now
+        )
+        query = f"(from:{email} OR to:{email}) after:{window_start:%Y/%m/%d}"
+
+        page_token = None
+        while True:
+            response = gmail.users().messages().list(
+                userId="me", q=query, pageToken=page_token
+            ).execute()
+            for item in response.get("messages", []) or []:
+                message_ids.add(item["id"])
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+
+    findings = []
+    for message_id in message_ids:
+        message = gmail.users().messages().get(
+            userId="me", id=message_id, format="full"
+        ).execute()
+        finding = _classify_message(own_email, message)
+        if finding is not None:
+            findings.append(finding)
+
+    findings = _suppress_stale_bounces(findings)
+    findings.sort(key=lambda f: f.get("occurred_at") or "")
+
+    result = apply_findings(user, findings, dry_run=dry_run)
+
+    if not dry_run:
+        connection.backfill_status = "done"
+        connection.backfill_completed_at = timezone.now()
+        connection.backfill_stats = result.as_stats()
+        connection.save(
+            update_fields=["backfill_status", "backfill_completed_at", "backfill_stats"]
+        )
+
+    return result

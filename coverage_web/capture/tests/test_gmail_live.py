@@ -7,6 +7,7 @@ function under test here is a pure function of a message dict.
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from capture import gmail_live
 
@@ -160,3 +161,87 @@ class TestIsConfigured:
         settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
         settings.GMAIL_LIVE_TOKEN_KEY = "key"
         assert gmail_live.is_configured() is True
+
+
+class TestMessageOccurredAt:
+    """`internalDate` -> `occurred_at` on every finding — the backfill
+    command's whole reason to exist is applying findings whose real time
+    isn't "now", so a message with no parseable date must not crash the
+    classifier, just omit the field."""
+
+    def test_parses_internal_date_to_iso(self):
+        # 2026-09-01T14:00:00Z in epoch milliseconds.
+        message = {"internalDate": "1788271200000"}
+        assert gmail_live._message_occurred_at(message) == "2026-09-01T14:00:00+00:00"
+
+    def test_missing_internal_date_is_none(self):
+        assert gmail_live._message_occurred_at({}) is None
+
+    def test_garbled_internal_date_is_none(self):
+        assert gmail_live._message_occurred_at({"internalDate": "not-a-number"}) is None
+
+    def test_classify_message_carries_occurred_at_through(self):
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL, "Subject": "Re: hi"},
+            snippet="a reply",
+        )
+        message["internalDate"] = "1788271200000"
+        finding = gmail_live._classify_message(OWN_EMAIL, message)
+        assert finding["occurred_at"] == "2026-09-01T14:00:00+00:00"
+
+
+NOW = datetime(2026, 9, 1, tzinfo=dt_timezone.utc)
+
+
+class TestBackfillWindowStart:
+    def test_zero_touch_contact_gets_365_days(self):
+        start = gmail_live._backfill_window_start(None, now=NOW)
+        assert start == NOW - timedelta(days=365)
+
+    def test_recently_touched_contact_gets_last_touch_minus_overlap(self):
+        last_touch = NOW - timedelta(days=10)
+        start = gmail_live._backfill_window_start(last_touch, now=NOW)
+        assert start == last_touch - timedelta(days=7)
+
+    def test_a_very_old_last_touch_is_capped_at_90_days(self):
+        last_touch = NOW - timedelta(days=400)
+        start = gmail_live._backfill_window_start(last_touch, now=NOW)
+        assert start == NOW - timedelta(days=90)
+
+
+class TestSuppressStaleBounces:
+    def test_a_bounce_before_a_later_reply_is_dropped(self):
+        findings = [
+            {"email": "a@b.com", "bounced": True, "occurred_at": "2026-03-01T00:00:00+00:00"},
+            {"email": "a@b.com", "replied": True, "occurred_at": "2026-06-01T00:00:00+00:00"},
+        ]
+        kept = gmail_live._suppress_stale_bounces(findings)
+        assert all(not f.get("bounced") for f in kept)
+        assert len(kept) == 1
+
+    def test_a_bounce_with_no_later_reply_is_kept(self):
+        findings = [
+            {"email": "a@b.com", "bounced": True, "occurred_at": "2026-06-01T00:00:00+00:00"},
+        ]
+        kept = gmail_live._suppress_stale_bounces(findings)
+        assert len(kept) == 1
+        assert kept[0]["bounced"] is True
+
+    def test_a_bounce_after_the_reply_is_kept_not_the_reply_thats_stale(self):
+        """A later bounce (address stopped working after they'd replied
+        once) is real evidence too — only a bounce that PRECEDES proof of
+        delivery is the stale one."""
+        findings = [
+            {"email": "a@b.com", "replied": True, "occurred_at": "2026-03-01T00:00:00+00:00"},
+            {"email": "a@b.com", "bounced": True, "occurred_at": "2026-06-01T00:00:00+00:00"},
+        ]
+        kept = gmail_live._suppress_stale_bounces(findings)
+        assert any(f.get("bounced") for f in kept)
+
+    def test_different_contacts_do_not_cross_suppress(self):
+        findings = [
+            {"email": "a@b.com", "bounced": True, "occurred_at": "2026-03-01T00:00:00+00:00"},
+            {"email": "c@d.com", "replied": True, "occurred_at": "2026-06-01T00:00:00+00:00"},
+        ]
+        kept = gmail_live._suppress_stale_bounces(findings)
+        assert any(f.get("bounced") for f in kept)

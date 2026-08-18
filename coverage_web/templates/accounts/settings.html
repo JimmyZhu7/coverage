@@ -1089,6 +1089,32 @@
               </a>
             </div>
           </div>
+
+          {% if gmail_live.connected and gmail_live.status != "revoked" %}
+          {% comment %}
+          One-time historical pass, separate from the live status above:
+          "connected" only means the live watcher is running from now
+          forward — this row is the ONLY place a student learns whether
+          their past history got filled in too. See capture/gmail_live.py's
+          backfill_connection for what "done" actually did.
+          {% endcomment %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Past History</span>
+              <div class="set-row-desc">
+                {% if gmail_live.backfill_status == "done" %}
+                  Done — {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize }} logged from your existing contacts' history.
+                {% elif gmail_live.backfill_status == "running" %}
+                  Running now — this can take a few minutes for a year of mail.
+                {% elif gmail_live.backfill_status == "failed" %}
+                  Hit a snag — it'll retry automatically.
+                {% else %}
+                  Queued — starts shortly, no action needed.
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endif %}
         </div>
       </section>
       {% endif %}

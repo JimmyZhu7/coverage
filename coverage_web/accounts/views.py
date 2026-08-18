@@ -281,6 +281,8 @@ def _gmail_live_context(user) -> dict:
         "gmail_address": connection.gmail_address,
         "status": connection.status,
         "last_notification_at": connection.last_notification_at,
+        "backfill_status": connection.backfill_status,
+        "backfill_stats": connection.backfill_stats,
     }
 
 
