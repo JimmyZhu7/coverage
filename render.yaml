@@ -119,6 +119,15 @@ services:
           type: web
           name: coverage-web
           envVarKey: DJANGO_SECRET_KEY
+      # Required by production.py at import time (no default — see that
+      # module's comment), so EVERY process that boots Django needs it, not
+      # just the ones that actually serve /capture/inbound/. Missing here
+      # crashes the worker before it gets anywhere near Pub/Sub.
+      - key: CAPTURE_INBOUND_SECRET
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: CAPTURE_INBOUND_SECRET
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost # no HTTP served here; any value satisfies settings import
       # sync: false, NOT fromService — these start blank on coverage-web too
@@ -233,6 +242,13 @@ services:
           type: web
           name: coverage-web
           envVarKey: DJANGO_SECRET_KEY
+      # Required by production.py at import time — see the identical comment
+      # on coverage-gmail-live above.
+      - key: CAPTURE_INBOUND_SECRET
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: CAPTURE_INBOUND_SECRET
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost
       # sync: false — see the identical comment on coverage-gmail-live above.
