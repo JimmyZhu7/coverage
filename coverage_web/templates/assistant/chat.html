@@ -28,7 +28,16 @@ materials.
   body.as-body-chat .site-footer { display: none; }
 
   .as-page {
-    max-width: 1040px;
+    /* Was a bespoke 1040px, noticeably tighter than this app's own widest
+       tier — Opportunities already uses the full --page-w-full measure, and
+       on anything wider than a laptop this page sat in a narrow tunnel with
+       dead margins on both sides while every OTHER content-dense page used
+       the room. Individual messages still wrap at .as-turn's own 68ch, so
+       widening this doesn't stretch a single bubble into an uncomfortable
+       reading line — it just gives the sidebar and the message column
+       themselves more air, the same way Opportunities' extra width goes to
+       its table, not to any one cell. */
+    max-width: var(--page-w-full);
     padding-top: var(--s4);
     padding-bottom: var(--s3);
   }
