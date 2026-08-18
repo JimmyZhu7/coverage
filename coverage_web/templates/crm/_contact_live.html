@@ -66,14 +66,35 @@ values.
       above it.{% endcomment %}
       <details class="cd-opener">
         <summary>Coffee chat brief</summary>
-        <div id="contact-ai-brief">
+        {% comment %}hx-headers on the WRAPPER, not the button: the button is
+        a bare `hx-post` with no surrounding <form>, so htmx has no
+        `{% templatetag openblock %} csrf_token {% templatetag closeblock %}`
+        hidden input to pick up and Django rejected every click with a 403.
+        Same fix, same spelling, as crm/week.html and
+        directory/_results.html. The wrapper is also the swap target, so it
+        (and this attribute) survives every re-render.{% endcomment %}
+        <div id="contact-ai-brief" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
           {% include "crm/_contact_ai_brief.html" with contact=contact brief=None requested=False %}
         </div>
       </details>
     </div>
 
-    {# ---- Where this stands, and moving it ---- #}
+    {# ---- What this relationship is, in words (AI-written) ---- #}
+    {% comment %}Its OWN card, immediately under the one holding the angle
+    and notes, and deliberately not inside it: those two are the student's
+    own words about this person and this is not, so the two must never share
+    a box a reader could mistake for one authorship. Own htmx target too, for
+    the same reason the coffee-chat brief has one — rewriting a summary must
+    not discard an unsaved opener draft in the card above.{% endcomment %}
     <div class="cd-card kin-reveal" style="--i:1">
+      <h2 class="cd-h">Relationship summary</h2>
+      <div id="contact-ai-summary" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+        {% include "crm/_contact_ai_summary.html" %}
+      </div>
+    </div>
+
+    {# ---- Where this stands, and moving it ---- #}
+    <div class="cd-card kin-reveal" style="--i:2">
       <div class="cd-state">
         <h2 class="cd-h">Warmth</h2>
         {% comment %}state_line is the WHOLE sentence — the view already
@@ -123,7 +144,7 @@ values.
     </div>
 
     {# ---- History, newest first ---- #}
-    <div class="cd-card kin-reveal" style="--i:2">
+    <div class="cd-card kin-reveal" style="--i:3">
       <h2 class="cd-h">History <span class="cd-count">{{ touch_rows|length }}</span></h2>
       {% if touch_rows %}
         <ol class="cd-log">

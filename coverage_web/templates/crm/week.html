@@ -94,6 +94,42 @@
     </div>
   {% endif %}
 
+  {% if situation_events %}
+    {% comment %}
+    The situation snapshot (assistant.situation.build_situation): what moved
+    in data Coverage already scrapes, since RECENT_DAYS ago — a deadline
+    change or a close on a role this student tracks, or a fresh posting at
+    a firm they already have a foothold at. Deterministic cards built
+    straight from typed event fields, NO model involved in the text — see
+    the module's own docstring: a moved deadline is the one thing on this
+    page that must never be allowed to hallucinate urgency. Capped to 3 in
+    the view (crm.today.week), the same number the brief's own prompt gets
+    to see, so the sentence above never leads with a change nobody has a
+    card for.
+    {% endcomment %}
+    <div class="situation-strip">
+      {% for e in situation_events %}
+        <div class="situation-card kin-reveal" style="--i: {{ forloop.counter0 }}">
+          <div class="situation-card-text">
+            {% if e.kind == "deadline_moved" %}
+              <p><b>{{ e.title|smart_title }}</b> at {{ e.firm|smart_title }}: deadline moved
+                {% if e.old_date %}from {{ e.old_date|date:"M j" }} {% elif e.old_value %}from {{ e.old_value }} {% endif %}to
+                {% if e.new_date %}{{ e.new_date|date:"M j" }}{% else %}{{ e.new_value|default:"no date" }}{% endif %}.</p>
+            {% elif e.kind == "role_closed" %}
+              <p><b>{{ e.title|smart_title }}</b> at {{ e.firm|smart_title }} closed. Not accepting applications anymore.</p>
+            {% elif e.kind == "new_role_at_known_firm" %}
+              <p>{{ e.firm|smart_title }} just opened <b>{{ e.title|smart_title }}</b>{% if e.location %} · {{ e.location|smart_location }}{% endif %}.</p>
+            {% endif %}
+          </div>
+          <div class="situation-card-actions">
+            <a class="situation-card-link" href="{{ e.url }}" target="_blank" rel="nofollow noopener">View role</a>
+            <a class="situation-card-link" href="{% url 'assistant:chat' %}">Talk about it</a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   {% comment %}
   The directory stats. They led the page once, then spent a stretch at its
   foot after a hero plus four stat cards ate the whole fold — the queue is

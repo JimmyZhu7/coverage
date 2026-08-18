@@ -1143,6 +1143,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .daily-brief-link span { display: inline-block; transition: transform var(--t-fast); }
   .daily-brief-link:hover span { transform: translateX(2px); }
 
+  /* The situation strip: up to 3 deterministic cards under the daily brief
+     (assistant.situation.build_situation), one per changed role. Plain
+     surface cards, not the brief's tinted/animated treatment — these are
+     bookkeeping facts, not the advisor's own voice, and should read as
+     quieter than the sentence above them. */
+  .situation-strip { display: flex; flex-wrap: wrap; gap: var(--s3);
+    margin-bottom: var(--s4); }
+  .situation-card { flex: 1 1 260px; min-width: 220px;
+    display: flex; flex-direction: column; gap: var(--s2);
+    padding: var(--s3) var(--s4);
+    border: 1px solid var(--line); border-radius: var(--r-panel);
+    background: var(--surface); }
+  .situation-card-text p { margin: 0; color: var(--ink-2);
+    font-size: var(--fs-xs); line-height: 1.5; }
+  .situation-card-text b { color: var(--ink); font-weight: var(--w-med); }
+  .situation-card-actions { display: flex; gap: var(--s3); }
+  .situation-card-link { font-size: var(--fs-micro); font-weight: var(--w-med);
+    color: var(--accent-ink); text-decoration: none; }
+  .situation-card-link:hover { text-decoration: underline; }
+
   /* The staleness ring — a conic sweep around the avatar that fills as the
      contact's keep-warm clock runs down (--stale is 0-100, from views.py).
      Grey-to-danger by consumption, drawn as a 2.5px halo behind the circle.

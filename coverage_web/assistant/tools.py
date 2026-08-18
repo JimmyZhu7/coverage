@@ -101,6 +101,7 @@ from directory.recommend import cycle_choices
 from directory.views import _apply_region_filter, _STAGE_LABELS
 
 from .models import AdvisorMemory
+from .situation import build_situation
 
 # Every untrusted string is cut to this before it reaches the model. Notes and
 # posting titles are the two that actually run long; the cap applies to all of
@@ -381,6 +382,19 @@ TOOL_SCHEMAS: list[dict] = [
             "The roles the student has saved or is somewhere in the funnel on, "
             "grouped by status, with deadlines. Their applications, not the "
             "whole board."
+        ),
+        "strict": True,
+        "input_schema": _schema({}),
+    },
+    {
+        "name": "get_situation",
+        "description": (
+            "What changed recently on roles this student tracks or firms "
+            "they already know: a deadline that moved, a role that closed, "
+            "or a fresh posting at a firm where they have a contact or a "
+            "target tier. Use this for 'what's new', 'anything changed', "
+            "'did a deadline move' — it has memory of what a posting used "
+            "to say, which a fresh search_opportunities call does not."
         ),
         "strict": True,
         "input_schema": _schema({}),
@@ -752,6 +766,15 @@ def _get_contact(user, args) -> dict:
         "school_affiliation": contact.school_affiliation,
         "has_email": bool(contact.email),
         "student_note_about_them": _s(contact.angle),
+        # AI-WRITTEN, and named so it can never be read as the student's own
+        # words. `student_note_about_them` above is theirs (Contact.angle);
+        # this is crm.ai_summary's generated recap of the same relationship,
+        # kept a separate key rather than merged into that one precisely so
+        # the model — and anything reading this JSON later — can always tell
+        # which of the two a sentence came from. Read-only here: nothing in
+        # this tool generates or writes it.
+        "advisor_summary": _s(contact.ai_summary),
+        "advisor_summary_written": _iso(contact.ai_summary_generated_at),
         "recent_interactions": history,
     }
 
@@ -980,6 +1003,31 @@ def _get_my_pipeline(user, _args) -> dict:
             }
         )
     return {"today": today.isoformat(), "total": len(rows), "by_status": by_status}
+
+
+def _get_situation(user, _args) -> dict:
+    """assistant.situation.build_situation, trimmed for the model: the same
+    three event kinds the Today page's own cards render from (deadline_moved,
+    role_closed, new_role_at_known_firm), untruncated in count (the module
+    already caps each type) but with every string run through `_s()` like
+    every other tool result here."""
+    situation = build_situation(user)
+    events = []
+    for e in situation.get("events", []):
+        row = {
+            "kind": e.get("kind"),
+            "opportunity_id": e.get("opportunity_id"),
+            "title": _s(e.get("title"), 160),
+            "firm": _s(e.get("firm"), 120),
+            "url": _s(e.get("url"), 300),
+        }
+        if row["kind"] == "deadline_moved":
+            row["old_deadline"] = e.get("old_value") or None
+            row["new_deadline"] = e.get("new_value") or None
+        elif row["kind"] == "new_role_at_known_firm":
+            row["location"] = _s(e.get("location"), 120)
+        events.append(row)
+    return {"total": len(events), "events": events}
 
 
 # ---------------------------------------------------------------------------
@@ -1615,6 +1663,7 @@ _HANDLERS = {
     "get_my_firms": _get_my_firms,
     "get_calendar": _get_calendar,
     "get_my_pipeline": _get_my_pipeline,
+    "get_situation": _get_situation,
     "track_opportunity": _track_opportunity,
     "remember": _remember,
     "add_calendar_event": _add_calendar_event,

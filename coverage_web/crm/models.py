@@ -95,6 +95,24 @@ class Contact(PrivateModel):
     # mailto: URL — that is its whole purpose.
     opener = models.TextField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
+    # AI-WRITTEN, and the only field on this row a model is ever allowed to
+    # write. Two or three sentences on where this relationship stands,
+    # regenerated on the student's say-so — see crm/ai_summary.py.
+    #
+    # Deliberately a THIRD field rather than an append to `notes` or `angle`:
+    # those two are the student's own words about this person, and generated
+    # prose landing in either is prose they could never afterwards tell from
+    # something they wrote themselves. `ai_summary.py` reads both as context
+    # and writes only here (`update_fields` names these two columns and
+    # nothing else). Blank is the honest default — nothing generated yet, or
+    # not enough history to say anything specific — and every surface that
+    # renders this labels it as AI-drafted.
+    ai_summary = models.TextField(blank=True, default="")
+    # When the text above was written. Shown beside it, and the count of
+    # touches logged since is what lets the page say plainly that a summary
+    # has fallen behind the history it was written from. NULL means never
+    # generated, which is exactly the state a blank `ai_summary` implies.
+    ai_summary_generated_at = models.DateTimeField(null=True, blank=True)
     school_affiliation = models.BooleanField(default=False)
     # Display facts ported from the founder's campaign.db (both optional).
     school = models.CharField(max_length=64, blank=True, default="")

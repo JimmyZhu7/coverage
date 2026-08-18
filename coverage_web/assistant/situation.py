@@ -1,0 +1,295 @@
+"""The situation snapshot: what changed in data Coverage already scrapes,
+for one student, since the last time they looked.
+
+WHY THIS EXISTS: `directory.models.OpportunityChange` has logged every
+deadline move and every posting close/reopen since it landed — written four
+times a day by `ingest.py`, `reverify` and `refresh` — and until this module
+nothing anywhere read it back. Meanwhile `assistant/brief.py` (the daily
+sentence on the Today page) only ever looks at the cadence queue, which
+knows nothing about the board moving under a student's feet. This is the
+"notice" half of an advisor that used to only ever answer when asked: pure
+code, no model, that turns rows the scraper already wrote into a typed
+"what changed" snapshot.
+
+EXACTLY THREE EVENT TYPES, on purpose — decay and calendar events are
+already surfaced elsewhere on Today (the cadence queue and the Schedule
+rail respectively), and this module is not the place to re-derive either:
+
+  - `deadline_moved`  — a role the student TRACKS had its stated deadline
+    change.
+  - `role_closed`     — a role the student TRACKS was confirmed closed by
+    the scraper.
+  - `new_role_at_known_firm` — a fresh posting appeared at a firm the
+    student already has a foothold at (a contact there, or a tiered
+    target).
+
+THE TENANT RULE, same as `assistant/tools.py`
+------------------------------------------------
+`Opportunity` and `OpportunityChange` are SHARED-zone models (plain
+`.objects`, the whole board, not one student's) — but every filter that
+decides WHICH opportunities are even in play runs through this student's
+own tenant-scoped rows first: `UserOpportunity.objects.for_user(user)` for
+what they track, `crm.models.Contact.objects.for_user(user)` and
+`crm.models.UserFirm.objects.for_user(user)` for which firms they know.
+`assistant/tests/test_isolation.py` greps this whole package for the
+unscoped manager name, so it must never appear here.
+
+NEVER RAISES, same posture as `assistant/brief.py`
+------------------------------------------------------
+`build_situation` wraps its entire body in a try/except and returns an
+empty snapshot on any failure. This is pure DB reads with no LLM call, so
+the failure surface is much smaller than the brief's — but the contract
+this module owes the Today page is identical: a bug here must degrade to
+"no cards today", never a 500.
+
+NOT CACHED. Recomputed on every full-page Today load, deliberately — see
+the caller in `crm/today.py`. Every query here is bounded by the student's
+own tenant-scoped row counts (their tracked roles, their contacts, their
+tiered firms), the same cost shape as `crm.today._new_at_your_firms` and
+`_next_deadlines`, which already run uncached on every render. Caching
+would buy nothing but a day-old snapshot on a page whose whole point is
+"what's true right now", for a query cheap enough that dogfood is the
+right way to find out if that judgement call was wrong.
+"""
+
+from __future__ import annotations
+
+from datetime import date as _date, timedelta
+
+from django.db.models import Min
+from django.utils import timezone
+
+from analytics.models import UserOpportunity
+from crm.models import Contact, UserFirm
+from directory.classify import TARGET_BUCKETS
+from directory.deadlines import is_posting_closed
+from directory.dupes import fold_duplicates
+from directory.models import Opportunity, OpportunityChange
+
+# How far back counts as "recent". Matches `crm.today._new_at_your_firms`'s
+# own window (`since = timezone.now() - timedelta(days=7)`) — that function
+# already answers the exact same "what's new since last look" question for
+# a different slice of the same data, and a student reading both should
+# never be told two different definitions of "recent" on one page.
+RECENT_DAYS = 7
+
+# Per-event-type cap. A student tracking hundreds of roles must never run
+# an effectively-unbounded query here; five of any one kind is already more
+# than a daily card can show, and the flat `events` list below caps the
+# rendered total further still.
+MAX_PER_TYPE = 5
+
+# The whole snapshot's cap, across all three types combined. Looser than
+# what actually renders (the Today page shows at most 3 cards, matching the
+# brief's own card cap) — callers that want more raw signal than the card
+# strip shows (e.g. a future digest) can still have it, up to this ceiling.
+MAX_TOTAL_EVENTS = 10
+
+_EMPTY: dict = {
+    "deadline_moved": [],
+    "role_closed": [],
+    "new_role_at_known_firm": [],
+    "events": [],
+}
+
+
+def _parse_date(value: str | None) -> _date | None:
+    """A `OpportunityChange.render_value`d date, back to a real `date` — or
+    `None` for `""` (no value) or anything that isn't ISO-8601. Used so the
+    card template can format a real date (`|date:"M j"`) rather than
+    re-parsing a string, while the raw text survives alongside it for the
+    (rare) case a stored value was never a date to begin with."""
+    if not value:
+        return None
+    try:
+        return _date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _deadline_moved_events(tracked_ids: list[int], since, limit: int) -> list[dict]:
+    """`OpportunityChange` rows on a tracked opportunity where the stated
+    deadline itself moved, most recent first, at most one row per
+    opportunity — a role that moved twice in the window is reported once,
+    old-to-newest, not as two disagreeing cards."""
+    if not tracked_ids:
+        return []
+    rows = (
+        OpportunityChange.objects
+        .filter(field="deadline", opportunity_id__in=tracked_ids, observed_at__gte=since)
+        .select_related("opportunity", "opportunity__firm")
+        .order_by("-observed_at")
+    )
+    seen: set[int] = set()
+    events: list[dict] = []
+    for row in rows:
+        if row.opportunity_id in seen:
+            continue
+        seen.add(row.opportunity_id)
+        opp = row.opportunity
+        events.append({
+            "kind": "deadline_moved",
+            "opportunity_id": opp.id,
+            "title": opp.title,
+            "firm": opp.firm.name,
+            "url": opp.url,
+            "old_value": row.old_value,
+            "new_value": row.new_value,
+            "old_date": _parse_date(row.old_value),
+            "new_date": _parse_date(row.new_value),
+            "observed_at": row.observed_at,
+        })
+        if len(events) >= limit:
+            break
+    return events
+
+
+def _role_closed_events(tracked_ids: list[int], since, limit: int) -> list[dict]:
+    """`OpportunityChange` rows recording a tracked role's status flipping
+    to closed, filtered to postings that are STILL closed right now
+    (`directory.deadlines.is_posting_closed`) — a role that closed and
+    reopened again inside the same window is not news the student needs to
+    act on, it is noise the scraper already resolved on its own."""
+    if not tracked_ids:
+        return []
+    rows = (
+        OpportunityChange.objects
+        .filter(field="status", new_value="closed", opportunity_id__in=tracked_ids, observed_at__gte=since)
+        .select_related("opportunity", "opportunity__firm")
+        .order_by("-observed_at")
+    )
+    seen: set[int] = set()
+    events: list[dict] = []
+    for row in rows:
+        if row.opportunity_id in seen:
+            continue
+        opp = row.opportunity
+        if not is_posting_closed(opp):
+            continue
+        seen.add(row.opportunity_id)
+        events.append({
+            "kind": "role_closed",
+            "opportunity_id": opp.id,
+            "title": opp.title,
+            "firm": opp.firm.name,
+            "url": opp.url,
+            "observed_at": row.observed_at,
+        })
+        if len(events) >= limit:
+            break
+    return events
+
+
+def _new_role_events(user, since, limit: int) -> list[dict]:
+    """Fresh open postings at a firm the student already has a foothold at.
+
+    JUDGEMENT CALL: the memo names "firms where they have contacts"
+    specifically. This uses the UNION of contact firms and tiered
+    (UserFirm) firms rather than contacts alone — a firm a student has
+    ranked as a target but hasn't met anyone at yet is just as "known" to
+    them as one where they have a contact, arguably more actionable (they
+    are actively trying to break in), and excluding it would silently drop
+    the single largest tiered-but-contactless firm case. Both populations
+    are the student's own tenant-scoped rows either way.
+    """
+    contact_firm_ids = set(
+        Contact.objects.for_user(user)
+        .filter(archived=False, firm_id__isnull=False)
+        .values_list("firm_id", flat=True)
+    )
+    tiered_firm_ids = set(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
+    firm_ids = contact_firm_ids | tiered_firm_ids
+    if not firm_ids:
+        return []
+
+    # Exclude board DEBUTS: a firm whose oldest posting is itself inside the
+    # window just joined Coverage's board, and every role it has would read
+    # as "new" for a reason that has nothing to do with the firm actually
+    # opening anything. Same fix `crm.today._new_at_your_firms` already
+    # made for the identical trap.
+    debut_ids = {
+        row["firm_id"]
+        for row in Opportunity.objects.filter(firm_id__in=firm_ids)
+        .values("firm_id").annotate(oldest=Min("first_seen"))
+        if row["oldest"] and row["oldest"] >= since
+    }
+    live_firm_ids = [f for f in firm_ids if f not in debut_ids]
+    if not live_firm_ids:
+        return []
+
+    dismissed_ids = set(
+        UserOpportunity.objects.for_user(user)
+        .filter(dismissed=True)
+        .values_list("opportunity_id", flat=True)
+    )
+
+    qs = (
+        Opportunity.objects
+        .filter(status="open", bucket__in=TARGET_BUCKETS, firm_id__in=live_firm_ids, first_seen__gte=since)
+        .select_related("firm")
+        .order_by("-first_seen")
+    )
+    if dismissed_ids:
+        qs = qs.exclude(id__in=dismissed_ids)
+
+    # Same repeat-listing problem the Opportunities feed already solves: a
+    # board scraped twice in one week posts the same requisition twice.
+    # Folded before capping, over a slightly wider slice than `limit` so a
+    # run of duplicates doesn't leave the capped result short.
+    rows, _folded = fold_duplicates(list(qs[: limit * 4]))
+
+    events = []
+    for o in rows[:limit]:
+        events.append({
+            "kind": "new_role_at_known_firm",
+            "opportunity_id": o.id,
+            "title": o.title,
+            "firm": o.firm.name,
+            "url": o.url,
+            "location": o.location,
+            "first_seen": o.first_seen,
+        })
+    return events
+
+
+def build_situation(user) -> dict:
+    """This student's "what changed" snapshot: up to `MAX_PER_TYPE` events
+    of each of the three kinds, plus a flat `events` list (all three kinds
+    merged, capped at `MAX_TOTAL_EVENTS`, most-urgent-first) for anything
+    that just wants a short list to render or summarize.
+
+    Ordering of the flat list is a judgement call, stated once here: a role
+    that CLOSED wastes ongoing effort if the student doesn't hear about it
+    (stop applying/prepping), a MOVED deadline risks a missed window if they
+    don't hear about it in time, and a NEW role is upside they didn't have
+    before — real, but the least time-pressured of the three. So
+    `role_closed` leads, then `deadline_moved`, then `new_role_at_known_firm`,
+    each internally most-recent-first.
+
+    Never raises — see the module docstring. Any failure returns the same
+    empty shape a student with nothing to report gets, so a bug here can
+    never turn into a broken Today page."""
+    try:
+        now = timezone.now()
+        since = now - timedelta(days=RECENT_DAYS)
+
+        tracked_ids = list(
+            UserOpportunity.objects.for_user(user)
+            .filter(dismissed=False)
+            .values_list("opportunity_id", flat=True)
+        )
+
+        role_closed = _role_closed_events(tracked_ids, since, MAX_PER_TYPE)
+        deadline_moved = _deadline_moved_events(tracked_ids, since, MAX_PER_TYPE)
+        new_roles = _new_role_events(user, since, MAX_PER_TYPE)
+
+        events = (role_closed + deadline_moved + new_roles)[:MAX_TOTAL_EVENTS]
+
+        return {
+            "deadline_moved": deadline_moved,
+            "role_closed": role_closed,
+            "new_role_at_known_firm": new_roles,
+            "events": events,
+        }
+    except Exception:  # noqa: BLE001 — never break the Today page over this
+        return dict(_EMPTY)

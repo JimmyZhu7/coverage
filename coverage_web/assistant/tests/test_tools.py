@@ -161,6 +161,49 @@ def test_get_contact_carries_history_tier_and_a_stripped_note(user, contact, fir
     assert history[0]["kind"] == "Chat happened"
 
 
+def test_get_contact_keeps_the_ai_summary_in_its_own_key(user, contact):
+    """The AI-written relationship note (crm.ai_summary) and the student's own
+    note about the same person are two different authorships, so they are two
+    different keys. Merging them would leave nothing in the payload able to
+    say which sentence came from whom."""
+    contact.angle = "STUDENT WROTE THIS"
+    contact.ai_summary = "THE MODEL WROTE THIS"
+    contact.ai_summary_generated_at = timezone.now()
+    contact.save()
+
+    result, is_error = _call(user, "get_contact", {"contact_id": contact.id})
+
+    assert not is_error
+    assert result["student_note_about_them"] == "STUDENT WROTE THIS"
+    assert result["advisor_summary"] == "THE MODEL WROTE THIS"
+    assert result["advisor_summary_written"] is not None
+    # Neither field absorbed the other, in either direction.
+    assert "THE MODEL WROTE THIS" not in result["student_note_about_them"]
+    assert "STUDENT WROTE THIS" not in result["advisor_summary"]
+
+
+def test_get_contact_reports_an_absent_ai_summary_as_blank_and_undated(user, contact):
+    result, _ = _call(user, "get_contact", {"contact_id": contact.id})
+    assert result["advisor_summary"] == ""
+    assert result["advisor_summary_written"] is None
+
+
+def test_get_contact_never_writes_an_ai_summary(user, contact):
+    """Reading a contact through the advisor is a read. Generation is the
+    student's own POST on the contact page (crm.views.contact_ai_summary)."""
+    for i in range(4):
+        Touch(
+            user=user, contact=contact, ts=timezone.now() - timedelta(days=i),
+            kind="outreach", channel="email", note=f"note {i}",
+        ).save()
+
+    _call(user, "get_contact", {"contact_id": contact.id})
+
+    contact.refresh_from_db()
+    assert contact.ai_summary == ""
+    assert contact.ai_summary_generated_at is None
+
+
 def test_get_contact_truncates_an_over_long_note(user, contact):
     t = Touch(
         user=user,
@@ -347,6 +390,34 @@ def test_get_my_pipeline_groups_by_status(user, firm, opportunity):
     assert set(result["by_status"]) == {"saved", "submitted"}
     assert result["by_status"]["saved"][0]["opportunity_id"] == opportunity.id
     assert result["by_status"]["saved"][0]["days_left"] == 10
+
+
+def test_get_situation_reports_a_moved_deadline_on_a_tracked_role(user, opportunity):
+    from directory.models import OpportunityChange
+
+    tracked = UserOpportunity(user=user, opportunity=opportunity)
+    tracked.save()
+    OpportunityChange.objects.create(
+        opportunity=opportunity, field="deadline", old_value="2026-08-01",
+        new_value="2026-08-20", stage="reverify", observed_at=timezone.now(),
+    )
+
+    result, is_error = _call(user, "get_situation")
+
+    assert not is_error
+    assert result["total"] == 1
+    event = result["events"][0]
+    assert event["kind"] == "deadline_moved"
+    assert event["opportunity_id"] == opportunity.id
+    assert event["old_deadline"] == "2026-08-01"
+    assert event["new_deadline"] == "2026-08-20"
+
+
+def test_get_situation_is_empty_for_a_student_with_no_changes(user):
+    result, is_error = _call(user, "get_situation")
+
+    assert not is_error
+    assert result == {"total": 0, "events": []}
 
 
 # ---------------------------------------------------------------------------

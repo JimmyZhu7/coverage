@@ -50,12 +50,51 @@ def _summarize_actions(actions: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def get_or_build(user, actions: list[dict], *, client=None) -> str | None:
+# How many situation events (assistant.situation.build_situation) the prompt
+# gets to see. Deliberately small and separate from the CARDS cap (also 3,
+# see crm/today.py's week()) — this is the same number for the same reason:
+# a brief that leads with the 4th-most-urgent change nobody's card shows
+# would be talking about something the student can't see on the page.
+MAX_SITUATION_SUMMARIZED = 3
+
+
+def _summarize_situation(events: list[dict]) -> str:
+    """A short plain-English line per situation event, for the prompt only —
+    the CARDS on the page are built straight from the typed event data with
+    no model involved (crm/today.py); this text exists purely so the
+    one-sentence brief can decide whether a change is the single most
+    important thing to lead with today, e.g. a deadline moving up outranks
+    the queue's own top contact."""
+    lines = []
+    for e in events[:MAX_SITUATION_SUMMARIZED]:
+        firm = e.get("firm") or "a firm"
+        title = e.get("title") or "a role"
+        kind = e.get("kind")
+        if kind == "deadline_moved":
+            old, new = e.get("old_value") or "no prior date", e.get("new_value") or "no date"
+            lines.append(f"- {title} at {firm}: deadline moved from {old} to {new}")
+        elif kind == "role_closed":
+            lines.append(f"- {title} at {firm}: this posting just closed")
+        elif kind == "new_role_at_known_firm":
+            lines.append(f"- {firm} just opened a new role: {title}")
+    return "\n".join(lines)
+
+
+def get_or_build(user, actions: list[dict], situation: list[dict] | None = None, *, client=None) -> str | None:
     """Today's brief. Returns None — never raises, never shows an error —
     if the feature is dark, there is nothing worth saying today, or
     generation fails for any reason; the Today page simply omits the card
     on a day this doesn't work, the same graceful-dark posture every other
-    optional integration in this app already has."""
+    optional integration in this app already has.
+
+    `situation` is the flat event list from `assistant.situation.
+    build_situation` (optional — callers that don't have one, or tests
+    written before it existed, simply omit it and get the old queue-only
+    behaviour). It extends the SAME prompt rather than triggering a second
+    model call: a deadline that just moved is often more urgent than the
+    queue's own top contact, and the model gets to decide that with both
+    facts in front of it at once, not two independent sentences stitched
+    together afterward."""
     today = timezone.localdate()
     existing = DailyBrief.objects.for_user(user).filter(date=today).first()
     if existing is not None:
@@ -65,32 +104,37 @@ def get_or_build(user, actions: list[dict], *, client=None) -> str | None:
         return None
 
     queue_summary = _summarize_actions(actions)
-    if not queue_summary:
-        return None  # nothing in the queue — don't spend a call to say so
+    situation_summary = _summarize_situation(situation or [])
+    if not queue_summary and not situation_summary:
+        return None  # nothing to say — don't spend a call to say so
+
+    prompt = (
+        "You are Coverage's recruiting advisor. In 1-2 SHORT "
+        "sentences, tell this student what matters most today — "
+        "lead with the single highest-priority thing, name it "
+        "specifically. No greeting, no summary of everything in the "
+        "list, no hedging.\n\nWrap exactly ONE short span in **bold** — "
+        "whichever single detail matters most to act on right "
+        "now: a person's name, or the exact deadline/day "
+        "count if that is the real urgency. Never bold more "
+        "than one span, never a whole sentence, and use no "
+        "other markdown at all."
+    )
+    if queue_summary:
+        prompt += "\n\nToday's queue:\n" + queue_summary
+    if situation_summary:
+        prompt += (
+            "\n\nThings that changed recently on roles this student tracks "
+            "or firms they know (a moved deadline or a closed posting can "
+            "outrank anything in the queue above):\n" + situation_summary
+        )
 
     try:
         client = client or get_client()
         response = client.messages.create(
             model=BRIEF_MODEL,
             max_tokens=MAX_TOKENS,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        "You are Coverage's recruiting advisor. In 1-2 SHORT "
-                        "sentences, tell this student what matters most in "
-                        "their queue today — lead with the single highest-"
-                        "priority person or deadline, name them by name. No "
-                        "greeting, no summary of everything in the list, no "
-                        "hedging.\n\nWrap exactly ONE short span in **bold** — "
-                        "whichever single detail matters most to act on right "
-                        "now: the person's name, or the exact deadline/day "
-                        "count if that is the real urgency. Never bold more "
-                        "than one span, never a whole sentence, and use no "
-                        "other markdown at all.\n\nToday's queue:\n" + queue_summary
-                    ),
-                }
-            ],
+            messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(
             (getattr(b, "text", None) or (isinstance(b, dict) and b.get("text")) or "")

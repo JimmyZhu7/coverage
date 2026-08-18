@@ -1497,3 +1497,58 @@ def test_the_brief_never_leaks_into_the_partial_cockpit_template(client, monkeyp
     client.force_login(user)
     resp = client.post(reverse("crm:today_park_all"))
     assert "Should not appear here." not in resp.content.decode()
+
+
+# ---------------------------------------------------------------------------
+# The situation snapshot: deterministic cards under the daily brief,
+# assistant.situation.build_situation. Same full-page-only invariant as the
+# brief itself — see the guard test below.
+# ---------------------------------------------------------------------------
+def test_a_moved_deadline_on_a_tracked_role_renders_a_card(client):
+    from analytics.models import UserOpportunity
+    from directory.models import Opportunity, OpportunityChange
+
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="north-bank", name="North Bank")
+    opp = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        deadline=timezone.localdate() + timedelta(days=20),
+        url="https://north.example/jobs/1",
+    )
+    UserOpportunity(user=user, opportunity=opp).save()
+    OpportunityChange.objects.create(
+        opportunity=opp, field="deadline", old_value="2026-08-01",
+        new_value="2026-08-20", stage="reverify", observed_at=timezone.now(),
+    )
+
+    body = _login_and_get(client, user)
+
+    assert "Summer Analyst" in body
+    assert "North Bank" in body
+    assert "deadline moved" in body
+
+
+def test_no_situation_cards_when_nothing_changed(client):
+    user = _user(weekly_touch_goal=14)
+    body = _login_and_get(client, user)
+    assert 'class="situation-strip"' not in body
+
+
+def test_the_htmx_partial_refresh_never_builds_the_situation_snapshot(client, monkeypatch):
+    """Same invariant as the brief itself (see
+    test_the_htmx_partial_refresh_never_calls_the_brief above): the partial
+    refresh shares _cockpit_context with week(), but only the full page load
+    may spend the extra situation queries."""
+    import assistant.situation
+
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    _touch(user, c, "outreach", days_ago=20)
+
+    def fail_if_called(*a, **kw):
+        raise AssertionError("the partial refresh must never build the situation snapshot")
+
+    monkeypatch.setattr(assistant.situation, "build_situation", fail_if_called)
+    client.force_login(user)
+    resp = client.post(reverse("crm:today_park_all"))
+    assert resp.status_code == 200

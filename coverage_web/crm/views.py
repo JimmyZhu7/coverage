@@ -37,7 +37,7 @@ from crm.forms import ChatDebriefForm, ContactForm
 from directory.classify import REGION_LABELS, TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
 
-from . import ai_brief, coverage, debrief as debrief_svc, services
+from . import ai_brief, ai_summary, coverage, debrief as debrief_svc, services
 from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
 
 
@@ -1183,6 +1183,11 @@ def _contact_live_context(
             request.GET.get("log") if request.GET.get("log") in TOUCH_TRANSITIONS else None
         ),
         "channels": CHANNEL_LABELS,
+        # How far behind the stored AI summary has fallen. Counted off the
+        # `touches` list already loaded above, so this costs no extra query —
+        # and it is only ever a DISPLAY fact: nothing here generates, because
+        # generation is a deliberate POST (crm.views.contact_ai_summary).
+        "summary_new_touches": ai_summary.touches_since_summary(contact, touches),
         "mailto": _mailto(
             contact.email, _capture_address(user), body=(contact.opener or "")
         ),
@@ -1225,3 +1230,32 @@ def contact_ai_brief(request: HttpRequest, pk: int) -> HttpResponse:
         record_event("ai_brief_generated", user=request.user)
     return render(request, "crm/_contact_ai_brief.html",
                   {"contact": contact, "brief": brief, "requested": True})
+
+
+@login_required
+@require_POST
+def contact_ai_summary(request: HttpRequest, pk: int) -> HttpResponse:
+    """(Re)write the AI relationship summary on `contact` — see
+    crm/ai_summary.py, which owns both the prompt and the rule that the
+    student's own `notes`/`angle` are read as context and never written.
+
+    POST, not GET, and for exactly the reason `contact_ai_brief` above gives:
+    this is a paid API call once ANTHROPIC_API_KEY is set, so it fires only
+    on a deliberate click, never on a prefetch, a reload, or a crawl of the
+    contact list. That is also why the summary is NOT generated lazily when
+    the detail page renders — the page shows the stored note and counts how
+    far behind it has fallen instead.
+
+    Renders the same fragment the page renders inline. A generation that
+    produced nothing (thin history, key unset, API down) leaves the previous
+    summary in place and says so plainly rather than erroring."""
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    summary = ai_summary.regenerate(contact)
+    if summary is not None:
+        record_event("ai_summary_generated", user=request.user)
+    return render(request, "crm/_contact_ai_summary.html", {
+        "contact": contact,
+        "requested": True,
+        "generated": summary is not None,
+        "summary_new_touches": ai_summary.touches_since_summary(contact),
+    })

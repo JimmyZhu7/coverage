@@ -172,3 +172,61 @@ def test_a_second_call_the_same_day_does_not_call_the_model_again():
 
     assert first == second
     assert len(client.messages.requests) == 1
+
+
+# ---------------------------------------------------------------------------
+# The situation snapshot extends the SAME prompt — no second model call.
+# ---------------------------------------------------------------------------
+def _deadline_event(title="Summer Analyst", firm="Goldman Sachs", old="2026-08-01", new="2026-08-15"):
+    return {
+        "kind": "deadline_moved", "title": title, "firm": firm,
+        "old_value": old, "new_value": new,
+    }
+
+
+def test_omitting_situation_entirely_keeps_the_old_queue_only_behaviour():
+    """Callers written before build_situation existed (and every test above
+    this one in the file) still work unmodified — `situation` defaults to
+    None rather than being required."""
+    user = _user()
+    client = FakeClient(_response("Ada's Goldman deadline is Friday."))
+
+    text = brief.get_or_build(user, [_action()], client=client)
+
+    assert text == "Ada's Goldman deadline is Friday."
+
+
+def test_a_situation_event_is_folded_into_the_same_prompt_not_a_second_call():
+    user = _user()
+    client = FakeClient(_response("Watch that deadline."))
+
+    brief.get_or_build(user, [_action()], [_deadline_event()], client=client)
+
+    assert len(client.messages.requests) == 1
+    prompt = client.messages.requests[0]["messages"][0]["content"]
+    assert "Summer Analyst" in prompt
+    assert "Goldman Sachs" in prompt
+    assert "2026-08-01" in prompt and "2026-08-15" in prompt
+
+
+def test_situation_events_alone_with_an_empty_queue_still_spends_a_call():
+    """An empty cadence queue used to mean "nothing worth saying" — but a
+    deadline moving on a tracked role is worth saying even when the queue
+    itself is empty."""
+    user = _user()
+    client = FakeClient(_response("Your Goldman deadline moved."))
+
+    text = brief.get_or_build(user, [], [_deadline_event()], client=client)
+
+    assert text == "Your Goldman deadline moved."
+    assert len(client.messages.requests) == 1
+
+
+def test_an_empty_queue_and_no_situation_events_still_spends_no_call():
+    user = _user()
+    client = FakeClient(_response("unused"))
+
+    text = brief.get_or_build(user, [], [], client=client)
+
+    assert text is None
+    assert client.messages.requests == []

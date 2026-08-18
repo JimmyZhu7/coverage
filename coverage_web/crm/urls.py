@@ -51,4 +51,7 @@ urlpatterns = [
     # htmx: save the Compose draft (contact.opener) in place.
     path("contacts/<int:pk>/opener/", views.contact_opener, name="contact_opener"),
     path("contacts/<int:pk>/ai-brief/", views.contact_ai_brief, name="contact_ai_brief"),
+    # htmx: (re)write the AI relationship summary. POST for the same reason
+    # ai-brief is — a paid call must never fire from a prefetch or a crawl.
+    path("contacts/<int:pk>/ai-summary/", views.contact_ai_summary, name="contact_ai_summary"),
 ]

@@ -34,7 +34,7 @@ from analytics.models import UserOpportunity
 from assistant import tools
 from assistant.models import AdvisorMemory, ChatConversation, ChatMessage
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
-from directory.models import Firm, Opportunity
+from directory.models import Firm, Opportunity, OpportunityChange
 
 User = get_user_model()
 
@@ -158,6 +158,11 @@ def alices_world(alice, firm):
     """Everything Alice owns: a contact with history, a target firm, a saved
     role, a calendar event."""
     contact = Contact(user=alice, firm=firm, name="Alice's Banker", role="MD")
+    # The AI-written relationship note (crm.ai_summary) rides out through
+    # `get_contact`'s payload like every other column on this row, so it needs
+    # the same cross-tenant proof they get.
+    contact.ai_summary = "Alice's AI-written relationship note."
+    contact.ai_summary_generated_at = timezone.now()
     contact.save()
     touch = Touch(
         user=alice, contact=contact, ts=timezone.now(), kind="chat",
@@ -225,6 +230,26 @@ def test_user_b_cannot_reach_user_a_s_row_by_id(bob, alices_world, tool_name, fi
     else:
         assert is_error, result
         assert "no contact with that id" in result["error"].lower()
+
+
+def test_alices_ai_summary_never_reaches_bob_through_any_tool(bob, alices_world):
+    """`get_contact` gained an `advisor_summary` key (crm.ai_summary's
+    AI-written relationship note). It is one more column on Alice's contact
+    row, so the guarantee is the same one every other column gets: Bob asking
+    for it by id, by search, or by queue gets nothing back with her words in
+    it. Asserted on the RAW payload rather than a parsed field, so a future
+    key rename cannot quietly drop the check."""
+    summary = alices_world["contact"].ai_summary
+    assert summary  # the fixture really did seed one
+
+    for name, args in (
+        ("get_contact", {"contact_id": alices_world["contact"].id}),
+        ("search_contacts", {"query": "banker"}),
+        ("get_today_queue", {}),
+        ("get_my_pipeline", {}),
+    ):
+        raw, _ = tools.execute(bob, name, args, "msg_test")
+        assert summary not in raw, name
 
 
 def test_user_b_gets_an_empty_network_not_user_a_s(bob, alices_world):
@@ -367,6 +392,24 @@ def test_bob_changing_a_setting_never_reaches_alices_account(bob, alice):
     assert bob.weekly_touch_goal == 3
     assert alice.weekly_touch_goal == 25
     assert alice.school == "Alice's School"
+
+
+def test_bobs_situation_never_shows_alices_tracked_deadline_change(bob, alices_world):
+    """Alice tracks a role (the `alices_world` fixture) and its deadline
+    moves inside the window. `get_situation` (assistant.situation.
+    build_situation) joins through `UserOpportunity.objects.for_user` to
+    decide which opportunities are even in play — Bob has tracked nothing,
+    so his result must come back empty, not Alice's change."""
+    OpportunityChange.objects.create(
+        opportunity=alices_world["opportunity"], field="deadline",
+        old_value="2026-08-01", new_value="2026-08-20",
+        stage="reverify", observed_at=timezone.now(),
+    )
+
+    result, is_error = _call(bob, "get_situation", {})
+
+    assert not is_error
+    assert result == {"total": 0, "events": []}
 
 
 def test_remembering_a_fact_never_reaches_another_students_cap_or_list(alice, bob):

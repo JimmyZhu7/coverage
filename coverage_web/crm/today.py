@@ -962,14 +962,30 @@ def week(request: HttpRequest) -> HttpResponse:
     # anything from crm — this app already imports FROM assistant
     # (assistant.tools reads crm.today._build_actions), so the reverse
     # import has to stay one-directional or the two apps import each other.
+    # assistant.situation is the same story: pure reads, no LLM, but it
+    # still only belongs on the full page load — see its own module
+    # docstring on why it isn't cached, and why it still must not fire from
+    # the htmx partial refresh (a bug here degrades gracefully to no cards,
+    # but it is a query cost the partial-refresh path has no business
+    # paying on every card click).
     from assistant.brief import get_or_build as get_daily_brief
+    from assistant.situation import build_situation
 
-    daily_brief = get_daily_brief(request.user, cockpit.pop("_actions_for_brief"))
+    situation = build_situation(request.user)
+    daily_brief = get_daily_brief(
+        request.user, cockpit.pop("_actions_for_brief"), situation=situation.get("events"),
+    )
     return render(
         request,
         "crm/week.html",
         {**cockpit, **_dashboard_context(request.user),
          "daily_brief": daily_brief,
+         # Capped to 3 for the card strip — same number the brief's own
+         # queue-card cap uses (assistant.brief.MAX_SITUATION_SUMMARIZED),
+         # so the sentence above never references a 4th change nobody can
+         # see a card for. `situation["events"]` is already priority-ordered
+         # (role_closed, then deadline_moved, then new_role_at_known_firm).
+         "situation_events": situation.get("events", [])[:3],
          # Signup lands on the /welcome/ wizard, but nothing ever looked at
          # whether it was FINISHED: close the tab at step one and every later
          # login lands here, on an empty queue over an unpersonalized feed,

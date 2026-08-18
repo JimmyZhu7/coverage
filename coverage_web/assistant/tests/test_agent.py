@@ -1111,6 +1111,22 @@ def test_the_prompt_teaches_the_draft_fence_and_when_not_to_use_it():
     assert "don't end a draft by asking whether to log it" in prompt
 
 
+def test_the_prompt_teaches_one_draft_block_per_person_on_a_batch_request():
+    """Without this, a "draft a re-ping for everyone who's gone cold" request
+    reads like any other single-draft ask, and the model's default instinct
+    is one draft plus an offer to do the rest on request — three extra round
+    trips for something that should be one reply. Pinned as content
+    assertions: the trigger phrasing, the look-everyone-up-first rule (no
+    guessed ids), and that this is still drafting, not a new write."""
+    prompt = agent.SYSTEM_PROMPT
+
+    assert "one draft block per person in that same reply" in prompt
+    assert "not one now and an offer to do the rest" in prompt
+    assert "Look each person up first" in prompt
+    assert "skip anyone you can't find rather than guessing" in prompt
+    assert "nothing sends and nothing logs until they act on each card themselves" in prompt
+
+
 def test_the_draft_fence_in_the_prompt_parses_with_the_real_parser():
     """The example the model copies has to be one the page can actually read.
     A drifted example is the one prompt bug no content assertion catches."""

@@ -1,0 +1,39 @@
+{% comment %}
+Rendered two ways, like crm/_contact_ai_brief.html: inline from
+_contact_live.html (requested=False) and as the htmx response after a POST to
+crm:contact_ai_summary (requested=True, `generated` saying whether that POST
+actually wrote anything).
+
+The difference from the coffee-chat brief: this text is STORED
+(Contact.ai_summary), so re-rendering it — including on every log-touch swap
+— costs nothing. Only the button spends a call, which is the whole reason it
+is a button and not something the page does on its own when you open it.
+
+It sits in its own card, never folded into the notes/angle block above it:
+this is the one paragraph on the page nobody in the student's life wrote.
+{% endcomment %}
+{% if contact.ai_summary %}
+  <p class="cd-ai-label">AI-drafted from this contact's history. Check it before you rely on it.</p>
+  <p class="cd-ai-brief">{{ contact.ai_summary|linebreaksbr }}</p>
+  <p class="cd-ai-hint">
+    Written {{ contact.ai_summary_generated_at|date:"M j, Y" }}.
+    {% if summary_new_touches %}
+      {{ summary_new_touches }} interaction{{ summary_new_touches|pluralize }} logged since — rewrite it to catch up.
+    {% endif %}
+  </p>
+{% else %}
+  <p class="cd-ai-hint">Where this relationship stands, in a couple of sentences, drafted from the history logged below.</p>
+{% endif %}
+{% if requested and not generated %}
+  {% comment %}Deliberately one line covering both "too thin to say anything"
+  and "the API is dark or failed" — the student's next move is the same in
+  either case, and nothing was changed by the attempt.{% endcomment %}
+  <p class="cd-ai-hint">Nothing written. There isn't enough logged history to say anything specific yet, or the AI is unavailable right now.</p>
+{% endif %}
+<button class="btn"
+        hx-post="{% url 'crm:contact_ai_summary' contact.pk %}"
+        hx-target="#contact-ai-summary" hx-swap="innerHTML"
+        hx-indicator="#contact-ai-summary-loading">
+  {% if contact.ai_summary %}Rewrite summary{% else %}Write summary{% endif %}
+</button>
+<span id="contact-ai-summary-loading" class="htmx-indicator cd-ai-loading">Writing…</span>
