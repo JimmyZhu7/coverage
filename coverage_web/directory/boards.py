@@ -141,6 +141,18 @@ BOARDS: list[tuple[str, BoardConfig]] = [
                          board_url="https://bankcampuscareers.tal.net/vx/mobile-0/brand-4/candidate/jobboard/vacancy/1/adv/")),
     ("bofa", TalnetBoard(firm="Bank of America", kind="events",
                          board_url="https://bankcampuscareers.tal.net/vx/mobile-0/brand-4/candidate/jobboard/vacancy/2/adv/")),
+    # Was live-verified 2026-07-23 (jobs board returned off-cycle
+    # internships). Re-checked 2026-08-18: the tenant now serves Oleeo
+    # Protect's "Quick Check Needed" interstitial (an ALTCHA proof-of-work
+    # challenge) on every request, tested with a plain, honest UA — a
+    # tenant-level anti-bot setting turned on sometime after the original
+    # check, not a scrape breaking. talnet.py's bot_challenge_reason()
+    # already recognizes this exact page and reports the board as
+    # unreadable rather than silently-empty, so nothing here is
+    # misbehaving. Kept configured in case the tenant turns the check back
+    # off; deliberately NOT worth building a challenge-solver for one
+    # board, which would cross from "read a public page" into defeating an
+    # employer's anti-bot control.
     ("ms", TalnetBoard(firm="Morgan Stanley", kind="jobs",
                        board_url="https://morganstanley.tal.net/vx/lang-en-GB/mobile-0/appcentre-1/brand-2/candidate/jobboard/vacancy/1/adv/")),
     ("ms", TalnetBoard(firm="Morgan Stanley", kind="events",
@@ -149,9 +161,11 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # posting, campus roles under the dedicated /emergingtalent/job/ path.
     ("hsbc", SitemapBoard(firm="HSBC", sitemap_url="https://apply.careers.hsbc.com/sitemap.xml",
                           path_filter="/emergingtalent/job/")),
-    # Nomura's campus platform is also tal.net (live-verified 2026-07-23:
-    # jobs board returns off-cycle internships, events board the "Insider
-    # Series" insight evenings).
+    # Nomura's campus platform is also tal.net. Was live-verified
+    # 2026-07-23 (jobs board returned off-cycle internships, events board
+    # the "Insider Series" insight evenings). Re-checked 2026-08-18: same
+    # Oleeo Protect challenge as Morgan Stanley above, same reasoning for
+    # leaving it configured rather than attempting to solve it.
     ("nomura", TalnetBoard(firm="Nomura", kind="jobs",
                            board_url="https://nomuracampus.tal.net/vx/mobile-0/candidate/jobboard/vacancy/1/adv/")),
     ("nomura", TalnetBoard(firm="Nomura", kind="events",
@@ -165,15 +179,16 @@ BOARDS: list[tuple[str, BoardConfig]] = [
                            site_number="CX_1", keywords=("intern", "graduate", "analyst"))),
     ("lazard", OracleBoard(firm="Lazard", host="icbpjb.fa.ocs.oraclecloud.com",
                            site_number="CX_2", keywords=("intern", "graduate", "analyst"))),
+    # Was live and EMPTY, not broken, as of 2026-08-05 (the page served
+    # ~108KB with zero vacancy links). Re-checked 2026-08-18: now the same
+    # Oleeo Protect "Quick Check Needed" challenge as Morgan Stanley/Nomura
+    # above — the tenant switched from "reachable but empty" to "not
+    # reachable" sometime in between. Same reasoning for leaving both
+    # boards configured rather than solving the challenge.
     ("evercore", TalnetBoard(firm="Evercore", kind="jobs",
                              board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/2/adv/")),
     ("evercore", TalnetBoard(firm="Evercore", kind="jobs",
                              board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/3/adv/")),
-    # Live and EMPTY, not broken (re-verified 2026-08-05: the page serves
-    # ~108KB with zero vacancy links). Kept configured so the day Jefferies
-    # posts campus roles they land without anyone remembering to re-add the
-    # board; health reports it as "fetches cleanly, no rows" rather than as
-    # a config bug.
     ("jefferies", TalnetBoard(firm="Jefferies", kind="jobs",
                               board_url="https://jefferies.tal.net/vx/lang-en-GB/mobile-0/appcentre-ext/brand-4/xf-016c915b0a67/candidate/jobboard/vacancy/2/adv/")),
     # Solomon's students board is real but empty out of season; the
@@ -280,7 +295,14 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # package's honest UA — a block, not a puzzle), D.E. Shaw (in-house, no
     # feed in 1.8MB of markup), Two Sigma (Avature, but the RSS feed is
     # disabled and SearchJobs 404s), Balyasny (no ATS host in markup),
-    # Wolverine/CTC (JS shells). ----
+    # Wolverine/CTC (JS shells).
+    # Re-checked 2026-08-18, nothing to change: Marshall Wace's own board
+    # (boards-api.greenhouse.io/v1/boards/marshallwace/jobs) still returns
+    # a clean 200 with `{"jobs": [], "meta": {"total": 0}}` — genuinely
+    # empty right now, not a broken token or a shape change, so the
+    # connector needs no fix. Citadel/D.E. Shaw/Two Sigma/Balyasny spot-
+    # checked again too; still no discoverable ATS on any of their public
+    # careers pages. ----
     ("bridgewater", GreenhouseBoard(firm="Bridgewater", token="bridgewater89")),
     ("aqr", GreenhouseBoard(firm="AQR", token="aqr")),
     ("squarepoint", GreenhouseBoard(firm="Squarepoint", token="squarepointcapital")),
