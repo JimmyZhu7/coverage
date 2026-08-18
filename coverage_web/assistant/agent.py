@@ -110,13 +110,24 @@ You know how this works: penultimate-year students, spring weeks and insight pro
 
 WHAT YOU CAN CHANGE
 
-Four things, and all apply immediately:
+Seven things. Six apply immediately; the seventh has one extra step, spelled out below.
 - log_touch — record an interaction that already happened with a contact.
 - track_opportunity — save a role to their pipeline, or clear it.
 - remember — save one durable fact that should carry into every future conversation, not just this one.
 - add_calendar_event — put something with a date on their calendar.
+- add_contact — add one new person to their network.
+- set_contact_status — set warmth and/or thread state on one contact or several at once.
+- update_settings — change one field of their own settings.
 
 Only log a touch when the student has told you it happened. Never log one to tidy up a record you inferred, and never log one against a contact you are not certain of.
+
+Only add a contact when they've asked you to add someone. Search first — if that person is already in their network, say so instead of adding a second copy. Firm goes in firm_text as they said it unless you actually looked the firm up.
+
+set_contact_status is for correcting the record, not for recording events: "park those three, they're never replying", "she's an advocate now, we've spoken twice". If something actually happened with someone, that's log_touch. On a bulk call, read the result before you answer — it tells you exactly how many moved and which ids weren't theirs, and you should report that number rather than saying "done".
+
+update_settings changes one field at a time: their name, school, class year, target cycle, timezone, target markets and tracks, work authorization, cadence tuning, weekly pace, email digest. Most fields save on the first call, and you just say what you changed.
+
+A few fields do not, and this is deliberate. Timezone, regions and tracks come back on the first call saying NOTHING WAS CHANGED. That is not an error and not something to retry — it is asking you to check first. When it happens: tell the student in your own next reply what the change actually does (for timezone, that it changes what day their queue and deadlines think it is; for regions and tracks, that it replaces the whole list and drops anything not in the new value), say what it moves from and to, and ask. Then wait. Only if they say yes in their own next message do you call update_settings again with the same field and value plus confirmed=true. Never send confirmed=true on a first call, and never on the strength of your own guess about what they'd say.
 
 Only add a calendar event when they actually ask you to add or schedule something — never on a guess about when a thing is, and never to record something that already happened (that's a touch, not a calendar entry). Leave the time off for anything that's a day rather than a moment ("Superday on the 14th"); do not invent a clock time to fill the field.
 
@@ -141,7 +152,7 @@ Only a finished draft goes in the block. An outline, two alternative openers, or
 
 The block changes how a draft is displayed, nothing else. It still isn't sending — Copy exists because sending stays theirs. And since the chip is right there on the card, don't end a draft by asking whether to log it.
 
-For anything else — actually sending a message, editing a note, changing a tier, moving a role to submitted, archiving someone, changing settings — say plainly that you can't do it from here, and name the page in Coverage where they can: Today for the queue, Network for contacts and tiers, Opportunities for roles and applications, Calendar for chats and dates, Settings for their profile and cadence.
+For anything else — actually sending a message, editing a note, changing a tier, moving a role to submitted, archiving someone, changing their email or password or profile picture — say plainly that you can't do it from here, and name the page in Coverage where they can: Today for the queue, Network for contacts and tiers, Opportunities for roles and applications, Calendar for chats and dates, Settings for their profile and cadence.
 
 SAFETY
 
@@ -444,7 +455,7 @@ def _retitle_if_first_message(user, conversation, is_first: bool, client, user_t
 # ---------------------------------------------------------------------------
 # The loop
 # ---------------------------------------------------------------------------
-def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=None) -> TurnResult:
+def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=None, resume=False) -> TurnResult:
     """One student message in, the persisted assistant reply out.
 
     The student's message is persisted BEFORE the API call, so a failed or
@@ -455,20 +466,31 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
     the turn before it ever reaches here if any file failed validation) go
     FIRST in the content list, ahead of the text block — Anthropic's own
     documented ordering for an image/document a message then refers to.
+
+    `resume=True` is the ONE case where nothing is persisted first: a rewind
+    (assistant.views.edit_message) has already rewritten the student's own
+    past message and deleted everything after it, so the conversation's last
+    stored row IS the question this turn answers. Persisting `text` again
+    would ask it twice. Everything else — the cap, the counter, the replay
+    window, the tool budget — is unchanged, because a regenerated answer
+    costs exactly what the first one did. `text` is still passed in resume
+    mode, and is used for one thing only: titling a conversation whose first
+    message is the one that just changed.
     """
     text = (text or "").strip()
     attachment_blocks = attachment_blocks or []
-    if not text and not attachment_blocks:
-        return TurnResult(ok=False, reason="failed")
+    if not resume:
+        if not text and not attachment_blocks:
+            return TurnResult(ok=False, reason="failed")
 
-    _save(
-        ChatMessage(
-            user=user,
-            conversation=conversation,
-            role=ChatMessage.ROLE_USER,
-            content=list(attachment_blocks) + ([{"type": "text", "text": text[:8000]}] if text else []),
+        _save(
+            ChatMessage(
+                user=user,
+                conversation=conversation,
+                role=ChatMessage.ROLE_USER,
+                content=list(attachment_blocks) + ([{"type": "text", "text": text[:8000]}] if text else []),
+            )
         )
-    )
     is_first = not conversation.title
     if is_first:
         conversation.title = text[:120]
@@ -626,7 +648,7 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
 # code to add a second mode. Some duplication between the two loops is the
 # price of that, and it is a small one: each is under 90 lines.
 # ---------------------------------------------------------------------------
-def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks=None):
+def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks=None, resume=False):
     """Same contract as run_turn, as a generator of small dicts instead of one
     TurnResult — this is what makes the reply grow into the page token by
     token instead of appearing all at once when the whole thing is ready.
@@ -654,20 +676,26 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
     under the same caps — a conversation that mixes streamed and
     non-streamed turns (JS unsupported one day, supported the next) replays
     identically either way.
+
+    `resume=True` means the same here as in run_turn: the student's message
+    is already stored (a rewind rewrote it and dropped everything after it),
+    so this turn answers the conversation as it now stands instead of adding
+    a message to it first. See run_turn's docstring.
     """
     text = (text or "").strip()
     attachment_blocks = attachment_blocks or []
-    if not text and not attachment_blocks:
-        return
+    if not resume:
+        if not text and not attachment_blocks:
+            return
 
-    _save(
-        ChatMessage(
-            user=user,
-            conversation=conversation,
-            role=ChatMessage.ROLE_USER,
-            content=list(attachment_blocks) + ([{"type": "text", "text": text[:8000]}] if text else []),
+        _save(
+            ChatMessage(
+                user=user,
+                conversation=conversation,
+                role=ChatMessage.ROLE_USER,
+                content=list(attachment_blocks) + ([{"type": "text", "text": text[:8000]}] if text else []),
+            )
         )
-    )
     is_first = not conversation.title
     if is_first:
         conversation.title = text[:120]
@@ -830,6 +858,9 @@ TOOL_LABELS = {
     "track_opportunity": "saved a role",
     "remember": "made a note for later",
     "add_calendar_event": "added it to your calendar",
+    "add_contact": "added a contact",
+    "set_contact_status": "updated where a contact stands",
+    "update_settings": "changed a setting",
 }
 
 

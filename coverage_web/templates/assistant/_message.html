@@ -1,9 +1,16 @@
 {% load assistant_extras %}
 {% comment %}
 One turn in the thread. `row` is a dict built by assistant.views._thread_rows:
-role, text, tools (human labels for the lookups behind an answer), notice
-(non-empty only for a message Coverage wrote about itself), attachments
-(user turns only — filenames of any image/document blocks it carried).
+role, text, message_id (the stored row's own pk), tools (human labels for the
+lookups behind an answer), notice (non-empty only for a message Coverage
+wrote about itself), attachments (user turns only — filenames of any
+image/document blocks it carried).
+
+Under the bubble sits one quiet actions row, invisible until the turn is
+hovered or something inside it is focused (chat.html's `.as-msg-actions`),
+holding the one thing each side of the conversation is for: Copy what
+Coverage said, Edit what you said. Same restraint as the history rows'
+kebab — the thread stays calm until you reach for it.
 {% endcomment %}
 <article class="as-msg as-msg--{{ row.role }}{% if row.notice %} as-msg--notice{% endif %} kin-reveal">
   {% if row.role == 'assistant' %}
@@ -50,5 +57,59 @@ role, text, tools (human labels for the lookups behind an answer), notice
         <p class="as-evidence">Read {% for t in row.tools %}{{ t }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
       {% endif %}
     </div>
+
+    {% if row.role == 'user' %}
+      {% comment %}
+      Edit and re-ask. The textarea starts hidden and is revealed in place of
+      the bubble (chat.html, `.as-msg.is-editing`) — the same reveal-an-
+      already-rendered-input shape the history rows' rename uses, rather than
+      a second way of doing the same thing.
+
+      A plain <form>, not htmx: on a browser that can stream, chat.html
+      intercepts the submit and runs the fresh turn as SSE right into the
+      thread; on one that can't, this posts for real and the endpoint
+      redirects back to the conversation. `data-confirm` is what makes the
+      shared dialog ask first, either way.
+      {% endcomment %}
+      <form class="as-msg-edit-form" method="post" action="{% url 'assistant:edit_message' %}"
+            data-confirm="Send from here? Everything after this message is deleted. This can't be undone."
+            data-confirm-ok="Send">
+        {% csrf_token %}
+        <input type="hidden" name="message" value="{{ row.message_id }}">
+        <label class="as-label" for="as-edit-{{ row.message_id }}">Edit your message</label>
+        <textarea id="as-edit-{{ row.message_id }}" name="text" class="as-msg-edit-input"
+                  rows="2" maxlength="{{ max_chars }}">{{ row.text }}</textarea>
+        <div class="as-msg-edit-actions">
+          <button type="button" class="btn as-msg-edit-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Send</button>
+        </div>
+      </form>
+      <div class="as-msg-actions">
+        <button type="button" class="as-msg-btn as-msg-edit" aria-label="Edit this message" title="Edit">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M11 2.5l2.5 2.5L5 13.5l-3 .5.5-3L11 2.5z" stroke="currentColor"
+                  stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    {% elif row.text and not row.notice %}
+      {% comment %}
+      Copy the whole reply — prose and any drafted message inside it, in
+      reading order. The draft card keeps its OWN Copy button for the common
+      case of wanting just the email; this one is for the answer.
+      {% endcomment %}
+      <div class="as-msg-actions">
+        <button type="button" class="as-msg-btn as-msg-copy" aria-label="Copy this reply" title="Copy">
+          <svg class="as-icon-copy" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M5.5 5.5V3.5h7v7h-2M3.5 5.5h7v7h-7z" stroke="currentColor"
+                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg class="as-icon-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3.5 8.5l3 3 6-6" stroke="currentColor" stroke-width="1.5"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    {% endif %}
   </div>
 </article>

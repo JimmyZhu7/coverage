@@ -107,6 +107,11 @@ def _thread_rows(user, conversation) -> list[dict]:
                 {
                     "role": "user",
                     "text": message.text,
+                    # Same row-level primary key the assistant rows below
+                    # carry, for the same kind of reason: it is what the
+                    # edit control posts back to rewind the conversation to
+                    # this point (`edit_message`).
+                    "message_id": message.id,
                     "tools": [],
                     "notice": "",
                     "attachments": message.attachment_names,
@@ -301,14 +306,40 @@ def send(request: HttpRequest) -> HttpResponse:
     return render(request, "assistant/_thread.html", _context(request, conversation))
 
 
-@login_required
-@require_POST
-def stream(request: HttpRequest) -> HttpResponse:
-    """The composer's real transport (see chat.html's JS): the same one turn
-    as `send`, as Server-Sent Events instead of one blocking response.
+def _editable_message_id(user, conversation, before_id: int | None = None) -> int | None:
+    """The student's own message that a just-finished streamed turn answered.
+
+    STREAM PATH ONLY, and the mirror image of `_draft_segments`: the browser
+    drew that user bubble itself, straight from the textarea, so it holds the
+    words but not the stored row's id — and the edit control needs the id to
+    post back. Resolved here rather than added to the agent loop's own event
+    contract, for the same reason the draft metadata is: the loop's job is
+    the turn, not what the page hangs off it.
+
+    The row is the newest non-`tool_result` user turn before the reply — or
+    simply the newest one when there is no reply to look before, which is
+    every way a turn can END BADLY (no API key, daily cap, model unreachable,
+    a rejected attachment). Those are exactly the moments a student is most
+    likely to want to reword and try again, so the pencil has to be there for
+    them too, not only after a turn that worked.
+    """
+    rows = ChatMessage.objects.for_user(user).filter(
+        conversation=conversation, role=ChatMessage.ROLE_USER
+    )
+    if before_id is not None:
+        rows = rows.filter(pk__lt=before_id)
+    for message in rows.order_by("-created", "-id"):
+        if not message.is_tool_result:
+            return message.id
+    return None
+
+
+def _sse(request: HttpRequest, conversation, text: str, blocks, errors, *, resume=False) -> HttpResponse:
+    """One streamed turn as `text/event-stream`, shared by the two POSTs that
+    can start one: a plain send (`stream`) and a rewind (`edit_message`).
 
     Django itself never streams to the model — `agent.stream_turn` is a
-    generator, and this view's only job is turning each of its small dicts
+    generator, and this function's only job is turning each of its small dicts
     into one `data: <json>\\n\\n` frame. A synchronous `StreamingHttpResponse`
     over a generator is enough for that: gunicorn's sync workers flush each
     `yield` to the client as it happens, no ASGI/websocket machinery needed
@@ -319,15 +350,12 @@ def stream(request: HttpRequest) -> HttpResponse:
     (the default for a few common ones) turns a stream back into exactly the
     all-at-once response this endpoint exists to avoid.
     """
-    conversation = _current_conversation(request.user, _posted_conversation_id(request))
-    text = (request.POST.get("message") or "").strip()[:MAX_MESSAGE_CHARS]
-    blocks, errors = attachments_mod.blocks_for(request.FILES.getlist("file"))
 
     def frames():
         # `TimezoneMiddleware` already activated request.user.timezone — but
         # only for the SYNCHRONOUS part of the request/response cycle, which
         # this generator is not part of. `StreamingHttpResponse` wraps it
-        # lazily: `stream()` returns almost immediately, the middleware's own
+        # lazily: the view returns almost immediately, the middleware's own
         # `finally: timezone.deactivate()` runs right after, and only THEN
         # does the WSGI server actually iterate this generator to produce a
         # body — by which point the activation is already gone and every
@@ -348,15 +376,37 @@ def stream(request: HttpRequest) -> HttpResponse:
                 # capped) — one frame, nothing streamed, no API call spent on
                 # a request that was never going to be sent.
                 reply = agent.reject_attachments(request.user, conversation, text, errors)
-                yield f"data: {json.dumps({'type': 'notice', 'kind': 'failed', 'text': reply.text})}\n\n"
+                rejected = {
+                    "type": "notice",
+                    "kind": "failed",
+                    "text": reply.text,
+                    "user_message_id": _editable_message_id(request.user, conversation),
+                }
+                yield f"data: {json.dumps(rejected)}\n\n"
                 return
-            for event in agent.stream_turn(request.user, conversation, text, attachment_blocks=blocks):
-                if event.get("type") == "done" and event.get("message_id"):
-                    # The one thing the agent loop can't know and the browser
-                    # can't derive: who each draft is for, and whether its
-                    # touch is already on the record. Resolved here rather
-                    # than in agent.py so the loop keeps its single job.
-                    event = {**event, "drafts": _draft_segments(request.user, event["message_id"])}
+            for event in agent.stream_turn(
+                request.user, conversation, text, attachment_blocks=blocks, resume=resume
+            ):
+                if event.get("type") == "notice":
+                    # A turn that ended badly still leaves the question on
+                    # screen, and still deserves a pencil on it.
+                    event = {
+                        **event,
+                        "user_message_id": _editable_message_id(request.user, conversation),
+                    }
+                elif event.get("type") == "done" and event.get("message_id"):
+                    # The two things the agent loop can't know and the browser
+                    # can't derive: who each draft is for (and whether its
+                    # touch is already on the record), and the stored id of
+                    # the question this answered, which is what that bubble's
+                    # edit control posts back.
+                    event = {
+                        **event,
+                        "drafts": _draft_segments(request.user, event["message_id"]),
+                        "user_message_id": _editable_message_id(
+                            request.user, conversation, event["message_id"]
+                        ),
+                    }
                 yield f"data: {json.dumps(event)}\n\n"
         finally:
             timezone.deactivate()
@@ -365,6 +415,112 @@ def stream(request: HttpRequest) -> HttpResponse:
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
+
+
+@login_required
+@require_POST
+def stream(request: HttpRequest) -> HttpResponse:
+    """The composer's real transport (see chat.html's JS): the same one turn
+    as `send`, as Server-Sent Events instead of one blocking response. The
+    transport itself is `_sse` above, shared with the rewind endpoint.
+    """
+    conversation = _current_conversation(request.user, _posted_conversation_id(request))
+    text = (request.POST.get("message") or "").strip()[:MAX_MESSAGE_CHARS]
+    blocks, errors = attachments_mod.blocks_for(request.FILES.getlist("file"))
+    return _sse(request, conversation, text, blocks, errors)
+
+
+def _messages_after(user, message):
+    """Every row of the same conversation that comes AFTER this one, in the
+    order the thread is actually read.
+
+    `ChatMessage.Meta.ordering` is `["created", "id"]`, so "after" is that
+    same COMPOUND comparison, not `created__gt` on its own. The difference is
+    not theoretical: one turn writes an assistant row and the user row of
+    `tool_result` blocks answering it back to back in the same request, and
+    on SQLite (and on any clock the DB rounds) those two can land on an
+    identical `created`. With `created__gt` alone the second one would
+    survive a rewind that deleted the first — leaving a `tool_result` whose
+    `tool_use` no longer exists, which is the one shape the Messages API
+    rejects outright (see agent._replayable), i.e. a conversation that can
+    never be answered again.
+    """
+    return (
+        ChatMessage.objects.for_user(user)
+        .filter(conversation_id=message.conversation_id)
+        .filter(Q(created__gt=message.created) | Q(created=message.created, id__gt=message.id))
+    )
+
+
+@login_required
+@require_POST
+def edit_message(request: HttpRequest) -> HttpResponse:
+    """Rewind: change one of the student's own past messages and carry on
+    from there, the way Claude.ai's edit-and-resend does.
+
+    DESTRUCTIVE, and honestly so. Everything after the edited message is
+    deleted — not hidden, not branched. A branch would mean a tree, a tree
+    means a version switcher on every turn, and this page's whole shape is a
+    single readable conversation. The student is told plainly what will go
+    (chat.html's confirm dialog, the same one a chat delete uses) and then it
+    goes.
+
+    Only the student's OWN messages, and never a `tool_result` row: editing
+    what the model said would be editing the record of what happened, and
+    the point of a rewind is to ask differently, not to rewrite history.
+
+    A logged touch that came from a draft in one of the deleted replies is
+    deliberately left alone. The email was really sent; the CRM row is a fact
+    about the student's network, not a fact about this conversation, and the
+    conversation is not what makes it true.
+
+    TWO RESPONSES, the same split `send`/`stream` already have: with
+    `stream=1` (what chat.html's JS posts) the fresh turn comes back as the
+    same SSE frames a normal send does, so the reply grows into the page
+    where the deleted ones used to be. Without it, the turn runs
+    synchronously and the browser is redirected back to the conversation —
+    the path a browser that can't `fetch`/`ReadableStream` takes.
+    """
+    message = get_object_or_404(
+        ChatMessage.objects.for_user(request.user), pk=_posted_int(request, "message") or 0
+    )
+    if message.role != ChatMessage.ROLE_USER or message.is_tool_result:
+        return HttpResponseBadRequest("Only your own messages can be edited.")
+    text = (request.POST.get("text") or "").strip()[:MAX_MESSAGE_CHARS]
+    if not text:
+        return HttpResponseBadRequest("An edited message still needs something in it.")
+
+    conversation = message.conversation
+    # BEFORE the edit, while `message.created`/`message.id` still describe
+    # where in the thread this row sits.
+    is_first = not (
+        ChatMessage.objects.for_user(request.user)
+        .filter(conversation=conversation)
+        .filter(Q(created__lt=message.created) | Q(created=message.created, id__lt=message.id))
+        .exists()
+    )
+    _messages_after(request.user, message).delete()
+
+    # Attachments survive the edit: the file is what it always was, only the
+    # words about it changed. Every text block is replaced, never appended
+    # to — an edit that left the old question in place would send the model
+    # both versions and get an answer to neither.
+    kept = [b for b in message.blocks() if isinstance(b, dict) and b.get("type") != "text"]
+    message.content = kept + [{"type": "text", "text": text[:8000]}]
+    message.save(update_fields=["content"])
+
+    # A rewound FIRST message makes the conversation's title stale — it was
+    # derived from words that no longer exist. Blanking it here is what makes
+    # the turn below treat this as a first message again and re-title it
+    # (agent._retitle_if_first_message), which is also why the title is not
+    # saved separately: the turn saves the conversation itself.
+    if is_first:
+        conversation.title = ""
+
+    if request.POST.get("stream"):
+        return _sse(request, conversation, text, [], [], resume=True)
+    agent.run_turn(request.user, conversation, text, resume=True)
+    return redirect("assistant:chat_conversation", conversation_id=conversation.id)
 
 
 @login_required

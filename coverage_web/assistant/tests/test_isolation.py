@@ -104,6 +104,34 @@ def test_no_tool_body_takes_a_user_from_its_arguments():
         assert "user_id" not in json.dumps(schema["input_schema"]), schema["name"]
 
 
+# Anthropic's grammar compiler refuses a request outright once the OPTIONAL
+# parameters across every tool schema in one request pass a fixed ceiling —
+# measured live 2026-08-18: 26 offered, every single turn 400'd with
+# "Schemas contains too many optional parameters (26)... limit: 24", taking
+# the whole advisor down, not just the tool that pushed the count over. This
+# is not a per-tool defect a normal test would catch — each tool's own
+# schema is perfectly valid on its own, and it only breaks in combination
+# with every OTHER tool that already exists. A margin, not the bare limit:
+# 20 leaves room for one more small tool before this fires again as a real
+# warning instead of a live production outage.
+_MAX_TOTAL_OPTIONAL_PARAMS = 20
+
+
+def test_the_combined_tool_schemas_stay_under_the_apis_optional_param_ceiling():
+    total = 0
+    for schema in tools.TOOL_SCHEMAS:
+        props = schema["input_schema"].get("properties", {})
+        required = set(schema["input_schema"].get("required", []))
+        total += sum(1 for p in props if p not in required)
+    assert total <= _MAX_TOTAL_OPTIONAL_PARAMS, (
+        f"{total} optional parameters across all tool schemas combined — "
+        f"Anthropic's actual hard limit is 24, at which point EVERY turn "
+        f"fails, not just the tool that pushed it over. Trim an existing "
+        f"tool's optional fields before adding more (add_contact was cut "
+        f"from 9 to 3 for exactly this reason — see its own docstring)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # 2. Cross-tenant reads and writes
 # ---------------------------------------------------------------------------
@@ -157,7 +185,16 @@ def _call(user, name, args, message_id="msg_test"):
     return json.loads(payload), is_error
 
 
-# Every tool that takes a row id, with the id it takes.
+# Every tool that takes ONE tenant-scoped row id, with the id it takes.
+#
+# The three writes added after this list are covered by their own tests below
+# rather than here, because none of them fits this shape: `set_contact_status`
+# takes a LIST of ids (a batch fails differently from a single call — it has
+# to report the skipped ones, not error out), `add_contact` takes no
+# tenant-scoped id at all (only a SHARED-zone `firm_id`), and
+# `update_settings` takes no id of any kind. Each still gets a cross-tenant
+# test; see "Bob cannot..." / "lands in his own network" / "never reaches
+# Alice's account" further down.
 _ID_TOOLS = [
     ("get_contact", "contact_id", "contact"),
     ("log_touch", "contact_id", "contact"),
@@ -271,6 +308,67 @@ def test_search_opportunities_never_leaks_another_student_s_dismissals(bob, alic
     assert [r["opportunity_id"] for r in result["roles"]] == [opportunity.id]
 
 
+def test_bob_cannot_move_alices_contacts_with_a_list_of_her_ids(bob, alices_world):
+    """`set_contact_status` takes a LIST, so the parametrized sweep above
+    cannot reach it — one bad id in a batch is a different shape of mistake
+    from one bad id on its own. Every id Bob borrows must come back in
+    `not_found` and change nothing: reported, never silently skipped, and
+    never allowed to look like a success."""
+    alices = alices_world["contact"]
+    before = (alices.warmth, alices.thread_state)
+    touches_before = Touch.objects.for_user(alices.user).count()
+
+    result, is_error = _call(
+        bob,
+        "set_contact_status",
+        {"contact_ids": [alices.id, 999999], "thread_state": "parked", "warmth": "advocate"},
+    )
+
+    assert not is_error
+    assert result["changed_count"] == 0
+    assert result["changed"] == []
+    assert sorted(result["not_found"]) == sorted([alices.id, 999999])
+    assert "do not claim the rest" in result["instruction"]
+    alices.refresh_from_db()
+    assert (alices.warmth, alices.thread_state) == before
+    # No audit touch either: the override was never reached, so her history
+    # has nothing in it from Bob's call.
+    assert Touch.objects.for_user(alices.user).count() == touches_before
+
+
+def test_a_contact_bob_adds_lands_in_his_own_network_and_nowhere_else(bob, alices_world):
+    """`add_contact` takes no tenant-scoped id at all — the ONLY thing putting
+    the new row under the right student is the `user` execute() closes over,
+    which is the same shape of bug (a write that forgets whose it is) the
+    rest of this file exists to catch on reads."""
+    result, is_error = _call(bob, "add_contact", {"name": "Bob's New Person", "firm_text": "Some Bank"})
+
+    assert not is_error
+    assert Contact.objects.for_user(bob).filter(name="Bob's New Person").exists()
+    # Alice keeps exactly the one contact her fixture gave her — and the
+    # shared firm both students can see did not carry anything across.
+    assert [c.name for c in Contact.objects.for_user(alices_world["contact"].user)] == ["Alice's Banker"]
+
+
+def test_bob_changing_a_setting_never_reaches_alices_account(bob, alice):
+    """Settings are written straight onto the `User` row, which is not a
+    `PrivateModel` with a `.for_user()` scope to forget — the tool writes to
+    the `user` object execute() was handed and nothing else. Pinned here
+    because a future refactor that looked the user up by anything other than
+    that closure would be silent."""
+    alice.weekly_touch_goal, alice.school = 25, "Alice's School"
+    alice.save(update_fields=["weekly_touch_goal", "school"])
+
+    result, is_error = _call(bob, "update_settings", {"field": "weekly_touch_goal", "value": "3"})
+
+    assert not is_error
+    bob.refresh_from_db()
+    alice.refresh_from_db()
+    assert bob.weekly_touch_goal == 3
+    assert alice.weekly_touch_goal == 25
+    assert alice.school == "Alice's School"
+
+
 def test_remembering_a_fact_never_reaches_another_students_cap_or_list(alice, bob):
     """Alice's own memories must not count against Bob's MAX_MEMORIES cap,
     and Bob's remember() must never write to Alice's list — the only thing
@@ -347,3 +445,44 @@ def test_bob_cannot_log_a_touch_from_alices_draft(client, alice, bob, alices_wor
     # Alice's contact keeps the one touch her own fixture gave her.
     assert Touch.objects.for_user(alice).count() == 1
     assert Touch.objects.for_user(bob).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# 4. The rewind
+#
+# The other write on this page that takes an id straight from a POST body
+# rather than from a model's tool arguments — and the only one that DELETES.
+# A rewind pointed at another student's message would take out their whole
+# conversation from that point on, so it gets its own door check.
+# ---------------------------------------------------------------------------
+def test_bob_cannot_rewind_a_message_in_alices_conversation(client, alice, bob):
+    conversation = ChatConversation(user=alice, title="Alice's plan")
+    conversation.save()
+    question = ChatMessage(
+        user=alice, conversation=conversation, role=ChatMessage.ROLE_USER,
+        content=[{"type": "text", "text": "where should I spend this week?"}],
+    )
+    question.save()
+    answer = ChatMessage(
+        user=alice, conversation=conversation, role=ChatMessage.ROLE_ASSISTANT,
+        content=[{"type": "text", "text": "On Morgan Stanley."}],
+    )
+    answer.save()
+
+    client.force_login(bob)
+    response = client.post(
+        reverse("assistant:edit_message"), {"message": question.id, "text": "hijacked"}
+    )
+
+    assert response.status_code == 404
+    # Nothing of hers moved: not the words, not the turns after them, not the
+    # title the answer earned.
+    assert [m.id for m in ChatMessage.objects.for_user(alice).filter(conversation=conversation)] == [
+        question.id,
+        answer.id,
+    ]
+    question.refresh_from_db()
+    assert question.text == "where should I spend this week?"
+    conversation.refresh_from_db()
+    assert conversation.title == "Alice's plan"
+    assert ChatMessage.objects.for_user(bob).count() == 0

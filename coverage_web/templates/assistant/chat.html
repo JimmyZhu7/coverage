@@ -271,6 +271,58 @@ materials.
     font-size: var(--fs-xs); color: var(--ink-2); }
   .as-attachment-chip svg { flex: none; width: 13px; height: 13px; color: var(--ink-3); }
 
+  /* ---- Per-turn actions: one small button under each bubble — Copy on
+     what Coverage said, Edit on what the student said. Quiet until the turn
+     is hovered or something inside it takes focus, the same restraint the
+     history row's kebab uses. A thread that shows every control at rest
+     reads as a toolbar; this one stays a conversation until you reach for
+     it. The row keeps its height either way, so a hover never shifts the
+     message above it. ---- */
+  .as-msg-actions { display: flex; gap: 2px; min-height: 22px; opacity: 0;
+    transition: opacity var(--t-fast); }
+  .as-msg--user .as-msg-actions { justify-content: flex-end; }
+  .as-msg:hover .as-msg-actions, .as-msg-actions:focus-within { opacity: 1; }
+  /* Nothing hovers on a touch screen, so there they simply stay visible. */
+  @media (hover: none) { .as-msg-actions { opacity: 1; } }
+  .as-msg-btn { flex: none; width: 22px; height: 22px; border-radius: 6px; border: none;
+    background: transparent; color: var(--ink-3); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color var(--t-fast), background-color var(--t-fast); }
+  .as-msg-btn:hover { background: var(--accent-soft); color: var(--ink); }
+  .as-msg-btn svg { width: 13px; height: 13px; }
+  /* One button, two icons, the state swap done in CSS — the same "Copy →
+     Copied" beat the draft card's own button has, without room for a label
+     next to a 22px icon. */
+  .as-msg-copy .as-icon-check, .as-msg-copy.is-copied .as-icon-copy { display: none; }
+  .as-msg-copy.is-copied .as-icon-check { display: block; color: var(--accent); }
+  .as-msg-copy.is-copied { color: var(--accent); }
+
+  /* ---- Editing one of your own past messages (the rewind). Revealed in
+     place of the bubble, same shape as the history row's rename: the input
+     is already in the DOM, and a class on the turn swaps which of the two
+     is showing. ---- */
+  .as-msg-edit-form { display: none; width: 100%; }
+  .as-msg.is-editing .as-msg-edit-form { display: block; }
+  /* The bubble is what normally gives a turn its width, and it's hidden
+     while editing — without this the textarea would collapse to the width
+     of whatever short message is being edited. */
+  .as-msg.is-editing .as-turn { width: 100%; }
+  .as-msg.is-editing .as-bubble, .as-msg.is-editing .as-msg-actions { display: none; }
+  .as-msg-edit-input { width: 100%; box-sizing: border-box; resize: none; display: block;
+    border: 1px solid var(--accent-line); border-radius: 16px 16px 4px 16px;
+    background: var(--surface); padding: var(--s3) var(--s4); max-height: 240px;
+    overflow-y: auto; font: var(--w-reg) var(--fs-m)/1.5 var(--font-ui); color: var(--ink); }
+  /* Same reason the composer clears these: coverage.css draws its own
+     sitewide textarea focus ring and hover shadow, square-cornered, which
+     shows up floating inside this input's rounded border. */
+  .as-msg-edit-input:hover { border-color: var(--accent-line); box-shadow: none; }
+  .as-msg-edit-input:focus, .as-msg-edit-input:focus-visible {
+    outline: none; border-color: var(--accent-line);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+  .as-msg-edit-actions { display: flex; justify-content: flex-end; gap: var(--s2);
+    margin-top: var(--s2); }
+  .as-msg-edit-actions .btn { padding: 6px 14px; font-size: var(--fs-xs); }
+
   /* ---- Draft card: the one thing on this page a student takes somewhere
      else, so it gets an edge you can see rather than dissolving into the
      paragraph around it. Same accent-soft/hairline pair as .as-off and the
@@ -839,9 +891,14 @@ element by the next turn.
     var confirmText = document.getElementById("as-confirm-text");
     var confirmOk = document.getElementById("as-confirm-ok");
     var confirmCancel = document.getElementById("as-confirm-cancel");
-    function askConfirm(message) {
+    // `okLabel` because not every destructive action on this page is a
+    // delete: a rewind's confirm button says "Send", and a dialog whose
+    // only button says "Delete" would be describing the wrong half of what
+    // is about to happen.
+    function askConfirm(message, okLabel) {
       return new Promise(function (resolve) {
         confirmText.textContent = message;
+        confirmOk.textContent = okLabel || "Delete";
         confirmDialog.showModal();
         function settle(result) {
           confirmDialog.close();
@@ -864,7 +921,7 @@ element by the next turn.
         var message = e.target.dataset ? e.target.dataset.confirm : null;
         if (!message) return;
         e.preventDefault();
-        askConfirm(message).then(function (ok) {
+        askConfirm(message, e.target.dataset.confirmOk).then(function (ok) {
           // .submit() (not .requestSubmit()) deliberately: it does not
           // re-fire the "submit" event at all, so this can't loop back
           // into this same listener a second time.
@@ -904,23 +961,54 @@ element by the next turn.
     });
     settle(shell);
 
-    // 6b. Draft cards — the Copy button, wired once by delegation so it
-    // covers both the server-rendered card (assistant/_draft_card.html) and
-    // the one §7's mirror builds mid-stream, with no re-hookup either way.
+    // 6b. Copy — one extraction, two buttons. The draft card's own Copy
+    // (assistant/_draft_card.html) takes just the email; the one under an
+    // assistant bubble (assistant/_message.html) takes the whole reply,
+    // prose and drafts together in reading order. Both are wired once by
+    // delegation, so they cover the server-rendered markup and the DOM §7
+    // builds mid-stream with no re-hookup either way.
     //
-    // The text comes off the RENDERED body, not a raw copy of the model's
+    // The text comes off the RENDERED node, not a raw copy of the model's
     // output stashed in a data attribute: by then the escaping step's
     // entities (&amp;, &#x27;) are already decoded back into the characters
-    // a student expects to paste. The one thing rendering loses is the line
-    // breaks — chat_format turned them into <br> — so those get put back
-    // here, on a clone, leaving what is on screen untouched.
-    function draftPlainText(el) {
+    // a student expects to paste. What rendering loses is put back here, on
+    // a clone, leaving what is on screen untouched — the line breaks
+    // chat_format turned into <br>, and the blank line between two blocks
+    // that are only separated by being separate elements. What rendering
+    // ADDED gets taken back out: the buttons, the chips, the evidence line
+    // and the "Subject" tag are chrome, not words anyone means to paste.
+    var COPY_CHROME = ".as-draft-actions, .as-msg-actions, .as-evidence, .as-attachments";
+    // Every block of real words in a reply, in reading order. A draft's body
+    // carries `.as-body` too, so one selector puts prose, a draft's Subject
+    // and a draft's body in the order they are read.
+    var COPY_BLOCKS = ".as-body, .as-draft-subject";
+    function trimEnds(text) {
+      return (text || "").replace(/^\s+|\s+$/g, "");
+    }
+    function plainText(el) {
       var clone = el.cloneNode(true);
-      var breaks = clone.querySelectorAll("br");
-      for (var i = 0; i < breaks.length; i++) {
-        breaks[i].replaceWith(document.createTextNode("\n"));
-      }
-      return clone.textContent.replace(/^\n+|\n+$/g, "");
+      clone.querySelectorAll(COPY_CHROME).forEach(function (node) { node.remove(); });
+      clone.querySelectorAll(".as-draft-subject > span").forEach(function (tag) {
+        tag.replaceWith(document.createTextNode("Subject: "));
+      });
+      clone.querySelectorAll("br").forEach(function (br) {
+        br.replaceWith(document.createTextNode("\n"));
+      });
+      // BLOCK BY BLOCK, never one `textContent` of the whole bubble: the
+      // gaps between elements in a Django template are real text nodes, and
+      // reading the subtree flat drags every line of source indentation into
+      // the clipboard. Measured live: copying one reply with a draft in it
+      // produced six lines of leading spaces before the first word. Joining
+      // the blocks instead gives exactly the blank line between them that
+      // was on screen.
+      var blocks = clone.querySelectorAll(COPY_BLOCKS);
+      if (!blocks.length) return trimEnds(clone.textContent);
+      var parts = [];
+      blocks.forEach(function (block) {
+        var text = trimEnds(block.textContent);
+        if (text) parts.push(text);
+      });
+      return parts.join("\n\n");
     }
     // The Clipboard API needs a secure context AND a permission the browser
     // can simply refuse (an embedded/sandboxed frame refuses it outright).
@@ -954,7 +1042,7 @@ element by the next turn.
       var card = button.closest(".as-draft");
       var body = card && card.querySelector(".as-draft-body");
       if (!body) return;
-      copyText(draftPlainText(body)).then(function () {
+      copyText(plainText(body)).then(function () {
         var label = button.querySelector(".as-draft-copy-label");
         if (!label || button.dataset.copied) return;
         button.dataset.copied = "1";
@@ -964,6 +1052,81 @@ element by the next turn.
           delete button.dataset.copied;
         }, 1600);
       }).catch(function () { /* nowhere left to put it; saying so would not help */ });
+    });
+
+    // The whole-reply Copy. Same handler shape as the draft one above; the
+    // tick is a second icon the CSS swaps in rather than a label, since a
+    // 22px icon button has no room for one.
+    document.addEventListener("click", function (e) {
+      var button = e.target.closest ? e.target.closest(".as-msg-copy") : null;
+      if (!button) return;
+      var turn = button.closest(".as-msg");
+      var bubble = turn && turn.querySelector(".as-bubble");
+      if (!bubble) return;
+      copyText(plainText(bubble)).then(function () {
+        if (button.dataset.copied) return;
+        button.dataset.copied = "1";
+        button.classList.add("is-copied");
+        button.setAttribute("title", "Copied");
+        setTimeout(function () {
+          button.classList.remove("is-copied");
+          button.setAttribute("title", "Copy");
+          delete button.dataset.copied;
+        }, 1600);
+      }).catch(function () { /* nowhere left to put it; saying so would not help */ });
+    });
+
+    // 6d. Rewind, part one: showing the editor. The turn takes an
+    // `is-editing` class that swaps its own bubble for the textarea already
+    // sitting in the DOM — the same reveal-what's-already-there shape the
+    // history rows' rename uses. Cancel and Escape put the original words
+    // back. What SAVING does is part two, in §7, because a rewind's second
+    // half is exactly the streamed turn a send already runs.
+    function autoSizeEdit(el) {
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 240) + "px";
+    }
+    function closeEditor(turn) {
+      if (!turn) return;
+      var input = turn.querySelector(".as-msg-edit-input");
+      if (input) input.value = input.defaultValue;
+      turn.classList.remove("is-editing");
+    }
+    document.addEventListener("click", function (e) {
+      if (!e.target.closest) return;
+      var trigger = e.target.closest(".as-msg-edit");
+      if (trigger) {
+        var turn = trigger.closest(".as-msg");
+        if (!turn) return;
+        turn.classList.add("is-editing");
+        var input = turn.querySelector(".as-msg-edit-input");
+        if (input) {
+          autoSizeEdit(input);
+          input.focus();
+          // Caret at the end, not a full selection: they came to change a
+          // word, not to retype the message.
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+        return;
+      }
+      var cancel = e.target.closest(".as-msg-edit-cancel");
+      if (cancel) closeEditor(cancel.closest(".as-msg"));
+    });
+    document.addEventListener("input", function (e) {
+      if (e.target && e.target.classList && e.target.classList.contains("as-msg-edit-input")) {
+        autoSizeEdit(e.target);
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (!e.target || !e.target.classList || !e.target.classList.contains("as-msg-edit-input")) return;
+      if (e.key === "Escape") closeEditor(e.target.closest(".as-msg"));
+      // Enter sends, Shift+Enter writes a newline — the composer's own rule,
+      // so the editor behaves like the box the message was typed in.
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        var form = e.target.closest("form");
+        if (form) form.requestSubmit();
+      }
     });
 
     // 7. Streaming send — the actual "kinetic flow" request: the reply
@@ -1221,7 +1384,68 @@ element by the next turn.
         turn.appendChild(who);
         turn.appendChild(bubble);
         article.appendChild(turn);
-        return { el: article, body: body, bubble: bubble };
+        return { el: article, body: body, bubble: bubble, column: turn };
+      }
+
+      // The per-turn actions row, the JS mirror of assistant/_message.html's
+      // own. Attached only once a turn is FINISHED — Copy on half a reply
+      // would take half a reply, and a message whose id the server hasn't
+      // told us yet has nothing to rewind to. Keep these two in lockstep
+      // with the template, the same way chipMarkup above tracks
+      // _draft_chip.html.
+      var MSG_COPY_ICON =
+        '<svg class="as-icon-copy" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+        '<path d="M5.5 5.5V3.5h7v7h-2M3.5 5.5h7v7h-7z" stroke="currentColor" ' +
+        'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      var MSG_CHECK_ICON =
+        '<svg class="as-icon-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+        '<path d="M3.5 8.5l3 3 6-6" stroke="currentColor" stroke-width="1.5" ' +
+        'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      var PENCIL_ICON =
+        '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+        '<path d="M11 2.5l2.5 2.5L5 13.5l-3 .5.5-3L11 2.5z" stroke="currentColor" ' +
+        'stroke-width="1.5" stroke-linejoin="round"/></svg>';
+      var EDIT_URL = "{% url 'assistant:edit_message' %}";
+      var EDIT_CONFIRM =
+        "Send from here? Everything after this message is deleted. This can't be undone.";
+
+      function attachAssistantActions(turn) {
+        if (turn.column.querySelector(".as-msg-actions")) return;
+        var actions = document.createElement("div");
+        actions.className = "as-msg-actions";
+        actions.innerHTML =
+          '<button type="button" class="as-msg-btn as-msg-copy" ' +
+          'aria-label="Copy this reply" title="Copy">' + MSG_COPY_ICON + MSG_CHECK_ICON +
+          "</button>";
+        turn.column.appendChild(actions);
+      }
+
+      function attachUserActions(turn, messageId, text) {
+        if (!messageId || turn.column.querySelector(".as-msg-edit-form")) return;
+        var form = document.createElement("form");
+        form.className = "as-msg-edit-form";
+        form.method = "post";
+        form.action = EDIT_URL;
+        form.dataset.confirm = EDIT_CONFIRM;
+        form.dataset.confirmOk = "Send";
+        form.innerHTML =
+          '<input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">' +
+          '<input type="hidden" name="message" value="' + Number(messageId) + '">' +
+          '<textarea name="text" class="as-msg-edit-input" rows="2" ' +
+          'maxlength="{{ max_chars }}" aria-label="Edit your message"></textarea>' +
+          '<div class="as-msg-edit-actions">' +
+          '<button type="button" class="btn as-msg-edit-cancel">Cancel</button>' +
+          '<button type="submit" class="btn btn-primary">Send</button></div>';
+        var area = form.querySelector("textarea");
+        area.value = text;
+        area.defaultValue = text; // what Cancel and Escape restore
+        var actions = document.createElement("div");
+        actions.className = "as-msg-actions";
+        actions.innerHTML =
+          '<button type="button" class="as-msg-btn as-msg-edit" ' +
+          'aria-label="Edit this message" title="Edit">' + PENCIL_ICON + "</button>";
+        turn.column.appendChild(form);
+        turn.column.appendChild(actions);
       }
       function setComposerBusy(busy) {
         var input = document.getElementById("as-input");
@@ -1255,42 +1479,26 @@ element by the next turn.
           .catch(function () { /* a one-turn-stale sidebar title is not worth surfacing */ });
       }
 
-      composerForm.addEventListener("submit", function (e) {
-        e.preventDefault();
-        var input = document.getElementById("as-input");
-        var text = (input.value || "").trim();
-        // A message needs text OR an attachment, never neither — matches
-        // agent.stream_turn's own guard, so this never opens a request the
-        // server would just persist nothing for.
-        if ((!text && !selectedFiles.length) || input.disabled) return;
+      function currentConversationId() {
+        var field = composerForm.querySelector('input[name="conversation"]');
+        return field ? field.value : "";
+      }
 
-        var conversationField = composerForm.querySelector('input[name="conversation"]');
-        var conversationId = conversationField ? conversationField.value : "";
-
+      // One streamed turn, whatever started it: a send from the composer, or
+      // a rewind from an edited message further up the thread. Both post a
+      // form and read back the same frames, so both live here rather than in
+      // two copies of the same pump.
+      //
+      // `pending` is the user turn this page drew ITSELF a moment ago (the
+      // composer case) — it has the words but not the stored row's id, so
+      // its edit control can only be hung on it once the server names it on
+      // the terminal frame. A rewind passes nothing: that turn was already
+      // on the page, with its id, before any of this ran.
+      function runStream(url, formData, pending) {
         var log = ensureLog();
-        var userTurn = buildTurn("user");
-        if (selectedFiles.length) {
-          var attachWrap = document.createElement("div");
-          attachWrap.className = "as-attachments";
-          selectedFiles.forEach(function (f) {
-            var chip = document.createElement("span");
-            chip.className = "as-attachment-chip";
-            chip.textContent = "📎 " + f.name;
-            attachWrap.appendChild(chip);
-          });
-          userTurn.bubble.insertBefore(attachWrap, userTurn.body);
-        }
-        if (text) userTurn.body.innerHTML = chatFormat(text);
-        else userTurn.body.remove();
-        log.appendChild(userTurn.el);
+        var input = document.getElementById("as-input");
+        var conversationId = currentConversationId();
 
-        // Built BEFORE clearing the textarea/attachments below — FormData
-        // reads the form's state at construction time, not lazily.
-        var formData = new FormData(composerForm);
-
-        input.value = "";
-        autoSize(input);
-        clearAttachments();
         setComposerBusy(true);
         if (typingText) typingText.textContent = "Thinking…";
         if (typingEl) typingEl.classList.add("htmx-request"); // htmx's own indicator CSS, no swap needed to trigger it
@@ -1316,6 +1524,11 @@ element by the next turn.
             var noticeTurn = buildTurn("assistant", true);
             noticeTurn.body.innerHTML = chatFormat(event.text);
             log.appendChild(noticeTurn.el);
+            // Terminal too, so the question above it earns its pencil here
+            // as well: "try that again in a moment" is exactly when someone
+            // wants to reword and retry. The notice itself gets no Copy —
+            // Coverage talking about itself is not an answer.
+            if (pending) attachUserActions(pending.turn, event.user_message_id, pending.text);
             scrollLogToEnd();
           } else if (event.type === "done" && assistantTurn) {
             // The final redraw, and the only one that can finish a draft
@@ -1328,6 +1541,12 @@ element by the next turn.
               evidence.textContent = "Read " + event.tools.join(", ");
               assistantTurn.bubble.appendChild(evidence);
             }
+            // Only now: the reply is whole, so Copy takes a whole reply, and
+            // `user_message_id` (resolved in assistant/views.py, same ride
+            // as `drafts`) is what makes the question above it editable
+            // without waiting for a page reload.
+            attachAssistantActions(assistantTurn);
+            if (pending) attachUserActions(pending.turn, event.user_message_id, pending.text);
           }
         }
         function handleFrame(frame) {
@@ -1346,7 +1565,7 @@ element by the next turn.
           log.appendChild(failTurn.el);
         }
 
-        fetch("{% url 'assistant:stream' %}", { method: "POST", body: formData })
+        fetch(url, { method: "POST", body: formData })
           .then(function (response) {
             if (!response.ok || !response.body) throw new Error("stream failed to open");
             var reader = response.body.getReader();
@@ -1372,7 +1591,85 @@ element by the next turn.
             scrollLogToEnd();
             refreshHistory(conversationId);
           });
+      }
+
+      composerForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var input = document.getElementById("as-input");
+        var text = (input.value || "").trim();
+        // A message needs text OR an attachment, never neither — matches
+        // agent.stream_turn's own guard, so this never opens a request the
+        // server would just persist nothing for.
+        if ((!text && !selectedFiles.length) || input.disabled) return;
+
+        var log = ensureLog();
+        var userTurn = buildTurn("user");
+        if (selectedFiles.length) {
+          var attachWrap = document.createElement("div");
+          attachWrap.className = "as-attachments";
+          selectedFiles.forEach(function (f) {
+            var chip = document.createElement("span");
+            chip.className = "as-attachment-chip";
+            chip.textContent = "📎 " + f.name;
+            attachWrap.appendChild(chip);
+          });
+          userTurn.bubble.insertBefore(attachWrap, userTurn.body);
+        }
+        if (text) userTurn.body.innerHTML = chatFormat(text);
+        else userTurn.body.remove();
+        log.appendChild(userTurn.el);
+
+        // Built BEFORE clearing the textarea/attachments below — FormData
+        // reads the form's state at construction time, not lazily.
+        var formData = new FormData(composerForm);
+
+        input.value = "";
+        autoSize(input);
+        clearAttachments();
+
+        runStream("{% url 'assistant:stream' %}", formData, { turn: userTurn, text: text });
       });
+
+      // 7b. Rewind, part two: saving an edited message. Capture phase, and
+      // it stops the event there — §6c's generic `data-confirm` handler is
+      // on `document` too, and would otherwise confirm and then plain-submit
+      // this form, navigating away from a page that can perfectly well do
+      // this without leaving. That fallback is exactly what a browser
+      // WITHOUT fetch/ReadableStream gets: none of this block runs, the
+      // generic handler takes the form, and the endpoint answers a real POST
+      // with a redirect (assistant.views.edit_message).
+      //
+      // The thread is truncated on screen before the request goes out. The
+      // server is about to delete the same rows, and leaving replies to a
+      // question that no longer exists sitting on the page while a new one
+      // streams in below them would read as the edit having failed.
+      document.addEventListener("submit", function (e) {
+        var form = e.target;
+        if (!form.classList || !form.classList.contains("as-msg-edit-form")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var area = form.querySelector(".as-msg-edit-input");
+        var text = (area.value || "").trim();
+        if (!text) return;
+        askConfirm(form.dataset.confirm, form.dataset.confirmOk).then(function (ok) {
+          if (!ok) return;
+          var article = form.closest(".as-msg");
+          while (article.nextElementSibling) article.nextElementSibling.remove();
+          var body = article.querySelector(".as-bubble .as-body");
+          if (!body) {
+            body = document.createElement("div");
+            body.className = "as-body";
+            article.querySelector(".as-bubble").appendChild(body);
+          }
+          body.innerHTML = chatFormat(text);
+          area.defaultValue = text; // a second edit starts from these words
+          article.classList.remove("is-editing");
+
+          var formData = new FormData(form);
+          formData.append("stream", "1");
+          runStream(EDIT_URL, formData, null);
+        });
+      }, true);
     }
 
     // 8. Voice input (Web Speech API). Feature-detected and otherwise

@@ -1004,8 +1004,16 @@ _MANUAL_OVERRIDE_PREFIX = re.compile(
 
 
 def _display_note(note: str | None) -> str:
-    note = _NOTE_MARKER.sub("", note or "").strip()
-    return _MANUAL_OVERRIDE_PREFIX.sub("", note).strip()
+    """Both markers stripped, OUTERMOST FIRST — and that order is the whole
+    subtlety. `_NOTE_MARKER` is anchored to the start of the string, so a
+    marker written INSIDE a manual-override note ("manual override:
+    thread_state=parked — [assistant:msg_9] their words") only reaches the
+    start once the override prefix in front of it is gone. Stripping in the
+    other order left the bracket marker sitting on the student's own
+    contact page, which is exactly what both of these regexes exist to
+    prevent. A note carrying only one of the two is unaffected either way."""
+    note = _MANUAL_OVERRIDE_PREFIX.sub("", note or "").strip()
+    return _NOTE_MARKER.sub("", note).strip()
 
 
 def _status_line(contact: Contact) -> str:

@@ -481,7 +481,7 @@ def test_no_schema_exposes_a_user_or_tenant_argument():
 
 def test_every_schema_has_a_handler_and_every_handler_a_schema():
     named = {s["name"] for s in tools.TOOL_SCHEMAS}
-    assert named == set(tools._HANDLERS) | {"log_touch"}
+    assert named == set(tools._HANDLERS) | set(tools._MESSAGE_ID_HANDLERS)
     assert tools.WRITE_TOOLS <= named
 
 
@@ -611,3 +611,462 @@ def test_add_calendar_event_rejects_an_unknown_kind(user):
     })
     assert is_error
     assert CalendarEvent.objects.for_user(user).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# add_contact
+# ---------------------------------------------------------------------------
+def test_add_contact_writes_the_same_row_the_hand_form_would(user):
+    result, is_error = _call(user, "add_contact", {
+        "name": "Priya Nair", "firm_text": "South Bank", "role": "Associate",
+        "email": "priya@south.example",
+    })
+
+    assert not is_error
+    assert result["added"] is True
+    contact = Contact.objects.for_user(user).get(name="Priya Nair")
+    assert result["contact_id"] == contact.id
+    assert contact.firm_text == "South Bank"
+    assert contact.role == "Associate"
+    assert contact.email == "priya@south.example"
+    # Warmth and thread state are the ratchet's to set, never the form's or
+    # this tool's — a brand-new contact starts exactly where the CRM's own
+    # add path leaves them.
+    assert (contact.warmth, contact.thread_state) == ("cold", "no_reply")
+    # Provenance is honest about which door the row came in by.
+    assert contact.source == "assistant"
+
+
+def test_add_contact_records_the_same_funnel_event_the_crm_page_does(user):
+    """`crm.views.contact_new` records `contact_added`, and the activation
+    health check counts it. A contact added through chat is the same
+    activation, so it has to land in the same place or the funnel
+    under-counts the students who used the advisor to do it."""
+    from analytics.models import ProductEvent
+
+    _call(user, "add_contact", {"name": "Funnel Person"})
+
+    event = ProductEvent.objects.for_user(user).get(event="contact_added")
+    assert event.props["source"] == "assistant"
+
+
+def test_add_contact_offers_only_the_quick_add_fields(user):
+    """`add_contact`'s schema is deliberately name/firm_text/role/email only
+    — not ContactForm's full eleven fields. Two reasons: it mirrors the
+    CRM's own `?quick=1` fast path (role/school/email/linkedin/region/angle
+    all hidden behind that page's `{% if not quick %}`), and TOOL_SCHEMAS
+    combined has a hard ceiling of 24 optional parameters before Anthropic's
+    API refuses every request outright — measured live at 26 offered, which
+    404'd the entire advisor, not just this tool. firm_id and region are
+    gone entirely rather than merely untested; a value for either is simply
+    not read."""
+    result, is_error = _call(user, "add_contact", {
+        "name": "Ken Lau", "firm_id": 999999, "region": "eu",
+    })
+
+    assert not is_error
+    contact = Contact.objects.for_user(user).get(name="Ken Lau")
+    assert contact.firm_id is None
+    assert contact.region == ""
+
+
+def test_add_contact_rejects_a_value_the_contact_form_would_reject(user):
+    """Validation is the model's own `full_clean`, so the email rule here is
+    the same one `crm.forms.ContactForm` enforces — and the message the model
+    reads back is the one the student would have seen on the form."""
+    result, is_error = _call(user, "add_contact", {"name": "Bad Email", "email": "not-an-email"})
+
+    assert is_error
+    assert "valid email" in result["error"].lower()
+    assert not Contact.objects.for_user(user).exists()
+
+
+def test_add_contact_with_no_name_is_an_error(user):
+    result, is_error = _call(user, "add_contact", {"firm_text": "South Bank"})
+
+    assert is_error
+    assert not Contact.objects.for_user(user).exists()
+
+
+def test_add_contact_refuses_to_make_a_second_copy_of_someone(user, contact):
+    """"Add Jane Banker" said about someone already tracked is the common
+    case, and a duplicate row forks a history in two — the same split
+    `crm.views`' archive comment describes, arriving through a different
+    door. The refusal names the id they already have so the model can talk
+    about the real relationship instead."""
+    result, is_error = _call(user, "add_contact", {"name": "jane banker", "firm_text": "North Bank"})
+
+    assert not is_error
+    assert result["added"] is False
+    assert result["already_exists"] is True
+    assert result["contact_id"] == contact.id
+    assert "already in the student's network" in result["instruction"]
+    assert Contact.objects.for_user(user).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# set_contact_status
+#
+# `crm.services.set_contact_state` commits on its own psycopg connection
+# outside Django's transaction, so every test that reaches it needs
+# `transaction=True` — same reasoning as the log_touch test above.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db(transaction=True)
+def test_set_contact_status_moves_one_contact_and_leaves_an_audit_touch():
+    from crm.views import _display_note
+
+    u = User.objects.create_user(email="status@example.com", password="x")
+    c = Contact(user=u, name="Never Replies")
+    c.save()
+
+    payload, is_error = tools.execute(
+        u, "set_contact_status",
+        {"contact_ids": [c.id], "thread_state": "parked", "note": "Three notes, nothing back"},
+        "msg_status1",
+    )
+    result = json.loads(payload)
+
+    assert not is_error
+    assert result["changed_count"] == 1
+    assert result["not_found"] == []
+    assert result["changed"][0]["thread_state_before"] == "no_reply"
+    assert result["changed"][0]["thread_state_after"] == "parked"
+    c.refresh_from_db()
+    assert c.thread_state == "parked"
+    # The override writes its own touch row, so the history has no gap — and
+    # the assistant marker rides on it exactly as it does for log_touch. It
+    # sits INSIDE set_state's own "manual override: ..." prefix (that string
+    # is written by the domain package, not here), and `_display_note` strips
+    # both, so the student reads only their own words.
+    touch = Touch.objects.for_user(u).get(contact=c)
+    assert "[assistant:msg_status1]" in touch.note
+    assert _display_note(touch.note) == "Three notes, nothing back"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_set_contact_status_moves_a_whole_batch_in_one_call():
+    u = User.objects.create_user(email="bulk@example.com", password="x")
+    contacts = []
+    for i in range(3):
+        c = Contact(user=u, name=f"Quiet {i}")
+        c.save()
+        contacts.append(c)
+
+    payload, is_error = tools.execute(
+        u, "set_contact_status",
+        {"contact_ids": [c.id for c in contacts], "thread_state": "parked", "warmth": "cold"},
+        "msg_bulk",
+    )
+    result = json.loads(payload)
+
+    assert not is_error
+    assert result["changed_count"] == 3
+    for c in contacts:
+        c.refresh_from_db()
+        assert c.thread_state == "parked"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_set_contact_status_reports_the_ids_it_could_not_find():
+    """A batch with one bad id must not fail the other two, and must not
+    quietly pretend it moved three. The model needs the skipped ids in the
+    result to answer honestly."""
+    u = User.objects.create_user(email="partial@example.com", password="x")
+    other = User.objects.create_user(email="notmine@example.com", password="x")
+    mine = Contact(user=u, name="Mine")
+    mine.save()
+    also_mine = Contact(user=u, name="Also Mine")
+    also_mine.save()
+    theirs = Contact(user=other, name="Theirs")
+    theirs.save()
+
+    payload, is_error = tools.execute(
+        u, "set_contact_status",
+        {"contact_ids": [mine.id, theirs.id, 999999, also_mine.id], "thread_state": "quiet"},
+        "msg_partial",
+    )
+    result = json.loads(payload)
+
+    assert not is_error
+    assert result["changed_count"] == 2
+    assert sorted(result["not_found"]) == sorted([theirs.id, 999999])
+    assert "do not claim the rest" in result["instruction"]
+    theirs.refresh_from_db()
+    assert theirs.thread_state == "no_reply"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_set_contact_status_counts_a_repeated_id_once():
+    u = User.objects.create_user(email="dupes@example.com", password="x")
+    c = Contact(user=u, name="Listed Twice")
+    c.save()
+
+    payload, _ = tools.execute(
+        u, "set_contact_status", {"contact_ids": [c.id, c.id], "warmth": "replied"}, "msg_dupe"
+    )
+
+    assert json.loads(payload)["changed_count"] == 1
+    assert Touch.objects.for_user(u).count() == 1
+
+
+def test_set_contact_status_rejects_an_unknown_thread_state_or_warmth(user, contact):
+    bad_state, is_error = _call(
+        user, "set_contact_status", {"contact_ids": [contact.id], "thread_state": "ghosted"}
+    )
+    assert is_error and "ghosted" in bad_state["error"]
+
+    bad_warmth, is_error = _call(
+        user, "set_contact_status", {"contact_ids": [contact.id], "warmth": "toasty"}
+    )
+    assert is_error and "toasty" in bad_warmth["error"]
+
+    contact.refresh_from_db()
+    assert (contact.warmth, contact.thread_state) == ("cold", "no_reply")
+    assert not Touch.objects.for_user(user).exists()
+
+
+def test_set_contact_status_with_nothing_to_set_is_an_error(user, contact):
+    result, is_error = _call(user, "set_contact_status", {"contact_ids": [contact.id]})
+
+    assert is_error
+    assert not Touch.objects.for_user(user).exists()
+
+
+def test_set_contact_status_with_an_empty_list_is_an_error(user):
+    result, is_error = _call(user, "set_contact_status", {"contact_ids": [], "warmth": "cold"})
+    assert is_error
+
+
+def test_set_contact_status_refuses_a_batch_over_the_cap_rather_than_doing_part_of_it(user, firm):
+    """Over the cap the whole call is refused. Silently doing the first 25 of
+    40 is the worst of both: the student is told it worked and a quarter of
+    their network is in a state nobody chose."""
+    ids = []
+    for i in range(tools.MAX_BULK_CONTACTS + 1):
+        c = Contact(user=user, firm=firm, name=f"Person {i:02d}")
+        c.save()
+        ids.append(c.id)
+
+    result, is_error = _call(user, "set_contact_status", {"contact_ids": ids, "thread_state": "parked"})
+
+    assert is_error
+    assert str(tools.MAX_BULK_CONTACTS) in result["error"]
+    assert not Touch.objects.for_user(user).exists()
+    assert not Contact.objects.for_user(user).filter(thread_state="parked").exists()
+
+
+# ---------------------------------------------------------------------------
+# update_settings
+# ---------------------------------------------------------------------------
+def test_update_settings_changes_an_ordinary_field_on_the_first_call(user):
+    result, is_error = _call(user, "update_settings", {"field": "weekly_touch_goal", "value": "15"})
+
+    assert not is_error
+    assert result["updated"] is True
+    assert result["value_after"] == "15"
+    user.refresh_from_db()
+    assert user.weekly_touch_goal == 15
+
+
+def test_update_settings_writes_each_family_of_ordinary_field(user):
+    """One case per storage shape the five settings forms actually use: a
+    plain column, an int column, a JSON dict keyed by region, a JSON dict of
+    cadence overrides, the assets dict, and the boolean whose form field is
+    named the opposite of its column."""
+    _call(user, "update_settings", {"field": "school", "value": "HKUST"})
+    _call(user, "update_settings", {"field": "class_year", "value": str(min(tools._CLASS_YEARS))})
+    _call(user, "update_settings", {"field": "work_auth_us", "value": "sponsorship"})
+    _call(user, "update_settings", {"field": "followup_after_business_days", "value": "5"})
+    _call(user, "update_settings", {"field": "advocate_target", "value": "3"})
+    _call(user, "update_settings", {"field": "weekly_digest_enabled", "value": "false"})
+
+    user.refresh_from_db()
+    assert user.school == "HKUST"
+    assert user.class_year == min(tools._CLASS_YEARS)
+    assert user.work_authorization["us"] == "sponsorship"
+    assert user.cadence_params["followup_after_business_days"] == 5
+    assert user.assets["advocate_target"] == 3
+    # The checkbox reads "Weekly Email Digest" and the column reads opt-OUT;
+    # false in, opted out stored.
+    assert user.weekly_digest_opt_out is True
+
+
+def test_update_settings_clears_an_override_rather_than_storing_a_zero(user):
+    """`CadenceForm`'s own contract: a blank input REMOVES the override so the
+    product default applies. Storing a 0 would leave a number the engine
+    silently ignores, which is the defect that contract exists to avoid."""
+    _call(user, "update_settings", {"field": "park_after_business_days", "value": "30"})
+    _call(user, "update_settings", {"field": "park_after_business_days", "value": ""})
+
+    user.refresh_from_db()
+    assert "park_after_business_days" not in user.cadence_params
+
+
+def test_update_settings_keeps_the_keys_it_does_not_own(user):
+    """Copy-then-set, never a fresh dict — the same rule the forms follow. A
+    key an admin pinned by hand, or another region's work-auth answer, must
+    survive a change to a neighbouring one."""
+    user.cadence_params = {"some_admin_key": 99}
+    user.work_authorization = {"hk": "citizen"}
+    user.save(update_fields=["cadence_params", "work_authorization"])
+
+    _call(user, "update_settings", {"field": "max_cold_touches", "value": "2"})
+    _call(user, "update_settings", {"field": "work_auth_us", "value": "citizen"})
+
+    user.refresh_from_db()
+    assert user.cadence_params["some_admin_key"] == 99
+    assert user.work_authorization == {"hk": "citizen", "us": "citizen"}
+
+
+def test_update_settings_rejects_a_value_the_settings_page_would_reject(user):
+    """The ranges and vocabularies are imported from the forms, not restated,
+    so anything the real page refuses is refused here too."""
+    out_of_range, is_error = _call(
+        user, "update_settings", {"field": "max_cold_touches", "value": "7"}
+    )
+    assert is_error and "between 1 and 2" in out_of_range["error"]
+
+    not_a_number, is_error = _call(
+        user, "update_settings", {"field": "weekly_touch_goal", "value": "loads"}
+    )
+    assert is_error
+
+    bad_auth, is_error = _call(
+        user, "update_settings", {"field": "work_auth_us", "value": "green-card"}
+    )
+    assert is_error
+
+    user.refresh_from_db()
+    assert user.cadence_params == {}
+    assert user.weekly_touch_goal is None
+    assert user.work_authorization == {}
+
+
+def test_update_settings_refuses_a_field_outside_the_allowlist(user):
+    """The login identity is not a recruiting preference. It is not in the
+    allowlist at all, so this is a refusal with the page named, not a write."""
+    result, is_error = _call(user, "update_settings", {"field": "email", "value": "new@example.com"})
+
+    assert is_error
+    assert "Settings page" in result["error"]
+    user.refresh_from_db()
+    assert user.email == "student@example.com"
+
+
+def test_the_settings_allowlist_never_offers_identity_auth_or_upload_fields():
+    """Structural, not behavioural: these must not be reachable even by name.
+    A field added to this tool later that belongs to the account rather than
+    the recruiting campaign fails here before anyone has to reason about it."""
+    banned = {
+        "email", "password", "avatar", "remove_avatar", "google_sub",
+        "capture_slug", "calendar_token", "plan", "is_staff", "is_superuser",
+        "timezone_auto", "language",
+    }
+    assert banned.isdisjoint(tools.SETTINGS_FIELDS)
+    schema = next(s for s in tools.TOOL_SCHEMAS if s["name"] == "update_settings")
+    assert banned.isdisjoint(schema["input_schema"]["properties"]["field"]["enum"])
+
+
+def test_an_important_setting_changes_nothing_on_a_call_without_confirmation(user):
+    """One call, no `confirmed`: the write does not happen, and the error is
+    the protocol — describe the effect, then ask. A timezone silently moving
+    a student's week boundary is exactly the bug class Settings exists to
+    avoid, and it is no better arriving through chat."""
+    result, is_error = _call(user, "update_settings", {"field": "timezone", "value": "Europe/London"})
+
+    assert is_error
+    assert "NOT CHANGED" in result["error"]
+    assert "what day your queue and deadlines think it is" in result["error"]
+    assert "confirmed=true" in result["error"]
+    user.refresh_from_db()
+    assert user.timezone == ""
+
+
+def test_an_important_setting_applies_only_on_the_second_confirmed_call(user):
+    first, is_error = _call(user, "update_settings", {"field": "timezone", "value": "Europe/London"})
+    assert is_error
+    user.refresh_from_db()
+    assert user.timezone == ""
+
+    second, is_error = _call(
+        user, "update_settings", {"field": "timezone", "value": "Europe/London", "confirmed": True}
+    )
+
+    assert not is_error
+    assert second["updated"] is True
+    user.refresh_from_db()
+    assert user.timezone == "Europe/London"
+    # An explicit pick turns following OFF, exactly as ProfileForm.apply_to
+    # does — otherwise the next page load would overrule the choice.
+    assert user.timezone_auto is False
+
+
+def test_confirming_a_timezone_of_auto_turns_following_back_on(user):
+    user.timezone, user.timezone_auto = "Europe/London", False
+    user.save(update_fields=["timezone", "timezone_auto"])
+
+    result, is_error = _call(
+        user, "update_settings", {"field": "timezone", "value": "auto", "confirmed": True}
+    )
+
+    assert not is_error
+    user.refresh_from_db()
+    assert user.timezone_auto is True
+    # The stored zone is left alone: it stays correct until the browser next
+    # reports one, and clearing it would hand them a UTC day for no reason.
+    assert user.timezone == "Europe/London"
+
+
+def test_an_unknown_timezone_is_refused_even_when_confirmed(user):
+    """Confirmation is about blast radius, not about validation. A zone
+    `zoneinfo` does not know would make the middleware's read fail later,
+    somewhere with no student in front of it."""
+    result, is_error = _call(
+        user, "update_settings", {"field": "timezone", "value": "Mars/Olympus", "confirmed": True}
+    )
+
+    assert is_error
+    user.refresh_from_db()
+    assert user.timezone == ""
+
+
+def test_regions_replace_the_whole_list_which_is_why_they_need_confirming(user):
+    user.regions = ["us", "hk"]
+    user.save(update_fields=["regions"])
+
+    unconfirmed, is_error = _call(user, "update_settings", {"field": "regions", "value": "hk"})
+    assert is_error
+    assert "REPLACES" in unconfirmed["error"]
+    user.refresh_from_db()
+    assert user.regions == ["us", "hk"]  # nothing dropped on the first call
+
+    confirmed, is_error = _call(
+        user, "update_settings", {"field": "regions", "value": "hk, us", "confirmed": True}
+    )
+
+    assert not is_error
+    user.refresh_from_db()
+    assert user.regions == ["hk", "us"]
+
+
+def test_an_unknown_region_token_is_refused_even_when_confirmed(user):
+    result, is_error = _call(
+        user, "update_settings", {"field": "regions", "value": "hk,atlantis", "confirmed": True}
+    )
+
+    assert is_error
+    assert "atlantis" in result["error"]
+    user.refresh_from_db()
+    assert user.regions == []
+
+
+def test_confirmed_is_ignored_on_an_ordinary_field(user):
+    """`confirmed=true` on a field that never needed it is not an error and
+    not a second meaning — an ordinary write is an ordinary write."""
+    result, is_error = _call(
+        user, "update_settings", {"field": "name", "value": "Sam Chan", "confirmed": True}
+    )
+
+    assert not is_error
+    user.refresh_from_db()
+    assert user.name == "Sam Chan"

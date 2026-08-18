@@ -14,6 +14,10 @@ urlpatterns = [
     # POST only — every send costs money (see views.py).
     path("send/", views.send, name="send"),
     path("stream/", views.stream, name="stream"),
+    # Rewind: edit one of your own past messages, drop everything after it,
+    # and answer it again. POST only, same reason as send/stream — it spends
+    # a real turn, and it deletes.
+    path("messages/edit/", views.edit_message, name="edit_message"),
     path("history/", views.history_fragment, name="history"),
     path("new/", views.new_conversation, name="new"),
     path("rename/", views.rename_conversation, name="rename"),

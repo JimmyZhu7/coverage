@@ -1,5 +1,5 @@
-"""The advisor's tools: everything it is allowed to know, and the two things
-it is allowed to change.
+"""The advisor's tools: everything it is allowed to know, and the handful of
+things it is allowed to change.
 
 THE TENANT RULE, which is the whole security story
 ---------------------------------------------------
@@ -20,18 +20,33 @@ before the pk lookup. Every read AND write tool is tested for exactly that.
 
 WHAT THE MODEL MAY DO
 ---------------------
-Reads are free. Writes are exactly four — `log_touch`, `track_opportunity`
-(`saved`/`clear` only), `remember`, and `add_calendar_event` — chosen
-because each is cheap, reversible in one click somewhere the student
-already knows (the CRM page itself, the Calendar page's own delete button,
-or the Talk page's own memory list), and none of them sends anything to
-another human. Nothing here emails anyone, edits a note, archives a
-contact, or changes a setting. That is a product decision, not an
-oversight: an advisor that can quietly rewrite your CRM is a different,
-scarier product, and the confirm-card machinery it would need is not built.
-When the student
-asks for something outside these two, the system prompt tells the model to
-say so plainly and name the page they'd do it on.
+Reads are free. Writes are exactly seven — `log_touch`, `track_opportunity`
+(`saved`/`clear` only), `remember`, `add_calendar_event`, `add_contact`,
+`set_contact_status` and `update_settings` — chosen because each is cheap
+and reversible in one click somewhere the student already knows (the CRM
+page itself, the Calendar page's own delete button, the Talk page's own
+memory list, the Settings page's own inputs), and none of them sends
+anything to another human. Nothing here emails anyone, edits a note, or
+archives a contact. That is a product decision, not an oversight: an
+advisor that can quietly rewrite your CRM is a different, scarier product.
+When the student asks for something outside these seven, the system prompt
+tells the model to say so plainly and name the page they'd do it on.
+
+THE ONE WRITE THAT IS NOT ONE-SHOT
+-----------------------------------
+`update_settings` splits its allowlist into ordinary fields, which apply on
+the first call like every other write here, and IMPORTANT ones
+(`SETTINGS_IMPORTANT`), which do not. An important field called without
+`confirmed=true` writes NOTHING and comes back as a ToolError telling the
+model to describe the concrete effect to the student and wait for a yes in
+their own next message before calling again. Timezone is the archetype: it
+silently redefines what day the queue, the pace week and every deadline
+countdown are talking about, and a student who says "I'm in London now"
+in passing has not asked for that. `regions`/`tracks` are there for a
+different reason — they REPLACE a whole list, so an unconfirmed "add HK"
+would silently drop US. The protocol is stated in `agent.SYSTEM_PROMPT` as
+well as in the error, because a model will not reliably infer a two-call
+handshake from an error message it is seeing for the first time.
 
 UNTRUSTED TEXT
 --------------
@@ -62,15 +77,27 @@ from datetime import time as dt_time
 from django.db import IntegrityError
 from django.utils import timezone
 
+from accounts.forms import (
+    AUTO_TIMEZONE,
+    CLASS_YEAR_CHOICES,
+    REGION_CHOICES as PROFILE_REGION_CHOICES,
+    TRACK_CHOICES,
+    CadenceForm,
+    WeeklyPaceForm,
+    known_timezones,
+)
+from accounts.models import WORK_AUTH
+from analytics.events import record_event
 from analytics.models import UserOpportunity
-from coverage_domain.pipeline import CHANNELS, TOUCH_TRANSITIONS
+from coverage_domain.pipeline import CHANNELS, THREAD_STATES, TOUCH_TRANSITIONS, WARMTH
 from crm import services
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
-from crm.today import _build_actions
+from crm.today import TUNABLE_CADENCE_PARAMS, _build_actions
 from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS
 from crm.views import _display_note
 from directory.classify import TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
+from directory.recommend import cycle_choices
 from directory.views import _apply_region_filter, _STAGE_LABELS
 
 from .models import AdvisorMemory
@@ -89,8 +116,92 @@ MAX_ROWS = 25
 # The regions this product models (Contact.REGION_CHOICES' vocabulary).
 REGIONS = ("us", "hk")
 
+# How many contacts one `set_contact_status` call may move. Same number and
+# same reasoning as MAX_ROWS above: a batch bigger than a screenful is one
+# the student cannot have read back before saying yes to it, and the CRM's
+# own bulk control (`crm.today.today_park_all`) works off the park strip,
+# which is bounded by the same order of magnitude. Over the cap the tool
+# refuses the whole call rather than silently doing the first 25.
+MAX_BULK_CONTACTS = 25
+
 _KIND_LABELS = dict(TOUCH_KIND_LABELS)
 _CHANNEL_LABELS = dict(CHANNEL_LABELS)
+
+
+# ---------------------------------------------------------------------------
+# The settings allowlist.
+#
+# Built FROM the five forms /welcome/settings/ actually posts — ProfileForm,
+# WorkAuthorizationForm, CadenceForm, WeeklyPaceForm, NotificationsForm — and
+# validated against their own vocabularies and ranges (imported above, never
+# restated), so a value this tool accepts is one the real Settings page would
+# accept too, and a range tightened there tightens here on the same commit.
+#
+# WHAT IS DELIBERATELY NOT HERE, and will not be added:
+#   email          — USERNAME_FIELD, the login identity itself.
+#   avatar,
+#   remove_avatar  — a file upload; there is no file in a chat turn.
+#   google_sub     — the auth link.
+#   password, capture_slug, calendar_token, plan, is_staff/is_superuser —
+#                    credentials, secrets and entitlements, none of which are
+#                    a recruiting preference.
+#   language       — the column exists but is READ BY NOTHING (see its own
+#                    field comment); Settings removed its control for exactly
+#                    that reason, and a tool that writes it would be the same
+#                    defect wearing a different hat.
+#   timezone_auto  — not an independent knob: it is a consequence of HOW the
+#                    zone was chosen, and `timezone` below sets it the same
+#                    way `ProfileForm.apply_to` does.
+# ---------------------------------------------------------------------------
+_WORK_AUTH_VALUES = frozenset(value for value, _ in WORK_AUTH)
+_WORK_AUTH_PREFIX = "work_auth_"
+_WORK_AUTH_FIELDS = tuple(
+    f"{_WORK_AUTH_PREFIX}{code}" for code, _ in PROFILE_REGION_CHOICES
+)
+_PROFILE_REGIONS = frozenset(code for code, _ in PROFILE_REGION_CHOICES)
+_PROFILE_TRACKS = frozenset(code for code, _ in TRACK_CHOICES)
+_CLASS_YEARS = frozenset(int(value) for value, _ in CLASS_YEAR_CHOICES if value)
+
+SETTINGS_FIELDS: tuple[str, ...] = (
+    "name",
+    "school",
+    "class_year",
+    "target_cycle",
+    "regions",
+    "tracks",
+    "timezone",
+    "weekly_touch_goal",
+    "weekly_digest_enabled",
+    "advocate_target",
+    *TUNABLE_CADENCE_PARAMS,
+    *_WORK_AUTH_FIELDS,
+)
+
+# The fields that do NOT apply on the first call. See the module docstring:
+# each of these changes something the student would not see change, so the
+# tool refuses once and makes the model say out loud what it is about to do.
+SETTINGS_IMPORTANT = frozenset({"timezone", "regions", "tracks"})
+
+# What the model must tell the student BEFORE asking them to confirm. Written
+# in the student's terms, not the column's — "what day your queue thinks it
+# is" is the thing they can actually agree or object to.
+_IMPORTANT_EFFECTS = {
+    "timezone": (
+        "this changes what day your queue and deadlines think it is — your "
+        "cadence queue, your pace week and every deadline countdown all roll "
+        "over on this zone"
+    ),
+    "regions": (
+        "this REPLACES your whole list of target markets, so any market not "
+        "in the new value is dropped, and the Opportunities feed and your "
+        "firm recommendations follow it"
+    ),
+    "tracks": (
+        "this REPLACES your whole list of target tracks, so any track not in "
+        "the new value is dropped, and the Opportunities feed and your firm "
+        "recommendations follow it"
+    ),
+}
 
 
 class ToolError(Exception):
@@ -370,11 +481,133 @@ TOOL_SCHEMAS: list[dict] = [
             ["title", "date"],
         ),
     },
+    {
+        "name": "add_contact",
+        "description": (
+            "Add one new person to the student's network — someone they just "
+            "met, were introduced to, or found and want to track. Search "
+            "first: if they are already in the network this refuses rather "
+            "than making a second copy of the same person. Only call this "
+            "when the student has actually asked you to add someone, never "
+            "to tidy up a name that came up in conversation.\n\n"
+            "SPLIT 'TITLE AT FIRM' EVERY TIME — this is the one mistake that "
+            "actually happens here, on every model, and it cannot be "
+            "corrected afterward (there is no edit-contact tool, so a firm "
+            "left out is gone for good). 'Associate at Evercore' is TWO "
+            "facts, not one: role='Associate' and firm_text='Evercore'. "
+            "Before calling this, name the firm out loud in your own head "
+            "and check firm_text is not empty whenever the student named an "
+            "employer — 'Marcus Lee, Associate at Evercore' means "
+            "firm_text='Evercore', not firm_text left blank because the "
+            "sentence was 'about' the person rather than the firm."
+        ),
+        "strict": True,
+        "input_schema": _schema(
+            {
+                "name": {"type": "string", "description": "Their full name, as the student said it."},
+                "firm_text": {
+                    "type": "string",
+                    "description": (
+                        "REQUIRED whenever the student named an employer — "
+                        "the firm/company name only, e.g. 'Evercore'. Read "
+                        "the tool description above before leaving this "
+                        "blank."
+                    ),
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Their title only, e.g. 'VP, IBD' or 'Associate' — not the firm.",
+                },
+                "email": {"type": "string", "description": "Their email, if the student gave one."},
+            },
+            ["name"],
+        ),
+    },
+    {
+        "name": "set_contact_status",
+        "description": (
+            "Set warmth and/or thread state directly on one contact or on "
+            "several at once — the manual override, not a logged "
+            "interaction. Use this when the student is CORRECTING the "
+            "record ('park those three, they're never replying', 'mark her "
+            "as an advocate'). If something actually happened with one "
+            "person, that is log_touch instead. Ids that aren't theirs are "
+            "reported back as not found, never silently skipped."
+        ),
+        "strict": True,
+        "input_schema": _schema(
+            {
+                "contact_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": f"From search_contacts. Up to {MAX_BULK_CONTACTS} at a time.",
+                },
+                "thread_state": {
+                    "type": "string",
+                    "enum": list(THREAD_STATES),
+                    "description": "Where the thread stands. 'parked' takes them out of the queue.",
+                },
+                "warmth": {
+                    "type": "string",
+                    "enum": list(WARMTH),
+                    "description": "How warm the relationship is.",
+                },
+                "note": {"type": "string", "description": "Why, in the student's own words."},
+            },
+            ["contact_ids"],
+        ),
+    },
+    {
+        "name": "update_settings",
+        "description": (
+            "Change one field of the student's own settings — profile, "
+            "target markets and tracks, timezone, work authorization, "
+            "cadence tuning, weekly pace, email digest. One field per call. "
+            "`value` is always a string: a number for numeric fields, "
+            "true/false for the digest, a comma-separated list for regions "
+            "and tracks (which REPLACE the whole list), and an empty string "
+            "to clear a field back to its default. Some fields are "
+            "important enough that the first call deliberately changes "
+            "nothing and tells you to check with the student first — read "
+            "that error and follow it rather than retrying."
+        ),
+        "strict": True,
+        "input_schema": _schema(
+            {
+                "field": {
+                    "type": "string",
+                    "enum": list(SETTINGS_FIELDS),
+                    "description": "Which setting to change.",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The new value as a string. Empty string clears the field.",
+                },
+                "confirmed": {
+                    "type": "boolean",
+                    "description": (
+                        "True only after you have told the student what an "
+                        "important change does and they have said yes in "
+                        "their own next message. Leave it out otherwise."
+                    ),
+                },
+            },
+            ["field", "value"],
+        ),
+    },
 ]
 
 # Which tools write. Used for instrumentation and for the caps the loop
 # enforces — nothing about a write is decided by the model.
-WRITE_TOOLS = frozenset({"log_touch", "track_opportunity", "remember", "add_calendar_event"})
+WRITE_TOOLS = frozenset({
+    "log_touch",
+    "track_opportunity",
+    "remember",
+    "add_calendar_event",
+    "add_contact",
+    "set_contact_status",
+    "update_settings",
+})
 
 # Same reasoning as every other row cap in this module (DEFAULT_ROWS/
 # MAX_ROWS below): a handful of durable facts is the realistic case, and a
@@ -967,6 +1200,412 @@ def _add_calendar_event(user, args) -> dict:
     }
 
 
+def _add_contact(user, args) -> dict:
+    """Hand-add one contact, the same write `crm.views.contact_new` makes:
+    `Contact(...)` with `user` and `source` set, saved through the tenant
+    manager's own model, plus the `contact_added` product event that view
+    records — so a person the advisor added counts in the activation funnel
+    exactly like one typed into the form.
+
+    Validation is `full_clean()` against the model rather than a hand-rolled
+    copy of it, so the email and every max_length are the ones
+    `crm.forms.ContactForm` enforces.
+
+    ONLY name/firm_text/role/email ARE OFFERED, not the ContactForm's full
+    eleven fields. Two reasons, not one: this mirrors the CRM's own
+    `?quick=1` fast path on `contact_new` ("ten seconds: who, where, one
+    line so you remember them, everything else can wait" — `firm_id`,
+    `linkedin`, `school`, `region`, `angle` and `notes` are all hidden
+    behind that same page's `{% if not quick %}`). And the schema has a
+    hard ceiling: `TOOL_SCHEMAS` combined may carry at most 24 OPTIONAL
+    parameters across every tool before Anthropic's grammar compiler
+    refuses the whole request outright (measured live: 26 offered, every
+    single turn 400'd — the entire advisor was down, not just this tool).
+    Four fields is what a name said out loud in one breath actually
+    carries; the rest is exactly the friction the quick-add path already
+    decided a first capture doesn't need.
+
+    A same-name contact already in the network is refused rather than
+    duplicated: "add Jane Chen" said about someone already tracked is the
+    common case, and a second Jane Chen splits a history in two — the same
+    fork `crm.views`' archive comment describes, arriving through a
+    different door. The refusal names the existing id so the model can talk
+    about the person the student already has.
+    """
+    from django.core.exceptions import ValidationError
+
+    name = _s(args.get("name"), 255)
+    if not name:
+        raise ToolError("name is required.")
+
+    existing = (
+        Contact.objects.for_user(user)
+        .filter(archived=False, name__iexact=name)
+        .first()
+    )
+    if existing is not None:
+        return {
+            "added": False,
+            "already_exists": True,
+            "contact_id": existing.id,
+            "name": _s(existing.name, 120),
+            "firm": _firm_name(existing),
+            "instruction": (
+                "Someone with this name is already in the student's network, "
+                "so nothing was added. Tell them that and say where the "
+                "relationship stands rather than saying you added anyone. If "
+                "it is genuinely a different person with the same name, they "
+                "can add them on the Network page."
+            ),
+        }
+
+    contact = Contact(
+        user=user,
+        name=name,
+        firm_text=_s(args.get("firm_text"), 255),
+        role=_s(args.get("role"), 255),
+        email=_s(args.get("email"), 254),
+        source="assistant",
+    )
+    try:
+        contact.full_clean()
+    except ValidationError as e:
+        # One field at a time, in the model's own words — "Enter a valid email
+        # address." is exactly what the student would have seen on the form.
+        first = next(iter(e.message_dict.items()))
+        raise ToolError(f"{first[0]}: {first[1][0]}") from None
+    contact.save()
+    record_event("contact_added", user=user, source="assistant")
+
+    return {
+        "added": True,
+        "contact_id": contact.id,
+        "name": contact.name,
+        "firm": _firm_name(contact),
+        "role": contact.role,
+        "region": contact.region or "unknown",
+        "undo": "The student can edit or archive this on the contact's page in Coverage.",
+    }
+
+
+def _set_contact_status(user, args, *, message_id: str = "") -> dict:
+    """Move warmth and/or thread_state on up to `MAX_BULK_CONTACTS` contacts,
+    one `services.set_contact_state` call each.
+
+    A LOOP over the audited override, never a bulk `.update()` — the same
+    call and the same reasoning as `crm.today.today_park_all`: that path
+    inserts its own `manual_override` touch per contact, so the history has
+    no gap, and it is the one thing allowed to move `thread_state` off the
+    terminal `advocate` state. A bulk UPDATE would change a dozen
+    relationships with nothing on the record saying who did it.
+
+    An id that does not resolve through `.for_user` — another student's, or
+    one that never existed — is collected into `not_found` and reported
+    back, not silently dropped and not allowed to fail the other 24. The
+    model needs that list to answer honestly instead of saying "done".
+    """
+    raw_ids = args.get("contact_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise ToolError("contact_ids must be a non-empty list of contact ids.")
+    if len(raw_ids) > MAX_BULK_CONTACTS:
+        raise ToolError(
+            f"That is {len(raw_ids)} contacts; {MAX_BULK_CONTACTS} is the most "
+            "one call may change. Ask the student which ones matter most, or "
+            "do it in smaller batches they can actually check."
+        )
+
+    thread_state = (args.get("thread_state") or "").strip()
+    warmth = (args.get("warmth") or "").strip()
+    if not thread_state and not warmth:
+        raise ToolError("Give a thread_state, a warmth, or both — otherwise there is nothing to set.")
+    if thread_state and thread_state not in THREAD_STATES:
+        raise ToolError(f"Unknown thread_state {thread_state!r}.")
+    if warmth and warmth not in WARMTH:
+        raise ToolError(f"Unknown warmth {warmth!r}.")
+
+    note = _s(args.get("note"), MAX_STR)
+    # Same permanent marker as `_log_touch`: the override's own audit touch
+    # says which assistant message moved this contact, and
+    # `crm.views._display_note` strips the marker so the student never reads it.
+    marked = f"[assistant:{message_id}] " + note if note else f"[assistant:{message_id}]"
+
+    # Ordered, de-duplicated: "park 12, 12, 9" is one park each, and the
+    # result reports the ids in the order the model asked for them.
+    wanted: list[int] = []
+    for raw in raw_ids:
+        try:
+            cid = int(raw)
+        except (TypeError, ValueError):
+            raise ToolError(f"{raw!r} is not a contact id.")
+        if cid not in wanted:
+            wanted.append(cid)
+
+    owned = {
+        c.id: c
+        for c in Contact.objects.for_user(user).filter(pk__in=wanted).select_related("firm")
+    }
+
+    changed, not_found = [], []
+    for cid in wanted:
+        contact = owned.get(cid)
+        if contact is None:
+            not_found.append(cid)
+            continue
+        before = (contact.warmth, contact.thread_state)
+        services.set_contact_state(
+            user.id,
+            contact.id,
+            warmth=warmth or None,
+            thread_state=thread_state or None,
+            note=marked,
+        )
+        contact.refresh_from_db()
+        changed.append(
+            {
+                "contact_id": contact.id,
+                "name": _s(contact.name, 120),
+                "firm": _firm_name(contact),
+                "warmth_before": before[0],
+                "warmth_after": contact.warmth,
+                "thread_state_before": before[1],
+                "thread_state_after": contact.thread_state,
+            }
+        )
+
+    result = {
+        "changed_count": len(changed),
+        "changed": changed,
+        "not_found": not_found,
+        "undo": "The student can set any of these back on the contact's own page.",
+    }
+    if not_found:
+        result["instruction"] = (
+            "Some of those ids are not in this student's network, so nothing "
+            "was changed for them. Say how many you actually moved and do not "
+            "claim the rest."
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# update_settings
+# ---------------------------------------------------------------------------
+def _blank(raw) -> bool:
+    return not str(raw or "").strip()
+
+
+def _int_setting(raw, field: str, low: int, high: int) -> int:
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise ToolError(f"{field} must be a whole number between {low} and {high}.") from None
+    if not low <= value <= high:
+        raise ToolError(f"{field} must be between {low} and {high}.")
+    return value
+
+
+def _csv_setting(raw, field: str, allowed: frozenset[str]) -> list[str]:
+    tokens, seen = [], set()
+    for part in str(raw or "").split(","):
+        token = part.strip().lower()
+        if not token or token in seen:
+            continue
+        if token not in allowed:
+            raise ToolError(f"{token!r} is not a {field} this product tracks. Pick from {sorted(allowed)}.")
+        seen.add(token)
+        tokens.append(token)
+    return tokens
+
+
+_TRUTHY = {"true", "yes", "on", "1"}
+_FALSY = {"false", "no", "off", "0"}
+
+
+def _bool_setting(raw, field: str) -> bool:
+    token = str(raw or "").strip().lower()
+    if token in _TRUTHY:
+        return True
+    if token in _FALSY:
+        return False
+    raise ToolError(f"{field} must be true or false.")
+
+
+def _setting_display(user, field: str) -> str:
+    """One field's current value, as a plain string — used for the before/after
+    the model reports back, so a student can see what it actually moved."""
+    if field in TUNABLE_CADENCE_PARAMS:
+        return str((user.cadence_params or {}).get(field, "") or "")
+    if field == "advocate_target":
+        return str((user.assets or {}).get("advocate_target", "") or "")
+    if field.startswith(_WORK_AUTH_PREFIX):
+        code = field[len(_WORK_AUTH_PREFIX):]
+        return str((user.work_authorization or {}).get(code, "") or "")
+    if field == "weekly_digest_enabled":
+        return "false" if user.weekly_digest_opt_out else "true"
+    if field in ("regions", "tracks"):
+        return ", ".join(getattr(user, field, None) or [])
+    if field == "timezone":
+        return "auto" if user.timezone_auto else (user.timezone or "")
+    return str(getattr(user, field, "") or "")
+
+
+def _apply_setting(user, field: str, raw) -> None:
+    """Write one field. Each branch mirrors the `apply_to` of the form that
+    owns that field on /welcome/settings/ — including the clearing rules,
+    which are not incidental: a blank cadence input REMOVES the override so
+    the product default applies, rather than storing a zero the engine then
+    ignores (see `accounts.forms.CadenceForm`'s own docstring)."""
+    if field in ("name", "school"):
+        setattr(user, field, _s(raw, 255))
+        user.save(update_fields=[field])
+
+    elif field == "class_year":
+        if _blank(raw):
+            user.class_year = None
+        else:
+            year = _int_setting(raw, "class_year", min(_CLASS_YEARS), max(_CLASS_YEARS))
+            if year not in _CLASS_YEARS:
+                raise ToolError(f"class_year must be one of {sorted(_CLASS_YEARS)}.")
+            user.class_year = year
+        user.save(update_fields=["class_year"])
+
+    elif field == "target_cycle":
+        value = str(raw or "").strip()
+        known = {code for code, _ in cycle_choices() if code}
+        if value and value not in known:
+            raise ToolError(f"target_cycle must be one of {sorted(known)}.")
+        user.target_cycle = value
+        user.save(update_fields=["target_cycle"])
+
+    elif field == "regions":
+        user.regions = _csv_setting(raw, "region", _PROFILE_REGIONS)
+        user.save(update_fields=["regions"])
+
+    elif field == "tracks":
+        user.tracks = _csv_setting(raw, "track", _PROFILE_TRACKS)
+        user.save(update_fields=["tracks"])
+
+    elif field == "timezone":
+        value = str(raw or "").strip()
+        if value.lower() in ("auto", AUTO_TIMEZONE):
+            # Same contract as ProfileForm.apply_to: auto turns following back
+            # on and leaves the stored zone alone, so the student keeps a
+            # correct day until the browser next reports one.
+            user.timezone_auto = True
+        else:
+            if value and value not in known_timezones():
+                raise ToolError(
+                    "That isn't a timezone this system knows. Give an IANA name "
+                    "like 'Asia/Hong_Kong', or 'auto' to follow their device."
+                )
+            user.timezone_auto = False
+            user.timezone = value
+        user.save(update_fields=["timezone", "timezone_auto"])
+
+    elif field == "weekly_touch_goal":
+        user.weekly_touch_goal = (
+            None if _blank(raw)
+            else _int_setting(raw, "weekly_touch_goal", 1, WeeklyPaceForm.MAX_GOAL)
+        )
+        user.save(update_fields=["weekly_touch_goal"])
+
+    elif field == "weekly_digest_enabled":
+        # The column is named the OPPOSITE of the setting, on purpose — see
+        # NotificationsForm's docstring. This is the same one translation.
+        user.weekly_digest_opt_out = not _bool_setting(raw, "weekly_digest_enabled")
+        user.save(update_fields=["weekly_digest_opt_out"])
+
+    elif field == "advocate_target":
+        low, high = CadenceForm.ADVOCATE_TARGET_RANGE
+        assets = dict(user.assets or {})
+        if _blank(raw):
+            assets.pop("advocate_target", None)
+        else:
+            assets["advocate_target"] = _int_setting(raw, "advocate_target", low, high)
+        user.assets = assets
+        user.save(update_fields=["assets"])
+
+    elif field in TUNABLE_CADENCE_PARAMS:
+        low, high = TUNABLE_CADENCE_PARAMS[field]
+        params = dict(user.cadence_params or {})
+        if _blank(raw):
+            params.pop(field, None)
+        else:
+            params[field] = _int_setting(raw, field, low, high)
+        user.cadence_params = params
+        user.save(update_fields=["cadence_params"])
+
+    elif field.startswith(_WORK_AUTH_PREFIX):
+        code = field[len(_WORK_AUTH_PREFIX):]
+        value = str(raw or "").strip().lower()
+        if value and value not in _WORK_AUTH_VALUES:
+            raise ToolError(f"{field} must be one of {sorted(_WORK_AUTH_VALUES)}, or empty to clear it.")
+        auth = dict(user.work_authorization or {})
+        if value:
+            auth[code] = value
+        else:
+            auth.pop(code, None)
+        user.work_authorization = auth
+        user.save(update_fields=["work_authorization"])
+
+    else:  # pragma: no cover — the allowlist check above already caught this
+        raise ToolError(f"{field} is not a setting the advisor can change.")
+
+
+def _update_settings(user, args) -> dict:
+    """Change one settings field.
+
+    Two tiers, and the split is the whole point (see the module docstring).
+    An ordinary field applies on the first call like every other write in
+    this file. An important one does not: without `confirmed=true` this
+    writes NOTHING and raises, and the error is the instruction — say what
+    the change actually does, wait for the student's own yes, then call
+    again. One tool rather than a propose/confirm pair because a `confirm`
+    tool would have to re-take the field and the value anyway (nothing here
+    stores a pending proposal), which makes it a second copy of this
+    function's allowlist and validation under a different name — and two
+    copies of an allowlist is how one of them drifts.
+    """
+    field = (args.get("field") or "").strip()
+    if field not in SETTINGS_FIELDS:
+        raise ToolError(
+            f"{field!r} is not a setting the advisor can change. Changeable "
+            f"fields: {', '.join(SETTINGS_FIELDS)}. Anything else — their "
+            "email, their password, their profile picture — is theirs to "
+            "change on the Settings page."
+        )
+
+    raw = args.get("value")
+    if raw is None:
+        raise ToolError("value is required. Use an empty string to clear a field.")
+
+    if field in SETTINGS_IMPORTANT and not args.get("confirmed"):
+        raise ToolError(
+            f"NOT CHANGED, and this is not a failure. {field} is important: "
+            f"{_IMPORTANT_EFFECTS[field]}. Do not call this tool again yet. "
+            "In your own next reply, tell the student in plain words what "
+            f"this change does and what it moves from ({_setting_display(user, field) or 'not set'}) "
+            f"to ({str(raw).strip() or 'cleared'}), and ask them to confirm. "
+            "Only if they say yes in their own next message, call "
+            "update_settings again with the same field and value plus "
+            "confirmed=true."
+        )
+
+    before = _setting_display(user, field)
+    _apply_setting(user, field, raw)
+    user.refresh_from_db()
+    after = _setting_display(user, field)
+
+    return {
+        "updated": True,
+        "field": field,
+        "value_before": before,
+        "value_after": after,
+        "confirmed": bool(args.get("confirmed")),
+        "undo": "The student can change this back on the Settings page.",
+    }
+
+
 _HANDLERS = {
     "get_today_queue": _get_today_queue,
     "search_contacts": _search_contacts,
@@ -979,6 +1618,17 @@ _HANDLERS = {
     "track_opportunity": _track_opportunity,
     "remember": _remember,
     "add_calendar_event": _add_calendar_event,
+    "add_contact": _add_contact,
+    "update_settings": _update_settings,
+}
+
+# The two writes that stamp the assistant message id into the row they leave
+# behind, so a student reading their own history six weeks from now can tell
+# which touches a model wrote for them. Dispatched separately only because
+# they take an argument the model never supplies.
+_MESSAGE_ID_HANDLERS = {
+    "log_touch": _log_touch,
+    "set_contact_status": _set_contact_status,
 }
 
 
@@ -995,8 +1645,9 @@ def execute(user, name: str, tool_input: dict | None, message_id: str = "") -> t
     """
     args = tool_input if isinstance(tool_input, dict) else {}
     try:
-        if name == "log_touch":
-            payload = _log_touch(user, args, message_id=message_id)
+        stamped = _MESSAGE_ID_HANDLERS.get(name)
+        if stamped is not None:
+            payload = stamped(user, args, message_id=message_id)
         else:
             handler = _HANDLERS.get(name)
             if handler is None:

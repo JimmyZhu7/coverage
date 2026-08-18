@@ -358,6 +358,101 @@ def test_a_tool_call_made_mid_stream_sees_the_students_own_timezone(client, monk
     assert shanghai_wall_clock.date().isoformat() == "2026-08-18"
 
 
+@override_settings(ANTHROPIC_API_KEY="sk-test")
+def test_the_confirm_twice_protocol_survives_a_real_streamed_turn(client, monkeypatch):
+    """The two-call handshake, driven end to end through the actual endpoint
+    rather than against `tools.execute` directly — because the thing being
+    checked is that the REFUSAL is what reaches the model mid-stream, and
+    that the turn then finishes normally instead of dying on it. Two POSTs,
+    the way a student would do it: the first asks, the second confirms."""
+    from assistant import agent
+    from assistant.tests.test_agent import FakeStreamingClient, _response, _text, _tool_use
+
+    user = User.objects.create_user(email="mover@example.com", password="pw12345!")
+    client.force_login(user)
+
+    fake = FakeStreamingClient([
+        # Turn one: the model tries it, gets told no, explains and asks.
+        ([], _response([_tool_use("update_settings", {"field": "timezone", "value": "Europe/London"})], "tool_use")),
+        (
+            ["That changes what day"],
+            _response([_text("That changes what day your queue and deadlines think it is. Go ahead?")], "end_turn"),
+        ),
+        # Turn two: the student said yes, so now it carries confirmed.
+        (
+            [],
+            _response(
+                [_tool_use("update_settings", {"field": "timezone", "value": "Europe/London", "confirmed": True})],
+                "tool_use",
+            ),
+        ),
+        (["Moved"], _response([_text("Moved you to London time.")], "end_turn")),
+    ])
+    monkeypatch.setattr(agent, "get_client", lambda: fake)
+
+    first = client.post(reverse("assistant:stream"), {"message": "I've moved to London"})
+    b"".join(first.streaming_content)  # the generator only runs once consumed
+
+    user.refresh_from_db()
+    assert user.timezone == ""  # asked, not done
+
+    second = client.post(reverse("assistant:stream"), {"message": "yes please"})
+    body = b"".join(second.streaming_content).decode()
+
+    user.refresh_from_db()
+    assert user.timezone == "Europe/London"
+    assert user.timezone_auto is False
+    assert "changed a setting" in body  # the evidence line the student sees
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(ANTHROPIC_API_KEY="sk-test")
+def test_a_bulk_status_change_made_mid_stream_moves_only_this_students_people(client, monkeypatch):
+    """`services.set_contact_state` commits on its own psycopg connection, so
+    this is the transactional end-to-end check that the loop over it really
+    lands — three ids in, two of them this student's, one somebody else's."""
+    from assistant import agent
+    from assistant.tests.test_agent import FakeStreamingClient, _response, _text, _tool_use
+
+    user = User.objects.create_user(email="parker@example.com", password="pw12345!")
+    stranger = User.objects.create_user(email="stranger@example.com", password="pw12345!")
+    client.force_login(user)
+
+    quiet_one = Contact(user=user, name="Quiet One")
+    quiet_one.save()
+    quiet_two = Contact(user=user, name="Quiet Two")
+    quiet_two.save()
+    not_theirs = Contact(user=stranger, name="Someone Else's")
+    not_theirs.save()
+
+    fake = FakeStreamingClient([
+        (
+            [],
+            _response(
+                [_tool_use("set_contact_status", {
+                    "contact_ids": [quiet_one.id, not_theirs.id, quiet_two.id],
+                    "thread_state": "parked",
+                    "note": "No reply after three notes",
+                })],
+                "tool_use",
+            ),
+        ),
+        (["Parked two"], _response([_text("Parked two of them.")], "end_turn")),
+    ])
+    monkeypatch.setattr(agent, "get_client", lambda: fake)
+
+    response = client.post(reverse("assistant:stream"), {"message": "park the quiet ones"})
+    b"".join(response.streaming_content)
+
+    for contact in (quiet_one, quiet_two):
+        contact.refresh_from_db()
+        assert contact.thread_state == "parked"
+    not_theirs.refresh_from_db()
+    assert not_theirs.thread_state == "no_reply"
+    assert Touch.objects.for_user(user).count() == 2
+    assert Touch.objects.for_user(stranger).count() == 0
+
+
 def test_stream_rejects_a_get(signed_in):
     assert signed_in.get(reverse("assistant:stream")).status_code == 405
 
@@ -760,3 +855,360 @@ def test_an_anonymous_visitor_cannot_log_a_drafted_touch(client):
 
     assert response.status_code == 302
     assert "/accounts/login/" in response["Location"]
+
+
+# ---------------------------------------------------------------------------
+# Rewind: edit one of your own past messages and carry on from there.
+#
+# Destructive by design — everything after the edited message is deleted, not
+# branched — so these tests are mostly about what is GONE afterwards, and
+# about the one thing that must never be gone: another student's thread.
+#
+# ANTHROPIC_API_KEY="" throughout except where a scripted client is the
+# point. With no key the fresh turn writes the "not switched on" notice
+# instead of calling anything, which is all these cases need: a new assistant
+# row at the end proves the turn ran, without a slow, billed, non-deterministic
+# model call.
+# ---------------------------------------------------------------------------
+def _turn(user, conversation, role, text):
+    message = ChatMessage(
+        user=user, conversation=conversation, role=role, content=[{"type": "text", "text": text}]
+    )
+    message.save()
+    return message
+
+
+def _ids(user, conversation):
+    return [m.id for m in ChatMessage.objects.for_user(user).filter(conversation=conversation)]
+
+
+def _rendered_thread(html: str) -> str:
+    """Just the turns on screen — the page also carries every one of these
+    class names in its <style> block and in the JS that mirrors this markup
+    for a streamed reply, and neither of those is a control anyone can
+    click."""
+    return html[html.index('id="as-log"') : html.index('class="as-composer"')]
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_editing_a_message_drops_every_turn_after_it_and_answers_again(signed_in, user):
+    conversation = ChatConversation(user=user, title="Goldman plan")
+    conversation.save()
+    first = _turn(user, conversation, "user", "who should I chase?")
+    answer = _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+    second = _turn(user, conversation, "user", "and after that?")
+    later = _turn(user, conversation, "assistant", "Then Goldman.")
+
+    response = signed_in.post(
+        reverse("assistant:edit_message"), {"message": first.id, "text": "who should I chase at Citi?"}
+    )
+
+    assert response.status_code == 302
+    surviving = _ids(user, conversation)
+    assert answer.id not in surviving
+    assert second.id not in surviving
+    assert later.id not in surviving
+    first.refresh_from_db()
+    # Replaced, not appended to: the old question must not still be in there
+    # for the model to answer instead of the new one.
+    assert first.text == "who should I chase at Citi?"
+    assert "who should I chase?" not in first.text
+    # The turn really ran: a fresh assistant row sits after the edited one.
+    assert [m.role for m in ChatMessage.objects.for_user(user).filter(conversation=conversation)] == [
+        "user",
+        "assistant",
+    ]
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_a_rewind_drops_a_later_row_that_shares_the_edited_messages_timestamp(signed_in, user):
+    """The compound-ordering case, forced.
+
+    `ChatMessage.Meta.ordering` is ["created", "id"], and one turn writes
+    several rows inside a single request — on any clock the database rounds,
+    two of them can land on an identical `created`. So "after" has to be that
+    same compound comparison. With `created__gt` alone the row below the
+    edited one would survive on screen, and a `tool_result` could be left
+    with no `tool_use` to answer, which the Messages API rejects outright.
+    """
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    earlier = _turn(user, conversation, "user", "the question before")
+    target = _turn(user, conversation, "user", "the one being edited")
+    later = _turn(user, conversation, "assistant", "the answer after")
+    instant = timezone.now()
+    for message in (earlier, target, later):
+        ChatMessage.objects.for_user(user).filter(pk=message.pk).update(created=instant)
+
+    signed_in.post(
+        reverse("assistant:edit_message"), {"message": target.id, "text": "the one being edited, reworded"}
+    )
+
+    surviving = _ids(user, conversation)
+    # Same instant, lower id: before it, and untouched.
+    assert earlier.id in surviving
+    # Same instant, higher id: after it, and gone.
+    assert later.id not in surviving
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_editing_the_last_message_in_a_chat_deletes_nothing_else(signed_in, user):
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    kept_question = _turn(user, conversation, "user", "first question")
+    kept_answer = _turn(user, conversation, "assistant", "first answer")
+    last = _turn(user, conversation, "user", "second question")
+
+    signed_in.post(
+        reverse("assistant:edit_message"), {"message": last.id, "text": "second question, reworded"}
+    )
+
+    surviving = _ids(user, conversation)
+    assert kept_question.id in surviving
+    assert kept_answer.id in surviving
+    assert last.id in surviving
+    last.refresh_from_db()
+    assert last.text == "second question, reworded"
+    # Still answered again, even though nothing needed deleting.
+    assert ChatMessage.objects.for_user(user).filter(conversation=conversation).count() == 4
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_the_advisors_own_words_cannot_be_edited(signed_in, user):
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    question = _turn(user, conversation, "user", "who should I chase?")
+    answer = _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+
+    response = signed_in.post(
+        reverse("assistant:edit_message"), {"message": answer.id, "text": "Chase nobody."}
+    )
+
+    assert response.status_code == 400
+    answer.refresh_from_db()
+    assert answer.text == "Chase Morgan Stanley."
+    assert _ids(user, conversation) == [question.id, answer.id]
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_a_tool_result_row_cannot_be_edited(signed_in, user):
+    """Machinery, not a message. It is user-ROLE, which is exactly why the
+    check is on `is_tool_result` too and not on the role alone."""
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    _turn(user, conversation, "user", "who today?")
+    machinery = ChatMessage(
+        user=user, conversation=conversation, role="user",
+        content=[{"type": "tool_result", "tool_use_id": "t1", "content": "{}"}],
+    )
+    machinery.save()
+
+    response = signed_in.post(
+        reverse("assistant:edit_message"), {"message": machinery.id, "text": "something else"}
+    )
+
+    assert response.status_code == 400
+    assert machinery.id in _ids(user, conversation)
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_an_edit_with_nothing_in_it_is_rejected_and_deletes_nothing(signed_in, user):
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    question = _turn(user, conversation, "user", "who should I chase?")
+    answer = _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+
+    response = signed_in.post(reverse("assistant:edit_message"), {"message": question.id, "text": "   "})
+
+    assert response.status_code == 400
+    assert _ids(user, conversation) == [question.id, answer.id]
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_a_rewind_keeps_the_files_attached_to_the_message_it_edits(signed_in, user):
+    """The words changed; the resume they attached did not."""
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    message = ChatMessage(
+        user=user, conversation=conversation, role="user",
+        content=[
+            {"type": "document", "_filename": "resume.pdf"},
+            {"type": "text", "text": "what do you think?"},
+        ],
+    )
+    message.save()
+
+    signed_in.post(
+        reverse("assistant:edit_message"), {"message": message.id, "text": "be honest about this"}
+    )
+
+    message.refresh_from_db()
+    assert message.attachment_names == ["resume.pdf"]
+    assert message.text == "be honest about this"
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_rewinding_the_first_message_retitles_the_conversation(signed_in, user):
+    """A title derived from words that no longer exist is a stale title."""
+    conversation = ChatConversation(user=user, title="Chasing Goldman")
+    conversation.save()
+    first = _turn(user, conversation, "user", "how do I get into Goldman?")
+    _turn(user, conversation, "assistant", "Start with the alumni.")
+
+    signed_in.post(
+        reverse("assistant:edit_message"), {"message": first.id, "text": "how do I get into Citi?"}
+    )
+
+    conversation.refresh_from_db()
+    assert conversation.title == "how do I get into Citi?"
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_rewinding_a_later_message_leaves_the_title_alone(signed_in, user):
+    conversation = ChatConversation(user=user, title="Chasing Goldman")
+    conversation.save()
+    _turn(user, conversation, "user", "how do I get into Goldman?")
+    _turn(user, conversation, "assistant", "Start with the alumni.")
+    second = _turn(user, conversation, "user", "which alumni?")
+
+    signed_in.post(
+        reverse("assistant:edit_message"), {"message": second.id, "text": "which alumni exactly?"}
+    )
+
+    conversation.refresh_from_db()
+    assert conversation.title == "Chasing Goldman"
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_editing_another_students_message_404s_and_changes_nothing(client, user):
+    other = User.objects.create_user(email="rewind-other@example.com", password="pw12345!")
+    theirs = ChatConversation(user=other, title="Not yours")
+    theirs.save()
+    their_question = _turn(other, theirs, "user", "their private plan")
+    their_answer = _turn(other, theirs, "assistant", "their private advice")
+
+    client.force_login(user)
+    response = client.post(
+        reverse("assistant:edit_message"), {"message": their_question.id, "text": "hijacked"}
+    )
+
+    assert response.status_code == 404
+    assert _ids(other, theirs) == [their_question.id, their_answer.id]
+    their_question.refresh_from_db()
+    assert their_question.text == "their private plan"
+
+
+def test_edit_rejects_a_get(signed_in):
+    """It deletes, and it spends a turn. Not something a prefetcher or a back
+    button gets to fire."""
+    assert signed_in.get(reverse("assistant:edit_message")).status_code == 405
+
+
+def test_an_anonymous_visitor_cannot_rewind_anything(client):
+    response = client.post(reverse("assistant:edit_message"))
+
+    assert response.status_code == 302
+    assert "/accounts/login/" in response["Location"]
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test")
+def test_a_streamed_rewind_answers_over_the_turns_it_deleted(client, monkeypatch):
+    """The transport the page actually uses: `stream=1` gets the same SSE
+    frames a send does, so the new reply grows in where the old ones were.
+
+    The model is a scripted stub (the same `FakeStreamingClient` the agent's
+    own tests use), not a real call — this is about the endpoint's shape, and
+    a real turn would be slow, billed and non-deterministic.
+    """
+    from assistant import agent
+    from assistant.tests.test_agent import FakeStreamingClient, _response, _text
+
+    student = User.objects.create_user(email="rewind-stream@example.com", password="pw12345!")
+    client.force_login(student)
+    conversation = ChatConversation(user=student, title="Where to spend the week")
+    conversation.save()
+    question = _turn(student, conversation, "user", "where should I spend this week?")
+    stale = _turn(student, conversation, "assistant", "Spend it on Goldman.")
+
+    monkeypatch.setattr(
+        agent,
+        "get_client",
+        lambda: FakeStreamingClient([(["Spend it on ", "Citi."], _response([_text("Spend it on Citi.")], "end_turn"))]),
+    )
+
+    response = client.post(
+        reverse("assistant:edit_message"),
+        {"message": question.id, "text": "where should I spend this week, Citi aside?", "stream": "1"},
+    )
+
+    assert response.status_code == 200
+    assert response["Content-Type"] == "text/event-stream"
+    body = b"".join(response.streaming_content).decode()  # the generator only runs once consumed
+    assert '"type": "delta"' in body
+    assert '"type": "done"' in body
+    # The terminal frame names the question it answered, which is what hangs
+    # an edit control on a bubble the browser drew itself.
+    assert f'"user_message_id": {question.id}' in body
+
+    turns = list(ChatMessage.objects.for_user(student).filter(conversation=conversation))
+    assert stale.id not in [t.id for t in turns]
+    assert [t.role for t in turns] == ["user", "assistant"]
+    assert turns[0].id == question.id
+    assert turns[0].text == "where should I spend this week, Citi aside?"
+    assert turns[1].text == "Spend it on Citi."
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_the_thread_offers_copy_on_every_answer_and_edit_on_every_question(signed_in, user):
+    """ChatGPT's own habit: a Copy on every reply, not only the ones that
+    happen to hold a drafted email. And its opposite number on the student's
+    side — the pencil that rewinds."""
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    question = _turn(user, conversation, "user", "who should I chase?")
+    _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+
+    body = signed_in.get(reverse("assistant:chat_conversation", args=[conversation.id])).content.decode()
+
+    # Scoped to the rendered thread: the same class names also appear in the
+    # page's own <style> block and in the JS that mirrors this markup for a
+    # streamed turn, and neither of those is a control on screen.
+    thread = _rendered_thread(body)
+    assert thread.count('class="as-msg-btn as-msg-copy"') == 1
+    assert thread.count('class="as-msg-edit-form"') == 1
+    # The edit control posts the row's own id back.
+    assert f'name="message" value="{question.id}"' in thread
+    # And says plainly what it is about to destroy.
+    assert "Everything after this message is deleted" in thread
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_a_notice_gets_no_copy_button(signed_in, user):
+    """Coverage talking about itself is not an answer worth copying."""
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    _turn(user, conversation, "user", "who should I chase?")
+    notice = ChatMessage(
+        user=user, conversation=conversation, role="assistant", notice=ChatMessage.NOTICE_FAILED,
+        content=[{"type": "text", "text": "I couldn't reach the model just then."}],
+    )
+    notice.save()
+
+    body = signed_in.get(reverse("assistant:chat_conversation", args=[conversation.id])).content.decode()
+
+    assert "couldn't reach the model" in body
+    assert 'class="as-msg-btn as-msg-copy"' not in _rendered_thread(body)
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_a_stream_that_ends_badly_still_names_the_message_to_edit(signed_in, user):
+    """A composer send draws its own user bubble, so the id that makes it
+    editable can only come from the stream's terminal frame. A turn that
+    FAILED is the likeliest moment of all to want to reword and try again,
+    so the failure frame carries it too, not just the successful one."""
+    response = signed_in.post(reverse("assistant:stream"), {"message": "who should I chase?"})
+
+    body = b"".join(response.streaming_content).decode()
+    question = ChatMessage.objects.for_user(user).filter(role="user").first()
+    assert '"type": "notice"' in body
+    assert f'"user_message_id": {question.id}' in body
