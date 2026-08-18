@@ -254,6 +254,33 @@ materials.
     background: var(--accent-soft); color: var(--accent);
     display: flex; align-items: center; justify-content: center; }
   .as-avatar .logo-mark { width: 15px; height: 15px; }
+  /* Only the avatar JS builds for a live reply gets this — a server-
+     rendered history turn (assistant/_message.html, a page reload) never
+     did any "thinking" the student watched happen, so it never pops. Same
+     spring-overshoot shape site's `kin-reveal` uses elsewhere, just scoped
+     to this one circle instead of a whole row. */
+  .as-avatar--live { animation: as-avatar-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  @keyframes as-avatar-pop {
+    0% { transform: scale(0.4); opacity: 0; }
+    60% { transform: scale(1.15); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  /* Added only between the first token of a reply and its `done` event
+     (runStream's applyEvent) — the ring pulses for exactly as long as
+     Coverage is actually still generating. Same expanding-ring technique
+     as `.as-mic.is-listening` below, `--accent` in place of `--danger`
+     since this is normal activity, not a live microphone. */
+  .as-avatar.is-thinking {
+    animation: as-avatar-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
+      as-avatar-pulse 1.4s ease-in-out 360ms infinite;
+  }
+  @keyframes as-avatar-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent); }
+    50% { box-shadow: 0 0 0 6px transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .as-avatar--live, .as-avatar.is-thinking { animation: none; }
+  }
   .as-turn { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 68ch; }
   .as-msg--user .as-turn { align-items: flex-end; }
   .as-who { margin: 0; font-family: var(--font-mono); font-size: var(--fs-micro);
@@ -1364,9 +1391,14 @@ element by the next turn.
       function buildTurn(role, notice) {
         var article = document.createElement("article");
         article.className = "as-msg as-msg--" + role + (notice ? " as-msg--notice" : "") + " kin-reveal";
+        var avatar;
         if (role === "assistant") {
-          var avatar = document.createElement("span");
-          avatar.className = "as-avatar";
+          avatar = document.createElement("span");
+          // `as-avatar--live`: this turn is being built by JS right now, as
+          // opposed to a server-rendered history turn from a page load —
+          // see the class's own CSS comment for why that distinction
+          // matters (it's what pops).
+          avatar.className = "as-avatar as-avatar--live";
           avatar.setAttribute("aria-hidden", "true");
           avatar.innerHTML = LOGO_MARK;
           article.appendChild(avatar);
@@ -1384,7 +1416,7 @@ element by the next turn.
         turn.appendChild(who);
         turn.appendChild(bubble);
         article.appendChild(turn);
-        return { el: article, body: body, bubble: bubble, column: turn };
+        return { el: article, body: body, bubble: bubble, column: turn, avatar: avatar };
       }
 
       // The per-turn actions row, the JS mirror of assistant/_message.html's
@@ -1512,6 +1544,12 @@ element by the next turn.
             if (!assistantTurn) {
               assistantTurn = buildTurn("assistant");
               log.appendChild(assistantTurn.el);
+              // Pulsing starts the moment there's an avatar to pulse, not
+              // from Send — the composer's own dots (`#as-typing`) already
+              // cover the gap before the first token. Cleared on "done"
+              // below, and belt-and-braces in the stream's own .finally()
+              // in case the connection dies mid-reply with no "done" frame.
+              if (assistantTurn.avatar) assistantTurn.avatar.classList.add("is-thinking");
             }
             accumulated += event.text;
             renderTurnBody(assistantTurn, accumulated);
@@ -1531,6 +1569,8 @@ element by the next turn.
             if (pending) attachUserActions(pending.turn, event.user_message_id, pending.text);
             scrollLogToEnd();
           } else if (event.type === "done" && assistantTurn) {
+            // The reply is whole — nothing left to pulse for.
+            if (assistantTurn.avatar) assistantTurn.avatar.classList.remove("is-thinking");
             // The final redraw, and the only one that can finish a draft
             // card: `drafts` carries what the tokens alone can't say — whose
             // draft this is, and whether its touch is already on the record.
@@ -1585,6 +1625,12 @@ element by the next turn.
           })
           .catch(showFailureTurn)
           .finally(function () {
+            // Belt-and-braces: a connection that dies mid-reply (partial
+            // text already on screen, per showFailureTurn's own comment)
+            // never sends a "done" frame, so the removal above never runs.
+            // An avatar left pulsing forever after the stream is dead would
+            // be lying about something still being generated.
+            if (assistantTurn && assistantTurn.avatar) assistantTurn.avatar.classList.remove("is-thinking");
             if (typingEl) typingEl.classList.remove("htmx-request");
             setComposerBusy(false);
             if (input && !input.disabled) input.focus();
