@@ -82,7 +82,12 @@ def get_or_build(user, actions: list[dict], *, client=None) -> str | None:
                         "their queue today — lead with the single highest-"
                         "priority person or deadline, name them by name. No "
                         "greeting, no summary of everything in the list, no "
-                        "hedging, no markdown.\n\nToday's queue:\n" + queue_summary
+                        "hedging.\n\nWrap exactly ONE short span in **bold** — "
+                        "whichever single detail matters most to act on right "
+                        "now: the person's name, or the exact deadline/day "
+                        "count if that is the real urgency. Never bold more "
+                        "than one span, never a whole sentence, and use no "
+                        "other markdown at all.\n\nToday's queue:\n" + queue_summary
                     ),
                 }
             ],

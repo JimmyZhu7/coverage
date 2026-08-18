@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load textstyle %}
+{% load assistant_extras %}
 
 {% block title %}Today · Coverage{% endblock %}
 
@@ -74,9 +75,12 @@
     was nothing worth saying today — never an empty card, never an error.
     {% endcomment %}
     <div class="daily-brief kin-reveal">
-      <span class="daily-brief-icon" aria-hidden="true">{% include "_logo.html" %}</span>
-      <p class="daily-brief-text">{{ daily_brief }}</p>
-      <a class="daily-brief-link" href="{% url 'assistant:chat' %}">Talk about it →</a>
+      <div class="daily-brief-head">
+        <span class="daily-brief-icon" aria-hidden="true">{% include "_logo.html" %}</span>
+        <span class="daily-brief-eyebrow"><span class="live-dot"></span> Today's move</span>
+      </div>
+      <p class="daily-brief-text">{{ daily_brief|chat_format }}</p>
+      <a class="daily-brief-link" href="{% url 'assistant:chat' %}">Talk about it <span aria-hidden="true">→</span></a>
     </div>
   {% endif %}
 

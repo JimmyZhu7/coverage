@@ -1079,21 +1079,54 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border-radius: var(--r-panel); background: var(--accent-soft); }
   .setup-nudge-text { color: var(--accent-ink); font-size: var(--fs-s); }
 
-  /* The daily brief. Same accent-soft card language as .setup-nudge — this
-     is the same "advisor speaking" register — but it carries the mark
-     instead of a bold lead-in, since the sentence itself is the content. */
-  .daily-brief { display: flex; align-items: flex-start; gap: var(--s3);
-    margin-bottom: var(--s4); padding: var(--s3) var(--s4);
+  /* The daily brief. Same "advisor speaking" register as .setup-nudge, now
+     carrying this app's own kinetic language (kin-hero's diagonal sheen,
+     the ribbon's live-dot) instead of sitting as a flat static box — this
+     is the one card on the page that changes every day, so it is the one
+     that should visibly say so. Stacked top to bottom — mark, sentence,
+     action — rather than one crowded row, so a two-line brief doesn't fight
+     the CTA for space and the eyebrow reads before the sentence does. */
+  .daily-brief {
+    position: relative; overflow: hidden;
+    margin-bottom: var(--s4); padding: var(--s4);
     border: 1px solid var(--accent-line); border-radius: var(--r-panel);
-    background: var(--accent-soft); }
-  .daily-brief-icon { flex: none; width: 20px; height: 20px; margin-top: 2px;
-    color: var(--accent); }
-  .daily-brief-icon svg { width: 100%; height: 100%; }
-  .daily-brief-text { flex: 1; margin: 0; color: var(--accent-ink);
-    font-size: var(--fs-m); line-height: 1.5; }
-  .daily-brief-link { flex: none; align-self: center; color: var(--accent-ink);
-    font-size: var(--fs-s); font-weight: 600; white-space: nowrap; }
+    background: linear-gradient(135deg, var(--surface) 0%, var(--accent-soft) 100%);
+    box-shadow: var(--shadow-1);
+  }
+  /* The exact sheen .kin-hero uses, reused rather than reinvented — a slow
+     diagonal highlight that crosses and rests off-screen, so it reads as
+     this app's own signature "something live here" instead of a new motif
+     invented for one card. */
+  .daily-brief::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(115deg, transparent 34%,
+      color-mix(in srgb, var(--accent) 8%, transparent) 50%, transparent 66%);
+    background-size: 250% 100%; background-repeat: no-repeat;
+    animation: kin-sheen 7.5s ease-in-out infinite;
+  }
+  .daily-brief-head { position: relative; display: flex; align-items: center;
+    gap: var(--s2); margin-bottom: var(--s2); }
+  .daily-brief-icon { flex: none; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; }
+  .daily-brief-icon svg { width: 14px; height: 14px; }
+  .daily-brief-eyebrow { display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+  .daily-brief-text { position: relative; margin: 0; color: var(--ink);
+    font-size: var(--fs-m); line-height: 1.55; max-width: 68ch; }
+  /* The one or two words the advisor itself chose to bold — see
+     assistant.brief's prompt — get the accent ink rather than plain black,
+     so the important word pops without the sentence turning into a wall of
+     bold. `chat_format` (assistant_extras) is what turns the model's
+     **word** into this <strong> in the first place. */
+  .daily-brief-text strong { color: var(--accent-ink); font-weight: var(--w-med); }
+  .daily-brief-link { position: relative; display: inline-flex; align-items: center;
+    gap: 4px; margin-top: var(--s3); color: var(--accent-ink);
+    font-size: var(--fs-s); font-weight: var(--w-med); white-space: nowrap; }
+  .daily-brief-link span { display: inline-block; transition: transform var(--t-fast); }
   .daily-brief-link:hover { text-decoration: underline; }
+  .daily-brief-link:hover span { transform: translateX(2px); }
 
   /* The staleness ring — a conic sweep around the avatar that fills as the
      contact's keep-warm clock runs down (--stale is 0-100, from views.py).
