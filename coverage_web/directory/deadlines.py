@@ -20,6 +20,15 @@ is outside this change's ownership, so it was left alone; switching it to
 standing between "the definitions agree today" and "the definitions cannot
 drift". `test_closing_soon.py` pins the equivalence in the meantime, so the
 two implementations diverging will fail the suite rather than ship silently.
+
+`is_posting_closed` lives here for the same reason the window does. It answers
+the other half of "does this row still deserve urgency", and four surfaces
+needed it at once — My Applications, the weekly digest, the push alerts and
+the calendar/.ics feed all read a student's tracked roles and every one of
+them ignored `Opportunity.status`, so a posting the nightly pass had already
+watched the firm take down still rendered as live and still alerted. This
+module is the only place all four can import from without pulling
+`directory.views` into the CRM's import graph.
 """
 
 from __future__ import annotations
@@ -35,6 +44,29 @@ from django.utils import timezone
 #: is not. The number itself is a product judgement (roughly "this and next
 #: week"), not a law of nature — but it must be ONE number.
 CLOSING_SOON_DAYS = 10
+
+#: `Opportunity.status` once a reverify pass has watched the firm take the
+#: posting down (`closed_at` is stamped in the same moment, models.py).
+POSTING_CLOSED = "closed"
+
+
+def is_posting_closed(opportunity) -> bool:
+    """True when the SCRAPER has confirmed the firm pulled this posting.
+
+    NOT `UserOpportunity.applied_status == "closed"` (`directory.views.
+    TRACK_CLOSED`), which is the STUDENT marking their own application Done.
+    Two different facts, two different authors, the same word — and until this
+    predicate existed only the student-authored one was ever surfaced, which
+    is exactly how a dead role kept rendering as live. Named for the posting
+    so the two can't be misread for each other at a call site.
+
+    Tests `== POSTING_CLOSED` rather than `!= "open"`: `status` is a bare
+    CharField defaulting to `""` with no choices, so a row the scraper has
+    never re-checked carries neither value. An is-open test would drop every
+    one of those from the lists a student reads, which is a worse bug than
+    the one it would fix.
+    """
+    return (getattr(opportunity, "status", "") or "") == POSTING_CLOSED
 
 
 def closing_soon_window(today: date | None = None) -> tuple[date, date]:

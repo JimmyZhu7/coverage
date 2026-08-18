@@ -86,7 +86,8 @@ class Command(BaseCommand):
             f"boards {s['boards_ok']}/{s['boards_total']} ok, "
             f"fetched {s['fetched']}, "
             f"created {s['created']}, updated {s['updated']}, unchanged {s['unchanged']}, "
-            f"reopened {s['reopened']}, closed {s['closed']}"
+            f"reopened {s['reopened']}, closed {s['closed']}, "
+            f"changes recorded {s.get('changes_recorded', 0)}"
         ))
         if s["created_firms"]:
             self.stdout.write(f"  auto-created firms (not in seed set): {', '.join(s['created_firms'])}")

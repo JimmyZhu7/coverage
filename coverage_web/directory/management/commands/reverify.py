@@ -49,6 +49,13 @@ happened this pass either way, and both fields exist to mean exactly that.
 The honesty contract: `last_verified` moves ONLY on a positive liveness
 signal. The card's "Verified N Days Ago" pill therefore never lies.
 
+Every move this pass makes — a `deadline` corrected from the provider's own
+answer, a posting flipped closed — is also recorded row-by-row in
+`directory.models.OpportunityChange`. The deadline overwrite above was
+silent until then: the stored date was gone the instant the fresh one was
+assigned, so nothing downstream could tell a student tracking that role
+that its deadline had moved at all.
+
 Volume: capped at --limit rows per run (default 200), oldest first, fetched
 through a small thread pool — the same politeness posture as fetch_many.
 Each run is recorded in scrape_runs (connector="reverify").
@@ -75,7 +82,7 @@ from django.utils import timezone
 
 from coverage_connectors import verify
 
-from directory.models import Opportunity, ScrapeRun
+from directory.models import Opportunity, OpportunityChange, ScrapeRun
 
 
 def _fresh_deadline(deadline_dates: list[str]) -> date | None:
@@ -133,7 +140,15 @@ class Command(BaseCommand):
 
         run = ScrapeRun.objects.create(connector="reverify", started=now, status="running")
         stats = {"checked": 0, "verified_open": 0, "closed": 0,
-                 "unreachable": 0, "needs_verification": 0}
+                 "unreachable": 0, "needs_verification": 0,
+                 # Row-level moves written to OpportunityChange this pass.
+                 "changes_recorded": 0}
+        # This command is the ONLY place a stored deadline gets corrected
+        # from the provider's own fresh answer, and until now it did so
+        # silently — the old date was gone the instant the new one was
+        # assigned, so a student tracking the role could not be told it had
+        # moved. Accumulated unsaved, written in one bulk_create below.
+        changes: list[OpportunityChange] = []
 
         def check(opp):
             try:
@@ -164,11 +179,21 @@ class Command(BaseCommand):
                 update_fields.append("last_verified")
                 fresh = _fresh_deadline(result.deadline_dates) if result is not None else None
                 if fresh is not None and fresh != opp.deadline:
+                    changes.append(OpportunityChange.entry(
+                        opp.pk, "deadline", opp.deadline, fresh,
+                        stage=OpportunityChange.STAGE_REVERIFY, at=now,
+                        note="provider's verify endpoint states a different date",
+                    ))
                     opp.deadline = fresh
                     opp.deadline_precision = "day"
                     update_fields += ["deadline", "deadline_precision"]
                 opp.save(update_fields=update_fields)
             elif verdict == "closed":
+                changes.append(OpportunityChange.entry(
+                    opp.pk, "status", opp.status or "open", "closed",
+                    stage=OpportunityChange.STAGE_REVERIFY, at=now,
+                    note="provider's verify endpoint reports the posting closed",
+                ))
                 opp.status = "closed"
                 opp.closed_at = now
                 opp.save(update_fields=update_fields + ["status", "closed_at"])
@@ -176,6 +201,12 @@ class Command(BaseCommand):
                 # unreachable / needs-verification: we looked, we can't say —
                 # last_verified deliberately does NOT move.
                 opp.save(update_fields=update_fields)
+
+        # One write for the whole pass. A --dry-run never reaches this with
+        # anything queued: the loop `continue`s before any of it.
+        if changes:
+            OpportunityChange.objects.bulk_create(changes, batch_size=1000)
+        stats["changes_recorded"] = len(changes)
 
         run.finished = timezone.now()
         run.stats = stats
@@ -186,5 +217,6 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f"reverify [{label}]: {stats['checked']} checked — "
             f"{stats['verified_open']} open, {stats['closed']} closed, "
-            f"{stats['unreachable']} unreachable, {stats['needs_verification']} undecidable"
+            f"{stats['unreachable']} unreachable, {stats['needs_verification']} undecidable, "
+            f"{stats['changes_recorded']} changes recorded"
         ))

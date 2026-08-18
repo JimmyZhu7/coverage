@@ -22,6 +22,14 @@ Design contract
   Lever/Workday, and for Greenhouse jobs whose firm set none) we store null,
   never a fabricated value. See `_apply_opportunity` for the field-by-field
   mapping and its documented compromises.
+- **Row-level change recording.** Every field-level move a pass makes — a
+  `deadline` that shifted, a `status` that closed or reopened, a `title`
+  that was rewritten — is written to `directory.models.OpportunityChange`,
+  one append-only row apiece. This module used to compute `changed` per row
+  and spend it entirely on `stats["updated"] += 1`, which left every
+  downstream pipeline able to see that *something* moved and never *what*.
+  Only genuine moves are recorded (an unchanged posting writes nothing),
+  and they land in one `bulk_create` inside this module's transaction.
 
 Network seam
 ------------
@@ -50,7 +58,7 @@ from .classify import (
     extract_deadline_from_text, extract_sponsorship, normalize_region, posting_text,
 )
 from .dupes import identity_fragment, provider_identity
-from .models import Firm, Opportunity, ScrapeRun
+from .models import Firm, Opportunity, OpportunityChange, ScrapeRun
 
 # Connector confidence-band string labels are absent for ATS postings (the
 # connectors deliberately never invent a confidence for an API value), so
@@ -202,7 +210,8 @@ class _FirmResolver:
 
 # --------------------------------------------------------------------------- upsert
 
-def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, campus_hint: bool = False) -> None:
+def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
+                       campus_hint: bool = False, changes: list | None = None) -> None:
     """Create or update the one `opportunities` row keyed by (firm, url).
 
     Field mapping (connector `Opportunity` -> Django `Opportunity` column):
@@ -250,6 +259,14 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     `campus_hint` says the source board is itself campus-scoped (see
     `classify.board_is_campus`), which lets neutral Analyst titles on a
     students board classify as entry-level.
+
+    `changes`, when given, is the caller's accumulator for
+    `OpportunityChange` rows — UNSAVED, so one `bulk_create` per pass
+    covers the lot rather than a query per move on a job already writing
+    ~17,000 rows. Only genuine moves are appended, and only on the update
+    path: an unchanged posting (the overwhelming majority of any run)
+    appends nothing at all, and a creation has no "before" worth recording.
+    See `OpportunityChange` for why this seam exists.
     """
     deadline, deadline_ok = _parse_deadline(opp.deadline)
     if not deadline_ok:
@@ -354,6 +371,12 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
 
     was_closed = existing.status == "closed"
     changed = existing.content_hash != h
+    # The row as it stands BEFORE this pass overwrites it. `title` is
+    # assigned on the very next line with no read of the prior value, so a
+    # rename was unrecoverable the instant that assignment ran — capture
+    # first or there is nothing to capture.
+    prior_title = existing.title
+    prior_deadline = existing.deadline
 
     existing.title = title
     existing.bucket = bucket
@@ -400,6 +423,37 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *, ca
     existing.last_verified = now
     existing.last_checked = now
     existing.save()
+
+    if changes is not None:
+        # Diffed against the captured priors rather than driven off
+        # `changed`, deliberately. The content hash covers six fields at
+        # once, so a run that recorded "the deadline moved" because the
+        # LOCATION moved would emit exactly the false signal a downstream
+        # alert has no way to filter. What moved is what gets written.
+        if was_closed:
+            changes.append(OpportunityChange.entry(
+                existing.pk, "status", "closed", "open",
+                stage=OpportunityChange.STAGE_SCRAPE, at=now,
+                note="listed live again by a board that had stopped listing it",
+            ))
+        if prior_title != existing.title:
+            changes.append(OpportunityChange.entry(
+                existing.pk, "title", prior_title, existing.title,
+                stage=OpportunityChange.STAGE_SCRAPE, at=now,
+            ))
+        if prior_deadline != existing.deadline:
+            changes.append(OpportunityChange.entry(
+                existing.pk, "deadline", prior_deadline, existing.deadline,
+                stage=OpportunityChange.STAGE_SCRAPE, at=now,
+                # The drop-to-None path above is not the provider
+                # withdrawing a date — it is us retracting our own
+                # unverified reading of prose that has since changed. A
+                # consumer told only "deadline -> ∅" would report a
+                # withdrawal the firm never made.
+                note="" if existing.deadline is not None else
+                     "posting changed while the stored date was only our reading "
+                     "of its prose; retracted as unverified",
+            ))
 
     if was_closed:
         stats["reopened"] += 1
@@ -454,9 +508,16 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
         # Rows that would have been a second copy of a posting we already hold,
         # matched back to it by provider id instead. See directory.dupes.
         "deduped_by_identity": 0,
+        # Row-level change records written this pass (see OpportunityChange).
+        # Counted here so an operator reading `refresh` output can see that
+        # the seam fired at all — a pass reporting hundreds of `updated`
+        # and zero changes recorded is a broken recorder, not a quiet night.
+        "changes_recorded": 0,
         "providers": set(), "firms_touched": set(), "created_firms": [],
         "errors": [],
     }
+    # Accumulated unsaved OpportunityChange rows; one bulk_create at the end.
+    changes: list[OpportunityChange] = []
 
     seen_by_pair: dict[tuple[int, str], set[str]] = {}
     pair_all_ok: dict[tuple[int, str], bool] = {}
@@ -503,12 +564,14 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
                 })
                 continue
             seen_by_pair[pair].add(opp.url)
+            mark = len(changes)
             try:
                 # savepoint per row: one malformed posting must not roll back
                 # (or abort) every other firm's upserts in this transaction.
                 with transaction.atomic():
                     touched = _apply_opportunity(firm, opp, now, stats,
-                                                 campus_hint=campus)
+                                                 campus_hint=campus,
+                                                 changes=changes)
                 # An identity match updates a row stored under the provider's
                 # PREVIOUS url for this posting. That url was never in this
                 # fetch, so without this line closed-detection would read its
@@ -517,6 +580,10 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
                 if touched:
                     seen_by_pair[pair].add(touched)
             except Exception as exc:  # noqa: BLE001 — isolate, record, continue
+                # The savepoint rolled this row's write back, so anything it
+                # appended describes a change that did not survive. Recording
+                # it would be a change log stating moves the table never made.
+                del changes[mark:]
                 # Keep the url in `seen`: the fetch returned it live, so a
                 # transient upsert error must NOT make closed-detection flip
                 # an existing open row to closed. It just isn't updated this run.
@@ -560,10 +627,34 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
                              "skipped auto-close (suspected shape change)",
                 })
                 continue
-            closed = open_qs.exclude(url__in=seen).update(
-                status="closed", last_checked=now, closed_at=now
+            # The ids and prior statuses BEFORE the update. This is a bulk
+            # `.update()`, so the rows are never loaded and their ids are
+            # not otherwise in memory anywhere — which is how the single
+            # largest status change in the whole pipeline managed to leave
+            # nothing per-row behind. One extra values_list buys every one
+            # of them; the alternative is loading and saving each row.
+            doomed = list(
+                open_qs.exclude(url__in=seen).values_list("id", "status")
+            )
+            closed = Opportunity.objects.filter(
+                id__in=[opp_id for opp_id, _ in doomed]
+            ).update(status="closed", last_checked=now, closed_at=now)
+            changes.extend(
+                OpportunityChange.entry(
+                    opp_id, "status", prior_status or "open", "closed",
+                    stage=OpportunityChange.STAGE_SCRAPE_CLOSE, at=now,
+                    note="absent from a complete, successful fetch of the board",
+                )
+                for opp_id, prior_status in doomed
             )
             stats["closed"] += closed
+
+    # One write for every move the pass made, inside the same transaction as
+    # the moves themselves: an ingest that rolls back must not leave a change
+    # log claiming things that were undone.
+    if changes:
+        OpportunityChange.objects.bulk_create(changes, batch_size=1000)
+    stats["changes_recorded"] = len(changes)
 
     stats["created_firms"] = resolver.created_firms
     # Make the stats JSON-serializable for the ScrapeRun.stats jsonb column.

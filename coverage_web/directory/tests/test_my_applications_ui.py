@@ -388,3 +388,149 @@ def test_progressed_stage_wins_the_fold_over_the_untouched_copy(client, duplicat
     assert by_key["submitted"]["items"][0]["title"] == "Campus Insight Forum"
     assert by_key["saved"]["count"] == 1
     assert by_key["saved"]["items"][0]["title"] == "Summer Analyst, Global Markets"
+
+
+# ---------------------------------------------------------------------------
+# The posting the FIRM took down, which is not the student's "Done" stage.
+#
+# The incident: every surface reading a student's tracked roles partitioned on
+# `UserOpportunity.applied_status` (the student's own marking) and none of them
+# read `Opportunity.status` (the nightly reverify pass watching the firm pull
+# the listing). A role that died last night sat in Closing Soon counting down
+# to a deadline it no longer had.
+#
+# The rows are MOVED and MARKED, never dropped. A tracked role is the student's
+# own record of something they may actually have applied to; losing it would be
+# a far worse bug than the one being fixed.
+# ---------------------------------------------------------------------------
+
+def _rendered(client):
+    """The page's BODY, with the inlined <style> block cut off.
+
+    Every negative assertion below needs this: the page ships its stylesheet
+    inline, and a CSS comment mentioning a class or a rule is not the page
+    saying anything to a student. The existing suite hit the same trap and
+    solved it by slicing around one element (see the apps-lens-empty test)."""
+    body = client.get(reverse("my_applications")).content.decode()
+    return body[body.index("</style>"):]
+
+
+def _shut(user, *, n=90, days=3, stage="saved", status="closed", firm=None):
+    firm = firm or Firm.objects.create(name=f"Firm {n}", slug=f"firm-{n}")
+    o = Opportunity.objects.create(
+        firm=firm, url=f"https://x/shut/{n}", title=f"Analyst {n}",
+        bucket="internship", status=status,
+        deadline=None if days is None else TODAY + timedelta(days=days),
+    )
+    UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status=stage)
+    return o
+
+
+@pytest.mark.django_db
+def test_a_closed_posting_leaves_the_deadline_lenses_for_its_own(client):
+    """It was in Closing Soon, counting down. A dead posting has no deadline
+    urgency left in it for anyone."""
+    user = _user()
+    _shut(user, days=3)
+    client.force_login(user)
+
+    lenses = {l["key"]: l for l in client.get(reverse("my_applications")).context["lenses"]}
+    assert lenses["closing"]["items"] == []
+    assert len(lenses["posting_closed"]["items"]) == 1
+
+
+@pytest.mark.django_db
+def test_the_lens_fractions_still_account_for_every_live_row_when_one_is_closed(client):
+    """The band is a partition and the page prints "x of N live" beside each
+    lens, which invites the student to subtract. A row filtered out of all
+    four dated lenses with nowhere to land would leave a hole they can find."""
+    user = _user()
+    firm = Firm.objects.create(name="Evercore", slug="evercore")
+    _shut(user, n=1, days=3, firm=firm)
+    _shut(user, n=2, days=3, status="open", firm=firm)
+    _shut(user, n=3, days=None, status="open", firm=firm)
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+    counted = sum(len(l["items"]) for l in resp.context["lenses"])
+    assert counted == resp.context["live_total"] == 3
+
+
+@pytest.mark.django_db
+def test_a_closed_posting_is_marked_closed_instead_of_counting_down(client):
+    """The whole bug in one assertion: the page must not render a live-sounding
+    countdown for a posting the firm has already pulled."""
+    user = _user()
+    _shut(user, days=3, stage="saved")
+    client.force_login(user)
+
+    body = _rendered(client)
+    assert "This posting is closed" in body
+    assert "no longer accepting applications" in body
+    assert "closes in 3 days" not in body
+
+
+@pytest.mark.django_db
+def test_a_submitted_application_is_told_it_still_stands(client):
+    """The product judgement. Closing is the expected next thing that happens
+    to a posting you already applied to, and telling that student their role
+    is dead invents a loss — their application is untouched. Same fact as the
+    saved case, different news, so a different sentence."""
+    user = _user()
+    _shut(user, days=3, stage="submitted")
+    client.force_login(user)
+
+    body = _rendered(client)
+    assert "This posting is closed" in body
+    assert "Your application still stands" in body
+    assert "no longer accepting applications" not in body
+
+
+@pytest.mark.django_db
+def test_a_closed_posting_keeps_its_place_in_the_students_funnel(client):
+    """Never delete the student's own record. The row stays in the stage they
+    put it in, and is marked closed there too — the funnel is the one section
+    guaranteed to show every tracked row."""
+    user = _user()
+    o = _shut(user, days=3, stage="submitted")
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+    stages = {s["key"]: s for s in resp.context["stages"]}
+    assert [i["title"] for i in stages["submitted"]["items"]] == [o.title]
+    assert stages["submitted"]["items"][0]["posting_closed"]["submitted"] is True
+    assert resp.context["total"] == 1
+
+
+@pytest.mark.django_db
+def test_the_two_closed_meanings_are_never_merged(client):
+    """`applied_status="closed"` is the student's Done marking;
+    `Opportunity.status="closed"` is the scraper's. A row in Done whose posting
+    is still open must not pick up the posting-closed sentence, and the
+    posting-closed lens is keyed apart from the Done stage on purpose."""
+    user = _user()
+    _shut(user, days=3, stage="closed", status="open")
+    client.force_login(user)
+
+    body = _rendered(client)
+    assert "Done, no longer live" in body
+    assert "This posting is closed" not in body
+    lenses = {l["key"]: l for l in client.get(reverse("my_applications")).context["lenses"]}
+    assert lenses["posting_closed"]["items"] == []
+
+
+@pytest.mark.django_db
+def test_a_posting_the_scraper_never_rechecked_is_untouched(client):
+    """The over-filtering guard. `Opportunity.status` defaults to "" and most
+    rows have never been reverified, so the rule is `== "closed"` rather than
+    `!= "open"` — reading blank as closed would empty the deadline lenses for
+    nearly every student."""
+    user = _user()
+    _shut(user, days=3, status="")
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+    lenses = {l["key"]: l for l in resp.context["lenses"]}
+    assert len(lenses["closing"]["items"]) == 1
+    assert lenses["posting_closed"]["items"] == []
+    assert "This posting is closed" not in _rendered(client)

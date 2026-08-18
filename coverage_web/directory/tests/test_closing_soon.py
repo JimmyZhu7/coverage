@@ -225,9 +225,14 @@ def test_the_funnel_is_the_partition_and_sums_to_the_total(client, board, tracke
     # The lenses are a SECOND partition, of the live rows, over the same set —
     # never a third pile of roles. Each of the six fixture rows sits in exactly
     # one lens: past -> passed, today + day 9 -> closing, day 10 + day 90 ->
-    # later, no deadline -> rolling.
+    # later, no deadline -> rolling. Every posting on this board is open, so
+    # the fifth lens (rows the FIRM took down, `Opportunity.status`) is empty
+    # and is asserted at 0 rather than dropped from the dict — an empty lens
+    # still has to be part of the partition for the sum below to mean anything.
     by_key = {lens["key"]: len(lens["items"]) for lens in resp.context["lenses"]}
-    assert by_key == {"passed": 1, "closing": 2, "later": 2, "rolling": 1}
+    assert by_key == {
+        "posting_closed": 0, "passed": 1, "closing": 2, "later": 2, "rolling": 1,
+    }
     assert sum(by_key.values()) == resp.context["live_total"] == 6
     # Before the residue lenses existed this sum was 3 — the day-10 and
     # day-90 rows were in no lens at all while still being counted in the

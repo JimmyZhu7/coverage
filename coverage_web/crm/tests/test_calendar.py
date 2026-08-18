@@ -556,14 +556,18 @@ def test_the_feed_needs_no_session(client, user):
 # ---------------------------------------------------------------------------
 
 def _tracked_role(user, *, days, title="Summer Analyst", status="", dismissed=False,
-                  firm=None, url=None):
+                  firm=None, url=None, posting_status="open"):
+    """`status` is the STUDENT's funnel stage (`applied_status`);
+    `posting_status` is the POSTING's own (`Opportunity.status`, written by the
+    nightly reverify pass). Both spell "closed" and they mean different
+    things — see directory/deadlines.py's `is_posting_closed`."""
     from analytics.models import UserOpportunity
     from directory.models import Opportunity
 
     firm = firm or Firm.objects.filter(slug="gs").first() or Firm.objects.create(
         slug="gs", name="Goldman Sachs")
     opp = Opportunity.objects.create(
-        firm=firm, title=title, status="open",
+        firm=firm, title=title, status=posting_status,
         deadline=timezone.localdate() + timedelta(days=days),
         url=url or f"https://gs.com/{title.lower().replace(' ', '-')}-{days}")
     UserOpportunity.all_objects.create(
@@ -893,3 +897,83 @@ def test_an_opening_still_reaches_the_subscribed_feed_without_an_alarm(client, l
     ).content.decode()
     assert "SUMMARY:Goldman Sachs · Applications open" in body
     assert "BEGIN:VALARM" not in body
+
+
+# ---------------------------------------------------------------------------
+# A posting the FIRM took down (Opportunity.status), which is a different fact
+# from the student's own "Done" stage tested above.
+#
+# The incident: layer 4 read neither the grid nor the .ics against
+# `Opportunity.status`, so a dead posting kept its "closes this day" row and,
+# worse, kept firing VALARM reminders at -P7D and -P1D inside the student's own
+# calendar app for a role that no longer existed.
+# ---------------------------------------------------------------------------
+
+def test_a_closed_posting_raises_no_alarm_in_the_subscribed_feed(client, user):
+    """The harm being fixed. A VALARM is a phone waking someone up to act, and
+    a pulled posting leaves nothing to act on."""
+    _tracked_role(user, days=6, title="Dead Role", posting_status="closed",
+                  url="https://gs.com/dead")
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+
+    assert "BEGIN:VALARM" not in body
+    assert "TRIGGER;RELATED=START:-P7D" not in body
+
+
+def test_a_closed_posting_keeps_its_event_rather_than_vanishing(client, user):
+    """The deliberate choice against dropping the VEVENT. This feed is
+    SUBSCRIBED, so the event is already in the student's own calendar app;
+    omitting it would delete it from their week at the next refresh, silently.
+    It stays on its day and says what happened instead."""
+    _tracked_role(user, days=6, title="Dead Role", posting_status="closed",
+                  url="https://gs.com/dead")
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+
+    assert body.count("BEGIN:VEVENT") == 1
+    assert "Goldman Sachs · Dead Role" in body
+    assert "https://gs.com/dead" in body
+
+
+def test_a_closed_postings_summary_leads_with_closed_not_a_tensed_verb(client, user):
+    """The marker rides at the FRONT of the SUMMARY because a lock-screen
+    notification shows the summary and nothing else, and "closes" against
+    "closed" is one character of difference in that position."""
+    _tracked_role(user, days=6, title="Dead Role", posting_status="closed")
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+
+    assert "SUMMARY:Closed: Goldman Sachs · Dead Role" in body
+    assert "Dead Role closes" not in body
+
+
+def test_a_closed_posting_stops_claiming_to_close_on_the_grid(client, logged_in):
+    """The in-app month grid told the same lie in its own tense."""
+    _tracked_role(logged_in, days=5, title="Dead Role", posting_status="closed")
+    body = client.get("/app/calendar/").content.decode()
+
+    assert "Dead Role" in body, "the student's own tracked row is never dropped"
+    assert "Closed: Goldman Sachs · Dead Role" in body
+    assert "Dead Role closes this day" not in body
+
+
+def test_an_open_posting_beside_a_closed_one_keeps_its_alarms(client, user):
+    """The over-reach guard: one dead row must not strip the alarms off the
+    live rows sharing the feed."""
+    _tracked_role(user, days=6, title="Dead Role", posting_status="closed",
+                  url="https://gs.com/dead")
+    _tracked_role(user, days=8, title="Live Role", url="https://gs.com/live")
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+
+    assert "SUMMARY:Goldman Sachs · Live Role closes" in body
+    assert "TRIGGER;RELATED=START:-P7D" in body
+    assert body.count("BEGIN:VALARM") == 2, "two alarms, both from the live row"
+
+
+def test_a_posting_the_scraper_never_rechecked_still_alarms(client, user):
+    """The over-filtering guard. `Opportunity.status` defaults to "" and most
+    rows have never been reverified, so the rule is `== "closed"` rather than
+    `!= "open"` — otherwise the feed would go silent for nearly everyone."""
+    _tracked_role(user, days=6, title="Unchecked Role", posting_status="")
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+
+    assert "Unchecked Role closes" in body
+    assert "TRIGGER;RELATED=START:-P7D" in body

@@ -67,6 +67,7 @@ from django.utils import timezone
 
 from accounts.models import PushSubscription
 from accounts.push import SubscriptionExpired, is_configured, send_notification
+from directory.deadlines import is_posting_closed
 from directory.views import TRACK_CLOSED, _lens_item, _tracked_rows
 
 #: T-7 and T-2, per the product plan (see this module's docstring).
@@ -102,9 +103,26 @@ def _due_rows(user, *, today: date, days: tuple[int, ...]) -> list[dict]:
     Reuses `directory.views._tracked_rows` (the exact fold/dedup My
     Applications and the weekly digest both read) and `_lens_item` for the
     per-row shape (`days_left`, `firm_name`, `title`) rather than re-deriving
-    either."""
+    either.
+
+    TWO KINDS OF DEAD, BOTH EXCLUDED. `TRACK_CLOSED` is the student's own
+    "Done" marking; `is_posting_closed` is the nightly reverify pass watching
+    the firm take the posting down. Only the first was ever checked here, so
+    this command raised "Goldman Sachs closes in 2 days" on a phone for a
+    posting that had already died the night before — the alert naming a
+    deadline that no longer belonged to anything.
+
+    The posting check applies at EVERY funnel stage, deliberately. A student
+    who already submitted still cares about that role, and the row stays on
+    their list saying so (My Applications marks it), but a push notification
+    is an instruction to act before a door shuts. That door is shut. There is
+    no act left to instruct, for them or for anyone."""
     rows = _tracked_rows(user)
-    live = [uo for uo in rows if (uo.applied_status or "saved") != TRACK_CLOSED]
+    live = [
+        uo for uo in rows
+        if (uo.applied_status or "saved") != TRACK_CLOSED
+        and not is_posting_closed(uo.opportunity)
+    ]
     items = [_lens_item(uo, today=today) for uo in live]
     return [i for i in items if i["days_left"] in days]
 

@@ -38,8 +38,39 @@ CONSECUTIVE_FAILURES = 3
 WALL_STREAK_SCAN_RUNS = 60
 
 
+# Not every entry in `stats["errors"]` is a failure. Two of them are the
+# ingest's own safety guards REPORTING THEMSELVES: the truncation guard
+# ("board reported more results than one fetch returns") and the suspicious-
+# wipe guard ("fetch ok but 0 rows while postings are open"). In both cases
+# the fetch SUCCEEDED — `boards_ok` was incremented — and the guard simply
+# declined to auto-close on a list it knew was incomplete, which is the
+# correct and desired behaviour.
+#
+# Measured 2026-08-18: J.P. Morgan and Lazard (both oracle, both genuinely
+# healthy — 146 and 73 open rows, none stale) had been tripping the
+# "failing in each of the last 3 scrape runs / stale data being presented as
+# fresh" alarm every single run, because `repeat_failures` read every
+# `errors` entry as a failure. That is the exact trap this module already
+# documents for bot walls: an alarm that fires daily on a working system
+# teaches the reader to ignore the line that exists to catch real breakage.
+#
+# Matched on the message text rather than a new flag on purpose —
+# `walled_boards` walks 60 historical runs, and a flag written from today
+# forward would misread every `ScrapeRun` already in the table.
+_GUARD_NOTICE_MARKER = "skipped auto-close"
+
+
 def _is_walled(err: dict) -> bool:
     return (err.get("error") or "").startswith(BOT_BLOCK_PREFIX)
+
+
+def _is_guard_notice(err: dict) -> bool:
+    """A guard declining to act on incomplete data — not a fetch failure."""
+    return _GUARD_NOTICE_MARKER in (err.get("error") or "")
+
+
+def _is_real_failure(err: dict) -> bool:
+    return not _is_walled(err) and not _is_guard_notice(err)
 
 
 def repeat_failures(limit_runs: int = CONSECUTIVE_FAILURES) -> list[str]:
@@ -66,7 +97,7 @@ def repeat_failures(limit_runs: int = CONSECUTIVE_FAILURES) -> list[str]:
         return []
     per_run = [
         {e.get("firm", "") for e in (r.stats or {}).get("errors", [])
-         if not _is_walled(e)}
+         if _is_real_failure(e)}
         for r in runs
     ]
     always = set.intersection(*per_run) - {""}
@@ -130,6 +161,88 @@ def walled_boards() -> list[dict]:
     return out
 
 
+def duplicate_firms() -> list[dict]:
+    """Firm rows sharing a name, with the postings stranded behind each
+    non-canonical copy.
+
+    THE INCIDENT. Ids 199 (slug `td`) and 207 (slug `td-closed`) both carry
+    the name "TD Securities" — one seeded, one minted by a test fixture run
+    directly against the dev database on 2026-08-15. Measured 2026-08-18:
+    1,475 URLs exist under both firms and 1,258 of them are open on BOTH
+    sides right now, which is 1,258 duplicate cards in a feed whose whole
+    pitch is that it is more trustworthy than the spreadsheet it replaces.
+
+    WHY IT IS WORSE THAN COSMETIC. The board catalog keys on slug, and
+    `ingest._FirmResolver` resolves a board's firm NAME to the lowest-id
+    match. So every scrape lands on 199, and nothing ever resolves to 207:
+    its rows are unreachable by any board, so they are never re-fetched,
+    never re-verified, and never closed. They sit open forever at whatever
+    they said the day the split happened. Staleness elsewhere in this
+    pipeline self-heals on the next pass; this does not, because there is
+    no next pass for those rows.
+
+    WHY THIS CHECK EXISTS. `_FirmResolver`'s `.order_by("id")` fix stopped a
+    collision from WIDENING, and `manage.py merge_duplicate_firms` can clean
+    one up — but between them nothing ever said a collision was there. The
+    live one went unnoticed for three days across roughly a dozen scheduled
+    scrapes. That is exactly this module's subject: a failure whose only
+    symptom is data quietly going wrong while every count stays green.
+
+    Cheap in the healthy case, which is the one that runs nightly: one
+    aggregate query returning nothing. The per-group work only happens when
+    a collision actually exists.
+    """
+    from .firm_merge import find_duplicate_firm_groups
+
+    groups = find_duplicate_firm_groups()
+    if not groups:
+        return []
+
+    # Only the non-canonical rows strand postings — the canonical (lowest-id)
+    # row is the one every board already resolves to.
+    stranded_ids = [f.id for group in groups for f in group[1:]]
+    frozen = dict(
+        Opportunity.objects.exclude(status="closed")
+        .filter(firm_id__in=stranded_ids)
+        .values_list("firm_id")
+        .annotate(n=Count("id"))
+        .values_list("firm_id", "n")
+    )
+    return [
+        {
+            "name": group[0].name,
+            "canonical": group[0].slug,
+            "duplicates": [f.slug for f in group[1:]],
+            "stranded_rows": sum(frozen.get(f.id, 0) for f in group[1:]),
+        }
+        for group in groups
+    ]
+
+
+def guarded_boards() -> list[str]:
+    """Firms whose latest full scrape hit a guard that declined to auto-close.
+
+    Not an alarm, and deliberately a quiet ·-line: these boards are working.
+    But the operator does lose something real — for as long as a board
+    reports a partial list, closed-detection never runs on it, so a posting
+    the firm took down stays open until `reverify` reaches that URL on its
+    own and closes it from evidence. That is slower than the nightly sweep,
+    and it is worth knowing which firms are on the slow path.
+
+    Replaces, rather than merely removes, what these boards used to
+    contribute: before `_is_guard_notice` they were being announced every
+    run as failing and serving stale data, which was false on both counts.
+    """
+    latest = (ScrapeRun.objects.filter(connector="all")
+              .order_by("-started").first())
+    if latest is None:
+        return []
+    return sorted({
+        e.get("firm", "") for e in (latest.stats or {}).get("errors", [])
+        if _is_guard_notice(e)
+    } - {""})
+
+
 def boards_that_never_yield() -> dict[str, list[str]]:
     """Catalog entries whose firm has never produced a single row, split by
     what the scrape logs say about WHY.
@@ -169,7 +282,7 @@ def boards_that_never_yield() -> dict[str, list[str]]:
               .order_by("-started").first())
     latest_errors = (latest.stats or {}).get("errors", []) if latest else []
     erroring_firms = {
-        e.get("firm", "").lower() for e in latest_errors if not _is_walled(e)
+        e.get("firm", "").lower() for e in latest_errors if _is_real_failure(e)
     }
     walled_firms = {
         e.get("firm", "").lower() for e in latest_errors if _is_walled(e)
@@ -235,6 +348,19 @@ def enrichment_health() -> list[str]:
 def health_report() -> list[str]:
     """Human-readable warning lines; empty when everything is healthy."""
     lines: list[str] = []
+    # First, and always a ⚠ rather than a standing ·-line: unlike a bot wall,
+    # this one is fixable from here by a single command, and the rows behind
+    # it never self-heal. It should keep nagging until somebody runs it.
+    for dupe in duplicate_firms():
+        stranded = (f"{dupe['stranded_rows']} postings stranded"
+                    if dupe["stranded_rows"] else "no postings stranded")
+        lines.append(
+            f"⚠ duplicate firm rows for {dupe['name']!r} "
+            f"({', '.join(dupe['duplicates'])} alongside {dupe['canonical']}; "
+            f"{stranded} — no board resolves to them, so they never refresh "
+            f"or close, and they render as duplicate cards): fix with "
+            f"`manage.py merge_duplicate_firms --apply`"
+        )
     lines += enrichment_health()
     failing = repeat_failures()
     if failing:
@@ -257,6 +383,13 @@ def health_report() -> list[str]:
             f"{marker} bot-walled (operator requires a human check; not a "
             f"config bug and not an empty board — check by hand): "
             f"{', '.join(parts)}"
+        )
+    guarded = guarded_boards()
+    if guarded:
+        lines.append(
+            "· auto-close skipped on a partial list (board is healthy; these "
+            "firms' dead postings close via reverify instead of the nightly "
+            f"sweep, so they clear more slowly): {', '.join(guarded)}"
         )
     silent = boards_that_never_yield()
     if silent["broken"]:

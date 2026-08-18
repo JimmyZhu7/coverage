@@ -102,14 +102,23 @@ def _closing_this_week(user, *, today: date) -> list[dict]:
     same per-row shape (`_lens_item`, which already carries `stage_label` —
     the overlap rule's own answer to "a Saved role closing Friday is still
     just one row, correctly labeled, not duplicated or dropped")."""
-    from directory.deadlines import is_closing_soon
+    from directory.deadlines import is_closing_soon, is_posting_closed
     from directory.views import TRACK_CLOSED, _lens_item, _tracked_rows
 
     rows = _tracked_rows(user)
-    # LIVE rows only, same rule My Applications' lenses enforce: a finished
-    # application has no deadline urgency left in it, and a Done row in this
-    # section would put a dead role at the top of the email.
-    live = [uo for uo in rows if (uo.applied_status or "saved") != TRACK_CLOSED]
+    # LIVE rows only, same rule My Applications' lenses enforce, and now the
+    # same two-sided test: a finished application has no deadline urgency left
+    # in it (TRACK_CLOSED, the student's own "Done"), and neither has a
+    # posting the reverify pass watched the firm take down (is_posting_closed,
+    # a fact about the posting, not about the student). This section is
+    # headed "closing this week"; a role that closed LAST week under either
+    # meaning is not that, and advertising it as such is the email telling a
+    # student to hurry toward something already gone.
+    live = [
+        uo for uo in rows
+        if (uo.applied_status or "saved") != TRACK_CLOSED
+        and not is_posting_closed(uo.opportunity)
+    ]
     items = [
         _lens_item(uo, today=today)
         for uo in live

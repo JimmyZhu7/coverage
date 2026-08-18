@@ -22,6 +22,16 @@ reimplementing them, so each stays independently runnable and tested:
                       last month.
 5. `reverify`       — liveness-check the stalest open rows (capped).
 
+Then one piece of housekeeping, in-process rather than as a sixth command:
+stages 1 and 5 both append to `opportunity_changes`, which is append-only
+and would otherwise grow for as long as the cron runs. `OpportunityChange
+.prune` drops rows past the retention window at the end of every pass —
+`--prune-changes-older-than N` overrides the default (see
+`OpportunityChange.RETENTION_DAYS` for why it is 180 days), and 0 keeps
+everything, for an operator who wants a full season to analyse. This runs
+even when a stage above failed: a broken board is no reason to let a table
+grow unbounded.
+
 Stages 3 and 4 were missing from this chain for exactly one day and the gap
 was already visible: the newest posting on the board carried no description,
 no deadline and no facts, because the only enrichment run had been a manual
@@ -56,6 +66,13 @@ class Command(BaseCommand):
         # tomorrow — the queue is "rows with no detail_text yet", so it drains
         # by itself.
         parser.add_argument("--enrich-limit", type=int, default=400)
+        # Retention for the append-only `opportunity_changes` table. Left
+        # unset it uses `OpportunityChange.RETENTION_DAYS`; 0 disables the
+        # sweep entirely and keeps every record.
+        parser.add_argument("--prune-changes-older-than", type=int, default=None,
+                            help="Delete OpportunityChange rows older than this "
+                                 "many days (default: the model's RETENTION_DAYS; "
+                                 "0 keeps everything).")
 
     def handle(self, *args, **opts):
         failures = []
@@ -80,6 +97,19 @@ class Command(BaseCommand):
             except Exception as exc:  # noqa: BLE001 — carry on; report at the end
                 failures.append((label, str(exc)))
                 self.stderr.write(self.style.WARNING(f"{label} failed: {exc}"))
+        # Housekeeping, and deliberately BEFORE the failure exit below:
+        # stages 1 and 5 both append to `opportunity_changes`, so a pass
+        # that skipped retention because some unrelated board broke would
+        # let the table grow for as long as the breakage lasted — which is
+        # exactly the stretch nobody is watching it.
+        from directory.models import OpportunityChange
+
+        pruned = OpportunityChange.prune(
+            older_than_days=opts["prune_changes_older_than"]
+        )
+        if pruned:
+            self.stdout.write(f"pruned {pruned} change record(s) past retention")
+
         if failures:
             raise SystemExit(f"refresh finished with failures: {[f[0] for f in failures]}")
 

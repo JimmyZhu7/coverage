@@ -48,11 +48,15 @@ def _sub(user, endpoint="https://push.example.com/1", **kw):
     )
 
 
-def _tracked(user, *, n=1, days, applied_status="saved"):
+def _tracked(user, *, n=1, days, applied_status="saved", status="open"):
+    """`status` is the POSTING's (`Opportunity.status`, written by the nightly
+    reverify pass); `applied_status` is the STUDENT's own funnel stage. Two
+    unrelated facts that both spell "closed" — see directory/views.py's
+    TRACK_CLOSED comment."""
     firm = Firm.objects.create(name=f"Firm {n}", slug=f"firm-{n}")
     o = Opportunity.objects.create(
         firm=firm, url=f"https://x/{n}", title=f"Summer Analyst {n}",
-        bucket="internship", status="open", deadline=TODAY + timedelta(days=days),
+        bucket="internship", status=status, deadline=TODAY + timedelta(days=days),
     )
     UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status=applied_status)
     return o
@@ -249,3 +253,77 @@ def test_explicit_days_argument_overrides_the_default_window():
         _run("--days", "3")
 
     mock_webpush.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# The posting the firm already took down.
+#
+# The incident: `_due_rows` filtered on the student's own funnel stage
+# (TRACK_CLOSED, "Done") and never on `Opportunity.status`, which the nightly
+# reverify pass writes when a firm pulls a posting. A student's phone raised
+# "Goldman Sachs Summer Analyst closes in 2 days" for a role that had died the
+# night before, naming a deadline that no longer belonged to anything.
+# ---------------------------------------------------------------------------
+
+@override_settings(**VAPID_SETTINGS)
+def test_a_posting_the_firm_closed_is_never_pushed():
+    """The bug itself: a scraper-closed posting sitting exactly on T-7."""
+    user = _user("dead@example.com")
+    _sub(user)
+    _tracked(user, days=7, status="closed")
+
+    with patch("accounts.push.webpush") as mock_webpush:
+        out = _run()
+
+    mock_webpush.assert_not_called()
+    assert "nothing due" in out
+
+
+@override_settings(**VAPID_SETTINGS)
+def test_a_closed_posting_is_silent_at_every_funnel_stage():
+    """Including for a student who already submitted. They still care about
+    the role, and it stays on their list saying so, but a push is an
+    instruction to act before a door shuts and that door is shut."""
+    user = _user("applied@example.com")
+    _sub(user)
+    _tracked(user, n=1, days=7, applied_status="submitted", status="closed")
+    _tracked(user, n=2, days=2, applied_status="interview", status="closed")
+
+    with patch("accounts.push.webpush") as mock_webpush:
+        _run()
+
+    mock_webpush.assert_not_called()
+
+
+@override_settings(**VAPID_SETTINGS)
+def test_a_posting_the_scraper_never_rechecked_still_pushes():
+    """The over-filtering guard, and the reason the rule is `== "closed"`
+    rather than `!= "open"`. `Opportunity.status` is a bare CharField
+    defaulting to "", so a row no reverify pass has reached carries neither
+    value — reading blank as "not open" would silence the alerts for every
+    one of them, which is a bigger outage than the bug being fixed."""
+    user = _user("blank@example.com")
+    _sub(user)
+    _tracked(user, days=7, status="")
+
+    with patch("accounts.push.webpush") as mock_webpush:
+        _run()
+
+    mock_webpush.assert_called_once()
+
+
+@override_settings(**VAPID_SETTINGS)
+def test_an_open_posting_beside_a_closed_one_still_gets_its_push():
+    """Guards the filter against over-reach in the other direction: one dead
+    row in a student's list must not suppress the live rows next to it."""
+    user = _user("mixed@example.com")
+    _sub(user)
+    _tracked(user, n=1, days=7, status="closed")
+    live = _tracked(user, n=2, days=7, status="open")
+
+    with patch("accounts.push.webpush") as mock_webpush:
+        _run()
+
+    mock_webpush.assert_called_once()
+    _, kwargs = mock_webpush.call_args
+    assert live.title in kwargs["data"]

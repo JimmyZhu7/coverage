@@ -8,8 +8,11 @@ design, concretely"). Plain `models.Model` / default manager throughout;
 
 from __future__ import annotations
 
+from datetime import date as _date, timedelta
+
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
+from django.utils import timezone
 
 
 class Firm(models.Model):
@@ -131,6 +134,155 @@ class Opportunity(models.Model):
 
     def __str__(self) -> str:
         return f"{self.firm.name} — {self.title}"
+
+
+class OpportunityChange(models.Model):
+    """Append-only, row-level record of what actually MOVED on a posting.
+
+    The scan has always known, per row, and always threw it away.
+    `ingest._apply_opportunity` computes a `content_hash` and then decides
+    two things outright on every one of the ~17,000 rows a full pass
+    touches — `was_closed = existing.status == "closed"` and `changed =
+    existing.content_hash != h` — before spending both on
+    `stats["updated"] += 1` and moving on. `ScrapeRun.stats` was the only
+    trace a scrape left behind, and it holds counts (`created`, `updated`,
+    `unchanged`, `reopened`, `closed`) plus firm-level error dicts. Not one
+    field in it can answer *which* posting, so nothing downstream could
+    ever learn that a particular role's deadline had moved or that it had
+    died. The evidence was computed and discarded, four times a day.
+
+    The gap is not academic. A student tracks a role; the pass overwrites
+    its `deadline` with a fresher one from the provider (`reverify` does
+    exactly that, and the old date is gone the instant the new one is
+    written) or flips `status` to "closed". Every consumer then reads the
+    new row as though it had always said that. Nobody is told the date
+    moved, because there was no table to tell them from.
+
+    This is that table. One row per field that genuinely moved, written by
+    the stage that moved it, carrying the value before and the value after.
+
+    What it deliberately does NOT record:
+
+    - **Unchanged postings.** The overwhelming majority of any pass is rows
+      that did not move. A change row apiece would be ~17,000 writes a run
+      recording, precisely, nothing. Only real moves land here.
+    - **Creations.** A new posting has no "before" to record, and
+      `first_seen` already dates it. Writing every field of every row on a
+      fresh catalog's first scrape would bury the actual signal under the
+      import.
+
+    Values are stored as TEXT and rendered through `render_value`: a date
+    becomes its ISO string, a status its own word, a title itself. That
+    follows `FirmDate.history` — the one history-shaped structure that
+    predates this model — which coerces every observation field with
+    `str(...)` and stamps time with `.isoformat()` (see
+    `import_firm_dates`). `""` means "no value" on either side, which is
+    how a deadline dropped to NULL round-trips honestly instead of
+    vanishing into an untyped null.
+    """
+
+    # Which pipeline stage wrote the row. The point of naming the stage is
+    # that the same field moves for materially different reasons: a
+    # `deadline` rewritten by `reverify` is the provider's own verify
+    # endpoint stating a fresh date, while one dropped by `scrape` is our
+    # unverified reading of prose being retracted (see ingest's
+    # no-downgrade rules). A consumer that cannot tell them apart cannot
+    # decide which is worth waking a student for.
+    STAGE_SCRAPE = "scrape"
+    STAGE_SCRAPE_CLOSE = "scrape.close"
+    STAGE_REVERIFY = "reverify"
+
+    # Half a year. The longest question anything asks of this table is "did
+    # this move during my recruiting cycle", and a cycle runs from the
+    # August kickoff to the following spring — 180 days covers one end to
+    # end with room at both ends. Beyond that a row is history rather than
+    # evidence: the posting it describes has almost certainly closed and
+    # the student who tracked it has moved into the next cycle. At a few
+    # hundred real moves per pass and four passes a day this settles at a
+    # few hundred thousand rows and stops growing, which is the whole
+    # point — an append-only table on a 6-hourly cron with no answer for
+    # its own growth is a slow outage. `refresh` calls `prune` at the end
+    # of every scheduled pass; `--prune-changes-older-than` overrides the
+    # window, and 0 disables the sweep for an operator who wants to keep
+    # a full season for analysis.
+    RETENTION_DAYS = 180
+
+    opportunity = models.ForeignKey(
+        Opportunity, on_delete=models.CASCADE, related_name="changes"
+    )
+    field = models.CharField(max_length=32)
+    old_value = models.TextField(blank=True, default="")
+    new_value = models.TextField(blank=True, default="")
+    stage = models.CharField(max_length=32)
+    # Free-text reason, where the field name alone understates what
+    # happened — "absent from a complete fetch" is a very different close
+    # from the provider's verify endpoint saying so out loud.
+    note = models.TextField(blank=True, default="")
+    # Passed in by the writer, never `auto_now_add`: one pass stamps a
+    # single `now` across every row it touches, and that shared timestamp
+    # is what makes "everything run N moved" a groupable question.
+    observed_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "opportunity_changes"
+        # `-id` is the tiebreak that makes the order total: a whole pass
+        # shares one `observed_at`, so sorting on it alone leaves the rows
+        # within a run in whatever order the database feels like.
+        ordering = ["-observed_at", "-id"]
+        indexes = [
+            # "what has moved on this posting" — the tracked-role timeline.
+            models.Index(fields=["opportunity", "-observed_at"], name="opp_change_opp_seen_idx"),
+            # "every deadline that moved since ..." — the alert/digest sweep.
+            models.Index(fields=["field", "-observed_at"], name="opp_change_field_seen_idx"),
+            # `prune`'s cutoff scan.
+            models.Index(fields=["observed_at"], name="opp_change_seen_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.field}: {self.old_value or '∅'} -> {self.new_value or '∅'}"
+
+    @staticmethod
+    def render_value(value) -> str:
+        """A stored value's honest text form. `None` -> `""` ("no value",
+        the same convention `FirmDate.history` uses for a known-unknown
+        date), dates -> ISO, everything else -> `str`."""
+        if value is None:
+            return ""
+        if isinstance(value, _date):  # covers datetime, which subclasses date
+            return value.isoformat()
+        return str(value)
+
+    @classmethod
+    def entry(cls, opportunity_id: int, field: str, old, new, *,
+              stage: str, at, note: str = "") -> "OpportunityChange":
+        """An UNSAVED change row, values rendered. Callers accumulate these
+        and `bulk_create` once per pass — a scrape that wrote them one at a
+        time would add a query per move to a job already doing ~17,000."""
+        return cls(
+            opportunity_id=opportunity_id,
+            field=field,
+            old_value=cls.render_value(old),
+            new_value=cls.render_value(new),
+            stage=stage,
+            note=note,
+            observed_at=at,
+        )
+
+    @classmethod
+    def prune(cls, *, older_than_days: int | None = None, now=None) -> int:
+        """Delete change rows past the retention window; returns how many.
+
+        `older_than_days=0` (or negative) is an explicit "keep everything"
+        and deletes nothing, so an operator can disable the sweep without
+        having to remove the call. In steady state each run only removes
+        the slice that aged out since the last one, so the queryset
+        `.delete()` walks is small however large the table gets.
+        """
+        days = cls.RETENTION_DAYS if older_than_days is None else older_than_days
+        if days <= 0:
+            return 0
+        cutoff = (now or timezone.now()) - timedelta(days=days)
+        return cls.objects.filter(observed_at__lt=cutoff).delete()[0]
 
 
 class FirmDate(models.Model):

@@ -50,6 +50,7 @@ from directory.deadlines import (
     CLOSING_SOON_DAYS,
     closing_soon_window,
     is_closing_soon,
+    is_posting_closed,
 )
 from directory.dupes import fold_duplicates
 from directory.facts import paragraphs
@@ -2446,6 +2447,45 @@ def _urgency_band(days_left):
     return {"key": "later", "label": ""}
 
 
+def _posting_closed_note(uo) -> dict | None:
+    """How one tracked row says "the firm took this posting down", or None
+    when it hasn't been taken down.
+
+    WHICH "CLOSED" THIS IS. `Opportunity.status == "closed"` — the nightly
+    reverify pass observing the posting is gone. NOT `applied_status ==
+    TRACK_CLOSED` (the "Done" stage above), which is the student's own
+    marking. Every surface that read a student's tracked roles checked only
+    the second, so a role the firm killed last night rendered here exactly
+    like a live one.
+
+    SUBMITTED AND SAVED ARE NOT THE SAME NEWS, so they don't get the same
+    sentence. A posting closing after you applied is the expected next thing
+    that happens to it; your application is untouched, and telling that
+    student "no longer accepting applications" invents a loss where there
+    isn't one. A posting closing while it was only ever saved is a door
+    shutting on something they never got through. One fact, two meanings, and
+    the copy is the only place that difference can live — the row is marked
+    either way, and neither one is hidden or deleted.
+
+    The wording tracks `templates/directory/_role_drawer.html`'s closed
+    caution deliberately: that is the same sentence about the same fact, one
+    click away on this same page, and two phrasings would read as two
+    different findings.
+    """
+    o = uo.opportunity
+    if not is_posting_closed(o):
+        return None
+    submitted = (uo.applied_status or "saved") in _FUNNEL_STATES
+    when = f", confirmed {timesince(o.closed_at)} ago" if o.closed_at else ""
+    tail = ("Your application still stands." if submitted
+            else "It's no longer accepting applications.")
+    return {
+        "submitted": submitted,
+        "label": "Closed",
+        "note": f"This posting is closed{when}. {tail}",
+    }
+
+
 def _lens_item(uo, *, today):
     """One row as it appears in a deadline lens (Closing Soon / Rolling).
 
@@ -2480,6 +2520,11 @@ def _lens_item(uo, *, today):
         # surface that knew nothing about sponsorship, pay or a language wall.
         "facts": _fact_chips(o),
         "has_text": bool((o.raw or {}).get("detail_text")),
+        # Set only when the SCRAPER has confirmed the posting gone. The
+        # countdown above stays as-is and the template renders this instead of
+        # it: "closes in 3 days" on a posting that is already down is the lie
+        # this whole change exists to stop.
+        "posting_closed": _posting_closed_note(uo),
     }
 
 
@@ -2502,6 +2547,11 @@ def _stage_card(uo, *, today) -> dict:
         "reported": deadline_provenance(o),
         "facts": _fact_chips(o),
         "has_text": bool((o.raw or {}).get("detail_text")),
+        # The funnel sections are the partition — every tracked row shows up
+        # in exactly one of them, including rows in no lens at all. Without
+        # this a scraper-closed posting was indistinguishable from a live one
+        # in the one section a student is guaranteed to read.
+        "posting_closed": _posting_closed_note(uo),
     }
 
 
@@ -2570,7 +2620,16 @@ def my_applications(request):
 
     Done rows are excluded from both lenses. A finished application has no
     deadline urgency left in it, and letting one back into Closing Soon would
-    put a dead role at the top of the page."""
+    put a dead role at the top of the page.
+
+    POSTING CLOSED is the fifth lens and the second meaning of "dead". Done is
+    the student's own marking; `Opportunity.status == "closed"` is the nightly
+    reverify pass watching the firm take the posting down, which no surface on
+    this page ever read — so a role that died last night sat in Closing Soon
+    counting down to a deadline it no longer had. Those rows are moved, never
+    dropped: a tracked role is the student's own record, and deleting one they
+    may have actually applied to would be a far worse bug than the one being
+    fixed here. They stay in their funnel stage too, marked there as well."""
     today = timezone.localdate()
     rows = _tracked_rows(request.user)
 
@@ -2604,8 +2663,16 @@ def my_applications(request):
 
     # The lenses read the LIVE rows only (everything that isn't Done).
     live = [uo for uo in rows if (uo.applied_status or "saved") != TRACK_CLOSED]
+    # A posting the reverify pass has confirmed gone has no deadline urgency
+    # left in it for anyone, so it leaves the four dated lenses and gets its
+    # own below. Partitioned HERE, once, rather than tested inside each of the
+    # four: the fractions printed beside every lens ("1 of 12 live") invite
+    # the student to subtract, so a row that quietly vanished from all four
+    # would leave a hole they can find. Five lenses, still one partition.
+    shut_rows = [uo for uo in live if is_posting_closed(uo.opportunity)]
+    dated = [uo for uo in live if not is_posting_closed(uo.opportunity)]
     closing = [
-        _lens_item(uo, today=today) for uo in live
+        _lens_item(uo, today=today) for uo in dated
         if is_closing_soon(uo.opportunity.deadline, today=today)
     ]
     closing.sort(key=lambda i: (i["days_left"], i["firm_name"].lower()))
@@ -2614,7 +2681,7 @@ def my_applications(request):
     # calling it rolling would be a small lie about the posting. Rolling roles
     # carry no countdown and are never styled as overdue.
     rolling = [
-        _lens_item(uo, today=today) for uo in live
+        _lens_item(uo, today=today) for uo in dated
         if uo.opportunity.deadline is None
     ]
     # The two lenses above leave a hole, and the fractions printed beside them
@@ -2624,17 +2691,23 @@ def my_applications(request):
     # Both get a lens, so every live row is accounted for on this band.
     window_first, window_last = closing_soon_window(today)
     later = [
-        _lens_item(uo, today=today) for uo in live
+        _lens_item(uo, today=today) for uo in dated
         if uo.opportunity.deadline is not None
         and uo.opportunity.deadline > window_last
     ]
     later.sort(key=lambda i: (i["days_left"], i["firm_name"].lower()))
     passed = [
-        _lens_item(uo, today=today) for uo in live
+        _lens_item(uo, today=today) for uo in dated
         if uo.opportunity.deadline is not None
         and uo.opportunity.deadline < window_first
     ]
     passed.sort(key=lambda i: (i["days_left"], i["firm_name"].lower()))
+    # Sorted by firm, not by days_left: a closed posting's countdown is the
+    # one number on the row that means nothing any more, and half of these
+    # rows carry no deadline at all (a rolling role can be pulled too), so
+    # `days_left` is None for them and would not sort against an int.
+    shut = [_lens_item(uo, today=today) for uo in shut_rows]
+    shut.sort(key=lambda i: (i["firm_name"].lower(), i["title"].lower()))
 
     # Read down the band and you read down the calendar: what has gone, what
     # is going, what is coming, what never had a date. `empty_state` is what
@@ -2642,6 +2715,18 @@ def my_applications(request):
     # coaching: go find roles that close soon / everything you track is dated)
     # from the two that are just noise when empty.
     lenses = [
+        # First in the band because it is the most finished thing on it: the
+        # other four are degrees of "when", this one is "never again". Keyed
+        # `posting_closed`, NOT `closed`, so it can never be confused at a
+        # call site or in a test with the `closed` STAGE below, which is the
+        # student's own Done marking and a different fact entirely.
+        {
+            "key": "posting_closed",
+            "label": "Posting Closed",
+            "items": shut,
+            "note": "The firm took these down. They stay on your list; they just aren't live.",
+            "empty_state": False,
+        },
         {
             "key": "passed",
             "label": "Deadline Passed",

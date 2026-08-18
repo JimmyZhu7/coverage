@@ -308,6 +308,11 @@
      mark it identically. */
   .cal-ev-tracked.is-reported .cal-ev-title {
     text-decoration: underline dotted currentColor; text-underline-offset: 2px; }
+  /* The firm pulled this posting. It keeps its place on the day (it is still
+     the student's tracked role) and loses the urgency bar it no longer earns
+     — the red rail is what makes a deadline row read as something to act on,
+     and there is nothing to act on here. */
+  .cal-ev-tracked.is-shut { border-left-color: var(--line-strong); color: var(--ink-2); }
   .cal-ev-time { font-family: var(--font-mono); font-size: var(--fs-nano); color: var(--ink-3);
     flex: none; letter-spacing: -0.02em; }
   .cal-ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;

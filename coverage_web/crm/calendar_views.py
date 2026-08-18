@@ -44,6 +44,7 @@ from django.views.decorators.http import require_POST
 
 from analytics.models import UserOpportunity
 from core.templatetags.textstyle import smart_title
+from directory.deadlines import is_posting_closed
 from directory.dupes import fold_duplicates
 from directory.models import FirmDate
 
@@ -173,6 +174,11 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             "url": opp.url,
             "stage": uo.applied_status or "saved",
             "reported": _is_reported(opp),
+            # The grid said "closes this day" about postings the firm had
+            # already pulled. The row stays (it is the student's own tracked
+            # role, and a date they may still be planning around); what
+            # changes is that it stops claiming to be a live deadline.
+            "posting_closed": is_posting_closed(opp),
         })
 
     for day in buckets:
@@ -227,6 +233,16 @@ def _tracked_deadlines(user, first: date, last: date):
     is history. The status string is written in exactly one place; it is
     matched here as a literal rather than imported to keep the directory app
     out of the CRM's import graph.
+
+    A posting the SCRAPER has closed (`Opportunity.status`, a different fact
+    from the `applied_status` matched above — see
+    `directory.deadlines.is_posting_closed`) deliberately still comes back
+    from this query. Both callers need the row: the grid marks it, and the
+    .ics feed retitles it rather than dropping a VEVENT out from under a
+    calendar the student already subscribed to. What neither does any more is
+    alarm on it. Filtering here would have been the shorter patch and the
+    wrong one — it would have deleted the row from their calendar instead of
+    telling them the truth about it.
     """
     return (UserOpportunity.objects.for_user(user)
             .filter(dismissed=False,
@@ -561,28 +577,55 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
     # Layer 4 — the roles this user tracks, on the day they close. These are
     # the rows that most deserve the alarm: a starred posting is a stated
     # intention, and this feed is what turns it into a reminder.
+    #
+    # A POSTING THE FIRM HAS PULLED IS RETITLED, NOT DROPPED. Three options
+    # were on the table and the other two are worse:
+    #
+    #   * Omit the VEVENT. This feed is SUBSCRIBED — the event is already
+    #     sitting in the student's own calendar app, so omitting it deletes it
+    #     from their week at the next refresh, silently and with no way to ask
+    #     why. A thing that vanishes teaches you to distrust the feed; the
+    #     entry that says what happened teaches you what happened.
+    #   * STATUS:CANCELLED. Semantically the closest iCalendar has, but client
+    #     behaviour splits: some strike it through, some hide it, some drop it
+    #     outright — which lands us back at a silent disappearance on exactly
+    #     the phones this feed exists for.
+    #
+    # So the event stays on its day, says "Closed:" first, and raises no
+    # alarm. The alarm is the only part that was actively harmful: a VALARM is
+    # a phone waking someone up to act, and there is nothing left to do.
     for uo in _fold_tracked(
         list(_tracked_deadlines(user, window_start.date(), window_end.date()))
     ):
         opp = uo.opportunity
         # The marker rides in the SUMMARY, not the description: a phone
         # notification shows the summary and nothing else, and that
-        # notification is the whole reason this feed exists.
+        # notification is the whole reason this feed exists. Same argument
+        # puts "Closed:" at the FRONT rather than tensing the verb — "closes"
+        # against "closed" is one character on a lock screen, which is no
+        # signal at all.
         reported = _is_reported(opp)
-        summary = f"{_role_label(opp)} closes" + (" (reported)" if reported else "")
+        closed = is_posting_closed(opp)
+        summary = (f"Closed: {_role_label(opp)}" if closed
+                   else f"{_role_label(opp)} closes"
+                        + (" (reported)" if reported else ""))
         lines += ["BEGIN:VEVENT",
                   f"UID:coverage-uo-{uo.id}@coverage.app",
                   f"DTSTAMP:{stamp}",
                   f"SUMMARY:{esc(summary)}",
                   f"DTSTART;VALUE=DATE:{opp.deadline:%Y%m%d}"]
         note = ("Read from the posting's own text, not a field the board "
-                "published.\n" if reported else "")
+                "published.\n" if reported and not closed else "")
+        if closed:
+            note = ("The firm has taken this posting down. It stays on your "
+                    "calendar so the date still makes sense.\n")
         if opp.url:
             lines += [f"URL:{esc(opp.url)}",
                       f"DESCRIPTION:{esc(note + opp.url)}"]
         elif note:
             lines.append(f"DESCRIPTION:{esc(note)}")
-        lines += alarms(summary)
+        if not closed:
+            lines += alarms(summary)
         lines.append("END:VEVENT")
 
     lines.append("END:VCALENDAR")

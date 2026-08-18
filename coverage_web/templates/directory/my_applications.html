@@ -137,6 +137,15 @@
      shared component in coverage.css. */
   .lens-facts { display: inline-flex; flex-wrap: wrap; gap: 4px;
     margin-left: var(--s2); vertical-align: middle; }
+  /* A pulled posting keeps its row and loses its urgency styling: the left
+     rail and the coloured countdown are what make a lens row read as
+     something to do this week. Muted, not hidden — the row is still the
+     student's own tracked role and still opens the posting. */
+  .apps-lens-row.is-shut { border-left-color: var(--line-strong); }
+  .apps-lens-row.is-shut .lens-role a { color: var(--ink-2); }
+  .lens-when.lens-shut { color: var(--ink-3); }
+  .lens-shut-note { display: block; margin-top: 2px; font-size: var(--fs-xs);
+    color: var(--ink-2); text-transform: none; letter-spacing: 0; }
   .lens-read { margin-left: var(--s2); }
   .apps-read { align-self: flex-start; }
   /* The funnel cards' own countdown and chips. Compact, because these cards
@@ -211,6 +220,18 @@
   .apps-stage.stage-closed .apps-title a { color: var(--ink-2); }
   .apps-done-mark { font-size: var(--fs-micro); text-transform: uppercase;
     letter-spacing: 0.06em; font-weight: var(--w-med); color: var(--ink-3); }
+  /* The firm pulled the posting. A full sentence rather than a pill like
+     `.apps-done-mark` above, because the two marks say genuinely different
+     things and this one's wording changes with the funnel stage (see
+     `_posting_closed_note` in views.py) — a three-word chip can't carry that,
+     and a student reading a bare CLOSED beside an application they submitted
+     would reasonably think they had lost it.
+
+     The copy itself is deliberately NOT quoted in this comment: the page
+     inlines its stylesheet, so a comment repeating a user-facing string makes
+     that string impossible to assert the absence of. */
+  .apps-shut-mark { display: block; margin-top: var(--s1); font-size: var(--fs-xs);
+    color: var(--ink-2); }
 </style>
 {% endblock %}
 
@@ -286,9 +307,17 @@
           {% if lens.items %}
             <ul class="apps-lens-list">
               {% for r in lens.items %}
-                <li class="apps-lens-row u-{{ r.urgency.key }}">
-                  <span class="lens-when{% if not r.deadline.posted %} lens-rolling{% endif %}">
-                    {% if r.deadline.posted %}
+                <li class="apps-lens-row u-{{ r.urgency.key }}{% if r.posting_closed %} is-shut{% endif %}">
+                  <span class="lens-when{% if not r.deadline.posted and not r.posting_closed %} lens-rolling{% endif %}{% if r.posting_closed %} lens-shut{% endif %}">
+                    {% if r.posting_closed %}
+                      {% comment %}The firm took this posting down, so the
+                      countdown beside it is the one number on the row that
+                      means nothing now. It is replaced rather than dressed:
+                      "closes in 3 days" on a dead posting is the exact lie
+                      this page used to tell.{% endcomment %}
+                      <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M3.8 3.8l8.4 8.4" stroke-linecap="round"/></svg>
+                      <span>Closed</span>
+                    {% elif r.deadline.posted %}
                       {% if r.urgency.key == 'now' %}
                         <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 2.2 15 14H1L8 2.2Z" stroke-linejoin="round"/><path d="M8 6.6v3.1" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".85" fill="currentColor" stroke="none"/></svg>
                       {% else %}
@@ -312,6 +341,12 @@
                   <span class="lens-role">
                     <a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a>
                     <span class="lens-firm">{{ r.firm_name|smart_title }}{% if r.location %} · {{ r.location|smart_location }}{% endif %}</span>
+                    {% comment %}Same sentence the role drawer shows for the
+                    same fact one click away, and it changes with the stage:
+                    a posting closing after you applied leaves your
+                    application standing, which is a different piece of news
+                    from a posting closing on one you only saved.{% endcomment %}
+                    {% if r.posting_closed %}<span class="lens-shut-note">{{ r.posting_closed.note }}</span>{% endif %}
                     {% comment %}What the posting states about applying, same
                     chips as the feed and the firm page. This page is where a
                     student decides what to do this week, and it knew none of
@@ -359,6 +394,12 @@
                 only thing telling two saves apart.{% endcomment %}
                 {% if uo.location %}<span class="apps-loc">{{ uo.location|smart_location }}</span>{% endif %}
                 {% if stage.key == 'closed' %}<span class="apps-done-mark">Done, no longer live</span>{% endif %}
+                {% comment %}Two different "closed" can be true of one card and
+                they are marked separately on purpose. Above: the student put
+                this in Done themselves. Below: the firm took the posting down,
+                which the scraper saw and no surface here ever said. A row can
+                carry both, one, or neither.{% endcomment %}
+                {% if uo.posting_closed %}<span class="apps-shut-mark">{{ uo.posting_closed.note }}</span>{% endif %}
 
                 {% comment %}
                 When it closes, and what the posting states about applying.
@@ -366,7 +407,10 @@
                 with a deadline nine days out and say nothing about it, while
                 the lens band above showed exactly that for the same row.
                 {% endcomment %}
-                {% if uo.deadline.posted %}
+                {% comment %}`not uo.posting_closed`: a countdown on a posting
+                the firm has already pulled is a live-sounding number attached
+                to nothing. The closed sentence above replaces it.{% endcomment %}
+                {% if uo.deadline.posted and not uo.posting_closed %}
                   <span class="apps-when{% if uo.deadline.past %} is-past{% endif %}{% if uo.reported %} is-reported{% endif %}"
                         {% if uo.reported %}title="{{ uo.reported.why }}"{% endif %}>{{ uo.deadline.countdown|capfirst }}{% if uo.reported %}<span class="vh"> ({{ uo.reported.label }})</span>{% endif %}</span>
                 {% endif %}

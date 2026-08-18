@@ -35,10 +35,13 @@ def _firm(name="Evercore", slug="evercore"):
     return Firm.objects.create(name=name, slug=slug)
 
 
-def _opp(firm, n=1, *, days=None, bucket="internship"):
+def _opp(firm, n=1, *, days=None, bucket="internship", status="open"):
+    """`status` is the POSTING's own (`Opportunity.status`, written by the
+    nightly reverify pass when a firm takes a listing down) — not the
+    student's funnel stage, which is `UserOpportunity.applied_status`."""
     return Opportunity.objects.create(
         firm=firm, url=f"https://x/{firm.slug}/{n}", title=f"Summer Analyst {n}",
-        bucket=bucket, status="open",
+        bucket=bucket, status=status,
         deadline=None if days is None else TODAY + timedelta(days=days),
     )
 
@@ -250,3 +253,60 @@ def test_an_already_tracked_role_is_never_recommended_as_new():
     pick_titles = [p["title"] for p in digest["picks"] if p["firm_name"] == "Evercore"]
     assert untracked.title in pick_titles
     assert tracked.title not in pick_titles
+
+
+# ---------------------------------------------------------------------------
+# "Closing this week" must mean a role that can still be applied to.
+#
+# The incident: _closing_this_week partitioned on the student's own Done
+# marking and never on `Opportunity.status`, so a posting the firm had already
+# taken down was advertised in the retention email as closing this week — the
+# digest telling a student to hurry toward something already gone.
+# ---------------------------------------------------------------------------
+
+def test_a_posting_the_firm_closed_is_not_advertised_as_closing_this_week():
+    user = _user()
+    o = _opp(_firm(), days=3, status="closed")
+    UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+
+    assert assemble_digest(user, today=TODAY) is None
+
+
+def test_a_closed_posting_is_dropped_from_the_digest_at_every_funnel_stage():
+    """A student who submitted still cares about the role, but "closing this
+    week" is a claim about the deadline, and the deadline stopped meaning
+    anything when the firm pulled the posting."""
+    user = _user()
+    firm = _firm()
+    for n, stage in enumerate(("submitted", "interview", "offer"), start=1):
+        o = _opp(firm, n=n, days=3, status="closed")
+        UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status=stage)
+
+    assert assemble_digest(user, today=TODAY) is None
+
+
+def test_a_posting_the_scraper_never_rechecked_still_closes_this_week():
+    """The over-filtering guard. `Opportunity.status` defaults to "" and most
+    rows have never been reverified, so the rule has to be `== "closed"`, not
+    `!= "open"` — otherwise the digest empties itself for nearly everyone."""
+    user = _user()
+    o = _opp(_firm(), days=3, status="")
+    UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+
+    digest = assemble_digest(user, today=TODAY)
+    assert digest is not None
+    assert len(digest["closing"]) == 1
+
+
+def test_an_open_role_beside_a_closed_one_still_reaches_the_digest():
+    """One dead row must not suppress the live rows next to it."""
+    user = _user()
+    firm = _firm()
+    dead = _opp(firm, n=1, days=3, status="closed")
+    live = _opp(firm, n=2, days=4, status="open")
+    for o in (dead, live):
+        UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+
+    digest = assemble_digest(user, today=TODAY)
+    assert digest is not None
+    assert [i["title"] for i in digest["closing"]] == [live.title]

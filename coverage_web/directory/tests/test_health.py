@@ -253,3 +253,143 @@ def test_a_pass_that_read_nothing_it_queued_is_not_a_healthy_pass():
 def test_a_pass_failing_more_than_it_reads_is_reported():
     _enrich_run(queued=100, fetched=20, unreachable=80)
     assert any("unreachable" in line for line in health.enrichment_health())
+
+
+# ---------------------------------------------------------------------------
+# Duplicate firm rows. The live split (ids 199 `td` / 207 `td-closed`, both
+# "TD Securities") put 1,258 postings open on both sides at once — duplicate
+# cards in the feed, and the 207 side unreachable by any board, so those rows
+# never refresh and never close. The resolver fix stopped it widening; nothing
+# said it was there.
+# ---------------------------------------------------------------------------
+
+def test_two_firms_sharing_a_name_are_reported_with_the_canonical_named():
+    Firm.objects.create(slug="td", name="TD Securities")
+    Firm.objects.create(slug="td-closed", name="TD Securities")
+
+    found = health.duplicate_firms()
+
+    assert len(found) == 1
+    assert found[0]["name"] == "TD Securities"
+    # Canonical is the oldest row, which is what every board resolves to.
+    assert found[0]["canonical"] == "td"
+    assert found[0]["duplicates"] == ["td-closed"]
+
+
+def test_distinctly_named_firms_report_nothing():
+    """The healthy case, and the one that runs nightly."""
+    Firm.objects.create(slug="gs", name="Goldman Sachs")
+    Firm.objects.create(slug="ms", name="Morgan Stanley")
+
+    assert health.duplicate_firms() == []
+
+
+def test_the_stranded_count_covers_only_the_unreachable_copy():
+    """The canonical firm's postings are fine — a board still resolves to
+    them every run. Only the duplicate's rows are frozen, so only those are
+    what the operator needs the number for."""
+    canonical = Firm.objects.create(slug="td", name="TD Securities")
+    stranded = Firm.objects.create(slug="td-closed", name="TD Securities")
+    for i in range(3):
+        Opportunity.objects.create(firm=canonical, url=f"https://x/c{i}",
+                                   title="SA", bucket="internship", status="open")
+    for i in range(2):
+        Opportunity.objects.create(firm=stranded, url=f"https://x/s{i}",
+                                   title="SA", bucket="internship", status="open")
+    # A closed row is already dead; it is not what "stranded" is counting.
+    Opportunity.objects.create(firm=stranded, url="https://x/s-dead",
+                               title="SA", bucket="internship", status="closed")
+
+    assert health.duplicate_firms()[0]["stranded_rows"] == 2
+
+
+def test_a_name_collision_is_caught_regardless_of_casing():
+    """`_FirmResolver` matches case-insensitively, so a casing difference
+    splits postings exactly the same way a byte-identical name does."""
+    Firm.objects.create(slug="td", name="TD Securities")
+    Firm.objects.create(slug="td-2", name="td securities")
+
+    assert len(health.duplicate_firms()) == 1
+
+
+def test_the_report_names_the_command_that_fixes_it():
+    """A warning the reader cannot act on is noise. This one is fixable from
+    here, so it says how."""
+    Firm.objects.create(slug="td", name="TD Securities")
+    Firm.objects.create(slug="td-closed", name="TD Securities")
+
+    line = next(l for l in health.health_report() if "duplicate firm rows" in l)
+
+    assert "merge_duplicate_firms --apply" in line
+    assert line.startswith("⚠")
+
+
+# ---------------------------------------------------------------------------
+# Guard notices are not failures. The ingest's truncation and suspicious-wipe
+# guards write into `stats["errors"]` when they DECLINE to auto-close on an
+# incomplete list — the fetch succeeded. Measured 2026-08-18: J.P. Morgan and
+# Lazard, both healthy, had been ringing the "failing every run / stale data"
+# alarm continuously because every `errors` entry counted as a failure.
+# ---------------------------------------------------------------------------
+
+_TRUNCATED = ("board reported more results than one fetch returns; "
+              "skipped auto-close (partial list)")
+_WIPE_GUARD = ("fetch ok but 0 rows while postings are open; "
+               "skipped auto-close (suspected shape change)")
+
+
+def _run_with(errors, *, ago_minutes=0):
+    """`_run` builds every error as a timeout; these need real messages."""
+    return ScrapeRun.objects.create(
+        connector="all",
+        started=timezone.now() - timedelta(minutes=ago_minutes),
+        status="partial",
+        stats={"errors": errors},
+    )
+
+
+def test_a_truncating_board_does_not_ring_the_failure_alarm():
+    """J.P. Morgan's live shape: a healthy oracle board too big for one fetch,
+    reported as failing every run for days."""
+    for ago in (180, 120, 60):
+        _run_with([{"firm": "J.P. Morgan", "error": _TRUNCATED}], ago_minutes=ago)
+
+    assert health.repeat_failures() == []
+
+
+def test_the_suspicious_wipe_guard_also_does_not_ring_it():
+    for ago in (180, 120, 60):
+        _run_with([{"firm": "Lazard", "error": _WIPE_GUARD}], ago_minutes=ago)
+
+    assert health.repeat_failures() == []
+
+
+def test_a_real_failure_still_rings_while_a_guard_notice_is_present():
+    """The guard exclusion must not become a blanket mute."""
+    for ago in (180, 120, 60):
+        _run_with([
+            {"firm": "J.P. Morgan", "error": _TRUNCATED},
+            {"firm": "UBS", "error": "timed out"},
+        ], ago_minutes=ago)
+
+    assert health.repeat_failures() == ["UBS"]
+
+
+def test_a_guarded_board_is_named_in_its_own_quiet_line():
+    """Silencing the false alarm must not silence the fact — these firms are
+    on the slower reverify path for closed-detection."""
+    _run_with([{"firm": "J.P. Morgan", "error": _TRUNCATED}])
+
+    assert health.guarded_boards() == ["J.P. Morgan"]
+    line = next(l for l in health.health_report() if "auto-close skipped" in l)
+    assert line.startswith("·"), "a healthy board must not wear the alarm marker"
+    assert "J.P. Morgan" in line
+
+
+def test_a_never_yielding_board_reporting_only_a_guard_notice_is_not_called_broken(monkeypatch):
+    """'Broken' means a bad URL or a failing fetch. A guard notice is neither."""
+    Firm.objects.create(slug="jpm", name="J.P. Morgan")
+    monkeypatch.setattr(health, "BOARDS", [("jpm", object())])
+    _run_with([{"firm": "J.P. Morgan", "error": _TRUNCATED}])
+
+    assert health.boards_that_never_yield()["broken"] == []
