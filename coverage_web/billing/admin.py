@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import CreditLedger, ProcessedStripeEvent
+from .models import CreditLedger, ProcessedStripeEvent, ProWaitlist
 
 
 @admin.register(CreditLedger)
@@ -44,6 +44,22 @@ class ProcessedStripeEventAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(ProWaitlist)
+class ProWaitlistAdmin(admin.ModelAdmin):
+    """This IS the notification list until Pro has a real checkout — the
+    founder reads it here by hand and reaches out manually. See the model's
+    own docstring on why no email is sent automatically."""
+
+    list_display = ("email", "user", "source", "created")
+    list_filter = ("source",)
+    search_fields = ("email", "user__email")
+    date_hierarchy = "created"
+    readonly_fields = ("email", "user", "source", "created")
 
     def has_add_permission(self, request):
         return False

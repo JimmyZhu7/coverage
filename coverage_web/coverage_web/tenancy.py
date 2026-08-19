@@ -81,8 +81,9 @@ class TenantManager(models.Manager.from_queryset(TenantQuerySet)):
 
 class PrivateModel(models.Model):
     """Abstract base for every private-zone table (docs/build-plan.md §2).
-    Concrete subclasses must have a `user` ForeignKey — nullable only for
-    `product_events`, which legitimately has pre-signup/anonymous rows —
+    Concrete subclasses must have a `user` ForeignKey — nullable only where
+    anonymous rows are a legitimate case (`product_events`'s pre-signup
+    funnel events; `billing.ProWaitlist`'s logged-out "notify me" joins) —
     so `user_id` is a real, denormalized, indexed column on every row.
     """
 

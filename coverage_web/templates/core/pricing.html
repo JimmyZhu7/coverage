@@ -85,6 +85,14 @@
   .plan-note { font-size: var(--fs-xs); color: var(--ink-3);
     margin: var(--s2) 0 0; text-align: center; }
 
+  /* Pro's "Notify me" — intent capture standing in for the checkout button
+     Pro doesn't have yet. Stacked, not side-by-side: the card is narrow at
+     the breakpoint where two plan columns already compete for width, so a
+     row-layout email+button would be the first thing to squash. */
+  .plan-waitlist { display: flex; flex-direction: column; gap: var(--s2); }
+  .plan-waitlist input[type="email"] { margin: 0; }
+  .plan-waitlist .plan-note { margin-top: 0; }
+
   /* ---- Side-by-side comparison table ---------------------------------------
      The cards are the pitch; this is the inventory. Deliberately NOT a boxed
      grid: row separators on the bare page ground, one 4% accent wash down the
@@ -262,8 +270,25 @@
             <li>Multi-cycle archive of past seasons</li>
           </ul>
           <div class="plan-cta">
-            <a class="btn" aria-disabled="true">Coming Soon</a>
-            <p class="plan-note">Announced in the app first.</p>
+            {% comment %}
+            Intent capture, not a checkout: Pro has no button today, so a
+            visitor who wants it has nowhere to go. This is that "nowhere" —
+            one email, deduped, read by the founder until Pro has a real
+            checkout. See billing/models.py::ProWaitlist and
+            billing/views.py::waitlist_join.
+            {% endcomment %}
+            <form method="post" action="{% url 'billing:waitlist_join' %}" class="plan-waitlist">
+              {% csrf_token %}
+              {% if user.is_authenticated %}
+                <button type="submit" class="btn btn-primary">Notify Me When Pro Opens</button>
+                <p class="plan-note">We'll reach you at {{ user.email }}.</p>
+              {% else %}
+                <input type="email" name="email" placeholder="you@school.edu"
+                       aria-label="Email for the Pro waitlist" required>
+                <button type="submit" class="btn btn-primary">Notify Me When Pro Opens</button>
+                <p class="plan-note">Announced in the app first.</p>
+              {% endif %}
+            </form>
           </div>
         </article>
       </div>

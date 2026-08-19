@@ -118,6 +118,52 @@ class CreditLedger(PrivateModel):
         return f"{self.user_id}: {sign}{self.delta} ({self.kind})"
 
 
+class ProWaitlist(PrivateModel):
+    """Pro launch waitlist — the pricing page's Pro card is stamped "In the
+    works" with no checkout yet (docs/pricing-rebalance-plan.md §4), so this
+    is where the "Notify me when Pro opens" click actually goes. One row per
+    interested email; `billing/views.py::waitlist_join` writes it alongside
+    a `pro_waitlist_joined` product event, same posture as every other
+    funnel signal (see `analytics.events.record_event`'s docstring).
+
+    No email is ever sent from this table today — there is no provider
+    configured (`settings.EMAIL_URL` only wires the password-reset and
+    weekly-digest sends, both of which already print to logs instead when
+    unset). This is intent capture, not a mailing list: the founder reads it
+    by hand in admin until Pro has a real checkout to notify people into.
+
+    `user` nullable for the same reason `analytics.ProductEvent.user` is
+    (see that model and `coverage_web.tenancy.PrivateModel`'s own
+    docstring): a logged-out visitor can join with just an email.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="pro_waitlist_entries",
+    )
+    email = models.EmailField()
+    # Where the click came from — always "pricing_page" today. Kept as a
+    # field rather than assumed so a second surface (an in-app upsell
+    # banner, say) is a call site, not a schema change.
+    source = models.CharField(max_length=32, default="pricing_page")
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "pro_waitlist"
+        ordering = ["-created"]
+        constraints = [
+            # The dedupe half of "rate-limit/dedupe by email" — a second
+            # join with the same address is a no-op, not a second row.
+            models.UniqueConstraint(fields=["email"], name="uniq_pro_waitlist_email"),
+        ]
+
+    def __str__(self) -> str:
+        return self.email
+
+
 class ProcessedStripeEvent(models.Model):
     """Idempotency record for `billing/stripe_gateway.py::handle_webhook_event`
     — Stripe's own docs guarantee at-least-once webhook delivery, so the
