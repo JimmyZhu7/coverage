@@ -1130,9 +1130,26 @@
                aria-labelledby="gmail-live-h">
         <div class="set-head">
           <h2 id="gmail-live-h">Gmail Live</h2>
-          <p>Real-time reply and bounce detection, straight from your inbox.</p>
+          <p>Real-time reply and bounce detection, straight from your inbox.
+            {% if not gmail_live.is_pro %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro</span>{% endif %}</p>
         </div>
         <div class="set-body">
+          {% comment %}
+          Real-time sync is Pro-only (docs/pricing-rebalance-plan.md §7);
+          Connect Gmail and Scan Now below are open to every plan — this row
+          is the ONLY place the gate is stated so the rest of the card never
+          has to repeat it.
+          {% endcomment %}
+          {% if not gmail_live.is_pro %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-desc">
+                Real-time sync is a Pro feature. Connecting Gmail and
+                on-demand scans below are free on any plan.
+              </div>
+            </div>
+          </div>
+          {% endif %}
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Status</span>
@@ -1142,10 +1159,17 @@
                     <strong>Access was revoked</strong> — reconnect below.
                   {% else %}
                     Connected as {{ gmail_live.gmail_address }}.
-                    {% if gmail_live.last_notification_at %}
-                      Last update {{ gmail_live.last_notification_at|timesince }} ago.
+                    {% if gmail_live.is_pro %}
+                      {% if gmail_live.last_notification_at %}
+                        Last update {{ gmail_live.last_notification_at|timesince }} ago.
+                      {% elif gmail_live.watch_active %}
+                        No activity seen yet.
+                      {% else %}
+                        Real-time sync is queued and will turn on shortly.
+                      {% endif %}
                     {% else %}
-                      No activity seen yet.
+                      Real-time sync is off on the Free plan — use Scan Now
+                      below to check for updates.
                     {% endif %}
                   {% endif %}
                 {% else %}

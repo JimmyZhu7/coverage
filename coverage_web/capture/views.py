@@ -64,16 +64,29 @@ def gmail_callback(request):
 
     messages.success(request, f"Gmail connected: {connection.gmail_address}.")
     if connection.watch_expiration is None:
-        # connect_gmail stored a perfectly good connection but could not
-        # register the Pub/Sub watch (see its comment on why that is not
-        # fatal). Everything except real-time push still works, and the
-        # daily gmail_watch_renew retries on its own — but saying so beats
-        # letting the user wonder why nothing arrives instantly.
-        messages.warning(
-            request,
-            "Real-time updates aren't active yet — Coverage will keep "
-            "retrying. Your historical scan will still run.",
-        )
+        if request.user.plan == "pro":
+            # connect_gmail stored a perfectly good connection but could not
+            # register the Pub/Sub watch (see its comment on why that is not
+            # fatal). Everything except real-time push still works, and the
+            # daily gmail_watch_renew retries on its own — but saying so
+            # beats letting the user wonder why nothing arrives instantly.
+            messages.warning(
+                request,
+                "Real-time updates aren't active yet — Coverage will keep "
+                "retrying. Your historical scan will still run.",
+            )
+        else:
+            # Expected, not a failure: real-time sync is Pro-only
+            # (docs/pricing-rebalance-plan.md §7) and `connect_gmail` never
+            # even attempts `register_watch` for a Free plan, so there is
+            # nothing here to retry. A plain info note, not the "still
+            # retrying" warning above, which would wrongly imply this fixes
+            # itself.
+            messages.info(
+                request,
+                "Real-time sync is a Pro feature. Your historical scan will "
+                "still run, and Scan Now works anytime on any plan.",
+            )
     return redirect(f"{reverse('accounts:settings')}#gmail-live")
 
 

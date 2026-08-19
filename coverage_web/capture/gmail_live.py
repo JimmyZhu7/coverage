@@ -282,28 +282,37 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
     # `renew_watches()` re-registers every active row whose
     # `watch_expiration` is null, daily.
     #
-    # So a watch failure must not be allowed to escape. There are no
-    # ATOMIC_REQUESTS on this project, meaning the row above is already
-    # committed by the time this runs: letting `register_watch` raise
-    # produced the worst possible outcome — a generic 500 page for a mailbox
-    # that WAS, in fact, connected. And `register_watch` re-raises anything
-    # that isn't a 401/403, which covers the most likely first-connect
-    # failure of all: a 400 "Error sending test message to Cloud PubSub ...
-    # User not authorized" when the topic hasn't granted publish rights to
-    # gmail-api-push@system.gserviceaccount.com, or a 404 when
-    # GMAIL_LIVE_PUBSUB_TOPIC names a topic that doesn't exist. Both are
+    # Real-time sync is Pro-only (docs/pricing-rebalance-plan.md §7): a Free
+    # user's connection is already complete without it — the refresh token
+    # works, the backfill above is queued, and Scan Now (capture/views.py::
+    # gmail_rescan) is open to every plan. `renew_watches()` mirrors this
+    # same `user.plan == "pro"` gate for every later daily tick, so a Free
+    # connection simply never gets real-time turned on rather than having it
+    # granted here and revoked later.
+    #
+    # For a Pro user, a watch failure must not be allowed to escape. There
+    # are no ATOMIC_REQUESTS on this project, meaning the row above is
+    # already committed by the time this runs: letting `register_watch`
+    # raise produced the worst possible outcome — a generic 500 page for a
+    # mailbox that WAS, in fact, connected. And `register_watch` re-raises
+    # anything that isn't a 401/403, which covers the most likely
+    # first-connect failure of all: a 400 "Error sending test message to
+    # Cloud PubSub ... User not authorized" when the topic hasn't granted
+    # publish rights to gmail-api-push@system.gserviceaccount.com, or a 404
+    # when GMAIL_LIVE_PUBSUB_TOPIC names a topic that doesn't exist. Both are
     # config, both are fixable, and neither is a reason to throw the
     # connection away.
-    try:
-        register_watch(connection)
-    except Exception:  # noqa: BLE001 - a watch is retried daily; a connect isn't
-        logger.exception(
-            "Gmail Live: connected %s but users.watch() failed — real-time "
-            "notifications stay off until gmail_watch_renew succeeds. Check "
-            "GMAIL_LIVE_PUBSUB_TOPIC exists and grants publish rights to "
-            "gmail-api-push@system.gserviceaccount.com.",
-            connection.gmail_address,
-        )
+    if user.plan == "pro":
+        try:
+            register_watch(connection)
+        except Exception:  # noqa: BLE001 - a watch is retried daily; a connect isn't
+            logger.exception(
+                "Gmail Live: connected %s but users.watch() failed — real-time "
+                "notifications stay off until gmail_watch_renew succeeds. Check "
+                "GMAIL_LIVE_PUBSUB_TOPIC exists and grants publish rights to "
+                "gmail-api-push@system.gserviceaccount.com.",
+                connection.gmail_address,
+            )
     return connection
 
 
@@ -357,9 +366,17 @@ def register_watch(connection: GmailConnection) -> None:
 
 def renew_watches() -> tuple[int, int]:
     """Re-registers any connection whose watch expires within a day (or has
-    none yet). Returns (renewed, revoked) for the calling command to report."""
+    none yet). Returns (renewed, revoked) for the calling command to report.
+
+    `user__plan="pro"` mirrors `connect_gmail`'s own gate: real-time sync is
+    Pro-only (docs/pricing-rebalance-plan.md §7), so a Free connection is
+    simply never picked up here. That is the whole mechanism by which a
+    downgraded (or trial-expired) Pro connection loses real-time honestly —
+    nothing deletes or disconnects it, this query just stops renewing its
+    watch, and Google's own 7-day expiry does the rest.
+    """
     soon = timezone.now() + timedelta(days=1)
-    due = GmailConnection.all_objects.filter(status="active").filter(
+    due = GmailConnection.all_objects.filter(status="active", user__plan="pro").filter(
         Q(watch_expiration__isnull=True) | Q(watch_expiration__lte=soon)
     )
     renewed = revoked = 0
@@ -382,11 +399,22 @@ def process_notification(gmail_address: str, published_history_id: str) -> None:
     the mailbox address the notification names (Gmail's payload, not
     anything we control) and syncs it."""
     try:
-        connection = GmailConnection.all_objects.get(
+        connection = GmailConnection.all_objects.select_related("user").get(
             gmail_address=gmail_address, status="active"
         )
     except GmailConnection.DoesNotExist:
         return  # disconnected or unknown mailbox — nothing to do
+
+    # Defensive drop, not the primary gate: neither `connect_gmail` nor
+    # `renew_watches` ever registers a watch for a non-Pro connection, so a
+    # live notification arriving here for one means the plan changed AFTER
+    # the watch was already live with Google (a trial that just expired, or
+    # a manual downgrade) — Google's push can keep arriving for up to the
+    # watch's remaining 7-day life. Drop rather than sync so a downgraded
+    # account doesn't keep getting real-time coverage until the stale watch
+    # itself finally expires.
+    if connection.user.plan != "pro":
+        return
     sync_connection(connection)
 
 

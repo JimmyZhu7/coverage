@@ -339,12 +339,18 @@ def _gmail_live_context(user) -> dict:
     doing nothing."""
     if not gmail_live.is_configured():
         return {"available": False}
+    # Real-time sync is Pro-only (docs/pricing-rebalance-plan.md §7) — the
+    # template reads this to show the real-time toggle as Pro-gated while
+    # keeping Connect/Scan Now open to every plan. Mirrors the exact check
+    # `capture.gmail_live.connect_gmail`/`renew_watches` gate on.
+    is_pro = getattr(user, "plan", "") == "pro"
     connection = GmailConnection.all_objects.filter(user=user).first()
     if connection is None:
-        return {"available": True, "connected": False}
+        return {"available": True, "connected": False, "is_pro": is_pro}
     return {
         "available": True,
         "connected": True,
+        "is_pro": is_pro,
         "gmail_address": connection.gmail_address,
         "status": connection.status,
         "last_notification_at": connection.last_notification_at,
@@ -353,6 +359,11 @@ def _gmail_live_context(user) -> dict:
         "rescan_status": connection.rescan_status,
         "rescan_completed_at": connection.rescan_completed_at,
         "rescan_stats": connection.rescan_stats,
+        # Whether real-time is actually live right now — distinct from
+        # `is_pro`: a Pro connection whose watch registration hasn't landed
+        # yet (queued for the next `gmail_watch_renew` tick) is Pro but not
+        # yet live; a Free connection is never live at all.
+        "watch_active": connection.watch_expiration is not None,
         # The one thing the template actually branches on for the button's
         # disabled state — kept as a computed bool here rather than a
         # `{% if rescan_status == "pending" or rescan_status == "running" %}`
