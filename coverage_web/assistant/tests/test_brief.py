@@ -104,6 +104,39 @@ def test_the_model_call_always_uses_the_cheap_tier():
     assert client.messages.requests[0]["model"] == brief.BRIEF_MODEL
 
 
+def test_a_concurrent_winner_is_returned_instead_of_500ing():
+    """`DailyBrief` carries a real UniqueConstraint on (user, date) — exactly
+    the guard a check-then-create sequence needs when two requests for the
+    same student's brief overlap (the new async crm.views.daily_brief
+    endpoint made this realistic: two tabs open on Today at once, or a
+    retried POST, can both find `existing is None` and both reach the
+    model). Without handling the constraint's own IntegrityError, the
+    request that loses the race 500s on its own `.save()` instead of
+    simply returning the winner's already-cached text — the exact
+    "even a replayed POST costs nothing after the first" guarantee
+    crm.views.daily_brief's docstring claims but this path never
+    actually honoured.
+
+    A `FakeClient` that writes the CONCURRENT winner's row from inside its
+    own `.create()` call stands in for the wall-clock gap between our
+    `existing is None` check and our own save — the same gap two real
+    overlapping requests would race across.
+    """
+    user = _user()
+
+    class RacyMessages:
+        def create(self, **kwargs):
+            DailyBrief(user=user, date=timezone.localdate(), text="Winner's brief.").save()
+            return _response("Our own brief, arriving second.")
+
+    client = SimpleNamespace(messages=RacyMessages())
+
+    text = brief.get_or_build(user, [_action()], client=client)
+
+    assert text == "Winner's brief."
+    assert DailyBrief.objects.for_user(user).count() == 1
+
+
 def test_a_model_error_returns_none_and_writes_no_row():
     user = _user()
     client = FakeClient(RuntimeError("network blip"))
