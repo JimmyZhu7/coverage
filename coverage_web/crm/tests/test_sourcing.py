@@ -9,6 +9,8 @@ link searches THIS firm") should be assertable without a database row.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -21,6 +23,10 @@ from directory.classify import TRACK_LABELS
 from directory.models import Firm
 
 User = get_user_model()
+
+STYLES = (
+    Path(__file__).resolve().parents[2] / "templates" / "crm" / "_styles.html"
+)
 
 
 class FakeUser:
@@ -249,6 +255,40 @@ def test_a_covered_firm_has_no_card_and_so_no_panel(client):
     # the panel in a comment whether or not any card renders one.
     assert '<summary class="src-toggle">' not in body
     assert sourcing.DISCLOSURE not in body
+
+
+def test_the_panel_drop_is_a_real_animation_and_reduced_motion_turns_it_off():
+    """`--t-med` is a TRANSITION token: it expands to a duration AND a
+    timing function. Written as `animation: src-drop var(--t-med) ease
+    both` that is two timing functions in one shorthand, so the browser
+    throws the whole declaration away and the panel appears with no drop
+    at all. Measured live at 1440x950: `animationName` computed to "none"
+    with `prefers-reduced-motion: no-preference`, which is the value the
+    reduced-motion guard below is supposed to be the only way to get.
+
+    An invalid shorthand is silent in every unit test that reads the
+    rendered page, so the check has to be on the declaration itself.
+    """
+    css = " ".join(STYLES.read_text().split())
+    match = re.search(r"\.src-panel \{(.*?)\}", css, re.S)
+    assert match, ".src-panel is gone from crm/_styles.html"
+    shorthand = re.search(r"animation:\s*src-drop([^;]*);", match.group(1))
+    assert shorthand, "the panel lost its drop-in animation"
+    value = shorthand.group(1)
+    assert "var(--t-" not in value, (
+        "--t-* are transition tokens (duration + easing together); one in "
+        "an animation shorthand alongside a second easing makes the whole "
+        "declaration invalid and the animation silently never runs"
+    )
+    assert re.search(r"\d+ms", value), "the drop needs a literal duration"
+    # And the only way to get no animation stays the user's own setting.
+    guard = re.search(
+        r"@media \(prefers-reduced-motion: reduce\) \{([^}]*\.src-panel[^}]*\})",
+        css,
+    )
+    assert guard and "animation: none" in guard.group(1), (
+        "the panel's drop must be off under prefers-reduced-motion: reduce"
+    )
 
 
 # ---------------------------------------------------------------------------

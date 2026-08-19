@@ -700,7 +700,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     background: var(--surface); border: 1px solid var(--line-strong);
     border-radius: var(--r-panel); box-shadow: var(--shadow-2);
     padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2);
-    animation: src-drop var(--t-med) ease both; }
+    /* Literal duration and easing, the way every other `animation:` in
+       this app writes it. `--t-med` is a TRANSITION token: it expands to
+       "180ms cubic-bezier(...)", so `var(--t-med) ease` put two timing
+       functions in one shorthand, and the browser dropped the whole
+       declaration. The panel appeared with no drop at all. */
+    animation: src-drop 180ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
   /* The last two cards in a row would otherwise hang their panel off the
      right edge of the page. */
   .gap-row > .gap-card:nth-child(n+5) .src-panel { left: auto; right: 0; }
