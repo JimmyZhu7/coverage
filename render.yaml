@@ -233,14 +233,16 @@ services:
       - key: GMAIL_LIVE_TOKEN_KEY
         sync: false
 
-  # ---- Gmail Live first-connect backfill, every 15 minutes --------------
-  # A tight tick because a newly-connected user should not sit at "queued"
-  # for hours, but each run costs almost nothing when idle — the very first
-  # thing it does is `SELECT ... WHERE backfill_status IN (pending, failed)`,
-  # and at this app's scale (a handful of users) that's empty on nearly
-  # every one of the 96 runs/day. See capture/management/commands/
-  # gmail_backfill.py for what actually happens on the rare run that finds
-  # something.
+  # ---- Gmail Live first-connect backfill + "Scan Now" rescans, every ----
+  # ---- 15 minutes ---------------------------------------------------------
+  # A tight tick because a newly-connected user (or someone who just hit
+  # "Scan Now" in Settings) should not sit at "queued" for hours, but each
+  # run costs almost nothing when idle — the very first things it does are
+  # `SELECT ... WHERE backfill_status IN (pending, failed)` and the same
+  # for `rescan_status`, and at this app's scale (a handful of users) both
+  # are empty on nearly every one of the 96 runs/day. See capture/
+  # management/commands/gmail_backfill.py for what actually happens on the
+  # rare run that finds something in either queue.
   - type: cron
     name: coverage-gmail-backfill
     runtime: docker

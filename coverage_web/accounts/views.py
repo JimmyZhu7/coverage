@@ -283,6 +283,15 @@ def _gmail_live_context(user) -> dict:
         "last_notification_at": connection.last_notification_at,
         "backfill_status": connection.backfill_status,
         "backfill_stats": connection.backfill_stats,
+        "rescan_status": connection.rescan_status,
+        "rescan_completed_at": connection.rescan_completed_at,
+        "rescan_stats": connection.rescan_stats,
+        # The one thing the template actually branches on for the button's
+        # disabled state — kept as a computed bool here rather than a
+        # `{% if rescan_status == "pending" or rescan_status == "running" %}`
+        # in the template, so the "what counts as in-flight" rule lives in
+        # one place.
+        "rescan_in_progress": connection.rescan_status in ("pending", "running"),
     }
 
 

@@ -81,6 +81,38 @@ class GmailConnection(PrivateModel):
     # human reading either has one shape to learn.
     backfill_stats = models.JSONField(default=dict, blank=True)
 
+    # A user-triggered "Scan Now" rescan (Settings > Gmail Live) — a full
+    # re-check of Gmail against ALL of the user's contacts, on demand,
+    # repeatably. DELIBERATELY a separate set of fields from the
+    # backfill_* ones above rather than reusing them: `backfill_status`
+    # means specifically "has the ORIGINAL post-connect backfill ever
+    # completed" and is sticky at "done" forever once true (see its own
+    # comment) — a rescan is a different, repeatable action that must be
+    # able to run again and again without disturbing that fact.
+    RESCAN_CHOICES = [
+        ("none", "Never run"),
+        # Set the moment the "Scan Now" button is pressed; the same
+        # gmail_backfill cron tick that picks up first-connect backfills
+        # also picks up a "pending" rescan — see that command's docstring.
+        ("pending", "Queued"),
+        ("running", "Running"),
+        ("done", "Done"),
+        ("failed", "Failed — will retry"),
+    ]
+    rescan_status = models.CharField(
+        max_length=16, choices=RESCAN_CHOICES, default="none"
+    )
+    # When "Scan Now" was pressed. Also doubles as the in-flight guard: the
+    # Settings view disables the button whenever `rescan_status` is
+    # `pending`/`running`, so a user can't queue five rescans at once.
+    rescan_requested_at = models.DateTimeField(null=True, blank=True)
+    rescan_completed_at = models.DateTimeField(null=True, blank=True)
+    # Same shape as backfill_stats, plus the Phase-3 AI residue stage's own
+    # counters (see capture/gmail_residue.py) merged in under their own
+    # keys — one JSON blob, one place a human reads "what did the last
+    # rescan find".
+    rescan_stats = models.JSONField(default=dict, blank=True)
+
     class Meta(PrivateModel.Meta):
         db_table = "gmail_connections"
 

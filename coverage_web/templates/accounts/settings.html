@@ -1114,6 +1114,41 @@
               </div>
             </div>
           </div>
+
+          {% comment %}
+          "Scan Now" — a user-triggered, repeatable re-check of Gmail
+          against ALL contacts (not just what one import added). Separate
+          from Past History above: that row reports the ONE-TIME original
+          backfill and never changes again once done; this one can be
+          re-run any time, so it gets its own status. See
+          capture/gmail_live.py::run_rescan and capture/views.py::gmail_rescan.
+          {% endcomment %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Rescan Gmail</span>
+              <div class="set-row-desc">
+                {% if gmail_live.rescan_status == "running" %}
+                  Running now — this can take a few minutes.
+                {% elif gmail_live.rescan_status == "pending" %}
+                  Queued — starts shortly.
+                {% elif gmail_live.rescan_status == "failed" %}
+                  Last scan hit a snag — it'll retry automatically.
+                {% elif gmail_live.rescan_status == "done" %}
+                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago — {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize }} logged.
+                {% else %}
+                  Re-check your whole Gmail history against all of your contacts.
+                {% endif %}
+              </div>
+            </div>
+            <div class="set-row-control">
+              <form method="post" action="{% url 'capture:gmail_rescan' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn" {% if gmail_live.rescan_in_progress %}disabled{% endif %}>
+                  {% if gmail_live.rescan_in_progress %}Scanning…{% else %}Scan Now{% endif %}
+                </button>
+              </form>
+            </div>
+          </div>
           {% endif %}
         </div>
       </section>

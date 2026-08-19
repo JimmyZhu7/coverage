@@ -16,6 +16,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import Http404
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from capture import gmail_live
@@ -74,4 +75,39 @@ def gmail_disconnect(request):
     would just be a second place for that call to silently fail."""
     GmailConnection.all_objects.filter(user=request.user).delete()
     messages.success(request, "Gmail disconnected.")
+    return redirect(f"{reverse('accounts:settings')}#gmail-live")
+
+
+@login_required
+@require_POST
+def gmail_rescan(request):
+    """"Scan Now" — a user-triggered, repeatable re-check of Gmail against
+    ALL of the user's contacts. Distinct from the one-time automatic
+    first-connect backfill above: this only QUEUES the work
+    (`rescan_status="pending"`); the same `gmail_backfill` cron tick that
+    already polls for pending first-connect backfills also picks up a
+    pending rescan and runs `gmail_live.run_rescan` — see that command's
+    docstring for why this stays queue-and-poll rather than running inline
+    here (a year of per-contact Gmail searches, now plus a capped AI pass,
+    is not something a POST's response can wait on).
+
+    Refuses to queue a second rescan while one is already `pending` or
+    `running`, so a student clicking the button five times in a row can't
+    stack five runs — the Settings page also disables the button in that
+    state, this is the server-side guarantee behind it.
+    """
+    connection = GmailConnection.all_objects.filter(
+        user=request.user, status="active"
+    ).first()
+    if connection is None:
+        messages.error(request, "Connect Gmail before running a scan.")
+        return redirect(f"{reverse('accounts:settings')}#gmail-live")
+    if connection.rescan_status in ("pending", "running"):
+        messages.info(request, "A scan is already in progress.")
+        return redirect(f"{reverse('accounts:settings')}#gmail-live")
+
+    connection.rescan_status = "pending"
+    connection.rescan_requested_at = timezone.now()
+    connection.save(update_fields=["rescan_status", "rescan_requested_at"])
+    messages.success(request, "Scan queued — check back in a few minutes.")
     return redirect(f"{reverse('accounts:settings')}#gmail-live")

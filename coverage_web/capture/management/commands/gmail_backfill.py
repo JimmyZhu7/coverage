@@ -1,36 +1,51 @@
 """gmail_backfill — the one-time historical pass for a newly-connected
-Gmail Live mailbox.
+Gmail Live mailbox, AND the user-triggered "Scan Now" rescan (Settings >
+Gmail Live). One command, one tick, two independent selections — see the
+build plan's Phase 2 note on why this reuses the existing scheduling
+mechanism rather than inventing a second one.
 
 `connect_gmail()` (capture/gmail_live.py) marks a fresh connection
 `backfill_status="pending"` right after the live watch is registered — so
 live coverage starts immediately, and this command is what fills in the
-past. Run it on a short tick (10-15 min is plenty; most runs find nothing
-pending). Never run inline in the OAuth callback: a year of per-contact
-Gmail searches is a multi-minute job, and the connect flow's redirect has
-to stay instant.
+past. `capture.views.gmail_rescan` marks a connection `rescan_status=
+"pending"` when a user presses "Scan Now" in Settings. Run this command on
+a short tick (10-15 min is plenty; most runs find nothing pending in
+either queue). Never run either pass inline in a request: a year of
+per-contact Gmail searches is a multi-minute job, and both the connect
+flow's redirect and the Settings POST have to stay instant.
 
     python manage.py gmail_backfill
     python manage.py gmail_backfill --email you@example.com
     python manage.py gmail_backfill --dry-run
 
-Picks up connections whose `backfill_status` is `pending` (a first run) or
-`failed` (an earlier attempt died partway — Google API hiccups happen over
-a multi-minute job, and this retries automatically on the next tick rather
-than leaving a mailbox stuck with no history forever). `done` is sticky and
-never re-selected — see `connect_gmail`'s comment on why a reconnect must
-not silently re-run a completed backfill.
+BACKFILL selection: `backfill_status` `pending` (a first run) or `failed`
+(an earlier attempt died partway — Google API hiccups happen over a
+multi-minute job, and this retries automatically on the next tick rather
+than leaving a mailbox stuck with no history forever). `done` is sticky
+and never re-selected — see `connect_gmail`'s comment on why a reconnect
+must not silently re-run a completed backfill.
 
-`--dry-run` runs every search, classification, and apply decision and
-writes nothing — including no `backfill_status` transition and no `Import`
-row — same discipline `capture_gmail --dry-run` already uses, for the same
-reason: a mis-scoped first run is the one mistake here that's tedious to
-unpick after the fact.
+RESCAN selection: `rescan_status` `pending` or `failed`, same retry
+posture. Deliberately a SEPARATE field/query from `backfill_status` — a
+rescan is a different, repeatable action, not the one-time original
+backfill; see `GmailConnection.rescan_status`'s own comment. Runs
+`gmail_live.run_rescan`, which is the deterministic pass over ALL contacts
+followed by the capped Haiku residue stage (`capture.gmail_residue`) —
+never run as part of the BACKFILL selection above, only here.
+
+`--dry-run` runs every search, classification, and apply decision for
+BOTH selections and writes nothing — including no status transition and
+no `Import` row, and (per `run_rescan`) no AI call for the residue stage
+either — same discipline `capture_gmail --dry-run` already uses, for the
+same reason: a mis-scoped first run is the one mistake here that's tedious
+to unpick after the fact.
 """
 
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand
 from django.db.models import Q
+from django.utils import timezone
 
 from analytics.models import Import
 from capture import gmail_live
@@ -38,10 +53,13 @@ from capture.models import GmailConnection
 
 
 class Command(BaseCommand):
-    help = "Run the one-time historical backfill for pending Gmail Live connections."
+    help = (
+        "Run the one-time historical backfill for pending Gmail Live "
+        "connections, and any queued 'Scan Now' rescans."
+    )
 
     def add_arguments(self, parser):
-        parser.add_argument("--email", help="Run backfill for just this user.")
+        parser.add_argument("--email", help="Run backfill/rescan for just this user.")
         parser.add_argument(
             "--dry-run", action="store_true",
             help="Report what would happen; write nothing (no status change, no Import row).",
@@ -52,49 +70,97 @@ class Command(BaseCommand):
             self.stdout.write("Gmail Live is not configured — nothing to backfill.")
             return
 
-        connections = GmailConnection.all_objects.filter(status="active").filter(
-            Q(backfill_status="pending") | Q(backfill_status="failed")
-        )
+        base = GmailConnection.all_objects.filter(status="active")
         if opts["email"]:
-            connections = connections.filter(user__email=opts["email"])
+            base = base.filter(user__email=opts["email"])
 
-        connections = list(connections)
-        if not connections:
+        backfill_connections = list(
+            base.filter(Q(backfill_status="pending") | Q(backfill_status="failed"))
+        )
+        rescan_connections = list(
+            base.filter(Q(rescan_status="pending") | Q(rescan_status="failed"))
+        )
+
+        if not backfill_connections and not rescan_connections:
             self.stdout.write("Nothing pending.")
             return
 
-        for connection in connections:
-            prefix = "[dry-run] " if opts["dry_run"] else ""
-            if not opts["dry_run"]:
-                connection.backfill_status = "running"
+        for connection in backfill_connections:
+            self._run_backfill(connection, dry_run=opts["dry_run"])
+
+        for connection in rescan_connections:
+            self._run_rescan(connection, dry_run=opts["dry_run"])
+
+    def _run_backfill(self, connection, *, dry_run: bool) -> None:
+        prefix = "[dry-run] " if dry_run else ""
+        if not dry_run:
+            connection.backfill_status = "running"
+            connection.save(update_fields=["backfill_status"])
+
+        try:
+            result = gmail_live.backfill_connection(connection, dry_run=dry_run)
+        except Exception as exc:  # noqa: BLE001
+            if not dry_run:
+                connection.backfill_status = "failed"
                 connection.save(update_fields=["backfill_status"])
-
-            try:
-                result = gmail_live.backfill_connection(
-                    connection, dry_run=opts["dry_run"]
-                )
-            except Exception as exc:  # noqa: BLE001
-                if not opts["dry_run"]:
-                    connection.backfill_status = "failed"
-                    connection.save(update_fields=["backfill_status"])
-                self.stderr.write(
-                    f"{prefix}{connection.gmail_address}: backfill failed, will "
-                    f"retry next run: {exc}"
-                )
-                continue
-
-            if not opts["dry_run"]:
-                Import.all_objects.create(
-                    user=connection.user,
-                    kind="gmail_backfill",
-                    filename=connection.gmail_address,
-                    row_stats=result.as_stats(),
-                )
-
-            self.stdout.write(
-                f"{prefix}{connection.gmail_address}: {result.findings} findings, "
-                f"{result.touches_logged} touches, {result.outreach_logged} outreach, "
-                f"{result.bounced_cleared} bounces cleared"
+            self.stderr.write(
+                f"{prefix}{connection.gmail_address}: backfill failed, will "
+                f"retry next run: {exc}"
             )
-            for line in result.details:
-                self.stdout.write(f"  {prefix}{line}")
+            return
+
+        if not dry_run:
+            Import.all_objects.create(
+                user=connection.user,
+                kind="gmail_backfill",
+                filename=connection.gmail_address,
+                row_stats=result.as_stats(),
+            )
+
+        self.stdout.write(
+            f"{prefix}{connection.gmail_address}: {result.findings} findings, "
+            f"{result.touches_logged} touches, {result.outreach_logged} outreach, "
+            f"{result.bounced_cleared} bounces cleared"
+        )
+        for line in result.details:
+            self.stdout.write(f"  {prefix}{line}")
+
+    def _run_rescan(self, connection, *, dry_run: bool) -> None:
+        prefix = "[dry-run] " if dry_run else ""
+        if not dry_run:
+            connection.rescan_status = "running"
+            connection.save(update_fields=["rescan_status"])
+
+        try:
+            stats = gmail_live.run_rescan(connection, dry_run=dry_run)
+        except Exception as exc:  # noqa: BLE001
+            if not dry_run:
+                connection.rescan_status = "failed"
+                connection.save(update_fields=["rescan_status"])
+            self.stderr.write(
+                f"{prefix}{connection.gmail_address}: rescan failed, will "
+                f"retry next run: {exc}"
+            )
+            return
+
+        if not dry_run:
+            connection.rescan_status = "done"
+            connection.rescan_completed_at = timezone.now()
+            connection.rescan_stats = stats
+            connection.save(
+                update_fields=["rescan_status", "rescan_completed_at", "rescan_stats"]
+            )
+            Import.all_objects.create(
+                user=connection.user,
+                kind="gmail_rescan",
+                filename=connection.gmail_address,
+                row_stats=stats,
+            )
+
+        residue = stats.get("residue", {})
+        self.stdout.write(
+            f"{prefix}{connection.gmail_address}: rescan — {stats.get('touches_logged', 0)} "
+            f"touches, residue {residue.get('residue_threads_processed', 0)}/"
+            f"{residue.get('residue_threads_seen', 0)} threads processed "
+            f"({residue.get('genuine_reply', 0)} genuine, {residue.get('auto_reply', 0)} auto-reply)"
+        )
