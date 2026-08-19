@@ -171,19 +171,24 @@ def _tracks_of(user) -> list[str]:
     return seen
 
 
-def _round_robin(tracks: Iterable[str]) -> list[tuple[str, Archetype]]:
+def _round_robin(tracks: Iterable[str]) -> list[tuple[str, int, Archetype]]:
     """One archetype from each track, then the next from each, and so on.
 
     Depth-first would give a dual-track student three IB rows and nothing
     about markets, which is the opposite of what having two tracks means.
+
+    Carries each archetype's index WITHIN ITS OWN TRACK, not its position
+    in the interleaved output, because that index becomes the row's
+    analytics key: "st-0" has to mean the same seat in every student's
+    funnel, whether markets was their first track or their second.
     """
     tracks = list(tracks)
     tables = [TRACK_ARCHETYPES[t] for t in tracks]
-    out: list[tuple[str, Archetype]] = []
+    out: list[tuple[str, int, Archetype]] = []
     for i in range(max((len(t) for t in tables), default=0)):
         for track, table in zip(tracks, tables):
             if i < len(table):
-                out.append((track, table[i]))
+                out.append((track, i, table[i]))
     return out
 
 
@@ -248,10 +253,9 @@ def suggestions_for(firm: Any, user: Any, *, limit: int = DEFAULT_LIMIT) -> list
 
     rows: list[dict] = []
     if tracks:
-        picks = _round_robin(tracks)[:archetype_slots]
         rows = [
             _row(f"{track}-{i}", label, why, firm_name, terms)
-            for i, (track, (label, why, terms)) in enumerate(picks)
+            for track, i, (label, why, terms) in _round_robin(tracks)[:archetype_slots]
         ]
     else:
         rows = [

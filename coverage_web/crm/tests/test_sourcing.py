@@ -189,6 +189,18 @@ def test_keys_are_unique_so_the_event_log_can_tell_rows_apart():
     assert len(set(keys)) == len(keys)
 
 
+def test_a_key_names_the_same_seat_whatever_order_the_tracks_are_in():
+    """The key is what the funnel groups on, so "st-0" has to mean the
+    markets flow-desk analyst whether markets was the student's first
+    track or their second."""
+    first = sourcing.suggestions_for({"name": "UBS"}, FakeUser(["st", "ib"]))
+    second = sourcing.suggestions_for({"name": "UBS"}, FakeUser(["ib", "st"]))
+    by_key = {r["key"]: r["label"] for r in first}
+    for row in second:
+        assert by_key.get(row["key"], row["label"]) == row["label"]
+    assert by_key["st-0"] == sourcing.TRACK_ARCHETYPES["st"][0][0]
+
+
 # ---------------------------------------------------------------------------
 # 5. The render: the panel on the Coverage Gaps card.
 # ---------------------------------------------------------------------------
