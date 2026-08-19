@@ -121,7 +121,13 @@
           </div>
           <div class="situation-card-actions">
             <a class="situation-card-link" href="{{ e.url }}" target="_blank" rel="nofollow noopener">View role</a>
-            <a class="situation-card-link" href="{% url 'assistant:chat' %}">Talk about it</a>
+            {% comment %}
+            `?about=role:<id>` — assistant.views._about_prefill resolves this
+            to a real Opportunity and prefills the composer with a sentence
+            naming it, instead of the advisor opening on a blank box with no
+            idea which role the student just read about.
+            {% endcomment %}
+            <a class="situation-card-link" href="{% url 'assistant:chat' %}?about=role:{{ e.opportunity_id }}">Talk about it</a>
           </div>
         </div>
       {% endfor %}

@@ -22,6 +22,7 @@ prefetcher, a link scanner, or a back button will happily fire on its own.
 from __future__ import annotations
 
 import json
+import re
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
@@ -43,6 +44,7 @@ from coverage_domain.pipeline import CHANNELS, TOUCH_TRANSITIONS
 from crm import services
 from crm.models import Contact, Touch
 from crm.utils import CHANNEL_LABELS  # a list of (value, label) pairs, not a dict
+from directory.models import Opportunity
 
 from . import agent
 from . import attachments as attachments_mod
@@ -302,6 +304,58 @@ def _posted_conversation_id(request: HttpRequest) -> int | None:
     return _posted_int(request, "conversation")
 
 
+# What a "Talk about it" link (crm/week.html's situation cards, the daily
+# brief card) carries as its `?about=` value — a KIND and an ID, never free
+# text, so nothing from the query string ever reaches the page except a
+# sentence THIS view composed itself from a real row. See `_about_prefill`.
+_ABOUT_RE = re.compile(r"^(role|contact):(\d+)$")
+
+
+def _about_prefill(user, raw: str) -> str | None:
+    """The composer's opener for a "Talk about it" link, or None if `raw`
+    names nothing real.
+
+    `raw` is `request.GET.get("about")` — untrusted, but it is never echoed:
+    it is parsed into a kind and an id, the id is resolved through a
+    tenant-safe lookup, and the OPENER SENTENCE IS BUILT FROM THE RESOLVED
+    ROW, not from the query string. A student who edits the URL by hand gets
+    either a real opener about a real row of THEIRS, or nothing prefilled —
+    never another student's name, and never arbitrary text in the composer.
+
+    `contact` goes through `Contact.objects.for_user(user)`, the same
+    tenancy guarantee every other contact lookup in this app relies on. Roles
+    are shared-zone data (`Opportunity` has no owner), so there is no tenant
+    filter to apply — only existence is checked, same as `search_opportunities`
+    reading the open board for anyone.
+
+    A bare `"today"` (the daily brief card, which is about the whole day
+    rather than one role or contact) gets a generic opener with no lookup at
+    all.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if raw == "today":
+        return "Let's talk about today's move."
+
+    match = _ABOUT_RE.match(raw)
+    if not match:
+        return None
+    kind, raw_id = match.groups()
+
+    if kind == "contact":
+        contact = Contact.objects.for_user(user).filter(pk=int(raw_id)).first()
+        if contact is None:
+            return None
+        return f"Let's talk about {contact.name}."
+
+    # kind == "role"
+    opportunity = Opportunity.objects.select_related("firm").filter(pk=int(raw_id)).first()
+    if opportunity is None:
+        return None
+    return f"Let's talk about the {opportunity.title} role at {opportunity.firm.name}."
+
+
 @login_required
 def chat(request: HttpRequest, conversation_id: int | None = None) -> HttpResponse:
     conversation = _current_conversation(request.user, conversation_id)
@@ -310,6 +364,14 @@ def chat(request: HttpRequest, conversation_id: int | None = None) -> HttpRespon
     # stream's own response) never reads this, so it stays out of the
     # shared _context() rather than costing every send an unused query.
     context["memories"] = AdvisorMemory.objects.for_user(request.user)
+    # A "Talk about it" link (crm/week.html, crm/_daily_brief.html) carries
+    # which role, contact, or day it was clicked from — see _about_prefill.
+    # Only the full page GET resolves this: _context() (shared with send/
+    # stream's fragment responses) never sees it, so a reply never gets the
+    # opener typed back into the box under it.
+    prefill = _about_prefill(request.user, request.GET.get("about", ""))
+    if prefill:
+        context["prefill_text"] = prefill
     return render(request, "assistant/chat.html", context)
 
 

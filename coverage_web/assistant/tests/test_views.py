@@ -19,7 +19,7 @@ from django.utils import timezone
 from analytics.models import ProductEvent
 from assistant.models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
 from crm.models import Contact, Touch
-from directory.models import Firm
+from directory.models import Firm, Opportunity
 
 User = get_user_model()
 
@@ -98,6 +98,76 @@ def test_the_composer_is_disabled_while_the_feature_is_dark(signed_in):
 
     assert "needs an Anthropic API key" in body
     assert "disabled" in body
+
+
+# ---------------------------------------------------------------------------
+# "Talk about it" context — a link from Today or the daily brief card carries
+# ?about=role:<id> / ?about=contact:<id> / ?about=today, and the chat page
+# prefills the composer with a sentence naming the real row instead of
+# opening on a blank box that has no idea what was just clicked.
+# ---------------------------------------------------------------------------
+def test_about_role_prefills_the_composer_with_the_roles_own_title_and_firm(signed_in):
+    firm = Firm.objects.create(slug="north-bank", name="North Bank")
+    opportunity = Opportunity.objects.create(
+        firm=firm, title="2028 Summer Analyst", bucket="internship",
+        region="hk", location="Hong Kong", status="open",
+    )
+
+    body = signed_in.get(reverse("assistant:chat") + f"?about=role:{opportunity.id}").content.decode()
+
+    assert "2028 Summer Analyst" in body
+    assert "North Bank" in body
+
+
+def test_about_contact_prefills_the_composer_with_the_contacts_own_name(signed_in, user):
+    contact = Contact(user=user, name="Priya Raman", firm_text="Citi")
+    contact.save()
+
+    body = signed_in.get(reverse("assistant:chat") + f"?about=contact:{contact.id}").content.decode()
+
+    assert "Priya Raman" in body
+
+
+def test_about_today_prefills_a_generic_opener_with_no_lookup(signed_in):
+    body = signed_in.get(reverse("assistant:chat") + "?about=today").content.decode()
+
+    assert "today&#x27;s move" in body or "today's move" in body
+
+
+def test_about_another_students_contact_is_not_leaked_into_the_prefill(client, user):
+    """The security case: an id in the query string that isn't THIS
+    student's contact must resolve to nothing, never to another student's
+    name landing in the composer."""
+    other = User.objects.create_user(email="other@example.com", password="pw12345!")
+    theirs = Contact(user=other, name="Someone Else", firm_text="Rival Bank")
+    theirs.save()
+    client.force_login(user)
+
+    body = client.get(reverse("assistant:chat") + f"?about=contact:{theirs.id}").content.decode()
+
+    assert "Someone Else" not in body
+
+
+def test_about_an_unknown_role_id_prefills_nothing(signed_in):
+    body = signed_in.get(reverse("assistant:chat") + "?about=role:999999").content.decode()
+
+    assert "Let&#x27;s talk about" not in body
+    assert "Let's talk about" not in body
+
+
+def test_about_garbage_is_silently_ignored_not_echoed(signed_in):
+    """Whatever a student (or a crafted link) puts after `about=` that isn't
+    a recognised kind:id pair must never show up verbatim in the page — the
+    composer stays exactly as empty as it is with no `about` at all."""
+    plain = signed_in.get(reverse("assistant:chat")).content.decode()
+    injected = signed_in.get(
+        reverse("assistant:chat") + "?about=<script>alert(1)</script>"
+    ).content.decode()
+
+    assert "<script>alert(1)</script>" not in injected
+    # Same composer markup either way — garbage `about` behaves exactly like
+    # no `about` at all, not like a degraded version of the real feature.
+    assert plain.count('id="as-input"') == injected.count('id="as-input"')
 
 
 def test_an_empty_send_changes_nothing(signed_in, user):

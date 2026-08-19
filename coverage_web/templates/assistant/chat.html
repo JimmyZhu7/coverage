@@ -1044,7 +1044,14 @@ element by the next turn.
         log.scrollTo({ top: log.scrollHeight, behavior: reduce ? "auto" : "smooth" });
       }
       var input = root.querySelector("#as-input");
-      if (input && !input.disabled) input.focus();
+      if (input) {
+        // A "Talk about it" link (assistant.views._about_prefill) can land
+        // here with the composer already holding a sentence, not empty —
+        // size the box to fit it instead of leaving a multi-line opener
+        // clipped in the single-row default height.
+        autoSize(input);
+        if (!input.disabled) input.focus();
+      }
       var mic = root.querySelector("#as-mic");
       if (mic && window.covMicSupported) mic.hidden = false;
     }

@@ -30,6 +30,11 @@ saying today — never an empty card, never an error.
     uses for its own header row) means the extra width does something
     instead of just being background past the last word.
     {% endcomment %}
-    <a class="daily-brief-link btn" href="{% url 'assistant:chat' %}">Talk about it <span aria-hidden="true">→</span></a>
+    {% comment %}
+    `?about=today` — the brief isn't about one role or contact, so
+    assistant.views._about_prefill gives the composer a generic opener
+    instead of a blank box, same idea as the situation cards' `role:<id>`.
+    {% endcomment %}
+    <a class="daily-brief-link btn" href="{% url 'assistant:chat' %}?about=today">Talk about it <span aria-hidden="true">→</span></a>
   </div>
 {% endif %}

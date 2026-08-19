@@ -71,9 +71,16 @@ same shape as every AI chat surface a student has already used.
       {% endcomment %}
       <div class="as-attach-chips" id="as-attach-chips" hidden></div>
       <label class="as-label" for="as-input">Your message</label>
+      {% comment %}
+      `prefill_text` (assistant.views._about_prefill) is set only on the full
+      page GET, from a "Talk about it" link that named a real role or
+      contact — never from raw query-string text. Auto-escaped like any other
+      template variable, and it's inside a <textarea>, so there is nothing
+      here to render as markup even if a firm or contact name held one.
+      {% endcomment %}
       <textarea id="as-input" name="message" rows="1" maxlength="{{ max_chars }}"
                 placeholder="Message Coverage…"
-                {% if not configured %}disabled{% endif %}></textarea>
+                {% if not configured %}disabled{% endif %}>{{ prefill_text|default:"" }}</textarea>
     </div>
     <div class="as-actions">
       <span id="as-typing" class="htmx-indicator as-typing" aria-live="polite">
