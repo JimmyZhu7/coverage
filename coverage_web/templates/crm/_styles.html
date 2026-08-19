@@ -142,6 +142,54 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .lane-park .act-card { border-left-color: var(--line-strong); }
   .lane-title .park-all { margin-left: auto; }
 
+  /* The day-one seed lane (crm/_seed_lane.html). Deliberately
+     NOT act-card shaped — a suggestion and a due follow-up must never look
+     alike. A DASHED left edge is the whole tell: every real queue card
+     carries a solid coloured one, so "not yet real" is legible before a word
+     is read, and it degrades to a visible difference in high-contrast and
+     forced-colors modes where a tint would not.
+     Tokens only, so both themes come for free. */
+  .lane-seed { margin-bottom: var(--s6); }
+  .seed-list { list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: var(--s2); }
+  .seed-row { display: flex; align-items: center; gap: var(--s3);
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 2px dashed var(--accent-line);
+    border-radius: var(--r-panel); padding: var(--s3) var(--s4);
+    transition: border-color var(--t-fast); }
+  .seed-row:hover { border-color: var(--accent-line);
+    border-left-color: var(--accent); }
+  /* The step number. Mono like every other figure in the product, and
+     aria-hidden in the markup — an ordered list already says "1, 2, 3" to a
+     reader, so this is the sighted half of the same fact, not a second one. */
+  .seed-step { flex: none; width: 22px; height: 22px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent-ink);
+    font-family: var(--font-mono); font-size: var(--fs-nano);
+    font-variant-numeric: tabular-nums; }
+  .seed-text { min-width: 0; flex: 1 1 auto; }
+  .seed-title { margin: 0; font-size: var(--fs-s); font-weight: var(--w-med);
+    line-height: 1.35; color: var(--ink); }
+  .seed-why { margin: 2px 0 0; font-size: var(--fs-xs); color: var(--ink-2);
+    line-height: 1.45; }
+  .seed-btn { flex: none; padding: 6px 12px; font-size: var(--fs-xs);
+    white-space: nowrap; }
+  /* On a narrow screen the button drops under the text rather than crushing
+     it to two words a line. 44px min-height is the finger target the rest of
+     the product holds.
+
+     A GRID rather than `flex-wrap`, because wrapping is per-item: measured at
+     390px, a row whose reason ran long pushed only the text down and left its
+     step number stranded alone on the line above, so two rows of the same
+     lane disagreed about their own shape. Two columns pins the number beside
+     the title it numbers, whatever the text does, and the button spans both.
+     `start` so the number lines up with the first line of a two-line title. */
+  @media (max-width: 560px) {
+    .seed-row { display: grid; grid-template-columns: auto 1fr;
+      align-items: start; gap: var(--s2) var(--s3); }
+    .seed-btn { grid-column: 1 / -1; width: 100%; min-height: 44px; }
+  }
+
   /* Up next: the held-back remainder. Collapsed by default, exact count in
      the summary, complete list inside — the cap paces, it never filters. */
   .upnext { margin-bottom: var(--s6); background: var(--surface);

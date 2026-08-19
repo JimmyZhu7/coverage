@@ -18,13 +18,35 @@ on every quick action so all of it stays in sync.
     {% if not queue_total and not debriefs %}
       <div class="empty">
         {% if contact_count %}
-          <h2>You're all caught up.</h2>
-          <p>Nothing's due right now. Add people or log a touch to keep the cadence moving.</p>
+          {% comment %}
+          "You're all caught up" is only honest when there is a network to be
+          caught up ON. With one contact just touched, cadence puts the
+          follow-up six business days out and this page went quiet for a week
+          — congratulating a day-old account on an empty queue it had no way
+          to fill. When seeds exist the headline says what is actually true
+          (nothing is DUE) and the lane below says what to do about it.
+
+          The reverse is a real message too, which is why this branches on
+          `seeds` rather than on the contact count: a student who has read a
+          thirty-person queue and snoozed all of it HAS caught up, the view's
+          gate returns no seeds for them, and they keep the line they earned.
+          {% endcomment %}
+          {% if seeds %}
+            <h2>Nothing due today.</h2>
+            <p>Your network is still thin, so the cadence has little to work with. Start here.</p>
+          {% else %}
+            <h2>You're all caught up.</h2>
+            <p>Nothing's due right now. Add people or log a touch to keep the cadence moving.</p>
+          {% endif %}
         {% else %}
           <h2>No contacts yet.</h2>
           <p>Add the people you're networking with and Coverage will tell you who to reach, and when.</p>
         {% endif %}
-        <a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>
+        {% comment %}
+        A generic "Go to Network" under three specific, named first moves is
+        the weakest link on the page competing with the strongest ones.
+        {% endcomment %}
+        {% if not seeds %}<a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>{% endif %}
       </div>
     {% elif not lanes and not debriefs %}
       {% comment %}
@@ -41,6 +63,13 @@ on every quick action so all of it stays in sync.
         </p>
       </div>
     {% endif %}
+
+    {% comment %}
+    Day-one seeds. Only ever present when the queue is silent (the view's own
+    gate), so this can never push real work down the page — where there is
+    work, `seeds` is empty and this renders nothing at all.
+    {% endcomment %}
+    {% if seeds %}{% include "crm/_seed_lane.html" %}{% endif %}
 
     {% comment %}
     Chat prep. First on the page whenever it exists: a conversation happening

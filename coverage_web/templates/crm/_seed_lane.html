@@ -1,0 +1,38 @@
+{% comment %}
+The "Start here" lane — the day-one queue, rendered only when the real queue
+has nothing to say (crm.today._cockpit_context's silence gate).
+
+WHY THIS IS NOT AN act-card. Every card in the queue above is a DUE action
+with audited write buttons behind it: "Log it" attests that you sent
+something, "They replied" records an event about somebody else. A seed is a
+suggestion. Wearing the same shape, a suggestion and a due follow-up become
+indistinguishable at a glance, and the one thing this page sells is that the
+difference is always legible. So: its own row shape, a dashed left edge
+rather than the solid coloured one an act-card carries, no warmth chip, no
+priority badge, and exactly one control per row — a link to somewhere that
+already exists, never an hx-post that writes state.
+
+Each row carries its own reason in the student's own facts (their tiered
+firm, a confirmed date on it, how many people they have there). Nothing here
+is stored: a seed is derived on every render, so it disappears the moment its
+condition stops being true. There is nothing to dismiss and nothing to
+complete.
+{% endcomment %}
+<section class="lane lane-seed" aria-labelledby="seed-lane-h">
+  <h2 class="lane-title" id="seed-lane-h">
+    Start here
+    <span class="lane-count">{{ seeds|length }}</span>
+  </h2>
+  <ol class="seed-list">
+    {% for s in seeds %}
+      <li class="seed-row kin-reveal" style="--i:{{ forloop.counter0 }}">
+        <span class="seed-step" aria-hidden="true">{{ forloop.counter }}</span>
+        <div class="seed-text">
+          <h3 class="seed-title">{{ s.title }}</h3>
+          <p class="seed-why">{{ s.why }}</p>
+        </div>
+        <a class="btn btn-primary seed-btn" href="{{ s.href }}">{{ s.cta }}</a>
+      </li>
+    {% endfor %}
+  </ol>
+</section>
