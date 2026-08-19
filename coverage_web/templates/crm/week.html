@@ -173,11 +173,19 @@
       The most actionable number on the page, honest at zero too: nothing
       unsaved is a real state worth naming, not a bare "0" that reads like
       the feature is broken.
+
+      The label used to read "Name your year, unsaved" — a phrase that
+      parses as "your profile didn't save" as easily as its intended
+      meaning ("N roles name your class year and you haven't saved them").
+      Spelling out the class year itself (read straight off `user`, not
+      `dash` — `crm.today._dashboard_context` carries the count but not the
+      year) removes the ambiguity instead of relying on word order to
+      carry it.
       {% endcomment %}
       {% if dash.eligible_unsaved %}
         <a class="ribbon-stat kin-reveal is-urgent" style="--i: 2" href="{% url 'opportunities' %}">
           <span class="ribbon-num">{{ dash.eligible_unsaved }}</span>
-          <span class="ribbon-lbl">Name your year, unsaved</span>
+          <span class="ribbon-lbl">For Class of {{ user.class_year }}, not saved yet</span>
         </a>
       {% elif dash.has_year %}
         <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'opportunities' %}">
