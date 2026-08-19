@@ -621,7 +621,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   @media (max-width: 700px) { .newat-list { columns: 1; } }
 
   /* ---- Coverage Gaps strip: where you are least covered, worst first ---- */
-  .gap-strip { margin-bottom: var(--s5); }
+  /* Positioned and lifted so an open "Who to find" panel (absolutely
+     positioned inside a card, below it) paints OVER the Network board
+     rather than under it. Without this the strip and the board are both
+     z-index:auto siblings, so the board wins on document order and the
+     panel opens into a white rectangle with the board's first lane drawn
+     on top of it. */
+  .gap-strip { margin-bottom: var(--s5); position: relative; z-index: 5; }
   .gap-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: var(--s3); }
   @media (max-width: 1180px) { .gap-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
