@@ -218,24 +218,34 @@
   .v-live { display: inline-flex; align-items: center; gap: 6px;
     font-size: 11px; color: var(--ink-2); }
 
-  /* Vignette 2: the Today queue with a pace ring. */
-  .v-today { display: flex; gap: var(--s4); align-items: flex-start; position: relative; }
-  .v-queue { flex: 1; display: flex; flex-direction: column; gap: var(--s2); }
-  .v-act { border: 1px solid var(--line); border-radius: 10px; background: var(--paper);
-    padding: var(--s2) var(--s3); font-size: var(--fs-s); display: flex;
-    justify-content: space-between; align-items: center; gap: var(--s2); }
-  .v-act b { font-size: var(--fs-s); }
-  .v-act .why { color: var(--ink-3); font-size: 11px; }
-  .v-act .go { flex: none; font-size: 11px; font-weight: var(--w-med);
-    border-radius: 999px; padding: 3px 10px; background: var(--accent);
+  /* Vignette 2: one card off the queue, opened.
+
+     This used to be the Today queue with the pace ring — the exact picture
+     the hero now shows, two screens apart. Repeating it taught the visitor
+     nothing on the second look, so this vignette drops a level instead: the
+     hero shows WHAT the queue looks like, this shows what a row is FOR —
+     why Coverage ranked this person today, the angle to open with, and the
+     four one-click outcomes the copy beside it promises. */
+  .v-decide { border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: var(--r-panel); background: var(--paper);
+    padding: var(--s3) var(--s4); position: relative; }
+  .v-flag { display: inline-block; font-size: 11px; font-weight: var(--w-med);
+    border-radius: 999px; padding: 2px 10px; margin-right: 6px;
+    background: var(--danger-soft); color: var(--danger); }
+  .v-decide-why { font-size: 11px; color: var(--ink-3); margin: 0 0 var(--s2);
+    font-family: var(--font-mono); }
+  .v-decide-name { font-weight: var(--w-bold); font-size: var(--fs-s); margin: 0 0 4px; }
+  .v-decide-name span { font-weight: var(--w-reg); color: var(--ink-3); }
+  .v-decide-angle { font-size: 12px; color: var(--ink-2); margin: 0 0 var(--s3); }
+  .v-rail { display: flex; flex-wrap: wrap; gap: 6px; }
+  .v-rail span { font-size: 11px; font-weight: var(--w-med); border-radius: 999px;
+    padding: 4px 12px; border: 1px solid var(--line-strong); color: var(--ink-2);
+    background: var(--surface); }
+  .v-rail span.is-primary { background: var(--accent); border-color: var(--accent);
     color: var(--on-accent); }
-  .v-ring { flex: none; width: 92px; height: 92px; border-radius: 50%;
-    background: conic-gradient(var(--accent) 0deg 252deg, var(--line) 252deg 360deg);
-    display: flex; align-items: center; justify-content: center; }
-  .v-ring::before { content: "7/10"; width: 68px; height: 68px; border-radius: 50%;
-    background: var(--surface); display: flex; align-items: center; justify-content: center;
-    font-family: var(--font-mono); font-weight: var(--w-bold); font-size: var(--fs-s);
-    color: var(--ink); }
+  .v-decide-next { font-size: 11px; color: var(--ink-3); margin: var(--s3) 0 0;
+    font-family: var(--font-mono); }
+  .v-decide-next b { color: var(--ink-2); font-weight: var(--w-med); }
 
   /* Vignette 3: the warmth board. */
   .v-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3);
@@ -489,20 +499,24 @@
         <p>Your cadence becomes one ranked queue: overdue first, then due, each with the angle.</p>
         <ul class="feature-points">
           <li>One-click Sent, Reply, Snooze, Skip</li>
-          <li>A pace ring that fills as you work</li>
-          <li>Sorted by the tiers you set</li>
+          <li>Every card carries the angle to open with</li>
+          <li>Overdue first, then due, inside the tiers you set</li>
         </ul>
       </div>
       <div class="vig kin-reveal">
-        <p class="vig-label">Today · your queue</p>
-        <div class="v-today">
-          <div class="v-queue">
-            <div class="v-act"><span><b>Sarah Lin</b> <span class="why">· VP, coffee chat 12d ago</span></span><span class="go">Compose</span></div>
-            <div class="v-act"><span><b>Marcus Ito</b> <span class="why">· Analyst, replied Tue</span></span><span class="go">Reply</span></div>
-            <div class="v-act"><span><b>Priya Nair</b> <span class="why">· Associate, new intro</span></span><span class="go">Sent</span></div>
+        <p class="vig-label">Today · one card, opened</p>
+        <div class="v-decide">
+          <p class="v-decide-why"><span class="v-flag">Overdue</span> Tier 1 · no reply in 12 days</p>
+          <p class="v-decide-name">Sarah Lin <span>· VP, Investment Banking</span></p>
+          <p class="v-decide-angle">Angle: she mentioned the Hong Kong desk rotation on your last call.</p>
+          <div class="v-rail">
+            <span class="is-primary">Sent</span>
+            <span>Reply</span>
+            <span>Snooze</span>
+            <span>Skip</span>
           </div>
-          <div class="v-ring" aria-label="7 of 10 weekly touches"></div>
         </div>
+        <p class="v-decide-next">Next · <b>Marcus Ito</b>, due today, then four more</p>
       </div>
     </div>
 
