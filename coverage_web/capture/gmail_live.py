@@ -62,6 +62,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from billing import credits as billing_credits
 from capture import gmail_residue
 from capture.gmail import apply_findings
 from capture.models import GmailConnection
@@ -771,12 +772,18 @@ def run_rescan(connection: GmailConnection, *, dry_run: bool = False) -> dict:
     over whatever the deterministic pass couldn't classify.
 
     Two clearly separate stages composed here, not merged into one: the
-    first is free and unlimited; the second is metered, capped at
-    `gmail_residue.MAX_RESIDUE_THREADS`, and only runs when
-    `gmail_residue.is_configured()` (that module no-ops to zero-stats
-    otherwise). This composition point is what the `gmail_backfill`
-    command calls for a queued rescan — see that command's `--email` /
-    rescan-selection logic.
+    first is free and unlimited; the second is metered — clamped to
+    whatever `billing.credits` says this user's ledger can afford right now
+    (docs/credit-system-plan.md's enforcement point 2), which is itself
+    clamped to `gmail_residue.MAX_RESIDUE_THREADS`, and only runs at all
+    when `gmail_residue.is_configured()` (that module no-ops to zero-stats
+    otherwise). A student with zero affordable credits still gets the free
+    deterministic pass in full — the residue stage is simply skipped, and
+    `stats["residue"]["credit_limited"]` says so honestly rather than
+    silently under-reporting. This composition point is what the
+    `gmail_backfill` command calls for a queued rescan — see that command's
+    `--email` / rescan-selection logic. It runs from that cron command, not
+    a request, which is exactly why `billing.credits` never assumes one.
 
     Returns one merged stats dict: the deterministic `SyncResult.as_stats()`
     keys at the top level, plus a nested `"residue"` key with
@@ -791,11 +798,12 @@ def run_rescan(connection: GmailConnection, *, dry_run: bool = False) -> dict:
         residue_sink=residue,
     )
     stats = result.as_stats()
+    distinct_threads = len({e["thread_id"] for e in residue if e.get("thread_id")})
 
     if dry_run:
-        # A dry run must not spend a single metered AI call either — report
-        # how much residue WOULD be handed to Phase 3, but never call it.
-        distinct_threads = len({e["thread_id"] for e in residue if e.get("thread_id")})
+        # A dry run must not spend a single metered AI call, and must not
+        # touch the ledger either — report how much residue WOULD be handed
+        # to Phase 3, but never call it and never debit for it.
         stats["residue"] = {
             "residue_threads_seen": distinct_threads,
             "residue_threads_processed": 0,
@@ -803,8 +811,23 @@ def run_rescan(connection: GmailConnection, *, dry_run: bool = False) -> dict:
             "auto_reply": 0,
             "ambiguous": 0,
             "touches_logged": 0,
+            "credit_limited": False,
         }
         return stats
 
-    stats["residue"] = gmail_residue.run_residue_stage(connection, residue)
+    # The credit clamp, applied BEFORE a single classification call —
+    # `affordable` is threads, already floored at 0 (a student with no
+    # credits left still completes the free deterministic pass above; this
+    # just means the residue stage below processes nothing).
+    affordable = billing_credits.affordable_residue_threads(connection.user, distinct_threads)
+    residue_stats = gmail_residue.run_residue_stage(connection, residue, max_threads=affordable)
+    billing_credits.spend_rescan(connection.user, residue_stats["residue_threads_processed"])
+    # Honest labeling (docs/credit-system-plan.md §6): whenever fewer
+    # threads got processed than were actually seen, say so, rather than
+    # letting "seen 87 / processed 40" speak for itself in a stats dict
+    # nobody but a template reads closely.
+    residue_stats["credit_limited"] = (
+        residue_stats["residue_threads_processed"] < residue_stats["residue_threads_seen"]
+    )
+    stats["residue"] = residue_stats
     return stats

@@ -15,8 +15,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.test import override_settings
 from django.urls import reverse
 
+from billing import credits as billing_credits
+from billing.models import CreditLedger
 from capture import gmail_live, gmail_residue
 from capture.models import GmailConnection
 from crm.models import Contact, Touch
@@ -132,6 +135,115 @@ class TestRunRescan:
         assert "residue" in stats
         connection.refresh_from_db()
         assert connection.backfill_status == "done"  # untouched by run_rescan itself
+
+    def _residue_messages(self, connection, count: int, *, base_ms: int = 1_700_000_000_000):
+        """`count` bounce-shaped messages, each `_classify_message` returns
+        None for (unresolvable sender) — the deterministic pass's own
+        residue, one per distinct thread."""
+        message_ids = []
+        messages_by_id = {}
+        for i in range(count):
+            ms = base_ms + i
+            mid = f"residue-m{i}"
+            message_ids.append(mid)
+            messages_by_id[mid] = {
+                "threadId": f"thread-{ms}",
+                "snippet": "delivery failed, no address found in this text",
+                "internalDate": str(ms),
+                "payload": {
+                    "headers": [
+                        {"name": "From", "value": "mailer-daemon@mail.example"},
+                        {"name": "To", "value": connection.gmail_address},
+                        {"name": "Subject", "value": "Delivery Status Notification"},
+                    ],
+                },
+            }
+        return message_ids, messages_by_id
+
+    @override_settings(ANTHROPIC_API_KEY="sk-test-key", CREDIT_RESCAN_THREADS_PER_CREDIT=1)
+    def test_the_residue_stage_is_truncated_to_the_affordable_thread_budget(self, student, connection):
+        """docs/credit-system-plan.md's enforcement point 2: the residue
+        stage never sends more threads to Haiku than the ledger can pay
+        for, even though 5 candidates are on offer and the hard
+        MAX_RESIDUE_THREADS cap would allow all of them."""
+        Contact.all_objects.create(
+            user=student, name="Jane Banker", email="jane@bank.example", source="manual"
+        )
+        # Free's default grant is 60; spend it down to exactly 2, and with
+        # 1 thread/credit (this test's override) that's 2 affordable out of
+        # 5 candidates.
+        CreditLedger.all_objects.create(user=student, delta=-58, kind=CreditLedger.KIND_ADJUST)
+        assert billing_credits.balance(student) == 2
+
+        message_ids, messages_by_id = self._residue_messages(connection, 5)
+        client = _fake_gmail_client(message_ids, messages_by_id)
+
+        calls = []
+
+        def _fake_post_json(payload, *, timeout, retries):
+            calls.append(payload)
+            return {"content": [{"type": "text", "text": '{"outcome": "ambiguous", "quote": null}'}]}
+
+        with patch.object(gmail_live, "_gmail_client", return_value=client), \
+             patch.object(gmail_residue, "_post_json", side_effect=_fake_post_json):
+            stats = gmail_live.run_rescan(connection)
+
+        residue = stats["residue"]
+        assert residue["residue_threads_seen"] == 5
+        assert residue["residue_threads_processed"] == 2
+        assert len(calls) == 2
+        # Honest partial labeling (docs/credit-system-plan.md §6): fewer
+        # threads processed than seen must say so, not report a clean
+        # number that hides the truncation.
+        assert residue["credit_limited"] is True
+
+        # Debited for exactly what ran, not what was offered.
+        assert billing_credits.balance(student) == 0
+        row = CreditLedger.objects.for_user(student).get(kind=CreditLedger.KIND_SPEND_RESCAN)
+        assert row.delta == -2
+        assert row.props == {"threads": 2}
+
+    @override_settings(ANTHROPIC_API_KEY="sk-test-key")
+    def test_zero_affordable_credits_still_runs_the_free_deterministic_pass(self, student, connection):
+        """A student who has burned every credit still gets the free
+        deterministic pass in full — only the metered residue stage is
+        skipped, and it says so honestly rather than silently under-
+        reporting."""
+        contact = Contact.all_objects.create(
+            user=student, name="Jane Banker", email="jane@bank.example", source="manual"
+        )
+        CreditLedger.all_objects.create(user=student, delta=-60, kind=CreditLedger.KIND_ADJUST)
+        assert billing_credits.balance(student) == 0
+
+        genuine_reply = _message(
+            from_addr="Jane Banker <jane@bank.example>",
+            to_addr=connection.gmail_address,
+            subject="Re: chat",
+            snippet="Happy to chat!",
+            internal_date_ms=1_700_000_000_000,
+        )
+        residue_ids, residue_by_id = self._residue_messages(connection, 3, base_ms=1_800_000_000_000)
+        all_ids = ["m-genuine"] + residue_ids
+        all_by_id = {"m-genuine": genuine_reply, **residue_by_id}
+        client = _fake_gmail_client(all_ids, all_by_id)
+
+        with patch.object(gmail_live, "_gmail_client", return_value=client), \
+             patch.object(gmail_residue, "_post_json") as mocked_post:
+            stats = gmail_live.run_rescan(connection)
+
+        # The free deterministic pass ran in full and logged the genuine reply.
+        assert stats["touches_logged"] == 1
+        assert Touch.objects.for_user(student).filter(contact=contact).exists()
+
+        residue = stats["residue"]
+        assert residue["residue_threads_seen"] == 3
+        assert residue["residue_threads_processed"] == 0
+        assert residue["credit_limited"] is True
+        mocked_post.assert_not_called()  # not one metered API call was made
+
+        # No debit for a stage that never ran.
+        assert billing_credits.balance(student) == 0
+        assert not CreditLedger.objects.for_user(student).filter(kind=CreditLedger.KIND_SPEND_RESCAN).exists()
 
     def test_dry_run_makes_no_ai_call_even_if_configured(self, student, connection, settings):
         settings.ANTHROPIC_API_KEY = "sk-test-key"

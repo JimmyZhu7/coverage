@@ -252,3 +252,55 @@ def test_run_residue_stage_is_a_noop_with_empty_residue(student):
     stats = run_residue_stage(FakeConnection(student), [])
     assert stats["residue_threads_seen"] == 0
     assert stats["residue_threads_processed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# max_threads — the credit-metering clamp
+# (docs/credit-system-plan.md's enforcement point 2, capture/gmail_live.py)
+# ---------------------------------------------------------------------------
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_max_threads_clamps_below_the_hard_cap_when_it_is_the_smaller_limit(student):
+    """A student whose credit balance can only afford 7 threads must not
+    have the classifier reach for the 8th, even though the hard
+    MAX_RESIDUE_THREADS cap would allow up to 100."""
+    residue = [
+        _residue_message(thread_id=f"thread-{i}", from_addr=f"p{i}@x.com", subject="hi", snippet=f"body {i}")
+        for i in range(10)
+    ]
+    reply = _api_text_response({"outcome": "ambiguous", "quote": None})
+    with patch.object(gmail_residue, "_post_json", return_value=reply) as mocked:
+        stats = run_residue_stage(FakeConnection(student), residue, max_threads=7)
+
+    assert stats["residue_threads_seen"] == 10
+    assert stats["residue_threads_processed"] == 7
+    assert mocked.call_count == 7
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_max_threads_larger_than_the_hard_cap_never_exceeds_max_residue_threads(student):
+    """The two caps are independent and the SMALLER one wins — a generous
+    credit balance must never let a rescan exceed the 100-thread ceiling."""
+    residue = [
+        _residue_message(thread_id=f"thread-{i}", from_addr=f"p{i}@x.com", subject="hi", snippet=f"body {i}")
+        for i in range(101)
+    ]
+    reply = _api_text_response({"outcome": "ambiguous", "quote": None})
+    with patch.object(gmail_residue, "_post_json", return_value=reply):
+        stats = run_residue_stage(FakeConnection(student), residue, max_threads=1000)
+
+    assert stats["residue_threads_processed"] == MAX_RESIDUE_THREADS
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_max_threads_of_zero_makes_no_api_call_at_all(student):
+    """A student with no affordable credits: the residue stage runs (it is
+    not skipped entirely — `residue_threads_seen` still reports what was
+    THERE), it just classifies nothing."""
+    residue = [_residue_message(thread_id="t1", from_addr="a@x.com", subject="hi", snippet="body")]
+
+    with patch.object(gmail_residue, "_post_json") as mocked:
+        stats = run_residue_stage(FakeConnection(student), residue, max_threads=0)
+
+    assert stats["residue_threads_seen"] == 1
+    assert stats["residue_threads_processed"] == 0
+    mocked.assert_not_called()

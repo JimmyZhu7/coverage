@@ -50,10 +50,12 @@ THE CAP, non-negotiable
 At most `MAX_RESIDUE_THREADS` (100) residue THREADS are processed in one
 rescan run, no matter how many residue messages the deterministic pass
 collected. This is the one call site in the whole Gmail Live feature that
-spends real, metered API money per run; a future credit-metering pass is
-meant to wrap exactly this function without touching anything upstream of
-it (see the module's WHY in the build plan) -- keeping the cap a hard,
-tested constant here is what makes that possible.
+spends real, metered API money per run -- which is exactly why
+`run_residue_stage`'s `max_threads` parameter exists: `capture.gmail_live.
+run_rescan` computes what the caller's credit balance can actually afford
+(`billing.credits.affordable_residue_threads`, docs/credit-system-plan.md
+enforcement point 2) and clamps to it BEFORE a single classification call
+is made, on top of (never instead of) this hard 100-thread ceiling.
 """
 
 from __future__ import annotations
@@ -237,14 +239,22 @@ def run_residue_stage(
     model: str = DEFAULT_MODEL,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     retries: int = DEFAULT_RETRIES,
+    max_threads: int | None = None,
 ) -> dict:
     """The Phase-3 follow-up stage to a "Scan Now" rescan. `residue` is the
     list `backfill_connection(..., residue_sink=residue)` collected — dicts
     shaped `{"message": <gmail message dict>, "thread_id": str}`.
 
     Deliberately a separate, well-named function from the deterministic
-    stage above it (not folded into `backfill_connection`) so a future
-    credit-metering pass can wrap exactly this call site.
+    stage above it (not folded into `backfill_connection`) so the
+    credit-metering pass can wrap exactly this call site — which is exactly
+    what `max_threads` is for: `capture.gmail_live.run_rescan` computes what
+    the caller's credit balance can actually afford
+    (`billing.credits.affordable_residue_threads`) and passes it in here.
+    `None` (every other caller, and every existing test) means "no extra
+    clamp" — `MAX_RESIDUE_THREADS` alone still applies. When both are given,
+    the SMALLER wins; this function never spends more API calls than either
+    limit allows.
 
     Never raises: an API failure on one message downgrades that message to
     "ambiguous" and the run continues; a missing key means the stage is a
@@ -278,8 +288,11 @@ def run_residue_stage(
         return stats
 
     # THE cap, enforced by slicing before a single API call is made for the
-    # 101st+ candidate.
-    thread_items = list(by_thread.items())[:MAX_RESIDUE_THREADS]
+    # 101st+ candidate — and, when the caller passed one, the SMALLER of
+    # that hard ceiling and whatever the credit system says is affordable
+    # right now (see this function's docstring on `max_threads`).
+    effective_cap = MAX_RESIDUE_THREADS if max_threads is None else min(MAX_RESIDUE_THREADS, max_threads)
+    thread_items = list(by_thread.items())[:effective_cap]
     stats["residue_threads_processed"] = len(thread_items)
 
     own_email = connection.gmail_address.lower()
