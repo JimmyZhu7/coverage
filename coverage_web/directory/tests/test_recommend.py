@@ -709,6 +709,81 @@ def test_role_matches_tracks_filters_the_job_not_the_firm(title, tracks, expecte
     assert role_matches_tracks(title, tracks) is expected
 
 
+@pytest.mark.parametrize("region,regions,expected", [
+    # Names a region they want: keep.
+    ("hk", ("hk", "us"), True),
+    # Names a region they don't: drop. Includes the two "stated but not one
+    # of the six trackable markets" codes — a role that said WHERE it is,
+    # just not somewhere the student targeted.
+    ("other", ("hk", "us"), False),
+    ("global", ("hk", "us"), False),
+    ("sg", ("hk", "us"), False),
+    # No region at all (the board couldn't place it): drop, once the
+    # student has stated a preference — same as `_apply_region_filter` and
+    # `_matching` already treat a blank region under a live filter.
+    ("", ("hk", "us"), False),
+    # No stated regions: nothing to filter to, so filter nothing — even a
+    # role with a blank region passes, same "no stated X" posture as tracks.
+    ("", (), True),
+    ("other", (), True),
+])
+def test_role_matches_regions_filters_the_market_not_the_firm(region, regions, expected):
+    """The Pune, India half of the customer walk: a role's own
+    `Opportunity.region` compared against the student's stated regions,
+    not the firm's `Firm.regions` list — a universal bank with an HK/US
+    student's tier can still post an ops role in a market it does not
+    track for that student."""
+    from directory.recommend import role_matches_regions
+    assert role_matches_regions(region, regions) is expected
+
+
+@pytest.mark.parametrize(
+    "bucket,class_year_derived,target_cycles,profile_class_year,expected",
+    [
+        # Bucket matches what the student is recruiting for: keep.
+        ("internship", "", ("2028 Summer Internship",), 2028, True),
+        # Bucket is a rung the student never picked a cycle for (a
+        # full-time role shown to a student who has only ever picked
+        # summer-internship cycles): drop. The Nashville Wealth Management
+        # "New Associate (full-time)" half of the customer walk.
+        ("entry_level", "", ("2028 Summer Internship",), 2028, False),
+        # No target cycles stated: nothing to filter the bucket against.
+        ("entry_level", "", (), 2028, True),
+        ("entry_level", "", None, 2028, True),
+        # A derived class year 2+ off the student's own: drop, even though
+        # the bucket matches — the "MBA Summer Associate" half of the walk,
+        # where the programme's own shape implies a class years away from
+        # a sophomore's.
+        ("internship", "2025", ("2028 Summer Internship",), 2028, False),
+        # A derived class year exactly 1 off: `_class_fit` already calls
+        # this "worth a look, not a fit" and scores it (not zero) — this
+        # filter must not be stricter than the ranker it borrows the gap
+        # from, so it still passes.
+        ("internship", "2027", ("2028 Summer Internship",), 2028, True),
+        # A derived class year that matches outright: keep.
+        ("internship", "2028", ("2028 Summer Internship",), 2028, True),
+        # No derived year at all (the common case: only 611 of ~21,700 rows
+        # board-wide carry one) and no profile class year: nothing to
+        # compare, so nothing is excluded on this axis.
+        ("internship", "", (), None, True),
+        ("internship", "2025", ("2028 Summer Internship",), None, True),
+    ],
+)
+def test_role_matches_level_filters_the_rung_not_the_firm(
+    bucket, class_year_derived, target_cycles, profile_class_year, expected,
+):
+    """The full-time-New-Associate and MBA-Summer-Associate halves of the
+    customer walk: a role can name the student's track and sit in their
+    region and still be the wrong rung of the ladder for them. Reuses the
+    same gap `_class_fit` scores (0 match, 1 near, 2+ excluded) rather than
+    inventing a second class-year rule, and the same `parse_target_cycle`
+    the cycle bonus already uses for the bucket half."""
+    from directory.recommend import role_matches_level
+    assert role_matches_level(
+        bucket, class_year_derived, target_cycles, profile_class_year,
+    ) is expected
+
+
 def test_a_stated_track_outranks_one_inferred_from_the_firm():
     """Evidence over inference. Without the gap, a generic "Intern" at a firm
     covering three of the student's tracks (18 + 3 + 3) outscored a posting

@@ -1433,6 +1433,58 @@ def test_new_at_firms_widget_caps_at_one_role_per_firm():
     assert len(firms_reported) == len(set(firms_reported)), "every firm reported at most once"
 
 
+def test_new_at_firms_drops_the_wrong_market_and_the_wrong_rung(client):
+    """The other two-thirds of the customer walk `role_matches_tracks` alone
+    didn't fix: a Pune, India ops role and a full-time "New Associate"
+    programme both reached a US/HK IB-track sophomore's day-one brief
+    alongside the retail-branch case — right firm, wrong market, wrong rung
+    of the ladder. A genuinely relevant IB summer analyst role at the same
+    firm must still show."""
+    from directory.models import Opportunity
+
+    user = _user(
+        weekly_touch_goal=14, class_year=2028,
+        regions=["us", "hk"], tracks=["ib"],
+        target_cycles=["2028 Summer Internship"],
+    )
+    firm = Firm.objects.create(slug="universal-bank", name="Universal Bank")
+    UserFirm.all_objects.create(user=user, firm=firm)
+    anchor = Opportunity.objects.create(
+        firm=firm, title="Older Anchor Role", bucket="internship",
+        status="open", location="New York", region="us",
+        url="https://example.com/universal-bank/anchor")
+    Opportunity.objects.filter(pk=anchor.pk).update(
+        first_seen=timezone.now() - timedelta(days=30))
+
+    # Wrong market: an IB-titled role, but its own region is "other" — a
+    # market this student never named — not the firm's region list.
+    pune = Opportunity.objects.create(
+        firm=firm, title="Investment Banking Off-Cycle Analyst",
+        bucket="internship", status="open", location="Pune, India",
+        region="other", url="https://example.com/universal-bank/pune")
+    # Wrong rung: a full-time IB programme, while this sophomore has only
+    # ever picked a Summer Internship cycle.
+    full_time = Opportunity.objects.create(
+        firm=firm, title="Investment Banking Full-Time Analyst Program",
+        bucket="entry_level", status="open", location="New York",
+        region="us", url="https://example.com/universal-bank/full-time")
+    # Genuinely relevant: right track, right market, right rung, and its
+    # own shape implies exactly this student's graduating class.
+    relevant = Opportunity.objects.create(
+        firm=firm, title="Investment Banking Summer Analyst Program",
+        bucket="internship", cohort="2027", status="open",
+        location="New York", region="us", class_year_derived="2028",
+        url="https://example.com/universal-bank/relevant")
+
+    result = _cockpit_context(user)["new_at_firms"]
+    role_ids = {r["id"] for r in result["roles"]}
+
+    assert pune.id not in role_ids, "wrong market must not read as news"
+    assert full_time.id not in role_ids, "wrong rung must not read as news"
+    assert relevant.id in role_ids, "the fix must not zero out a real match"
+    assert result["count"] == 1
+
+
 # ---------------------------------------------------------------------------
 # The daily brief: generated once per day, only on the full page load, never
 # on the htmx partial refresh that shares _cockpit_context with week().

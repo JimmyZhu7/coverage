@@ -665,7 +665,12 @@ def _new_at_your_firms(user, limit=5) -> dict:
     from crm.models import UserFirm
     from directory.classify import TARGET_BUCKETS
     from directory.models import Opportunity
-    from directory.recommend import role_matches_tracks
+    from directory.recommend import (
+        role_matches_level,
+        role_matches_regions,
+        role_matches_tracks,
+    )
+    from directory.views import _eligibility, _eligibility_profile
 
     firm_ids = list(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
     if not firm_ids:
@@ -708,6 +713,29 @@ def _new_at_your_firms(user, limit=5) -> dict:
     # counts the roles it would actually show. Costs no query — the titles
     # are already loaded. See `role_matches_tracks` for the rule.
     rows = [o for o in rows if role_matches_tracks(o.title, user.tracks)]
+
+    # RELEVANT TO WHERE, AND WHEN. Two more axes the FIRM-only query is blind
+    # to, same posture as the track filter above and same customer walk that
+    # found it: a Pune, India ops role and a full-time "New Associate"
+    # programme both reached a US/HK IB-track sophomore's day-one brief this
+    # way — right firm, wrong market, wrong rung of the ladder. All three
+    # filters run in memory over the same already-loaded rows.
+    rows = [o for o in rows if role_matches_regions(o.region, user.regions)]
+    rows = [
+        o for o in rows
+        if role_matches_level(o.bucket, o.class_year_derived,
+                               user.target_cycles, user.class_year)
+    ]
+    # And never a role the student's own stated facts rule OUT entirely (a
+    # wrong stated class year, a market that won't sponsor them) — the same
+    # blocking verdict `directory.views._eligibility` already issues for
+    # Picked-for-you, applied here rather than duplicated.
+    elig_profile = _eligibility_profile(user)
+    if elig_profile:
+        rows = [
+            o for o in rows
+            if not (lambda v: v and v["blocking"])(_eligibility(o, elig_profile))
+        ]
 
     # ONE PER FIRM in the displayed list — `count` stays the true total.
     # A firm's own campus recruiting team routinely posts a whole batch of

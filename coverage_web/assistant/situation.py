@@ -65,7 +65,8 @@ from directory.classify import TARGET_BUCKETS
 from directory.deadlines import is_posting_closed
 from directory.dupes import fold_duplicates
 from directory.models import Opportunity, OpportunityChange
-from directory.recommend import role_matches_tracks
+from directory.recommend import role_matches_level, role_matches_regions, role_matches_tracks
+from directory.views import _eligibility, _eligibility_profile
 
 # How far back counts as "recent". Matches `crm.today._new_at_your_firms`'s
 # own window (`since = timezone.now() - timedelta(days=7)`) — that function
@@ -253,6 +254,28 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
     # Applied AFTER fold_duplicates so the fold still sees the full slice,
     # and it costs no query: the titles are already in memory.
     rows = [o for o in rows if role_matches_tracks(o.title, user.tracks)]
+
+    # RELEVANT TO WHERE, AND WHEN. Same posture, two more axes: a Pune,
+    # India ops role and a full-time "New Associate" programme both reached
+    # a US/HK IB-track sophomore's day-one brief in the same customer
+    # walk that found the track gap — right firm, wrong market, wrong rung
+    # of the ladder. See `role_matches_regions` and `role_matches_level`.
+    rows = [o for o in rows if role_matches_regions(o.region, user.regions)]
+    rows = [
+        o for o in rows
+        if role_matches_level(o.bucket, o.class_year_derived,
+                               user.target_cycles, user.class_year)
+    ]
+    # And never a role the student's own stated facts rule OUT entirely (a
+    # wrong stated class year, a market that won't sponsor them) — the same
+    # blocking verdict `directory.views._eligibility` already issues for
+    # Picked-for-you, applied here rather than duplicated.
+    elig_profile = _eligibility_profile(user)
+    if elig_profile:
+        rows = [
+            o for o in rows
+            if not (lambda v: v and v["blocking"])(_eligibility(o, elig_profile))
+        ]
 
     # ONE PER FIRM. A firm's own campus recruiting team routinely posts a
     # whole batch of reqs the same week — CICC alone can post three roles

@@ -729,6 +729,114 @@ def role_matches_tracks(title: str, tracks) -> bool:
     return True
 
 
+def role_matches_regions(region: str, regions) -> bool:
+    """Whether a role's OWN `Opportunity.region` is compatible with the
+    regions a student stated. Same posture as `role_matches_tracks`: a
+    student who has named NO regions gets no filtering.
+
+    Deliberately reads the ROLE's region, not the firm's `Firm.regions`
+    list — a firm can run desks in five markets and post a role in only
+    one of them, and the firm-level list is what let a Pune, India ops
+    role read as relevant to a Hong Kong/US student who had merely tiered
+    the bank. `directory.views._apply_region_filter` and
+    `accounts.onboarding_preview._matching` are the two places the product
+    already filters listings by region, and both filter on this same
+    field for the same reason.
+
+    BLANK REGION — the honest case, not the rare one: 2,249 of ~21,700 rows
+    board-wide resolve to no region at all, because the location string
+    didn't parse. The instinct is to let it pass unfiltered ("the firm is
+    already theirs; an unknown location makes no claim"), mirroring how
+    `role_matches_tracks` treats a silent title. But that is NOT what the
+    product already does with a stated region preference: both
+    `_apply_region_filter` (`region__iexact=region`) and `_matching`
+    (`region__in=answers["regions"]`) exclude blank rows the moment a
+    specific region is asked for — a blank only ever surfaces again under
+    the *explicit* "Unstated" facet, never for free inside an ordinary
+    region filter. Diverging here would make this the one surface on the
+    board where "you said Hong Kong" quietly includes rows nobody can
+    place. So a blank region FAILS once the student has stated any region,
+    same as the feed's own filter would drop it. `region_matches_tracks`'s
+    silent-title case is not a counterexample to this: a title's silence
+    still leaves the FIRM's own stated coverage to speak for the role,
+    while a blank region has no fallback source of truth to defer to at
+    all — nothing else on the row claims a place.
+
+      role names a region they want     -> True
+      role names a region they don't    -> False  (including "other" and
+                                                    "global": stated, just
+                                                    not one of theirs)
+      role names no region (blank)      -> False  (see above)
+      student named no regions          -> True   (nothing to filter to)
+    """
+    wanted = set(regions or ())
+    if not wanted:
+        return True
+    return bool(region) and region in wanted
+
+
+def role_matches_level(
+    bucket: str,
+    class_year_derived: str,
+    target_cycles,
+    profile_class_year: int | None,
+) -> bool:
+    """Whether a role's own LEVEL — its programme bucket, and the class year
+    its shape implies — is compatible with the level a student is actually
+    recruiting at. Same posture as the other two filters: nothing stated
+    (by either side) means nothing is filtered.
+
+    Exists for the failure the track and region filters do not cover: a
+    role can name the student's exact track, sit in one of their regions,
+    and still be the wrong RUNG of the ladder — a full-time "New Associate"
+    role, or a programme whose intake year implies a graduating class years
+    off from the student's, surfacing as day-one news for an undergrad
+    sophomore who is nowhere near either. Two independent checks, either of
+    which can fail a role:
+
+    1. BUCKET vs. the buckets the student's `target_cycles` name
+       (`parse_target_cycle`, same parser `_class_fit`'s cycle bonus uses).
+       A sophomore who has only ever picked Summer Internship cycles has
+       told the product it is not recruiting for `entry_level` roles yet —
+       an honest reading of their own stated plan, not a guess about their
+       year. Cycles that fail to parse are ignored rather than treated as
+       "nothing stated": a student who typed something is still a student
+       who said SOMETHING, just not something this parses, and a role
+       should not be excluded on the strength of a parse failure.
+
+    2. The DERIVED class year (`Opportunity.class_year_derived`, from
+       `classify.derive_class_year` — a convention, never the posting's own
+       words) against the student's stated `class_year`, using the exact
+       gap `_class_fit` already scores: 0 is a match, 1 is "worth a look"
+       (near, not excluded), 2+ is excluded here — `_class_fit` already
+       scores a gap that wide as zero, so nothing ranks it up today; this
+       makes the same judgement into "and don't call it news" for a card
+       that exists to say "you should look at this right now."
+
+    Deliberately does NOT duplicate `directory.views._eligibility`'s
+    BLOCKING verdict (a stated class year or extracted grad-window that
+    excludes this student outright) — that is a harder, title/body-STATED
+    fact and the caller applies it separately, the same verdict
+    `Candidate.blocked` already reads elsewhere. This function only ever
+    acts on the softer, INFERRED signals a role's shape carries, and never
+    on nothing: a role with no derivable year and a student with cycles
+    this can't place both pass.
+    """
+    if bucket and target_cycles:
+        wanted_buckets = set()
+        for raw in target_cycles:
+            parsed = parse_target_cycle(raw)
+            if parsed is not None:
+                wanted_buckets.add(parsed[0])
+        if wanted_buckets and bucket not in wanted_buckets:
+            return False
+    if class_year_derived and profile_class_year:
+        derived = _int_or_none(class_year_derived)
+        if derived is not None and abs(derived - profile_class_year) >= 2:
+            return False
+    return True
+
+
 def _track_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     """Industry preference — the ROLE's function first, the firm's coverage
     only where the role is silent.

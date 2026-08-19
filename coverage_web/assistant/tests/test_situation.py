@@ -300,6 +300,53 @@ def test_one_firms_posting_batch_does_not_crowd_out_every_other_firm():
     assert len(firms_reported) == len(set(firms_reported)), "every firm reported at most once"
 
 
+def test_new_role_drops_the_wrong_market_and_the_wrong_rung():
+    """The other two-thirds of the customer walk `role_matches_tracks` alone
+    didn't fix: a Pune, India ops role and a full-time "New Associate"
+    programme both reached a US/HK IB-track sophomore's advisor snapshot
+    alongside the retail-branch case — right firm, wrong market, wrong rung
+    of the ladder. A genuinely relevant IB summer analyst role at the same
+    firm must still show. Same fixtures and assertions as
+    `crm.tests.test_today.test_new_at_firms_drops_the_wrong_market_and_the_wrong_rung`,
+    for the sibling surface."""
+    user = _user()
+    user.class_year = 2028
+    user.regions = ["us", "hk"]
+    user.tracks = ["ib"]
+    user.target_cycles = ["2028 Summer Internship"]
+    user.save()
+    firm = _firm(name="Universal Bank", slug="universal-bank")
+    UserFirm(user=user, firm=firm, tier=1).save()
+    _opp(firm, url="https://example.com/universal-bank/old",
+         first_seen=timezone.now() - timedelta(days=60))
+
+    pune = Opportunity.objects.create(
+        firm=firm, title="Investment Banking Off-Cycle Analyst",
+        bucket="internship", status="open", region="other",
+        url="https://example.com/universal-bank/pune")
+    Opportunity.objects.filter(pk=pune.pk).update(first_seen=timezone.now())
+
+    full_time = Opportunity.objects.create(
+        firm=firm, title="Investment Banking Full-Time Analyst Program",
+        bucket="entry_level", status="open", region="us",
+        url="https://example.com/universal-bank/full-time")
+    Opportunity.objects.filter(pk=full_time.pk).update(first_seen=timezone.now())
+
+    relevant = Opportunity.objects.create(
+        firm=firm, title="Investment Banking Summer Analyst Program",
+        bucket="internship", cohort="2027", class_year_derived="2028",
+        status="open", region="us",
+        url="https://example.com/universal-bank/relevant")
+    Opportunity.objects.filter(pk=relevant.pk).update(first_seen=timezone.now())
+
+    result = situation.build_situation(user)
+
+    reported_ids = {e["opportunity_id"] for e in result["new_role_at_known_firm"]}
+    assert pune.id not in reported_ids, "wrong market must not read as news"
+    assert full_time.id not in reported_ids, "wrong rung must not read as news"
+    assert relevant.id in reported_ids, "the fix must not zero out a real match"
+
+
 def test_a_boards_debut_week_does_not_flood_the_new_role_event():
     """A firm whose FIRST posting is itself inside the window just joined
     Coverage — every role it has would read as "new" for a reason that has
