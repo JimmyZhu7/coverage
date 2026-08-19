@@ -619,6 +619,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .newat-loc::before { content: "·"; margin-right: 8px; }
   @media (max-width: 700px) { .newat-list { columns: 1; } }
+  /* The honest-empty line: things moved at the student's firms and none of
+     them named their track. Deliberately typeset as quiet body copy rather
+     than as a row — it is an answer, not a listing, and styling it like a
+     listing would invite the eye to look for the link that isn't there. */
+  .newat-empty { margin: 0; color: var(--ink-3); font-size: var(--fs-xs); }
 
   /* ---- Coverage Gaps strip: where you are least covered, worst first ---- */
   /* Positioned and lifted so an open "Who to find" panel (absolutely

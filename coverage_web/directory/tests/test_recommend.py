@@ -684,17 +684,36 @@ def test_role_function_reads_the_job_not_the_employer(title, expected):
 
 
 @pytest.mark.parametrize("title,tracks,expected", [
-    # Names a track they want, or names nothing at all: keep. The firm is
-    # already theirs, so a silent title makes no claim to contradict.
+    # Names a track they want: keep. This is the ONLY way in.
     ("2028 Investment Banking Summer Analyst", ("ib",), True),
-    ("Summer Analyst Program", ("ib",), True),
+    ("Investment Banking - Consumer & Retail - Analyst", ("ib",), True),
     # Names a track they are NOT recruiting for: drop.
     ("Sales & Trading Summer Analyst", ("ib",), False),
     # Names a function outside the vocabulary entirely: drop.
     ("Internal Audit Summer Analyst", ("ib",), False),
     ("Branch Manager I - Woodstock Branch", ("ib",), False),
-    # No stated tracks: nothing to be relevant TO, so filter nothing. A
-    # silent empty card is worse than a broad one.
+    # NAMES NOTHING AT ALL: drop. The regression this rule exists for.
+    # An earlier cut let a silent title through and leaned on the non-track
+    # blocklist to catch the rest — and the Jackson, Tennessee branch
+    # requisition came straight back to the top of a US/IB student's brief,
+    # because its title is the single word "Intern" and there was never a
+    # phrase for the blocklist to match. On the live board that rule left 33
+    # roles of which 2 named investment banking; the other 31 were
+    # Engineering, Risk, Controllers, Corporate Treasury, Human Capital
+    # Management and Media Relations, all silent, all inheriting their bank's
+    # firm-level coverage. These two surfaces claim "new AND relevant", so
+    # the role has to say it.
+    ("Intern", ("ib",), False),
+    ("Summer Analyst Program", ("ib",), False),
+    ("Engineering — Summer Analyst", ("ib",), False),
+    ("Corporate Treasury — Summer Analyst", ("ib",), False),
+    ("Human Capital Management — Summer Analyst", ("ib",), False),
+    # A silent title is silent for everyone: a student recruiting BOTH of a
+    # universal bank's two tracked lines still doesn't get its branch reqs,
+    # which is what any "the firm is narrowly tracked" escape hatch would
+    # have readmitted (Morgan Stanley carries exactly ["ib", "st"]).
+    ("Intern", ("ib", "st"), False),
+    # No stated tracks: nothing to be relevant TO, so filter nothing.
     ("Branch Manager I - Woodstock Branch", (), True),
     ("Internal Audit Summer Analyst", None, True),
 ])
@@ -704,7 +723,11 @@ def test_role_matches_tracks_filters_the_job_not_the_firm(title, tracks, expecte
     `assistant.situation._new_role_events`. Both select purely on the FIRM,
     which is right for the firm axis and blind to the job: a student tiering
     a universal bank is tiering its investment bank, and the same firm also
-    posts branch, audit and helpdesk reqs."""
+    posts branch, audit and helpdesk reqs.
+
+    An ALLOWLIST, deliberately unlike `_track_fit`'s three-case ranking rule:
+    a feed row shows its score and its reasons and the student is browsing,
+    while these two surfaces are the product saying "look at this now"."""
     from directory.recommend import role_matches_tracks
     assert role_matches_tracks(title, tracks) is expected
 

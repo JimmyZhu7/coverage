@@ -693,9 +693,8 @@ def role_function(title: str) -> str:
 
 
 def role_matches_tracks(title: str, tracks) -> bool:
-    """Whether a role's OWN TITLE is compatible with the tracks a student is
-    recruiting for. The same three-case rule `_track_fit` scores with, as a
-    plain yes/no for callers that must FILTER rather than rank.
+    """Whether a role's OWN TITLE **states** one of the tracks a student is
+    recruiting for. An ALLOWLIST, not a blocklist — the role has to say it.
 
     Exists because the two "what's new at your firms" surfaces — Today's card
     (`crm.today._new_at_your_firms`) and the advisor's situation snapshot
@@ -707,26 +706,63 @@ def role_matches_tracks(title: str, tracks) -> bool:
     role in Jackson, Tennessee — confidently, in the first thing they ever
     read from this product.
 
+    WHY AN ALLOWLIST, AND NOT THE THREE-CASE RULE `_track_fit` RANKS WITH.
+    The first cut of this function let a silent title through ("the firm is
+    already theirs; the title makes no claim to contradict") and leaned on
+    `_NON_TRACK_FUNCTION` to catch the rest. That rule shipped, and the same
+    Jackson, Tennessee requisition (opportunity 22872) came straight back as
+    the hero card for the same US/IB/2028 profile — because its title is the
+    single word "Intern", so there was never a phrase for a blocklist to
+    match. Measured on the live board for that profile the week after:
+    **33 rows survived every filter and 2 of them named investment banking.**
+    The other 31 were Engineering, Risk, Controllers, Corporate Treasury,
+    Human Capital Management, Media Relations, Conflicts Resolution — every
+    one of them silent on the track axis and every one of them inheriting a
+    firm's coverage it had nothing to do with. A blocklist of function words
+    will always lag the market's title vocabulary; the market invents a new
+    department name faster than this regex gets edited.
+
+    WHY THE FIRM'S OWN COVERAGE CANNOT RESCUE THE SILENT CASE. The obvious
+    escape hatch is "let a silent title through when the FIRM is narrowly
+    tracked" — a one-line IB boutique's unlabelled "Summer Analyst Program"
+    really is an IB role. It does not survive contact with the data:
+    `Firm.tracks` tops out at TWO entries across the whole board, and Morgan
+    Stanley — a universal bank running a retail branch network in Jackson,
+    Tennessee — carries exactly `["ib", "st"]`, the same shape a two-desk
+    boutique would. There is no field on `Firm` that distinguishes "does
+    only this" from "does this among forty other things", so any
+    firm-narrowness test would readmit requisition 22872 for any student
+    recruiting IB and S&T. Until the model can tell those two firms apart,
+    the honest answer is to require the ROLE to speak for itself.
+
+    THIS IS NOT THE RANKING RULE, ON PURPOSE. `_track_fit` still scores a
+    silent title off `Firm.tracks` (capped at `W_TRACK_CAP`, and its reason
+    chip says "matches IB" with a tooltip naming the FIRM as the source).
+    That is fine for a feed row, where track is one of five axes, the score
+    is visible, and the student is browsing. It is not fine here: these two
+    surfaces announce "this is new AND you should look at it right now",
+    which is a much stronger claim than a ranked row, so it carries a much
+    higher bar of evidence. Callers that want ranking parity should score
+    with `score_candidate`, not filter with this.
+
     A student who has stated NO tracks gets no filtering: there is nothing to
-    be relevant to, and a silent empty card is worse than a broad one.
+    be relevant to, and everything is equally (ir)relevant.
 
       title names a track they want   -> True
       title names a track they don't  -> False
       title names a non-track         -> False  (audit, ops, branch, ...)
         function
-      title names nothing at all      -> True   (the firm is already theirs;
-                                                 the title makes no claim to
-                                                 contradict)
+      title names nothing at all      -> False  (the role has not earned
+                                                 "relevant"; the caller says
+                                                 so out loud — see
+                                                 `_new_at_your_firms`)
+      student stated no tracks        -> True   (nothing to filter to)
     """
     wanted = set(tracks or ())
     if not wanted:
         return True
     fn = role_function(title)
-    if fn == "none":
-        return False
-    if fn:
-        return fn in wanted
-    return True
+    return bool(fn) and fn != "none" and fn in wanted
 
 
 def role_matches_regions(region: str, regions) -> bool:

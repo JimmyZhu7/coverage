@@ -296,6 +296,31 @@ on every quick action so all of it stays in sync.
           {% endfor %}
         </ul>
       </section>
+    {% elif new_at_firms.total_new %}
+      {% comment %}
+      Things moved at the student's firms this week and NONE of them named
+      the track they recruit for. Saying so is the point: the roles are
+      filtered by an allowlist (see directory.recommend.role_matches_tracks),
+      which is a hard bar that will often leave nothing, and a strip that
+      silently disappears on those weeks reads as a broken card rather than
+      an answer. The alternative — padding the list with the Engineering and
+      Controllers reqs that survived the firm query — is the exact bug the
+      allowlist exists to kill.
+
+      "see all" goes to the same feed the populated strip links to, so the
+      student can go and judge the other 31 for themselves. Coverage declines
+      to call them news; it does not hide them.
+      {% endcomment %}
+      <section class="newat newat-none">
+        <h2 class="waiting-title">
+          New at your firms <span class="lane-count">0</span>
+          <a class="waiting-note newat-all" href="{% url 'opportunities' %}">this week · see all</a>
+        </h2>
+        <p class="newat-empty">
+          {{ new_at_firms.total_new }} new role{{ new_at_firms.total_new|pluralize }} at your firms
+          this week{% if new_at_firms.track_label %}, none in {{ new_at_firms.track_label }}{% else %}, none naming a track you recruit for{% endif %}.
+        </p>
+      </section>
     {% endif %}
   </div>
 

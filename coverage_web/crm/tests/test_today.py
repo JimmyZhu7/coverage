@@ -1486,6 +1486,116 @@ def test_new_at_firms_drops_the_wrong_market_and_the_wrong_rung(client):
     assert result["count"] == 1
 
 
+def test_new_at_firms_never_calls_a_silent_title_news(client):
+    """The Jackson, Tennessee regression, asserted end to end.
+
+    The first fix for this added `\\bbranch\\b` to the non-track blocklist and
+    a unit test that `role_matches_tracks("...Branch...", ("ib",))` is False.
+    That test passed and the bug shipped anyway, because the requisition that
+    started it (Morgan Stanley, opportunity 22872, Jackson TN) has the bare
+    one-word title "Intern" — the word "branch" never appears in it, so the
+    regex never had a chance at the very row its docstring cites. A blocklist
+    assertion is not a card assertion; this is the card assertion.
+
+    Measured on the live board for this exact profile shape the week the
+    allowlist landed: 33 rows survived every filter under the old rule and 2
+    of them named investment banking. Under the allowlist, 2 of 2 do.
+    """
+    from directory.models import Opportunity
+
+    user = _user(
+        weekly_touch_goal=14, class_year=2028,
+        regions=["us"], tracks=["ib"],
+        target_cycles=["2028 Summer Internship"],
+    )
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley", tracks=["ib", "st"])
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    anchor = Opportunity.objects.create(
+        firm=firm, title="Older Anchor Role", bucket="internship",
+        status="open", location="New York", region="us",
+        url="https://example.com/ms/anchor")
+    Opportunity.objects.filter(pk=anchor.pk).update(
+        first_seen=timezone.now() - timedelta(days=30))
+
+    # The row itself: right firm, right market, right rung, right class —
+    # and its title says nothing whatsoever about what the job is.
+    jackson = Opportunity.objects.create(
+        firm=firm, title="Intern", bucket="internship", status="open",
+        location="Jackson, Tennessee, United States of America", region="us",
+        url="https://example.com/ms/22872")
+    # Same silence, dressed up. Every one of these survived the blocklist on
+    # live data and was reported to an IB student as news worth acting on.
+    for i, title in enumerate((
+        "Engineering — Summer Analyst",
+        "Corporate Treasury — Summer Analyst",
+        "Controllers — Summer Analyst",
+        "Human Capital Management — Summer Analyst",
+        "Executive Office, Media Relations — Summer Analyst",
+        "Conflicts Resolution Group — Summer Analyst",
+    )):
+        Opportunity.objects.create(
+            firm=firm, title=title, bucket="internship", status="open",
+            location="New York", region="us",
+            url=f"https://example.com/ms/silent-{i}")
+    # ...and one role that actually says what it is.
+    real = Opportunity.objects.create(
+        firm=firm, title="Investment Banking Summer Analyst",
+        bucket="internship", status="open", location="New York", region="us",
+        url="https://example.com/ms/ib")
+
+    result = _cockpit_context(user)["new_at_firms"]
+    role_ids = {r["id"] for r in result["roles"]}
+
+    assert jackson.id not in role_ids, (
+        "a bare 'Intern' title states no track and must not be called news"
+    )
+    assert result["count"] == 1
+    assert role_ids == {real.id}
+    # And the card must not go silent about the rest — it says how many moved
+    # and that none of them were in the student's track, rather than
+    # disappearing (reads as broken) or padding itself back out with them.
+    assert result["total_new"] == 8
+    assert result["track_label"] == "investment banking"
+
+
+def test_new_at_firms_says_so_when_nothing_relevant_moved(client):
+    """The honest-empty path. An allowlist this strict will often leave
+    nothing, and on those weeks the strip must still answer the question it
+    was asked: things moved, none of them were yours."""
+    from directory.models import Opportunity
+
+    user = _user(
+        weekly_touch_goal=14, class_year=2028,
+        regions=["us"], tracks=["ib"],
+        target_cycles=["2028 Summer Internship"],
+    )
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley", tracks=["ib", "st"])
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    anchor = Opportunity.objects.create(
+        firm=firm, title="Older Anchor Role", bucket="internship",
+        status="open", location="New York", region="us",
+        url="https://example.com/ms/anchor")
+    Opportunity.objects.filter(pk=anchor.pk).update(
+        first_seen=timezone.now() - timedelta(days=30))
+    for i, title in enumerate(("Intern", "Engineering — Summer Analyst",
+                               "Risk — Summer Analyst")):
+        Opportunity.objects.create(
+            firm=firm, title=title, bucket="internship", status="open",
+            location="New York", region="us",
+            url=f"https://example.com/ms/quiet-{i}")
+
+    result = _cockpit_context(user)["new_at_firms"]
+    assert result["count"] == 0
+    assert result["roles"] == []
+    assert result["total_new"] == 3
+    assert result["track_label"] == "investment banking"
+
+    client.force_login(user)
+    body = client.get("/app/").content.decode()
+    assert "3 new roles at your firms" in body
+    assert "none in investment banking" in body
+
+
 # ---------------------------------------------------------------------------
 # The daily brief: generated once per day, only on the full page load, never
 # on the htmx partial refresh that shares _cockpit_context with week().

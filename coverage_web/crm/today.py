@@ -664,7 +664,7 @@ def _new_at_your_firms(user, limit=5) -> dict:
     pixels saying it.
     """
     from crm.models import UserFirm
-    from directory.classify import TARGET_BUCKETS
+    from directory.classify import TARGET_BUCKETS, TRACK_LABELS
     from directory.models import Opportunity
     from directory.recommend import (
         role_matches_level,
@@ -675,7 +675,7 @@ def _new_at_your_firms(user, limit=5) -> dict:
 
     firm_ids = list(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
     if not firm_ids:
-        return {"count": 0, "roles": []}
+        return {"count": 0, "roles": [], "total_new": 0, "track_label": ""}
     since = timezone.now() - timedelta(days=7)
 
     # Exclude board DEBUTS: when a firm's oldest row is itself inside the
@@ -707,20 +707,11 @@ def _new_at_your_firms(user, limit=5) -> dict:
     # isn't itself inflated by the same duplicates the list then hides.
     rows, _folded = fold_duplicates(qs)
 
-    # RELEVANT TO WHAT THEY RECRUIT FOR. The query above selects purely on the
-    # FIRM, so a student who tiered a universal bank for its investment bank
-    # also got its branch, audit and helpdesk reqs reported as news worth
-    # acting on. Filtered before `count` below, so the number the card states
-    # counts the roles it would actually show. Costs no query — the titles
-    # are already loaded. See `role_matches_tracks` for the rule.
-    rows = [o for o in rows if role_matches_tracks(o.title, user.tracks)]
-
-    # RELEVANT TO WHERE, AND WHEN. Two more axes the FIRM-only query is blind
-    # to, same posture as the track filter above and same customer walk that
-    # found it: a Pune, India ops role and a full-time "New Associate"
-    # programme both reached a US/HK IB-track sophomore's day-one brief this
-    # way — right firm, wrong market, wrong rung of the ladder. All three
-    # filters run in memory over the same already-loaded rows.
+    # RELEVANT TO WHERE, AND WHEN. Two axes the FIRM-only query is blind to:
+    # a Pune, India ops role and a full-time "New Associate" programme both
+    # reached a US/HK IB-track sophomore's day-one brief this way — right
+    # firm, wrong market, wrong rung of the ladder. Both run in memory over
+    # the same already-loaded rows, so they cost no query.
     rows = [o for o in rows if role_matches_regions(o.region, user.regions)]
     rows = [
         o for o in rows
@@ -737,6 +728,27 @@ def _new_at_your_firms(user, limit=5) -> dict:
             o for o in rows
             if not (lambda v: v and v["blocking"])(_eligibility(o, elig_profile))
         ]
+
+    # RELEVANT TO WHAT THEY RECRUIT FOR — applied LAST, on purpose, so the
+    # count either side of it is a fact worth stating.
+    #
+    # `role_matches_tracks` is an allowlist: a role has to NAME one of the
+    # student's tracks to be called news. That is a deliberately hard bar and
+    # it will often leave nothing (see the function's own docstring for the
+    # 2-of-33 measurement that forced it). The temptation at that point is to
+    # loosen the filter until the card has something in it. The honest move is
+    # the opposite: keep the bar and say what happened.
+    #
+    # So the card gets BOTH numbers. `total_new` is everything that is genuinely
+    # new at the student's firms, in their market, at their rung, that they are
+    # eligible for — the whole truth about what moved this week. `count` is the
+    # subset that names their track. When they differ and `count` is zero, the
+    # template says "31 new roles at your firms, none in investment banking",
+    # which is a real answer; silently rendering nothing would read as a broken
+    # card, and padding it with Engineering roles would be the original bug.
+    relevant = [o for o in rows if role_matches_tracks(o.title, user.tracks)]
+    total_new = len(rows)
+    rows = relevant
 
     # ONE PER FIRM in the displayed list — `count` stays the true total.
     # A firm's own campus recruiting team routinely posts a whole batch of
@@ -755,7 +767,18 @@ def _new_at_your_firms(user, limit=5) -> dict:
         if len(roles) >= limit:
             break
 
-    return {"count": len(rows), "roles": roles}
+    # `track_label` is the one the student would recognise from Settings, not
+    # the chip abbreviation — "none in investment banking" reads; "none in IB"
+    # reads like a filter state. Only ever set when there is exactly one thing
+    # to name; with two or more tracks the template says "none in the tracks
+    # you recruit for" rather than listing them.
+    tracks = [t for t in (user.tracks or []) if t in TRACK_LABELS]
+    return {
+        "count": len(rows),
+        "roles": roles,
+        "total_new": total_new,
+        "track_label": TRACK_LABELS[tracks[0]].lower() if len(tracks) == 1 else "",
+    }
 
 
 def _next_deadlines(user, today, limit=4) -> list[dict]:
