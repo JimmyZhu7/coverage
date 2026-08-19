@@ -48,6 +48,7 @@ entry point below no-ops (rather than 500s) until all four settings are set.
 from __future__ import annotations
 
 import base64
+import logging
 import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 from email.utils import parseaddr
@@ -77,6 +78,8 @@ from crm.models import Contact, Touch
 BACKFILL_ZERO_TOUCH_DAYS = 365
 BACKFILL_TOUCHED_WINDOW_DAYS = 90
 BACKFILL_OVERLAP_DAYS = 7
+
+logger = logging.getLogger(__name__)
 
 GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
 GMAIL_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
@@ -115,7 +118,23 @@ def is_configured() -> bool:
 # ---------------------------------------------------------------------------
 
 def _fernet() -> Fernet:
-    return Fernet(settings.GMAIL_LIVE_TOKEN_KEY.encode("utf-8"))
+    # `is_configured()` only checks this setting is non-EMPTY — it cannot
+    # check it is a valid key without constructing a Fernet, which is what
+    # this is. A key that isn't 32 url-safe-base64 bytes (truncated on a
+    # copy-paste, generated with the wrong tool, quoted with the quotes
+    # included) makes Fernet raise a bare `ValueError` from whichever call
+    # site happened to encrypt or decrypt first — and the OAuth callback
+    # only catches `GmailLiveError`, so that surfaces as a blank 500 page
+    # rather than "your key is malformed."
+    try:
+        return Fernet(settings.GMAIL_LIVE_TOKEN_KEY.encode("utf-8"))
+    except (ValueError, TypeError) as exc:
+        raise GmailLiveError(
+            "GMAIL_LIVE_TOKEN_KEY is not a valid Fernet key — it must be the "
+            "exact 44-character output of Fernet.generate_key(), with no "
+            "quotes or truncation. Regenerate it and set it on every service "
+            "that talks to Gmail."
+        ) from exc
 
 
 def encrypt_token(raw: str) -> str:
@@ -190,8 +209,19 @@ def build_auth_url(redirect_uri: str, state: str) -> str:
 
 def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
     """Exchange the consent code for tokens, register the watch, and store
-    (or update) this user's `GmailConnection`. Raises `GmailLiveError` on
-    anything that leaves the user without a working connection."""
+    (or update) this user's `GmailConnection`.
+
+    Raises `GmailLiveError` — and ONLY `GmailLiveError` — on anything that
+    leaves the user without a working connection. That is not a stylistic
+    preference: `capture.views.gmail_callback` catches exactly this type and
+    nothing else, so any other exception escaping here renders the generic
+    500 page ("Something broke on our side") for what is, every time, a
+    fixable Google-console setting the user needs to be told about. Each
+    `except` below exists because of one such escape.
+
+    A failure to register the `users.watch()` is deliberately NOT fatal —
+    see the comment at that call.
+    """
     flow = _flow(redirect_uri)
     try:
         flow.fetch_token(code=code)
@@ -210,8 +240,22 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
             "reconnect."
         )
 
-    gmail = build("gmail", "v1", credentials=creds)
-    profile = gmail.users().getProfile(userId="me").execute()
+    # The FIRST real call against the Gmail API on this project. It fails
+    # loudly and specifically when a docs/gmail-live-setup.md step was
+    # missed — most often a 403 "Gmail API has not been used in project N
+    # before or it is disabled", which is a `HttpError`, not a
+    # `GmailLiveError`, and so used to escape this function entirely and
+    # render the generic 500 page. Translate it: the user's fix is a
+    # console setting, and they can only apply it if they are told.
+    try:
+        gmail = build("gmail", "v1", credentials=creds)
+        profile = gmail.users().getProfile(userId="me").execute()
+    except Exception as exc:  # noqa: BLE001 - surfaced as GmailLiveError below
+        raise GmailLiveError(
+            f"Google refused to read the mailbox profile: {exc}. Check that "
+            "the Gmail API is enabled on this OAuth client's Cloud project "
+            "and that your account is on the app's test-user list."
+        ) from exc
 
     # A completed backfill must not re-run just because the user
     # disconnected and reconnected the same mailbox — but a reconnect after
@@ -230,7 +274,36 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
             "backfill_status": backfill_status,
         },
     )
-    register_watch(connection)
+
+    # The connection is now STORED and, on its own, complete: the refresh
+    # token works, the backfill is queued, and the twice-daily agent sync is
+    # unaffected. `users.watch()` only adds real-time push on top of that,
+    # and it is the one piece of a connection that already repairs itself —
+    # `renew_watches()` re-registers every active row whose
+    # `watch_expiration` is null, daily.
+    #
+    # So a watch failure must not be allowed to escape. There are no
+    # ATOMIC_REQUESTS on this project, meaning the row above is already
+    # committed by the time this runs: letting `register_watch` raise
+    # produced the worst possible outcome — a generic 500 page for a mailbox
+    # that WAS, in fact, connected. And `register_watch` re-raises anything
+    # that isn't a 401/403, which covers the most likely first-connect
+    # failure of all: a 400 "Error sending test message to Cloud PubSub ...
+    # User not authorized" when the topic hasn't granted publish rights to
+    # gmail-api-push@system.gserviceaccount.com, or a 404 when
+    # GMAIL_LIVE_PUBSUB_TOPIC names a topic that doesn't exist. Both are
+    # config, both are fixable, and neither is a reason to throw the
+    # connection away.
+    try:
+        register_watch(connection)
+    except Exception:  # noqa: BLE001 - a watch is retried daily; a connect isn't
+        logger.exception(
+            "Gmail Live: connected %s but users.watch() failed — real-time "
+            "notifications stay off until gmail_watch_renew succeeds. Check "
+            "GMAIL_LIVE_PUBSUB_TOPIC exists and grants publish rights to "
+            "gmail-api-push@system.gserviceaccount.com.",
+            connection.gmail_address,
+        )
     return connection
 
 

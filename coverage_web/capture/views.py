@@ -63,6 +63,17 @@ def gmail_callback(request):
         return redirect(f"{reverse('accounts:settings')}#gmail-live")
 
     messages.success(request, f"Gmail connected: {connection.gmail_address}.")
+    if connection.watch_expiration is None:
+        # connect_gmail stored a perfectly good connection but could not
+        # register the Pub/Sub watch (see its comment on why that is not
+        # fatal). Everything except real-time push still works, and the
+        # daily gmail_watch_renew retries on its own — but saying so beats
+        # letting the user wonder why nothing arrives instantly.
+        messages.warning(
+            request,
+            "Real-time updates aren't active yet — Coverage will keep "
+            "retrying. Your historical scan will still run.",
+        )
     return redirect(f"{reverse('accounts:settings')}#gmail-live")
 
 
