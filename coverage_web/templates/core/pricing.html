@@ -71,6 +71,15 @@
     font-size: var(--fs-s); color: var(--ink-2); line-height: 1.5; }
   .plan-features li b { color: var(--ink); font-weight: var(--w-med);
     font-variant-numeric: tabular-nums; }
+  /* Allowances get their own muted line instead of trailing the sentence.
+     "15 messages a day, 60 a month" is a spec value, not prose, and pinned
+     to the end of a claim it was the thing that pushed the advisor bullet
+     to three lines. The comparison table below already renders its values
+     in mono for exactly this reason (.cmp-val), so the card and the table
+     now say numbers the same way. */
+  .plan-features .feat-meta { display: block; margin-top: var(--s1);
+    font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .plan-features li::before { content: ""; position: absolute; left: 0; top: 4px;
     width: 14px; height: 14px;
     border-radius: 50%;
@@ -199,6 +208,35 @@
     <h1 class="kin-hero-title">The board is free. The sync is Pro.</h1>
     <p class="kin-hero-sub">Every listing, every deadline, free for everyone.
       Pro adds sync, speed, and a stronger advisor.</p>
+    {% comment %}
+    The live counts, promoted out of the Free card's bullets.
+
+    They used to be bolded numbers buried mid-sentence — "2435 live campus
+    roles across 78 firms hiring today" — which made a pricing card read
+    like a changelog and made the numbers, the most persuasive thing on the
+    page, the hardest part of it to see. Every SaaS pricing page that shows
+    live inventory puts it above the cards, not inside a bullet.
+
+    This is `.kin-hero-stats` from coverage.css, the same component the
+    landing hero uses for the same three figures. No new CSS, no new
+    tokens, and it re-themes and re-flows with everything else. The numbers
+    are still the measured ones from core.views.pricing; nothing here is
+    typed.
+    {% endcomment %}
+    <div class="kin-hero-stats">
+      <div class="kin-hero-stat">
+        <span class="dash-num">{{ open_count }}</span>
+        <span class="dash-lbl">Live Campus Roles</span>
+      </div>
+      <div class="kin-hero-stat">
+        <span class="dash-num">{{ firm_count }}</span>
+        <span class="dash-lbl">Firms Hiring Today</span>
+      </div>
+      <div class="kin-hero-stat">
+        <span class="dash-num">{{ market_count }}</span>
+        <span class="dash-lbl">Markets Tracked</span>
+      </div>
+    </div>
   </header>
 
   <div class="aud">
@@ -221,21 +259,36 @@
           This list spent a cycle advertising "four markets" while the board
           had tracked six for weeks — a pricing page's claims are the ones
           most likely to go stale and least likely to be re-read.
+
+          One line per claim (2026-08-20). Four of these bullets were
+          multi-line paragraphs with numbers bolded mid-sentence, which is
+          how a spec sheet reads, not a pricing card. Nothing was dropped —
+          every claim was either shortened, split into the two separate
+          things it was always describing, or moved:
+
+            open_count / firm_count -> the hero stat strip above
+            "Today queue AND Network board" -> two bullets, one idea each,
+              which also makes the card mirror the comparison table's two
+              matching rows instead of paraphrasing them
+            advisor caps -> .feat-meta, a muted spec line under the claim
+
+          The sponsorship bullet is the deliberate exception and stays two
+          lines: "not stated" is a term a student has no way to decode from
+          context, and the promise not to guess is the whole point of it.
           {% endcomment %}
           <ul class="plan-features">
-            <li><b>{{ open_count }}</b> live campus roles across <b>{{ firm_count }}</b> firms hiring today</li>
-            <li>Filters across <b>{{ market_count }}</b> markets and six verticals</li>
-            <li><b>{{ read_count }}</b> postings read in full, so deadlines and
-              requirements come from the posting rather than the board's summary</li>
-            <li>Eligibility checked against your class year and visa, with
-              <b>{{ sponsorship_count }}</b> roles answering sponsorship outright
-              and the rest marked not stated, never guessed</li>
+            <li>Every live campus role, from every firm hiring today</li>
+            <li>Filters across all <b>{{ market_count }}</b> markets and six verticals</li>
+            <li><b>{{ read_count }}</b> postings read in full, not the board's summary</li>
+            <li>Eligibility checked against your class year and visa</li>
+            <li><b>{{ sponsorship_count }}</b> roles answer sponsorship outright,
+              the rest marked not stated, never guessed</li>
             <li>Deadline fuses, rolling markers, and a label on every inferred date</li>
-            <li>The Today queue and the Network board: warmth lanes, firm tiers,
-              one-click logging</li>
-            <li>Talk to Coverage: an advisor that reads your own contacts,
-              firms and deadlines before it answers.
-              {{ advisor_free_cap }} messages a day, {{ advisor_free_grant }} a month.</li>
+            <li>The Today queue, with one-click logging</li>
+            <li>The Network board: warmth lanes and firm tiers</li>
+            <li><b>Talk to Coverage:</b> an advisor that reads your own contacts,
+              firms and deadlines before it answers
+              <span class="feat-meta">{{ advisor_free_cap }} messages a day, {{ advisor_free_grant }} a month</span></li>
             <li>CSV import, export, and instant deletion</li>
           </ul>
           <div class="plan-cta">
@@ -265,11 +318,11 @@
             §2d): it is the anchor now, not a footnote after the advisor
             bullet.
             {% endcomment %}
-            <li>Gmail Live: real-time sync that logs itself. Calendar sync too,
-              only if you connect it.</li>
-            <li>Talk to Coverage on a stronger model, with sharper judgement
-              on where your week should go.
-              Three times the credits: {{ advisor_pro_grant }} a month.</li>
+            <li><b>Gmail Live:</b> real-time sync that logs itself</li>
+            <li>Calendar sync too, only if you connect it</li>
+            <li><b>Talk to Coverage</b> on a stronger model, with sharper
+              judgement on where your week should go
+              <span class="feat-meta">Three times the credits: {{ advisor_pro_grant }} a month</span></li>
             <li>Hourly refresh on your Tier 1 firms, instead of every six hours</li>
             <li>LinkedIn contact import</li>
             <li>Multi-cycle archive of past seasons</li>
