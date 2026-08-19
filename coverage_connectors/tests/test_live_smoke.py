@@ -9,9 +9,10 @@ Board identifiers:
 - Greenhouse: "williamblair" and "tpgcareers" — both taken directly from
   the original codebase's own `_ATS_BOARDS` config (`sources.py`).
   williamblair's board points `absolute_url` at the firm's own custom
-  domain (a documented verify() limitation, see greenhouse.py); tpgcareers
-  uses the vanilla job-boards.greenhouse.io host, so it's used for the
-  fetch->verify round trip instead.
+  domain; `classify_url()` resolves it via the known `_CUSTOM_DOMAIN_TOKENS`
+  mapping (see greenhouse.py), so it's used for the fetch->verify round
+  trip against a known custom domain, while tpgcareers uses the vanilla
+  job-boards.greenhouse.io host and covers the plain round trip instead.
 - Workday: "citi.wd5" / "Citi_Early_Careers_Events_Site" — taken directly
   from the original's own `_ATS_BOARDS` config.
 - Lever: "palantir" — the original's `_ATS_BOARDS` never actually wired up
@@ -82,10 +83,9 @@ def test_workday_live_fetch():
 
 @pytest.mark.live
 def test_greenhouse_live_verify_open():
-    # tpgcareers, not williamblair: williamblair's absolute_url points at
-    # the firm's own custom domain, which verify() cannot classify by
-    # design (see greenhouse.py's module docstring on this known
-    # limitation, ported unchanged from the original).
+    # tpgcareers, not williamblair: this covers the plain
+    # job-boards.greenhouse.io round trip. The known-custom-domain round
+    # trip (williamblair) is covered separately below.
     board = GreenhouseBoard(firm="TPG", token="tpgcareers")
     fetched = fetch(board)
     assert fetched.ok and fetched.opportunities
@@ -95,13 +95,23 @@ def test_greenhouse_live_verify_open():
 
 
 @pytest.mark.live
-def test_greenhouse_live_verify_needs_verification_on_custom_domain():
+def test_greenhouse_live_verify_open_on_known_custom_domain():
+    # williamblair's absolute_url points at the firm's own custom domain
+    # (www.williamblair.com?gh_jid=<id>), not job-boards.greenhouse.io.
+    # classify_url() resolves it via the known `_CUSTOM_DOMAIN_TOKENS`
+    # mapping (see greenhouse.py), so this verifies live same as any other
+    # recognized board -- it's a known custom domain, not an unlisted one.
+    # (Unlisted custom domains, which classify_url() cannot resolve and
+    # verify() reports as "needs-verification", are covered by the offline
+    # test_verify_needs_verification_on_unlisted_custom_domain_url in
+    # test_greenhouse.py -- that's pure regex/dict-lookup logic with no
+    # live board to hit.)
     board = GreenhouseBoard(firm="William Blair", token="williamblair")
     fetched = fetch(board)
     assert fetched.ok and fetched.opportunities
 
     status = verify(fetched.opportunities[0].url)
-    assert status.result == "needs-verification", status.evidence
+    assert status.result == "verified-open", status.evidence
 
 
 @pytest.mark.live
