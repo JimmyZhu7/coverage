@@ -11,7 +11,10 @@ import pytest
 from django.test import override_settings
 
 from directory import ai_extract
-from directory.ai_extract import AIExtractError, DeadlineGuess, complete_text, extract_deadline_ai, is_configured
+from directory.ai_extract import (
+    AIExtractError, DeadlineGuess, SponsorshipGuess, complete_text, extract_deadline_ai,
+    extract_sponsorship_ai, is_configured,
+)
 
 
 class FakeHTTPResponse:
@@ -180,6 +183,102 @@ def test_post_json_raises_after_exhausting_retries(monkeypatch):
 
     with pytest.raises(AIExtractError):
         ai_extract._post_json({"x": 1}, timeout=5, retries=1)
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_extract_sponsorship_ai_no_ops_without_a_key(monkeypatch):
+    called = []
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: called.append(1))
+    assert extract_sponsorship_ai("We do not offer visa sponsorship.") is None
+    assert called == []
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_extract_sponsorship_ai_empty_text_short_circuits():
+    assert extract_sponsorship_ai("") is None
+    assert extract_sponsorship_ai(None) is None
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_extract_sponsorship_ai_accepts_a_grounded_no(monkeypatch):
+    text = "Role details below.\nThis employer does not sponsor employment visas for this position.\nMore text."
+    reply = _api_text_response(json.dumps({
+        "sponsorship": "no",
+        "quote": "This employer does not sponsor employment visas for this position.",
+    }))
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: reply)
+
+    guess = extract_sponsorship_ai(text)
+    assert guess == SponsorshipGuess(
+        value="no",
+        phrase="This employer does not sponsor employment visas for this position.",
+        confidence=0.5,
+    )
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_extract_sponsorship_ai_accepts_a_grounded_yes(monkeypatch):
+    text = "We are pleased to sponsor work visas for exceptional candidates in this role."
+    reply = _api_text_response(json.dumps({
+        "sponsorship": "yes",
+        "quote": "We are pleased to sponsor work visas for exceptional candidates in this role.",
+    }))
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: reply)
+    guess = extract_sponsorship_ai(text)
+    assert guess.value == "yes"
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_extract_sponsorship_ai_rejects_an_ungrounded_quote(monkeypatch):
+    """THE core defense, same as the deadline pass: a model that
+    free-associates a plausible answer must never reach the database."""
+    text = "This posting says nothing about visas at all."
+    reply = _api_text_response(json.dumps({
+        "sponsorship": "no",
+        "quote": "This employer does not sponsor visas.",
+    }))
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: reply)
+    assert extract_sponsorship_ai(text) is None
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_extract_sponsorship_ai_rejects_no_answer(monkeypatch):
+    text = "Will you now or in the future require sponsorship? * Select..."
+    reply = _api_text_response(json.dumps({"sponsorship": None, "quote": None}))
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: reply)
+    assert extract_sponsorship_ai(text) is None
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_extract_sponsorship_ai_rejects_an_invalid_value(monkeypatch):
+    """Only "yes"/"no" are acceptable — anything else (a stray "maybe", an
+    empty string) is treated the same as no answer, never coerced."""
+    text = "Sponsorship details vary by role."
+    reply = _api_text_response(json.dumps({
+        "sponsorship": "maybe", "quote": "Sponsorship details vary by role.",
+    }))
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: reply)
+    assert extract_sponsorship_ai(text) is None
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_extract_sponsorship_ai_rejects_malformed_json(monkeypatch):
+    reply = _api_text_response("not json at all")
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: reply)
+    assert extract_sponsorship_ai("Sponsorship: ask HR.") is None
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_extract_sponsorship_ai_strips_a_markdown_code_fence(monkeypatch):
+    text = "This role does not offer immigration sponsorship of any kind."
+    fenced = "```json\n" + json.dumps({
+        "sponsorship": "no",
+        "quote": "This role does not offer immigration sponsorship of any kind.",
+    }) + "\n```"
+    monkeypatch.setattr(ai_extract, "_post_json", lambda *a, **kw: _api_text_response(fenced))
+    guess = extract_sponsorship_ai(text)
+    assert guess is not None
+    assert guess.value == "no"
 
 
 @override_settings(ANTHROPIC_API_KEY="")

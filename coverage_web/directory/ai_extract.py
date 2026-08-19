@@ -1,9 +1,10 @@
 """LLM access for the app: deadline extraction over cached posting text (this
-module's original, primary purpose), plus `complete_text()`, a thin shared
-client any other feature (e.g. `crm.ai_brief`'s coffee-chat briefs) can call
-rather than each hand-rolling its own Anthropic API plumbing. One
-configuration surface, one retry/timeout policy, one place that goes dark
-when `ANTHROPIC_API_KEY` is unset.
+module's original, primary purpose), sponsorship extraction (the same
+grounded-quote shape, added for Decision 3's AI pass — see below), plus
+`complete_text()`, a thin shared client any other feature (e.g.
+`crm.ai_brief`'s coffee-chat briefs) can call rather than each hand-rolling
+its own Anthropic API plumbing. One configuration surface, one retry/timeout
+policy, one place that goes dark when `ANTHROPIC_API_KEY` is unset.
 
 DEADLINE EXTRACTION, specifically
 
@@ -217,6 +218,101 @@ def extract_deadline_ai(
     # evidence -- kept distinguishable so a future audit can tell which
     # mechanism produced a given deadline without re-deriving it from raw.
     return DeadlineGuess(value=deadline_iso, phrase=quote, confidence=0.5)
+
+
+# ---------------------------------------------------------------------------
+# SPONSORSHIP EXTRACTION — Decision 3's AI pass
+# (docs/founder-decisions-2026-08-20.md), the last of the four steps.
+#
+# By the time this pass would run, steps 1-3 have already recovered every
+# answer classify.extract_sponsorship's regex (the Workday structured field
+# plus the missed phrasings) and directory.sponsorship's firm-policy
+# fallback can find for free. What's left is real prose the regex genuinely
+# cannot parse — the same "long tail" argument as the deadline pass above,
+# and the same grounding rule: the model must quote the EXACT sentence its
+# answer came from, verified as a real substring of the source text, or the
+# answer is rejected. This never invents a sponsorship stance; it only reads
+# one already sitting in text this app has already fetched.
+#
+# Scope, deliberately narrow (see extract_sponsorship_ai management command):
+# only rows where BOTH the posting and the firm's own policy are still
+# silent, and only rows whose text contains a sponsorship-adjacent keyword —
+# a row with neither could not possibly have an answer for the model to find,
+# and sending it anyway would only burn a paid call for a guaranteed "no
+# answer" (1,358 of the pre-regex 2,304 unknown rows, per Decision 3).
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SponsorshipGuess:
+    value: str           # "yes" or "no" — never "unknown"; see extract_sponsorship_ai
+    phrase: str           # the exact sentence the model quoted, verified as a substring of the input
+    confidence: float     # 0.5 — same second-pass tier as DeadlineGuess.confidence
+
+
+_SPONSORSHIP_PROMPT = """You are reading the text of a job/internship posting. Answer ONLY the question below, from ONLY the text given -- never from general knowledge about the employer.
+
+QUESTION: Does this text state, as the EMPLOYER'S OWN POLICY, whether the employer will sponsor a work visa (e.g. H-1B, employment pass, work permit) for this specific role? A candidate-facing application-form question -- like "Will you now or in the future require sponsorship? * Select..." -- is NOT an answer to this question; it is something the CANDIDATE fills in, not a statement the employer makes. Only a declarative statement of the employer's own policy counts.
+
+If the text states the employer WILL sponsor, respond with EXACTLY this JSON shape and nothing else:
+{"sponsorship": "yes", "quote": "<the exact sentence from the text stating this, copied verbatim, unmodified>"}
+
+If the text states the employer WILL NOT sponsor, respond with EXACTLY:
+{"sponsorship": "no", "quote": "<the exact sentence from the text stating this, copied verbatim, unmodified>"}
+
+If the text does not clearly state the employer's own sponsorship policy -- including if the only sponsorship-related text is a candidate application-form question -- respond with EXACTLY:
+{"sponsorship": null, "quote": null}
+
+The "quote" field, when present, MUST be an exact, verbatim substring of the text below -- do not paraphrase, summarize, or fix typos in it. If you cannot quote it exactly, answer null instead of guessing.
+
+TEXT:
+\"\"\"
+{text}
+\"\"\"
+"""
+
+
+def extract_sponsorship_ai(
+    text: str | None,
+    *,
+    model: str = DEFAULT_MODEL,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    retries: int = DEFAULT_RETRIES,
+) -> SponsorshipGuess | None:
+    """One posting's cached text in, a grounded sponsorship guess out (or
+    `None`) -- never raises for a "no answer" case, only for a genuine API
+    failure (`AIExtractError`), same contract as `extract_deadline_ai`."""
+    if not is_configured():
+        return None
+    t = (text or "").strip()
+    if not t:
+        return None
+    t = t[:MAX_INPUT_CHARS]
+
+    prompt = _SPONSORSHIP_PROMPT.replace("{text}", t)
+    response = _post_json(
+        {
+            "model": model,
+            "max_tokens": 300,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=timeout,
+        retries=retries,
+    )
+    raw = _extract_response_text(response).strip()
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+    value = parsed.get("sponsorship")
+    quote = parsed.get("quote")
+    if value not in ("yes", "no") or not quote:
+        return None
+    if not _grounded(quote, t):
+        return None
+
+    return SponsorshipGuess(value=value, phrase=quote, confidence=0.5)
 
 
 DEFAULT_TEXT_MODEL = "claude-sonnet-5"

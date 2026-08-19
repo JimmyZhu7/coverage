@@ -117,11 +117,15 @@ Notes:
   title call (`_TITLE_MODEL`, ~$0.0001), the daily brief
   (`assistant/brief.py`'s `DailyBrief` — an auto-generated product surface,
   NOT `crm/ai_brief.py`'s user-triggered coffee-chat brief, which is now
-  metered above), `crm/ai_summary`, and `extract_deadlines_ai`. The first
-  three are bookkeeping calls already gated (once per day, MIN_TOUCHES,
-  POST-behind-a-button) and each costs a fraction of a cent; the last is a
-  founder-run management command. If any of them ever becomes user-triggered
-  at volume, it joins the table — the ledger's `kind` field is built for that.
+  metered above), `crm/ai_summary`, `extract_deadlines_ai`, and
+  `extract_sponsorship_ai` (added 2026-08-20 —
+  docs/founder-decisions-2026-08-20.md, Decision 3's AI pass over the
+  sponsorship residue). The first three are bookkeeping calls already
+  gated (once per day, MIN_TOUCHES, POST-behind-a-button) and each costs a
+  fraction of a cent; the last two are founder-run management commands,
+  never wired into a cron or a user-triggered path. If any of them ever
+  becomes user-triggered at volume, it joins the table — the ledger's
+  `kind` field is built for that.
 
 ## 2. Competitive landscape & pricing
 
