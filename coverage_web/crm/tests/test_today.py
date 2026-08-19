@@ -606,7 +606,8 @@ def test_the_ghost_park_it_button_actually_parks(client):
     # And they are OFF today's queue, not deleted or archived. Scoped to
     # the cockpit specifically: the activity feed further down the SAME
     # page is a log of what happened and correctly still names her in its
-    # own "Manual override" line — this checks the QUEUE, not the whole page.
+    # own "Updated manually" line (crm.utils.TOUCH_KIND_LABELS) — this
+    # checks the QUEUE, not the whole page.
     assert c.archived is False
     ctx = _cockpit_context(user)
     queued_names = [a["contact"]["name"] for lane in ctx["lanes"] for a in lane["items"]]

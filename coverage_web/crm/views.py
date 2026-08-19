@@ -1042,13 +1042,47 @@ _NOTE_MARKER = re.compile(r"^\[(?:gmail|capture|assistant):[^\]]*\]\s*")
 # column=value pairs are the same kind of machine bookkeeping as the bracket
 # markers above — real for the audit trail, meaningless to a user reading
 # their OWN history: "thread_state=chat_done" names a database column, not a
-# fact about them, and it duplicated the row's own "Manual override"
-# kind_label besides. Confirmed live: James Bai's contact page (id=312)
-# rendered "thread_state=chat_done — Correction: ..." verbatim as a History
+# fact about them, and it duplicated the row's own kind_label besides.
+# Confirmed live: James Bai's contact page (id=312) rendered
+# "thread_state=chat_done — Correction: ..." verbatim as a History
 # entry. Stripped at display, same posture as `_NOTE_MARKER` — only the
 # human-authored explanation after the dash (if any) is shown.
 _MANUAL_OVERRIDE_PREFIX = re.compile(
     r"^manual override:[^—]*(?:—\s*)?", re.IGNORECASE)
+
+# Same note, parsed rather than stripped — see `_override_label` below.
+_MANUAL_OVERRIDE_PARSE = re.compile(
+    r"^manual override:\s*(?P<fields>[^—]*)(?:—\s*(?P<human>.*))?$",
+    re.IGNORECASE | re.DOTALL,
+)
+_ASSISTANT_NOTE = re.compile(r"^\[assistant:[^\]]*\]")
+
+
+def _override_label(note: str | None) -> str:
+    """Plain-language History label for a `manual_override` touch, replacing
+    the raw kind name ("Manual override") which is engineering language for
+    the audit MECHANISM, not a description of what happened. It read like
+    "your profile didn't save" to a student, when it always means either
+    "you parked this contact" or "your advisor parked this contact" (or,
+    off the Park path, some other direct correction) — confirmed live.
+
+    Reuses the same `set_state` note format `_MANUAL_OVERRIDE_PREFIX` strips:
+    "manual override: <col>=<val>, ... [— <human note>]". WHO is read off
+    the human note's own `[assistant:...]` marker (assistant/tools.py logs
+    every override it makes with one, same posture as `_NOTE_MARKER` above)
+    — present means the advisor acted for the student, absent means the
+    student did it themselves (Park, or a direct correction). WHAT is read
+    off the changed column: `thread_state=parked` names the one everyday
+    case in plain words; anything else falls back to the honest generic.
+    """
+    m = _MANUAL_OVERRIDE_PARSE.match(note or "")
+    if not m:
+        return "Updated manually"
+    fields = m.group("fields") or ""
+    human = (m.group("human") or "").lstrip()
+    who = "Your advisor" if _ASSISTANT_NOTE.match(human) else "You"
+    verb = "parked this contact" if "thread_state=parked" in fields else "updated this contact"
+    return f"{who} {verb}"
 
 
 def _display_note(note: str | None) -> str:
@@ -1086,12 +1120,19 @@ def _contact_live_context(
     channel_labels = dict(CHANNEL_LABELS)
     # Display rows for the history: the raw model rows leak enum spellings
     # ("reply_received · email") into the page. Labels here, once, instead of
-    # a template filter per cell.
+    # a template filter per cell. manual_override gets its own plain-language
+    # label (see `_override_label`) instead of the dict fallback, because
+    # the generic "kind name, sentence-cased" reads as engineering jargon
+    # for this one kind specifically — every other kind is already a plain
+    # verb in TOUCH_KIND_LABELS.
     touch_rows = [
         {
             "ts": t.ts,
             "kind": t.kind,
-            "kind_label": kind_labels.get(t.kind, t.kind.replace("_", " ").capitalize()),
+            "kind_label": (
+                _override_label(t.note) if t.kind == MANUAL_OVERRIDE_KIND
+                else kind_labels.get(t.kind, t.kind.replace("_", " ").capitalize())
+            ),
             "channel_label": channel_labels.get(t.channel, t.channel),
             "note": _display_note(t.note),
             "inbound": t.kind in _INBOUND_TOUCH_KINDS,

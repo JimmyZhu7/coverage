@@ -49,6 +49,17 @@ def _confidence_label(value) -> str:
 WARMTH_ORDER = ["cold", "replied", "chatted", "advocate"]
 
 # Friendly labels for the log-a-touch control and the weekly-list verbs.
+#
+# `manual_override` rides at the end on purpose: it is not a real interaction
+# a student logs (log_touch rejects it — see TOUCH_TRANSITIONS), only the
+# audit trail's own kind for a direct state correction (Park, or a fix from
+# the student or their advisor). `_contact_live.html`'s "Interaction" <select>
+# skips this one value explicitly so it never becomes a choosable, always-
+# erroring option; every OTHER reader of this list (Today's activity feed,
+# the contact page's History, the advisor's own tool responses) wants a
+# plain label here rather than falling back to "Manual override" — see
+# crm.views._override_label for the richer, note-aware label History uses
+# instead of this generic one.
 TOUCH_KIND_LABELS: list[tuple[str, str]] = [
     ("outreach", "Reached out"),
     ("follow_up", "Followed up"),
@@ -58,6 +69,7 @@ TOUCH_KIND_LABELS: list[tuple[str, str]] = [
     ("thank_you", "Sent thank-you"),
     ("reping", "Re-pinged"),
     ("maintain", "Kept warm"),
+    ("manual_override", "Updated manually"),
 ]
 CHANNEL_LABELS: list[tuple[str, str]] = [
     ("email", "Email"),

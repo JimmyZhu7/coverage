@@ -356,7 +356,9 @@ def test_manual_override_column_value_prefix_is_hidden_from_history(client):
 def test_manual_override_with_no_human_note_shows_no_column_dump(client):
     """A bare "manual override: warmth=hot" (no " — <note>" suffix) has no
     human-authored text to keep — the whole column=value dump is hidden
-    rather than shown as if it meant something to the reader."""
+    rather than shown as if it meant something to the reader. The kind_label
+    itself reads "You updated this contact", not the raw "Manual override"
+    kind name — see crm.views._override_label."""
     user = _user()
     now = timezone.now()
     contact = Contact.all_objects.create(user=user, name="Dana Cole", role="Analyst")
@@ -370,7 +372,8 @@ def test_manual_override_with_no_human_note_shows_no_column_dump(client):
     body = resp.content.decode()
 
     assert "warmth=hot" not in body
-    assert "Manual override" in body
+    assert "Manual override" not in body
+    assert "You updated this contact" in body
 
 
 # ---------------------------------------------------------------------------

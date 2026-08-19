@@ -132,7 +132,15 @@ values.
             hx-swap="outerHTML">
         {% csrf_token %}
         <select name="kind" aria-label="Interaction">
-          {% for value, label in touch_kinds %}<option value="{{ value }}"{% if value == preselect_kind %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% comment %}
+          "manual_override" rides in `touch_kinds` (crm.utils.TOUCH_KIND_LABELS)
+          so History and the activity feed get a plain label for it, but it is
+          not a real interaction to LOG — log_touch rejects it outright (not in
+          TOUCH_TRANSITIONS) since it is the audit trail's own kind for a state
+          correction, not a student action. Skipped here so the dropdown never
+          offers a choice that always errors.
+          {% endcomment %}
+          {% for value, label in touch_kinds %}{% if value != "manual_override" %}<option value="{{ value }}"{% if value == preselect_kind %} selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
         </select>
         <select name="channel" aria-label="Channel">
           {% for value, label in channels %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
