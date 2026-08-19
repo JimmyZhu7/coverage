@@ -173,5 +173,17 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     if not text:
         return None
     text = text[:MAX_BRIEF_CHARS]
-    DailyBrief(user=user, date=today, text=text).save()
-    return text
+    # get_or_create, not a plain save(): this endpoint is reachable twice for
+    # the same student/day (a double-load of Today, two tabs, a client-side
+    # retry against a slow response) and both requests can pass the
+    # `existing is None` check above before either has written its row.
+    # `uniq_daily_brief_user_date` is exactly the guard against two rows for
+    # one day, but a bare `.save()` on the loser meant the DB constraint threw
+    # an uncaught IntegrityError instead of the graceful "no card" this
+    # module promises everywhere else — Django's get_or_create retries its
+    # own `get()` when the nested create hits that constraint, so the loser
+    # quietly returns whichever text actually won the race.
+    row, _created = DailyBrief.all_objects.get_or_create(
+        user=user, date=today, defaults={"text": text},
+    )
+    return row.text

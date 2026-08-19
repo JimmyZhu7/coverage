@@ -230,3 +230,51 @@ def test_an_empty_queue_and_no_situation_events_still_spends_no_call():
 
     assert text is None
     assert client.messages.requests == []
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: crm.views.daily_brief is an htmx POST endpoint a student can
+# fire twice (a double-load, two tabs on Today at once, a client-side retry
+# after a slow response). Both requests can pass the "nothing cached yet"
+# check before either has written its row — DailyBrief.date has a real
+# UniqueConstraint(user, date) precisely to prevent two rows for one day, so
+# the loser of the race must not crash.
+# ---------------------------------------------------------------------------
+
+class _RaceClient:
+    """Like FakeClient, but the concurrent writer's row lands DURING this
+    call's `messages.create` — simulating a second in-flight request that
+    finishes first."""
+
+    def __init__(self, response, user, date, winner_text="Other request won."):
+        self.messages = self
+        self.requests = []
+        self._response = response
+        self._user = user
+        self._date = date
+        self._winner_text = winner_text
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        DailyBrief.all_objects.create(
+            user=self._user, date=self._date, text=self._winner_text,
+        )
+        return self._response
+
+
+def test_a_concurrent_generation_does_not_crash_on_the_unique_constraint():
+    """Two requests both see no cached row, both call the model; the second
+    one to try to save must not blow up with an IntegrityError from
+    `uniq_daily_brief_user_date` — it should quietly defer to whichever
+    request actually won the race, the same way `debrief.dismiss`'s
+    `get_or_create` already does for `ChatDebrief`."""
+    user = _user()
+    today = timezone.localdate()
+    client = _RaceClient(_response("This request's own answer."), user, today)
+
+    text = brief.get_or_build(user, [_action()], client=client)
+
+    # Exactly one row for the day either way — the constraint's whole job —
+    # and the caller gets text back rather than a 500.
+    assert DailyBrief.objects.for_user(user).filter(date=today).count() == 1
+    assert text is not None
