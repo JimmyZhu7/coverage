@@ -163,29 +163,44 @@ def _raw_balance(user) -> int:
 #: locking the student out of the chat they didn't overuse.
 _SPEND_KINDS = (CreditLedger.KIND_SPEND_CHAT, CreditLedger.KIND_SPEND_RESCAN)
 
+#: `_SPEND_KINDS` plus `KIND_REFUND`, for the two usage counters below.
+#: `refund()` exists for exactly one shape of event: a spend that already
+#: landed in `_SPEND_KINDS` turned out to correspond to a turn the student
+#: never got an answer to. Netting the refund's positive row against its
+#: matching spend row in the SAME query is what makes `daily_spent` and
+#: `month_usage` treat that turn as though it never happened — matching
+#: `refund`'s own fairness rule (see its docstring) instead of only
+#: half-honoring it by restoring the balance while still burning the
+#: day's allowance and misreporting the month's usage. `KIND_ADJUST` stays
+#: excluded: an admin adjustment has no matching spend row to net against.
+_NET_SPEND_KINDS = _SPEND_KINDS + (CreditLedger.KIND_REFUND,)
+
 
 def daily_spent(user) -> int:
-    """Credits spent (a positive count) since local midnight today — the
-    burst guard's own counter (§4). Grants and admin adjustments never
-    count against it; only `spend()` rows (`_SPEND_KINDS`) do."""
+    """Credits spent (a positive count), net of same-day refunds, since
+    local midnight today — the burst guard's own counter (§4). Grants and
+    admin adjustments never count against it; `spend()` rows do, and a
+    `refund()` of one nets back out — see `_NET_SPEND_KINDS`."""
     start, end = _day_window(user)
     total = (
         CreditLedger.objects.for_user(user)
-        .filter(kind__in=_SPEND_KINDS, created__gte=start, created__lt=end)
+        .filter(kind__in=_NET_SPEND_KINDS, created__gte=start, created__lt=end)
         .aggregate(s=Sum("delta"))["s"]
     )
     return -(total or 0)
 
 
 def month_usage(user) -> int:
-    """Credits spent since this user's local first-of-month — distinct from
-    `daily_spent`: this resets on the calendar, that resets nightly. Powers
-    the Settings page's "used N so far this month" line."""
+    """Credits spent, net of refunds, since this user's local first-of-month
+    — distinct from `daily_spent`: this resets on the calendar, that resets
+    nightly. Powers the Settings page's "used N so far this month" line,
+    which must reconcile with the balance shown right next to it — a
+    refunded turn changes neither."""
     today = _user_localdate(user)
     start = timezone.make_aware(datetime.combine(today.replace(day=1), time.min))
     total = (
         CreditLedger.objects.for_user(user)
-        .filter(kind__in=_SPEND_KINDS, created__gte=start)
+        .filter(kind__in=_NET_SPEND_KINDS, created__gte=start)
         .aggregate(s=Sum("delta"))["s"]
     )
     return -(total or 0)
@@ -296,16 +311,47 @@ def refund(user, cost: int, **props) -> None:
     that's known, so the fix is a compensating credit, not skipping the
     original debit.
 
-    Written as `KIND_ADJUST`, the same kind an admin correction uses — on
-    purpose: `_SPEND_KINDS` (this module, above) deliberately excludes
-    `KIND_ADJUST` from the daily burst guard and the Settings usage line,
-    because a refund is a correction of an earlier charge, not new
-    activity, and must not read as if the student spent AND got money
-    back today. A non-positive `cost` is a no-op, same as `spend`.
+    Written as its own `KIND_REFUND`, NOT `KIND_ADJUST` — this used to
+    reuse `KIND_ADJUST` (the same kind an admin correction writes), which
+    got the balance right but nothing else: `_SPEND_KINDS` excludes
+    `KIND_ADJUST` from the daily burst guard and the Settings "used this
+    month" line, so the ORIGINAL negative `spend_chat`/`spend_rescan` row
+    kept counting against both even after the refund restored the balance.
+    A run of turns that all fail after round 0 — an Anthropic outage, a
+    flaky patch of tool-call network errors — could burn through a
+    student's entire `daily_burst` and lock them out for the rest of the
+    day while `balance()` showed them untouched, and
+    `agent.py::_credit_block_notice` would then tell them "your credits for
+    the month are still there" while they'd gotten zero answers. Settings
+    would show the same mismatch: a full balance next to a nonzero "used N
+    this month."
+
+    The counter-argument — round 0 DID reach the API and cost real money,
+    so the burst guard, an abuse backstop against a runaway loop or a
+    shared password (docs/credit-system-plan.md §4), is arguably right to
+    count it — doesn't hold up against this module's own fairness rule.
+    `spend`'s docstring and the call sites in `assistant/agent.py` are
+    explicit that the rule is "never charged for a request the student
+    didn't get an answer to," full stop, not "...unless the API had
+    already been called." A refunded turn is defined to be, from the
+    student's side, exactly as if it never happened — the burst guard and
+    the usage line have to agree with the balance on that, or the refund is
+    only half-honored. (The actual model-spend accounting this
+    counter-argument cares about already happens independently, in
+    `assistant/agent.py::_log_usage`'s `assistant_usage` event, which
+    is not touched by a refund — that's the one place a refunded round 0's
+    real API cost is still visible.)
+
+    `daily_spent`/`month_usage` net a `KIND_REFUND` row against its
+    matching spend row in the same window (`_NET_SPEND_KINDS`, this
+    module, above) — so a same-day refund fully cancels the burst-guard and
+    monthly-usage impact of the spend it reverses, the same way it already
+    cancels the balance impact. A non-positive `cost` is a no-op, same as
+    `spend`.
     """
     if cost <= 0:
         return
-    CreditLedger.all_objects.create(user=user, delta=int(cost), kind=CreditLedger.KIND_ADJUST, props=props or {})
+    CreditLedger.all_objects.create(user=user, delta=int(cost), kind=CreditLedger.KIND_REFUND, props=props or {})
 
 
 # ---------------------------------------------------------------------------

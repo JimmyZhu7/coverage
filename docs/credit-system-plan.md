@@ -384,6 +384,35 @@ Settings (one `Sum` query). A limit a user can see coming is a product
 decision; one that ambushes them is a bug report. This is the only UI work
 in the plan beyond the notice copy.
 
+**Refunds net out of the burst guard and the monthly usage line, not just
+the balance.** `billing/credits.py::refund` (assistant/agent.py's fairness
+rule: never charged for a turn the student didn't get an answer to, even
+when the charge already landed on round 0 and only a later round failed)
+writes its own `KIND_REFUND` row, and `daily_spent`/`month_usage` net a
+same-window refund against the spend row it reverses. A refunded turn is
+defined to be, from the student's side, exactly as if it never happened —
+not "the balance came back but the turn still counts against today's
+allowance and this month's usage total."
+
+This was a real decision, not the obvious shape: round 0 genuinely did
+reach the API and cost real money, so there's a case that the daily burst
+guard — an abuse backstop against a runaway loop or a shared password,
+not a billing mechanism — should count it regardless of refund. That
+argument loses to this module's own stated fairness rule, which draws no
+such exception, and to what not netting actually does in practice: a run
+of turns that all fail after round 0 (an outage, a flaky patch of
+tool-call network errors) can burn a student's entire `daily_burst` and
+lock them out for the rest of the day while their balance sits untouched
+— and the zero-credit notice (`_credit_block_notice`) would then tell them
+"your credits for the month are still there," which reads as dishonest
+when they got zero answers. Settings would show the same kind of
+mismatch: a full balance next to a nonzero "used N this month." The real
+per-round API cost this counter-argument cares about is tracked
+independently anyway, in `assistant/agent.py::_log_usage`'s
+`assistant_usage` event — untouched by a refund, and the right place to
+look for actual model spend, as distinct from what a student's allowance
+should reflect.
+
 ## 7. Refill and rollover
 
 - **Refill:** full grant on the 1st of each month, user's own timezone

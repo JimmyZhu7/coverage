@@ -176,6 +176,87 @@ def test_a_pro_user_on_their_last_credits_is_still_let_through_the_overdraw_edge
 
 
 # ---------------------------------------------------------------------------
+# refund() — a compensating credit that nets out of usage, not just balance
+# ---------------------------------------------------------------------------
+@override_settings(CREDIT_PLANS={"free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15}})
+def test_refund_writes_a_positive_kind_refund_row(student):
+    credits.refund(student, 3, reason="turn_failed_after_charge", model="claude-haiku-4-5")
+
+    row = CreditLedger.objects.for_user(student).get(kind=CreditLedger.KIND_REFUND)
+    assert row.delta == 3
+    assert row.props == {"reason": "turn_failed_after_charge", "model": "claude-haiku-4-5"}
+
+
+def test_refund_of_zero_or_negative_writes_nothing(student):
+    credits.refund(student, 0)
+    credits.refund(student, -5)
+
+    assert CreditLedger.objects.for_user(student).count() == 0
+
+
+@override_settings(CREDIT_PLANS={"free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 2}})
+def test_a_refund_frees_the_burst_guard_it_reverses(student):
+    """The scenario docs/credit-system-plan.md's refund section walks
+    through: round 0 of a turn charges, a later round fails, the turn is
+    refunded. That refunded turn must not count as one of today's 2
+    burst-guard slots — a `spend()` immediately followed by its matching
+    `refund()` must land the student back where they started, not one
+    slot closer to being locked out for the day."""
+    credits.spend(student, 1, CreditLedger.KIND_SPEND_CHAT, model="claude-haiku-4-5")
+    credits.refund(student, 1, reason="turn_failed_after_charge", model="claude-haiku-4-5")
+
+    assert credits.daily_spent(student) == 0
+    assert credits.balance(student) == 60
+
+    # Both burst-guard slots are still available — a refunded charge left
+    # no trace on today's spend count.
+    assert credits.can_spend(student, 1)
+    credits.spend(student, 1, CreditLedger.KIND_SPEND_CHAT)
+    assert credits.can_spend(student, 1)
+    credits.spend(student, 1, CreditLedger.KIND_SPEND_CHAT)
+    assert not credits.can_spend(student, 1)
+
+
+@override_settings(CREDIT_PLANS={"free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15}})
+def test_a_refund_frees_the_monthly_usage_line(student):
+    """Settings' "used N so far this month" line must reconcile with the
+    balance shown next to it — a refunded turn changes neither."""
+    credits.spend(student, 5, CreditLedger.KIND_SPEND_CHAT)
+    credits.spend(student, 3, CreditLedger.KIND_SPEND_RESCAN, threads=25)
+    credits.refund(student, 5, reason="turn_failed_after_charge")
+
+    assert credits.month_usage(student) == 3  # only the un-refunded rescan spend
+    assert credits.balance(student) == 60 - 3
+
+
+@override_settings(CREDIT_PLANS={"free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15}})
+def test_a_repeated_refunded_turn_never_exhausts_the_burst_guard(student):
+    """The consequence docs/credit-system-plan.md now calls out by name: a
+    run of turns that each charge and then get refunded (an outage, a
+    flaky patch of tool-call failures) must not burn through daily_burst
+    at all — every one of them nets to zero."""
+    for _ in range(20):  # far more than daily_burst=15 would allow if unrefunded
+        credits.spend(student, 1, CreditLedger.KIND_SPEND_CHAT)
+        credits.refund(student, 1, reason="turn_failed_after_charge")
+
+    assert credits.daily_spent(student) == 0
+    assert credits.can_spend(student, 1)
+    assert credits.balance(student) == 60
+
+
+@override_settings(CREDIT_PLANS={"free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15}})
+def test_an_unrefunded_spend_still_counts_normally_alongside_refunded_ones(student):
+    """Netting must not over-correct: a refund only cancels the spend it
+    actually reverses, not unrelated spend in the same window."""
+    credits.spend(student, 1, CreditLedger.KIND_SPEND_CHAT)
+    credits.refund(student, 1, reason="turn_failed_after_charge")
+    credits.spend(student, 1, CreditLedger.KIND_SPEND_CHAT)  # a normal, un-refunded charge
+
+    assert credits.daily_spent(student) == 1
+    assert credits.balance(student) == 59
+
+
+# ---------------------------------------------------------------------------
 # Rollover, capped at 2x monthly grant
 # ---------------------------------------------------------------------------
 @override_settings(CREDIT_PLANS={"free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15}})

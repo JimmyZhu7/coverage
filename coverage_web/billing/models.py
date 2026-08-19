@@ -44,12 +44,22 @@ class CreditLedger(PrivateModel):
     # `kind`s so the Settings page and any future revenue reporting can
     # tell the two apart without parsing `props`.
     KIND_PURCHASE = "purchase"
+    # A reversal of a specific earlier `spend()` row (billing/credits.py::
+    # refund) — kept distinct from KIND_ADJUST on purpose, even though both
+    # are positive founder/system-written rows: an adjustment is new
+    # activity (a correction with no matching spend, e.g. undoing a
+    # mistaken grant), while a refund cancels out a spend that already
+    # happened. That distinction is what lets `daily_spent`/`month_usage`
+    # net a refund against its matching spend — see this app's
+    # `credits.py::_SPEND_KINDS` for why the two must not share a `kind`.
+    KIND_REFUND = "refund"
     KIND_CHOICES = [
         (KIND_GRANT, "Monthly grant"),
         (KIND_SPEND_CHAT, "Chat message"),
         (KIND_SPEND_RESCAN, "Rescan residue classification"),
         (KIND_ADJUST, "Admin adjustment"),
         (KIND_PURCHASE, "Credit top-up purchase"),
+        (KIND_REFUND, "Refund of a failed turn"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
