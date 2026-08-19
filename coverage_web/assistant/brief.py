@@ -39,7 +39,21 @@ def _summarize_actions(actions: list[dict]) -> str:
     for a in actions[:MAX_ACTIONS_SUMMARIZED]:
         contact = a.get("contact") or {}
         name = contact.get("name") or "someone"
-        firm = contact.get("firm_text") or "no firm on file"
+        # Read the action's RESOLVED firm name, not the contact's raw
+        # `firm_text`. A contact the CSV import successfully matched to a
+        # directory firm has `firm_text` CLEARED (accounts/services.py: a
+        # linked firm is the source of truth, the free text is dropped so
+        # it can't go stale) — so reading `firm_text` here told the model
+        # that every correctly-linked contact had "no firm on file" while
+        # the one contact whose firm FAILED to match was the only one
+        # carrying a name. Two review rounds in a row the daily brief then
+        # confidently asserted the exact inverse of the student's own data
+        # ("she's the only one connected to a target firm"). The model was
+        # reading wrong data correctly. `firm_name` on the action is built
+        # by coverage_domain.cadence from the linked firm first, falling
+        # back to firm_text, which is the same precedence every other
+        # surface in this app uses.
+        firm = a.get("firm_name") or contact.get("firm_text") or "no firm on file"
         label = a.get("label") or a.get("action") or "follow up"
         reason = a.get("reason") or ""
         line = f"- {name} ({firm}): {label} — {reason}".rstrip(" —")

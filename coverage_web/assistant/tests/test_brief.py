@@ -58,6 +58,42 @@ def _response(text):
     return SimpleNamespace(content=[SimpleNamespace(text=text)])
 
 
+def test_a_linked_contact_is_described_by_its_real_firm_not_no_firm_on_file():
+    """Regression for the brief asserting the INVERSE of a student's own
+    data, two review rounds in a row. A contact the CSV import matched to a
+    directory firm has `firm_text` cleared (the linked firm is the source of
+    truth) and the resolved name travels on the action as `firm_name`.
+    Reading `firm_text` here made every correctly-linked contact read as
+    "no firm on file" and the one UNMATCHED contact the only one carrying a
+    name — so the model, reading wrong data correctly, told the student the
+    broken contact was "the only one connected to a target firm".
+    """
+    linked = {
+        "contact": {"name": "Maya Chen", "firm_text": ""},  # matched → cleared
+        "firm_name": "Goldman Sachs",                      # resolved by cadence
+        "label": "Follow up", "reason": "idle 12 days", "closes_on": None,
+    }
+    unmatched = {
+        "contact": {"name": "Sam Okafor", "firm_text": "Bain and Company"},
+        "firm_name": "Bain and Company",
+        "label": "Follow up", "reason": "idle 9 days", "closes_on": None,
+    }
+    text = brief._summarize_actions([linked, unmatched])
+    assert "Maya Chen (Goldman Sachs)" in text
+    assert "no firm on file" not in text
+    assert "Sam Okafor (Bain and Company)" in text
+
+
+def test_a_contact_with_no_firm_anywhere_still_says_so_honestly():
+    """The fallback chain still bottoms out honestly when there genuinely
+    is no firm: no linked firm, no free text, no resolved name."""
+    bare = {
+        "contact": {"name": "Pat Doe", "firm_text": ""},
+        "label": "Follow up", "reason": "", "closes_on": None,
+    }
+    assert "Pat Doe (no firm on file)" in brief._summarize_actions([bare])
+
+
 def test_a_cached_brief_is_returned_without_calling_the_model():
     user = _user()
     DailyBrief(user=user, date=timezone.localdate(), text="Chen's idle 12 days.").save()
