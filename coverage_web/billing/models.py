@@ -1,0 +1,79 @@
+"""billing — Coverage's credit ledger (docs/credit-system-plan.md).
+
+An append-only audit trail for every credit grant, spend, and admin
+adjustment, matching the convention `analytics.ProductEvent` already set
+(see that model's docstring): no mutable balance column, because a running
+total is a second copy of the truth that can silently drift from its own
+history. At this scale, `Sum("delta")` over an indexed per-user queryset is
+microseconds, and the ledger itself IS the audit trail — every grant, every
+spend, every admin top-up is a row somebody can read back.
+
+Two metered AI surfaces spend from this ONE pool: `assistant/agent.py`
+("spend_chat", one row per student chat message) and
+`capture/gmail_residue.py` via `capture/gmail_live.py::run_rescan`
+("spend_rescan", one row per rescan's residue stage). Neither app owns
+credits — this app does, so a third metered surface is a new `kind`
+constant, not a new ledger.
+
+Private zone, like every other per-user table — `coverage_web.tenancy`'s
+`PrivateModel` base, so `objects` refuses an unscoped query and the only
+supported way to read a student's own rows is `.objects.for_user(user)`.
+This app's own writer path (`billing/credits.py`) and Django admin reach for
+`all_objects` explicitly, matching `analytics.record_event`'s posture: a
+visible, greppable admission that a write/read is deliberately
+cross-tenant, not a loophole around the guard.
+"""
+
+from __future__ import annotations
+
+from django.conf import settings
+from django.db import models
+from django.db.models import Q
+
+from coverage_web.tenancy import PrivateModel
+
+
+class CreditLedger(PrivateModel):
+    KIND_GRANT = "grant"
+    KIND_SPEND_CHAT = "spend_chat"
+    KIND_SPEND_RESCAN = "spend_rescan"
+    KIND_ADJUST = "adjust"
+    KIND_CHOICES = [
+        (KIND_GRANT, "Monthly grant"),
+        (KIND_SPEND_CHAT, "Chat message"),
+        (KIND_SPEND_RESCAN, "Rescan residue classification"),
+        (KIND_ADJUST, "Admin adjustment"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    # Positive for a grant or an admin top-up, negative for a spend. Never
+    # zero — a zero-delta row would be a no-op audit entry with nothing to
+    # record.
+    delta = models.IntegerField()
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES)
+    # "2026-08", written only on grant rows. The UniqueConstraint below is
+    # what actually enforces "at most one grant per user per month" — this
+    # column exists so that constraint has something to key on, and so a
+    # grant row can be found again ("did August already get its grant?")
+    # without scanning every row and parsing `created`.
+    period = models.CharField(max_length=7, blank=True, default="")
+    # Free-form audit detail: {"model": "claude-sonnet-5"} on a chat spend,
+    # {"threads": 37} on a rescan spend. Never a secret or message content.
+    props = models.JSONField(default=dict, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "credit_ledger"
+        ordering = ["-created"]
+        indexes = [models.Index(fields=["user", "created"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "period"],
+                condition=Q(kind="grant"),
+                name="uniq_monthly_grant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        sign = "+" if self.delta >= 0 else ""
+        return f"{self.user_id}: {sign}{self.delta} ({self.kind})"

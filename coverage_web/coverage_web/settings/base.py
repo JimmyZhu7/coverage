@@ -72,6 +72,9 @@ INSTALLED_APPS = [
                 # app used to also hold was retired 2026-08-19
 
     "assistant",  # private zone: "Talk to Coverage" — the advisor page's conversations
+    "billing",  # private zone: the credit ledger both assistant and capture spend from
+                # (docs/credit-system-plan.md) — not folded into either app because
+                # it's a third surface's dependency just as much as the first two's
 ]
 
 # The scheme+host the app is reachable at, for links that have to be built
@@ -118,6 +121,44 @@ ASSISTANT_PLANS = {
         "daily_cap": env.int("ASSISTANT_PRO_DAILY_CAP", default=60),
     },
 }
+# `daily_cap` above is no longer what stops a student mid-plan — the credit
+# system below (docs/credit-system-plan.md) replaced it as the actual
+# enforcement in assistant/agent.py. It stays defined here, and
+# core/views.py's pricing-page context still reads it, because
+# templates/core/pricing.html's own copy names it and that page is out of
+# scope for this change (another pass owns pricing-page content).
+
+# ---------------------------------------------------------------------------
+# The credit system (docs/credit-system-plan.md) — one pool metering BOTH AI
+# surfaces that spend real model money: "Talk to Coverage" chat messages
+# (assistant/agent.py, billing/credits.py's "spend_chat") and a Gmail Live
+# rescan's Haiku residue classification (capture/gmail_residue.py via
+# capture/gmail_live.py::run_rescan, "spend_rescan"). Replaces the old
+# per-plan daily MESSAGE cap above as the thing that actually gates a turn;
+# `daily_burst` below is the new abuse backstop — see the plan doc's §4 for
+# why a monthly pool needs one at all (a runaway loop or a shared password
+# burning a month in an hour).
+#
+# 1 credit ≈ $0.02 of model spend ≈ one Haiku chat message (§1). Sonnet
+# costs 3x that in real API pricing, hence Pro's message_cost=3. Every
+# number below is set from the margin math in §3 of the plan doc, not a
+# round number for its own sake — see that section before changing any of
+# them.
+CREDIT_PLANS = {
+    "free": {
+        "monthly_grant": env.int("CREDIT_FREE_MONTHLY_GRANT", default=60),
+        "message_cost": env.int("CREDIT_FREE_MESSAGE_COST", default=1),
+        "daily_burst": env.int("CREDIT_FREE_DAILY_BURST", default=15),
+    },
+    "pro": {
+        "monthly_grant": env.int("CREDIT_PRO_MONTHLY_GRANT", default=180),
+        "message_cost": env.int("CREDIT_PRO_MESSAGE_COST", default=3),
+        "daily_burst": env.int("CREDIT_PRO_DAILY_BURST", default=45),
+    },
+}
+# One credit buys a classification pass over this many rescan residue
+# threads, rounded up — a maxed-out 100-thread pass costs 10 credits (§1).
+CREDIT_RESCAN_THREADS_PER_CREDIT = env.int("CREDIT_RESCAN_THREADS_PER_CREDIT", default=10)
 
 # ---------------------------------------------------------------------------
 # Web Push (deadline alerts — accounts.push, send_deadline_push_alerts).
