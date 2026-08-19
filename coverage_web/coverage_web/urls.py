@@ -23,8 +23,15 @@ urlpatterns = [
     path("opportunities/mine/", directory_views.my_applications, name="my_applications"),
     path("opportunities/<int:pk>/track/", directory_views.track_opportunity, name="track_opportunity"),
     # One click saves every open role whose own text names the user's class
-    # year — the eligibility lens reaching the pipeline.
+    # year — the eligibility lens reaching the pipeline. Gated behind an
+    # explicit confirm (see the banner's <details> in _results.html) and
+    # reversible immediately after (`track_eligible_undo`, below).
     path("opportunities/track-eligible/", directory_views.track_eligible, name="track_eligible"),
+    path("opportunities/track-eligible/undo/", directory_views.track_eligible_undo, name="track_eligible_undo"),
+    # Bulk-remove every role still sitting in Saved (never Applied/
+    # Interviewing/Offer) — the other side of the one-click bulk save, so 200+
+    # rows never again means 200+ individual Remove clicks.
+    path("opportunities/saved/clear/", directory_views.clear_saved, name="clear_saved"),
     # The description we already fetched, read inline instead of behind a
     # four-second Workday shell. Public: the posting itself is public.
     path("opportunities/<int:pk>/read/", directory_views.role_description, name="role_description"),

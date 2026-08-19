@@ -2368,6 +2368,17 @@ def _eligible_unsaved_count(user, rows, profile) -> int:
     )
 
 
+# The session key `track_eligible` stashes its batch under, so a redirect to
+# My Applications can offer an "Undo" that removes exactly the rows THIS
+# bulk save created — never a hand-saved row, and never an earlier batch's
+# rows once the student has looked at them (see `_my_applications_context`,
+# which pops this the one time it renders). Session-backed rather than a
+# DB column: the batch is only ever meant to be undoable in the moment right
+# after the write, not queried or audited later, and `product_events` (via
+# `record_event` below) already carries the durable count for that.
+BULK_SAVE_SESSION_KEY = "bulk_save_batch"
+
+
 @login_required
 @require_POST
 def track_eligible(request):
@@ -2380,6 +2391,20 @@ def track_eligible(request):
     window AND Settings stated a class year. A role already tracked keeps
     its stage untouched, and a dismissed role stays dismissed — "not for
     me" outranks "your year", because the user said so.
+
+    Two guards this used not to have, added after a customer-perspective
+    walk found one click dumping 207 roles into a 1-role pipeline with no
+    way back:
+
+    CONFIRM. The banner's own `<details>` discloses "Save N roles to My
+    Applications?" before the real submit button ever renders (see
+    `directory/_results.html`), so a plain click never writes. But that is
+    a template affordance, not a guarantee — anyone can POST this endpoint
+    directly. `confirmed=1` is the actual gate: without it, nothing is
+    written, full stop, no matter what the client claims the count was.
+
+    UNDO. Every id this call creates is stashed in the session (see
+    `BULK_SAVE_SESSION_KEY` above) for `track_eligible_undo` to reverse.
     """
     from analytics.models import UserOpportunity
 
@@ -2387,11 +2412,14 @@ def track_eligible(request):
     if not profile or not profile.get("class_year"):
         return HttpResponseBadRequest("no class year in Settings")
 
+    if request.POST.get("confirmed") != "1":
+        return HttpResponseBadRequest("confirmation required")
+
     touched = dict(
         UserOpportunity.all_objects.filter(user=request.user)
         .values_list("opportunity_id", "dismissed")
     )
-    saved = 0
+    saved_ids: list[int] = []
     for o in Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS):
         v = _eligibility(o, profile)
         if not (v and v["kind"] == "year_ok"):
@@ -2399,9 +2427,13 @@ def track_eligible(request):
         if o.id in touched:
             continue
         UserOpportunity.all_objects.create(user=request.user, opportunity=o)
-        saved += 1
+        saved_ids.append(o.id)
+    saved = len(saved_ids)
     if saved:
         record_event("eligible_bulk_saved", user=request.user, count=saved)
+        # Overwrites any earlier, presumably-already-seen batch — only the
+        # most recent bulk save is ever offered an undo.
+        request.session[BULK_SAVE_SESSION_KEY] = {"ids": saved_ids, "count": saved}
     from django.contrib import messages
 
     messages.success(
@@ -2411,6 +2443,87 @@ def track_eligible(request):
     from django.shortcuts import redirect
 
     return redirect("my_applications" if saved else "opportunities")
+
+
+@login_required
+@require_POST
+def track_eligible_undo(request):
+    """Reverse the most recent `track_eligible` bulk save, and only that.
+
+    Scoped to the exact ids that call created (via the session batch) AND to
+    rows still sitting untouched in Saved — `applied_status` blank or the
+    legacy literal "saved", never dismissed. A role the student has since
+    moved to Applied/Interviewing/Offer/Done, or dismissed, is real progress
+    or a real decision and undo must never eat it, even if it happened to be
+    one of the ids this batch created.
+    """
+    from django.db.models import Q
+
+    from analytics.models import UserOpportunity
+
+    batch = request.session.get(BULK_SAVE_SESSION_KEY)
+    ids = (batch or {}).get("ids") or []
+    if not ids:
+        return HttpResponseBadRequest("nothing to undo")
+
+    removed, _ = (
+        UserOpportunity.objects.for_user(request.user)
+        .filter(Q(applied_status="") | Q(applied_status="saved"),
+                opportunity_id__in=ids, dismissed=False)
+        .delete()
+    )
+    request.session.pop(BULK_SAVE_SESSION_KEY, None)
+    record_event("eligible_bulk_undone", user=request.user, count=removed)
+    from django.contrib import messages
+
+    messages.success(
+        request,
+        f"Undid the bulk save. Removed {removed} role{'' if removed == 1 else 's'}."
+        if removed else
+        "Nothing left to undo — those roles already moved on.")
+    from django.shortcuts import redirect
+
+    return redirect("my_applications")
+
+
+@login_required
+@require_POST
+def clear_saved(request):
+    """Bulk-remove every role sitting in Saved — the other side of the
+    one-click bulk save. Applied/Interviewing/Offer/Done rows are never
+    touched: this only ever empties the one stage a mis-click (or a bulk
+    save) can flood, never real funnel progress.
+
+    Confirm-gated the same way `track_eligible` is (see there): the
+    template's own `<details>` states the count before the real button
+    renders, and `confirmed=1` is the actual server-side gate a plain POST
+    can't skip. Tenant-scoped through `.for_user`, so this can only ever
+    touch the signed-in user's own rows.
+    """
+    from django.db.models import Q
+
+    from analytics.models import UserOpportunity
+
+    if request.POST.get("confirmed") != "1":
+        return HttpResponseBadRequest("confirmation required")
+
+    removed, _ = (
+        UserOpportunity.objects.for_user(request.user)
+        .filter(Q(applied_status="") | Q(applied_status="saved"), dismissed=False)
+        .delete()
+    )
+    # A batch mid-undo-window that just got cleared has nothing left to undo.
+    request.session.pop(BULK_SAVE_SESSION_KEY, None)
+    record_event("saved_bulk_cleared", user=request.user, count=removed)
+    from django.contrib import messages
+
+    messages.success(
+        request,
+        f"Cleared {removed} saved role{'' if removed == 1 else 's'}."
+        if removed else "Nothing in Saved to clear.")
+    from django.shortcuts import redirect
+
+    return redirect("my_applications")
 
 
 @login_required
@@ -2886,6 +2999,21 @@ def _my_applications_context(request):
         .select_related("opportunity", "opportunity__firm")
         .order_by("opportunity__firm__name", "opportunity__title")
     )
+    # The bulk-save undo offer. NOT popped here — the ids must survive this
+    # very render so the Undo button it draws has something to submit to
+    # (`track_eligible_undo` reads the same session key). Instead this
+    # renders it once by flagging it "shown": a batch already flagged is
+    # left out of the context on every later render — reload, htmx swap,
+    # whatever — the same one-shot lifetime `django.contrib.messages` gives
+    # every flash message on the product, without deleting the one thing
+    # the Undo control on THIS page still needs. `track_eligible_undo`
+    # deletes the session key outright once it actually reverses the batch.
+    batch = request.session.get(BULK_SAVE_SESSION_KEY)
+    if batch and not batch.get("shown"):
+        recent_bulk_save = batch
+        request.session[BULK_SAVE_SESSION_KEY] = {**batch, "shown": True}
+    else:
+        recent_bulk_save = None
     return {
         "stages": stages,
         "lenses": lenses,
@@ -2893,6 +3021,7 @@ def _my_applications_context(request):
         "live_total": len(live),
         "closing_soon_days": CLOSING_SOON_DAYS,
         "hidden": hidden,
+        "recent_bulk_save": recent_bulk_save,
     }
 
 
