@@ -665,6 +665,7 @@ def _new_at_your_firms(user, limit=5) -> dict:
     from crm.models import UserFirm
     from directory.classify import TARGET_BUCKETS
     from directory.models import Opportunity
+    from directory.recommend import role_matches_tracks
 
     firm_ids = list(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
     if not firm_ids:
@@ -699,6 +700,14 @@ def _new_at_your_firms(user, limit=5) -> dict:
     # list is a copy, not two roles. Folded before counting too, so "321"
     # isn't itself inflated by the same duplicates the list then hides.
     rows, _folded = fold_duplicates(qs)
+
+    # RELEVANT TO WHAT THEY RECRUIT FOR. The query above selects purely on the
+    # FIRM, so a student who tiered a universal bank for its investment bank
+    # also got its branch, audit and helpdesk reqs reported as news worth
+    # acting on. Filtered before `count` below, so the number the card states
+    # counts the roles it would actually show. Costs no query — the titles
+    # are already loaded. See `role_matches_tracks` for the rule.
+    rows = [o for o in rows if role_matches_tracks(o.title, user.tracks)]
 
     # ONE PER FIRM in the displayed list — `count` stays the true total.
     # A firm's own campus recruiting team routinely posts a whole batch of

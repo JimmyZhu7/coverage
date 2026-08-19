@@ -65,6 +65,7 @@ from directory.classify import TARGET_BUCKETS
 from directory.deadlines import is_posting_closed
 from directory.dupes import fold_duplicates
 from directory.models import Opportunity, OpportunityChange
+from directory.recommend import role_matches_tracks
 
 # How far back counts as "recent". Matches `crm.today._new_at_your_firms`'s
 # own window (`since = timezone.now() - timedelta(days=7)`) — that function
@@ -242,6 +243,16 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
     # batch crowd every other firm's news out of the window before dedup
     # ever gets a chance to run.
     rows, _folded = fold_duplicates(list(qs[: limit * 8]))
+
+    # RELEVANT TO WHAT THEY RECRUIT FOR. Everything above this line selects on
+    # the FIRM, which is right for the firm axis and blind to the job: the
+    # same bank that runs the investment bank a student tiered also posts
+    # branch, audit and helpdesk reqs, and this snapshot feeds the daily
+    # brief — the first thing a new student ever reads from Coverage. See
+    # `role_matches_tracks` for the rule and the failure that prompted it.
+    # Applied AFTER fold_duplicates so the fold still sees the full slice,
+    # and it costs no query: the titles are already in memory.
+    rows = [o for o in rows if role_matches_tracks(o.title, user.tracks)]
 
     # ONE PER FIRM. A firm's own campus recruiting team routinely posts a
     # whole batch of reqs the same week — CICC alone can post three roles

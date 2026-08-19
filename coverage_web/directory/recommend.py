@@ -661,6 +661,15 @@ _NON_TRACK_FUNCTION = re.compile(
     r"|\bsoftware engineer(ing)?\b|\bdeveloper\b|\bcyber ?security\b"
     r"|\bnetwork engineer\b|\bhelp ?desk\b|\bit support\b"
     r"|\boperations?\b|\bback ?office\b|\bmiddle ?office\b"
+    # Retail branch network: "Branch Manager", "Relationship Banker |
+    # Meadowbrook Branch", "Branch Relationship Manager, Consumer Banking".
+    # 229 open rows carried this and NONE of them named a track, so every one
+    # inherited its bank's firm-level coverage and scored as an IB match —
+    # which is how a Jackson, Tennessee branch role reached the top of a
+    # US/IB student's day-one brief. Deliberately NOT `\bretail\b`: that is
+    # also an IB COVERAGE GROUP, and banning it would misread real
+    # "Investment Banking — Consumer & Retail" analyst roles as non-track.
+    r"|\bbranch\b"
     r"|\brisk management\b|\bcredit risk\b|\bmodel validation\b"
     r"|\baccounting\b|\bfinancial report(ing)?\b|\bprocurement\b",
     re.I)
@@ -681,6 +690,43 @@ def role_function(title: str) -> str:
         if rx.search(title or ""):
             return track
     return ""
+
+
+def role_matches_tracks(title: str, tracks) -> bool:
+    """Whether a role's OWN TITLE is compatible with the tracks a student is
+    recruiting for. The same three-case rule `_track_fit` scores with, as a
+    plain yes/no for callers that must FILTER rather than rank.
+
+    Exists because the two "what's new at your firms" surfaces — Today's card
+    (`crm.today._new_at_your_firms`) and the advisor's situation snapshot
+    (`assistant.situation._new_role_events`) — select purely on the FIRM.
+    That is right for the firm axis and wrong for everything on top of it: a
+    student who tiers a universal bank is tiering its investment bank, and
+    the same firm also posts branch, audit and helpdesk reqs. So the day-one
+    brief could open by telling a US/IB student to apply to a retail branch
+    role in Jackson, Tennessee — confidently, in the first thing they ever
+    read from this product.
+
+    A student who has stated NO tracks gets no filtering: there is nothing to
+    be relevant to, and a silent empty card is worse than a broad one.
+
+      title names a track they want   -> True
+      title names a track they don't  -> False
+      title names a non-track         -> False  (audit, ops, branch, ...)
+        function
+      title names nothing at all      -> True   (the firm is already theirs;
+                                                 the title makes no claim to
+                                                 contradict)
+    """
+    wanted = set(tracks or ())
+    if not wanted:
+        return True
+    fn = role_function(title)
+    if fn == "none":
+        return False
+    if fn:
+        return fn in wanted
+    return True
 
 
 def _track_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:

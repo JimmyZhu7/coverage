@@ -666,6 +666,14 @@ def _p(**kw):
     ("2027 Commercial & Investment Bank Risk Management Summer Analyst", "none"),
     ("2027 Internal Audit Analyst Program", "none"),
     ("2027 Operations Summer Analyst Program (New York)", "none"),
+    # The retail branch network. 229 open rows carried "branch" and not one
+    # named a track, so each inherited its bank's firm-level coverage and
+    # scored as an IB match — which is how a Jackson, Tennessee branch role
+    # reached the top of a US/IB student's day-one brief.
+    ("Branch Manager I - Woodstock Branch", "none"),
+    ("Relationship Banker | Meadowbrook Branch", "none"),
+    # ...but NOT by banning "retail", which is also an IB coverage group.
+    ("Investment Banking - Consumer & Retail - Analyst", "ib"),
     # Nothing stated: the firm's coverage is allowed to speak.
     ("Intern", ""),
     ("Summer Analyst Program", ""),
@@ -673,6 +681,32 @@ def _p(**kw):
 def test_role_function_reads_the_job_not_the_employer(title, expected):
     from directory.recommend import role_function
     assert role_function(title) == expected
+
+
+@pytest.mark.parametrize("title,tracks,expected", [
+    # Names a track they want, or names nothing at all: keep. The firm is
+    # already theirs, so a silent title makes no claim to contradict.
+    ("2028 Investment Banking Summer Analyst", ("ib",), True),
+    ("Summer Analyst Program", ("ib",), True),
+    # Names a track they are NOT recruiting for: drop.
+    ("Sales & Trading Summer Analyst", ("ib",), False),
+    # Names a function outside the vocabulary entirely: drop.
+    ("Internal Audit Summer Analyst", ("ib",), False),
+    ("Branch Manager I - Woodstock Branch", ("ib",), False),
+    # No stated tracks: nothing to be relevant TO, so filter nothing. A
+    # silent empty card is worse than a broad one.
+    ("Branch Manager I - Woodstock Branch", (), True),
+    ("Internal Audit Summer Analyst", None, True),
+])
+def test_role_matches_tracks_filters_the_job_not_the_firm(title, tracks, expected):
+    """The yes/no rule the two "new at your firms" surfaces filter on —
+    `crm.today._new_at_your_firms` and
+    `assistant.situation._new_role_events`. Both select purely on the FIRM,
+    which is right for the firm axis and blind to the job: a student tiering
+    a universal bank is tiering its investment bank, and the same firm also
+    posts branch, audit and helpdesk reqs."""
+    from directory.recommend import role_matches_tracks
+    assert role_matches_tracks(title, tracks) is expected
 
 
 def test_a_stated_track_outranks_one_inferred_from_the_firm():
