@@ -62,6 +62,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from capture import gmail_residue
 from capture.gmail import apply_findings
 from capture.models import GmailConnection
 from crm.models import Contact, Touch
@@ -604,27 +605,63 @@ def _backfill_window_start(last_touch, *, now) -> "datetime":
     return max(last_touch - timedelta(days=BACKFILL_OVERLAP_DAYS), floor)
 
 
-def backfill_connection(connection: GmailConnection, *, dry_run: bool = False):
-    """The one-time historical pass for a newly-connected mailbox. Searches
-    per-contact (see module note above), classifies every message found
-    with the SAME deterministic `_classify_message` the live path uses, then
-    funnels everything through one `apply_findings` call — the identical
-    ratchet/dedup contract the daily sync and the live listener both already
-    rely on, so a message the live watcher already logged today is simply
-    ratcheted away rather than double-counted.
+def backfill_connection(
+    connection: GmailConnection,
+    *,
+    contacts=None,
+    dry_run: bool = False,
+    update_backfill_status: bool = True,
+    residue_sink: list | None = None,
+):
+    """One historical pass over `contacts` (or, by default, every contact the
+    user has). Searches per-contact (see module note above), classifies
+    every message found with the SAME deterministic `_classify_message` the
+    live path uses, then funnels everything through one `apply_findings`
+    call — the identical ratchet/dedup contract the daily sync and the live
+    listener both already rely on, so a message the live watcher already
+    logged today is simply ratcheted away rather than double-counted.
 
     Findings are sorted ascending by `occurred_at` before applying, so the
     ladder climbs in the order things actually happened rather than
     whatever order the per-contact searches returned them in.
+
+    `contacts`: an explicit iterable of `Contact` rows to scan, e.g. just the
+    handful a CSV import created. Defaults to
+    `Contact.objects.for_user(user).filter(archived=False).exclude(email="")`
+    — every non-archived contact with an email — which is what the very
+    first post-connect backfill (and a full "Scan Now" rescan) both want.
+
+    `update_backfill_status`: whether this run should write
+    `backfill_status`/`backfill_completed_at`/`backfill_stats` on
+    `connection`. Defaults to True, which is exactly the original
+    first-connect-backfill behavior (`gmail_backfill`'s pending/failed
+    sweep). Callers running a narrower or repeatable scan — the
+    import-triggered scoped scan, or a user-triggered "Scan Now" rescan —
+    pass `False`, because `backfill_status` means specifically "has the
+    ORIGINAL post-connect backfill ever completed" and must stay sticky at
+    `done` regardless of how many other scans run afterward. Those callers
+    are responsible for recording their own run's outcome wherever it
+    belongs.
+
+    `residue_sink`: when given a list, every message this pass could NOT
+    confidently classify (`_classify_message` returned `None` — see
+    `capture.gmail_residue`'s module docstring for exactly what that
+    covers) is appended to it as `{"message": <raw message dict>,
+    "thread_id": str}`. Defaults to `None`, which collects nothing — this
+    is what keeps the free automatic first-connect backfill and Phase 1's
+    import-triggered scan (neither passes a sink) entirely AI-free; only
+    the "Scan Now" rescan command opts in, feeding the result to
+    `gmail_residue.run_residue_stage` afterward.
     """
     gmail = _gmail_client(connection)
     user = connection.user
     own_email = connection.gmail_address.lower()
     now = timezone.now()
 
-    contacts = list(
-        Contact.objects.for_user(user).filter(archived=False).exclude(email="")
-    )
+    if contacts is None:
+        contacts = Contact.objects.for_user(user).filter(archived=False).exclude(email="")
+    contacts = list(contacts)
+
     last_touch_by_contact = dict(
         Touch.objects.for_user(user)
         .values("contact_id")
@@ -661,13 +698,17 @@ def backfill_connection(connection: GmailConnection, *, dry_run: bool = False):
         finding = _classify_message(own_email, message)
         if finding is not None:
             findings.append(finding)
+        elif residue_sink is not None:
+            residue_sink.append(
+                {"message": message, "thread_id": message.get("threadId", "")}
+            )
 
     findings = _suppress_stale_bounces(findings)
     findings.sort(key=lambda f: f.get("occurred_at") or "")
 
     result = apply_findings(user, findings, dry_run=dry_run)
 
-    if not dry_run:
+    if not dry_run and update_backfill_status:
         connection.backfill_status = "done"
         connection.backfill_completed_at = timezone.now()
         connection.backfill_stats = result.as_stats()
@@ -676,3 +717,94 @@ def backfill_connection(connection: GmailConnection, *, dry_run: bool = False):
         )
 
     return result
+
+
+def backfill_new_contacts(user, contacts) -> "object | None":
+    """Best-effort, zero-AI enrichment scan for contacts a CSV import just
+    created (docs/build-plan.md §5's "Phase 1"). A student who imports
+    people they've already emailed should not see 180 identical cold rows
+    just because Coverage never checked Gmail — this runs the SAME
+    deterministic `backfill_connection` pass `gmail_backfill` uses, scoped
+    to only the handful of contacts this one import created, synchronously,
+    right after the import (a handful of per-contact searches is not the
+    multi-minute job a full-mailbox first-connect backfill is, so there is
+    no need to defer this to the cron the way that one has to).
+
+    Never raises — an import's own success/failure is independent of
+    whether this enrichment scan ran, same posture as `crm.ai_summary`.
+    Returns `None` whenever nothing happened (no contacts, Gmail Live not
+    configured, no active connection, or the scan itself errored) and the
+    `SyncResult` on an actual scan, mostly so tests can assert on it.
+
+    `update_backfill_status=False`: this is a narrow, incidental scan, not
+    the original first-connect backfill `GmailConnection.backfill_status`
+    tracks — see `backfill_connection`'s docstring on why that field must
+    stay untouched here.
+    """
+    contacts = list(contacts) if contacts else []
+    if not contacts:
+        return None
+    try:
+        if not is_configured():
+            return None
+        connection = GmailConnection.all_objects.filter(
+            user=user, status="active"
+        ).first()
+        if connection is None:
+            return None
+        return backfill_connection(
+            connection, contacts=contacts, update_backfill_status=False
+        )
+    except Exception:  # noqa: BLE001 — an import must never fail because enrichment did
+        return None
+
+
+# ---------------------------------------------------------------------------
+# "Scan Now" rescan (Settings > Gmail Live) — user-triggered, repeatable
+# ---------------------------------------------------------------------------
+
+def run_rescan(connection: GmailConnection, *, dry_run: bool = False) -> dict:
+    """The full "Scan Now" pipeline for one connection: the deterministic
+    `backfill_connection` pass over ALL of the user's contacts (repeatable,
+    never touching `backfill_status` — see that function's docstring),
+    followed by the capped Haiku residue stage (`capture.gmail_residue`)
+    over whatever the deterministic pass couldn't classify.
+
+    Two clearly separate stages composed here, not merged into one: the
+    first is free and unlimited; the second is metered, capped at
+    `gmail_residue.MAX_RESIDUE_THREADS`, and only runs when
+    `gmail_residue.is_configured()` (that module no-ops to zero-stats
+    otherwise). This composition point is what the `gmail_backfill`
+    command calls for a queued rescan — see that command's `--email` /
+    rescan-selection logic.
+
+    Returns one merged stats dict: the deterministic `SyncResult.as_stats()`
+    keys at the top level, plus a nested `"residue"` key with
+    `run_residue_stage`'s own stats. Callers store this whole dict as
+    `GmailConnection.rescan_stats`.
+    """
+    residue: list[dict] = []
+    result = backfill_connection(
+        connection,
+        update_backfill_status=False,
+        dry_run=dry_run,
+        residue_sink=residue,
+    )
+    stats = result.as_stats()
+
+    if dry_run:
+        # A dry run must not spend a single metered AI call either — report
+        # how much residue WOULD be handed to Phase 3, but never call it.
+        distinct_threads = len({e["thread_id"] for e in residue if e.get("thread_id")})
+        stats["residue"] = {
+            "residue_threads_seen": distinct_threads,
+            "residue_threads_processed": 0,
+            "genuine_reply": 0,
+            "auto_reply": 0,
+            "ambiguous": 0,
+            "touches_logged": 0,
+        }
+        return stats
+
+    stats["residue"] = gmail_residue.run_residue_stage(connection, residue)
+    return stats
