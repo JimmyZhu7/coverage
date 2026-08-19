@@ -450,25 +450,7 @@
             <li>Multi-cycle archive of past seasons</li>
           </ul>
           <div class="plan-cta">
-            {% comment %}
-            Intent capture, not a checkout: Pro has no button today, so a
-            visitor who wants it has nowhere to go. This is that "nowhere" —
-            one email, deduped, read by the founder until Pro has a real
-            checkout. See billing/models.py::ProWaitlist and
-            billing/views.py::waitlist_join.
-            {% endcomment %}
-            <form method="post" action="{% url 'billing:waitlist_join' %}" class="plan-waitlist">
-              {% csrf_token %}
-              {% if user.is_authenticated %}
-                <button type="submit" class="btn btn-primary">Notify Me When Pro Opens</button>
-                <p class="plan-note">We'll reach you at {{ user.email }}.</p>
-              {% else %}
-                <input type="email" name="email" placeholder="you@school.edu"
-                       aria-label="Email for the Pro waitlist" required>
-                <button type="submit" class="btn btn-primary">Notify Me When Pro Opens</button>
-                <p class="plan-note">Announced in the app first.</p>
-              {% endif %}
-            </form>
+            {% include "core/_waitlist_form.html" with source="pricing_page" label="Notify Me When Pro Opens" aria="Email for the Pro waitlist" note="Announced in the app first." %}
           </div>
         </article>
       </div>
@@ -627,13 +609,15 @@
             founding clubs: the workspace is free for year one.</p>
           <div class="plan-cta">
             {% comment %}
-            Hook for the waitlist control. Another agent is adding a
-            "Notify me when Pro opens" mechanic to the Pro card in this same
-            file (tagged "pro") — reuse that same component here, tagged
-            "team", instead of building a second waitlist path. Left as a
-            plain anchor until that component lands.
+            The same waitlist component the Pro card uses, tagged "team" —
+            which is what the hook that used to sit here asked for. It was a
+            plain `href="#notify"` pointing at an anchor that exists nowhere
+            in this document: the Team economics rewrite's only CTA went
+            nowhere and left no trace of the club officer who clicked it.
+            The tag is what keeps the two lists apart; see `_WAITLIST_SOURCES`
+            in billing/views.py.
             {% endcomment %}
-            <a class="btn" href="#notify" aria-disabled="true">Run a club? Notify me</a>
+            {% include "core/_waitlist_form.html" with source="pricing_page_team" label="Run a club? Notify me" aria="Email for the Team waitlist" note="We'll tell you before we open club workspaces." %}
           </div>
         </article>
 

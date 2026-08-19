@@ -154,9 +154,11 @@ class ProWaitlist(PrivateModel):
         related_name="pro_waitlist_entries",
     )
     email = models.EmailField()
-    # Where the click came from — always "pricing_page" today. Kept as a
-    # field rather than assumed so a second surface (an in-app upsell
-    # banner, say) is a call site, not a schema change.
+    # WHICH INTENT the click expressed, and part of the row's identity — see
+    # the constraint below. "pricing_page" is the Pro card; "pricing_page_team"
+    # is the Team card's "Run a club? Notify me". The allowlist of accepted
+    # values lives in `billing/views.py::_WAITLIST_SOURCES` beside the
+    # confirmation sentence each one gets.
     source = models.CharField(max_length=32, default="pricing_page")
     created = models.DateTimeField(auto_now_add=True)
 
@@ -165,8 +167,19 @@ class ProWaitlist(PrivateModel):
         ordering = ["-created"]
         constraints = [
             # The dedupe half of "rate-limit/dedupe by email" — a second
-            # join with the same address is a no-op, not a second row.
-            models.UniqueConstraint(fields=["email"], name="uniq_pro_waitlist_email"),
+            # join with the same address FOR THE SAME INTENT is a no-op, not
+            # a second row.
+            #
+            # (email, source), not email alone. Wanting Pro and running a
+            # club are two different asks from one person, and the whole
+            # point of `source` is that the founder can read the Team list
+            # without the Pro list in it. Keyed on email alone, the second
+            # ask was a silent `get_or_create` no-op that left one row
+            # labelled with whichever intent happened to come first — the
+            # segmentation the field exists for, quietly discarded at the
+            # only moment it mattered.
+            models.UniqueConstraint(
+                fields=["email", "source"], name="uniq_pro_waitlist_email_source"),
         ]
 
     def __str__(self) -> str:

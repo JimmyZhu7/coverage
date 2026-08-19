@@ -1,6 +1,8 @@
 """billing/views.py::waitlist_join — the Pro card's "Notify me when Pro
-opens" control (templates/core/pricing.html). Pro is stamped "In the works"
-with no checkout button; this is where that intent actually goes.
+opens" control AND the Team card's "Run a club? Notify me"
+(templates/core/pricing.html, both rendering core/_waitlist_form.html). Both
+tiers are stamped "In the works" with no checkout button; this is where those
+intents actually go, kept apart by `source`.
 """
 
 from __future__ import annotations
@@ -92,6 +94,61 @@ class TestWaitlistJoinLoggedIn:
 
         entry = ProWaitlist.all_objects.get(email="alt@example.com")
         assert entry.user_id == student.id
+
+
+class TestWaitlistIntents:
+    """Team shipped with `<a href="#notify" aria-disabled="true">` pointing at
+    an anchor that exists nowhere on the page, and this view hard-coded
+    `source="pricing_page"`. Both halves had to move: a shared control, and a
+    key that can hold two intents from one person."""
+
+    def test_the_team_card_records_its_own_intent(self, client):
+        with patch("billing.views.record_event") as mock_record:
+            client.post(reverse("billing:waitlist_join"),
+                        {"email": "officer@example.com", "source": "pricing_page_team"})
+
+        entry = ProWaitlist.all_objects.get(email="officer@example.com")
+        assert entry.source == "pricing_page_team"
+        assert mock_record.call_args.kwargs["source"] == "pricing_page_team"
+
+    def test_one_person_can_want_pro_and_run_a_club(self, client):
+        """The reason the unique key is (email, source). Keyed on email alone
+        the second ask is a silent `get_or_create` no-op and the Team list
+        never learns this person exists."""
+        client.post(reverse("billing:waitlist_join"),
+                    {"email": "both@example.com", "source": "pricing_page"})
+        client.post(reverse("billing:waitlist_join"),
+                    {"email": "both@example.com", "source": "pricing_page_team"})
+
+        assert set(ProWaitlist.all_objects.filter(email="both@example.com")
+                   .values_list("source", flat=True)) == {"pricing_page", "pricing_page_team"}
+
+    def test_a_repeat_of_the_SAME_intent_is_still_deduped(self, client):
+        for _ in range(2):
+            client.post(reverse("billing:waitlist_join"),
+                        {"email": "twice@example.com", "source": "pricing_page_team"})
+        assert ProWaitlist.all_objects.filter(email="twice@example.com").count() == 1
+
+    def test_an_unknown_source_falls_back_to_pro_rather_than_being_stored(self, client):
+        """`source` is what the list is segmented on, so it is an allowlist,
+        not a pass-through — otherwise the first script to post arbitrary
+        strings makes the field mean nothing. The visitor still keeps their
+        place: a tampered hidden input is not their fault."""
+        client.post(reverse("billing:waitlist_join"),
+                    {"email": "tampered@example.com", "source": "'; DROP TABLE --"})
+
+        entry = ProWaitlist.all_objects.get(email="tampered@example.com")
+        assert entry.source == "pricing_page"
+
+
+class TestPricingPageControls:
+    def test_both_cards_post_to_the_waitlist_and_neither_is_a_dead_anchor(self, client):
+        body = client.get(reverse("core:pricing")).content.decode()
+        assert 'value="pricing_page"' in body
+        assert 'value="pricing_page_team"' in body
+        assert "Run a club? Notify me" in body
+        # The anchor the Team CTA used to point at never existed on this page.
+        assert 'href="#notify"' not in body
 
 
 class TestWaitlistJoinThrottle:

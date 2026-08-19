@@ -1,0 +1,39 @@
+{% comment %}
+Intent capture, not a checkout. Neither Pro nor Team has a button that takes
+money today, so a visitor who wants one has nowhere to go; this is that
+"nowhere" — one email, deduped per (email, intent), read by the founder in
+admin until there is a real checkout to notify people into. See
+billing/models.py::ProWaitlist and billing/views.py::waitlist_join.
+
+ONE component, two cards. The Pro card had this form and the Team card had
+`<a href="#notify" aria-disabled="true">` pointing at an anchor that does not
+exist anywhere on the page — a club officer who clicked it learned nothing
+and left no trace, on the one CTA the Team economics rewrite has. Rather than
+build a second waitlist path, both cards include this partial and pass the
+one thing that actually differs.
+
+Parameters:
+  source  the intent, written to ProWaitlist.source and segmented on later.
+          Must be a key of `_WAITLIST_SOURCES` in billing/views.py; anything
+          else falls back to Pro there rather than being rejected.
+  label   the button's words.
+  aria    the email input's accessible name — "Email" alone on a page with
+          two of these forms tells a screen-reader user nothing about which
+          list they are joining.
+  note    the line under the button for a signed-out visitor. Signed-in
+          visitors get their own address echoed back instead, which is the
+          more useful sentence.
+{% endcomment %}
+<form method="post" action="{% url 'billing:waitlist_join' %}" class="plan-waitlist">
+  {% csrf_token %}
+  <input type="hidden" name="source" value="{{ source }}">
+  {% if user.is_authenticated %}
+    <button type="submit" class="btn btn-primary">{{ label }}</button>
+    <p class="plan-note">We'll reach you at {{ user.email }}.</p>
+  {% else %}
+    <input type="email" name="email" placeholder="you@school.edu"
+           aria-label="{{ aria }}" required>
+    <button type="submit" class="btn btn-primary">{{ label }}</button>
+    <p class="plan-note">{{ note }}</p>
+  {% endif %}
+</form>

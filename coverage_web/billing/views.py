@@ -100,18 +100,48 @@ def _waitlist_throttled(request) -> bool:
     return False
 
 
+# The intents this endpoint will record, and the words it says back for each.
+#
+# An ALLOWLIST, not a pass-through of whatever the form posted: `source` is
+# what the founder segments the list on, and a field a stranger can write
+# arbitrary strings into is a field that stops meaning anything the first
+# time someone points a script at it. An unrecognised value falls back to
+# `_WAITLIST_DEFAULT` rather than being rejected — a visitor who really did
+# want to be told about Pro should not lose their place over a tampered
+# hidden input.
+#
+# `confirm` is per-intent because "we'll let you know when Pro opens" is the
+# wrong sentence to say to a club officer who asked about Team.
+_WAITLIST_SOURCES = {
+    "pricing_page": "You're on the list. We'll let you know when Pro opens.",
+    "pricing_page_team": (
+        "You're on the list. We'll let you know when Team workspaces open."
+    ),
+}
+_WAITLIST_DEFAULT = "pricing_page"
+
+
 @require_POST
 def waitlist_join(request):
-    """"Notify me when Pro opens" (templates/core/pricing.html's Pro card).
-    Open to signed-out visitors — the email field IS the account for
-    someone who hasn't signed up yet — so this is deliberately not
-    `@login_required`, unlike every other billing view in this module.
+    """"Notify me when Pro opens", and the Team card's "Run a club? Notify
+    me" (both in templates/core/pricing.html, both rendering
+    core/_waitlist_form.html). Open to signed-out visitors — the email field
+    IS the account for someone who hasn't signed up yet — so this is
+    deliberately not `@login_required`, unlike every other billing view in
+    this module.
 
-    Writes one `ProWaitlist` row (deduped by email — `get_or_create` turns a
-    repeat join into a no-op read, not an IntegrityError) and a
+    Writes one `ProWaitlist` row per (email, INTENT) and a
     `pro_waitlist_joined` product event, then bounces back to Pricing with a
     plain confirmation. No email is sent from here — see ProWaitlist's own
     docstring on why.
+
+    The intent is part of the key, not just a label on the row. Team shipped
+    with a dead `href="#notify"` and this view hard-coded
+    `source="pricing_page"`, so wiring the two together on a
+    unique-on-email-alone table would have made the SECOND click a silent
+    no-op: a student who asked about Pro in March and then, running the club
+    in September, asked about Team would leave exactly one row saying "Pro".
+    Merging the two intents is the one thing segmenting the list is for.
     """
     pricing_url = reverse("core:pricing")
 
@@ -130,13 +160,17 @@ def waitlist_join(request):
         messages.error(request, "Enter a valid email to join the waitlist.")
         return redirect(pricing_url)
 
+    source = (request.POST.get("source") or "").strip()
+    if source not in _WAITLIST_SOURCES:
+        source = _WAITLIST_DEFAULT
+
     user = request.user if request.user.is_authenticated else None
     _, created = ProWaitlist.all_objects.get_or_create(
-        email=email, defaults={"user": user, "source": "pricing_page"},
+        email=email, source=source, defaults={"user": user},
     )
     if created:
-        record_event("pro_waitlist_joined", user=user, source="pricing_page")
-        messages.success(request, "You're on the list. We'll let you know when Pro opens.")
+        record_event("pro_waitlist_joined", user=user, source=source)
+        messages.success(request, _WAITLIST_SOURCES[source])
     else:
         messages.info(request, "You're already on the list.")
     return redirect(pricing_url)
