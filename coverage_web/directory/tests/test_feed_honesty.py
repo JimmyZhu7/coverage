@@ -662,7 +662,7 @@ def test_save_your_year_saves_exactly_the_year_ok_roles(client, student):
     body = client.get("/opportunities/").content.decode()
     assert "1 open role names your class year" in body
 
-    resp = client.post("/opportunities/track-eligible/")
+    resp = client.post("/opportunities/track-eligible/", {"confirmed": "1"})
     assert resp.status_code == 302
     tracked = set(UserOpportunity.all_objects.filter(user=student)
                   .values_list("opportunity_id", flat=True))
@@ -678,7 +678,7 @@ def test_not_for_me_outranks_your_year(client, student):
     UserOpportunity.all_objects.create(user=student, opportunity=dismissed,
                                        dismissed=True)
     client.force_login(student)
-    client.post("/opportunities/track-eligible/")
+    client.post("/opportunities/track-eligible/", {"confirmed": "1"})
     uo = UserOpportunity.all_objects.get(user=student, opportunity=dismissed)
     assert uo.dismissed is True, "the user said no; a bulk save must not unsay it"
 
@@ -688,7 +688,7 @@ def test_the_offer_disappears_once_everything_is_saved(client, student):
     firm = Firm.objects.create(slug="citi", name="Citi")
     _grad_role(firm, ["2029"], "2029", title="Only Intern")
     client.force_login(student)
-    client.post("/opportunities/track-eligible/")
+    client.post("/opportunities/track-eligible/", {"confirmed": "1"})
     body = client.get("/opportunities/").content.decode()
     assert "names your class year" not in body, "a satisfied offer stops offering"
 
