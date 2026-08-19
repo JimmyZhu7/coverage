@@ -217,7 +217,11 @@ def test_sponsorship_reads_the_regional_dict_not_a_bare_bool():
     firm = _firm(sponsors={"us": True, "hk": "unknown"})
     us_role = _opp(firm, "https://x/1", region="us")
     hk_role = _opp(firm, "https://x/2", region="hk")
-    assert _sponsorship_tag(us_role) == {"label": "Sponsorship", "css": "spon-known"}
+    # A firm-sourced answer gets its own "· firm policy" label — see
+    # directory.sponsorship.effective_sponsorship — never the posting-stated
+    # wording, so the pill cannot be mistaken for a claim the posting made.
+    assert _sponsorship_tag(us_role) == {
+        "label": "Sponsors · firm policy", "css": "spon-known"}
     assert _sponsorship_tag(hk_role) is None  # "unknown" for hk -> no pill
 
 
@@ -243,6 +247,14 @@ def test_the_posting_s_own_field_still_wins_over_the_firm_fallback():
     firm = _firm(sponsors={"us": False})
     role = _opp(firm, "https://x/1", region="us", sponsorship="yes")
     assert _sponsorship_tag(role) == {"label": "Sponsorship", "css": "spon-known"}
+
+
+@pytest.mark.django_db
+def test_firm_sourced_no_gets_its_own_pill_label():
+    firm = _firm(sponsors={"us": False})
+    role = _opp(firm, "https://x/1", region="us")
+    assert _sponsorship_tag(role) == {
+        "label": "No sponsorship · firm policy", "css": "spon-none"}
 
 
 # ---------------------------------------------------------------------------

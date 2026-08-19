@@ -487,7 +487,7 @@ this file is not redundant with it — see the note there.
      ink as any other count, only quieter. */
   .ob-pv-count.is-zero { color: var(--ink-3); font-weight: var(--w-reg); }
 
-  /* The sponsorship breakdown. Three bars at their real widths. */
+  /* The sponsorship breakdown. Four bars at their real widths. */
   .ob-pv-bars { list-style: none; margin: 0 0 var(--s3); padding: 0;
     display: grid; gap: var(--s2); }
   .ob-pv-bars li {
@@ -505,11 +505,16 @@ this file is not redundant with it — see the note there.
     background: var(--line); overflow: hidden; }
   .ob-pv-bar-fill { display: block; height: 100%; width: var(--w);
     border-radius: 999px; transition: width var(--t-med); }
-  /* Three states, three token colours — the same vocabulary the feed's own
-     sponsorship facet uses. Never colour alone: each bar is labelled. */
-  .ob-pv-bar-fill.is-yes { background: var(--ok); }
-  .ob-pv-bar-fill.is-no  { background: var(--danger); }
-  .ob-pv-bar-fill.is-unk { background: var(--line-strong); }
+  /* Four states, four token colours — the same vocabulary the feed's own
+     sponsorship facet and pill use (see directory/sponsorship.py). "Firm
+     policy known" gets the accent, not ok/danger: it is real information
+     but not the posting's own word, and reusing yes/no's colours would
+     read as more certain than it is. Never colour alone: each bar is
+     labelled. */
+  .ob-pv-bar-fill.is-yes  { background: var(--ok); }
+  .ob-pv-bar-fill.is-no   { background: var(--danger); }
+  .ob-pv-bar-fill.is-firm { background: var(--accent); }
+  .ob-pv-bar-fill.is-unk  { background: var(--line-strong); }
 
   /* The Network board, at the size it actually is. Empty columns, drawn
      empty. */

@@ -242,31 +242,57 @@ _SILENT = ("", "unknown")
 def work_preview(user, answers) -> dict:
     """How many of the student's matching roles answer the visa question.
 
-    One GROUP BY over (region, sponsorship) carries everything this panel
-    says: the three totals AND the per-region breakdown the "ruled out" line
-    needs. At most 9 regions x 4 states, so the result set is a couple of
-    dozen tuples regardless of how many roles are in scope.
+    Four bars, not three, per docs/founder-decisions-2026-08-20.md,
+    Decision 3: a posting saying yes, a posting saying no, a firm's stated
+    per-region policy where the posting itself said nothing, and genuine
+    silence. `directory.sponsorship.effective_sponsorship` is the one place
+    that precedence (posting beats firm policy beats unknown) is decided —
+    the feed's sponsorship filter and `_eligibility`'s visa verdict read the
+    same rule, so this panel can't quote a number those surfaces disagree
+    with.
+
+    One GROUP BY over (region, sponsorship, firm) carries everything this
+    panel says: the four totals AND the per-region breakdown the "ruled out"
+    line needs. Firm joins into the grouping only to key the small firm-policy
+    map built once per call — still a couple of dozen-to-low-hundreds tuples
+    for any profile-narrowed set, not a per-row query.
 
     The framing is deliberately unflattering. 13 roles in the whole live set
-    say they sponsor. Rounding that up into a reassuring sentence would be
-    the lie this panel exists not to tell, so the "haven't said" bar is drawn
+    SAY they sponsor. Rounding that up into a reassuring sentence would be
+    the lie this panel exists not to tell, so the "not stated" bar is drawn
     at its real, dominant width and captioned as unanswered rather than as
-    open.
+    open. A firm's policy is real information and earns its own bar — but it
+    is not a posting's own word, so it never merges into "yes"/"no" here.
     """
+    from directory.sponsorship import firm_policy_map
+
     qs = _matching(answers)
     grid = list(
-        qs.values("region", "sponsorship").annotate(n=Count("id"))
+        qs.values("region", "sponsorship", "firm_id").annotate(n=Count("id"))
     )
+    policy = firm_policy_map()
 
     yes = sum(g["n"] for g in grid if g["sponsorship"] == "yes")
     no = sum(g["n"] for g in grid if g["sponsorship"] == "no")
-    silent = sum(g["n"] for g in grid if g["sponsorship"] in _SILENT)
-    total = yes + no + silent
+    firm_known = sum(
+        g["n"] for g in grid
+        if g["sponsorship"] in _SILENT
+        and policy.get((g["firm_id"], g["region"])) in ("yes", "no")
+    )
+    silent = sum(
+        g["n"] for g in grid
+        if g["sponsorship"] in _SILENT
+        and policy.get((g["firm_id"], g["region"])) not in ("yes", "no")
+    )
+    total = yes + no + firm_known + silent
 
     # The regions where this student has said, in the matrix they are looking
-    # at, that they need a visa. That plus a posting saying "no" is
+    # at, that they need a visa. That plus a POSTING saying "no" is
     # `_eligibility`'s `visa_out` — the one blocking verdict this step can
-    # produce, and the reason the step exists.
+    # produce. A firm-level "no" is deliberately excluded from this count:
+    # `_eligibility` treats it as a non-blocking warning, never a wall, and
+    # this panel's "ruled out" line must mean the same thing `_eligibility`
+    # means by it.
     needs = [code for code, value in answers["work_auth"].items()
              if value == "sponsorship"]
     blocked = sum(g["n"] for g in grid
@@ -276,14 +302,16 @@ def work_preview(user, answers) -> dict:
         "count": total,
         "yes": yes,
         "no": no,
+        "firm_known": firm_known,
         "silent": silent,
         # Widths as integer percents so the template does no arithmetic.
         "yes_pct": round(100 * yes / total) if total else 0,
         "no_pct": round(100 * no / total) if total else 0,
+        "firm_known_pct": round(100 * firm_known / total) if total else 0,
         "silent_pct": round(100 * silent / total) if total else 0,
         "blocked": blocked,
         "needs_labels": _phrase([REGION_LABELS[c] for c in needs if c in REGION_LABELS]),
-        "answered": yes + no,
+        "answered": yes + no + firm_known,
     }
 
 

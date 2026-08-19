@@ -67,23 +67,33 @@ the branch that runs is an empty state that says nothing matched.
   </p>
 
   {% if preview.count %}
-    {% comment %}Three real bars, drawn at their real widths. The "haven't
-    said" bar is the wide one on live data (2,304 of 2,435) and it stays
-    wide — this panel's job on this step is to show the student how thin the
-    answered set actually is, not to flatter it.{% endcomment %}
+    {% comment %}Four real bars, drawn at their real widths. "Not stated" is
+    the wide one on live data and it stays wide — this panel's job on this
+    step is to show the student how thin the answered set actually is, not
+    to flatter it. "Firm policy known" is its own bar rather than folded into
+    yes/no: it's real information (directory.sponsorship.effective_sponsorship
+    falls back to it the same way the feed filter and _eligibility do), but
+    it is the firm's general policy, not this posting's own word, and
+    collapsing the two would claim a certainty the posting never stated.
+    {% endcomment %}
     <ul class="ob-pv-bars">
       <li style="--i: 0;">
-        <span class="ob-pv-bar-lab">Say they sponsor</span>
+        <span class="ob-pv-bar-lab">Posting says yes</span>
         <span class="ob-pv-bar"><span class="ob-pv-bar-fill is-yes" style="--w: {{ preview.yes_pct }}%;"></span></span>
         <span class="ob-pv-bar-n">{{ preview.yes }}</span>
       </li>
       <li style="--i: 1;">
-        <span class="ob-pv-bar-lab">Say they don't</span>
+        <span class="ob-pv-bar-lab">Posting says no</span>
         <span class="ob-pv-bar"><span class="ob-pv-bar-fill is-no" style="--w: {{ preview.no_pct }}%;"></span></span>
         <span class="ob-pv-bar-n">{{ preview.no }}</span>
       </li>
       <li style="--i: 2;">
-        <span class="ob-pv-bar-lab">Haven't said</span>
+        <span class="ob-pv-bar-lab">Firm policy known</span>
+        <span class="ob-pv-bar"><span class="ob-pv-bar-fill is-firm" style="--w: {{ preview.firm_known_pct }}%;"></span></span>
+        <span class="ob-pv-bar-n">{{ preview.firm_known }}</span>
+      </li>
+      <li style="--i: 3;">
+        <span class="ob-pv-bar-lab">Not stated</span>
         <span class="ob-pv-bar"><span class="ob-pv-bar-fill is-unk" style="--w: {{ preview.silent_pct }}%;"></span></span>
         <span class="ob-pv-bar-n">{{ preview.silent }}</span>
       </li>
@@ -108,8 +118,9 @@ the branch that runs is an empty state that says nothing matched.
     <p class="ob-pv-empty">No live roles match your profile yet, so there is nothing to answer for.</p>
   {% endif %}
 
-  <p class="ob-pv-foot">Counted over the roles matching your profile. "Haven't
-    said" means the posting never mentioned sponsorship — never that it won't.</p>
+  <p class="ob-pv-foot">Most postings never say. Coverage shows you the ones
+    that do, tells you when it is the firm's policy rather than the posting,
+    and scores the rest as neutral, never as a guess.</p>
 
 {% elif preview.kind == "firms" %}
   <p class="ob-pv-metric">

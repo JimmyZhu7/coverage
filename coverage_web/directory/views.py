@@ -56,6 +56,7 @@ from directory.dupes import fold_duplicates
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
 from directory.recommend import Candidate, Profile, parse_target_cycle, recommend
+from directory.sponsorship import effective_sponsorship, firm_policy_map, firm_policy_q
 from directory.timeline import EVENT_LABELS
 
 # Firm category labels — the insider taxonomy students actually sort firms
@@ -234,28 +235,25 @@ def _sponsorship_tag(opp) -> dict | None:
     fall back to the firm-level fact from the seed. Still unknown -> no pill
     rather than a hedge.
 
-    `Firm.sponsors` is a per-REGION JSON dict (`{"us": True, "hk": "unknown"}`
-    — see `seed_directory._sponsors_blob`), never a bare bool, so it must be
-    looked up by `opp.region`, not tested as a truthy/falsy scalar. The
-    scalar test was unreachable on every one of the ~4,000 open rows even
-    though 58 firms hold real per-region data.
+    Reads `directory.sponsorship.effective_sponsorship`, the one place this
+    precedence (posting beats firm policy beats unknown) is decided — the
+    feed's sponsorship filter, `_eligibility` and the onboarding preview's
+    work-auth bars all read the same function, so this pill can no longer say
+    something the other three surfaces disagree with.
 
-    A blank `opp.region` (~1,223 open rows — mostly unparsed board
-    locations) has no region to key the lookup on, so this returns None
-    rather than falling back to *some* region of the firm's: a firm that
-    sponsors in HK but not the US must never stamp "Sponsorship" on a role
-    whose own market is unknown."""
-    s = (opp.sponsorship or "unknown").lower()
-    if s == "yes":
+    A firm-sourced answer gets its OWN label ("· firm policy") rather than
+    reusing the posting-stated one: a firm's general policy is a weaker claim
+    about this specific role than the posting's own words, and the pill
+    saying so is what lets `_eligibility` treat a firm-sourced "no" as a
+    warning rather than a wall."""
+    value, source = effective_sponsorship(opp)
+    if value == "yes":
+        if source == "firm":
+            return {"label": "Sponsors · firm policy", "css": "spon-known"}
         return {"label": "Sponsorship", "css": "spon-known"}
-    if s == "no":
-        return {"label": "No Sponsorship", "css": "spon-none"}
-    if not opp.region:
-        return None
-    firm_fact = (opp.firm.sponsors or {}).get(opp.region)
-    if firm_fact is True or firm_fact == "true":
-        return {"label": "Sponsorship", "css": "spon-known"}
-    if firm_fact is False or firm_fact == "false":
+    if value == "no":
+        if source == "firm":
+            return {"label": "No sponsorship · firm policy", "css": "spon-none"}
         return {"label": "No Sponsorship", "css": "spon-none"}
     return None
 
@@ -955,20 +953,39 @@ _SPONSOR_SILENT = ("", "unknown")
 
 
 def _apply_sponsorship_filter(qs, value: str):
+    """"yes"/"no"/"unknown" against the EFFECTIVE answer — the posting's own
+    field, or (only when the posting is silent) the firm's per-region policy
+    from `directory.sponsorship`. A role showing a "No Sponsorship · firm
+    policy" pill used to still pass a "Sponsors visas" filter, because this
+    function read `sponsorship` alone while the pill already fell back to
+    `Firm.sponsors`; see `directory.sponsorship.effective_sponsorship` for
+    the one precedence rule both now share."""
+    if value not in ("yes", "no", "unknown"):
+        return qs
+    policy = firm_policy_map()
+    silent = Q(sponsorship__in=_SPONSOR_SILENT)
     if value == "unknown":
-        return qs.filter(sponsorship__in=_SPONSOR_SILENT)
-    if value in ("yes", "no"):
-        return qs.filter(sponsorship=value)
-    return qs
+        firm_answered = firm_policy_q("yes", policy) | firm_policy_q("no", policy)
+        return qs.filter(silent).exclude(firm_answered)
+    return qs.filter(Q(sponsorship=value) | (silent & firm_policy_q(value, policy)))
 
 
 def _sponsorship_facet(qs, current: str) -> list[dict]:
-    """Options with live counts, same contract as the other counted facets."""
-    counts = Counter(qs.values_list("sponsorship", flat=True))
-    silent = sum(counts.get(k, 0) for k in _SPONSOR_SILENT)
-    total = sum(counts.values())
-    per = {"": total, "yes": counts.get("yes", 0),
-           "no": counts.get("no", 0), "unknown": silent}
+    """Options with live counts, same contract as the other counted facets.
+
+    Counted the same way `_apply_sponsorship_filter` filters: a silent
+    posting whose firm has a per-region policy counts under "yes"/"no", not
+    "unknown". One query (`values_list`) plus the same small firm-policy map
+    the filter builds — cheap regardless of how many rows are in `qs`."""
+    policy = firm_policy_map()
+    per = {"": 0, "yes": 0, "no": 0, "unknown": 0}
+    for sponsorship, firm_id, region in qs.values_list("sponsorship", "firm_id", "region"):
+        per[""] += 1
+        stated = (sponsorship or "unknown").lower()
+        if stated in ("yes", "no"):
+            per[stated] += 1
+            continue
+        per[policy.get((firm_id, region), "unknown")] += 1
     return [{"value": v, "label": label, "count": per.get(v, 0),
              "selected": v == current}
             for v, label in SPONSORSHIP_CHOICES]
@@ -1278,16 +1295,34 @@ def _eligibility(o, profile):
     """
     if not profile:
         return None
-    # Visa first: it is the harder wall. Only when the posting NAMES a
-    # market, the user has answered for that market, the answer is "needs
-    # sponsorship", and the posting says no.
+    # Visa first: it is the harder wall. Only when the role NAMES a market
+    # and the user has answered for that market as "needs sponsorship" does
+    # the sponsorship answer matter at all — `effective_sponsorship` (see
+    # directory/sponsorship.py) is what decides that answer, reading the
+    # posting first and the firm's per-region policy only when the posting
+    # is silent, same precedence the pill and the feed filter use.
+    #
+    # A posting's own "no" is a hard wall (`blocking: True`) because it is a
+    # statement about THIS role. A firm-sourced "no" is softened to a
+    # non-blocking warning — a firm's general policy is a weaker claim about
+    # one specific role than the posting's own words, and the product's rule
+    # is never to block a pick on a guess (docs/founder-decisions-2026-08-20
+    # .md, Decision 3).
     region = (o.region or "").lower()
-    if (region and o.sponsorship == "no"
-            and profile["work_auth"].get(region) == "sponsorship"):
-        return {"kind": "visa_out", "blocking": True,
-                "label": "Won't sponsor you here",
-                "why": ("This posting says it cannot sponsor a visa, and your "
-                        "Settings say you need sponsorship in this market")}
+    if region and profile["work_auth"].get(region) == "sponsorship":
+        value, source = effective_sponsorship(o)
+        if value == "no" and source == "posting":
+            return {"kind": "visa_out", "blocking": True,
+                    "label": "Won't sponsor you here",
+                    "why": ("This posting says it cannot sponsor a visa, and your "
+                            "Settings say you need sponsorship in this market")}
+        if value == "no" and source == "firm":
+            return {"kind": "visa_firm_no", "blocking": False,
+                    "label": "Firm policy: may not sponsor here",
+                    "why": ("The posting itself does not say, but this firm's "
+                            "stated policy is not to sponsor visas in this "
+                            "market, and your Settings say you need "
+                            "sponsorship here.")}
     cy = profile["class_year"]
     # The TITLE's own explicit statement ("Class of 2027") — `Opportunity.
     # class_year`, extractors.extract_class_year. This is the rarest and most

@@ -189,14 +189,40 @@ def test_work_step_counts_the_sponsorship_answers_honestly(client, user, world):
     client.force_login(user)
 
     body = _get(client, "work_auth", live="1", work_auth_us="sponsorship").content.decode()
-    # 3 us/ib roles: one yes, one no, one silent.
+    # 3 us/ib roles: one yes, one no, one silent. Neither firm in the fixture
+    # carries a `sponsors` policy, so the new "firm policy known" bar is 0.
     assert _num(body) == 2  # "2 of 3 answer the visa question"
     assert "of 3 answer the visa question" in body
     nums = [int(n) for n in re.findall(r'ob-pv-bar-n">(\d+)<', body)]
-    assert nums == [1, 1, 1]  # yes / no / silent
+    assert nums == [1, 1, 0, 1]  # posting-yes / posting-no / firm-known / not-stated
     # The one blocking verdict: a us role saying "no" while the student says
     # they need sponsorship in the us.
     assert "<strong>1</strong> of these are ruled out" in body
+
+
+def test_work_step_counts_a_firm_policy_answer_in_its_own_bar(db):
+    """docs/founder-decisions-2026-08-20.md, Decision 3: a firm's per-region
+    policy is real information, distinct from a silent posting AND from a
+    posting's own stated answer — it gets a fourth bar, not folded into
+    either."""
+    from accounts.onboarding_preview import work_preview
+
+    firm = Firm.objects.create(slug="db2", name="Deutsche Bank Two",
+                               regions=["us"], tracks=["ib"],
+                               sponsors={"us": False})
+    Opportunity.objects.create(
+        firm=firm, title="Silent Posting, Firm Says No", bucket="internship",
+        status="open", region="us", sponsorship="unknown",
+        url="https://x.test/db2/1")
+
+    answers = {"regions": ["us"], "tracks": [], "class_year": None,
+               "work_auth": {}, "firm_ids": [], "live": True}
+    preview = work_preview(None, answers)
+    assert preview["yes"] == 0
+    assert preview["no"] == 0
+    assert preview["firm_known"] == 1
+    assert preview["silent"] == 0
+    assert preview["answered"] == 1  # firm policy counts as answered
 
 
 def test_work_step_reads_the_saved_profile_not_an_empty_one(client, user, world):
@@ -330,7 +356,13 @@ def test_an_unknown_step_falls_back_instead_of_erroring(client, user, world):
     # pipeline (or an N+1 over the picked firms) on a control that re-runs
     # every time a chip is toggled.
     ("profile", 5),
-    ("work_auth", 3),
+    # work_auth's budget is 4, not 3: `firm_policy_map()` (see
+    # directory/sponsorship.py) adds one small, bounded scan of firms
+    # carrying policy data (58 on live data) so the panel can answer with
+    # the SAME firm-fallback rule the feed filter and `_eligibility` use —
+    # a second query, not an N+1, so still one flat cost regardless of how
+    # many roles are in scope.
+    ("work_auth", 4),
     ("firms", 3),
     ("import", 4),
 ])
