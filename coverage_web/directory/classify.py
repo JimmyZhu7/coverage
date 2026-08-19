@@ -1031,12 +1031,53 @@ _SPONSOR_NO = (
     "without sponsorship", "without the need for sponsorship",
     "without the need for visa sponsorship",
     "not eligible for sponsorship",
+    # Added from a live-data sweep of the 946 not-stated rows whose text
+    # mentions sponsor/visa/work authorisation (see
+    # docs/founder-decisions-2026-08-20.md, Decision 3): declarative
+    # employer statements the phrase lists above didn't catch because the
+    # exact wording differs from the handful of set phrases already
+    # covered. Each is a literal quote from a real posting, not a
+    # generalised pattern, to keep the same "wrong is worse than unknown"
+    # discipline as the rest of this list.
+    "not offering sponsorship", "not offering visa sponsorship",
+    "sponsorship not offered",
+    "will not engage in immigration sponsorship",
+    "without the need for current or future sponsorship",
+    "without the need for employer sponsorship",
+    "will not require sponsorship",
+    "sponsorship for work authorization not required",
+    "do not offer any type of employment-based immigration sponsorship",
+    "unable to consider candidates that will require visa sponsorship",
+    "unable to consider candidates who will require visa sponsorship",
 )
 _SPONSOR_YES = (
     "visa sponsorship available", "sponsorship is available",
     "will sponsor", "provides visa sponsorship", "offers visa sponsorship",
     "provide visa sponsorship", "offer visa sponsorship",
     "h-1b sponsorship", "h1b sponsorship",
+    # Same live-data sweep as _SPONSOR_NO above.
+    "sponsorship where necessary", "supportive of immigration sponsorship",
+    "supportive of visa sponsorship", "supportive of us immigration sponsorship",
+)
+
+# The Workday structured field ("Available for Work Visa Sponsorship? Yes")
+# and its label variants, read as a labelled answer rather than free prose.
+# 636 open PwC rows carry this exact field (487 No / 46 Yes / 103 blank) and
+# it was never read — classify.extract_sponsorship only ever looked at
+# prose. Requiring the label to be followed immediately (allowing only
+# whitespace) by ":" or "?" and then the bare word "yes"/"no" is what keeps
+# this safe: a blank field ("...Sponsorship? Government Clearance...") or an
+# unrelated sentence ("...sponsorship. No refunds...", a period, not ":"/"?")
+# never matches, so this can't manufacture an answer the field didn't give.
+# Checked against all 1,513 open PwC rows: 46 Yes / 488 No / 103 blank (no
+# match) / 876 rows with no such field at all — matching the live counts in
+# docs/founder-decisions-2026-08-20.md exactly.
+_SPONSOR_STRUCTURED_FIELD = re.compile(
+    r"(?:available for work visa sponsorship|work visa sponsorship|"
+    r"visa sponsorship available|visa sponsorship|will sponsor|"
+    r"sponsorship available|sponsorship)"
+    r"\s*[:?]\s*(yes|no)\b",
+    re.IGNORECASE,
 )
 
 # "now or in the future" is handled separately from the plain _SPONSOR_NO
@@ -1081,6 +1122,11 @@ def extract_sponsorship(text: str | None) -> str:
     t = (text or "").lower()
     if not t:
         return "unknown"
+    # Structured field first: it's a direct labelled answer, not prose to
+    # interpret, so it outranks the phrase lists below.
+    structured = _SPONSOR_STRUCTURED_FIELD.search(text or "")
+    if structured:
+        return "yes" if structured.group(1).lower() == "yes" else "no"
     if any(k in t for k in _SPONSOR_NO):
         return "no"
     if "now or in the future" in t and _future_phrase_is_statement(text or ""):

@@ -720,3 +720,61 @@ def test_clean_title_keeps_bare_cohort_years(title, expected):
 ])
 def test_extract_sponsorship_future_phrase_question_vs_statement(text, expected):
     assert extract_sponsorship(text) == expected
+
+
+# ---------------------------------------------------------------------------
+# extract_sponsorship — the Workday structured field and the additional
+# declarative phrasings from the Decision 3 live-data sweep
+# (docs/founder-decisions-2026-08-20.md). Fixtures are trimmed verbatim from
+# live scraped detail text (PwC id=23662/16135/18193, Vanguard id=22299,
+# HSBC id=23668, Invesco, BofA, Optiver, Belvedere) so the patterns are
+# proven against the real scraped shape, not an idealised one.
+@pytest.mark.parametrize("text, expected", [
+    # PwC's Workday structured field: label, "?", then the bare answer,
+    # immediately followed by the next field label with no punctuation.
+    ("Travel Requirements Not Specified Available for Work Visa "
+     "Sponsorship? No Government Clearance Required? No Job Posting End "
+     "Date", "no"),
+    ("Amount of Overnight Travel Up to 40% Available for Work Visa "
+     "Sponsorship? Yes Government Clearance Required? No Job Posting End "
+     "Date", "yes"),
+    # Blank field: the label fires but the very next token is another
+    # label, not "Yes"/"No" — must stay unknown, never guess.
+    ("Travel Requirements Available for Work Visa Sponsorship? Government "
+     "Clearance Required? Job Posting End Date", "unknown"),
+    # A differently-labelled structured field (Belvedere): colon instead of
+    # "?", no "Available for Work Visa" prefix.
+    ("Amount of Travel Required: None Sponsorship: Yes Belvedere Trading",
+     "yes"),
+    ("Amount of Travel Required: None Sponsorship: No Belvedere Trading",
+     "no"),
+    # A bare "Sponsorship:" label with no Yes/No token right after it must
+    # not manufacture an answer out of unrelated prose that happens to
+    # follow.
+    ("Educational Requirements Sponsorship: Bank of America is unable to "
+     "consider candidates who will require visa sponsorship now, or in "
+     "the future, for this specific role.", "no"),
+    # Declarative NO phrasings the original _SPONSOR_NO list missed.
+    ("Special Factors Vanguard is not offering visa sponsorship for this "
+     "position. About Vanguard", "no"),
+    ("Applicants must be legally authorized to work in the U.S. as HSBC "
+     "will not engage in immigration sponsorship for this position. About "
+     "the business area", "no"),
+    ("We are seeking candidates authorized to work in the U.S. on a "
+     "permanent basis. We do not offer any type of employment-based "
+     "immigration sponsorship for this program. Invesco will not provide",
+     "no"),
+    ("Please note: Bank of America is unable to consider candidates that "
+     "will require visa sponsorship now, or in the future, for this "
+     "specific role.", "no"),
+    ("You are a proficient user of MS Word, Access, Excel, and PowerPoint "
+     "You will not require sponsorship for U.S. Work Authorization at "
+     "any time", "no"),
+    # Declarative YES phrasings the original _SPONSOR_YES list missed.
+    ("Competitive relocation packages and visa sponsorship where "
+     "necessary for expats. Who you are", "yes"),
+    ("Optiver is supportive of US immigration sponsorship for this role. "
+     "Optiver has a strong track record", "yes"),
+])
+def test_extract_sponsorship_structured_field_and_new_phrasings(text, expected):
+    assert extract_sponsorship(text) == expected
