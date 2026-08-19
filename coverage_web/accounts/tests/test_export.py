@@ -184,6 +184,7 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
         "gmail_connection": "gmail_connection.csv",
         "push_subscriptions": "push_subscriptions.csv",
         "credit_ledger": "credit_ledger.csv",
+        "pro_waitlist": "pro_waitlist.csv",
     }
     for label, _model in services._DELETE_ORDER:
         assert label in covered, (
