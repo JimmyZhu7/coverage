@@ -648,10 +648,28 @@ def test_onboarding_step_counter_covers_every_step(client, logged_in):
 
 
 def test_onboarding_rail_labels_every_step_readably(client, logged_in):
+    """Every step is named in words on the rail, not just numbered.
+
+    The label markup moved from a bare `<span>` to `.ob-rail-lab` when the
+    rail became a filled track; the thing worth protecting was never the tag
+    shape, it is that a student can read where they are.
+    """
     resp = client.get(_step("work_auth"))
     body = resp.content.decode()
     for label in ("Profile", "Work", "Firms", "Import"):
-        assert f"<span>{label}</span>" in body
+        assert f'<span class="ob-rail-lab">{label}' in body
+
+
+def test_onboarding_rail_marks_current_and_completed_without_relying_on_the_dot(
+    client, logged_in
+):
+    """The dot is aria-hidden, so the rail's state has to survive without it:
+    the current step carries aria-current, and finished steps say "completed"
+    in words rather than leaving a bare glyph to be announced."""
+    body = client.get(_step("firms")).content.decode()
+    assert body.count('aria-current="step"') == 1
+    # profile and work_auth are behind us on step 3; firms and import are not.
+    assert body.count('<span class="ob-sr"> completed</span>') == 2
 
 
 def test_onboarding_still_finishes_at_import(client, logged_in):

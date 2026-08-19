@@ -1,18 +1,638 @@
 {% comment %}
-Accounts-only extras. All base styling (forms, buttons, msgs, steps, cards,
-capture address, summary tables) lives in static/css/coverage.css. This
-partial must never style body/nav/main — the shared shell owns those.
+The onboarding wizard's own stylesheet. Nothing here styles body/nav/main —
+the shared shell (static/css/coverage.css) owns those, and every colour, size,
+radius, weight and easing below is one of its tokens. No new colour and no new
+type step is invented in this file.
+
+Scoped under `.ob`, which only the wizard renders, so none of it can reach the
+settings page — which shares two of the wizard's partials
+(_profile_form.html, _work_auth_matrix.html) and must keep its own layout.
+
+Motion: one system, borrowed from the site's kinetic layer (coverage.css
+§15b/§15c) rather than invented here — the same `cubic-bezier(0.22, 1, 0.36,
+1)` spring, the same rise-in entrance shape, the same index-driven stagger as
+`.kin-reveal`. coverage.css §17 already collapses every animation to 0.01ms
+under `prefers-reduced-motion: reduce`; the explicit block at the bottom of
+this file is not redundant with it — see the note there.
 {% endcomment %}
 <style>
-  /* v3: step titles sit on the centerline like every other page head;
-     the forms below them stay left-aligned for scannability. */
-  .page--narrow > h1, .page--narrow section > h1 { text-align: center; }
-  .firm-list { max-height: 340px; overflow-y: auto; border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s2) var(--s3); background: var(--surface); }
-  .firm-list .firm-meta { color: var(--ink-3); font-size: var(--fs-xs); }
-  .checkgrid { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s5); }
-  .survey-row { border-top: 1px solid var(--line); padding: var(--s2) 0; }
-  .survey-row:first-of-type { border-top: 0; }
-  .survey-check { display: flex; gap: var(--s2); align-items: center;
-    font-weight: var(--w-reg); margin: var(--s2) 0; }
+  /* ===================================================================
+     1. Shell + the two-column grid
+
+     The wizard is no longer a 680px column. Left is the form — the job.
+     Right is the live preview — the reward, and the argument for filling
+     the form in. The ratio is deliberate: the form is the wider column,
+     because it is the thing being used, and the panel is sized to hold
+     four role rows without scrolling.
+
+     `.page` gives padding and centring; `.ob` only narrows it, so the
+     shell keeps owning the page frame.
+     =================================================================== */
+  .ob { max-width: 1080px; }
+
+  .ob-grid {
+    display: grid; grid-template-columns: minmax(0, 1.32fr) minmax(0, 1fr);
+    gap: var(--s6); align-items: start;
+  }
+  .ob-main { min-width: 0; }
+  /* Sticky, because the form is taller than the panel on every step and a
+     preview that scrolls away is a preview nobody sees while answering.
+
+     The offset has to clear `.site-header`, which is itself `position:
+     sticky; top: 0; z-index: 40` (coverage.css §3) — so anything that pins
+     higher than the masthead's own height pins UNDERNEATH it. An earlier cut
+     used a flat `calc(var(--s7) + var(--s2))` = 56px against a masthead that
+     measures 113px, and the panel's eyebrow and the first digit of its count
+     spent every scrolled moment behind the blurred header bar.
+
+     113px is not hardcoded here, because the masthead's height is a property
+     of the shell and it wraps: `.site-header-inner` is `flex-wrap: wrap` and
+     `.site-nav` carries `margin: 0 auto`, so the auth row drops to a second
+     line and the total is content-dependent. The script at the bottom of this
+     file measures it and republishes it as `--ob-mast`. The fallback in the
+     `var()` is the measured height at every width where this two-column
+     layout applies (821px and up, checked to 1920px) — so with JS off the
+     offset is still correct today, and with JS on it stays correct if the
+     shell's masthead ever changes.
+
+     No `max-height` / `overflow-y` cap here, which was tried and taken back
+     out. On a short window (1280x640) the panel is taller than the space
+     under the masthead, and capping it made the overflow reachable — inside
+     a second, nested scrollbar. Unnecessary: a sticky element stops sticking
+     at the bottom of its containing block, so once `.ob-grid` ends the panel
+     rides up with the page and its footer comes into view under ordinary
+     page scrolling. Measured at 640px tall: panel bottom lands at 502px, on
+     screen. Nothing was unreachable, so nothing needed a scrollbar. */
+  .ob-side { min-width: 0; position: sticky;
+    top: calc(var(--ob-mast, 113px) + var(--s3)); }
+
+  /* Screen-reader-only text. There is no site-wide utility for this — the
+     shell inlines the clip pattern at each use — so this is the wizard's
+     local one rather than a new global class introduced from a corner of
+     the app. */
+  .ob-sr {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+    white-space: nowrap; border: 0;
+  }
+
+  /* ===================================================================
+     2. The progress rail
+
+     A track with a filled bar, not four disconnected dots: the fill's
+     width IS the answer to "how much is left", so the wizard's shape is
+     legible before a word is read. Geometry comes from two custom
+     properties the template sets (`--ob-i` = 1-based step, `--ob-n` =
+     total), so the step count is nowhere in this file.
+
+     Deliberately STILL: no arrival sweep, no pulsing ring. An earlier pass
+     animated the bar from the previous step's position on every page load,
+     which was a good idea for a one-column wizard. Here it would fire in
+     the same half-second as the preview panel's rows landing, and the
+     panel's narrowing is the motion that carries this design's argument.
+     Two competing entrances is one too many; the rail states, the panel
+     moves.
+     =================================================================== */
+  .ob-rail { position: relative; margin: 0 0 var(--s6); max-width: 520px; }
+  .ob-rail-track, .ob-rail-fill {
+    position: absolute; top: 11px; height: 2px; border-radius: 999px;
+    left: calc(50% / var(--ob-n)); right: calc(50% / var(--ob-n));
+  }
+  .ob-rail-track { background: var(--line); }
+  .ob-rail-fill {
+    background: linear-gradient(90deg,
+      color-mix(in srgb, var(--accent) 55%, transparent), var(--accent));
+    transform-origin: left center;
+    /* Fraction of the inter-dot span this step sits at. Step 1 is 0 (a
+       point under the first dot); the last step is 1. */
+    transform: scaleX(calc((var(--ob-i) - 1) / (var(--ob-n) - 1)));
+  }
+
+  .ob-rail-steps { display: flex; list-style: none; margin: 0; padding: 0;
+    position: relative; }
+  .ob-rail-steps li { flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 7px; }
+
+  /* Opaque fill, not transparent: the dot sits ON the track and has to
+     mask it, or the hairline draws through the numeral. */
+  .ob-rail-dot {
+    position: relative; z-index: 1; flex: none;
+    width: 24px; height: 24px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-size: var(--fs-micro); line-height: 1;
+    background: var(--paper); border: 1.5px solid var(--line);
+    color: var(--ink-3);
+    transition: background-color var(--t-med), border-color var(--t-med),
+      color var(--t-med);
+  }
+  .ob-rail-lab {
+    font-family: var(--font-mono); font-size: var(--fs-nano);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--ink-3); text-align: center;
+    transition: color var(--t-med);
+  }
+  .ob-rail-steps li.is-done .ob-rail-dot {
+    background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+  }
+  .ob-rail-steps li.is-done .ob-rail-lab { color: var(--ink-2); }
+  .ob-rail-steps li.is-current .ob-rail-dot {
+    border-color: var(--accent); color: var(--accent-ink); font-weight: var(--w-bold);
+  }
+  .ob-rail-steps li.is-current .ob-rail-lab {
+    color: var(--accent-ink); font-weight: var(--w-med);
+  }
+
+  /* ===================================================================
+     3. Step head
+
+     Left-aligned, unlike the earlier centred treatment: the head belongs
+     to the FORM column now, not to the page, and a centred heading over a
+     left-aligned form in a half-width column reads as a caption that has
+     drifted off its section. The mono eyebrow keeps the position legible
+     in words as well as on the rail.
+     =================================================================== */
+  .ob-head { margin: 0 0 var(--s5);
+    animation: ob-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .ob-eyebrow {
+    font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--accent); margin: 0 0 var(--s2);
+  }
+  .ob-head h1 {
+    font: var(--w-black) clamp(24px, 3vw, 32px)/1.12 var(--font-display);
+    letter-spacing: -0.012em; margin: 0; color: var(--ink);
+  }
+  .ob-lede { color: var(--ink-2); font-size: var(--fs-m);
+    margin: var(--s3) 0 0; max-width: 52ch; }
+
+  @keyframes ob-rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* ===================================================================
+     4. Card + actions
+     =================================================================== */
+  .ob-card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); padding: var(--s5);
+    box-shadow: var(--shadow-1);
+  }
+  .ob-actions { margin-top: var(--s5); display: flex; gap: var(--s3);
+    align-items: center; flex-wrap: wrap; }
+  .ob-skip { color: var(--ink-2); font-size: var(--fs-s); }
+
+  /* ===================================================================
+     5. Step 1 — Profile
+
+     The step asks two kinds of question: who you are (photo, name, school,
+     year) and what you're recruiting for (cycles, regions, tracks). Same
+     card, but a hairline and a wider gap where the subject changes, so the
+     eye gets a seam instead of nine identical rows.
+
+     Done with a sibling selector rather than new wrappers on purpose:
+     _profile_form.html is shared with the settings page and is an htmx
+     swap target there. Adding divs to it to serve this layout would change
+     margin collapsing on a page this pass was not asked to touch. The seam
+     is anchored to `.grid-2` (school + class year), the last block of the
+     identity half.
+     =================================================================== */
+  .ob-step--profile .grid-2 {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4);
+  }
+  .ob-step--profile .grid-2 + label {
+    margin-top: var(--s5); padding-top: var(--s5);
+    border-top: 1px solid var(--line);
+  }
+  /* The photo block leads the step, so it gets a surface of its own rather
+     than floating as the one unbordered thing above a stack of bordered
+     inputs. Its dashed drop-state border still wins on drag. */
+  .ob-step--profile .avatar-field {
+    margin: 0 0 var(--s4); padding: var(--s4);
+    background: var(--paper); border-radius: var(--r-panel);
+    border-style: solid; border-color: var(--line);
+  }
+  .ob-step--profile .avatar-field.is-dropping {
+    border-style: dashed; border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  /* ===================================================================
+     6. Step 2 — Work authorization
+
+     The matrix widget itself is already the right answer for this question
+     (see _work_auth_matrix.html) and is not redesigned here. What it gains
+     in the wizard is arrival: the rows cascade top to bottom, which is
+     also the order you fill them.
+
+     Row delays are per-position and stop at the sixth — the region
+     vocabulary is six long today. The base rule's 370ms matches the last
+     enumerated row rather than sitting mid-cascade, so a seventh region
+     added later arrives WITH the tail of the stagger instead of landing
+     between rows four and five.
+
+     (`.wa-head` is the matrix's first child, so the first region row is
+     `:nth-child(2)` — the offset is deliberate, not off-by-one.)
+     =================================================================== */
+  .ob-step--work .wa-row {
+    animation: ob-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 370ms;
+  }
+  .ob-step--work .wa-row:nth-child(2) { animation-delay: 220ms; }
+  .ob-step--work .wa-row:nth-child(3) { animation-delay: 250ms; }
+  .ob-step--work .wa-row:nth-child(4) { animation-delay: 280ms; }
+  .ob-step--work .wa-row:nth-child(5) { animation-delay: 310ms; }
+  .ob-step--work .wa-row:nth-child(6) { animation-delay: 340ms; }
+  .ob-step--work .wa-row:nth-child(7) { animation-delay: 370ms; }
+
+  /* ===================================================================
+     7. Step 3 — Firm picker
+
+     Was a 340px scroll box of one-per-line checkboxes: a list you read
+     rather than a board you pick from. As a tile grid the same firms fit
+     in a third of the vertical space, the region/track meta gets a line of
+     its own instead of trailing off the end of a label, and the thing the
+     student is building — a set — is visible as a set.
+
+     The tick and fill are a pure-CSS skin over the real checkbox, gated
+     behind @supports :has(): without it the native control stays visible
+     and the tile is still a working label. Nothing is hidden unless
+     something is drawn in its place.
+     =================================================================== */
+  .ob-pick-bar { display: flex; align-items: center; gap: var(--s3);
+    margin-bottom: var(--s3); flex-wrap: wrap; }
+  .ob-pick-search { flex: 1 1 12rem; min-width: 0; margin: 0; }
+  /* A live count, not a static hint. Tabular so it does not jitter as it
+     crosses from 9 to 10. */
+  .ob-pick-count {
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: var(--fs-xs); color: var(--ink-3); flex: none;
+    padding: 7px 13px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface);
+    transition: color var(--t-fast), border-color var(--t-fast),
+      background-color var(--t-fast);
+  }
+  .ob-pick-count.is-some {
+    color: var(--accent-ink); border-color: var(--accent-line);
+    background: var(--accent-soft);
+  }
+
+  .ob-firms {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: var(--s2); align-content: start;
+    max-height: 46vh; min-height: 120px; overflow-y: auto;
+    padding: var(--s2); border: 1px solid var(--line);
+    border-radius: var(--r-panel); background: var(--paper);
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+  }
+  .ob-firms::-webkit-scrollbar { width: 8px; }
+  .ob-firms::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+
+  /* `label` site-wide is a block with a 16px top margin and a heavier
+     weight — all of which has to be undone for a label that is a tile. */
+  .ob-firm {
+    position: relative; display: flex; flex-direction: column; gap: 2px;
+    margin: 0; padding: 10px 32px 10px 12px; min-width: 0; cursor: pointer;
+    border: 1px solid var(--line); border-radius: var(--r-ctl);
+    background: var(--surface); box-shadow: var(--shadow-1);
+    font-weight: var(--w-reg); font-size: var(--fs-s);
+    transition: border-color var(--t-fast), background-color var(--t-fast),
+      box-shadow var(--t-med), transform var(--t-fast);
+  }
+  .ob-firm:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2);
+    transform: translateY(-1px); }
+  .ob-firm:active { transform: translateY(0) scale(0.985); }
+  .ob-firm-name { font-weight: var(--w-med); color: var(--ink); line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ob-firm-meta { font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.35;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A class, not `hidden`: `.ob-firm` sets its own `display: flex`, an
+     author rule, which beats the UA's `[hidden] { display: none }`.
+     `.ob-firms-empty` is named here too — same toggle, same line of script,
+     and scoping the rule to `.ob-firm` alone left "No firms match that
+     search." permanently on screen under a grid that was matching fine. */
+  .ob-firm.is-ob-hidden,
+  .ob-firms-empty.is-ob-hidden { display: none; }
+
+  @supports selector(:has(*)) {
+    .ob-firm input[type="checkbox"] {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+      white-space: nowrap; border: 0;
+    }
+    /* The indicator: a hollow ring that fills and gains a tick. State is
+       carried by fill AND glyph AND the tile's own border, never colour
+       alone — the same rule the chipset and the work-auth matrix follow. */
+    .ob-firm::after {
+      content: ""; position: absolute; top: 10px; right: 10px;
+      width: 16px; height: 16px; border-radius: 50%;
+      border: 1.5px solid var(--line-strong); background: transparent;
+      background-repeat: no-repeat; background-position: center;
+      background-size: 10px 10px;
+      transition: background-color var(--t-fast), border-color var(--t-fast);
+    }
+    .ob-firm:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .ob-firm:has(:checked) { background: var(--accent-soft); border-color: var(--accent); }
+    .ob-firm:has(:checked) .ob-firm-name { color: var(--accent-ink); font-weight: var(--w-bold); }
+    .ob-firm:has(:checked)::after {
+      background-color: var(--accent); border-color: var(--accent);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      animation: ob-pop 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+  }
+  @keyframes ob-pop {
+    0%   { transform: scale(0.5); }
+    62%  { transform: scale(1.14); }
+    100% { transform: scale(1); }
+  }
+
+  .ob-firms-empty { grid-column: 1 / -1; margin: 0; padding: var(--s5) var(--s3);
+    text-align: center; color: var(--ink-3); font-size: var(--fs-s); }
+
+  /* ===================================================================
+     8. Step 4 — Import
+
+     The last step's job is to explain WHY importing now beats importing
+     later, and the old copy spent a four-line run-on sentence on it. Three
+     beats with a connector says the same causal chain in the shape of a
+     causal chain. Stacked rather than three-across: this column is half
+     the page now, and three cards side by side in it would be three
+     columns of two-word fragments.
+     =================================================================== */
+  .ob-flow { display: grid; gap: var(--s3); list-style: none; margin: 0; padding: 0; }
+  .ob-flow-step {
+    position: relative; padding: var(--s3) var(--s4);
+    border: 1px solid var(--line); border-radius: var(--r-panel);
+    background: var(--surface); box-shadow: var(--shadow-1);
+    animation: ob-rise 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .ob-flow-step:nth-child(1) { animation-delay: 180ms; }
+  .ob-flow-step:nth-child(2) { animation-delay: 280ms; }
+  .ob-flow-step:nth-child(3) { animation-delay: 380ms; }
+  .ob-flow-n {
+    display: block; font-family: var(--font-mono); font-size: var(--fs-nano);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--accent); margin-bottom: 3px;
+  }
+  .ob-flow-t { display: block; font-size: var(--fs-s); font-weight: var(--w-med);
+    color: var(--ink); line-height: 1.3; margin-bottom: 3px; }
+  .ob-flow-d { display: block; font-size: var(--fs-xs); color: var(--ink-3);
+    line-height: 1.45; }
+  /* The connector, absolutely positioned into the gap so it cannot change
+     a card's height, and inert to assistive tech by being generated
+     content inside an already aria-hidden list. */
+  .ob-flow-step + .ob-flow-step::before {
+    content: "↓"; position: absolute; top: calc(-1 * var(--s3)); left: var(--s4);
+    height: var(--s3); text-align: center; color: var(--line-strong);
+    font-size: 13px; line-height: var(--s3);
+  }
+  .ob-import-cta { display: flex; gap: var(--s3); flex-wrap: wrap;
+    margin-top: var(--s4); }
+
+  /* ===================================================================
+     9. The live preview panel — the point of this design
+
+     Everything drawn here is a real query against the live directory
+     (accounts/onboarding_preview.py). The panel's job is to make the
+     consequence of each answer visible while it is being given, so the
+     visual weight goes on the ONE number that changes and the real rows
+     under it.
+
+     The panel is quieter than the form on purpose — `--paper` rather than
+     `--surface`, one hairline, no shadow. It is a reflection of the form's
+     state, not a second thing competing to be filled in.
+     =================================================================== */
+  .ob-pv {
+    border: 1px solid var(--line); border-radius: var(--r-panel);
+    background: var(--paper); padding: var(--s4);
+  }
+  .ob-pv-head { display: flex; align-items: center; gap: var(--s2);
+    margin: 0 0 var(--s3); }
+  .ob-pv-eyebrow {
+    font-family: var(--font-mono); font-size: var(--fs-nano);
+    text-transform: uppercase; letter-spacing: 0.09em; color: var(--ink-3);
+  }
+  /* A live dot, the same signal the rest of the app uses for "this is the
+     current state of the data", pushed to the right of the eyebrow. */
+  .ob-pv-dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok); flex: none; }
+
+  .ob-pv-body { min-height: 232px; }
+  /* The panel is a polite live region, so the browser re-announces it on
+     swap. htmx's own in-flight class gives the one visual cue that a newer
+     answer is being counted, without moving anything. */
+  .ob-pv-body.htmx-request { opacity: 0.55; transition: opacity var(--t-fast); }
+
+  .ob-pv-metric { display: flex; align-items: baseline; gap: var(--s2);
+    margin: 0 0 var(--s3); flex-wrap: wrap; }
+  .ob-pv-num {
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: clamp(28px, 4.4vw, 38px); line-height: 1;
+    font-weight: var(--w-bold); color: var(--accent-ink);
+  }
+  .ob-pv-unit { font-size: var(--fs-s); color: var(--ink-2); }
+
+  .ob-pv-cap {
+    font-family: var(--font-mono); font-size: var(--fs-nano);
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3);
+    margin: 0 0 var(--s2);
+  }
+
+  /* The rows. Each one is a real posting: firm, title, and the taxonomy it
+     matched on. They stagger in so the set reads as something that just
+     narrowed rather than a block that was always there — which is the
+     entire argument of this layout. */
+  .ob-pv-rows { list-style: none; margin: 0 0 var(--s3); padding: 0;
+    display: grid; gap: 6px; }
+  .ob-pv-row {
+    display: grid; gap: 2px; padding: 9px 11px;
+    border: 1px solid var(--line); border-radius: var(--r-ctl);
+    background: var(--surface); min-width: 0;
+    animation: ob-pv-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 55ms);
+  }
+  @keyframes ob-pv-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .ob-pv-firm { font-size: var(--fs-xs); font-weight: var(--w-med);
+    color: var(--accent-ink); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .ob-pv-title { font-size: var(--fs-s); color: var(--ink); line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ob-pv-pills { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+  .ob-pv-pill {
+    font-size: var(--fs-nano); font-family: var(--font-mono);
+    color: var(--ink-3); border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 7px; white-space: nowrap;
+  }
+  /* The eligibility verdict is the one pill about the STUDENT, so it is
+     the only coloured one — and it carries its state in the word as well
+     as the colour, because the label is the verdict's own text. */
+  .ob-pv-pill--ok { color: var(--ok); border-color: var(--ok-line);
+    background: var(--ok-soft); }
+  .ob-pv-pill--out { color: var(--danger); border-color: var(--danger-line);
+    background: var(--danger-soft); }
+
+  /* The firms step reuses the row, plus a count on the right. */
+  .ob-pv-row--firm { grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "firm n" "meta n"; align-items: center; }
+  .ob-pv-row--firm .ob-pv-firm { grid-area: firm; font-size: var(--fs-s); }
+  .ob-pv-row--firm .ob-pv-title { grid-area: meta; font-size: var(--fs-xs);
+    color: var(--ink-3); }
+  .ob-pv-count { grid-area: n; font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; font-size: var(--fs-m);
+    font-weight: var(--w-med); color: var(--ink); padding-left: var(--s3); }
+  /* Zero is a real answer and must not read as an error — it is the same
+     ink as any other count, only quieter. */
+  .ob-pv-count.is-zero { color: var(--ink-3); font-weight: var(--w-reg); }
+
+  /* The sponsorship breakdown. Three bars at their real widths. */
+  .ob-pv-bars { list-style: none; margin: 0 0 var(--s3); padding: 0;
+    display: grid; gap: var(--s2); }
+  .ob-pv-bars li {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "lab n" "bar bar"; gap: 3px var(--s2);
+    align-items: center;
+    animation: ob-pv-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+  .ob-pv-bar-lab { grid-area: lab; font-size: var(--fs-xs); color: var(--ink-2); }
+  .ob-pv-bar-n { grid-area: n; font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; font-size: var(--fs-xs);
+    color: var(--ink); font-weight: var(--w-med); }
+  .ob-pv-bar { grid-area: bar; display: block; height: 6px; border-radius: 999px;
+    background: var(--line); overflow: hidden; }
+  .ob-pv-bar-fill { display: block; height: 100%; width: var(--w);
+    border-radius: 999px; transition: width var(--t-med); }
+  /* Three states, three token colours — the same vocabulary the feed's own
+     sponsorship facet uses. Never colour alone: each bar is labelled. */
+  .ob-pv-bar-fill.is-yes { background: var(--ok); }
+  .ob-pv-bar-fill.is-no  { background: var(--danger); }
+  .ob-pv-bar-fill.is-unk { background: var(--line-strong); }
+
+  /* The Network board, at the size it actually is. Empty columns, drawn
+     empty. */
+  .ob-pv-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px; margin: 0 0 var(--s3); }
+  .ob-pv-col { display: grid; gap: 4px; align-content: start;
+    padding: 7px 6px; border: 1px solid var(--line); border-radius: var(--r-ctl);
+    background: var(--surface);
+    animation: ob-pv-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 60ms); }
+  .ob-pv-col-lab { font-family: var(--font-mono); font-size: var(--fs-nano);
+    color: var(--ink-3); text-align: center; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .ob-pv-slot { display: block; height: 18px; border-radius: 5px;
+    border: 1px dashed var(--line); }
+
+  .ob-pv-note { font-size: var(--fs-xs); color: var(--ink-2); line-height: 1.5;
+    margin: 0 0 var(--s3); }
+  .ob-pv-note.is-out { color: var(--danger); }
+  .ob-pv-note.is-out strong { font-family: var(--font-mono); }
+  .ob-pv-empty {
+    margin: 0 0 var(--s3); padding: var(--s5) var(--s3); text-align: center;
+    font-size: var(--fs-s); color: var(--ink-2);
+    border: 1px dashed var(--line-strong); border-radius: var(--r-panel);
+  }
+  .ob-pv-foot { font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.5;
+    margin: 0; padding-top: var(--s3); border-top: 1px solid var(--line); }
+  .ob-pv-src { font-family: var(--font-mono); font-size: var(--fs-nano);
+    text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3);
+    margin: var(--s3) 0 0; }
+
+  /* ===================================================================
+     10. Responsive
+
+     At 820px the panel goes UNDER the form. The form is the job and the
+     preview is the reward, so on a phone the reward waits its turn — and
+     more concretely, a sticky panel above the fields would push Continue
+     off the bottom of the screen, which is the one thing this layout must
+     never do. `position: static` is the load-bearing line there: a sticky
+     element in a single-column stack pins itself over the content below it.
+     =================================================================== */
+  @media (max-width: 820px) {
+    .ob-grid { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
+    .ob-side { position: static; top: auto; }
+    .ob-pv-body { min-height: 0; }
+    /* Source order already puts the form first, so nothing needs
+       reordering — but the rail's cap comes off, since it is now the full
+       width of the page rather than of one column. */
+    .ob-rail { max-width: none; }
+  }
+  @media (max-width: 560px) {
+    .ob-step--profile .grid-2 { grid-template-columns: 1fr; }
+    .ob-firms { grid-template-columns: 1fr; max-height: 40vh; }
+    .ob-pv-num { font-size: 30px; }
+    /* Four board columns in 375px is four unreadable slivers. */
+    .ob-pv-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* The rail's four labels get tight at 375px. Letter-spacing gives back
+       the width; the SIZE stays at --fs-nano, which is the product's floor
+       (directory/tests/test_a11y.py pins it, and caught a 9px override
+       here). */
+    .ob-rail-lab { letter-spacing: 0.02em; }
+  }
+
+  /* ===================================================================
+     11. Reduced motion
+
+     coverage.css §17 already collapses every animation and transition to
+     0.01ms globally, which covers the entrances above. This block is not
+     redundant with it: `animation-duration: 0.01ms` still RUNS each
+     animation, and these should not run at all rather than run instantly —
+     a staggered set of rows arriving in 0.01ms is still a set of rows
+     arriving, which is exactly the effect somebody asking for reduced
+     motion asked not to have. The bars' `width` transition goes too: their
+     resting width is already the correct one.
+     =================================================================== */
+  @media (prefers-reduced-motion: reduce) {
+    .ob-head, .ob-step--work .wa-row, .ob-flow-step,
+    .ob-pv-row, .ob-pv-bars li, .ob-pv-col { animation: none; }
+    .ob-pv-bar-fill { transition: none; }
+    .ob-firm:hover, .ob-firm:active { transform: none; }
+  }
+  @supports selector(:has(*)) {
+    @media (prefers-reduced-motion: reduce) {
+      .ob-firm:has(:checked)::after { animation: none; }
+    }
+  }
 </style>
+
+{% comment %}
+Republishes the masthead's measured height as `--ob-mast`, which is what the
+sticky preview panel offsets itself by (§1).
+
+This is not a layout the wizard could compute in CSS. `.site-header` is
+`position: sticky; top: 0` in the shell, its inner is `flex-wrap: wrap`, and
+`.site-nav` carries `margin: 0 auto` — so the auth row wraps to a second line
+and the masthead's height is a function of its own content, not of the
+viewport. There is no CSS expression for "how tall is that element".
+
+Strictly an enhancement: the CSS carries a real measured fallback in its
+`var()`, so with JS off the offset is the correct one for today's masthead.
+All this adds is that it stays correct if the masthead ever changes.
+
+In `<head>`, so it waits for the element to exist. ResizeObserver where it is
+available (every browser this app supports), `resize` as the floor.
+{% endcomment %}
+<script>
+(function () {
+  function wire() {
+    var head = document.querySelector(".site-header");
+    var root = document.documentElement;
+    if (!head || !root.querySelector(".ob")) return;
+    function publish() {
+      // Rounded up: a fractional height would leave a sub-pixel seam of the
+      // panel's border showing under the masthead's blur.
+      root.style.setProperty("--ob-mast",
+        Math.ceil(head.getBoundingClientRect().height) + "px");
+    }
+    publish();
+    if (window.ResizeObserver) new ResizeObserver(publish).observe(head);
+    else window.addEventListener("resize", publish);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", wire);
+  } else { wire(); }
+})();
+</script>

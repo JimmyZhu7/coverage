@@ -6,7 +6,14 @@
 <div class="page page--narrow">
   <header class="page-head">
     <h1>Import Contacts</h1>
-    <p class="lede">Upload a CSV.</p>
+    {% comment %}"Upload a CSV." restated the h1 and the file input below it
+    and answered none of the two questions a student actually has here —
+    what goes in the file, and what happens to duplicates. The onboarding
+    step used to carry that sentence; it belongs on the page that does the
+    work, which is also the page reached from Settings, where there is no
+    wizard to have explained it.{% endcomment %}
+    <p class="lede">Names, emails, firms, roles, notes. We match firms to the
+      directory where we can and skip anyone you already have.</p>
   </header>
 
   {% if messages %}

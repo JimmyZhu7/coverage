@@ -1,21 +1,92 @@
 {% load textstyle %}
 {% comment %}
-The firm checkbox list. Rendered inside the onboarding step-2 form and
-re-rendered on its own as the htmx swap target for live search. Each firm
-carries data-region/data-track so the picker reads honestly; the checked
-state is preserved from the user's existing target firms.
+The firm picker: one tile per firm, a real <input type=checkbox name=firms>
+inside each. Rendered inside onboarding step 3's form.
+
+Every tile carries `data-search` — the firm's name plus its regions and
+tracks, pre-lowercased — so the filter below matches on a string that was
+composed on purpose instead of on `textContent`, which drags in whatever
+punctuation and whitespace the markup happens to have between the two
+spans. The checked state is preserved from the user's existing target firms.
+
+A filtered-out tile is HIDDEN, not removed: its checkbox stays in the form
+and still posts, so narrowing the search can never silently drop a firm the
+student already picked.
 {% endcomment %}
-<div class="firm-list" id="firm-list">
+<div class="ob-firms" id="firm-list">
   {% for firm in firms %}
-    <label>
+    {% comment %}`smart_title` on the name only; the meta keeps the
+    vocabulary's own casing.{% endcomment %}
+    <label class="ob-firm"
+           data-search="{{ firm.name|smart_title|lower }} {{ firm.regions|join:' '|lower }} {{ firm.tracks|join:' '|lower }}">
       <input type="checkbox" name="firms" value="{{ firm.id }}"
              {% if firm.id in selected_firm_ids %}checked{% endif %}>
-      <span>{{ firm.name|smart_title }}</span>
-      <span class="firm-meta">
-        {{ firm.regions|join:", " }}{% if firm.tracks %} · {{ firm.tracks|join:", " }}{% endif %}
-      </span>
+      <span class="ob-firm-name">{{ firm.name|smart_title }}</span>
+      {% comment %}The separator is conditional on BOTH sides existing. It
+      used to hang off `tracks` alone, so every firm with tracks but no
+      regions — Accenture, Deloitte, EY, PwC, most of the consulting
+      vertical — rendered its meta line as "· consulting", a bullet
+      separating a track from nothing.{% endcomment %}
+      <span class="ob-firm-meta">{{ firm.regions|join:", " }}{% if firm.regions and firm.tracks %} · {% endif %}{% if firm.tracks %}{{ firm.tracks|join:", " }}{% endif %}</span>
     </label>
   {% empty %}
-    <p class="muted">No firms match that search.</p>
+    <p class="ob-firms-empty">No firms in the directory yet.</p>
   {% endfor %}
+  {% comment %}The no-results state for the CLIENT-SIDE filter, which is a
+  different sentence from the empty clause above: that one means the
+  directory has no firms, this one means your search matched none of them.
+  Present in the DOM and hidden, so the script only toggles a class and
+  never builds markup.{% endcomment %}
+  <p class="ob-firms-empty is-ob-hidden" id="firm-none">No firms match that search.</p>
 </div>
+
+{% comment %}
+Filter + live count. Two behaviours, one listener each, no framework:
+
+* typing narrows the grid and toggles the "no matches" line;
+* checking a tile updates the count chip beside the search box.
+
+Both are progressive enhancements over a form that already works without
+them — with JS off you get every tile, all of them pickable, and a count
+that is simply the server-rendered starting number.
+{% endcomment %}
+<script>
+(function () {
+  var list = document.getElementById("firm-list");
+  var box = document.getElementById("firm-filter");
+  var none = document.getElementById("firm-none");
+  var count = document.getElementById("firm-count");
+  if (!list) return;
+
+  var tiles = Array.prototype.slice.call(list.querySelectorAll(".ob-firm"));
+
+  function recount() {
+    if (!count) return;
+    // Counts every checked box in the list, including tiles currently
+    // filtered out of view — they are still in the form and still post.
+    var n = list.querySelectorAll('input[name="firms"]:checked').length;
+    count.textContent = n + " picked";
+    count.classList.toggle("is-some", n > 0);
+  }
+
+  if (box) {
+    box.addEventListener("input", function () {
+      var q = box.value.trim().toLowerCase();
+      var shown = 0;
+      tiles.forEach(function (t) {
+        var hit = !q || (t.dataset.search || "").indexOf(q) > -1;
+        t.classList.toggle("is-ob-hidden", !hit);
+        if (hit) shown++;
+      });
+      if (none) none.classList.toggle("is-ob-hidden", shown > 0 || !tiles.length);
+    });
+  }
+
+  // Delegated: one listener for the whole grid rather than one per tile,
+  // which matters at directory scale.
+  list.addEventListener("change", function (e) {
+    if (e.target && e.target.name === "firms") recount();
+  });
+  recount();
+})();
+</script>

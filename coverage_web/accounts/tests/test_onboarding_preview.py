@@ -342,3 +342,106 @@ def test_the_panel_stays_cheap(client, user, world, django_assert_max_num_querie
     client.force_login(user)
     with django_assert_max_num_queries(budget):
         _get(client, step, live="1", regions="us", tracks="ib")
+
+
+# ---------------------------------------------------------------------------
+# Progressive enhancement
+# ---------------------------------------------------------------------------
+def test_the_wizard_renders_the_panel_server_side_on_every_step(client, user, world):
+    """With JS off the panel is still there, still correct, and the form
+    beneath it still posts. htmx only ever replaces the same partial."""
+    user.regions = ["us"]
+    user.save()
+    client.force_login(user)
+    for step in ("profile", "work_auth", "firms", "import"):
+        body = client.get(f"{reverse(WIZARD)}?step={step}").content.decode()
+        assert 'id="ob-preview"' in body
+        assert "ob-pv-num" in body, f"{step} rendered an empty panel"
+
+
+def test_the_panel_never_fires_on_a_keystroke(client, user, world):
+    """The school field runs its OWN htmx request on `keyup` for the
+    university datalist. The preview must not ride along with it: it triggers
+    on `change`, debounced, or a student typing a university name would run a
+    feed query per letter."""
+    client.force_login(user)
+    body = client.get(f"{reverse(WIZARD)}?step=profile").content.decode()
+    trigger = re.search(r'hx-trigger="(change from:#ob-form[^"]*)"', body)
+    assert trigger, "the preview lost its change trigger"
+    assert "keyup" not in trigger.group(1)
+    assert "delay:250ms" in trigger.group(1)
+    # The avatar file input must never be serialized into a preview GET.
+    assert 'hx-params="regions,tracks,class_year"' in body
+
+
+def test_the_step_machine_is_untouched(client, user, world):
+    """This pass was a redesign plus a read-only endpoint. Continue and Skip
+    still advance, and every field on every step is still optional."""
+    client.force_login(user)
+    resp = client.post(f"{reverse(WIZARD)}?step=profile", {"step": "profile"})
+    assert resp.status_code == 302 and "step=work_auth" in resp["Location"]
+    resp = client.post(f"{reverse(WIZARD)}?step=work_auth", {"step": "work_auth"})
+    assert resp.status_code == 302 and "step=firms" in resp["Location"]
+    resp = client.post(f"{reverse(WIZARD)}?step=firms", {"step": "firms"})
+    assert resp.status_code == 302 and "step=import" in resp["Location"]
+    resp = client.post(f"{reverse(WIZARD)}?step=import", {"step": "import"})
+    assert resp.status_code == 302 and resp["Location"] == "/app/"
+
+
+# ---------------------------------------------------------------------------
+# The wizard's own stylesheet
+# ---------------------------------------------------------------------------
+def _wizard_style(client) -> str:
+    """The contents of the `<style>` block _welcome_head.html injects."""
+    body = client.get(f"{reverse(WIZARD)}?step=profile").content.decode()
+    blocks = re.findall(r"<style>(.*?)</style>", body, re.S)
+    assert blocks, "the wizard stopped shipping its stylesheet"
+    return max(blocks, key=len)
+
+
+def test_the_wizard_stylesheet_has_no_unterminated_comment(client, user):
+    """A stray `*/` silently kills every rule after it.
+
+    This is not hypothetical. The sticky offset below was edited, the edit
+    left a second `*/` with no `/*` opening it, and `.ob-side` stopped
+    matching entirely — `position` computed back to `static` and the preview
+    panel scrolled away with the form. Nothing failed: not the template, not
+    `manage.py check`, not any test, because a browser skipping a malformed
+    rule is legal CSS and a Django template does not read what it inlines.
+
+    A comment scan is the cheapest thing that would have caught it, and it
+    catches the general case rather than that one selector.
+    """
+    client.force_login(user)
+    css = _wizard_style(client)
+    depth = 0
+    for token in re.finditer(r"/\*|\*/", css):
+        depth += 1 if token.group() == "/*" else -1
+        assert depth >= 0, (
+            f"a `*/` at offset {token.start()} closes a comment that was "
+            "never opened — every rule after it is dead"
+        )
+    assert depth == 0, "an unterminated `/*` swallows the rest of the stylesheet"
+
+
+def test_the_preview_panel_sticks_below_the_masthead(client, user):
+    """`.site-header` is itself sticky at `top: 0` (coverage.css §3), so the
+    panel has to offset by the masthead's real height or it pins underneath
+    it — which it did, at a flat 56px against a 113px masthead, hiding the
+    panel's eyebrow and the first digit of its count at every scroll
+    position.
+
+    The height is measured at runtime and republished as `--ob-mast`; the
+    `var()` fallback is what a JS-off browser gets, so it has to be a real
+    number rather than 0.
+    """
+    client.force_login(user)
+    css = _wizard_style(client)
+    offset = re.search(r"\.ob-side\s*\{[^}]*top:\s*calc\(([^;]+)\);", css)
+    assert offset, ".ob-side lost its sticky offset"
+    expr = offset.group(1)
+    assert "--ob-mast" in expr, "the offset stopped tracking the masthead"
+    fallback = re.search(r"--ob-mast,\s*(\d+)px", expr)
+    assert fallback and int(fallback.group(1)) >= 100, (
+        "the JS-off fallback has to clear the masthead on its own"
+    )

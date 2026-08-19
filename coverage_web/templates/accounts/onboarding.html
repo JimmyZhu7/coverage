@@ -4,81 +4,254 @@
 {% block head %}{% include "accounts/_welcome_head.html" %}{% endblock %}
 
 {% block content %}
-<div class="page page--narrow">
-  <ol class="steps">
-    {% for s in steps %}
-      <li class="{% if forloop.counter == step_number %}current{% elif forloop.counter < step_number %}done{% endif %}">
-        <span class="dot">{% if forloop.counter < step_number %}✓{% else %}{{ forloop.counter }}{% endif %}</span>
-        <span>{{ s.label }}</span>
-      </li>
-    {% endfor %}
-  </ol>
+{% comment %}
+The wizard — "Feed takes shape". Four steps, every field on every one of
+them optional; see the ONBOARDING_STEPS comment in accounts/views.py for why
+there is no fifth.
+
+Two columns, and which side is which is the whole idea. LEFT is the job: the
+same fields, the same optionality, the same Continue/Skip as before. RIGHT is
+the reward: the product surface those answers actually feed, drawn from live
+queries and narrowing as the student answers. Nothing on the right is
+decorative and nothing on it is invented — see _onboarding_preview.html.
+
+The panel is a progressive enhancement in the strict sense. It is rendered
+server-side on every step, so with JS off it is present, correct for the
+saved profile, and simply does not re-fetch; the form beneath it posts and
+advances exactly as it does today. htmx only ever replaces the panel's inner
+with a newer render of the same partial.
+
+Per-step htmx wiring, and why it is per-step:
+
+* `change`, never `keyup` — so the school autocomplete's keystrokes (which
+  fire their own `keyup` htmx request for the datalist) never drag a feed
+  query along with them. Text fields refresh the panel on blur, chips and
+  radios on click, which is when the answer actually changed.
+* `delay:250ms` debounces a student ticking four regions in a row down to
+  one request.
+* `hx-sync="this:replace"` — a newer answer supersedes an in-flight query
+  rather than racing it, so the panel can never settle on a stale count.
+* `hx-params` is a whitelist on step 1 because that form carries the avatar
+  file input, which has no business being serialized into a GET.
+
+`--ob-i` / `--ob-n` drive the rail's geometry from CSS alone (see
+_welcome_head.html §2); nothing here hardcodes the step count.
+{% endcomment %}
+<div class="page ob">
+
+  <nav class="ob-rail" aria-label="Setup progress"
+       style="--ob-i: {{ step_number }}; --ob-n: {{ step_total }};">
+    <span class="ob-rail-track" aria-hidden="true"></span>
+    <span class="ob-rail-fill" aria-hidden="true"></span>
+    <ol class="ob-rail-steps">
+      {% for s in steps %}
+        <li class="{% if forloop.counter == step_number %}is-current{% elif forloop.counter < step_number %}is-done{% endif %}"
+            {% if forloop.counter == step_number %}aria-current="step"{% endif %}>
+          {% comment %}
+          The dot is decorative: its numeral repeats the ordinal position the
+          list already has, and a bare "✓" is announced as the name of a
+          glyph, not as a state. `aria-current` carries "you are here", and
+          finished steps say "completed" in words.
+          {% endcomment %}
+          <span class="ob-rail-dot" aria-hidden="true">{% if forloop.counter < step_number %}✓{% else %}{{ forloop.counter }}{% endif %}</span>
+          <span class="ob-rail-lab">{{ s.label }}{% if forloop.counter < step_number %}<span class="ob-sr"> completed</span>{% endif %}</span>
+        </li>
+      {% endfor %}
+    </ol>
+  </nav>
+
+  <div class="ob-grid">
+  <div class="ob-main">
 
   {% if step == "profile" %}
-    <h1>Tell Us About Your Search</h1>
-    {% comment %}Names the surfaces that exist NOW. This line said "the
-    weekly list" months after that page was retired for Today — the first
-    sentence a new user reads was describing a product that no longer
-    ships.{% endcomment %}
-    <p class="lede">This tailors your feed and your Today queue, and your class year is what the eligibility checks run on. You can change all of it later in Settings.</p>
-    <form method="post" action="{% url 'accounts:onboarding' %}?step=profile" enctype="multipart/form-data">
+    <header class="ob-head">
+      <p class="ob-eyebrow">Step {{ step_number }} of {{ step_total }}</p>
+      <h1>Tell Us About Your Search</h1>
+      {% comment %}Names the surfaces that exist NOW. This line said "the
+      weekly list" months after that page was retired for Today — the first
+      sentence a new user reads was describing a product that no longer
+      ships. It then spent a third sentence promising the fields were
+      editable later, which the Skip links and the empty-form-is-valid
+      behaviour say more convincingly than a sentence can.{% endcomment %}
+      <p class="ob-lede">Shapes your feed and your Today queue. Class year is what
+        the eligibility checks run on. Watch the panel as you answer.</p>
+    </header>
+    <form method="post" id="ob-form" action="{% url 'accounts:onboarding' %}?step=profile" enctype="multipart/form-data">
       {% csrf_token %}
       <input type="hidden" name="step" value="profile">
-      {% include "accounts/_profile_form.html" %}
-      <div class="actions">
+      <div class="ob-step ob-step--profile">
+        <div class="ob-card">
+          {% include "accounts/_profile_form.html" %}
+        </div>
+      </div>
+      <div class="ob-actions">
         <button type="submit" class="btn btn-primary">Continue</button>
       </div>
     </form>
 
   {% elif step == "work_auth" %}
-    <h1>Where Can You Work?</h1>
-    <p class="lede">This is the one structural fact that moves your firm-fit score. Leave a region blank if you're not sure. Coverage scores unknown as neutral, never as a guess.</p>
-    <form method="post" action="{% url 'accounts:onboarding' %}?step=work_auth">
+    <header class="ob-head">
+      <p class="ob-eyebrow">Step {{ step_number }} of {{ step_total }}</p>
+      <h1>Where Can You Work?</h1>
+      {% comment %}Two sentences, not three. The cut one ("Coverage scores
+      unknown as neutral, never as a guess") is said again, verbatim in
+      substance, by the matrix's own footnote eight lines below — the student
+      read the same reassurance twice before answering anything.{% endcomment %}
+      <p class="ob-lede">The one structural fact that moves your firm-fit score.
+        Leave a region blank if you're not sure.</p>
+    </header>
+    <form method="post" id="ob-form" action="{% url 'accounts:onboarding' %}?step=work_auth">
       {% csrf_token %}
       <input type="hidden" name="step" value="work_auth">
-      {% comment %}Same widget as the settings page, so the control a student
-      learns here is the one they meet again later.
-      {% endcomment %}
-      {% include "accounts/_work_auth_matrix.html" with form=section_form %}
-      <div class="actions">
+      <div class="ob-step ob-step--work">
+        {% comment %}Same widget as the settings page, so the control a student
+        learns here is the one they meet again later. No card around it: the
+        matrix already draws its own bordered surface, and a panel inside a
+        panel is two borders saying one thing.
+        {% endcomment %}
+        {% include "accounts/_work_auth_matrix.html" with form=section_form %}
+      </div>
+      <div class="ob-actions">
         <button type="submit" class="btn btn-primary">Continue</button>
-        <a class="muted" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
+        <a class="ob-skip" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
       </div>
     </form>
 
   {% elif step == "firms" %}
-    <h1>Pick Your Target Firms</h1>
-    <p class="lede">Choose the firms you're recruiting for. They float to the top of your feed and fill the Picked column. Add or remove any time.</p>
-    <form method="post" action="{% url 'accounts:onboarding' %}?step=firms">
+    <header class="ob-head">
+      <p class="ob-eyebrow">Step {{ step_number }} of {{ step_total }}</p>
+      <h1>Pick Your Target Firms</h1>
+      {% comment %}The opening "Choose the firms you're recruiting for" was
+      the h1 again in a longer sentence. Dropped; the lede now only says what
+      the h1 cannot.{% endcomment %}
+      <p class="ob-lede">They float to the top of your feed and fill the Picked
+        column. Add or remove any time.</p>
+    </header>
+    <form method="post" id="ob-form" action="{% url 'accounts:onboarding' %}?step=firms">
       {% csrf_token %}
       <input type="hidden" name="step" value="firms">
-      <label for="firm-filter">Search firms</label>
-      <input type="text" id="firm-filter" placeholder="Type to filter…" autocomplete="off"
-             oninput="(function(q){document.querySelectorAll('#firm-list label').forEach(function(l){l.style.display=l.textContent.toLowerCase().indexOf(q)>-1?'':'none';});})(this.value.toLowerCase())">
-      {% include "accounts/_firm_list.html" %}
-      <div class="actions">
+      <div class="ob-step ob-step--firms">
+        <div class="ob-pick-bar">
+          {% comment %}The visible "Search firms" label and the "Type to
+          filter…" placeholder said the same thing twice, stacked. The label
+          stays for screen readers; the placeholder is the visible one.
+          {% endcomment %}
+          <label class="ob-sr" for="firm-filter">Search firms</label>
+          <input type="search" id="firm-filter" class="ob-pick-search"
+                 placeholder="Search firms, regions, tracks…" autocomplete="off">
+          {% comment %}Live count. Rendered server-side with the real starting
+          number, so it is right before any script runs and right for a
+          student re-entering the step with firms already picked.{% endcomment %}
+          <output class="ob-pick-count{% if selected_firm_ids %} is-some{% endif %}"
+                  id="firm-count">{{ selected_firm_ids|length }} picked</output>
+        </div>
+        {% include "accounts/_firm_list.html" %}
+      </div>
+      <div class="ob-actions">
         <button type="submit" class="btn btn-primary">Continue</button>
-        <a class="muted" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
+        <a class="ob-skip" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
       </div>
     </form>
 
   {% elif step == "import" %}
-    <h1>Bring Your Contacts In</h1>
-    <p class="lede">If you've already got recruiting contacts — a spreadsheet, a running list, people you've been emailing for months — import them now. It's worth doing before you connect Gmail: Coverage can only fill in someone's email history once they're already a contact, so anyone imported now starts with their real history attached instead of at zero.</p>
-    <div class="panel">
-      <p>Upload a CSV of your contacts: names, emails, firms, roles, notes. We'll match firms to the directory where we can and skip anything you already have.</p>
-      <div class="actions">
+    <header class="ob-head">
+      <p class="ob-eyebrow">Step {{ step_number }} of {{ step_total }}</p>
+      <h1>Bring Your Contacts In</h1>
+      {% comment %}The old lede ran four lines and buried its one real
+      argument — import before connecting Gmail, or the history has nothing to
+      attach to — at the end of a run-on sentence. That argument is a chain of
+      three events, so it is drawn as one below and the lede is back to a
+      single line.{% endcomment %}
+      <p class="ob-lede">Already emailing people? Import that list before you
+        connect Gmail.</p>
+    </header>
+    <div class="ob-step ob-step--import">
+      {% comment %}Stacked, not three across: this column is now half the page
+      and three cards side by side in it are three columns of two-word
+      fragments. Vertical is also the shape of a sequence.{% endcomment %}
+      <ol class="ob-flow" aria-hidden="true">
+        <li class="ob-flow-step">
+          <span class="ob-flow-n">Now</span>
+          <span class="ob-flow-t">Import your CSV</span>
+          <span class="ob-flow-d">Names, emails, firms, roles, notes.</span>
+        </li>
+        <li class="ob-flow-step">
+          <span class="ob-flow-n">On upload</span>
+          <span class="ob-flow-t">Firms get matched</span>
+          <span class="ob-flow-d">To the directory where we can. Duplicates skipped.</span>
+        </li>
+        <li class="ob-flow-step">
+          <span class="ob-flow-n">Later</span>
+          <span class="ob-flow-t">Gmail fills the history</span>
+          <span class="ob-flow-d">Only for people already in your contacts. Import first and yours arrive with real history, not at zero.</span>
+        </li>
+      </ol>
+      {% comment %}The diagram above is aria-hidden — three cards of stacked
+      fragments read as noise out loud. This says the same chain as one
+      sentence for anyone not looking at it.{% endcomment %}
+      <p class="ob-sr">Import your CSV of names, emails, firms, roles and notes.
+        Firms are matched to the directory where we can and duplicates are
+        skipped. Later, connecting Gmail fills in email history for people who
+        are already contacts, so anyone imported now starts with their real
+        history attached.</p>
+      <div class="ob-import-cta">
         <a class="btn" href="{% url 'accounts:import' %}?from=welcome">Import Contacts</a>
         <a class="btn" href="{% url 'accounts:import_template' %}">Download Template</a>
       </div>
     </div>
+    {% comment %}Finish is a POST — it stamps onboarded_at — so it is a form,
+    not a link dressed as one. It keeps the footer's primary slot because on
+    every step of this wizard the primary button in the footer is the one that
+    moves you forward, and here forward is out.{% endcomment %}
     <form method="post" action="{% url 'accounts:onboarding' %}?step=import">
       {% csrf_token %}
       <input type="hidden" name="step" value="import">
-      <div class="actions">
+      <div class="ob-actions">
         <button type="submit" class="btn btn-primary">Finish Setup</button>
       </div>
     </form>
   {% endif %}
+
+  </div>{# /.ob-main #}
+
+  <aside class="ob-side">
+    <div class="ob-pv" aria-label="Live preview of what your answers feed">
+      <p class="ob-pv-head">
+        <span class="ob-pv-eyebrow">{% if step == "firms" %}Your picked firms{% elif step == "work_auth" %}Sponsorship, answered{% elif step == "import" %}Your Network board{% else %}Your Opportunities feed{% endif %}</span>
+        <span class="ob-pv-dot" aria-hidden="true"></span>
+      </p>
+      {% comment %}
+      The swap target. `aria-live="polite"` announces the new count once the
+      student stops interacting — safe to have here precisely BECAUSE the
+      trigger is `change` and not `keyup`: a screen-reader user typing a
+      school name is not interrupted once per letter.
+
+      Steps 1-3 wire a refresh; step 4 has no answers left to change, so it
+      renders once and carries no htmx attributes at all.
+      {% endcomment %}
+      <div id="ob-preview" class="ob-pv-body" aria-live="polite"
+           {% if step == "profile" %}
+             hx-get="{% url 'accounts:onboarding_preview' %}?step=profile&live=1"
+             hx-trigger="change from:#ob-form delay:250ms"
+             hx-include="#ob-form" hx-params="regions,tracks,class_year"
+             hx-target="this" hx-swap="innerHTML" hx-sync="this:replace"
+           {% elif step == "work_auth" %}
+             hx-get="{% url 'accounts:onboarding_preview' %}?step=work_auth&live=1"
+             hx-trigger="change from:#ob-form delay:250ms"
+             hx-include="#ob-form" hx-params="not csrfmiddlewaretoken,step"
+             hx-target="this" hx-swap="innerHTML" hx-sync="this:replace"
+           {% elif step == "firms" %}
+             hx-get="{% url 'accounts:onboarding_preview' %}?step=firms&live=1"
+             hx-trigger="change from:#ob-form delay:250ms"
+             hx-include="#ob-form" hx-params="not csrfmiddlewaretoken,step"
+             hx-target="this" hx-swap="innerHTML" hx-sync="this:replace"
+           {% endif %}>
+        {% include "accounts/_onboarding_preview.html" %}
+      </div>
+      <p class="ob-pv-src">Live from the directory, not a sample.</p>
+    </div>
+  </aside>
+
+  </div>{# /.ob-grid #}
 </div>
 {% endblock %}
