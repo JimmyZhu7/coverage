@@ -8,16 +8,24 @@ image/document blocks it carried).
 
 Under the bubble sits one quiet actions row, invisible until the turn is
 hovered or something inside it is focused (chat.html's `.as-msg-actions`),
-holding the one thing each side of the conversation is for: Copy what
-Coverage said, Edit what you said. Same restraint as the history rows'
-kebab — the thread stays calm until you reach for it.
+holding the things each side of the conversation is for: on Coverage's own
+turns, Copy, Retry, and a thumbs up/down; on yours, Edit. Same restraint as
+the history rows' kebab — the thread stays calm until you reach for it.
+
+`retry_message_id` (assistant rows only) is the id of the question this
+answer answered — the same id the pencil-edit form above a USER row already
+posts back. Retry reuses that exact form via HTML's own `form="…"` button
+attribute rather than a second copy of the rewind machinery: click it and
+the browser submits that form with the words unchanged, which chat.html's
+existing rewind handling (confirm, delete-everything-after, re-ask) already
+knows how to do. No new JS path, just a second door into the same one.
 {% endcomment %}
 <article class="as-msg as-msg--{{ row.role }}{% if row.notice %} as-msg--notice{% endif %} kin-reveal">
   {% if row.role == 'assistant' %}
     <span class="as-avatar" aria-hidden="true">{% include "_logo.html" %}</span>
   {% endif %}
   <div class="as-turn">
-    <p class="as-who">{% if row.role == 'user' %}You{% else %}Coverage{% endif %}</p>
+    <p class="as-who">{% if row.role == 'user' %}You{% else %}Coverage{% endif %}{% if row.created %} <time class="as-msg-time" datetime="{{ row.created|date:'c' }}">{{ row.created|timesince }} ago</time>{% endif %}</p>
     <div class="as-bubble">
       {% if row.attachments %}
         <div class="as-attachments">
@@ -71,7 +79,8 @@ kebab — the thread stays calm until you reach for it.
       redirects back to the conversation. `data-confirm` is what makes the
       shared dialog ask first, either way.
       {% endcomment %}
-      <form class="as-msg-edit-form" method="post" action="{% url 'assistant:edit_message' %}"
+      <form class="as-msg-edit-form" id="as-edit-form-{{ row.message_id }}" method="post"
+            action="{% url 'assistant:edit_message' %}"
             data-confirm="Send from here? Everything after this message is deleted. This can't be undone."
             data-confirm-ok="Send">
         {% csrf_token %}
@@ -109,6 +118,43 @@ kebab — the thread stays calm until you reach for it.
                   stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
+        {% if row.retry_message_id %}
+          <button type="submit" form="as-edit-form-{{ row.retry_message_id }}"
+                  class="as-msg-btn as-msg-retry" aria-label="Retry this answer" title="Retry">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M12.5 8A4.5 4.5 0 1 1 11 4.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M12.5 3v3.6H8.9" stroke="currentColor" stroke-width="1.5"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        {% endif %}
+        {% comment %}
+        Thumbs: a fire-and-forget signal (assistant.views.feedback), not a
+        stored rating — nothing here re-renders, so `hx-swap="none"` lets
+        htmx fire the POST without touching the DOM. The active/inactive
+        look is pure CSS/JS (chat.html), independent of whether the request
+        has even finished — the same "acknowledge the click immediately"
+        instinct the Copy button's tick uses.
+        {% endcomment %}
+        <form class="as-msg-feedback" method="post" action="{% url 'assistant:feedback' %}"
+              hx-post="{% url 'assistant:feedback' %}" hx-swap="none">
+          {% csrf_token %}
+          <input type="hidden" name="message" value="{{ row.message_id }}">
+          <button type="submit" name="rating" value="up" class="as-msg-btn as-msg-up"
+                  aria-label="Good response" title="Good response">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M5.5 7v6.5H4A1 1 0 0 1 3 12.5V8A1 1 0 0 1 4 7h1.5ZM5.5 7l2.3-4.3a1 1 0 0 1 1.87.6L9.2 6H12a1 1 0 0 1 .98 1.2l-1 5A1 1 0 0 1 11 13H5.5"
+                    stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button type="submit" name="rating" value="down" class="as-msg-btn as-msg-down"
+                  aria-label="Needs work" title="Needs work">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M5.5 7v6.5H4A1 1 0 0 1 3 12.5V8A1 1 0 0 1 4 7h1.5ZM5.5 7l2.3-4.3a1 1 0 0 1 1.87.6L9.2 6H12a1 1 0 0 1 .98 1.2l-1 5A1 1 0 0 1 11 13H5.5"
+                    stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </form>
       </div>
     {% endif %}
   </div>
