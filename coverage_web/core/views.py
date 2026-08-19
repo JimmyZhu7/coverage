@@ -63,6 +63,20 @@ def _advisor_daily_cap(plan: str) -> int:
     return config["daily_burst"] // cost if cost > 0 else 0
 
 
+def _advisor_monthly_grant(plan: str) -> int:
+    """Credits granted to `plan` each month — the pool that funds chat turns
+    AND the Gmail residue scans, so it is the only figure on the page that
+    describes Pro's real depth advantage.
+
+    The page must not sell Pro as "more messages": a Pro message costs 3
+    credits against a 45-credit daily burst, so both plans compute to the
+    same 15 a day (see `_advisor_daily_cap`). The monthly grant is where the
+    3x actually lives (60 vs 180), and like every other number here it is
+    read from `CREDIT_PLANS` rather than typed into the template.
+    """
+    return billing_credits.plan_config(SimpleNamespace(plan=plan))["monthly_grant"]
+
+
 def pricing(request):
     """Pricing page. One real tier (free) and one honest preview (Pro).
 
@@ -92,6 +106,8 @@ def pricing(request):
             # the template.
             "advisor_free_cap": _advisor_daily_cap("free"),
             "advisor_pro_cap": _advisor_daily_cap("pro"),
+            "advisor_free_grant": _advisor_monthly_grant("free"),
+            "advisor_pro_grant": _advisor_monthly_grant("pro"),
         },
     )
 
