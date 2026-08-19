@@ -33,7 +33,7 @@ from crm.models import Contact, UserFirm
 from directory.models import Firm
 
 from .models import PushSubscription
-from . import onboarding_preview, services
+from . import onboarding_preview, services, trials as pro_trials
 from .forms import (
     CYCLE_SUGGESTIONS,
     REGION_CHOICES,
@@ -344,13 +344,22 @@ def _gmail_live_context(user) -> dict:
     # keeping Connect/Scan Now open to every plan. Mirrors the exact check
     # `capture.gmail_live.connect_gmail`/`renew_watches` gate on.
     is_pro = getattr(user, "plan", "") == "pro"
-    connection = GmailConnection.all_objects.filter(user=user).first()
+    # "Pro trial · N days left" — None for a permanent Pro/Free account, an
+    # int only while an actual trial (accounts.trials) is still running.
+    trial_days_left = pro_trials.trial_days_left(user)
+    connection = GmailConnection.all_objects.select_related("user").filter(user=user).first()
     if connection is None:
-        return {"available": True, "connected": False, "is_pro": is_pro}
+        return {
+            "available": True,
+            "connected": False,
+            "is_pro": is_pro,
+            "trial_days_left": trial_days_left,
+        }
     return {
         "available": True,
         "connected": True,
         "is_pro": is_pro,
+        "trial_days_left": trial_days_left,
         "gmail_address": connection.gmail_address,
         "status": connection.status,
         "last_notification_at": connection.last_notification_at,
@@ -370,6 +379,13 @@ def _gmail_live_context(user) -> dict:
         # in the template, so the "what counts as in-flight" rule lives in
         # one place.
         "rescan_in_progress": connection.rescan_status in ("pending", "running"),
+        # Free's once-per-GMAIL_FREE_RESCAN_INTERVAL_DAYS throttle
+        # (settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS) — the SAME function
+        # `capture.views.gmail_rescan` enforces server-side, so the button's
+        # disabled state and the date it names can never quietly disagree
+        # with what a POST would actually do. `None` for Pro/trial or a
+        # never-scanned Free connection (both mean "not throttled").
+        "rescan_unlocks_at": gmail_live.free_rescan_unlocks_at(connection),
     }
 
 
@@ -398,6 +414,11 @@ def _credits_context(user) -> dict:
         # so Jimmy can see the feature exists before he's set Stripe up.
         "stripe_configured": billing_stripe_gateway.is_configured(),
         "credit_packs": billing_stripe_gateway.CREDIT_PACKS,
+        # "Pro trial · N days left" (accounts.trials) — None outside an
+        # active trial, so the plan line reads as a plain "Pro Plan"/"Free
+        # Plan" for a permanent account exactly as it did before trials
+        # existed.
+        "trial_days_left": pro_trials.trial_days_left(user),
     }
 
 
@@ -480,6 +501,7 @@ def settings_view(request):
             "cycle_months": _cycle_months(),
             "gmail_live": _gmail_live_context(request.user),
             "credits": _credits_context(request.user),
+            "gmail_free_rescan_interval_days": django_settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS,
             "target_firm_count": UserFirm.objects.for_user(request.user).count(),
             "contact_count": contact_count,
             # Split out rather than folded in: "Contacts: 137" counted archived

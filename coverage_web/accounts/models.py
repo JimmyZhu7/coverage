@@ -199,6 +199,24 @@ class User(AbstractUser):
     PLAN_PRO = "pro"
     PLAN_CHOICES = [(PLAN_FREE, "Free"), (PLAN_PRO, "Pro")]
     plan = models.CharField(max_length=16, choices=PLAN_CHOICES, default=PLAN_FREE)
+    # Pro trial (settings.PRO_TRIAL_DAYS / PRO_TRIAL_TRIGGER, accounts/
+    # trials.py). `pro_trial_started_at` is set once, the first time
+    # `accounts.trials.start_trial_if_eligible` fires for this account, and
+    # stays set forever after — even once the trial ends and `plan` reverts
+    # to free — because it alone is what "never start a second trial" reads:
+    # a student who lets a first trial lapse must not get a second one just
+    # by reconnecting Gmail again.
+    pro_trial_started_at = models.DateTimeField(null=True, blank=True)
+    # When this account's Pro trial ends. The daily `pro_trial_expire`
+    # management command reverts `plan` back to "free" once this passes —
+    # see that command and accounts/trials.py::trial_days_left. Stays set
+    # (never cleared) after expiry so Settings' Credits and Gmail Live cards
+    # can still say "your trial ended" honestly rather than looking like
+    # there was never one. A Pro account with this left null was never on a
+    # trial at all (admin-granted, e.g. the founder's own account) — the
+    # expiry command's own selection query relies on exactly that
+    # distinction to leave such an account alone.
+    pro_trial_ends_at = models.DateTimeField(null=True, blank=True)
     onboarded_at = models.DateTimeField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)

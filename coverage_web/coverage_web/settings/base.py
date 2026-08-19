@@ -162,6 +162,38 @@ CREDIT_PLANS = {
 CREDIT_RESCAN_THREADS_PER_CREDIT = env.int("CREDIT_RESCAN_THREADS_PER_CREDIT", default=10)
 
 # ---------------------------------------------------------------------------
+# Pro trial (accounts/trials.py) — both reviewers' independent read on the
+# single highest-leverage conversion fix: "let them watch three replies log
+# themselves, then charge." Connecting Gmail flips a Free student to a
+# time-boxed Pro trial (accounts.trials.start_trial_if_eligible, called from
+# capture/gmail_live.py::connect_gmail's success path), so the trial's whole
+# pitch — real-time sync — turns on the same instant they connect.
+#
+# Both knobs are the founder's to tune, not a judgment call this app makes
+# for him: PRO_TRIAL_DAYS default is 14, his own call (superseding an
+# earlier 7-day default) — "watch three replies log themselves" needs
+# enough campus-recruiting traffic to plausibly happen inside the window.
+# PRO_TRIAL_TRIGGER exists because "connecting Gmail" is the only trigger
+# today but is unlikely to be the only one ever — a completed onboarding, a
+# CSV import, ... — so adding a second trigger later is a new call site
+# gated on this same setting, not a schema or code-path change.
+PRO_TRIAL_DAYS = env.int("PRO_TRIAL_DAYS", default=14)
+PRO_TRIAL_TRIGGER = env("PRO_TRIAL_TRIGGER", default="gmail_connect")
+
+# On-demand Gmail "Scan Now" (capture/views.py::gmail_rescan) is free on
+# every plan, but for Free it is throttled to once per this many days.
+# Reason: capture/gmail_live.py's real-time Pro gate (docs/
+# pricing-rebalance-plan.md §7) is only worth something if a Free user
+# can't reproduce it for free by mashing the same button the
+# gmail_backfill cron already polls every 15 minutes — an unthrottled
+# Scan Now turns "real-time" into "whenever you feel like clicking," which
+# guts the entire paid axis this plan sells. Pro (including an active Pro
+# trial) is never throttled — real-time sync already gives it standing
+# coverage, so a manual scan on top is just a convenience, not a
+# workaround.
+GMAIL_FREE_RESCAN_INTERVAL_DAYS = env.int("GMAIL_FREE_RESCAN_INTERVAL_DAYS", default=7)
+
+# ---------------------------------------------------------------------------
 # Web Push (deadline alerts — accounts.push, send_deadline_push_alerts).
 #
 # VAPID (RFC 8292) identifies this server to the browsers' own push relays

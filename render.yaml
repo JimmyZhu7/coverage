@@ -266,6 +266,38 @@ services:
       - key: GMAIL_LIVE_TOKEN_KEY
         sync: false
 
+  # ---- Pro trial expiry, once a day --------------------------------------
+  # accounts.trials starts a PRO_TRIAL_DAYS-long trial the moment a Free
+  # student connects Gmail (PRO_TRIAL_TRIGGER default "gmail_connect"); this
+  # is the other half — reverts `plan` back to "free" once
+  # `pro_trial_ends_at` passes. Does not touch Gmail at all: the trial's
+  # real-time sync stops on its own the next time coverage-gmail-watch-renew
+  # runs (its own `user.plan == "pro"` gate simply stops picking the
+  # connection up), so this only ever needs to run once a day, same cadence
+  # as that job. A fixed UTC hour is fine — this flips a plan, not a
+  # per-student "today," so there is no timezone-correctness reason (unlike
+  # the push-alerts/digest crons below) to anchor it to each student's own day.
+  - type: cron
+    name: coverage-pro-trial-expire
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "30 5 * * *" # 05:30 UTC — right after gmail-watch-renew, clear of the scrape's 00/06/12/18 marks
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py pro_trial_expire"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: DJANGO_SECRET_KEY
+      - key: DJANGO_ALLOWED_HOSTS
+        value: localhost
+
   # ---- Gmail Live first-connect backfill + "Scan Now" rescans, every ----
   # ---- 15 minutes ---------------------------------------------------------
   # A tight tick because a newly-connected user (or someone who just hit

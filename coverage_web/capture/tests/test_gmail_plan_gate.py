@@ -66,6 +66,14 @@ class TestConnectGmailPlanGate:
     def test_free_user_connects_without_a_watch_but_backfill_still_queues(
         self, free_student, settings
     ):
+        """Isolates the PLAN gate from the Pro trial (accounts.trials),
+        which also lives on this same call site and is ON by default
+        (PRO_TRIAL_TRIGGER="gmail_connect") — see
+        TestConnectGmailStartsAProTrial below for that behavior. Turning the
+        trigger off here proves the underlying gate holds independently: a
+        Free user who is NOT trial-eligible (or trials are configured off
+        entirely) still gets no watch."""
+        settings.PRO_TRIAL_TRIGGER = "off"
         settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()
         fake_gmail = _fake_gmail_client("free-student@example.com")
         with patch.object(gmail_live, "_flow", return_value=_fake_flow()), \
@@ -119,6 +127,46 @@ class TestConnectGmailPlanGate:
             )
 
         assert connection.watch_expiration is not None
+
+
+class TestConnectGmailStartsAProTrial:
+    """The Pro trial (accounts.trials) shares this exact call site — a Free
+    account's first Gmail connect flips `plan` to "pro" BEFORE the gate
+    above runs, so its real-time sync turns on the same request. Full
+    trial-lifecycle coverage (no-second-trial, expiry, expiry-doesn't-
+    disconnect) lives in accounts/tests/test_pro_trial.py; this class only
+    pins the one thing that's specific to THIS call site: the trial flip
+    actually reaches the watch-registration gate right below it."""
+
+    def test_a_free_users_first_connect_starts_a_trial_and_registers_a_watch(
+        self, free_student, settings
+    ):
+        settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()
+        fake_gmail = _fake_gmail_client("free-student@example.com")
+        with patch.object(gmail_live, "_flow", return_value=_fake_flow()), \
+             patch.object(gmail_live, "build", return_value=fake_gmail), \
+             patch.object(gmail_live, "_gmail_client", return_value=fake_gmail):
+            connection = gmail_live.connect_gmail(
+                free_student, "auth-code", "https://x/callback"
+            )
+
+        free_student.refresh_from_db()
+        assert free_student.plan == "pro"
+        assert free_student.pro_trial_ends_at is not None
+        assert connection.watch_expiration is not None
+
+    def test_the_trigger_can_be_turned_off_entirely(self, free_student, settings):
+        settings.PRO_TRIAL_TRIGGER = "off"
+        settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()
+        fake_gmail = _fake_gmail_client("free-student@example.com")
+        with patch.object(gmail_live, "_flow", return_value=_fake_flow()), \
+             patch.object(gmail_live, "build", return_value=fake_gmail), \
+             patch.object(gmail_live, "register_watch") as mock_register:
+            gmail_live.connect_gmail(free_student, "auth-code", "https://x/callback")
+
+        free_student.refresh_from_db()
+        assert free_student.plan == "free"
+        mock_register.assert_not_called()
 
 
 class TestRenewWatchesPlanGate:

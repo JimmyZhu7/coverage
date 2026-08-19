@@ -28,7 +28,7 @@ from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
 from assistant.models import (
     AdvisorMemory, ChatConversation, ChatFolder, ChatMessage, DailyBrief,
 )
-from billing.models import CreditLedger
+from billing.models import CreditLedger, ProWaitlist
 from capture import gmail_live
 from capture.models import GmailConnection
 from crm.models import CalendarEvent, ChatDebrief, Contact, Task, Touch, UserFirm
@@ -592,6 +592,7 @@ GMAIL_CONNECTION_EXPORT_COLUMNS = [
 # this browser's channel, same posture as the Gmail refresh token above.
 PUSH_SUBSCRIPTION_EXPORT_COLUMNS = ["user_agent", "created"]
 CREDIT_LEDGER_EXPORT_COLUMNS = ["created", "kind", "delta", "period", "props"]
+PRO_WAITLIST_EXPORT_COLUMNS = ["email", "source", "created"]
 PROFILE_EXPORT_COLUMNS = [
     "email", "name", "school", "class_year", "target_cycles", "regions",
     "tracks", "work_authorization", "angles", "advocate_target",
@@ -876,6 +877,20 @@ def credit_ledger_csv(user) -> str:
     )
 
 
+def pro_waitlist_csv(user) -> str:
+    """Whether this account joined the Pro "notify me" waitlist
+    (billing/models.py::ProWaitlist) — at most one row, since a join is
+    deduped by email at write time. A logged-out join under the SAME email
+    never links back here (ProWaitlist.user is only ever set for a join made
+    while signed in), which is a limitation of email-only intent capture,
+    not a gap in this export."""
+    rows = ProWaitlist.objects.for_user(user)
+    return _csv(
+        PRO_WAITLIST_EXPORT_COLUMNS,
+        ([w.email, w.source, _dt(w.created)] for w in rows),
+    )
+
+
 def profile_csv(user) -> str:
     """The `users` row itself — one header, one row. Everything Settings can
     set, including the answers that feed the fit score (`work_authorization`)
@@ -944,6 +959,8 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
      "Every credit grant, spend, purchase, and adjustment on your account."),
     ("product_events.csv", product_events_csv,
      "Your own usage events — which pages and actions you used."),
+    ("pro_waitlist.csv", pro_waitlist_csv,
+     "Whether you joined the Pro launch waitlist, and when."),
     ("profile.csv", profile_csv,
      "Your profile row: school, cycle, regions, work authorization, angles, "
      "and every engine setting."),
@@ -1032,6 +1049,7 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     ("push_subscriptions", PushSubscription),
     ("credit_ledger", CreditLedger),
     ("product_events", ProductEvent),
+    ("pro_waitlist", ProWaitlist),
 ]
 
 

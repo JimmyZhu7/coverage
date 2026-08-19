@@ -1074,6 +1074,7 @@
                 the new `user.plan`.
                 {% endcomment %}
                 <span class="pill plan-{{ credits.plan_label|lower }}">{{ credits.plan_label }} &middot; {{ credits.plan_model_label }}</span>
+                {% if credits.trial_days_left %}&middot; Pro trial &middot; {{ credits.trial_days_left }} day{{ credits.trial_days_left|pluralize }} left{% endif %}
               </span>
               <div class="set-row-desc">
                 {{ credits.monthly_grant }} credits refill {{ credits.refill_date|date:"j F" }}.
@@ -1131,7 +1132,8 @@
         <div class="set-head">
           <h2 id="gmail-live-h">Gmail Live</h2>
           <p>Real-time reply and bounce detection, straight from your inbox.
-            {% if not gmail_live.is_pro %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro</span>{% endif %}</p>
+            {% if gmail_live.trial_days_left %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro trial &middot; {{ gmail_live.trial_days_left }} day{{ gmail_live.trial_days_left|pluralize }} left</span>
+            {% elif not gmail_live.is_pro %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro</span>{% endif %}</p>
         </div>
         <div class="set-body">
           {% comment %}
@@ -1244,12 +1246,26 @@
                 {% else %}
                   Re-check your whole Gmail history against all of your contacts.
                 {% endif %}
+                {% comment %}
+                Free's once-per-GMAIL_FREE_RESCAN_INTERVAL_DAYS throttle
+                (settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS) —
+                capture.gmail_live.free_rescan_unlocks_at is the SAME
+                function capture.views.gmail_rescan enforces server-side, so
+                this date can never quietly disagree with what a POST would
+                actually do. Pro (including an active trial) never sees
+                this line.
+                {% endcomment %}
+                {% if gmail_live.rescan_unlocks_at %}
+                  <br>Free plan: one scan every {{ gmail_free_rescan_interval_days }} days.
+                  Next scan available {{ gmail_live.rescan_unlocks_at|date:"j M" }} · Pro scans any time.
+                {% endif %}
               </div>
             </div>
             <div class="set-row-control">
               <form method="post" action="{% url 'capture:gmail_rescan' %}">
                 {% csrf_token %}
-                <button type="submit" class="btn" {% if gmail_live.rescan_in_progress %}disabled{% endif %}>
+                <button type="submit" class="btn"
+                        {% if gmail_live.rescan_in_progress or gmail_live.rescan_unlocks_at %}disabled{% endif %}>
                   {% if gmail_live.rescan_in_progress %}Scanning…{% else %}Scan Now{% endif %}
                 </button>
               </form>

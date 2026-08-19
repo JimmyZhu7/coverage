@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import secrets
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404
@@ -120,7 +121,7 @@ def gmail_rescan(request):
     stack five runs — the Settings page also disables the button in that
     state, this is the server-side guarantee behind it.
     """
-    connection = GmailConnection.all_objects.filter(
+    connection = GmailConnection.all_objects.select_related("user").filter(
         user=request.user, status="active"
     ).first()
     if connection is None:
@@ -128,6 +129,16 @@ def gmail_rescan(request):
         return redirect(f"{reverse('accounts:settings')}#gmail-live")
     if connection.rescan_status in ("pending", "running"):
         messages.info(request, "A scan is already in progress.")
+        return redirect(f"{reverse('accounts:settings')}#gmail-live")
+
+    unlocks_at = gmail_live.free_rescan_unlocks_at(connection)
+    if unlocks_at is not None:
+        messages.error(
+            request,
+            "Free plan: one scan every "
+            f"{settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS} days. Next scan "
+            f"available {timezone.localtime(unlocks_at):%-d %b}. Pro scans any time.",
+        )
         return redirect(f"{reverse('accounts:settings')}#gmail-live")
 
     connection.rescan_status = "pending"

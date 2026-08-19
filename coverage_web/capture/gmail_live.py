@@ -63,6 +63,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from accounts import trials as pro_trials
 from billing import credits as billing_credits
 from capture import gmail_residue
 from capture.gmail import apply_findings
@@ -275,6 +276,17 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
         },
     )
 
+    # Pro trial (accounts.trials): a Free account's FIRST Gmail connect
+    # starts a time-boxed trial, flipping `user.plan` to "pro" BEFORE the
+    # plan gate right below sees it — so a trialing student's real-time sync
+    # turns on in the same request that connected Gmail, which is the whole
+    # point of the trial (the founder's own framing: "let them watch three
+    # replies log themselves, then charge"). No-ops for anyone not eligible
+    # (already Pro, already had a trial, or PRO_TRIAL_TRIGGER points
+    # elsewhere) — see that module for what "eligible" means.
+    if settings.PRO_TRIAL_TRIGGER == "gmail_connect":
+        pro_trials.start_trial_if_eligible(user, trigger="gmail_connect")
+
     # The connection is now STORED and, on its own, complete: the refresh
     # token works, the backfill is queued, and the twice-daily agent sync is
     # unaffected. `users.watch()` only adds real-time push on top of that,
@@ -388,6 +400,36 @@ def renew_watches() -> tuple[int, int]:
         else:
             renewed += 1
     return renewed, revoked
+
+
+# ---------------------------------------------------------------------------
+# Free plan's "Scan Now" throttle (settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS)
+# ---------------------------------------------------------------------------
+
+def free_rescan_unlocks_at(connection: GmailConnection):
+    """When THIS connection's next "Scan Now" becomes available on the Free
+    plan, or `None` if one can run right now.
+
+    Pro is never throttled here — including an active Pro trial, which is
+    simply `user.plan == "pro"` (accounts.trials never introduces a third
+    plan value, see that module). Real-time sync already gives Pro standing
+    coverage; the throttle exists so Free can't reproduce that coverage for
+    free by mashing the same button the gmail_backfill cron already polls
+    every 15 minutes — see settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS's own
+    comment for why that would gut the entire paid axis.
+
+    Shared by `capture.views.gmail_rescan` (the server-side enforcement) and
+    `accounts.views._gmail_live_context` (the Settings card's disabled
+    button + unlock date), so the two can never quietly disagree about what
+    "throttled" means.
+    """
+    if connection.user.plan == "pro":
+        return None
+    last_scan = connection.rescan_completed_at or connection.rescan_requested_at
+    if last_scan is None:
+        return None
+    unlocks_at = last_scan + timedelta(days=settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS)
+    return unlocks_at if unlocks_at > timezone.now() else None
 
 
 # ---------------------------------------------------------------------------
