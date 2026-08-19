@@ -169,13 +169,17 @@ def _raw_balance(user) -> int:
     return total or 0
 
 
-#: The two `kind`s that count as "spend" for the burst guard and the
+#: The `kind`s that count as "spend" for the burst guard and the
 #: Settings usage line. Deliberately excludes `KIND_ADJUST`: a negative
 #: admin adjustment (correcting an earlier mistaken grant, say) is not the
 #: kind of activity the burst guard exists to catch, and letting it eat a
 #: student's daily allowance would be a founder-support action silently
 #: locking the student out of the chat they didn't overuse.
-_SPEND_KINDS = (CreditLedger.KIND_SPEND_CHAT, CreditLedger.KIND_SPEND_RESCAN)
+_SPEND_KINDS = (
+    CreditLedger.KIND_SPEND_CHAT,
+    CreditLedger.KIND_SPEND_RESCAN,
+    CreditLedger.KIND_SPEND_BRIEF,
+)
 
 #: `_SPEND_KINDS` plus `KIND_REFUND`, for the two usage counters below.
 #: `refund()` exists for exactly one shape of event: a spend that already

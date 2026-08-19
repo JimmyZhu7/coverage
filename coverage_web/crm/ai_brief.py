@@ -27,6 +27,20 @@ to read or copy.
 
 Returns `None` whenever `ai_extract.is_configured()` is False or the API
 call fails -- callers show a plain "not available" state, never an error.
+
+CREDIT METERING (docs/founder-decisions-2026-08-20.md §2b): this is a
+user-triggered model call behind a POST button, the same shape as an
+advisor chat message, so `crm/views.py::contact_ai_brief` meters it through
+`billing.credits` exactly the way `assistant/agent.py::run_turn` meters a
+chat turn -- `can_spend` checked BEFORE calling `generate_coffee_chat_brief`
+below, `spend` written only AFTER a successful (non-None) generation. This
+module itself never touches the ledger: the same separation
+`crm/ai_summary.py` keeps from `record_event`, so a prompt-building bug
+here can never accidentally double-charge or charge for nothing. There is
+no cache to hit -- unlike `crm/ai_summary.py`'s `ai_summary` /
+`ai_summary_generated_at` columns on `Contact`, a brief is never persisted,
+so every "Generate brief" / "Regenerate" click is a genuine live call and
+is charged exactly once per click that succeeds.
 """
 
 from __future__ import annotations
@@ -35,8 +49,55 @@ from directory.ai_extract import complete_text, is_configured
 from directory.classify import TARGET_BUCKETS
 from directory.models import Opportunity
 
+# billing.credits is imported lazily inside credit_block_notice, not at
+# module scope: this module has no other reason to depend on billing, and
+# the one call site (crm/views.py) already imports billing.credits itself
+# for can_spend/spend -- see that view for the actual metering.
+
 _MAX_TOUCHES = 6
 _MAX_NOTE_CHARS = 400
+
+#: Cost of one coffee-chat brief, in credits -- 1, the same anchor unit as
+#: a Haiku chat message (docs/credit-system-plan.md §1). Not read from
+#: CREDIT_PLANS: unlike message_cost, which varies by plan (Free Haiku vs
+#: Pro Sonnet), a brief always runs on the same cheap-tier call regardless
+#: of the student's plan (see generate_coffee_chat_brief), so its cost is a
+#: flat constant, not a per-plan lookup.
+BRIEF_COST = 1
+
+
+def credit_block_notice(user) -> str:
+    """The copy for a brief request stopped by the credit system, in the
+    same honest, no-error voice as `assistant/agent.py::_credit_block_notice`
+    -- reimplemented locally rather than imported from there, because
+    `assistant.agent` imports `assistant.tools`, which imports
+    `crm.views`, so importing it from here (crm.ai_brief, which crm.views
+    itself imports) would be a circular import.
+
+    Same two-reason split as the chat notice: a genuinely empty monthly
+    pool reads differently from the daily burst guard tripping while the
+    month's balance is still sitting there.
+    """
+    from billing import credits as billing_credits
+
+    plan = billing_credits.plan_config(user)["plan"]
+    label = "Pro" if plan == billing_credits.PRO else "Free"
+    if billing_credits.balance(user) > 0:
+        return (
+            f"That's today's credit limit on the {label} plan — a safety "
+            f"net, not your monthly total. It resets at midnight; your "
+            f"credits for the month are still there."
+        )
+    refill = billing_credits.next_refill_date(user)
+    upgrade = (
+        " Pro comes with three times the credits and a stronger model."
+        if label == "Free" else ""
+    )
+    return (
+        f"That's the last of this month's credits on the {label} plan. "
+        f"They refill on {refill:%-d %B} — Today, Network and Opportunities "
+        f"are all still there.{upgrade}"
+    )
 
 _PROMPT_HEADER = """You are helping a student prepare for a coffee chat / informational call with a recruiting contact. Use ONLY the facts given below -- never invent a fact about the contact, the firm, or prior conversations that isn't stated here. If you don't have enough information for a section, say so briefly rather than guessing.
 

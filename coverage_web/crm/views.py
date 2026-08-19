@@ -31,6 +31,8 @@ from django.views.decorators.http import require_POST
 
 from analytics.events import record_event
 from analytics.models import UserOpportunity
+from billing import credits as billing_credits
+from billing.models import CreditLedger
 from coverage_domain import cadence, scoring
 from coverage_domain.pipeline import CHANNELS, MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS
 from crm.forms import ChatDebriefForm, ContactForm
@@ -1372,13 +1374,34 @@ def contact_ai_brief(request: HttpRequest, pk: int) -> HttpResponse:
     browser "Reload," or a crawler following a link — only a deliberate
     click. Renders inline via htmx; the panel states plainly this is
     AI-drafted and unconfigured/failed cases show a plain unavailable
-    message rather than an error."""
+    message rather than an error.
+
+    CREDIT METERING (docs/founder-decisions-2026-08-20.md §2b), same shape
+    as `assistant/agent.py::run_turn`'s chat-turn metering: `can_spend`
+    checked once, before the model call, a hard stop rather than a mid-call
+    one; the debit fires only after `generate_coffee_chat_brief` actually
+    returns a brief, never on an unconfigured/failed call (that call is
+    free — nothing metered ran) and never twice for the same click. At
+    zero credits the panel renders the same honest notice the chat uses
+    (`ai_brief.credit_block_notice`), not a 500 and not a silent brief."""
     contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    if not billing_credits.can_spend(request.user, ai_brief.BRIEF_COST):
+        return render(request, "crm/_contact_ai_brief.html", {
+            "contact": contact,
+            "brief": None,
+            "requested": True,
+            "blocked": True,
+            "credit_notice": ai_brief.credit_block_notice(request.user),
+        })
     brief = ai_brief.generate_coffee_chat_brief(contact)
     if brief is not None:
         record_event("ai_brief_generated", user=request.user)
+        billing_credits.spend(
+            request.user, ai_brief.BRIEF_COST, CreditLedger.KIND_SPEND_BRIEF,
+            contact_id=contact.pk,
+        )
     return render(request, "crm/_contact_ai_brief.html",
-                  {"contact": contact, "brief": brief, "requested": True})
+                  {"contact": contact, "brief": brief, "requested": True, "blocked": False})
 
 
 @login_required

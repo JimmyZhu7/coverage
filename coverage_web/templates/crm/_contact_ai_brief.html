@@ -2,7 +2,9 @@
 Rendered two ways: inline (requested=False, brief=None) as the initial
 "Generate" prompt inside the contact-live panel's <details>, and as the
 htmx response after a POST to crm:contact_ai_brief (requested=True), where
-brief is either the drafted text or None (unconfigured/failed).
+brief is either the drafted text, or None with `blocked` telling apart the
+two reasons: out of credits (blocked=True, credit_notice set — see
+crm.ai_brief.credit_block_notice) vs unconfigured/failed (blocked=False).
 {% endcomment %}
 {% if not requested %}
   <p class="cd-ai-hint">A short prep note drafted from this contact's own history.</p>
@@ -23,6 +25,8 @@ brief is either the drafted text or None (unconfigured/failed).
     Regenerate
   </button>
   <span id="contact-ai-brief-loading" class="htmx-indicator cd-ai-loading">Drafting…</span>
+{% elif blocked %}
+  <p class="cd-ai-hint">{{ credit_notice }}</p>
 {% else %}
   <p class="cd-ai-hint">Brief unavailable right now.</p>
 {% endif %}

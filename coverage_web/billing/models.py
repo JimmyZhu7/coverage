@@ -8,12 +8,13 @@ history. At this scale, `Sum("delta")` over an indexed per-user queryset is
 microseconds, and the ledger itself IS the audit trail — every grant, every
 spend, every admin top-up is a row somebody can read back.
 
-Two metered AI surfaces spend from this ONE pool: `assistant/agent.py`
-("spend_chat", one row per student chat message) and
-`capture/gmail_residue.py` via `capture/gmail_live.py::run_rescan`
-("spend_rescan", one row per rescan's residue stage). Neither app owns
-credits — this app does, so a third metered surface is a new `kind`
-constant, not a new ledger.
+Three metered AI surfaces spend from this ONE pool: `assistant/agent.py`
+("spend_chat", one row per student chat message), `capture/gmail_residue.py`
+via `capture/gmail_live.py::run_rescan` ("spend_rescan", one row per
+rescan's residue stage), and `crm/views.py::contact_ai_brief`
+("spend_brief", one row per successfully generated coffee-chat brief).
+Neither app owns credits — this app does, so a new metered surface is a
+new `kind` constant, not a new ledger.
 
 Private zone, like every other per-user table — `coverage_web.tenancy`'s
 `PrivateModel` base, so `objects` refuses an unscoped query and the only
@@ -37,6 +38,13 @@ class CreditLedger(PrivateModel):
     KIND_GRANT = "grant"
     KIND_SPEND_CHAT = "spend_chat"
     KIND_SPEND_RESCAN = "spend_rescan"
+    # Added 2026-08-19 (docs/founder-decisions-2026-08-20.md §2b): the
+    # coffee-chat prep brief (`crm/ai_brief.py` via `complete_text`) is a
+    # user-triggered model call behind a POST button, same shape as
+    # `spend_chat`, so it joins the ledger's own metered surfaces rather
+    # than staying free. One row per successful generation, never on a
+    # failed/unconfigured call — see `crm/views.py::contact_ai_brief`.
+    KIND_SPEND_BRIEF = "spend_brief"
     KIND_ADJUST = "adjust"
     # A pay-as-you-go top-up (billing/stripe_gateway.py), distinct from
     # KIND_GRANT: a grant is the free monthly allowance every plan carries,
@@ -71,6 +79,7 @@ class CreditLedger(PrivateModel):
         (KIND_GRANT, "Monthly grant"),
         (KIND_SPEND_CHAT, "Chat message"),
         (KIND_SPEND_RESCAN, "Rescan residue classification"),
+        (KIND_SPEND_BRIEF, "Coffee-chat brief"),
         (KIND_ADJUST, "Admin adjustment"),
         (KIND_PURCHASE, "Credit top-up purchase"),
         (KIND_REFUND, "Refund of a failed turn"),
