@@ -21,7 +21,8 @@ from django.contrib.messages import get_messages
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.views import _deletion_receipt
+from accounts.services import _DELETE_ORDER
+from accounts.views import _DELETED_LABELS, _deletion_receipt
 from crm.models import Contact, Touch, UserFirm
 from directory.models import Firm
 
@@ -81,6 +82,36 @@ def test_only_non_zero_tables_are_named():
     assert "138 touches" in receipt
     assert "task" not in receipt
     assert "fit score" not in receipt
+
+
+def test_every_receipt_label_names_a_table_that_is_actually_deleted():
+    """Structural, not behavioural — the guard for a whole class of silent
+    drift.
+
+    `_deletion_receipt` reads its counts with `counts.get(key)`, so a label
+    naming a table `delete_user_and_data` no longer deletes renders NOTHING
+    and fails NOTHING. It is dead weight that looks alive. That is precisely
+    what happened to the `capture_events` entry when the BCC/forward capture
+    pipeline was retired on 2026-08-19: the model went, its key stopped
+    appearing in the counts dict, and the label sat in `_DELETED_LABELS`
+    describing a table that no longer existed until a settings-page audit
+    read the two lists side by side.
+
+    Asserting containment rather than equality is deliberate: `_DELETE_ORDER`
+    is allowed to sweep bookkeeping tables the goodbye receipt does not name
+    (`imports`, `product_events`), because a receipt is a list of what the
+    student would call their data, not a schema dump. The reverse — a label
+    for a table nothing deletes — is always a bug.
+    """
+    deleted_keys = {label for label, _model in _DELETE_ORDER}
+    labelled_keys = {key for key, _singular, _plural in _DELETED_LABELS}
+
+    orphans = labelled_keys - deleted_keys
+    assert not orphans, (
+        f"{sorted(orphans)} labelled in accounts.views._DELETED_LABELS but not "
+        "deleted by accounts.services._DELETE_ORDER — the receipt line can "
+        "never render. Remove the label, or add the table to _DELETE_ORDER."
+    )
 
 
 def test_a_wrong_confirmation_deletes_nothing(client, student):

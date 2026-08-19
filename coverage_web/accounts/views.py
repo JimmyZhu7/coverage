@@ -541,6 +541,15 @@ def signout_other_sessions(request):
 # Labels for the per-table counts `delete_user_and_data` returns, so the
 # goodbye flash is an itemised receipt rather than a reassuring sentence. Keyed
 # by the same names as services._DELETE_ORDER.
+#
+# A key here that services._DELETE_ORDER does not produce is DEAD, silently:
+# `_deletion_receipt` reads the counts with `counts.get(key)`, so the line can
+# never render and nothing fails loudly to say so. That is exactly how the
+# `capture_events` entry survived the BCC/forward capture pipeline's removal
+# (2026-08-19) — the model it named was gone, its key stopped appearing in the
+# counts dict, and the label sat here describing nothing. `test_delete_receipt.
+# test_every_receipt_label_names_a_table_that_is_actually_deleted` is the guard
+# that turns the next such drift into a failing test instead of dead weight.
 _DELETED_LABELS: list[tuple[str, str, str]] = [
     ("contacts", "contact", "contacts"),
     ("touches", "touch", "touches"),
@@ -548,7 +557,6 @@ _DELETED_LABELS: list[tuple[str, str, str]] = [
     ("user_opportunities", "tracked role", "tracked roles"),
     ("tasks", "task", "tasks"),
     ("chat_debriefs", "chat debrief", "chat debriefs"),
-    ("capture_events", "capture event", "capture events"),
     ("fit_scores", "fit score", "fit scores"),
 ]
 
