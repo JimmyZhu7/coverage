@@ -148,12 +148,25 @@ def _extract_response_text(api_response: dict) -> str:
 
 
 def _grounded(quote: str | None, source: str) -> bool:
-    """The model's quote must appear verbatim (whitespace-normalized) in the
-    source text -- the anti-hallucination guard. See `directory.ai_extract`'s
-    identical rule for why this is non-negotiable."""
+    """The model's quote must appear verbatim (whitespace- and case-
+    normalized) in the source text -- the anti-hallucination guard. See
+    `directory.ai_extract`'s identical rule for why this is non-negotiable.
+
+    Case-INSENSITIVE on purpose: a model asked to copy a quote "verbatim"
+    routinely still re-capitalizes the first letter of a sentence it's
+    quoting (a genuine, common model habit, not a hypothetical) -- "hey,
+    thanks" in the source becomes "Hey, thanks" in the quote. That is the
+    same text, and a case-sensitive check would reject it, silently
+    downgrading a real, correctly-grounded answer to "ambiguous" -- the
+    exact loss this module exists to prevent for text the deterministic
+    pass already couldn't classify. This does not weaken the guard against
+    a genuinely fabricated quote: it still must match every character of
+    the source (mod whitespace and case), so a quote with no real basis in
+    the text is rejected exactly as before.
+    """
     if not quote:
         return False
-    norm = lambda s: re.sub(r"\s+", " ", s).strip()
+    norm = lambda s: re.sub(r"\s+", " ", s).strip().casefold()
     return norm(quote) in norm(source)
 
 

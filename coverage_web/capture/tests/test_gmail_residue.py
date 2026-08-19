@@ -304,3 +304,32 @@ def test_max_threads_of_zero_makes_no_api_call_at_all(student):
     assert stats["residue_threads_seen"] == 1
     assert stats["residue_threads_processed"] == 0
     mocked.assert_not_called()
+
+
+class TestGrounded:
+    """`_grounded` is the anti-hallucination guard: a model-claimed quote
+    must appear verbatim in the source text before its outcome is trusted
+    at all. It already whitespace-normalizes both sides — this checks the
+    other axis, case.
+
+    A model asked to copy a quote "verbatim" routinely still normalizes
+    sentence-initial capitalization (a genuine LLM habit, not a contrived
+    edge case) — "hey, thanks so much" in the source becomes "Hey, thanks
+    so much" in the quote. That is still the same text; a case-SENSITIVE
+    substring check rejects it anyway, silently downgrading a real,
+    correctly-grounded genuine_reply to "ambiguous" and dropping it — the
+    exact outcome this whole module exists to avoid for text the
+    deterministic pass already couldn't classify.
+    """
+
+    def test_a_case_differing_quote_is_still_grounded(self):
+        source = "hey, thanks so much for reaching out! Let's find a time."
+        quote = "Hey, thanks so much for reaching out!"
+        assert gmail_residue._grounded(quote, source) is True
+
+    def test_a_quote_not_present_at_all_is_still_rejected(self):
+        # The relaxation must not turn into "anything goes" — a fabricated
+        # quote with no basis in the source stays rejected regardless of case.
+        source = "hey, thanks so much for reaching out! Let's find a time."
+        quote = "Sure, let's grab coffee next Tuesday at noon."
+        assert gmail_residue._grounded(quote, source) is False
