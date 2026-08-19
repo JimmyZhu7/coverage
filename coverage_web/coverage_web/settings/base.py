@@ -12,6 +12,7 @@ override only what differs. `DJANGO_SETTINGS_MODULE` selects which one loads;
 via `os.environ.setdefault`, so an already-set env var (CI, PaaS) always wins.
 """
 
+import hashlib
 from pathlib import Path
 
 import environ
@@ -258,6 +259,18 @@ DATABASES = {
         "DATABASE_URL",
         default="postgres://coverage:coverage@localhost:5432/coverage",
     ),
+}
+# Multiple git worktrees (background agents, most days) share this one local
+# Postgres server, and Django's default test-DB name ("test_<NAME>") doesn't
+# know that — two worktrees running pytest at once each drop-and-recreate
+# the SAME `test_coverage`, and whichever one loses the race sees mid-DDL
+# tables it didn't create: hundreds of spurious errors that look like a
+# suite-wide failure but are really just two test runs sharing one database.
+# Keying the name off BASE_DIR gives every worktree (a distinct checkout
+# path) its own test database automatically, with no env var an agent has
+# to remember to set.
+DATABASES["default"]["TEST"] = {
+    "NAME": f"test_coverage_{hashlib.sha1(str(BASE_DIR).encode()).hexdigest()[:10]}"
 }
 
 AUTH_PASSWORD_VALIDATORS = [
