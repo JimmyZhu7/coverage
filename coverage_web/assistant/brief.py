@@ -183,7 +183,16 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     # module promises everywhere else — Django's get_or_create retries its
     # own `get()` when the nested create hits that constraint, so the loser
     # quietly returns whichever text actually won the race.
-    row, _created = DailyBrief.all_objects.get_or_create(
+    #
+    # `.objects.for_user(user).get_or_create(user=user, ...)`, deliberately
+    # not the unscoped escape-hatch manager: assistant/tests/test_isolation.py
+    # bans that name outright anywhere in this package — this module has no
+    # legitimate cross-tenant reason to reach for it. `.for_user(user)`
+    # already scopes the `get()` half; `user=user` in the kwargs is what the
+    # `create()` half needs, since get_or_create builds the new row from its
+    # own kwargs/defaults, not from whatever filters happen to already be on
+    # the queryset.
+    row, _created = DailyBrief.objects.for_user(user).get_or_create(
         user=user, date=today, defaults={"text": text},
     )
     return row.text

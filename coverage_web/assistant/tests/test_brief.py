@@ -256,7 +256,7 @@ class _RaceClient:
 
     def create(self, **kwargs):
         self.requests.append(kwargs)
-        DailyBrief.all_objects.create(
+        DailyBrief.objects.for_user(self._user).create(
             user=self._user, date=self._date, text=self._winner_text,
         )
         return self._response
