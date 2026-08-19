@@ -197,6 +197,39 @@ services:
       - key: VAPID_CLAIM_EMAIL
         sync: false # contact address for VAPID's "sub" claim, no "mailto:" prefix
 
+  # ---- Weekly retention digest, once a week -----------------------------
+  # send_weekly_digest is safe to run with zero paid setup: unset EMAIL_URL
+  # (production.py's env.email_url default) prints the digest to this cron's
+  # own logs instead of actually sending, so nothing bounces and nothing
+  # costs money before a real SMTP relay is bought — see the command's
+  # docstring. Same fixed-UTC-hour reasoning as push alerts above: each
+  # recipient's own "this week" is computed from their stored timezone, so
+  # the wall-clock run time only shifts when in their day it lands, not
+  # which week. Monday so "what closes this week" reads as a week ahead,
+  # not a week already half gone.
+  - type: cron
+    name: coverage-weekly-digest
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 13 * * 1" # Monday 13:00 UTC = 9am US Eastern / 9pm Hong Kong
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py send_weekly_digest"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: DJANGO_SECRET_KEY
+      - key: DJANGO_ALLOWED_HOSTS
+        value: localhost
+      - key: EMAIL_URL
+        sync: false # unset = every digest prints to this cron's logs instead of sending
+
   # ---- Gmail Live watch renewal, once a day -----------------------------
   # Google's users.watch() registration expires after 7 days regardless of
   # activity — this keeps it alive. gmail_live.is_configured() no-ops the
