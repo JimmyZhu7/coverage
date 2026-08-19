@@ -154,6 +154,48 @@ def debrief(request: HttpRequest, pk: int) -> HttpResponse:
 
 @login_required
 @require_POST
+def daily_brief(request: HttpRequest) -> HttpResponse:
+    """Generate (or return) today's brief, for the htmx node crm/week.html
+    draws when nothing is cached yet.
+
+    WHY THIS ENDPOINT EXISTS. `crm.today.week` used to call
+    `assistant.brief.get_or_build` inline, which put a synchronous Anthropic
+    request on the Today page's own response. Measured: 55.7ms with the row
+    already present, 2079.9ms when the model took 2.0s — the latency landed
+    on the page almost exactly 1:1 — and `assistant.client`'s 45s timeout
+    made the worst case a 45-second Today page. It happened once per student
+    per day, on the FIRST load of the day, which is the morning one.
+
+    Now the page renders immediately and this fills the card in behind it.
+    The cost of the split is that this request recomputes the cockpit to get
+    the queue the prompt summarises; that is one extra background request per
+    student per day, against an interactive page in ~50ms instead of seconds.
+
+    POST for the reason `contact_ai_brief` gives: once ANTHROPIC_API_KEY is
+    set this can spend money, so it must never fire from a prefetch, a
+    reload, or a crawler. `get_or_build` is still the only writer and still
+    caps itself at one model call per student per calendar day, so even a
+    replayed POST costs nothing after the first.
+
+    Renders the same partial the page does. Returns it EMPTY (not an error)
+    when the feature is dark or there was nothing worth saying — the card
+    simply never appears, which is the behaviour this has always had.
+    """
+    from assistant.brief import get_or_build
+    from assistant.situation import build_situation
+
+    cockpit = _cockpit_context(request.user)
+    situation = build_situation(request.user)
+    text = get_or_build(
+        request.user,
+        cockpit.get("_actions_for_brief") or [],
+        situation=situation.get("events"),
+    )
+    return render(request, "crm/_daily_brief.html", {"daily_brief": text})
+
+
+@login_required
+@require_POST
 def debrief_dismiss(request: HttpRequest, pk: int) -> HttpResponse:
     """Skip this debrief. Re-renders the cockpit so the card disappears in
     place, like the other Today quick actions."""

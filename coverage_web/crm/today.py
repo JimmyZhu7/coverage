@@ -1000,30 +1000,43 @@ def week(request: HttpRequest) -> HttpResponse:
     the calendar, and recent activity. The commodity layer (directory stats)
     sits BELOW the queue — Today is the relationship page."""
     cockpit = _cockpit_context(request.user)
-    # See _cockpit_context's own comment on _actions_for_brief: this is the
-    # one place (the full page load, never the htmx partial refresh) where
-    # generating a brief is appropriate. assistant.brief never imports
-    # anything from crm — this app already imports FROM assistant
-    # (assistant.tools reads crm.today._build_actions), so the reverse
-    # import has to stay one-directional or the two apps import each other.
-    # assistant.situation is the same story: pure reads, no LLM, but it
-    # still only belongs on the full page load — see its own module
-    # docstring on why it isn't cached, and why it still must not fire from
-    # the htmx partial refresh (a bug here degrades gracefully to no cards,
-    # but it is a query cost the partial-refresh path has no business
+    # THE BRIEF IS NOT GENERATED HERE. It used to be, and that put a
+    # synchronous Anthropic call on the request path of the page students
+    # open every morning: measured, the model's latency landed on the
+    # response almost exactly 1:1 (55.7ms with the row already present,
+    # 2079.9ms when the reply took 2.0s), and `assistant.client`'s timeout
+    # means the worst case is a 45-SECOND Today page. Once per user per day,
+    # on the first load of the day — which is the morning load, i.e. the one
+    # that sets the whole day's impression of how fast this product is.
+    #
+    # So: render whatever is already cached (one indexed read, free), and
+    # let `crm.views.daily_brief` do the generating over htmx once the page
+    # is interactive. `is_pending` is what tells the template whether to draw
+    # the placeholder that fetches it — without that check a dark deploy (no
+    # API key) would render a spinner that never resolves.
+    #
+    # assistant.brief never imports anything from crm — this app already
+    # imports FROM assistant (assistant.tools reads crm.today._build_actions),
+    # so the reverse import has to stay one-directional or the two apps
+    # import each other. assistant.situation is the same story: pure reads,
+    # no LLM, but it still only belongs on the full page load — see its own
+    # module docstring on why it isn't cached, and why it still must not fire
+    # from the htmx partial refresh (a bug here degrades gracefully to no
+    # cards, but it is a query cost the partial-refresh path has no business
     # paying on every card click).
-    from assistant.brief import get_or_build as get_daily_brief
+    from assistant.brief import get_cached as get_cached_brief, is_pending as brief_pending
     from assistant.situation import build_situation
 
     situation = build_situation(request.user)
-    daily_brief = get_daily_brief(
-        request.user, cockpit.pop("_actions_for_brief"), situation=situation.get("events"),
-    )
+    cockpit.pop("_actions_for_brief", None)
+    daily_brief = get_cached_brief(request.user)
     return render(
         request,
         "crm/week.html",
         {**cockpit, **_dashboard_context(request.user),
          "daily_brief": daily_brief,
+         # Only when there is nothing cached AND the feature is live.
+         "daily_brief_pending": daily_brief is None and brief_pending(request.user),
          # Capped to 3 for the card strip — same number the brief's own
          # queue-card cap uses (assistant.brief.MAX_SITUATION_SUMMARIZED),
          # so the sentence above never references a 4th change nobody can

@@ -12,6 +12,10 @@ urlpatterns = [
     # The literal segment is declared first so the <int:pk> converter can't
     # shadow it.
     path("today/park-all/", views.today_park_all, name="today_park_all"),
+    # htmx: today's brief, generated off the page's own response so an LLM
+    # call can never sit in front of the morning load. POST because it can
+    # spend money — same rule as the contact AI endpoints below.
+    path("today/brief/", views.daily_brief, name="daily_brief"),
     path("today/<int:pk>/<str:verb>/", views.today_act, name="today_act"),
     # Post-chat debrief, keyed by the `chat` touch it belongs to (one
     # debrief per chat — see crm.models.ChatDebrief).

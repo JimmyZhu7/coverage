@@ -80,6 +80,33 @@ def _summarize_situation(events: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def get_cached(user) -> str | None:
+    """Today's brief IF it has already been generated, else None. Never calls
+    the model, never writes.
+
+    Exists so the Today page can render the brief when it is already there —
+    one indexed read — without the FIRST load of each day paying for the
+    generation inline. Measured: with the row present the page took 55.7ms,
+    and without it the model's latency landed on the response almost exactly
+    1:1 (a 2.0s reply made a 2079.9ms page). That first load is the morning
+    one, so the whole day's impression of the product's speed was being set
+    by the one request that had to wait for an LLM.
+
+    `crm.views.daily_brief` is the htmx endpoint that does the generating,
+    after the page is already interactive. See its docstring.
+    """
+    today = timezone.localdate()
+    row = DailyBrief.objects.for_user(user).filter(date=today).first()
+    return row.text if row is not None else None
+
+
+def is_pending(user) -> bool:
+    """Whether a brief could still be generated for today — i.e. the feature
+    is live and nothing has been written yet. False means the Today page must
+    not render a placeholder that would never resolve."""
+    return is_configured() and get_cached(user) is None
+
+
 def get_or_build(user, actions: list[dict], situation: list[dict] | None = None, *, client=None) -> str | None:
     """Today's brief. Returns None — never raises, never shows an error —
     if the feature is dark, there is nothing worth saying today, or

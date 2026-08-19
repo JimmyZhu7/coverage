@@ -66,32 +66,30 @@
     </div>
   {% endif %}
 
+  {% comment %}
+  Two states, and the page never blocks on either.
+
+  Already generated (every load after the first one each day): the card is
+  rendered straight from the stored row, no request, no model.
+
+  Not generated yet (the first load of the day): an empty node that fetches
+  it once the page is interactive. Generating it inline used to cost this
+  page the model's entire latency — 55.7ms with the row present against
+  2079.9ms when the reply took 2.0s, and up to the 45s client timeout in the
+  worst case — on precisely the load a student makes every morning.
+
+  POST, not GET, matching the rule the other paid endpoints in this app
+  follow (crm.views.contact_ai_brief): a request that can spend money must
+  never fire from a prefetch, a reload, or a crawler. `hx-headers` carries
+  the CSRF token the same way the Opportunities feed's own lazy loader does.
+  {% endcomment %}
   {% if daily_brief %}
-    {% comment %}
-    Generated at most once per calendar day (assistant.brief.get_or_build) —
-    the one habit loop Talk to Coverage otherwise lacks: everything else
-    about it requires remembering to go open it, and this is already on the
-    page opened every morning. Silent when it's dark (no key set) or there
-    was nothing worth saying today — never an empty card, never an error.
-    {% endcomment %}
-    <div class="daily-brief kin-reveal">
-      <div class="daily-brief-body">
-        <div class="daily-brief-head">
-          <span class="daily-brief-icon" aria-hidden="true">{% include "_logo.html" %}</span>
-          <span class="daily-brief-eyebrow"><span class="live-dot"></span> Today's move</span>
-        </div>
-        <p class="daily-brief-text">{{ daily_brief|chat_format }}</p>
-      </div>
-      {% comment %}
-      A real button, not a bare link — on a wide screen the sentence caps
-      at a readable 68ch and leaves the rest of the row to fill. Giving that
-      space to a proper CTA (vertically centered against the whole card, the
-      "text left / action right" split every dashboard on this app already
-      uses for its own header row) means the extra width does something
-      instead of just being background past the last word.
-      {% endcomment %}
-      <a class="daily-brief-link btn" href="{% url 'assistant:chat' %}">Talk about it <span aria-hidden="true">→</span></a>
-    </div>
+    {% include "crm/_daily_brief.html" %}
+  {% elif daily_brief_pending %}
+    <div hx-post="{% url 'crm:daily_brief' %}"
+         hx-trigger="load"
+         hx-swap="outerHTML"
+         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'></div>
   {% endif %}
 
   {% if situation_events %}
