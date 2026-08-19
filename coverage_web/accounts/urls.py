@@ -12,6 +12,9 @@ urlpatterns = [
     # server-side on every step and htmx re-fetches it as answers change.
     path("preview/", views.onboarding_preview_view, name="onboarding_preview"),
     path("import/", views.import_contacts, name="import"),
+    # The import summary's "Link to..." fix-up for a firm string that didn't
+    # match the directory — re-points a batch of contacts' firm FK.
+    path("import/link-firm/", views.import_link_firm, name="import_link_firm"),
     path("import/template/", views.import_template, name="import_template"),
     path("settings/", views.settings_view, name="settings"),
     # University autocomplete (datalist options) for the School field.

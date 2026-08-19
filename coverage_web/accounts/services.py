@@ -122,9 +122,55 @@ IMPORT_TEMPLATE_COLUMNS = ["name", "email", "firm", "role", "notes", "angle"]
 
 def _norm(text: str) -> str:
     """Lowercase and strip everything that isn't a letter or digit. Used
-    both for header matching and for building dedup / firm-match keys, so
-    'J.P. Morgan' and 'JPMorgan' collapse to the same token."""
+    both for header matching and for building dedup keys, so 'J.P. Morgan'
+    and 'JPMorgan' collapse to the same token."""
     return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+# Trailing legal-entity words stripped from a firm string before matching.
+# Deliberately narrow and deliberately trailing-only: stripping from the END
+# only, one recognized word at a time, is what keeps "Bain & Company" and
+# "Bain Capital" from ever colliding — "Company" is a suffix here, "Capital"
+# isn't, so it's never touched. Verified against the live directory (127
+# firms, zero collisions) in accounts/tests/test_accounts.py.
+_LEGAL_SUFFIXES = frozenset({
+    "inc", "llc", "llp", "ltd", "co", "company", "corp", "corporation",
+    "group", "holdings", "partners", "plc", "limited",
+})
+# '&' / 'and' / '+' all mean the same thing between a firm's two halves
+# ("Bain & Company" / "Bain and Company" / "Bain + Company"); once split into
+# tokens the joiner carries no identity, so it's dropped rather than kept.
+_JOINERS = frozenset({"and"})
+
+
+def normalize_firm_name(text: str) -> str:
+    """Normalize a firm name/string for matching against the directory —
+    the forgiving counterpart to `_norm` above, used ONLY for firm
+    resolution (header matching and dedup keys still use `_norm`).
+
+    Case-insensitive; '&'/'and'/'+' collapse to the same joiner and are then
+    dropped; punctuation is stripped; whitespace is collapsed; a trailing
+    run of legal-entity words (Inc, LLC, LLP, Ltd, Co, Company, Corp,
+    Corporation, Group, Holdings, Partners, Plc, Limited) is peeled off the
+    end, one word at a time, but never down to nothing.
+
+    Deterministic and cheap on purpose — a dict lookup, not a fuzzy-match
+    library (see `_firm_lookup`). The one thing it must never do is merge
+    two real, distinct firms: 'Bain & Company' normalizes to 'bain', 'Bain
+    Capital' normalizes to 'baincapital' — 'Capital' is not a legal suffix,
+    so the distinguishing word is never touched. Checked against every real
+    near-collision in the live directory (Bain & Company / Bain Capital,
+    J.P. Morgan / Morgan Stanley, McKinsey & Company, Rothschild & Co, and
+    every "... Partners" firm) with zero merges across all 127 firms.
+    """
+    if not text:
+        return ""
+    lowered = text.lower().replace("&", " and ").replace("+", " and ")
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", lowered)
+    tokens = [t for t in cleaned.split() if t and t not in _JOINERS]
+    while len(tokens) > 1 and tokens[-1] in _LEGAL_SUFFIXES:
+        tokens.pop()
+    return "".join(tokens)
 
 
 def _build_column_map(header: list[str]) -> dict[int, str]:
@@ -144,6 +190,17 @@ def _build_column_map(header: list[str]) -> dict[int, str]:
 
 
 @dataclass
+class UnmatchedFirmGroup:
+    """One firm string this import couldn't resolve, plus enough to offer a
+    fix: which contacts carry it (so the "Link to..." POST can re-point
+    exactly those rows) and a best-effort suggestion, when there is one."""
+    firm_text: str
+    count: int
+    contact_ids: list[int] = field(default_factory=list)
+    suggested_firm: Firm | None = None
+
+
+@dataclass
 class ImportResult:
     created: int = 0
     skipped_duplicate: int = 0
@@ -152,6 +209,13 @@ class ImportResult:
     total_rows: int = 0
     unmatched_columns: bool = False
     errors: list[str] = field(default_factory=list)
+    # Firm strings from THIS import's created contacts that didn't resolve
+    # to a directory Firm — one entry per distinct firm (grouped by the same
+    # forgiving key `normalize_firm_name` uses for matching, so "Foo Inc"
+    # and "foo inc." on two different rows land in one group). Not part of
+    # `as_stats()` for the same reason `created_contacts` isn't: it carries
+    # live contact ids and a Firm reference, not JSON-safe summary data.
+    unmatched_firms: list["UnmatchedFirmGroup"] = field(default_factory=list)
     # The actual `Contact` rows this parse created (with real pks — Postgres
     # returns them from `bulk_create`), not just the count. Not part of
     # `as_stats()` — that dict is what gets stored as JSON on an `Import`
@@ -173,16 +237,76 @@ class ImportResult:
             "skipped_empty": self.skipped_empty,
             "firm_matched": self.firm_matched,
             "total_rows": self.total_rows,
+            "unmatched_firm_groups": len(self.unmatched_firms),
         }
 
 
 def _firm_lookup() -> dict[str, Firm]:
-    """Normalized firm name AND slug -> Firm, for text->firm matching."""
+    """Normalized firm name/slug -> Firm, for text->firm matching. Built
+    once per import (not per row) — a plain dict lookup, so matching stays
+    O(1) per CSV row regardless of directory size.
+
+    Two keys per name/slug: the strict `_norm` form (kept so an exact,
+    already-normalized paste of the slug still hits) and the forgiving
+    `normalize_firm_name` form (handles '&'/'and'/'+' and a trailing legal
+    suffix — this is what fixes "Bain and Company" against a directory
+    entry of "Bain & Company"). Verified collision-free across the whole
+    directory in accounts/tests/test_accounts.py.
+    """
     lookup: dict[str, Firm] = {}
     for firm in Firm.objects.all():
-        lookup[_norm(firm.name)] = firm
-        lookup[_norm(firm.slug)] = firm
+        for key in (
+            _norm(firm.name),
+            _norm(firm.slug),
+            normalize_firm_name(firm.name),
+            normalize_firm_name(firm.slug),
+        ):
+            if key:
+                lookup.setdefault(key, firm)
     return lookup
+
+
+def _guess_firm(key: str, firms: dict[str, Firm]) -> Firm | None:
+    """A cheap, deterministic best-effort suggestion for a firm string that
+    didn't match anything exactly — used only to prefill the "Link to..."
+    select, never to auto-link. Fires only when `key` is an unambiguous
+    prefix/suffix of exactly one directory firm's normalized key (e.g. a CSV
+    firm string with a trailing word the directory entry doesn't carry, or
+    vice versa). No scoring, no fuzzy distance — genuinely ambiguous or
+    unrelated strings suggest nothing rather than guess wrong."""
+    if not key:
+        return None
+    candidates = {
+        firm for lookup_key, firm in firms.items()
+        if lookup_key != key and (lookup_key.startswith(key) or key.startswith(lookup_key))
+    }
+    return candidates.pop() if len(candidates) == 1 else None
+
+
+def _group_unmatched_firms(
+    contacts: list[Contact], firms: dict[str, Firm]
+) -> list[UnmatchedFirmGroup]:
+    """Group this import's firm-text-only contacts by their normalized firm
+    string, so two rows spelled slightly differently ('Foo Inc' / 'foo
+    inc.') land in one fix-up card instead of two."""
+    groups: dict[str, UnmatchedFirmGroup] = {}
+    for contact in contacts:
+        if contact.firm_id or not contact.firm_text:
+            continue
+        key = normalize_firm_name(contact.firm_text)
+        if not key:
+            continue
+        group = groups.get(key)
+        if group is None:
+            group = UnmatchedFirmGroup(
+                firm_text=contact.firm_text,
+                count=0,
+                suggested_firm=_guess_firm(key, firms),
+            )
+            groups[key] = group
+        group.count += 1
+        group.contact_ids.append(contact.pk)
+    return sorted(groups.values(), key=lambda g: g.firm_text.lower())
 
 
 def parse_contacts_csv(user, text: str) -> ImportResult:
@@ -245,7 +369,10 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
         if not name:
             name = email
 
-        matched_firm = firms.get(_norm(firm_raw)) if firm_raw else None
+        matched_firm = (
+            firms.get(normalize_firm_name(firm_raw)) or firms.get(_norm(firm_raw))
+            if firm_raw else None
+        )
 
         email_key = email.strip().lower()
         firm_token = _norm(matched_firm.name) if matched_firm else _norm(firm_raw)
@@ -296,6 +423,7 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
         Contact.all_objects.bulk_create(to_create)
         result.created = len(to_create)
         result.created_contacts = to_create
+        result.unmatched_firms = _group_unmatched_firms(to_create, firms)
     return result
 
 
@@ -339,6 +467,43 @@ def import_contacts(user, *, file_bytes: bytes, filename: str) -> ImportResult:
     gmail_live.backfill_new_contacts(user, result.created_contacts)
 
     return result
+
+
+def link_contacts_to_firm(user, contact_ids: list[int], firm_id) -> int:
+    """The import summary's "Link to..." fix-up: re-point a batch of the
+    user's own free-text-firm contacts at a real directory `Firm`, in one
+    POST. Tenant-scoped through `.for_user` — structurally cannot touch
+    another user's rows even if a stray id leaked into the form.
+
+    `firm_text` is cleared once linked, matching the invariant the rest of
+    this module keeps: a contact with `firm_id` set carries the directory
+    name through `firm`, not a stale copy in `firm_text` (see
+    `_firm_label`). Leaving it in place is only correct for the OTHER
+    branch — unmatched and staying unmatched — where a name typed by hand
+    is still worth having.
+
+    Region is recomputed the same way `parse_contacts_csv` does for a fresh
+    import: `.update()` never calls `save()`, so a now-known, unambiguous
+    firm region has to be applied by hand or a contact linked here would
+    stay "unknown region" forever even though the firm answers it.
+    """
+    try:
+        firm = Firm.objects.get(pk=firm_id)
+    except (Firm.DoesNotExist, ValueError, TypeError):
+        return 0
+    contacts = list(Contact.objects.for_user(user).filter(pk__in=contact_ids))
+    if not contacts:
+        return 0
+    for contact in contacts:
+        contact.firm = firm
+        contact.firm_text = ""
+        if not contact.region:
+            contact.region = contact.default_region_from_firm()
+    Contact.all_objects.bulk_update(contacts, ["firm", "firm_text", "region"])
+    record_event(
+        "import_firm_linked", user=user, firm=firm.name, count=len(contacts)
+    )
+    return len(contacts)
 
 
 def import_template_csv() -> str:

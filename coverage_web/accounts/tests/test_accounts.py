@@ -301,6 +301,289 @@ def test_import_template_downloads(client, user):
 
 
 # ---------------------------------------------------------------------------
+# normalize_firm_name — the pure normalizer (B6: "Bain and Company" vs
+# "Bain & Company" silently failing to match)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "left,right",
+    [
+        ("Bain & Company", "Bain and Company"),
+        ("Bain & Company", "bain & company"),
+        ("Bain & Company", "Bain+Company"),
+        ("Goldman Sachs", "goldman sachs"),
+        ("Goldman Sachs", "GOLDMAN SACHS"),
+        ("Morgan Stanley & Co.", "Morgan Stanley"),
+        ("Morgan Stanley & Co", "Morgan Stanley"),
+        ("Rothschild & Co", "Rothschild and Co."),
+        ("McKinsey & Company", "McKinsey"),
+        ("J.P. Morgan", "JP Morgan"),
+        ("J.P. Morgan", "jp morgan"),
+        ("  Bain   &   Company  ", "Bain & Company"),
+    ],
+)
+def test_normalize_firm_name_treats_equivalent_spellings_as_equal(left, right):
+    assert services.normalize_firm_name(left) == services.normalize_firm_name(right)
+
+
+@pytest.mark.parametrize(
+    "left,right",
+    [
+        # The exact near-collision the bug report was built on: stripping
+        # "Company" as a legal suffix must never eat "Capital" too.
+        ("Bain & Company", "Bain Capital"),
+        ("Morgan Stanley", "J.P. Morgan"),
+        ("Goldman Sachs", "Goldman Sachs Asset Management"),
+        ("PJT Partners", "PJT Capital"),
+    ],
+)
+def test_normalize_firm_name_does_not_merge_distinct_firms(left, right):
+    assert services.normalize_firm_name(left) != services.normalize_firm_name(right)
+
+
+def test_normalize_firm_name_blank_is_blank():
+    assert services.normalize_firm_name("") == ""
+    assert services.normalize_firm_name(None) == ""
+
+
+def test_normalize_firm_name_never_strips_down_to_nothing():
+    # A firm whose entire name IS a suffix word (edge case, not a real
+    # directory entry) must not normalize to "".
+    assert services.normalize_firm_name("Group") == "group"
+    assert services.normalize_firm_name("Partners") == "partners"
+
+
+def test_normalize_firm_name_is_collision_free_across_the_live_directory(db):
+    """The strongest guarantee this function makes: run it over every real
+    firm in the directory and confirm no two distinct firms ever produce the
+    same key. Guards against a future suffix/joiner addition accidentally
+    merging two real firms (e.g. the ~10 "... Partners" firms in the
+    directory collapsing onto each other)."""
+    names = list(Firm.objects.values_list("name", flat=True))
+    if not names:
+        pytest.skip("directory not seeded in this test DB")
+    keys: dict[str, str] = {}
+    collisions = []
+    for name in names:
+        key = services.normalize_firm_name(name)
+        if key in keys and keys[key] != name:
+            collisions.append((keys[key], name, key))
+        keys.setdefault(key, name)
+    assert collisions == []
+
+
+# ---------------------------------------------------------------------------
+# Forgiving firm matching during import (B6)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def near_collision_firms(db):
+    """The real near-collision pair from the bug report, created directly
+    (not via the shared `firms` fixture) so these tests don't perturb the
+    firm-picker/onboarding tests that assume exactly gs/jpm exist."""
+    return {
+        "bain_co": Firm.objects.create(slug="bain", name="Bain & Company"),
+        "bain_cap": Firm.objects.create(slug="bain-capital", name="Bain Capital"),
+        "ms": Firm.objects.create(slug="morgan-stanley", name="Morgan Stanley"),
+        "gs": Firm.objects.create(slug="goldman-sachs", name="Goldman Sachs"),
+    }
+
+
+def test_import_matches_ampersand_firm_from_an_and_spelling(user, near_collision_firms):
+    result = services.parse_contacts_csv(
+        user, "name,firm\nAlex Consultant,Bain and Company\n"
+    )
+    assert result.created == 1
+    assert result.firm_matched == 1
+    contact = Contact.objects.for_user(user).get(name="Alex Consultant")
+    assert contact.firm_id == near_collision_firms["bain_co"].id
+    assert contact.firm_text == ""
+    assert result.unmatched_firms == []
+
+
+def test_import_matches_lowercase_and_trailing_legal_suffix(user, near_collision_firms):
+    result = services.parse_contacts_csv(
+        user,
+        "name,firm\n"
+        "Casey Analyst,goldman sachs\n"
+        "Drew Banker,Morgan Stanley & Co.\n",
+    )
+    assert result.created == 2
+    assert result.firm_matched == 2
+    casey = Contact.objects.for_user(user).get(name="Casey Analyst")
+    drew = Contact.objects.for_user(user).get(name="Drew Banker")
+    assert casey.firm_id == near_collision_firms["gs"].id
+    assert drew.firm_id == near_collision_firms["ms"].id
+
+
+def test_import_does_not_merge_bain_and_company_with_bain_capital(
+    user, near_collision_firms
+):
+    result = services.parse_contacts_csv(
+        user,
+        "name,firm\n"
+        "Pat Consultant,Bain and Company\n"
+        "Sam Investor,Bain Capital\n",
+    )
+    assert result.firm_matched == 2
+    pat = Contact.objects.for_user(user).get(name="Pat Consultant")
+    sam = Contact.objects.for_user(user).get(name="Sam Investor")
+    assert pat.firm_id == near_collision_firms["bain_co"].id
+    assert sam.firm_id == near_collision_firms["bain_cap"].id
+    assert pat.firm_id != sam.firm_id
+
+
+def test_import_reports_genuinely_unknown_firm_as_unmatched(user, near_collision_firms):
+    result = services.parse_contacts_csv(
+        user, "name,firm\nTaylor Unknown,Definitely Not A Real Fund LP\n"
+    )
+    assert result.created == 1
+    assert result.firm_matched == 0
+    assert len(result.unmatched_firms) == 1
+    group = result.unmatched_firms[0]
+    assert group.firm_text == "Definitely Not A Real Fund LP"
+    assert group.count == 1
+    contact = Contact.objects.for_user(user).get(name="Taylor Unknown")
+    assert group.contact_ids == [contact.pk]
+    assert group.suggested_firm is None
+
+
+def test_import_groups_unmatched_firm_variants_together(user, near_collision_firms):
+    """Two rows spelled slightly differently but normalizing the same way
+    land in one fix-up card, not two."""
+    result = services.parse_contacts_csv(
+        user,
+        "name,firm\n"
+        "One Person,Totally Unknown Fund\n"
+        "Two Person,totally unknown fund\n",
+    )
+    assert len(result.unmatched_firms) == 1
+    assert result.unmatched_firms[0].count == 2
+
+
+def test_import_verify_scenario_three_link_one_unmatched(user, near_collision_firms):
+    """The exact CSV from the bug walkthrough: three near-miss spellings
+    that should now match, and one genuinely unknown firm that shouldn't."""
+    csv_text = (
+        "name,email,firm\n"
+        "A One,a1@x.com,Bain and Company\n"
+        "A Two,a2@x.com,goldman sachs\n"
+        "A Three,a3@x.com,Morgan Stanley & Co.\n"
+        "A Four,a4@x.com,Definitely Not A Real Fund LP\n"
+    )
+    result = services.parse_contacts_csv(user, csv_text)
+    assert result.created == 4
+    assert result.firm_matched == 3
+    assert len(result.unmatched_firms) == 1
+    assert result.unmatched_firms[0].firm_text == "Definitely Not A Real Fund LP"
+
+
+# ---------------------------------------------------------------------------
+# link_contacts_to_firm — the unmatched-firm fix-up
+# ---------------------------------------------------------------------------
+def test_link_contacts_to_firm_repoints_firm_and_clears_firm_text(user, firms):
+    contact = Contact.all_objects.create(
+        user=user, name="Free Text Person", firm_text="Some Tiny Fund LP"
+    )
+    linked = services.link_contacts_to_firm(user, [contact.pk], firms["gs"].id)
+    assert linked == 1
+    contact.refresh_from_db()
+    assert contact.firm_id == firms["gs"].id
+    assert contact.firm_text == ""
+
+
+def test_link_contacts_to_firm_infers_region_from_the_linked_firm(user):
+    us_only_firm = Firm.objects.create(slug="us-only", name="US Only Firm", regions=["us"])
+    contact = Contact.all_objects.create(
+        user=user, name="Region Unknown", firm_text="US Only Firm Inc"
+    )
+    assert contact.region == ""
+    services.link_contacts_to_firm(user, [contact.pk], us_only_firm.id)
+    contact.refresh_from_db()
+    assert contact.region == "us"
+
+
+def test_link_contacts_to_firm_is_tenant_scoped(user, other_user, firms):
+    """A contact_id belonging to another user must never be re-pointed,
+    even if it leaked into the POST body (tampered form, stale page)."""
+    theirs = Contact.all_objects.create(
+        user=other_user, name="Not Yours", firm_text="Whatever Inc"
+    )
+    linked = services.link_contacts_to_firm(user, [theirs.pk], firms["gs"].id)
+    assert linked == 0
+    theirs.refresh_from_db()
+    assert theirs.firm_id is None
+    assert theirs.firm_text == "Whatever Inc"
+
+
+def test_link_contacts_to_firm_with_bad_firm_id_is_a_noop(user):
+    contact = Contact.all_objects.create(user=user, name="Someone", firm_text="X Corp")
+    assert services.link_contacts_to_firm(user, [contact.pk], 999999) == 0
+    assert services.link_contacts_to_firm(user, [contact.pk], "not-an-id") == 0
+    contact.refresh_from_db()
+    assert contact.firm_id is None
+
+
+def test_link_contacts_to_firm_records_event(user, firms):
+    contact = Contact.all_objects.create(user=user, name="Someone", firm_text="X Corp")
+    services.link_contacts_to_firm(user, [contact.pk], firms["gs"].id)
+    event = ProductEvent.all_objects.filter(user=user, event="import_firm_linked").first()
+    assert event is not None
+    assert event.props["firm"] == "Goldman Sachs"
+    assert event.props["count"] == 1
+
+
+def test_import_link_firm_view_links_and_redirects(client, user, firms):
+    contact = Contact.all_objects.create(
+        user=user, name="View Person", firm_text="Some Tiny Fund LP"
+    )
+    client.force_login(user)
+    resp = client.post(
+        reverse("accounts:import_link_firm"),
+        {"contact_id": [str(contact.pk)], "firm_id": str(firms["gs"].id)},
+    )
+    assert resp.status_code == 302
+    assert resp.url == reverse("accounts:import")
+    contact.refresh_from_db()
+    assert contact.firm_id == firms["gs"].id
+
+
+def test_import_link_firm_view_requires_login(client, firms):
+    resp = client.post(reverse("accounts:import_link_firm"), {"firm_id": firms["gs"].id})
+    assert resp.status_code in (302, 403)
+
+
+def test_import_link_firm_view_with_no_firm_chosen_does_not_crash(client, user):
+    contact = Contact.all_objects.create(user=user, name="Someone", firm_text="X Corp")
+    client.force_login(user)
+    resp = client.post(
+        reverse("accounts:import_link_firm"),
+        {"contact_id": [str(contact.pk)], "firm_id": ""},
+    )
+    assert resp.status_code == 302
+    contact.refresh_from_db()
+    assert contact.firm_id is None
+    assert contact.firm_text == "X Corp"
+
+
+def test_import_page_renders_unmatched_firms_with_link_controls(client, user, near_collision_firms):
+    client.force_login(user)
+    csv_text = "name,firm\nUnmatched Person,Definitely Not A Real Fund LP\n"
+    upload = _csv_upload(csv_text)
+    resp = client.post(reverse("accounts:import"), {"file": upload})
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert "Definitely Not A Real Fund LP" in body
+    assert "match the directory" in body
+    assert 'name="firm_id"' in body
+    assert 'name="contact_id"' in body
+
+
+def _csv_upload(text: str):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    return SimpleUploadedFile("contacts.csv", text.encode("utf-8"), content_type="text/csv")
+
+
+# ---------------------------------------------------------------------------
 # export
 # ---------------------------------------------------------------------------
 def test_export_contacts_returns_user_rows(client, user, other_user, firms):

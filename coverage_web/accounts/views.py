@@ -276,8 +276,43 @@ def import_contacts(request):
     return render(
         request,
         "accounts/import.html",
-        {"result": result, "from_onboarding": request.GET.get("from") == "welcome"},
+        {
+            "result": result,
+            "from_onboarding": request.GET.get("from") == "welcome",
+            # Only rendered when `result.unmatched_firms` is non-empty, but
+            # cheap enough (the whole directory, ~127 rows) to just always
+            # pass rather than special-case the query.
+            "all_firms": Firm.objects.all().order_by("name"),
+        },
     )
+
+
+@login_required
+@require_POST
+def import_link_firm(request):
+    """The import summary's "Link to..." fix-up. A plain redirect-after-POST
+    back to the (file-less) import page — the just-parsed `result` from the
+    upload that surfaced this group is gone either way once a new request
+    starts, so there is nothing to gain from re-rendering it inline, and a
+    redirect means a page refresh can't re-submit the link."""
+    contact_ids = [cid for cid in request.POST.getlist("contact_id") if cid.isdigit()]
+    firm_id = request.POST.get("firm_id")
+    target = reverse("accounts:import")
+    if request.GET.get("from") == "welcome" or request.POST.get("from") == "welcome":
+        target += "?from=welcome"
+    if not contact_ids or not firm_id:
+        messages.error(request, "Choose a firm to link.")
+        return redirect(target)
+    linked = services.link_contacts_to_firm(request.user, contact_ids, firm_id)
+    if linked:
+        firm_name = Firm.objects.filter(pk=firm_id).values_list("name", flat=True).first()
+        messages.success(
+            request,
+            f"Linked {linked} contact{'' if linked == 1 else 's'} to {firm_name}.",
+        )
+    else:
+        messages.error(request, "Couldn't link those contacts. Try again.")
+    return redirect(target)
 
 
 @login_required

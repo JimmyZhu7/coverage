@@ -36,6 +36,34 @@
     </div>
   {% endif %}
 
+  {% if result.unmatched_firms %}
+    <div class="panel">
+      {% if result.unmatched_firms|length == 1 %}
+        <h2 style="margin-top:0">1 firm didn't match the directory — link it?</h2>
+      {% else %}
+        <h2 style="margin-top:0">{{ result.unmatched_firms|length }} firms didn't match the directory — link them?</h2>
+      {% endif %}
+      <p class="muted">These contacts imported fine under the name you typed. Pick the real firm and every contact with that name updates at once.</p>
+      {% for group in result.unmatched_firms %}
+        <form method="post" action="{% url 'accounts:import_link_firm' %}{% if from_onboarding %}?from=welcome{% endif %}" class="unmatched-firm-row">
+          {% csrf_token %}
+          {% for cid in group.contact_ids %}
+            <input type="hidden" name="contact_id" value="{{ cid }}">
+          {% endfor %}
+          <span class="unmatched-firm-name">{{ group.firm_text }}</span>
+          <span class="muted">{{ group.count }} contact{{ group.count|pluralize }}</span>
+          <select name="firm_id">
+            <option value="">Don't link</option>
+            {% for firm in all_firms %}
+              <option value="{{ firm.id }}" {% if group.suggested_firm.id == firm.id %}selected{% endif %}>{{ firm.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-sm">Link</button>
+        </form>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   {% comment %}
   The `?from=welcome` flag rides along on the POST target. Without it the
   upload landed on a page that had forgotten it came from the wizard, so the
