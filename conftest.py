@@ -11,6 +11,26 @@ from __future__ import annotations
 import pytest
 
 
+def pytest_configure(config):
+    """Pin CONN_MAX_AGE to 0 for the whole suite.
+
+    `settings/base.py` turns on persistent database connections (default 60s)
+    because reconnecting per request costs a TCP+TLS handshake on every page
+    load in production. Django does NOT override that under test — a plain
+    `pytest.mark.django_db` test reads CONN_MAX_AGE as 60 — and a connection
+    still held open when a test finishes is precisely what makes teardown
+    fail with `database "test_coverage" is being accessed by other users`.
+
+    This hook runs before pytest-django creates the test database, so the
+    value is already 0 by the time any connection is opened. Production and
+    dev are unaffected.
+    """
+    from django.conf import settings
+
+    for alias in settings.DATABASES:
+        settings.DATABASES[alias]["CONN_MAX_AGE"] = 0
+
+
 @pytest.fixture(autouse=True)
 def _no_live_anthropic_calls(settings):
     """Blank `ANTHROPIC_API_KEY` for every test in the suite.

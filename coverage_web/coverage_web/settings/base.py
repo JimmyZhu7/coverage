@@ -273,6 +273,40 @@ DATABASES["default"]["TEST"] = {
     "NAME": f"test_coverage_{hashlib.sha1(str(BASE_DIR).encode()).hexdigest()[:10]}"
 }
 
+# ---------------------------------------------------------------------------
+# Persistent connections.
+#
+# Django's default is CONN_MAX_AGE=0: open a new Postgres connection at the
+# start of every request and close it at the end. Measured against the local
+# database (loopback, no TLS) that handshake costs a median 8.8ms while an
+# actual `SELECT 1` on an already-open connection costs 0.07ms — the setup is
+# ~125x the query. In production it is strictly worse: the connection crosses
+# a real network AND completes a TLS handshake, which is where the usual
+# 30-80ms figure for a managed Postgres comes from. That cost is paid once per
+# request, on every page, before any of the app's own work begins.
+#
+# SAFE HERE because the connection ceiling is small and known: the Dockerfile
+# runs gunicorn with `--workers 3` (sync workers, one request at a time each),
+# so the web service holds at most 3 connections, plus one per worker/cron
+# process — far inside even the smallest managed Postgres' limit.
+#
+# CONN_HEALTH_CHECKS is the pairing that makes reuse safe: Django pings a
+# pooled connection before handing it to a request, so one killed server-side
+# (a DB restart, an idle-timeout reaper) is transparently replaced rather than
+# surfacing as an InterfaceError on a user's page load.
+#
+# Forced back to 0 under pytest by the repo-root conftest.py — Django does
+# NOT do this itself (verified: CONN_MAX_AGE reads as 60 inside a test
+# without that hook), and a connection held open across tests is exactly what
+# makes teardown fail with "database is being accessed by other users".
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("DJANGO_CONN_MAX_AGE", default=60)
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+# Fail fast if the database is unreachable rather than tying up a gunicorn
+# worker for the OS-default TCP timeout (minutes) — the worker's own 60s
+# timeout would kill the request anyway, with less useful logging.
+DATABASES["default"].setdefault("OPTIONS", {})
+DATABASES["default"]["OPTIONS"].setdefault("connect_timeout", 5)
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
