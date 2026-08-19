@@ -8,7 +8,7 @@ from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
-from assistant import plans
+from billing import credits as billing_credits
 from directory.classify import TARGET_BUCKETS, TRACKED_REGIONS
 from directory.models import Firm, Opportunity
 
@@ -45,6 +45,24 @@ def home(request):
     )
 
 
+def _advisor_daily_cap(plan: str) -> int:
+    """The real number of chat turns a student on `plan` can send before
+    `billing.credits.can_spend`'s daily-burst guard cuts them off for the
+    day — NOT `assistant.plans.limits_for(...).daily_cap`, which stopped
+    being what gates a turn the moment the credit system
+    (docs/credit-system-plan.md) replaced it; `assistant/plans.py`'s own
+    docstring says so: "It no longer gates anything in agent.py." A message
+    costs `message_cost` credits, and `can_spend` blocks once today's spend
+    reaches `daily_burst`, so the real ceiling is that ratio's floor —
+    reading the stale `daily_cap` instead overstated Pro's real daily
+    allowance by 4x (60 shown vs. 45 // 3 = 15 actually enforced) once
+    Pro's message_cost rose above 1.
+    """
+    config = billing_credits.plan_config(SimpleNamespace(plan=plan))
+    cost = config["message_cost"]
+    return config["daily_burst"] // cost if cost > 0 else 0
+
+
 def pricing(request):
     """Pricing page. One real tier (free) and one honest preview (Pro).
 
@@ -69,10 +87,11 @@ def pricing(request):
             "sponsorship_count": campus.exclude(
                 sponsorship__in=["", "unknown"]).count(),
             # Same rule as the counts above — the advisor's per-plan caps are
-            # read from the one place that defines them (assistant/plans.py),
-            # never typed into the template.
-            "advisor_free_cap": plans.limits_for(SimpleNamespace(plan="free")).daily_cap,
-            "advisor_pro_cap": plans.limits_for(SimpleNamespace(plan="pro")).daily_cap,
+            # read from the credit system, the one place that actually
+            # enforces them today (see _advisor_daily_cap), never typed into
+            # the template.
+            "advisor_free_cap": _advisor_daily_cap("free"),
+            "advisor_pro_cap": _advisor_daily_cap("pro"),
         },
     )
 
