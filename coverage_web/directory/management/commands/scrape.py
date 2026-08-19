@@ -33,7 +33,8 @@ from directory.models import Firm
 # here still scrapes in the full pass but cannot be selected with --provider.
 _PROVIDERS = ("greenhouse", "lever", "workday", "oracle", "talnet", "sitemap",
               "mckinsey", "phenom", "goldmansachs", "talentgateway", "eightfold",
-              "beisen", "avature", "lumesse", "socgen", "talentsoft", "icims")
+              "beisen", "avature", "lumesse", "socgen", "talentsoft", "icims",
+              "successfactors")
 
 
 class Command(BaseCommand):

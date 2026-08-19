@@ -259,10 +259,26 @@ class AvatureBoard:
     provider: str = field(default="avature", init=False)
 
 
+@dataclass(frozen=True, slots=True)
+class SuccessFactorsBoard:
+    """A SAP SuccessFactors RMK career site's `/search/` page (see
+    successfactors.py). `origin` is the site's scheme+host (e.g.
+    "https://careers.ey.com"); `keywords` are the `q=` searches to run — one
+    request-walk each, deduped by posting URL, the same shape OracleBoard
+    uses, because RMK's `q=` is a relevance-ranked full-text search and no
+    single phrase covers "internship" and "trainee" on a global board. An
+    empty tuple walks the unfiltered board."""
+
+    firm: str
+    origin: str
+    keywords: tuple[str, ...] = ()
+    provider: str = field(default="successfactors", init=False)
+
+
 BoardConfig = (
     GreenhouseBoard | LeverBoard | WorkdayBoard | OracleBoard | TalnetBoard | SitemapBoard
     | McKinseyBoard | PhenomBoard | GoldmanSachsBoard | TalentGatewayBoard | EightfoldBoard
-    | BeisenBoard | AvatureBoard
+    | BeisenBoard | AvatureBoard | SuccessFactorsBoard
 )
 
 
