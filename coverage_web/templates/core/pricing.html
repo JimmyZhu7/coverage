@@ -6,6 +6,26 @@
 <style>
   /* ---- Pricing-page-only styles ------------------------------------------- */
 
+  /* ---- One icon family for the whole page ----------------------------------
+     Three marks used to appear here and they did not agree with each other:
+     a white check inside a filled navy disc (Free), a white minus inside a
+     filled grey disc (Pro), and a bare en-dash character (the table). Two
+     different metaphors, three different optical weights, and eight filled
+     discs stacked down a card read as a column of blobs rather than a list.
+
+     Now there is one check and one dash, drawn on the same 16px grid at the
+     same 1.9 stroke with the same round caps, so the dash is literally the
+     check's geometric opposite rather than a different idea. They are
+     rendered as MASKS, not as coloured SVGs: the shape is defined once and
+     the colour comes from `background`, which is what lets the same glyph
+     say "live" in --accent and "pending" in --ink-3 without a second asset
+     and without a colour baked into a data URI where dark mode cannot
+     reach it. */
+  .aud, .price-compare {
+    --icon-check: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.3 8.5l3.1 3.2 6.3-7.1" fill="none" stroke="black" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    --icon-dash: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.6 8h8.8" fill="none" stroke="black" stroke-width="1.9" stroke-linecap="round"/></svg>');
+  }
+
   /* Audience switcher: CSS-only segmented control (hidden radios + labels).
      The checked radio shows its panel via sibling selectors; no JS, and with
      CSS off both panels simply render stacked. */
@@ -81,14 +101,17 @@
     font-family: var(--font-mono); font-size: var(--fs-xs);
     color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .plan-features li::before { content: ""; position: absolute; left: 0; top: 4px;
-    width: 14px; height: 14px;
-    border-radius: 50%;
-    background:
-      no-repeat center / 8px url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M1.5 5.5l2.2 2.2L8.5 2.5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'),
-      var(--accent); }
-  .price-card.preview .plan-features li::before { background:
-      no-repeat center / 8px url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M2 5h6" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>'),
-      var(--ink-3); }
+    width: 16px; height: 16px; background: var(--accent);
+    -webkit-mask: var(--icon-check) no-repeat center / 16px;
+    mask: var(--icon-check) no-repeat center / 16px; }
+  /* Pro's items are things Pro HAS; the "In the works" badge at the head of
+     the card already says the tier itself is unbuilt, and the comparison
+     table makes exactly this argument for its own Pro column ("per-cell
+     badges would say the same thing sixteen times"). So Pro keeps the
+     check and drops to the muted ink: same glyph, one step back in
+     weight. The old filled minus-in-a-circle was a second metaphor
+     saying "excluded", which is not what a Pro feature is. */
+  .price-card.preview .plan-features li::before { background: var(--ink-3); }
   .plan-cta { margin-top: auto; }
   .plan-cta .btn { width: 100%; justify-content: center; display: inline-flex; }
   .plan-note { font-size: var(--fs-xs); color: var(--ink-3);
@@ -151,15 +174,21 @@
     padding: var(--s4) var(--s2) var(--s2); width: auto; }
   .cmp tbody tr:hover td.cmp-group { background-color: transparent; }
 
-  /* Three cell states, no fourth. */
-  .cmp-yes { display: inline-block; width: 16px; height: 16px;
-    border-radius: 50%;
-    background:
-      no-repeat center / 9px url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M1.5 5.5l2.2 2.2L8.5 2.5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'),
-      var(--accent); }
+  /* Three cell states, no fourth. The check and the dash are the same pair
+     the cards use, at the same 16px, so a visitor's eye carries one meaning
+     from the cards down into the table. The en-dash inside .cmp-no stays in
+     the markup as the no-CSS fallback and is masked over here; the cell's
+     aria-label is what actually carries the meaning either way. */
+  .cmp-yes, .cmp-no { display: inline-block; width: 16px; height: 16px;
+    vertical-align: middle; }
+  .cmp-yes { background: var(--accent);
+    -webkit-mask: var(--icon-check) no-repeat center / 16px;
+    mask: var(--icon-check) no-repeat center / 16px; }
+  .cmp-no { font-size: 0; background: var(--ink-3);
+    -webkit-mask: var(--icon-dash) no-repeat center / 16px;
+    mask: var(--icon-dash) no-repeat center / 16px; }
   .cmp-val { font-family: var(--font-mono); font-size: var(--fs-xs);
     color: var(--ink); font-variant-numeric: tabular-nums; }
-  .cmp-no { color: var(--ink-3); }
   /* One "In the works" marker for the whole Pro column. Per-cell badges would
      say the same thing sixteen times and make the table look unfinished; the
      tier itself is unlaunched, so stating it once at the head is both
