@@ -20,13 +20,15 @@ this partial and the full-page view both call, so they can never drift).
 <div id="apps-body">
 {% comment %}
 The bulk-save undo offer. Shown exactly once, right after `track_eligible`
-redirects here — `_my_applications_context` POPS the session batch, so a
-second load of this page (a refresh, a stage-change swap) never shows it
-again, the same one-shot lifetime a flash message gets. Its own form posts
-to `track_eligible_undo`, which only ever removes the ids THIS batch
-created and only if they are still untouched in Saved — a role the student
-has since moved forward, or dismissed, survives even if it was in the
-batch.
+redirects here — `_my_applications_context` flags the session batch
+"shown" on this very render (NOT pop: the Undo button below still needs to
+submit against it), so a second load of this page (a refresh, a
+stage-change swap) never shows it again, the same one-shot lifetime a
+flash message gets. Its own form posts to `track_eligible_undo`, which
+reads the same session key regardless of the "shown" flag, only ever
+removes the ids THIS batch created, and only if they are still untouched
+in Saved — a role the student has since moved forward, or dismissed,
+survives even if it was in the batch.
 {% endcomment %}
 {% if recent_bulk_save %}
   <div class="apps-undo" role="status">
