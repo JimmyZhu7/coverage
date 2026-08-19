@@ -519,6 +519,8 @@
       <a href="#pace">Weekly Pace</a>
       <p class="settings-nav-group">Notifications</p>
       <a href="#notifications">Notifications</a>
+      <p class="settings-nav-group">Plan &amp; Credits</p>
+      <a href="#credits">Credits</a>
       {% if gmail_live.available %}
       <p class="settings-nav-group">Gmail Live</p>
       <a href="#gmail-live">Gmail Live</a>
@@ -1042,6 +1044,35 @@
       <script src="{% static 'js/push-subscribe.js' %}" defer></script>
 
 
+      {# ---- Credits ---- #}
+      {% comment %}
+      docs/credit-system-plan.md §6: "show the meter" — the composer's own
+      quiet line is the other half of this (templates/assistant/_thread.html).
+      Always rendered, unlike Gmail Live below: every account has a plan and
+      a balance whether or not Gmail Live is even configured on this deploy.
+      {% endcomment %}
+      <section class="set-card kin-reveal" id="credits" style="--i:8"
+               aria-labelledby="credits-h">
+        <div class="set-head">
+          <h2 id="credits-h">Credits</h2>
+          <p>What powers the advisor chat and Gmail rescans.</p>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">{{ credits.plan_label }} Plan</span>
+              <div class="set-row-desc">
+                {{ credits.monthly_grant }} credits refill {{ credits.refill_date|date:"j F" }}.
+                Used {{ credits.month_usage }} so far this month.
+              </div>
+            </div>
+            <div class="set-row-control">
+              <span class="set-row-value">{{ credits.balance }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {% if gmail_live.available %}
       {% comment %}
       docs/build-plan.md §5's "v2" — a real Gmail connection, separate from
@@ -1135,6 +1166,11 @@
                   Last scan hit a snag — it'll retry automatically.
                 {% elif gmail_live.rescan_status == "done" %}
                   Last scan {{ gmail_live.rescan_completed_at|timesince }} ago — {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize }} logged.
+                  {% with residue=gmail_live.rescan_stats.residue %}
+                    {% if residue.credit_limited %}
+                      {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look; credits covered {{ residue.residue_threads_processed }} of them — the rest stay unclassified until credits refill.
+                    {% endif %}
+                  {% endwith %}
                 {% else %}
                   Re-check your whole Gmail history against all of your contacts.
                 {% endif %}

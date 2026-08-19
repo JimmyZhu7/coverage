@@ -72,14 +72,18 @@ class UserAdmin(DjangoUserAdmin):
         ),
         (
             # No billing writes this yet (no payment processor in the
-            # codebase) — admin IS the billing system for now. Only the
-            # advisor page reads it: assistant/plans.py.
+            # codebase) — admin IS the billing system for now. The advisor
+            # page (assistant/plans.py) and the credit ledger
+            # (billing/credits.py, billing/admin.py — grant or adjust a
+            # student's balance there) both read it.
             "Plan",
             {
                 "fields": ("plan",),
                 "description": (
-                    "Free: Haiku, 15 advisor messages a day. Pro: Sonnet, 60 a day. "
-                    "Set by hand until Stripe exists."
+                    "Free: Haiku, 60 credits/month (60 messages, or mix with rescans). "
+                    "Pro: Sonnet, 180 credits/month (60 messages at 3 credits each). "
+                    "Set by hand until Stripe exists — see the Credit Ledger admin to "
+                    "grant or adjust a student's balance directly."
                 ),
             },
         ),

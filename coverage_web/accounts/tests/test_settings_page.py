@@ -72,6 +72,10 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
         # comment on that block for why they share a card but not a save
         # path.
         "notifications",
+        # Credits (docs/credit-system-plan.md §6): always rendered, unlike
+        # Gmail Live below it, which only shows up once GMAIL_LIVE_* is
+        # configured — every account has a plan and a balance regardless.
+        "credits",
         "security", "data", "legal", "danger",
     }
 

@@ -24,6 +24,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from analytics.events import record_event
+from billing import credits as billing_credits
 from capture import gmail_live
 from capture.models import GmailConnection
 from crm.models import Contact, UserFirm
@@ -295,6 +296,21 @@ def _gmail_live_context(user) -> dict:
     }
 
 
+def _credits_context(user) -> dict:
+    """Settings' own credit meter (docs/credit-system-plan.md §6 — the
+    other half of "show the meter", alongside the chat composer's). Cheap
+    enough to compute on every settings render, same posture as
+    `_gmail_live_context` right above it."""
+    plan = billing_credits.plan_config(user)
+    return {
+        "balance": billing_credits.balance(user),
+        "plan_label": "Pro" if plan["plan"] == billing_credits.PRO else "Free",
+        "monthly_grant": plan["monthly_grant"],
+        "month_usage": billing_credits.month_usage(user),
+        "refill_date": billing_credits.next_refill_date(user),
+    }
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def settings_view(request):
@@ -373,6 +389,7 @@ def settings_view(request):
             # while you pick.
             "cycle_months": _cycle_months(),
             "gmail_live": _gmail_live_context(request.user),
+            "credits": _credits_context(request.user),
             "target_firm_count": UserFirm.objects.for_user(request.user).count(),
             "contact_count": contact_count,
             # Split out rather than folded in: "Contacts: 137" counted archived
