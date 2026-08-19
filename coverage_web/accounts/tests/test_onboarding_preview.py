@@ -225,6 +225,25 @@ def test_work_step_counts_a_firm_policy_answer_in_its_own_bar(db):
     assert preview["answered"] == 1  # firm policy counts as answered
 
 
+def test_work_step_names_the_four_states_honestly(client, user, world):
+    """docs/founder-decisions-2026-08-20.md, Decision 3: the bars are labelled
+    by WHO said what (posting vs firm), and the footnote states the honest
+    ceiling rather than promising an answer most postings never give."""
+    user.regions = ["us"]
+    user.tracks = ["ib"]
+    user.save()
+    client.force_login(user)
+
+    body = _get(client, "work_auth", live="1", work_auth_us="sponsorship").content.decode()
+    assert "Posting says yes" in body
+    assert "Posting says no" in body
+    assert "Firm policy known" in body
+    assert "Not stated" in body
+    assert ("Most postings never say. Coverage shows you the ones that do, "
+            "tells you when it is the firm's policy rather than the posting, "
+            "and scores the rest as neutral, never as a guess.") in " ".join(body.split())
+
+
 def test_work_step_reads_the_saved_profile_not_an_empty_one(client, user, world):
     """REGRESSION. `live=1` used to be read as a global flag, so on this step
     — whose form carries no region or track inputs — the profile filters came

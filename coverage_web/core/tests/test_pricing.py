@@ -176,6 +176,16 @@ def test_free_card_no_longer_claims_gmail_live(client):
 
 
 @pytest.mark.django_db
+def test_free_bullet_names_the_unstated_majority_honestly(client):
+    """docs/founder-decisions-2026-08-20.md, Decision 3: the sponsorship
+    bullet must not stop at the answered count — it has to say what happens
+    to everything else, or "outright" reads as the whole story."""
+    body = " ".join(client.get("/pricing/").content.decode().split())
+    assert ("roles answering sponsorship outright and the rest marked "
+            "not stated, never guessed") in body
+
+
+@pytest.mark.django_db
 def test_supporting_copy_agrees_with_the_rebalanced_story(client):
     """Hero and FAQ are part of the pitch and must not contradict the cards."""
     body = client.get("/pricing/").content.decode()
