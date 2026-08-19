@@ -196,7 +196,7 @@
   <header class="kin-hero">
     <span class="kin-hero-icon">{% include "_icon.html" with name="home" %}</span>
     <p class="kin-hero-eyebrow">Pricing</p>
-    <h1 class="kin-hero-title">The board is free. The engine is Pro.</h1>
+    <h1 class="kin-hero-title">The board is free. The sync is Pro.</h1>
     <p class="kin-hero-sub">Every listing, every deadline, free for everyone.
       Pro adds sync, speed, and a stronger advisor.</p>
   </header>
@@ -249,7 +249,7 @@
         <article class="price-card preview kin-reveal" style="--i:1">
           <span class="plan-badge soon">In the works</span>
           <h2 class="plan-name">Pro</h2>
-          <p class="plan-tagline">For the heaviest recruiting seasons.</p>
+          <p class="plan-tagline">For when the replies start coming in.</p>
           <p class="plan-price"><span class="amount">$69</span><span class="per">one cycle, ~6 months</span></p>
           <p class="plan-includes">Everything in Free, plus</p>
           <ul class="plan-features">
@@ -259,12 +259,16 @@
             burst, so both plans compute to the same 15 a day today. The 3x
             is real in the monthly grant (60 vs 180) and nowhere else, so
             that is the only multiple this card is allowed to claim.
+
+            Gmail Live goes first (2026-08-20 reorder, founder-decisions
+            §2d): it is the anchor now, not a footnote after the advisor
+            bullet.
             {% endcomment %}
+            <li>Gmail Live: real-time sync that logs itself. Calendar sync too,
+              only if you connect it.</li>
             <li>Talk to Coverage on a stronger model, with sharper judgement
               on where your week should go.
               Three times the credits: {{ advisor_pro_grant }} a month.</li>
-            <li>Gmail Live: real-time sync that logs itself. Calendar sync too,
-              only if you connect it.</li>
             <li>Hourly refresh on your Tier 1 firms, instead of every six hours</li>
             <li>LinkedIn contact import</li>
             <li>Multi-cycle archive of past seasons</li>
@@ -422,17 +426,36 @@
         <article class="price-card kin-reveal" style="--i:0">
           <span class="plan-badge soon">In the works</span>
           <h2 class="plan-name">Team</h2>
-          <p class="plan-tagline">For finance societies and student clubs running recruiting together.</p>
-          <p class="plan-price"><span class="amount">$249</span><span class="per">per year, flat &middot; up to 25 seats</span></p>
-          <p class="plan-includes">Everything in Pro, plus</p>
+          {% comment %}
+          Rewritten 2026-08-20 (founder-decisions §1): Team is a flat club
+          workspace on top of Free accounts. Pro seats are bought at the
+          individual price, club-billed, never pooled or discounted — the
+          $249/"everything in Pro" version sold $1,080/yr of worst-case
+          model spend for $249. See that doc for the full numbers.
+          {% endcomment %}
+          <p class="plan-tagline">Every member joins free; the club pays
+            $299 a year for the shared coverage board, and Pro seats cost
+            the same $69 a cycle whether the club buys one or twenty.</p>
+          <p class="plan-price"><span class="amount">$299</span><span class="per">per year, flat &middot; up to 25 members</span></p>
+          <p class="plan-includes">Every member on Free, plus</p>
           <ul class="plan-features">
             <li>Shared firm tiers and a club-wide coverage board</li>
             <li>See which firms your members already reach</li>
-            <li>Member seats managed by club officers, no per-seat billing</li>
-            <li>A shared calendar of every tracked deadline</li>
+            <li>Member seats managed by club officers, no per-seat billing
+              for the board</li>
+            <li>Pro for the people running outreach: $69 a cycle per seat, billed to the club</li>
           </ul>
+          <p class="plan-note">26&ndash;60 members: $599/year. First 5
+            founding clubs: the workspace is free for year one.</p>
           <div class="plan-cta">
-            <a class="btn" aria-disabled="true">Coming Soon</a>
+            {% comment %}
+            Hook for the waitlist control. Another agent is adding a
+            "Notify me when Pro opens" mechanic to the Pro card in this same
+            file (tagged "pro") — reuse that same component here, tagged
+            "team", instead of building a second waitlist path. Left as a
+            plain anchor until that component lands.
+            {% endcomment %}
+            <a class="btn" href="#notify" aria-disabled="true">Run a club? Notify me</a>
           </div>
         </article>
 

@@ -180,7 +180,10 @@ def test_supporting_copy_agrees_with_the_rebalanced_story(client):
     """Hero and FAQ are part of the pitch and must not contradict the cards."""
     body = client.get("/pricing/").content.decode()
 
-    assert "The board is free. The engine is Pro." in body
+    # 2026-08-20 lead sentence (founder-decisions-2026-08-20.md §2d): Pro's
+    # anchor is the sync, not a vague "engine".
+    assert "The board is free. The sync is Pro." in body
+    assert "The board is free. The engine is Pro." not in body
     assert "Free while we earn the right to charge." not in body
     assert "The whole board. No card, no trial clock." in body
 
@@ -189,3 +192,39 @@ def test_supporting_copy_agrees_with_the_rebalanced_story(client):
     assert "the Today queue and the Network board." in body
     assert "Everything listed in Free today stays in Free" not in body
     assert "This list is the floor. Free may grow; it will not shrink." in body
+
+
+@pytest.mark.django_db
+def test_pro_card_gmail_live_first_with_new_tagline(client):
+    """2026-08-20 (founder-decisions §1/§2d): Gmail Live anchors the Pro
+    card now, and the tagline names the moment Pro is for."""
+    body = client.get("/pricing/").content.decode()
+
+    assert "For when the replies start coming in." in body
+    assert "For the heaviest recruiting seasons." not in body
+
+    pro_card = re.search(
+        r'<article class="price-card preview.*?</article>', body, re.S
+    ).group(0)
+    gmail_idx = pro_card.index("Gmail Live: real-time sync")
+    advisor_idx = pro_card.index("Talk to Coverage on a stronger model")
+    assert gmail_idx < advisor_idx, "Gmail Live must be the first Pro bullet"
+
+
+@pytest.mark.django_db
+def test_team_card_matches_the_rebalanced_club_economics(client):
+    """2026-08-20 (founder-decisions §1): Team is a flat club workspace on
+    top of Free accounts; Pro seats are bought at the individual price,
+    club-billed, never pooled or discounted. Guards against the old
+    $249/"everything in Pro" model creeping back in."""
+    body = client.get("/pricing/").content.decode()
+
+    assert "$249" not in body
+    assert "$299" in body
+    assert "up to 25 members" in body
+    assert "Every member on Free, plus" in body
+    assert "Everything in Pro, plus" not in body
+    assert "$69 a cycle per seat, billed to the club" in body
+    assert "$599/year" in body
+    assert "founding clubs" in body
+    assert "Run a club? Notify me" in body
