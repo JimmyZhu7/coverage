@@ -93,6 +93,68 @@ def test_pricing_grants_and_caps_track_a_changed_credit_plan_config(client):
 
 
 @pytest.mark.django_db
+@override_settings(CREDIT_PLANS=_CREDIT_PLANS)
+def test_comparison_table_renders_every_row_in_both_columns(client):
+    """Sixteen feature rows in four groups, three cells each.
+
+    Counted rather than spot-checked: a comparison table that silently loses
+    a row is the failure mode that matters here, and it is invisible to a
+    test that only asserts a handful of labels exist.
+    """
+    body = client.get("/pricing/").content.decode()
+
+    table = re.search(r'<table class="cmp">.*?</table>', body, re.S)
+    assert table, "the side-by-side table should render inside the Individual panel"
+    table = table.group(0)
+
+    for group in ("The board", "The CRM", "The advisor", "Your data"):
+        assert f'<td class="cmp-group" colspan="3">{group}</td>' in table
+
+    rows = re.findall(r"<tr>(.*?)</tr>", table, re.S)
+    feature_rows = [r for r in rows if "cmp-group" not in r and "<th" not in r]
+    assert len(feature_rows) == 16, (
+        f"the spec calls for exactly 16 feature rows, found {len(feature_rows)}"
+    )
+    for row in feature_rows:
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+        assert len(cells) == 3, f"every feature row needs label + Free + Pro: {row!r}"
+        for state in cells[1:]:
+            assert (
+                "cmp-yes" in state or "cmp-no" in state or "cmp-val" in state
+            ), f"a plan cell must be a check, a dash, or a value: {state!r}"
+
+    # The two states the page uses to say "this is where Pro differs".
+    assert table.count('class="cmp-no"') == 3, (
+        "exactly three rows are Pro-only: Gmail Live, Calendar sync, LinkedIn import"
+    )
+    assert "Gmail scan on demand" in table, "the free on-demand scan stays on the board"
+    assert "Every 6 hours" in table and "Hourly on Tier 1" in table
+    assert "This cycle" in table and "Every cycle" in table
+    assert "Fast model" in table and "Stronger model" in table
+    assert 'class="cmp-badge">In the works</span>' in table, (
+        "one In-the-works marker on the Pro column header, and only one"
+    )
+    assert table.count("cmp-badge") == 1
+
+
+@pytest.mark.django_db
+@override_settings(CREDIT_PLANS=_CREDIT_PLANS)
+def test_comparison_table_credit_row_is_measured_not_typed(client):
+    """Row 13's two numbers are the context vars, not literals."""
+    body = client.get("/pricing/").content.decode()
+    table = re.search(r'<table class="cmp">.*?</table>', body, re.S).group(0)
+
+    row = re.search(
+        r"<tr>\s*<td>Credits a month, chat and Gmail AI scans</td>(.*?)</tr>",
+        table,
+        re.S,
+    )
+    assert row, "the credits row should exist under The advisor"
+    assert '<span class="cmp-val">60</span>' in row.group(1)
+    assert '<span class="cmp-val">180</span>' in row.group(1)
+
+
+@pytest.mark.django_db
 def test_free_card_no_longer_claims_gmail_live(client):
     """Move 1: real-time sync is the paid anchor; Free keeps the on-demand scan.
 

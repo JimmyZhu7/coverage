@@ -85,6 +85,73 @@
   .plan-note { font-size: var(--fs-xs); color: var(--ink-3);
     margin: var(--s2) 0 0; text-align: center; }
 
+  /* ---- Side-by-side comparison table ---------------------------------------
+     The cards are the pitch; this is the inventory. Deliberately NOT a boxed
+     grid: row separators on the bare page ground, one 4% accent wash down the
+     Pro column, and three cell states only (check, mono value, dash). A fully
+     ruled table with vertical lines reads like a settings screen, which is
+     the opposite of what a page a prospect judges the product by should do.
+
+     Every colour here resolves through a token, so the whole component
+     re-themes with the rest of the product — the accent wash is mixed FROM
+     --accent rather than hardcoded, which is why it survives the dark
+     palette's flip from deep navy to light blue. */
+  .price-compare { max-width: 860px; margin: 0 auto; }
+  .price-compare h2 { font: var(--w-black) 22px/1.2 var(--font-display);
+    letter-spacing: -0.01em; color: var(--ink); text-align: center;
+    margin: var(--s7) 0 var(--s4); }
+  /* Under 720px the table scrolls inside its own container instead of
+     squashing sixteen rows into a phone width. min-width is the contract
+     that makes the overflow actually happen. */
+  .cmp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cmp { width: 100%; max-width: 860px; min-width: 480px; margin: 0 auto;
+    border-collapse: collapse; }
+  .cmp td, .cmp th { border-bottom: 1px solid var(--line); }
+  .cmp th[scope="row"], .cmp td:first-child { text-align: left;
+    font-size: var(--fs-s); color: var(--ink-2); font-weight: var(--w-reg);
+    padding: var(--s3) var(--s2); }
+  .cmp thead th { font: var(--w-med) var(--fs-s) var(--font-display);
+    color: var(--ink); padding: var(--s3) var(--s2); }
+  .cmp thead th:first-child { border-bottom-color: var(--line); }
+  .cmp td:not(:first-child), .cmp thead th:not(:first-child) {
+    text-align: center; width: 150px; }
+  /* The Pro column reads as a column, not sixteen unrelated cells. The tint
+     is painted as a background IMAGE so the row-hover wash below can use
+     background-color underneath it and the two compose instead of fighting. */
+  .cmp td:last-child:not(.cmp-group), .cmp thead th:last-child {
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--accent) 4%, transparent),
+      color-mix(in srgb, var(--accent) 4%, transparent)); }
+  .cmp thead th:last-child { border-bottom-color: var(--accent-line); }
+  .cmp tbody td { transition: background-color var(--t-fast); }
+  .cmp tbody tr:hover td {
+    background-color: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .cmp tbody tr:hover td:first-child { color: var(--ink); }
+  /* Group headers span all three columns, so they must opt out of both the
+     Pro tint (they ARE :last-child) and the hover wash. */
+  .cmp td.cmp-group { text-transform: uppercase; letter-spacing: 0.06em;
+    font-size: var(--fs-xs); font-weight: var(--w-med); color: var(--ink-3);
+    padding: var(--s4) var(--s2) var(--s2); width: auto; }
+  .cmp tbody tr:hover td.cmp-group { background-color: transparent; }
+
+  /* Three cell states, no fourth. */
+  .cmp-yes { display: inline-block; width: 16px; height: 16px;
+    border-radius: 50%;
+    background:
+      no-repeat center / 9px url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M1.5 5.5l2.2 2.2L8.5 2.5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'),
+      var(--accent); }
+  .cmp-val { font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--ink); font-variant-numeric: tabular-nums; }
+  .cmp-no { color: var(--ink-3); }
+  /* One "In the works" marker for the whole Pro column. Per-cell badges would
+     say the same thing sixteen times and make the table look unfinished; the
+     tier itself is unlaunched, so stating it once at the head is both
+     cleaner and more honest. */
+  .cmp-badge { font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.08em; border-radius: 999px;
+    padding: 2px 8px; background: var(--stale-s); color: var(--stale-t);
+    margin-left: var(--s2); white-space: nowrap; font-weight: var(--w-reg); }
+
   .price-honesty { max-width: 640px; margin: var(--s7) auto 0; text-align: center;
     color: var(--ink-2); font-size: var(--fs-s); }
   .price-honesty h2 { font: var(--w-black) 22px/1.2 var(--font-display);
@@ -99,7 +166,20 @@
   .price-faq p { color: var(--ink-2); font-size: var(--fs-s);
     margin: var(--s2) 0 0; }
 
-  @media (max-width: 720px) { .price-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 720px) {
+    .price-grid { grid-template-columns: 1fr; }
+    /* The label column gives up its share first; the two plan columns are
+       already at their floor. Together with .cmp's min-width this is what
+       makes .cmp-scroll actually scroll rather than crush. */
+    .cmp td:not(:first-child), .cmp thead th:not(:first-child) { width: 130px; }
+  }
+
+  /* .kin-reveal is a page-load rise; nothing here depends on it to be
+     legible, so honour the preference and simply render the panel. */
+  @media (prefers-reduced-motion: reduce) {
+    .price-card.kin-reveal, .price-compare.kin-reveal { animation: none; }
+    .cmp tbody td { transition: none; }
+  }
 </style>
 {% endblock %}
 
@@ -187,6 +267,129 @@
           </div>
         </article>
       </div>
+
+      {% comment %}
+      The inventory, after the pitch. Two rules govern what may appear here:
+      every number comes from the credit system via context (row "Credits a
+      month"), and every typed string mirrors a claim the Pro card already
+      makes, so the table can never drift away from the cards above it.
+
+      No "messages a day" row on purpose: Free and Pro both compute to 15
+      today, and a row of two identical numbers sells nothing while implying
+      a difference. If CREDIT_PRO_DAILY_BURST is ever raised (see
+      docs/pricing-rebalance-plan.md §8) that row can be added under the
+      credits row.
+
+      Honesty note: the Gmail Live row claims Pro-only, which the code does
+      NOT yet enforce — `capture/gmail_live.py` gates on an env flag, not on
+      user.plan. Nobody has the feature on any deploy today, so no user is
+      affected, but the plan gate must land in the same release that turns
+      Gmail Live on (§7 of the same plan).
+      {% endcomment %}
+      <section class="price-compare kin-reveal" style="--i:2">
+        <h2>Side by side.</h2>
+        <div class="cmp-scroll">
+          <table class="cmp">
+            <caption class="vh">Free and Pro compared, feature by feature</caption>
+            <thead>
+              <tr>
+                <th scope="col"><span class="vh">Feature</span></th>
+                <th scope="col">Free</th>
+                <th scope="col">Pro<span class="cmp-badge">In the works</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="cmp-group" colspan="3">The board</td></tr>
+              <tr>
+                <td>Live campus roles, every tracked firm</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Market and vertical filters</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Deadlines read from the posting itself</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Eligibility and sponsorship answers</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Board refresh</td>
+                <td><span class="cmp-val">Every 6 hours</span></td>
+                <td><span class="cmp-val">Hourly on Tier 1</span></td>
+              </tr>
+
+              <tr><td class="cmp-group" colspan="3">The CRM</td></tr>
+              <tr>
+                <td>Today queue with one-click logging</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Network board: warmth lanes, firm tiers</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Gmail scan on demand</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Gmail Live: real-time, logs itself</td>
+                <td><span class="cmp-no" role="img" aria-label="Not included">&ndash;</span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Calendar sync</td>
+                <td><span class="cmp-no" role="img" aria-label="Not included">&ndash;</span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>LinkedIn contact import</td>
+                <td><span class="cmp-no" role="img" aria-label="Not included">&ndash;</span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+
+              <tr><td class="cmp-group" colspan="3">The advisor</td></tr>
+              <tr>
+                <td>Talk to Coverage</td>
+                <td><span class="cmp-val">Fast model</span></td>
+                <td><span class="cmp-val">Stronger model</span></td>
+              </tr>
+              <tr>
+                <td>Credits a month, chat and Gmail AI scans</td>
+                <td><span class="cmp-val">{{ advisor_free_grant }}</span></td>
+                <td><span class="cmp-val">{{ advisor_pro_grant }}</span></td>
+              </tr>
+
+              <tr><td class="cmp-group" colspan="3">Your data</td></tr>
+              <tr>
+                <td>CSV import and export</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Delete everything, instantly</td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+              </tr>
+              <tr>
+                <td>Season archive</td>
+                <td><span class="cmp-val">This cycle</span></td>
+                <td><span class="cmp-val">Every cycle</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <div class="aud-panel panel-team">
