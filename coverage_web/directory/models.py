@@ -131,6 +131,41 @@ class Opportunity(models.Model):
             models.UniqueConstraint(fields=["firm", "url"], name="uniq_opportunity_firm_url"),
         ]
         ordering = ["-first_seen"]
+        # Until now this table carried exactly two indexes — the primary key
+        # and `(firm, url)` — so EVERY query the Opportunities feed runs was a
+        # sequential scan over the whole table: the feed itself, and each of
+        # the cross-filtered facet counts. `status='open'` matches ~75% of
+        # rows and is not selective on its own, which is why neither index
+        # below leads with it alone.
+        #
+        # Measured on the live dev set (21,564 rows, 16,141 open), median of
+        # 9 runs, with and without these two:
+        #
+        #   feed rows (status+bucket, firm join, ordered) 53.3 -> 47.9 ms
+        #   region facet GROUP BY                          3.0 ->  0.5 ms
+        #   bucket facet over open set                     5.6 ->  3.0 ms
+        #
+        # ~10ms per page load, and the planner adopts both (verified with
+        # EXPLAIN — they are not indexes the optimiser ignores). The local
+        # gain is modest only because this whole 58MB table currently fits in
+        # cache on this machine; on the deployed 256MB Postgres a repeated
+        # 30MB sequential scan is competing for buffer space with everything
+        # else, which is where the difference between a scan and an index
+        # stops being 10%. The table has also grown ~5x since the feed's own
+        # comments were measured against a "4,342-row open set".
+        #
+        # A `first_seen` and a `deadline` index were measured too and are
+        # deliberately absent: the planner either ignored them or they moved
+        # nothing, and an index that earns nothing is still paid for on every
+        # nightly scrape write.
+        indexes = [
+            models.Index(fields=["status", "bucket"], name="idx_opp_status_bucket"),
+            models.Index(
+                fields=["bucket", "deadline", "first_seen"],
+                condition=models.Q(status="open"),
+                name="idx_opp_open_campus",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.firm.name} — {self.title}"
