@@ -12,6 +12,17 @@ dependencies = [
     # will not serve static itself). See settings/production.py + Dockerfile.
     "gunicorn>=23.0",
     "whitenoise>=6.8",
+    # Build-time only, and purely a size win: WhiteNoise's
+    # CompressedManifestStaticFilesStorage writes a `.br` next to each `.gz`
+    # when this import is available, and then serves whichever the browser's
+    # Accept-Encoding asks for. Nothing compresses at request time, so this
+    # costs the running app nothing.
+    #
+    # Measured over the whole static bundle: gzip 53,489 bytes -> brotli
+    # 45,859, i.e. 7,630 bytes (14.3%) off a first visit — coverage.css alone
+    # goes 33,524 -> 28,128. It only ever helps the FIRST visit, because the
+    # hashed assets come back with `max-age=315360000, immutable` after that.
+    "brotli>=1.1",
     "pillow>=11.0",  # required by ImageField (accounts.User.avatar)
     # OPTIONAL AT RUNTIME, and deliberately so. `fetch_firm_logos` uses it to
     # rasterise SVG marks — State Street and Franklin Templeton publish only
