@@ -55,6 +55,11 @@ dependencies = [
     # at rest with Fernet rather than stored plain, the same "use the
     # well-tested library, don't hand-roll crypto" call as pywebpush above.
     "cryptography>=43.0",
+    # Pay-as-you-go credit top-ups (billing/stripe_gateway.py). Importable
+    # with zero configuration — the SDK itself needs no key at import time,
+    # only at call time, which is exactly what `is_configured()` gates. See
+    # STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET in settings/base.py.
+    "stripe>=11.0",
 ]
 
 # Application, not a library anyone imports — don't build/install it as a

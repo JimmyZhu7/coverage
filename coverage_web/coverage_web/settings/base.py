@@ -439,3 +439,20 @@ GMAIL_LIVE_TOKEN_KEY = env("GMAIL_LIVE_TOKEN_KEY", default="")
 # scope is the easier one to justify if this ever goes through Google's
 # verification (see the CASA discussion in build-plan.md's risk register).
 GMAIL_LIVE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+# ---------------------------------------------------------------------------
+# Stripe (docs/credit-system-plan.md's "Stripe later" note — see
+# billing/stripe_gateway.py). Pay-as-you-go credit top-ups, Checkout
+# Sessions built with ad-hoc `price_data` rather than pre-created Stripe
+# Price IDs, so nothing here depends on Dashboard configuration existing
+# yet.
+#
+# Both blank by default, which is the feature's actual off-switch, exactly
+# like GMAIL_LIVE_* above: `stripe_gateway.is_configured()` gates every
+# entry point on both being set, so an unconfigured deploy shows the "Buy
+# more credits" block as a disabled "Coming soon" state instead of a
+# dead-end checkout button, and the webhook 400s cleanly rather than
+# verifying a signature against a secret that doesn't exist.
+# ---------------------------------------------------------------------------
+STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
+STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")

@@ -38,11 +38,18 @@ class CreditLedger(PrivateModel):
     KIND_SPEND_CHAT = "spend_chat"
     KIND_SPEND_RESCAN = "spend_rescan"
     KIND_ADJUST = "adjust"
+    # A pay-as-you-go top-up (billing/stripe_gateway.py), distinct from
+    # KIND_GRANT: a grant is the free monthly allowance every plan carries,
+    # a purchase is credits someone paid Stripe for — kept as separate
+    # `kind`s so the Settings page and any future revenue reporting can
+    # tell the two apart without parsing `props`.
+    KIND_PURCHASE = "purchase"
     KIND_CHOICES = [
         (KIND_GRANT, "Monthly grant"),
         (KIND_SPEND_CHAT, "Chat message"),
         (KIND_SPEND_RESCAN, "Rescan residue classification"),
         (KIND_ADJUST, "Admin adjustment"),
+        (KIND_PURCHASE, "Credit top-up purchase"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -77,3 +84,29 @@ class CreditLedger(PrivateModel):
     def __str__(self) -> str:
         sign = "+" if self.delta >= 0 else ""
         return f"{self.user_id}: {sign}{self.delta} ({self.kind})"
+
+
+class ProcessedStripeEvent(models.Model):
+    """Idempotency record for `billing/stripe_gateway.py::handle_webhook_event`
+    — Stripe's own docs guarantee at-least-once webhook delivery, so the
+    same `checkout.session.completed` event can (and does, in practice)
+    arrive twice. This table is the guard: the webhook handler does a
+    `get_or_create(stripe_event_id=...)` inside `transaction.atomic()`
+    BEFORE granting credits, so a duplicate delivery — or two concurrent
+    deliveries racing each other — hits this row's unique constraint
+    instead of writing a second grant.
+
+    Deliberately NOT a `PrivateModel` like `CreditLedger` above: a webhook
+    delivery has no request-time tenant context to scope against (Stripe
+    calls this server-to-server, with no signed-in user at all) — the
+    event ID it carries is the only identity available, and it names no
+    user until the handler reads `session.metadata["user_id"]` out of the
+    verified payload. A plain model with a global unique constraint is the
+    right shape for "have we seen this event ID before," full stop.
+    """
+
+    stripe_event_id = models.CharField(max_length=255, unique=True)
+    created = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return self.stripe_event_id

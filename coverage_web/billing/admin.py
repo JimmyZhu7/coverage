@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import CreditLedger
+from .models import CreditLedger, ProcessedStripeEvent
 
 
 @admin.register(CreditLedger)
@@ -25,4 +25,25 @@ class CreditLedgerAdmin(admin.ModelAdmin):
     readonly_fields = ("created",)
 
     def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ProcessedStripeEvent)
+class ProcessedStripeEventAdmin(admin.ModelAdmin):
+    """Read-only, like CreditLedgerAdmin above — a debugging aid for "did
+    this webhook event actually land," never something to hand-edit.
+    Deleting a row here would just make a legitimate redelivery grant
+    credits a second time, so no delete permission either."""
+
+    list_display = ("stripe_event_id", "created")
+    search_fields = ("stripe_event_id",)
+    readonly_fields = ("stripe_event_id", "created")
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_add_permission(self, request):
         return False

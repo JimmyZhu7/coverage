@@ -25,6 +25,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from analytics.events import record_event
 from billing import credits as billing_credits
+from billing import stripe_gateway as billing_stripe_gateway
 from capture import gmail_live
 from capture.models import GmailConnection
 from crm.models import Contact, UserFirm
@@ -308,6 +309,12 @@ def _credits_context(user) -> dict:
         "monthly_grant": plan["monthly_grant"],
         "month_usage": billing_credits.month_usage(user),
         "refill_date": billing_credits.next_refill_date(user),
+        # "Buy more credits" (billing/stripe_gateway.py). Always rendered,
+        # like the rest of this card — the disabled/"Coming soon" state
+        # IS the render when Stripe isn't configured, not a hidden block,
+        # so Jimmy can see the feature exists before he's set Stripe up.
+        "stripe_configured": billing_stripe_gateway.is_configured(),
+        "credit_packs": billing_stripe_gateway.CREDIT_PACKS,
     }
 
 

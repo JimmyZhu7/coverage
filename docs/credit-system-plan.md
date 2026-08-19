@@ -2,6 +2,20 @@
 
 Status: design for review, nothing built. No code or migrations exist for this yet.
 
+> **Changelog — v3, 2026-08-19 (pay-as-you-go top-ups, Stripe-shaped but
+> inert).** Built `billing/stripe_gateway.py`: two one-time credit packs
+> ($5→60, $12→160 — both priced against §3's governing ratio, see new §10)
+> on top of the monthly grant this doc already describes. Stripe is NOT
+> configured on this deploy yet (`STRIPE_SECRET_KEY` /
+> `STRIPE_WEBHOOK_SECRET` are both blank) — every entry point gates on
+> `stripe_gateway.is_configured()`, the exact pattern `capture/
+> gmail_live.py::is_configured()` already established, so the whole
+> feature builds, migrates, and passes its test suite with zero Stripe
+> keys present and renders on Settings as a disabled "Coming soon" block
+> rather than disappearing. See §10 for the full design. Unchanged:
+> everything above about the monthly grant, chat/rescan metering, and the
+> ledger itself.
+>
 > **Changelog — v2, 2026-08-19 (priced for margin).** v1 validated *cost* but
 > set no Pro price; its grants were upside-down at any price a student would
 > pay (1,500 Pro credits ≈ $30 of model spend — a $10/mo Pro that got fully
@@ -386,21 +400,20 @@ in the plan beyond the notice copy.
 
 ## 8. Explicitly out of scope
 
-- **Stripe / any payment processing.** Nothing here takes money. The system
-  runs entirely on the manually-set `user.plan`, same as today ("admin IS
-  the billing system for now" — accounts/admin.py). Admin gets a
-  `CreditLedger` registration plus a simple grant/adjust action, so the
-  founder can top up a beta tester by hand the same way he flips their plan.
-  **Stripe later:** the webhook writes `user.plan` (already anticipated in
-  the model's own comment — nothing downstream changes), grants keep
-  deriving from the plan, and paid top-up packs, if ever wanted, are just
-  positive ledger rows with `kind="purchase"`. No schema change needed.
-- Credit purchase UI and any checkout. The Pro *price* is no longer out of
-  scope — it is set at $12/month (§2–3) and the pricing page should show it
-  when this ships — but nothing collects money yet; `user.plan` stays
-  admin-set until Stripe.
+- **A Stripe-billed Pro subscription.** `user.plan` still flips by hand in
+  admin ("admin IS the billing system for now" — accounts/admin.py); Stripe
+  is only wired up for the one-time top-up packs (§10), not for charging
+  the $12/month Pro price itself or writing `user.plan` from a webhook. That
+  remains exactly the shape this section originally described: `user.plan`
+  admin-set, grants derived from it, no subscription checkout built.
 - Metering the un-metered calls listed in §1.
 - Per-user overrides beyond admin adjustment rows.
+
+Pay-as-you-go top-ups (one-time packs, not a subscription) ARE now built —
+see §10 — but Stripe itself is not yet configured on this deploy, so the
+feature is inert (disabled "Coming soon" UI, checkout redirects with a
+clean message, webhook 400s) until `STRIPE_SECRET_KEY` /
+`STRIPE_WEBHOOK_SECRET` are set.
 
 ## 9. Cost math at projected scale
 
@@ -423,6 +436,93 @@ The rescan line item specifically: if all 60 users ran two maxed-out
 scan the founder was worried about is the cheapest thing on the menu; the
 chat, with its 8-round loops and Sonnet tier, is where the money is, and
 the credit ratios (1 : 3 : 1-per-10-threads) price that truthfully.
+
+## 10. Pay-as-you-go top-ups (v3, `billing/stripe_gateway.py`)
+
+A second way to get credits, alongside the monthly grant §4 describes:
+one-time packs a student buys outright, on top of whatever their plan
+already grants. Not a subscription and not a replacement for the plan
+system — Pro is still admin-set (§8) — just a release valve for someone who
+burns a month's grant early and wants more now rather than waiting for
+the 1st.
+
+**The two packs, priced against §3's governing ratio** (grant ≤ 15 credits
+per dollar, to hold ≥ 70% margin at full burn, $0.02/credit planning cost):
+
+| Pack | Price | Credits | Credits/$ | Margin at full burn |
+|---|---|---|---|---|
+| Small | $5.00 | 60 | 12 | ~76% |
+| Large | $12.00 | 160 | 13.3 | ~73% |
+
+Both sit under the 15-credits-per-dollar ceiling with room to spare —
+priced a little more conservatively than the monthly grant itself (which
+runs the ceiling close to its limit at 15/$) because a one-time purchase
+has no rollover cap to bound worst-case exposure the way §7's 2x clamp
+does for the monthly pool. Price stored in cents (`price_cents`) throughout
+`stripe_gateway.py`, never as a float dollar amount.
+
+**Checkout, without any Stripe Dashboard configuration.**
+`create_checkout_session(user, pack_key, success_url, cancel_url)` builds a
+Stripe Checkout Session (`mode="payment"`) using ad-hoc `price_data` rather
+than a pre-created Stripe Price ID — the founder hasn't set those up, and
+dynamic `price_data` means this never needs to. `user.id` and `pack_key`
+travel in the session's `metadata`, which is how the webhook — running
+with no request context, no signed-in user, nothing but the verified
+payload — knows what to grant and to whom.
+
+**The `is_configured()` gate — copied directly from `capture/
+gmail_live.py`'s pattern.** `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`
+are both blank by default (`settings/base.py`); `stripe_gateway.
+is_configured()` is true only when both are set. Every entry point respects
+it:
+
+- **Settings page:** the "Buy more credits" block is always rendered
+  (never hidden — the founder should be able to see the feature exists),
+  but its buttons render `disabled` and the copy reads "Coming soon" when
+  `not is_configured()`.
+- **`POST /billing/checkout/<pack_key>/`:** redirects back to Settings with
+  a plain message ("Credit top-ups aren't available yet") instead of
+  attempting a Stripe call, when not configured.
+- **`POST /billing/webhook/`:** returns 400 immediately when not
+  configured, since there is no webhook secret to verify a signature
+  against anyway — and this path is never actually hit in that state,
+  because there's no webhook URL registered with Stripe yet to call it.
+- **`create_checkout_session` itself** raises `StripeGatewayError` if
+  called while unconfigured — callers must check first, same discipline as
+  every other call site in this app.
+
+The whole app builds, migrates, and passes its test suite with zero Stripe
+keys present (`billing/tests/test_stripe_gateway.py`); nothing here needs
+real Stripe credentials to develop or test against.
+
+**Idempotency — Stripe redelivers webhooks; grants must not double.**
+Stripe's own delivery guarantee is at-least-once, so
+`handle_webhook_event` must tolerate the identical event arriving twice
+(a retry after a slow 200, or two near-simultaneous deliveries racing each
+other). Guarded by a new model, `ProcessedStripeEvent` — deliberately
+*not* a `PrivateModel` like `CreditLedger`, because a webhook event carries
+no request-time tenant context to scope against; it's a plain model with a
+global `unique=True` on `stripe_event_id`. The handler does
+`get_or_create(stripe_event_id=...)` inside `transaction.atomic()` *before*
+calling `credits.grant_purchase`, so:
+
+- A sequential redelivery finds the row already exists and returns without
+  granting again.
+- Two concurrent deliveries race on the row's unique constraint the same
+  way `ensure_monthly_grant` (§4) races two concurrent grant checks — one
+  wins, one gets an `IntegrityError`-shaped conflict and backs off, and
+  either way exactly one grant lands. Covered by a real
+  `TransactionTestCase` test with multiple threads hitting the same event
+  ID concurrently, not just a sequential-duplicate happy path.
+
+**The ledger row.** `credits.grant_purchase(user, pack_key, stripe_event_id)`
+writes one positive `CreditLedger` row: `kind="purchase"` (a new `kind`,
+distinct from `"grant"` — a purchase is money spent, a grant is the free
+monthly allowance, and keeping them apart matters for any future revenue
+reporting), `delta` = the pack's credit amount, `props={"pack": ...,
+"stripe_event_id": ..., "price_cents": ...}` for the audit trail. No new
+concurrency primitive needed beyond the `ProcessedStripeEvent` guard above
+— by the time `grant_purchase` runs, the event is already known-unprocessed.
 
 ## Build order (when approved)
 

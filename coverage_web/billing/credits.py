@@ -310,6 +310,42 @@ def affordable_residue_threads(user, candidate_threads: int) -> int:
     return max(0, min(candidate_threads, affordable_credits * per_credit))
 
 
+# ---------------------------------------------------------------------------
+# Purchases (enforcement point 3 — billing/stripe_gateway.py's webhook)
+# ---------------------------------------------------------------------------
+def grant_purchase(user, pack_key: str, stripe_event_id: str) -> None:
+    """One positive ledger row for a completed pay-as-you-go top-up
+    (docs/credit-system-plan.md's "Stripe later" note: "paid top-up packs
+    ... are just positive ledger rows with `kind='purchase'`"). Called
+    exactly once per Stripe event, from inside the same `atomic()` block
+    `stripe_gateway.handle_webhook_event` uses to write the
+    `ProcessedStripeEvent` idempotency row — this function itself does not
+    re-check for a duplicate `stripe_event_id`; that guard lives one layer
+    up, same as `spend()` above trusting `can_spend()` to have already
+    decided affordability.
+
+    `stripe_gateway.CREDIT_PACKS` is the single source of truth for a
+    pack's price and credit amount, imported lazily (inside the function
+    body, not at module level) to avoid a circular import — `credits.py`
+    is the lower-level module both `stripe_gateway.py` and every other
+    caller build on, per this module's own docstring on not importing
+    upward from its callers.
+    """
+    from . import stripe_gateway
+
+    pack = stripe_gateway.CREDIT_PACKS[pack_key]
+    CreditLedger.all_objects.create(
+        user=user,
+        delta=pack["credits"],
+        kind=CreditLedger.KIND_PURCHASE,
+        props={
+            "pack": pack_key,
+            "stripe_event_id": stripe_event_id,
+            "price_cents": pack["price_cents"],
+        },
+    )
+
+
 def spend_rescan(user, threads_classified: int) -> None:
     """Debit for one rescan's residue stage — one credit per
     `CREDIT_RESCAN_THREADS_PER_CREDIT` threads ACTUALLY classified, rounded

@@ -1070,6 +1070,38 @@
               <span class="set-row-value">{{ credits.balance }}</span>
             </div>
           </div>
+
+          {% comment %}
+          ---- Buy more credits (billing/stripe_gateway.py) ----
+          Always rendered, never hidden — when Stripe isn't configured yet
+          this renders as a visibly disabled "Coming soon" state instead of
+          disappearing, so the feature is visible on the page before it's
+          switched on, same posture as the push-alerts toggle above
+          ("Not set up yet.") when VAPID isn't configured.
+          {% endcomment %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Buy More Credits</span>
+              <div class="set-row-desc">
+                {% if credits.stripe_configured %}
+                  One-time top-ups, on top of your monthly refill. Never expire.
+                {% else %}
+                  Coming soon — top-ups aren't available on this deploy yet.
+                {% endif %}
+              </div>
+            </div>
+            <div class="set-row-control">
+              {% for pack_key, pack in credits.credit_packs.items %}
+                <form method="post" action="{% url 'billing:checkout' pack_key %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn"
+                          {% if not credits.stripe_configured %}disabled{% endif %}>
+                    {{ pack.label }}
+                  </button>
+                </form>
+              {% endfor %}
+            </div>
+          </div>
         </div>
       </section>
 
