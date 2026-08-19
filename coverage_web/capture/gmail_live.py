@@ -146,6 +146,19 @@ def decrypt_token(ciphertext: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _flow(redirect_uri: str) -> Flow:
+    """A fresh `Flow` per request — `build_auth_url` and `connect_gmail` each
+    call this from a SEPARATE HTTP request (the browser round-trips through
+    Google in between), so nothing on a `Flow` instance survives from one
+    call to the other. `autogenerate_code_verifier` must stay off because of
+    that: its default (True, as of google-auth-oauthlib's current release)
+    has each fresh instance mint its own PKCE code_verifier, so the one
+    `connect_gmail` generates for the token exchange never matches the
+    code_challenge that `build_auth_url` already sent Google — every
+    exchange then fails with "invalid_grant: Missing code verifier". PKCE
+    exists to protect public clients that can't hold a secret; this is a
+    confidential "web" client with a real client_secret, and CSRF is already
+    covered by the `state` param, so there's nothing PKCE adds here worth
+    the cost of persisting a verifier across the redirect."""
     return Flow.from_client_config(
         {
             "web": {
@@ -157,6 +170,7 @@ def _flow(redirect_uri: str) -> Flow:
         },
         scopes=settings.GMAIL_LIVE_SCOPES,
         redirect_uri=redirect_uri,
+        autogenerate_code_verifier=False,
     )
 
 

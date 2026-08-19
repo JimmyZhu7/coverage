@@ -163,6 +163,32 @@ class TestIsConfigured:
         assert gmail_live.is_configured() is True
 
 
+class TestFlowHasPkceDisabled:
+    """Regression test for a real production outage (2026-08-19): Google
+    rejected every single token exchange with "invalid_grant: Missing code
+    verifier". `build_auth_url` and `connect_gmail` each build a fresh
+    `Flow` from a separate HTTP request — nothing on one instance survives
+    to the other — so if `Flow` auto-generates its own PKCE code_verifier
+    per instance (google-auth-oauthlib's default), the verifier the
+    callback's exchange sends never matches the code_challenge the connect
+    step already gave Google. See `_flow`'s docstring for the full story."""
+
+    def test_flow_does_not_autogenerate_a_pkce_verifier(self, settings):
+        settings.GMAIL_LIVE_CLIENT_ID = "id"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
+        flow = gmail_live._flow("https://example.com/capture/gmail/callback/")
+        assert flow.autogenerate_code_verifier is False
+        assert flow.code_verifier is None
+
+    def test_build_auth_url_sends_no_code_challenge(self, settings):
+        settings.GMAIL_LIVE_CLIENT_ID = "id"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
+        auth_url = gmail_live.build_auth_url(
+            "https://example.com/capture/gmail/callback/", state="s"
+        )
+        assert "code_challenge" not in auth_url
+
+
 class TestMessageOccurredAt:
     """`internalDate` -> `occurred_at` on every finding — the backfill
     command's whole reason to exist is applying findings whose real time
