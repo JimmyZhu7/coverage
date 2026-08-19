@@ -31,4 +31,7 @@ urlpatterns = [
     # The draft card's one-click "Log touch" — a real CRM write, no model
     # round trip, POST-only like every other write on this page.
     path("log-draft-touch/", views.log_draft_touch, name="log_draft_touch"),
+    # Thumbs up/down on an answer — a fire-and-forget analytics event, not a
+    # stored rating. POST-only like every write on this page.
+    path("feedback/", views.feedback, name="feedback"),
 ]

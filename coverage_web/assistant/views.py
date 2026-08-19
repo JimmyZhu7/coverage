@@ -37,6 +37,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from accounts.middleware import activate_for_user
+from analytics.events import record_event
 from billing import credits as billing_credits
 from coverage_domain.pipeline import CHANNELS, TOUCH_TRANSITIONS
 from crm import services
@@ -106,10 +107,18 @@ def _thread_rows(user, conversation) -> list[dict]:
     """
     rows: list[dict] = []
     pending_tools: list[str] = []
+    # The most recent user turn seen so far — an assistant row's own
+    # "retry" hook (see _message.html and chat.html's mirror of it): the
+    # question it answered, so a regenerate can resubmit that exact
+    # question through the same rewind endpoint an edit-and-resend already
+    # uses. None until the first real question, which is also the one case
+    # a retry button has nothing to point at.
+    last_user_message_id: int | None = None
     for message in ChatMessage.objects.for_user(user).filter(conversation=conversation):
         if message.role == ChatMessage.ROLE_USER:
             if message.is_tool_result:
                 continue
+            last_user_message_id = message.id
             rows.append(
                 {
                     "role": "user",
@@ -122,6 +131,7 @@ def _thread_rows(user, conversation) -> list[dict]:
                     "tools": [],
                     "notice": "",
                     "attachments": message.attachment_names,
+                    "created": message.created,
                 }
             )
             continue
@@ -143,6 +153,8 @@ def _thread_rows(user, conversation) -> list[dict]:
                 "segments": drafts_mod.split(text),
                 "tools": _tool_labels(pending_tools),
                 "notice": message.notice,
+                "created": message.created,
+                "retry_message_id": last_user_message_id,
             }
         )
         pending_tools = []
@@ -747,6 +759,42 @@ def log_draft_touch(request: HttpRequest) -> HttpResponse:
         "assistant/_draft_chip.html",
         {"draft": {"logged": True, "loggable": True, "contact_name": contact.name}},
     )
+
+
+@login_required
+@require_POST
+def feedback(request: HttpRequest) -> HttpResponse:
+    """Thumbs up/down on one of Coverage's own answers — a single append-only
+    signal, not a stored rating. `record_event` (analytics/events.py) is the
+    same write path every other funnel event in the product uses, so this
+    needs no model of its own: no PrivateModel, no migration, nothing a
+    tenant-isolation bug could ever leak between students. `for_user` on the
+    lookup is what makes `message` safe to trust from a POST body at all —
+    another student's row simply 404s, same as every other id this app takes
+    off a request.
+
+    Deliberately NOT idempotent and NOT read back anywhere on the page: unlike
+    the draft card's touch-logging chip, there is no "current rating" this
+    view needs to agree with itself about, and no UI depends on knowing what
+    was sent before. A double-click just logs two events, which is exactly as
+    fine as two clicks meaning two data points to whoever reads the funnel.
+    """
+    message = get_object_or_404(
+        ChatMessage.objects.for_user(request.user).filter(role=ChatMessage.ROLE_ASSISTANT),
+        pk=_posted_int(request, "message") or 0,
+    )
+    rating = (request.POST.get("rating") or "").strip()
+    if rating not in ("up", "down"):
+        return HttpResponseBadRequest("Unknown rating.")
+
+    record_event(
+        "assistant_feedback",
+        user=request.user,
+        message_id=message.id,
+        conversation_id=message.conversation_id,
+        rating=rating,
+    )
+    return JsonResponse({"ok": True})
 
 
 @login_required
