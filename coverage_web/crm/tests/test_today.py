@@ -1641,3 +1641,65 @@ def test_the_htmx_partial_refresh_never_builds_the_situation_snapshot(client, mo
     client.force_login(user)
     resp = client.post(reverse("crm:today_park_all"))
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# The Today page's query count must not scale with the size of the student's
+# network. It used to: `_waiting_on_reply` and both halves of `_schedule` fed
+# contacts into _cockpit.html, which renders the contact's FIRM per row, so
+# every person on the page cost their own firm SELECT; and `_chat_prep` ran
+# two `.first()` queries per chat happening today. Measured before the fix, a
+# tenant with 20 CRM rows took 36 queries and one with 60 took 50. After the
+# fix: 32 and 32.
+#
+# Deliberately a COMPARISON rather than a hardcoded number — the page
+# legitimately gains and loses queries as features move, and a magic constant
+# here would just get edited to whatever the code happens to do, defending
+# nothing. What must hold is that the count is FLAT in the row count.
+# ---------------------------------------------------------------------------
+def _today_query_count(client, user, n_contacts: int) -> int:
+    from django.db import connection, reset_queries
+    from django.test import override_settings
+
+    firms = [
+        Firm.objects.create(slug=f"qf-{user.pk}-{i}", name=f"QF {i}")
+        for i in range(8)
+    ]
+    for i in range(n_contacts):
+        # A chat happening today, which is what _chat_prep walks.
+        c = Contact.all_objects.create(
+            user=user, name=f"Q {i:03d}", firm=firms[i % 8],
+            thread_state=["no_reply", "replied", "chat_scheduled"][i % 3],
+        )
+        _touch(user, c, "outreach", days_ago=20)
+        CalendarEvent.all_objects.create(
+            user=user, contact=c, title=f"chat {i}",
+            starts_at=timezone.now() + timedelta(hours=1), kind="chat",
+        )
+        # Written to recently enough that the cadence engine has no action
+        # for them yet — which is exactly the population _waiting_on_reply
+        # exists to name, and therefore the one that exercises ITS join.
+        w = Contact.all_objects.create(
+            user=user, name=f"W {i:03d}", firm=firms[i % 8],
+            thread_state="no_reply",
+        )
+        _touch(user, w, "outreach", days_ago=2)
+
+    client.force_login(user)
+    client.get(reverse("crm:week"))          # warm
+    with override_settings(DEBUG=True):
+        reset_queries()
+        client.get(reverse("crm:week"))
+        return len(connection.queries)
+
+
+def test_today_does_not_run_more_queries_as_the_network_grows(client):
+    small = _today_query_count(
+        client, _user("q-small@example.com", weekly_touch_goal=14), 6)
+    big = _today_query_count(
+        client, _user("q-big@example.com", weekly_touch_goal=14), 24)
+    assert big <= small + 1, (
+        f"Today ran {small} queries for 6 contacts but {big} for 24 — a query "
+        f"count that grows with the network is an N+1. Check select_related on "
+        f"_waiting_on_reply / _schedule and the batched lookups in _chat_prep."
+    )
