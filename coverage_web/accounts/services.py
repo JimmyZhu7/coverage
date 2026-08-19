@@ -25,6 +25,7 @@ from django.utils import timezone
 
 from analytics.events import record_event
 from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
+from capture import gmail_live
 from crm.models import ChatDebrief, Contact, Task, Touch, UserFirm
 from directory.models import Firm
 
@@ -146,6 +147,14 @@ class ImportResult:
     total_rows: int = 0
     unmatched_columns: bool = False
     errors: list[str] = field(default_factory=list)
+    # The actual `Contact` rows this parse created (with real pks — Postgres
+    # returns them from `bulk_create`), not just the count. Not part of
+    # `as_stats()` — that dict is what gets stored as JSON on an `Import`
+    # row, and a list of model instances doesn't belong there. This exists
+    # so `import_contacts()` below can scope the free Gmail enrichment scan
+    # to exactly the contacts this one file created, instead of every
+    # contact the user has.
+    created_contacts: list = field(default_factory=list, repr=False)
 
     @property
     def skipped(self) -> int:
@@ -276,8 +285,12 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
 
     if to_create:
         # bulk_create goes through the base manager; user is set on each row.
+        # On Postgres this also populates each object's own `.pk` in place
+        # (the RETURNING clause) — that's what makes `created_contacts`
+        # usable by the caller without a second query.
         Contact.all_objects.bulk_create(to_create)
         result.created = len(to_create)
+        result.created_contacts = to_create
     return result
 
 
@@ -310,6 +323,16 @@ def import_contacts(user, *, file_bytes: bytes, filename: str) -> ImportResult:
         record_event(
             "import_failed", user=user, count=0, errors=list(result.errors)
         )
+
+    # Free, zero-AI enrichment: if this user already has Gmail connected,
+    # check its history for the people this import just created — a
+    # student who imports 180 contacts they've already emailed should not
+    # see all 180 as identical, un-contacted-looking cold rows just
+    # because Coverage never checked. Scoped to only the new rows (not the
+    # user's whole contact list) and never allowed to fail the import
+    # itself — see `gmail_live.backfill_new_contacts`'s docstring.
+    gmail_live.backfill_new_contacts(user, result.created_contacts)
+
     return result
 
 
