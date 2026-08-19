@@ -517,3 +517,49 @@ GMAIL_LIVE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 # ---------------------------------------------------------------------------
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
+
+# ---------------------------------------------------------------------------
+# Logging.
+#
+# WHY THIS BLOCK EXISTS: without it, a 500 in production is logged NOWHERE.
+# Django's DEFAULT_LOGGING routes `django.request` (the logger that carries
+# the traceback for every uncaught view exception) to exactly two handlers:
+# a StreamHandler filtered by `RequireDebugTrue`, and an AdminEmailHandler
+# filtered by `RequireDebugFalse`. In production DEBUG is False, so the
+# console handler is filtered OUT, and the email handler passes the filter
+# but has no ADMINS to mail — the traceback is dropped on the floor. The
+# user sees templates/500.html and the logs show only gunicorn's access
+# line: a bare "POST /... 500". That is exactly the state this project was
+# in while a real Gmail Live connect failure could not be diagnosed at all.
+#
+# Sentry (production.py's optional SENTRY_DSN) does capture these when it is
+# configured, but it is an optional, paid, currently-unset dependency, and
+# "can I see why my own app 500'd" must not depend on one.
+#
+# Everything goes to stderr, which is what Render/Fly/Docker collect.
+# ---------------------------------------------------------------------------
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {"format": "{levelname} {asctime} {name} {message}", "style": "{"},
+    },
+    "handlers": {
+        "stderr": {"class": "logging.StreamHandler", "formatter": "verbose"},
+    },
+    "root": {"handlers": ["stderr"], "level": "INFO"},
+    "loggers": {
+        # The one that matters: unhandled view exceptions, with traceback.
+        # propagate=False so this doesn't double-print through root.
+        "django.request": {
+            "handlers": ["stderr"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+        # Per-request access lines are gunicorn's job in production and
+        # runserver's own noise in development — either way, not this
+        # handler's, or every request prints twice.
+        "django.server": {"handlers": ["stderr"], "level": "INFO", "propagate": False},
+        "django.db.backends": {"level": "WARNING"},
+    },
+}

@@ -28,6 +28,58 @@ def test_the_500_page_renders_without_any_context():
     assert "{% static" not in html, "must not depend on the static machinery"
 
 
+def test_a_500_traceback_actually_reaches_the_logs():
+    """The 500 page above is all the USER sees; this is all the OPERATOR
+    gets, and for a while it was nothing at all.
+
+    Django's DEFAULT_LOGGING gives `django.request` — the logger carrying
+    every uncaught view exception's traceback — exactly two handlers: a
+    console one filtered by RequireDebugTrue, and an email one filtered by
+    RequireDebugFalse. Production has DEBUG=False and no ADMINS, so the
+    first is filtered out and the second has nobody to mail: the traceback
+    is discarded, and Render's logs show only gunicorn's "500" access line.
+    A real Gmail Live connect failure was un-diagnosable for exactly this
+    reason. settings/base.py now configures LOGGING explicitly.
+
+    Asserted on the OUTPUT settings.LOGGING actually produces, not on the
+    dict's shape — a shape assertion passes just as happily on a config
+    whose one handler is filtered into silence, which is the precise
+    failure being guarded against. The config is re-applied here with its
+    stream swapped for a buffer (and restored afterwards) because pytest
+    installs handlers of its own during a run, so reading the live handler
+    set would test pytest's plumbing rather than this project's.
+    """
+    import copy
+    import io
+    import logging
+    import logging.config
+
+    from django.conf import settings
+
+    assert settings.LOGGING, (
+        "LOGGING is unset, so Django falls back to DEFAULT_LOGGING, whose "
+        "only DEBUG=False handler is an email one with no ADMINS to mail"
+    )
+
+    sink = io.StringIO()
+    config = copy.deepcopy(settings.LOGGING)
+    for handler in config["handlers"].values():
+        if handler.get("class") == "logging.StreamHandler":
+            handler["stream"] = sink
+    logging.config.dictConfig(config)
+    try:
+        logging.getLogger("django.request").error(
+            "Internal Server Error: /capture/gmail/callback/",
+            exc_info=(RuntimeError, RuntimeError("uncaught view exception"), None),
+        )
+    finally:
+        logging.config.dictConfig(settings.LOGGING)
+
+    err = sink.getvalue()
+    assert "Internal Server Error: /capture/gmail/callback/" in err
+    assert "RuntimeError" in err, "the traceback itself has to survive, not just the line"
+
+
 def test_bare_legal_paths_redirect_to_the_real_pages(client):
     assert client.get("/privacy/").status_code == 301
     assert client.get("/privacy/", follow=True).status_code == 200
