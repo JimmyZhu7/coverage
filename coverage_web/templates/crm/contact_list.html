@@ -37,7 +37,7 @@
   {% endcomment %}
   {% if gaps %}
   <section class="gap-strip">
-    <h2 class="strip-title">Coverage Gaps <span class="scrub-count">worst {{ gaps|length }}</span></h2>
+    <h2 class="strip-title" title="Ranked by exposure: tier weight × how far this firm is from your advocate target, plus a bonus if its deadline is close. Hover a card for the exact math.">Coverage Gaps <span class="scrub-count">worst {{ gaps|length }}</span></h2>
     <div class="gap-row">
       {% for g in gaps %}
         <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"
@@ -69,9 +69,17 @@
           times on one card. `title=` above still carries the full
           breakdown for anyone hovering — this is the one number from it
           worth always showing without a hover, not the whole formula.
+
+          "{{ g.target }}" is the user's own advocate-per-firm target
+          (Settings > Cadence, `crm.coverage.advocate_target`, default 2),
+          not a fixed rule — the title= says so since the card itself has
+          no room to. "exp" spelled out as "exposure" in place: matches the
+          card's own title= breakdown ("... = exposure N"), so a reader who
+          hovers sees the same word the card already shows without hovering.
           {% endcomment %}
-          <div class="gap-state">{{ g.label }} · {{ g.advocates }}/{{ g.target }} advocates
-            <span class="gap-exp">· exp {{ g.exposure }}</span></div>
+          <div class="gap-state">{{ g.label }} ·
+            <span title="Your advocate target for this firm ({{ g.target }} per firm) — set in Settings &gt; Cadence.">{{ g.advocates }}/{{ g.target }} advocates</span>
+            <span class="gap-exp">· exposure {{ g.exposure }}</span></div>
           {% if g.lever %}
             <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Work {{ g.lever.name|smart_title }}</a>
           {% else %}
@@ -195,7 +203,7 @@
 
     {# ---- Right: Firm Coverage by tier (draggable) ---- #}
     <section class="net-coverage">
-      <h2 class="strip-title">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
+      <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a card between lanes to change a firm's tier.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
       <div class="net-panel">
       <div class="net-legend">
         <span><i class="dot dot-cold"></i> Emailed, No Reply</span>
@@ -205,7 +213,15 @@
       </div>
       {% for section in tier_sections %}
         <div class="tier-section" data-tier="{{ section.tier|default:'' }}">
-          <div class="tier-label">
+          {% comment %}
+          Same explainer a card already carries on hover ("Drag to another
+          tier. Tier drives your action priorities.") — repeated on the
+          lane's own heading so it reaches an EMPTY lane too. A "TIER 1"
+          header over a bare "Drop a firm here" placeholder had nothing on
+          it to hover; the lane label is the one element in that state
+          that's always there.
+          {% endcomment %}
+          <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a firm card here to set its tier.">
             <span>{{ section.label }}</span>
           </div>
           <div class="tier-grid">
@@ -232,11 +248,15 @@
                   is 2 or 3 slots, and dots that visibly fill say "one more to
                   go" faster than 1/2 does. The number stays in the title and
                   in the accessible name; filled sockets pop with the same
-                  chip-check spring the rest of the product uses.{% endcomment %}
+                  chip-check spring the rest of the product uses. Both name
+                  the target as YOURS, set in Settings — the number alone
+                  ("0/2 advocates") reads like a fixed rule with no visible
+                  source; it's `crm.coverage.advocate_target`, user-editable
+                  and defaulting to 2.{% endcomment %}
                   <span class="fc-adv{% if fc.adv_met %} is-met{% endif %}"
                         role="img"
-                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm"
-                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm">
+                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings"
+                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings &gt; Cadence">
                     {% for slot in fc.adv_slots %}<i class="adv-socket{% if slot %} is-filled{% endif %}"></i>{% endfor %}{% if fc.adv_met %} ✓{% endif %}
                   </span>
                 </div>

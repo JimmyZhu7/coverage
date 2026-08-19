@@ -533,19 +533,29 @@
       </div>
       <div class="vig kin-reveal">
         <p class="vig-label">Network · warmth board</p>
+        {% comment %}
+        Column headers read straight off the real board's own legend
+        (crm/templates/crm/contact_list.html's `.net-legend` — "Emailed, No
+        Reply / Replied / Chatted / Advocate") rather than the marketing
+        shorthand this vignette used to invent ("Cold / In touch / Warm").
+        Three columns still stand in for the real board's four lanes — this
+        is a preview, not the board — but every word on it is now a word a
+        new user will see again on Network, not a fourth vocabulary that
+        made the real page look like the wrong feature.
+        {% endcomment %}
         <div class="v-board">
           <div class="v-col">
-            <span class="v-col-h">Cold</span>
+            <span class="v-col-h">Emailed, No Reply</span>
             <div class="v-card">David Park · PE</div>
             <div class="v-card">Ana Sousa · S&amp;T</div>
           </div>
           <div class="v-col">
-            <span class="v-col-h">In touch</span>
+            <span class="v-col-h">Replied</span>
             <div class="v-card lift">Marcus Ito · IBD</div>
             <div class="v-card">Priya Nair · AM</div>
           </div>
           <div class="v-col">
-            <span class="v-col-h">Warm</span>
+            <span class="v-col-h">Advocate</span>
             <div class="v-card hot">Sarah Lin · IBD</div>
           </div>
         </div>

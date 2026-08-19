@@ -37,7 +37,7 @@ def _gap_strip(body: str) -> str:
     every membership check (`"x" in gap_strip`) nothing — the CSS block was
     just extra haystack — but silently broke the first assertion to COUNT
     occurrences, since CSS text landed inside the slice too."""
-    start = body.index('<h2 class="strip-title">Coverage Gaps')
+    start = body.index('<h2 class="strip-title" title="Ranked by exposure')
     return body[start : body.index("Contacts Needing Action", start)]
 
 
@@ -295,7 +295,7 @@ def test_an_unranked_firm_still_gets_the_add_contact_cta(client):
     # ("Coverage Gaps strip: where...") contains it too, in <head>, on
     # every page regardless of whether the section renders. The rendered
     # heading is a different, more specific string.
-    assert '<h2 class="strip-title">Coverage Gaps' not in body
+    assert '<h2 class="strip-title" title="Ranked by exposure' not in body
     assert reverse("crm:contact_new") + "?firm=wildcard-co" in body
 
 
@@ -333,7 +333,9 @@ def test_a_covered_firm_shows_no_action_at_all(client):
 def test_the_gap_strip_shows_its_score_without_a_hover(client):
     """The full formula lives in a `title=` tooltip, unreachable on any
     touch device — but the SCORE it resolves to, the thing a card is
-    actually ranked by, must be plain text, not hover-only."""
+    actually ranked by, must be plain text, not hover-only. Spelled out as
+    "exposure", not the "exp" abbreviation nobody could read without the
+    tooltip (which touch devices can never reach in the first place)."""
     user = User.objects.create_user(email="math@example.com", password="x")
     firm = Firm.objects.create(slug="exposed-co", name="Exposed Co")
     UserFirm.all_objects.create(user=user, firm=firm, tier=1)
@@ -341,9 +343,12 @@ def test_the_gap_strip_shows_its_score_without_a_hover(client):
     client.force_login(user)
     body = client.get(reverse("crm:contact_list")).content.decode()
     gap_block = _gap_strip(body)
-    # Tier 1, no contacts: 3 × 4 = exposure 12.
+    # Tier 1, no contacts: 3 × 4 = exposure 12. "· exposure 12" (not the bare
+    # substring) is the plain-text reading specifically — the hover tooltip
+    # below also contains "exposure 12" via its own "= exposure 12", and the
+    # two must not be conflated.
     assert 'class="gap-exp"' in gap_block
-    assert "exp 12" in gap_block
+    assert "· exposure 12" in gap_block
     # The full breakdown still rides along in the hover tooltip.
     assert "= exposure 12" in gap_block
 
@@ -373,7 +378,7 @@ def test_tied_gap_cards_carry_a_real_open_role_count_to_tell_them_apart(client):
     gap_block = _gap_strip(body)
 
     # Both tied at exposure 12 (Tier 1 × no_contacts = 3 × 4)...
-    assert gap_block.count("exp 12") == 2
+    assert gap_block.count("· exposure 12") == 2
     # ...but only the firm that's actually hiring gets the badge, and it
     # names the real count, not a guess.
     hiring_card = gap_block[gap_block.index("Hiring Co"):gap_block.index("Quiet Co")]
