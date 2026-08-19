@@ -32,7 +32,9 @@ import os
 
 import pytest
 
-from coverage_connectors import GreenhouseBoard, LeverBoard, WorkdayBoard, fetch, verify
+from coverage_connectors import (
+    AvatureBoard, GreenhouseBoard, LeverBoard, SuccessFactorsBoard, WorkdayBoard, fetch, verify,
+)
 
 RUN_LIVE = os.environ.get("RUN_LIVE") == "1"
 pytestmark = pytest.mark.skipif(not RUN_LIVE, reason="set RUN_LIVE=1 to run live network smoke tests")
@@ -109,4 +111,82 @@ def test_workday_live_verify_open():
     assert fetched.ok and fetched.opportunities
 
     status = verify(fetched.opportunities[0].url)
+    assert status.result == "verified-open", status.evidence
+
+
+# --------------------------------------------------------------------------
+# Boards added 2026-08-19 (Haitong / Accenture / Deloitte / EY). Each one is
+# smoke-tested here against the real site, because this catalog's standing
+# rule is that a board earns its place by returning real rows — see
+# directory/boards.py's own provenance note.
+# --------------------------------------------------------------------------
+
+@pytest.mark.live
+def test_haitong_workday_live_fetch():
+    """Haitong International's HK/NY board is small (single digits off
+    season), so this asserts the board is READABLE, not that it is busy —
+    an empty board and an unreachable one must not look the same."""
+    board = WorkdayBoard(firm="Haitong International", tenant_host="htisec.wd3",
+                         site="hti_careers")
+    result = fetch(board)
+
+    assert result.ok, f"live haitong fetch failed: {result.error}"
+    for opp in result.opportunities:
+        assert opp.source == "workday"
+        assert opp.title
+        assert opp.url.startswith("https://htisec.wd3.myworkdayjobs.com/hti_careers/")
+
+
+@pytest.mark.live
+def test_accenture_workday_search_text_scopes_the_board():
+    """Accenture's tenant reports a hard ceiling of total=2000 for any
+    search broad enough to reach it — INCLUDING the unfiltered board — and a
+    fetch that reads exactly `total` rows reports truncated=False, so a
+    board scoped past the ceiling would look complete while being a
+    truncation. The catalog's keywords must stay under it."""
+    board = WorkdayBoard(firm="Accenture", tenant_host="accenture.wd103",
+                         site="AccentureCareers", search_text="internship")
+    result = fetch(board)
+
+    assert result.ok, f"live accenture fetch failed: {result.error}"
+    assert 0 < result.raw_count < 2000, (
+        f"raw_count={result.raw_count} is at or past the tenant's 2000 ceiling — "
+        "re-pick the search_text rather than shipping a silent truncation"
+    )
+    assert any("intern" in o.title.lower() for o in result.opportunities)
+
+
+@pytest.mark.live
+def test_deloitte_avature_entry_level_facet_is_honoured():
+    """The `3_5_3` facet is what makes this board worth having: unfiltered,
+    the feed's 20 most-recent rows are all experienced-hire reqs. The
+    en_US path honours it; the bare /careers/ path silently ignores every
+    query param (verified live 2026-08-19)."""
+    board = AvatureBoard(
+        firm="Deloitte",
+        feed_url="https://apply.deloitte.com/en_US/careers/SearchJobs/feed/?3_5_3=477%2C478%2C480",
+    )
+    result = fetch(board)
+
+    assert result.ok, f"live deloitte fetch failed: {result.error}"
+    assert result.raw_count > 0
+    opp = result.opportunities[0]
+    assert opp.source == "avature"
+    assert opp.url.startswith("https://apply.deloitte.com/")
+
+
+@pytest.mark.live
+def test_successfactors_live_fetch_and_verify():
+    board = SuccessFactorsBoard(firm="EY", origin="https://careers.ey.com",
+                                keywords=("internship",))
+    result = fetch(board)
+
+    assert result.ok, f"live successfactors fetch failed: {result.error}"
+    assert result.raw_count > 0
+    opp = result.opportunities[0]
+    assert opp.source == "successfactors"
+    assert opp.title and opp.location
+    assert opp.url.startswith("https://careers.ey.com/ey/job/")
+
+    status = verify(opp.url)
     assert status.result == "verified-open", status.evidence

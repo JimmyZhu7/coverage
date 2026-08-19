@@ -42,7 +42,7 @@ from coverage_connectors import (
     AvatureBoard, BeisenBoard, BoardConfig, EightfoldBoard, GoldmanSachsBoard,
     GreenhouseBoard, IcimsBoard, LeverBoard, LumesseBoard, McKinseyBoard, OracleBoard,
     PhenomBoard, SocGenBoard,
-    TalentsoftBoard,
+    SuccessFactorsBoard, TalentsoftBoard,
     SitemapBoard, TalentGatewayBoard, TalnetBoard, WorkdayBoard,
 )
 
@@ -128,6 +128,70 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # the featured graduate subset; the full board would need a browser tier
     # (see talentgateway.py SCOPE).
     ("ubs", TalentGatewayBoard(firm="UBS", partner_id=25008, site_id=5131)),
+
+    # ---- Big Four (probed + live-verified 2026-08-19). The consulting
+    # column had MBB and PwC but none of EY/Deloitte/KPMG; three were
+    # probed, two are now boards and one is documented below as not
+    # buildable. ----
+    #
+    # Accenture — Workday, and the board is the whole firm: ~2,000+ reqs
+    # dominated by non-campus delivery roles in every geography. Two things
+    # forced the scoping, not just feed hygiene:
+    #   * the tenant reports `total: 2000` for ANY search broad enough to
+    #     reach it, the unfiltered board included — "intern", "graduate",
+    #     "graduate programme" and "strategy consulting intern" all report
+    #     exactly 2000. That is a ceiling, not a count.
+    #   * workday.py sets `truncated` from `total > len(jobs)`, so a fetch
+    #     that reads all 2000 rows the ceiling admits reports
+    #     truncated=False — a truncation that looks complete, which would
+    #     hand ingest's closed-detection a partial list it believes is whole.
+    # So the two search_texts below are chosen to sit well under the
+    # ceiling AND to avoid a hardcoded intake year: "internship" -> 205 rows
+    # (2026-08-19), "early careers" -> 114. Rejected for the record:
+    # "intern" (2000, and matches Internal/International), "2027 graduate
+    # program" (9 rows and precise, but stale the moment the cycle turns).
+    ("accenture", WorkdayBoard(firm="Accenture", tenant_host="accenture.wd103",
+                               site="AccentureCareers", search_text="internship")),  # live-verified 2026-08-19
+    ("accenture", WorkdayBoard(firm="Accenture", tenant_host="accenture.wd103",
+                               site="AccentureCareers", search_text="early careers")),  # live-verified 2026-08-19
+    #
+    # Deloitte US — Avature, same connector as Bain/Macquarie. The feed path
+    # matters twice over:
+    #   * `/careers/SearchJobs/feed/` (the path the site links) ignores EVERY
+    #     query param — search, jobRecordsPerPage, jobOffset, folderOffset —
+    #     and its 20 most-recent rows were, when probed, entirely
+    #     experienced-hire tax/cyber manager reqs: a board of pure noise for
+    #     a student feed.
+    #   * the `/en_US/careers/SearchJobs/feed/` path honours the site's own
+    #     `3_5_3` job-level facet, and 477,478,480 is the trio behind its
+    #     "Entry level" nav link (read from apply.deloitte.com's own markup).
+    #     Same 20 rows' worth of feed, but 20 FY28 campus analyst reqs.
+    # Pagination is still ignored on both paths, so this inherits the ~20
+    # most-recent limit already accepted for Bain and Macquarie below — here
+    # it costs less, because the facet spends those 20 slots on campus rows.
+    ("deloitte", AvatureBoard(
+        firm="Deloitte",
+        feed_url="https://apply.deloitte.com/en_US/careers/SearchJobs/feed/?3_5_3=477%2C478%2C480")),  # live-verified 2026-08-19
+    #
+    # EY — SAP SuccessFactors RMK, the first board on the new
+    # `successfactors` connector (see coverage_connectors/successfactors.py).
+    # This platform had been written off twice in this file — Janus Henderson
+    # 2026-07-24, GIC 2026-08-08, both noted as "SuccessFactors — no
+    # connector" — on the assumption it was JS-gated. It is not: careers.ey.com
+    # serves the full result table as plain HTML with an exact stated total
+    # and honest `startrow` paging. Both of those firms are now buildable and
+    # are on the backlog rather than in this commit.
+    # `q=` is relevance-ranked full text, not a filter, so it is used the way
+    # OracleBoard's `keywords` already are: one search each, deduped by URL.
+    # Measured 2026-08-19 — "internship" 88, "trainee" 32, "student" 59,
+    # 150 rows after dedupe. Rejected: "intern" (3,852 — it matches Internal
+    # Audit and International Tax), "graduate" (594, relevance decays into
+    # senior roles by the second page), "campus" (13, all recruiter reqs).
+    # The tail of even a good keyword decays into loosely-matched roles; that
+    # is the same broad-fetch-plus-classifier posture the TD Securities note
+    # below already documents, not a defect.
+    ("ey", SuccessFactorsBoard(firm="EY", origin="https://careers.ey.com",
+                               keywords=("internship", "trainee", "student"))),  # live-verified 2026-08-19
 
     # ---- Ported providers (radar-verified 2026-07-22, re-verified on add) ----
     # Oracle Recruiting Cloud — J.P. Morgan's public REST. PostingEndDate is
@@ -218,6 +282,19 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # CITIC CLSA — Workday, HQ Hong Kong (agent-identified + live-verified 2026-07-23).
     ("clsa", WorkdayBoard(firm="CLSA", tenant_host="citicclsa.wd3", site="External",
                           search_text="intern")),
+    # Haitong International — Workday, HQ Hong Kong (probed + live-verified
+    # 2026-08-19: 2 postings, "Compliance Officer" (New York) and a PWM
+    # Senior Officer role (Hong Kong - OIS)). Deliberately UNSCOPED, unlike
+    # its CLSA neighbour above: the whole tenant is two rows, so a
+    # search_text would filter a board that has nothing to filter and would
+    # hide the summer-internship req the day it reopens. The 2026 Summer
+    # Internship Program posting (R25000212) that made this firm worth adding
+    # is already gone — its posting page's own postingAvailable flag reads
+    # false, checked 2026-08-19 — which is exactly the state this entry
+    # exists to notice changing. HK/China-heavy userbase, so a thin board
+    # here is still worth the one nightly request.
+    ("haitong", WorkdayBoard(firm="Haitong International", tenant_host="htisec.wd3",
+                             site="hti_careers")),  # live-verified 2026-08-19
     ("barclays", WorkdayBoard(firm="Barclays", tenant_host="barclays.wd3", site="External_Career_Site_Barclays",
                               search_text="intern")),
     ("db", WorkdayBoard(firm="Deutsche Bank", tenant_host="db.wd3", site="DBWebsite", search_text="intern")),
@@ -391,6 +468,50 @@ BOARDS: list[tuple[str, BoardConfig]] = [
 #    JS shells with no ATS host in the served markup). These belong on the
 #    firm-detail page as manually-maintained `firm_dates`, not in the feed.
 #
+# ---- Big Four + CITIC Securities, probed 2026-08-19 ----
+#
+# Added this round: Accenture, Deloitte and EY (see their entries above).
+# Probed and NOT added, recorded so the next attempt starts from the result:
+#
+# A. KPMG US — no public board to read. www.kpmguscareers.com is WordPress;
+#    /job-search/ ships zero postings server-side (0 occurrences of
+#    "JobPosting", 0 job hrefs in 235KB of markup), its keyword/location
+#    inputs sit outside any <form> and are driven by JS, its theme bundle
+#    contains no API host, admin-ajax or wp-json call, and Yoast's sitemap
+#    index exposes exactly one child sitemap — pages, no jobs. The campus
+#    ATS does exist and IS a platform this package already supports:
+#    kpmgcampus.avature.net, linked from /early-career/. But its root
+#    redirects to /Login/ and both /careers/SearchJobs/ and
+#    /careers/SearchJobs/feed/ 404 — it is a candidate portal, not a public
+#    job board, and the only public page on it is a single scholarship
+#    landing page. Nothing here is scrapeable without an account, so this
+#    stays a firm-detail manual-dates situation like Centerview above.
+#
+# B. EY US campus (usearlycareers.ey.com) — reachable, honest, and EMPTY.
+#    The site is Radancy TalentBrew and its own front-end calls a plain
+#    public JSON endpoint, /search-jobs/results, which answers 200 with
+#    {"hasJobs": false} and data-total-job-results="0" (2026-08-19). A
+#    Radancy connector is therefore buildable whenever a Radancy board with
+#    rows is worth having — but writing one now would ship an untested
+#    parser against a board with nothing in it, so EY is covered through
+#    careers.ey.com's SuccessFactors board above instead. Its applications
+#    route on to eyglobal.yello.co, a Yello board, which is a separate
+#    platform again and was not pursued for the same reason.
+#
+# C. CITIC Securities — JS shell behind bot protection; not attempted.
+#    job.citic.com still answers HTTP 521 (origin unreachable) on both http
+#    and https, unchanged from the earlier scan. cs.ecitic.com serves a
+#    certificate that is not valid for that name; www.cs.ecitic.com resolves
+#    and points at the real careers site, careers.citics.com, whose campus
+#    and intern paths (/campus/headquarters, /headquarters/interns) all
+#    return the SAME 999-byte Vue shell with an empty <div id="app">. That
+#    shell loads NetEase Yidun (cstaticdun.126.net/load.min.js) at page
+#    level — an anti-bot/CAPTCHA product. Per the project rule, a board
+#    behind bot detection is a documented gap, not a target: the same call
+#    already made for Morgan Stanley/Nomura/Evercore on Oleeo Protect above.
+#    citics.zhiye.com and citic.zhiye.com were checked on the chance CITIC
+#    ran Beisen like CICC does; both return Beisen's "Not Found" page.
+#
 # Deliberately absent, and not a gap: the 11 corp-strat / pipeline targets
 # (Google, Microsoft, Amazon, Meta, Apple, Nvidia, Tencent, Alibaba, ByteDance,
 # SEO Career, MLT). `scripts/import_targets.py` creates `firms` rows for them so
@@ -462,6 +583,12 @@ DEFAULT_TRACKS: dict[str, list[str]] = {
     "bmo": ["ib"],
     "truist": ["ib"],
     "permira": ["pe"],
+    # Big Four expansion (2026-08-19). Haitong is an HK investment bank;
+    # Accenture/Deloitte/EY are the consulting column's Big Four additions.
+    "haitong": ["ib"],
+    "accenture": ["consulting"],
+    "deloitte": ["consulting"],
+    "ey": ["consulting"],
 }
 
 
