@@ -283,6 +283,31 @@ def spend(user, cost: int, kind: str, **props) -> None:
     CreditLedger.all_objects.create(user=user, delta=-int(cost), kind=kind, props=props or {})
 
 
+def refund(user, cost: int, **props) -> None:
+    """One positive ledger row reversing an earlier `spend()` that turned
+    out not to correspond to work the student actually got anything for.
+
+    Exists for exactly one shape of failure: a chat turn's round 0
+    succeeded (charged, per `spend`'s own fairness rule above) but a LATER
+    round then failed outright — a network hiccup mid-turn, or the round
+    cap running out before the model ever landed an answer — so the turn
+    still ends in a plain failure notice, the same as one that never
+    reached the model at all. The round-0 charge already fired by the time
+    that's known, so the fix is a compensating credit, not skipping the
+    original debit.
+
+    Written as `KIND_ADJUST`, the same kind an admin correction uses — on
+    purpose: `_SPEND_KINDS` (this module, above) deliberately excludes
+    `KIND_ADJUST` from the daily burst guard and the Settings usage line,
+    because a refund is a correction of an earlier charge, not new
+    activity, and must not read as if the student spent AND got money
+    back today. A non-positive `cost` is a no-op, same as `spend`.
+    """
+    if cost <= 0:
+        return
+    CreditLedger.all_objects.create(user=user, delta=int(cost), kind=CreditLedger.KIND_ADJUST, props=props or {})
+
+
 # ---------------------------------------------------------------------------
 # Rescan-specific helpers (enforcement point 2 — capture/gmail_live.py)
 # ---------------------------------------------------------------------------

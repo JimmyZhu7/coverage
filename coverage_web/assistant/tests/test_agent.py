@@ -1108,6 +1108,71 @@ def test_a_streamed_failed_turn_never_debits_credits(user, conversation):
     assert _balance(user) == before
 
 
+def test_a_turn_that_fails_on_a_later_round_is_refunded(user, conversation, contact):
+    """Round 0 succeeds (a tool_use response) and is charged there, exactly
+    as designed — but the SAME network hiccup that round 0 could have hit
+    is just as possible on round 1, after the charge already landed. The
+    student never sees an answer (the turn ends in "I couldn't reach the
+    model" same as any other failed turn), so they must not be left having
+    paid for it — the fairness rule this whole gate exists for is "never
+    charged for a request the student didn't get an answer to," and that
+    has to hold for round 1 exactly as much as round 0."""
+    before = _balance(user)
+    client = FakeClient(
+        [
+            _response([_tool_use("get_today_queue", {})], "tool_use"),
+            RuntimeError("connection reset"),
+        ]
+    )
+
+    result = agent.run_turn(user, conversation, "What's on today?", client=client)
+
+    assert not result.ok
+    assert result.reason == "failed"
+    assert _balance(user) == before
+
+
+def test_a_turn_that_exhausts_the_round_cap_is_refunded(user, conversation, contact):
+    """The other way a charged turn can end without ever landing an answer:
+    the model keeps calling tools until MAX_ROUNDS runs out. Round 0 was
+    charged; the student sees only "I went round in circles" — a failure,
+    not an answer — so that charge must come back."""
+    before = _balance(user)
+    script = [_response([_tool_use("get_today_queue", {}, block_id=f"t{i}")], "tool_use") for i in range(agent.MAX_ROUNDS)]
+    client = FakeClient(script)
+
+    result = agent.run_turn(user, conversation, "What's on today?", client=client)
+
+    assert not result.ok
+    assert result.reason == "failed"
+    assert _balance(user) == before
+
+
+def test_a_streamed_turn_that_fails_on_a_later_round_is_refunded(user, conversation, contact):
+    """The streaming sibling of test_a_turn_that_fails_on_a_later_round_is_refunded
+    — same fairness rule, the other transport."""
+    before = _balance(user)
+    script = [
+        ([], _response([_tool_use("get_today_queue", {})], "tool_use", msg_id="m0")),
+        RuntimeError("connection reset"),
+    ]
+    client = FakeStreamingClient(script)
+
+    list(agent.stream_turn(user, conversation, "What's on today?", client=client))
+
+    assert _balance(user) == before
+
+
+def test_a_streamed_turn_that_exhausts_the_round_cap_is_refunded(user, conversation, contact):
+    before = _balance(user)
+    script = [([], _response([_tool_use("get_today_queue", {})], "tool_use", msg_id=f"m{i}")) for i in range(agent.MAX_ROUNDS)]
+    client = FakeStreamingClient(script)
+
+    list(agent.stream_turn(user, conversation, "keep going", client=client))
+
+    assert _balance(user) == before
+
+
 @override_settings(CREDIT_PLANS={
     "free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15},
     "pro": {"monthly_grant": 180, "message_cost": 3, "daily_burst": 45},

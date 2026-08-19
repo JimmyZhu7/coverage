@@ -568,6 +568,14 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
     used = _tool_calls_used(conversation, user)
     executed: list[str] = []
     last_assistant: ChatMessage | None = None
+    # Whether THIS turn has already been charged (round 0 succeeded) —
+    # tracked so a failure on a LATER round, or running out the round cap,
+    # can refund it. The fairness rule this gate exists for is "never
+    # charged for a request the student didn't get an answer to," and a
+    # network hiccup on round 1 is exactly as possible as one on round 0 —
+    # the charge landing before that happens must not be the difference
+    # between refunded and not.
+    charged = False
 
     for round_no in range(MAX_ROUNDS):
         try:
@@ -579,6 +587,10 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
                 messages=_api_messages(conversation, user),
             )
         except Exception:  # noqa: BLE001 — see module docstring: never a 500
+            if charged:
+                billing_credits.refund(
+                    user, limits.message_cost, reason="turn_failed_after_charge", model=limits.model
+                )
             reply = _save(
                 _notice(
                     user,
@@ -598,6 +610,7 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
             billing_credits.spend(
                 user, limits.message_cost, "spend_chat", model=limits.model
             )
+            charged = True
         _log_usage(user, limits.model, response)
         blocks = [_as_dict(b) for b in response.content]
         last_assistant = _save(
@@ -659,7 +672,13 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
         )
 
     # Fell out of the loop still wanting tools: the model has not landed an
-    # answer inside the budget. Say so rather than showing a half-thought.
+    # answer inside the budget. Say so rather than showing a half-thought —
+    # and refund round 0's charge, since "I went round in circles" is a
+    # failure notice, not an answer, same as any other failed turn.
+    if charged:
+        billing_credits.refund(
+            user, limits.message_cost, reason="turn_exhausted_round_cap", model=limits.model
+        )
     reply = _save(
         _notice(
             user,
@@ -767,6 +786,9 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
     client = client or get_client()
     used = _tool_calls_used(conversation, user)
     executed: list[str] = []
+    # Same tracking as run_turn, and for the same reason — see that
+    # function's comment on `charged`.
+    charged = False
 
     for round_no in range(MAX_ROUNDS):
         blocks: list[dict] = []
@@ -791,11 +813,16 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
                 billing_credits.spend(
                     user, limits.message_cost, "spend_chat", model=limits.model
                 )
+                charged = True
             _log_usage(user, limits.model, final)
             blocks = [_as_dict(b) for b in final.content]
             stop_reason = final.stop_reason
             message_id = final.id or ""
         except Exception:  # noqa: BLE001 — see module docstring: never a 500
+            if charged:
+                billing_credits.refund(
+                    user, limits.message_cost, reason="turn_failed_after_charge", model=limits.model
+                )
             notice_text = "I couldn't reach the model just then. Try that again in a moment."
             _save(_notice(user, conversation, ChatMessage.NOTICE_FAILED, notice_text))
             yield {"type": "notice", "kind": "failed", "text": notice_text}
@@ -861,6 +888,12 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
 
         _save(ChatMessage(user=user, conversation=conversation, role=ChatMessage.ROLE_USER, content=results))
 
+    # Same refund as run_turn's own round-cap exhaustion — see that
+    # function's comment.
+    if charged:
+        billing_credits.refund(
+            user, limits.message_cost, reason="turn_exhausted_round_cap", model=limits.model
+        )
     notice_text = (
         "I went round in circles on that one and stopped myself. Try asking it "
         "a narrower way — one firm, or one week."
