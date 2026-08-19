@@ -225,7 +225,7 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
     existing = GmailConnection.all_objects.filter(user=user).first()
     backfill_status = "done" if existing and existing.backfill_status == "done" else "pending"
 
-    connection, _ = GmailConnection.objects.update_or_create(
+    connection, _ = GmailConnection.all_objects.update_or_create(
         user=user,
         defaults={
             "gmail_address": profile["emailAddress"],
