@@ -16,6 +16,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count as models_Count, Max as models_Max, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.timesince import timesince
 from django.views.decorators.http import require_POST
@@ -894,6 +895,225 @@ def _chat_prep(user, today, schedule) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Day-one seeds — the queue's answer when it has nothing of its own to say.
+# ---------------------------------------------------------------------------
+# THE HOLE THESE FILL. After onboarding with zero or one contact, Today said
+# "You're all caught up." With ONE contact just touched, cadence's follow-up
+# window puts the next action six business days out, so the page stays silent
+# for a week — at exactly the moment a new student most needs a push. "Caught
+# up" over an empty network is false comfort, and the queue is the habit loop:
+# it going dark on day one is the product failing at its own premise.
+#
+# WHAT A SEED IS, AND IS NOT. A seed is DERIVED FROM STATE on every render and
+# stored nowhere. There is no seed table, no "starter task" row, no completion
+# flag — a seed exists precisely as long as the condition that justifies it is
+# still true, and disappears the render after it stops being true. That is the
+# whole design: fake tasks that need dismissing are a second queue, and a
+# second queue on a page whose pitch is "this is more trustworthy than your
+# spreadsheet" is the one thing it cannot afford.
+#
+# Every seed also has to be TRUE. "Connect Gmail" is offered only where Gmail
+# Live is actually configured on this deploy (`gmail_live.is_configured()`) —
+# a dark deploy must never advertise a button that goes nowhere, the same rule
+# Settings' own Gmail card already follows.
+#
+# THE TWO SILENCES. An empty queue means one of two opposite things, and the
+# whole trigger rule is telling them apart:
+#
+#   nothing to do because you have nothing yet  -> seeds
+#   nothing to do because you handled it        -> "You're all caught up."
+#
+# A student with thirty contacts who has snoozed every one of them is in the
+# second case: they read the queue and made a decision about every row in it.
+# Answering that with "Add 3 people at Goldman Sachs" overwrites an earned
+# message with a beginner's one — the same false-comfort failure as the
+# original bug, just pointed the other way. So the network size is half the
+# rule and the silence is the other half; neither alone is honest.
+SEED_MAX = 3               # never more: this is a nudge, not a curriculum
+SEED_FIRM_TARGET = 3       # contacts at a target firm before it stops asking
+SEED_FIRM_SLOTS = 2        # at most two firm seeds, so the list isn't one note
+# Live contacts below which an account is still being BUILT rather than run.
+# Under five people there is no network for an empty queue to be an
+# achievement over; at five and up, silence is something the student did.
+SEED_NETWORK_FLOOR = 5
+
+
+def _seed_firm_dates(firm_ids: list[int], today) -> dict[int, dict]:
+    """The soonest REAL date per firm, for the seed's because-line.
+
+    Two sources, in order of authority: a confirmed `FirmDate` (confidence
+    1.0 — the same bar the cadence engine and the Deadlines rail hold, so a
+    rumour never becomes a countdown), and failing that the soonest deadline
+    on an open campus role at that firm.
+
+    Both are one bulk query over the (at most `SEED_FIRM_SLOTS`) candidate
+    firms, ordered latest-first so the last write into the dict is the
+    earliest date — the same batching pattern `_chat_prep` uses.
+    """
+    if not firm_ids:
+        return {}
+    out: dict[int, dict] = {}
+    for fd in (FirmDate.objects
+               .filter(firm_id__in=firm_ids, date__gte=today, confidence=1.0)
+               .order_by("-date")):
+        out[fd.firm_id] = {
+            "label": _FIRM_DATE_LABELS.get(
+                fd.event_kind, fd.event_kind.replace("_", " ")),
+            "date": fd.date,
+            "days": (fd.date - today).days,
+        }
+
+    missing = [fid for fid in firm_ids if fid not in out]
+    if missing:
+        for o in (Opportunity.objects
+                  .filter(firm_id__in=missing, status="open",
+                          bucket__in=TARGET_BUCKETS, deadline__gte=today)
+                  .order_by("-deadline")
+                  .only("firm_id", "deadline")):
+            out[o.firm_id] = {
+                "label": "Applications close",
+                "date": o.deadline,
+                "days": (o.deadline - today).days,
+            }
+    return out
+
+
+def _starter_seeds(user, today) -> list[dict]:
+    """Concrete first moves, derived from the student's OWN choices.
+
+    Only ever called for a queue with nothing to say AND a network still
+    being built (see the gate in `_cockpit_context`), so an account that is
+    merely quiet today pays none of these queries at all. Ordered by what
+    unblocks what: no target firms means nothing else can be computed, so it
+    goes first; the add-people seeds are the actual habit; import and Gmail
+    are accelerants; the track seed is the quietest because a wrong track
+    only mis-sorts a feed. Capped at SEED_MAX.
+
+    Each entry is `{key, title, why, cta, href}` — a real destination that
+    already exists, never a placeholder.
+    """
+    seeds: list[dict] = []
+    live = Contact.objects.for_user(user).filter(archived=False)
+
+    targets = list(
+        UserFirm.objects.for_user(user)
+        .exclude(firm_id=None)
+        .select_related("firm")
+    )
+
+    if not targets:
+        # The unfinished-onboarding banner (week.html) already says exactly
+        # this, with the same link, whenever `onboarded_at` is NULL. Two
+        # copies of one instruction on one screen reads as a bug, so this
+        # seed only speaks for the account that FINISHED the wizard and
+        # still has no firms — the case nothing else on the page covers.
+        if user.onboarded_at is not None:
+            seeds.append({
+                "key": "firms",
+                "title": "Pick your target firms",
+                "why": "Coverage builds the queue from the firms you're chasing. "
+                       "It doesn't know any yet.",
+                "cta": "Pick firms",
+                "href": f"{reverse('accounts:settings')}#firms",
+            })
+    else:
+        counts = {
+            row["firm_id"]: row["n"]
+            for row in (live.exclude(firm_id=None)
+                        .values("firm_id")
+                        .annotate(n=models_Count("id")))
+        }
+        thin = [uf for uf in targets
+                if counts.get(uf.firm_id, 0) < SEED_FIRM_TARGET]
+        # Highest tier first (tier 1 is the firm they care most about), then
+        # emptiest, then name so the order is stable across renders.
+        thin.sort(key=lambda uf: (
+            uf.tier if uf.tier is not None else 9,
+            counts.get(uf.firm_id, 0),
+            uf.firm.name,
+        ))
+        thin = thin[:SEED_FIRM_SLOTS]
+        dates = _seed_firm_dates([uf.firm_id for uf in thin], today)
+        for uf in thin:
+            have = counts.get(uf.firm_id, 0)
+            need = SEED_FIRM_TARGET - have
+            name = uf.firm.name
+            close = dates.get(uf.firm_id)
+            if close:
+                # A real, dated reason to move today. `days` is the honest
+                # distance, not a rounded "soon".
+                when = "today" if close["days"] == 0 else (
+                    "tomorrow" if close["days"] == 1 else f"{close['days']} days")
+                why = f"{close['label']} {close['date']:%b %-d}. That's {when}."
+            elif have:
+                why = f"{have} there so far. Three is where a firm starts to know you."
+            else:
+                why = "Nobody there yet. Three is where a firm starts to know you."
+            seeds.append({
+                "key": f"firm-{uf.firm_id}",
+                "title": (f"Add {need} people at {name}" if have == 0
+                          else f"Add {need} more at {name}"),
+                "why": why,
+                "cta": "Add someone",
+                "href": (f"{reverse('crm:contact_new')}"
+                         f"?firm={uf.firm.slug}&quick=1"),
+            })
+
+    if len(seeds) < SEED_MAX:
+        # The "small enough that one paste changes it" half of this is the
+        # gate's job (SEED_NETWORK_FLOOR) — nothing here runs above it. What
+        # is left to check is whether they already did it: `source="import"`
+        # is written by accounts.services.import_contacts, so a user who has
+        # run it once never sees this again.
+        if not live.filter(source="import").exists():
+            seeds.append({
+                "key": "import",
+                "title": "Import your contacts",
+                "why": "Already keeping a list? Bring the spreadsheet in and the "
+                       "cadence starts on all of it at once.",
+                "cta": "Import a CSV",
+                "href": reverse("accounts:import"),
+            })
+
+    if len(seeds) < SEED_MAX and not user.tracks:
+        seeds.append({
+            "key": "track",
+            "title": "Set your track",
+            "why": "IB, markets, PE. Pick one and the roles and news on this "
+                   "page narrow to it.",
+            "cta": "Set your track",
+            "href": f"{reverse('accounts:settings')}#profile",
+        })
+
+    # NEVER promised on a deploy where it is dark. `is_configured()` is the
+    # same runtime gate every gmail_live entry point holds and the same one
+    # Settings' own card branches on — a seed offering a connection this
+    # install cannot make is the exact class of over-claim this page exists
+    # to avoid.
+    #
+    # Imported HERE, not at module scope: `capture.gmail_live` pulls in the
+    # Google API client stack and imports `crm.models` on the way, and this
+    # module is imported by `crm.views` at startup. A local import keeps that
+    # weight off every process that never renders a silent queue, and keeps
+    # the crm -> capture -> crm loop from having to exist at all.
+    from capture import gmail_live
+    from capture.models import GmailConnection
+
+    if len(seeds) < SEED_MAX and gmail_live.is_configured():
+        if not GmailConnection.objects.for_user(user).exists():
+            seeds.append({
+                "key": "gmail",
+                "title": "Connect Gmail",
+                "why": "Replies land in your mailbox. Connected, Coverage logs "
+                       "them for you and the queue stays true.",
+                "cta": "Connect Gmail",
+                "href": f"{reverse('accounts:settings')}#gmail-live",
+            })
+
+    return seeds[:SEED_MAX]
+
+
 def _cockpit_context(user) -> dict:
     """The Today cockpit: a capped, momentum-ordered daily plan in three
     semantic lanes, an honest held-back remainder, a weekly pace figure, the
@@ -981,6 +1201,32 @@ def _cockpit_context(user) -> dict:
     ]
 
     schedule = _schedule(user, today)
+    chat_prep = _chat_prep(user, today, schedule)
+
+    # THE GATE. Both halves, because an empty queue means two opposite things
+    # (see the seeds header above) and only the pair tells them apart.
+    #
+    # SILENT: no planned lane, no chat to prep, no debrief to write, and
+    # nothing pacing out behind the cap. `park` is deliberately not in this
+    # test — a "Gone quiet" strip is a list of EXITS, not forward work, so a
+    # queue that holds only parks is silent in every sense that matters.
+    #
+    # STILL BEING BUILT: fewer than SEED_NETWORK_FLOOR live contacts. Without
+    # this, an account that has snoozed thirty real people gets told to go add
+    # three more — beginner advice overwriting a message the student earned.
+    # `contacts` is the live, non-archived list `_build_actions` already
+    # loaded, so this half of the rule costs no query at all.
+    #
+    # The gate is also the cost control: every query `_starter_seeds` runs
+    # happens inside this branch, so a student with a working queue — the
+    # common case, and the one a perf pass just cleaned up — pays exactly
+    # nothing for this feature.
+    seeds = (
+        _starter_seeds(user, today)
+        if (not lanes and not debriefs and not chat_prep and not held
+            and len(contacts) < SEED_NETWORK_FLOOR)
+        else []
+    )
 
     # Every contact the queue is already speaking about. "Waiting on reply" is
     # the page's silent bucket, so it must not re-list somebody who has a card
@@ -1014,7 +1260,11 @@ def _cockpit_context(user) -> dict:
         # happening today, with the last debrief pulled up alongside.
         "schedule": schedule[:6],
         "daybar": _daybar(schedule, timezone.localtime(timezone.now())),
-        "chat_prep": _chat_prep(user, today, schedule),
+        "chat_prep": chat_prep,
+        # Day-one seeds: concrete first moves derived from state on every
+        # render, never stored. Empty for any account whose queue has work
+        # in it. See `_starter_seeds`.
+        "seeds": seeds,
         "deadlines": _next_deadlines(user, today),
         "new_at_firms": _new_at_your_firms(user),
         "waiting": _waiting_on_reply(user, busy_ids),
