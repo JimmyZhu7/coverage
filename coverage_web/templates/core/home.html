@@ -7,6 +7,108 @@
 <style>
   /* ---- Landing-page-only styles. Everything shared lives in coverage.css. -- */
 
+  /* ---- Hero: the live desk ------------------------------------------------
+     The product is the hero. Copy left, a framed mock of the Today queue
+     right, so the first screen shows the thing rather than describing it.
+
+     The card keeps `.kin-hero` — its gradient, sheen sweep, border and
+     rise-in are already the marketing card treatment. That rule is SHARED
+     with /pricing/ and both auth screens, so every override here is scoped
+     to `.desk-hero`; nothing in coverage.css changes and those three pages
+     render exactly as before. Every colour is a token, so dark mode comes
+     for free through the palette in coverage.css §2. */
+  .desk-hero { display: grid; align-items: center; gap: var(--s7);
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    padding: var(--s7) var(--s6); }
+  .desk-copy { min-width: 0; }
+  .desk-eyebrow { display: inline-flex; align-items: center; gap: var(--s2);
+    font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent);
+    margin: 0 0 var(--s3); }
+  /* Beats `.kin-hero h1` (0,1,1) on specificity without touching it. */
+  .desk-hero .desk-title {
+    font: var(--w-black) clamp(32px, 3.6vw, 44px)/1.05 var(--font-display);
+    letter-spacing: -0.015em; color: var(--ink); margin: 0; max-width: 16ch; }
+  .desk-sub { color: var(--ink-2); font-size: var(--fs-m);
+    margin: var(--s3) 0 0; max-width: 48ch; }
+
+  /* The ledger, demoted. It used to be a 44px centred band; the panel now
+     carries the visual weight, so the numbers run inline under a hairline
+     and read as a footer to the copy rather than as the headline. */
+  .desk-stats { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s5);
+    margin-top: var(--s5); padding-top: var(--s4);
+    border-top: 1px solid var(--line); }
+  .desk-stat { display: flex; align-items: baseline; gap: var(--s2); }
+  .desk-stat .dash-num { font-size: 20px; color: var(--ink); }
+  .desk-stat .dash-lbl { white-space: nowrap; }
+
+  /* The panel: a mini Today screen, framed like a real window. */
+  .desk-panel { min-width: 0; margin: 0; overflow: hidden;
+    border: 1px solid var(--line); border-radius: var(--r-panel);
+    background: var(--surface); box-shadow: var(--shadow-2); }
+  .desk-bar { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s3); padding: 9px var(--s4);
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+    font-family: var(--font-mono); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+  .desk-bar-live { display: inline-flex; align-items: center; gap: 6px;
+    color: var(--ok); flex: none; }
+  .desk-body { display: flex; align-items: center; gap: var(--s4);
+    padding: var(--s4); }
+  .desk-queue { flex: 1; min-width: 0; display: flex; flex-direction: column;
+    gap: var(--s2); }
+
+  /* Rows arrive in a short staggered slide, so the panel reads as a queue
+     filling itself rather than a static screenshot. Transform + opacity
+     only: nothing reflows. Killed under reduced motion below. */
+  .desk-row { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s3); min-width: 0;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--paper); padding: var(--s2) var(--s3);
+    animation: desk-row-in 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(300ms + var(--i, 0) * 120ms); }
+  @keyframes desk-row-in {
+    from { opacity: 0; transform: translateX(-12px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .desk-row-main { min-width: 0; }
+  .desk-row b { display: block; font-size: var(--fs-s); font-weight: var(--w-bold);
+    color: var(--ink); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .desk-why { display: block; font-size: 11px; color: var(--ink-3);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk-go { flex: none; font-size: 11px; font-weight: var(--w-med);
+    border-radius: 999px; padding: 3px 10px;
+    background: var(--accent); color: var(--on-accent); }
+  .desk-go.is-done { background: var(--ok-soft); color: var(--ok);
+    box-shadow: inset 0 0 0 1px var(--ok-line); }
+
+  .desk-pace { flex: none; display: flex; flex-direction: column;
+    align-items: center; gap: var(--s2);
+    animation: desk-pace-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 680ms; }
+  @keyframes desk-pace-in {
+    from { opacity: 0; transform: scale(0.9); }
+    to   { opacity: 1; transform: none; }
+  }
+  .desk-ring { width: 84px; height: 84px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    background: conic-gradient(var(--accent) 0deg 252deg, var(--line) 252deg 360deg); }
+  .desk-ring::before { content: "7/10"; width: 62px; height: 62px;
+    border-radius: 50%; background: var(--surface);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-weight: var(--w-bold);
+    font-size: var(--fs-s); color: var(--ink); }
+  .desk-pace-lbl { font-family: var(--font-mono); font-size: var(--fs-nano);
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+
+  /* Says outright that the panel is a mock. A logged-out visitor has no
+     queue, and a live-dot panel labelled "your queue" would otherwise
+     read as their data. */
+  .desk-note { margin: 0; padding: 0 var(--s4) var(--s4);
+    font-size: var(--fs-xs); color: var(--ink-3); }
+
   /* Section scaffolding: generous vertical rhythm, one centered eyebrow per
      section, display-family section titles. */
   .land-section { margin: var(--s8) 0 0; }
@@ -167,14 +269,6 @@
     margin: 0 0 var(--s2); }
   .trust-item p { color: var(--ink-2); font-size: var(--fs-s); margin: 0; }
 
-  /* Stat band: the ledger, big. */
-  .stat-band { display: flex; justify-content: center; gap: var(--s8);
-    flex-wrap: wrap; margin-top: var(--s6); padding: var(--s6) 0;
-    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-  .stat-band .cell { text-align: center; }
-  .stat-band .dash-num { font-size: 44px; color: var(--ink); }
-  .stat-band .dash-lbl { display: block; margin-top: 4px; }
-
   /* Final CTA band. */
   .cta-band { text-align: center; margin: var(--s8) 0 var(--s5);
     padding: var(--s7) var(--s5);
@@ -191,12 +285,38 @@
     flex-wrap: wrap; }
 
   @media (max-width: 820px) {
+    /* Copy first, panel second — that is already the DOM order, so the
+       single column needs no reordering. */
+    .desk-hero { grid-template-columns: 1fr; gap: var(--s5);
+      padding: var(--s5) var(--s4); }
+    .desk-hero .desk-title { max-width: 20ch; }
+    .desk-sub { max-width: none; }
     .feature-row { grid-template-columns: 1fr; gap: var(--s5); }
     .feature-row.flip .feature-copy { order: 0; }
     .trust-band { grid-template-columns: 1fr; }
-    .stat-band { gap: var(--s6); }
     .v-board { grid-template-columns: repeat(2, 1fr); }
     .v-board .v-col:last-child { display: none; }
+  }
+
+  /* Phone: 84px of ring beside a queue row leaves the name ~110px wide and
+     everything ellipses. The pace turns into a footer strip under the queue
+     instead, which keeps the rows full-width and readable. */
+  @media (max-width: 520px) {
+    .desk-body { flex-direction: column; align-items: stretch; gap: var(--s3); }
+    .desk-pace { flex-direction: row; align-items: center; gap: var(--s3);
+      align-self: flex-start; }
+    .desk-ring { width: 62px; height: 62px; }
+    .desk-ring::before { width: 46px; height: 46px; font-size: 11px; }
+    .desk-stats { gap: var(--s2) var(--s4); }
+  }
+
+  /* Reduced motion: the hero's two entrances are the only new animations on
+     this page. coverage.css §17 already collapses every duration to 0.01ms,
+     which lands `both`-filled animations on their end state — this states it
+     outright so a future edit can't reintroduce a delayed reveal that leaves
+     rows invisible. */
+  @media (prefers-reduced-motion: reduce) {
+    .desk-row, .desk-pace { animation: none; opacity: 1; transform: none; }
   }
 </style>
 {% endblock %}
@@ -218,24 +338,78 @@
       {% endfor %}
     </div>
   {% endif %}
-  <header class="kin-hero">
-    <span class="kin-hero-icon">{% include "_icon.html" with name="home" %}</span>
-    <p class="kin-hero-eyebrow">Campus recruiting · finance &amp; consulting</p>
-    <h1 class="kin-hero-title">Everyone tracks deadlines. Nobody tracks the relationship.</h1>
-    <p class="kin-hero-sub">Live roles across six markets, plus a private CRM for the people behind them.</p>
-    <div class="kin-hero-stats">
-      <div class="kin-hero-stat"><span class="dash-num">{{ open_count|default:"0" }}</span><span class="dash-lbl">Live Campus Roles</span></div>
-      <div class="kin-hero-stat"><span class="dash-num">{{ firm_count|default:"0" }}</span><span class="dash-lbl">Firms Tracked</span></div>
-      <div class="kin-hero-stat"><span class="dash-num">6</span><span class="dash-lbl">Verticals</span></div>
+  {% comment %}
+  The hero is the product, not a poster of it: copy on the left, a framed mock
+  of the Today queue on the right. `.kin-hero` is kept for the shared card
+  treatment (tinted gradient, sheen sweep, border, rise-in) — but that rule
+  also dresses /pricing/ and both auth screens, so every layout override for
+  this page is scoped to `.desk-hero` in the style block above and nothing in
+  coverage.css is touched.
+
+  The panel is illustrative. A logged-out visitor has no queue, so the names
+  are fictional and the caption says so outright — the same honesty the
+  "Your data behaves like it's yours" band further down claims.
+  {% endcomment %}
+  <header class="kin-hero desk-hero">
+    <div class="desk-copy">
+      <p class="desk-eyebrow">
+        <span class="live-dot"></span>
+        Reading {{ open_count|default:"0" }} live roles right now
+      </p>
+      <h1 class="desk-title">Your recruiting desk, running in the background.</h1>
+      <p class="desk-sub">Coverage watches every deadline and every reply, and hands you one
+        ranked queue each morning: who to reach, and why.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/opportunities/">Browse Openings</a>
+        {% if user.is_authenticated %}
+          <a class="btn" href="/app/">Open Today</a>
+        {% else %}
+          <a class="btn" href="/accounts/signup/">Create Account</a>
+        {% endif %}
+      </div>
+      <div class="desk-stats">
+        <div class="desk-stat"><span class="dash-num">{{ open_count|default:"0" }}</span><span class="dash-lbl">Live Campus Roles</span></div>
+        <div class="desk-stat"><span class="dash-num">{{ firm_count|default:"0" }}</span><span class="dash-lbl">Firms Tracked</span></div>
+        <div class="desk-stat"><span class="dash-num">6</span><span class="dash-lbl">Verticals</span></div>
+      </div>
     </div>
-    <div class="actions">
-      <a class="btn btn-primary" href="/opportunities/">Browse Openings</a>
-      {% if user.is_authenticated %}
-        <a class="btn" href="/app/">Open Today</a>
-      {% else %}
-        <a class="btn" href="/accounts/signup/">Create Account</a>
-      {% endif %}
-    </div>
+
+    <figure class="desk-panel">
+      <div class="desk-bar">
+        <span>Today · your queue</span>
+        <span class="desk-bar-live"><span class="live-dot"></span> live</span>
+      </div>
+      <div class="desk-body">
+        <div class="desk-queue">
+          <div class="desk-row" style="--i:0">
+            <span class="desk-row-main">
+              <b>Sarah Lin</b>
+              <span class="desk-why">VP · coffee chat 12d ago</span>
+            </span>
+            <span class="desk-go">Compose</span>
+          </div>
+          <div class="desk-row" style="--i:1">
+            <span class="desk-row-main">
+              <b>Marcus Ito</b>
+              <span class="desk-why">Analyst · replied Tuesday</span>
+            </span>
+            <span class="desk-go">Reply</span>
+          </div>
+          <div class="desk-row" style="--i:2">
+            <span class="desk-row-main">
+              <b>Priya Nair</b>
+              <span class="desk-why">Associate · new intro</span>
+            </span>
+            <span class="desk-go is-done">Sent</span>
+          </div>
+        </div>
+        <div class="desk-pace">
+          <span class="desk-ring" role="img" aria-label="7 of 10 weekly touches"></span>
+          <span class="desk-pace-lbl">Weekly pace</span>
+        </div>
+      </div>
+      <figcaption class="desk-note">Example queue. Yours is built from your own contacts.</figcaption>
+    </figure>
   </header>
 
   {% if strip_firms %}
