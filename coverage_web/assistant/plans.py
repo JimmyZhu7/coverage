@@ -41,6 +41,20 @@ _DEFAULTS = {
 }
 
 
+def model_label(model: str) -> str:
+    """A short, student-facing name for a model id — `"claude-sonnet-5"` ->
+    `"Sonnet"`, `"claude-haiku-4-5-20251001"` -> `"Haiku"`. Derived from the
+    id's own naming convention (the alpha segment after `"claude-"`) rather
+    than a second `{model_id: display_name}` table someone has to remember
+    to update alongside `ASSISTANT_PLANS` — the credit meter's Pro/Free
+    badge (docs/credit-system-plan.md §6) calls this on `PlanLimits.model`
+    so the badge text can never drift from the model actually in use."""
+    for part in model.split("-"):
+        if part.isalpha() and part.lower() != "claude":
+            return part.capitalize()
+    return model
+
+
 @dataclass(frozen=True)
 class PlanLimits:
     plan: str
@@ -51,6 +65,10 @@ class PlanLimits:
     @property
     def label(self) -> str:
         return "Pro" if self.plan == PRO else "Free"
+
+    @property
+    def model_short(self) -> str:
+        return model_label(self.model)
 
 
 def plan_of(user) -> str:

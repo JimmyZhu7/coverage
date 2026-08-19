@@ -1249,6 +1249,16 @@ a.pill:hover { text-decoration: underline; }
 .pill.tag-cat   { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
 .pill.tag-class { background: var(--surface); color: var(--ink-2); border-color: var(--line-strong); }
 
+/* Plan badge — Settings' Credits card and the Talk composer meter (both
+   read `credits.plan_label`/`{{ plan_label }}` off the same billing
+   context, docs/credit-system-plan.md §6's "show the meter"). Same two
+   token pairs pricing.html's own `.plan-badge` already established for
+   Free vs. Pro — accent for Pro, neutral for Free — reused here rather
+   than duplicated so the two surfaces stay visually in sync without a
+   third color pair to invent. */
+.pill.plan-pro  { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
+.pill.plan-free { background: var(--surface); color: var(--ink-2); border-color: var(--line-strong); }
+
 .chip.warmth-cold     { background: var(--w-cold-s);     color: var(--w-cold-t);     border-color: var(--w-cold-l); }
 .chip.warmth-replied  { background: var(--w-replied-s);  color: var(--w-replied-t);  border-color: var(--w-replied-l); }
 .chip.warmth-chatted  { background: var(--w-chatted-s);  color: var(--w-chatted-t);  border-color: var(--w-chatted-l); }

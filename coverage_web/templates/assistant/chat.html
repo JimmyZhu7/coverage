@@ -228,6 +228,9 @@ materials.
     font-size: var(--fs-xs); color: var(--ink-3); }
   #as-credits-value { font-family: var(--font-mono);
     font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  /* Plan badge (.pill.plan-pro/.plan-free, coverage.css) — same inline
+     margin-left pattern as settings.html's Credits card. */
+  .as-credits .pill { margin-left: var(--s2); vertical-align: 1px; }
 
   /* ---- The thread itself: log/empty-state flexes, composer stays put ---- */
   .as-thread { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: var(--s3); }
@@ -1689,12 +1692,24 @@ element by the next turn.
       // that just happened mid-stream can't swap #as-thread the way a
       // non-streamed send does (see _thread.html's own comment on this).
       // Same fix: re-fetch the one number that could have changed.
+      // Same fetch also carries plan_label/model_label (FIX #2a) so the
+      // badge picks up a mid-session plan flip the instant the next
+      // streamed turn finishes, not just on the next full page load.
       function refreshCredits() {
         var el = document.getElementById("as-credits-value");
         if (!el) return;
         fetch("{% url 'assistant:credits' %}")
           .then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (data) { if (data) el.textContent = data.balance; })
+          .then(function (data) {
+            if (!data) return;
+            el.textContent = data.balance;
+            var badge = document.getElementById("as-plan-badge");
+            var label = document.getElementById("as-plan-label");
+            var model = document.getElementById("as-plan-model");
+            if (badge) badge.className = "pill plan-" + data.plan_label.toLowerCase();
+            if (label) label.textContent = data.plan_label;
+            if (model) model.textContent = data.model_label;
+          })
           .catch(function () { /* a one-turn-stale credit count is not worth surfacing */ });
       }
 

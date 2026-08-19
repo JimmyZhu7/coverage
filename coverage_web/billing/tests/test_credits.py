@@ -98,6 +98,92 @@ class ConcurrentGrantTest(TransactionTestCase):
 
 
 # ---------------------------------------------------------------------------
+# Mid-period plan upgrade (reconcile_plan_grant) — the walk-in-day fix
+# ---------------------------------------------------------------------------
+@override_settings(CREDIT_PLANS=_PLANS)
+def test_a_mid_period_upgrade_grants_the_difference_immediately(student):
+    before = credits.balance(student)  # writes and reads this period's Free grant
+    assert before == _PLANS["free"]["monthly_grant"]
+
+    student.plan = User.PLAN_PRO
+    student.save(update_fields=["plan"])
+
+    after = credits.balance(student)
+
+    # Read from settings, not a magic number: the difference is exactly
+    # Pro's monthly grant minus Free's — which, with this repo's real
+    # CREDIT_PLANS (docs/credit-system-plan.md), happens to be 180 - 60.
+    expected_delta = _PLANS["pro"]["monthly_grant"] - _PLANS["free"]["monthly_grant"]
+    assert expected_delta == 120
+    assert after - before == expected_delta == 120
+
+    upgrade_rows = CreditLedger.objects.for_user(student).filter(kind=CreditLedger.KIND_UPGRADE)
+    assert upgrade_rows.count() == 1
+    assert upgrade_rows.get().delta == 120
+
+
+@override_settings(CREDIT_PLANS=_PLANS)
+def test_a_second_balance_check_after_upgrading_grants_nothing_more(student):
+    credits.balance(student)
+    student.plan = User.PLAN_PRO
+    student.save(update_fields=["plan"])
+    after_upgrade = credits.balance(student)
+
+    # Calling balance() (and can_spend(), which also reconciles) again in
+    # the same period must not stack a second top-up.
+    assert credits.balance(student) == after_upgrade
+    assert credits.can_spend(student, 1) is True
+    assert credits.balance(student) == after_upgrade
+    assert CreditLedger.objects.for_user(student).filter(kind=CreditLedger.KIND_UPGRADE).count() == 1
+
+
+@override_settings(CREDIT_PLANS=_PLANS)
+def test_a_mid_period_downgrade_does_not_claw_back(pro_student):
+    before = credits.balance(pro_student)
+    assert before == _PLANS["pro"]["monthly_grant"]
+
+    pro_student.plan = User.PLAN_FREE
+    pro_student.save(update_fields=["plan"])
+
+    after = credits.balance(pro_student)
+
+    assert after == before  # no clawback — see reconcile_plan_grant's docstring
+    assert CreditLedger.objects.for_user(pro_student).filter(kind=CreditLedger.KIND_UPGRADE).count() == 0
+
+
+@override_settings(CREDIT_PLANS=_PLANS)
+def test_an_upgrade_row_never_leaks_across_tenants(student, pro_student):
+    credits.balance(student)
+    student.plan = User.PLAN_PRO
+    student.save(update_fields=["plan"])
+    credits.balance(student)
+
+    # student's upgrade row exists...
+    assert CreditLedger.objects.for_user(student).filter(kind=CreditLedger.KIND_UPGRADE).count() == 1
+    # ...but never shows up in another user's ledger, and never affects
+    # that user's own balance — pro_student was never touched.
+    assert CreditLedger.objects.for_user(pro_student).filter(kind=CreditLedger.KIND_UPGRADE).count() == 0
+    assert credits.balance(pro_student) == _PLANS["pro"]["monthly_grant"]
+
+
+@override_settings(CREDIT_PLANS=_PLANS)
+def test_an_upgrade_top_up_respects_the_2x_rollover_cap(student):
+    """A dormant Free balance near the 2x cap that then upgrades must not
+    stack a full rollover AND a full upgrade top-up past 2x the NEW plan's
+    grant — same clamp `ensure_monthly_grant` itself enforces."""
+    # Simulate "already near the cap": a big carried-over balance from an
+    # admin adjustment, well past what 2x Pro's grant (360) would allow.
+    CreditLedger.all_objects.create(user=student, delta=300, kind=CreditLedger.KIND_ADJUST)
+    credits.balance(student)  # writes this period's Free grant on top
+
+    student.plan = User.PLAN_PRO
+    student.save(update_fields=["plan"])
+    after = credits.balance(student)
+
+    assert after <= 2 * _PLANS["pro"]["monthly_grant"]
+
+
+# ---------------------------------------------------------------------------
 # Balance arithmetic
 # ---------------------------------------------------------------------------
 @override_settings(CREDIT_PLANS=_PLANS)

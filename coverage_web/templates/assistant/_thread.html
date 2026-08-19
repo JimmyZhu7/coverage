@@ -39,6 +39,16 @@ same shape as every AI chat surface a student has already used.
   {% endcomment %}
   <p class="as-credits" id="as-credits">
     <span id="as-credits-value">{{ credit_balance }}</span> credit{{ credit_balance|pluralize }} left this month
+    {% comment %}
+    Plan badge (FIX #2a — the walk-in-day bug: nothing on this page told a
+    just-upgraded student what they now had). `plan_limits` comes from
+    `assistant.plans.limits_for`, never a hardcoded model name. chat.html's
+    JS rewrites both spans' text after a streamed turn, same as it already
+    does for #as-credits-value — see assistant:credits below.
+    {% endcomment %}
+    <span class="pill plan-{{ plan_limits.plan }}" id="as-plan-badge">
+      <span id="as-plan-label">{{ plan_limits.label }}</span> &middot; <span id="as-plan-model">{{ plan_limits.model_short }}</span>
+    </span>
   </p>
 
   {% comment %}

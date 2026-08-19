@@ -49,6 +49,7 @@ from directory.models import Opportunity
 from . import agent
 from . import attachments as attachments_mod
 from . import drafts as drafts_mod
+from . import plans
 from .client import is_configured
 from .models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
 
@@ -288,6 +289,12 @@ def _context(request: HttpRequest, conversation: ChatConversation) -> dict:
         # `assistant:credits` once a streamed turn finishes instead — see
         # that view below.
         "credit_balance": billing_credits.balance(request.user),
+        # The meter's own Pro/Free badge (FIX #2a, docs/credit-system-
+        # plan.md §6 — "show the meter" now shows the PLAN, not just the
+        # number). `plans.limits_for` is the one place model selection is
+        # resolved — see that module's docstring on why nothing else in
+        # this app should read ASSISTANT_PLANS directly.
+        "plan_limits": plans.limits_for(request.user),
         **_history_context(request.user, conversation),
     }
 
@@ -641,8 +648,19 @@ def credits_fragment(request: HttpRequest) -> HttpResponse:
     """The composer's credit meter, GET-able on its own — same reason
     `history_fragment` exists: a streamed turn's SSE response isn't HTML the
     client can re-render `_thread.html`'s meter from, so chat.html's JS
-    calls this once a stream finishes and writes the number in directly."""
-    return JsonResponse({"balance": billing_credits.balance(request.user)})
+    calls this once a stream finishes and writes the number in directly.
+
+    Carries `plan_label`/`model_label` alongside `balance` (FIX #2a) so a
+    plan flip mid-session is picked up by the SAME poll the balance number
+    already uses, not just on a full page reload — a streamed turn sent
+    right after an admin flips the plan shows the new badge the instant
+    that turn finishes."""
+    limits = plans.limits_for(request.user)
+    return JsonResponse({
+        "balance": billing_credits.balance(request.user),
+        "plan_label": limits.label,
+        "model_label": limits.model_short,
+    })
 
 
 @login_required

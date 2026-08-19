@@ -53,6 +53,20 @@ class CreditLedger(PrivateModel):
     # net a refund against its matching spend — see this app's
     # `credits.py::_SPEND_KINDS` for why the two must not share a `kind`.
     KIND_REFUND = "refund"
+    # A mid-period top-up when a user's plan outranks the plan their
+    # period's `KIND_GRANT` row was written for (billing/credits.py::
+    # reconcile_plan_grant) — the walk-in-day fix: a Free -> Pro flip mid-
+    # month used to leave the displayed balance at the Free remainder until
+    # the 1st, because `ensure_monthly_grant` only ever writes a period's
+    # grant row once. Kept distinct from KIND_GRANT (this ISN'T "the
+    # month's allowance" — that row already exists and is never touched,
+    # per the ledger's append-only discipline) and from KIND_ADJUST (this
+    # IS derived from a specific, detectable event — a plan change against
+    # an existing grant — not a free-form founder correction with nothing
+    # to key idempotency off of). The `(user, period)` uniqueness below is
+    # what makes "did this period already get its upgrade top-up" a query,
+    # not a guess.
+    KIND_UPGRADE = "upgrade"
     KIND_CHOICES = [
         (KIND_GRANT, "Monthly grant"),
         (KIND_SPEND_CHAT, "Chat message"),
@@ -60,6 +74,7 @@ class CreditLedger(PrivateModel):
         (KIND_ADJUST, "Admin adjustment"),
         (KIND_PURCHASE, "Credit top-up purchase"),
         (KIND_REFUND, "Refund of a failed turn"),
+        (KIND_UPGRADE, "Mid-period plan upgrade top-up"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -88,6 +103,13 @@ class CreditLedger(PrivateModel):
                 fields=["user", "period"],
                 condition=Q(kind="grant"),
                 name="uniq_monthly_grant",
+            ),
+            # Same shape, one row per (user, period) — `reconcile_plan_grant`'s
+            # own idempotency backstop, matching `ensure_monthly_grant`'s.
+            models.UniqueConstraint(
+                fields=["user", "period"],
+                condition=Q(kind="upgrade"),
+                name="uniq_monthly_upgrade",
             ),
         ]
 

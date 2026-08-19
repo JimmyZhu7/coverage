@@ -52,6 +52,13 @@ from .models import CreditLedger
 FREE = "free"
 PRO = "pro"
 
+#: Ordering for "does this plan outrank that one" — `reconcile_plan_grant`'s
+#: own upgrade-vs-downgrade test. A tuple of names, not derived from
+#: `_DEFAULTS`'s dict order, so the ranking is explicit and doesn't
+#: silently depend on iteration order matching intent if a third tier is
+#: ever added.
+_PLAN_RANK = {FREE: 0, PRO: 1}
+
 # Fallbacks if settings are somehow missing a tier — mirrors
 # `assistant.plans._DEFAULTS`'s own posture so a bare test environment
 # behaves the same as a configured one.
@@ -67,16 +74,16 @@ def _plan_of(user) -> str:
     return plan if plan in _DEFAULTS else FREE
 
 
-def plan_config(user) -> dict:
-    """`monthly_grant` / `message_cost` / `daily_burst` for this user's
-    plan, `settings.CREDIT_PLANS` overriding the defaults above — exactly
-    the way `assistant.plans.limits_for` reads `ASSISTANT_PLANS`.
+def _plan_config(plan: str) -> dict:
+    """Same shape `plan_config(user)` returns, but for an explicit plan key
+    rather than one resolved from a user — what `reconcile_plan_grant`
+    needs to compute "what would plan X's monthly grant have been",
+    independent of which plan the user is on right now.
 
     Reads with `is not None`, not `or` — a plan config that explicitly sets
     a number to `0` (a Free tier with no daily burst allowance, say) must
     stay `0`, not silently fall back to the default because `0` is falsy.
     """
-    plan = _plan_of(user)
     configured = (getattr(settings, "CREDIT_PLANS", None) or {}).get(plan) or {}
     defaults = _DEFAULTS[plan]
 
@@ -90,6 +97,13 @@ def plan_config(user) -> dict:
         "message_cost": _int_or_default("message_cost"),
         "daily_burst": _int_or_default("daily_burst"),
     }
+
+
+def plan_config(user) -> dict:
+    """`monthly_grant` / `message_cost` / `daily_burst` for this user's
+    plan, `settings.CREDIT_PLANS` overriding the defaults above — exactly
+    the way `assistant.plans.limits_for` reads `ASSISTANT_PLANS`."""
+    return _plan_config(_plan_of(user))
 
 
 def rescan_threads_per_credit() -> int:
@@ -249,6 +263,114 @@ def ensure_monthly_grant(user) -> None:
             with transaction.atomic():
                 CreditLedger.all_objects.create(
                     user=user, delta=delta, kind=CreditLedger.KIND_GRANT, period=period,
+                    # `plan` recorded on the row itself — `reconcile_plan_grant`
+                    # below is what reads this back to tell "this period's
+                    # grant was written for Free, and the user is on Pro now"
+                    # apart from "this period's grant already reflects Pro".
+                    # A grant row written before this field existed has no
+                    # `plan` in `props`; `reconcile_plan_grant` treats that as
+                    # "no known baseline" and skips reconciling it rather than
+                    # guessing (see that function's docstring).
+                    props={"plan": plan["plan"]},
+                )
+        except IntegrityError:
+            pass
+
+
+def reconcile_plan_grant(user) -> None:
+    """Top up THIS period's balance the moment the user's CURRENT plan
+    outranks the plan their period's `KIND_GRANT` row was written for —
+    the walk-in-day fix (a customer who paid for Pro mid-month saw no
+    balance change until the 1st, because `ensure_monthly_grant` only
+    ever writes a period's grant row once and never revisits it).
+
+    Called from the same places `ensure_monthly_grant` is — `balance()`,
+    `can_spend()`, `affordable_residue_threads()` — so a plan flip in
+    admin is visible the moment ANY of those next runs, not just on the
+    1st: reloading Settings or Talk in the SAME request cycle a plan
+    change lands is enough.
+
+    IDEMPOTENCY, BY QUERYING, NOT MUTATING. This module's ledger is
+    append-only (see the module docstring) — the original `KIND_GRANT` row
+    for the period is never touched, so "has this period already been
+    reconciled" can't be answered by looking at that row. Instead: does a
+    `KIND_UPGRADE` row already exist for this user, this period? A second
+    (or concurrent) call in the same period is a no-op the moment the
+    first one lands, guarded the identical two ways `ensure_monthly_grant`
+    is — `select_for_update` on the user row serializes concurrent callers
+    for the SAME user, and the model's `(user, period, kind="upgrade")`
+    `UniqueConstraint` turns anything that still races into a harmless
+    `IntegrityError` this function swallows.
+
+    DOWNGRADE MID-PERIOD DOES NOT CLAW BACK — a deliberate decision, not an
+    oversight. If a Pro user drops to Free mid-month, whatever they were
+    already granted this period (the Pro amount, plus any earlier upgrade
+    top-up) stays theirs for the rest of the period; nothing here writes a
+    negative adjustment for it. Three reasons: (1) it mirrors §6's own
+    "overdraw edge" posture — being a little generous costs less than the
+    support conversation a clawback invites; (2) `user.plan` is admin-set,
+    hand-flipped by the founder (§8) — a downgrade is at least as likely to
+    be "undoing an accidental Pro flip" as a real cancellation, and this
+    function has no way to tell the two apart; (3) taking credits away from
+    a signed-in student's balance out from under them, mid-session, is
+    exactly the kind of silent, ambush-y change this whole fix exists to
+    prevent on the upgrade side — doing it on the downgrade side would
+    trade one walk-in-day bug for another.
+
+    ROLLOVER CAP, same shape `ensure_monthly_grant` enforces: the top-up is
+    clamped so the balance right after it lands never exceeds 2x the NEW
+    plan's monthly grant (`min(new_grant - old_grant, 2*new_grant -
+    current_balance)`, floored at 0) — a dormant account that upgrades
+    doesn't get to stack a full rollover AND a full upgrade top-up past the
+    cap the grant path already holds everyone else to.
+    """
+    period = _period_for(user)
+    grant_row = (
+        CreditLedger.objects.for_user(user)
+        .filter(kind=CreditLedger.KIND_GRANT, period=period)
+        .order_by("created")
+        .first()
+    )
+    if grant_row is None:
+        # ensure_monthly_grant hasn't run yet this period — nothing to
+        # reconcile against. Whichever plan writes that grant row (via
+        # plan_config -> _plan_of(user), read fresh at write time) is
+        # already the user's CURRENT plan, so there is nothing to top up.
+        return
+
+    granted_plan = (grant_row.props or {}).get("plan")
+    current_plan = _plan_of(user)
+    if granted_plan not in _PLAN_RANK:
+        # A legacy grant row written before this field existed, or an
+        # unrecognized plan string. No known baseline to compare against —
+        # skip rather than guess an upgrade that may not have happened.
+        return
+    if _PLAN_RANK[current_plan] <= _PLAN_RANK[granted_plan]:
+        return  # same plan as the grant, or a downgrade — see docstring
+
+    with transaction.atomic():
+        get_user_model().objects.select_for_update().get(pk=user.pk)
+        # Re-check inside the lock, same reason ensure_monthly_grant does:
+        # another request may have written the upgrade row while this one
+        # waited on the lock.
+        if CreditLedger.objects.for_user(user).filter(
+            kind=CreditLedger.KIND_UPGRADE, period=period
+        ).exists():
+            return
+        new_grant = _plan_config(current_plan)["monthly_grant"]
+        old_grant = _plan_config(granted_plan)["monthly_grant"]
+        current_balance = _raw_balance(user)
+        delta = max(0, min(new_grant - old_grant, 2 * new_grant - current_balance))
+        if delta <= 0:
+            return
+        try:
+            # A nested atomic (a savepoint), same reason ensure_monthly_grant
+            # uses one: a swallowed IntegrityError must not poison the outer
+            # transaction the row-lock is held in.
+            with transaction.atomic():
+                CreditLedger.all_objects.create(
+                    user=user, delta=delta, kind=CreditLedger.KIND_UPGRADE, period=period,
+                    props={"from_plan": granted_plan, "to_plan": current_plan},
                 )
         except IntegrityError:
             pass
@@ -257,9 +379,11 @@ def ensure_monthly_grant(user) -> None:
 def balance(user) -> int:
     """This user's current credit balance — the number the UI shows.
     Ensures the month's grant exists first (the lazy write §4 describes),
-    then floors at zero for display (§6: "displayed balance floors at
-    zero")."""
+    reconciles a mid-period plan upgrade second (see
+    `reconcile_plan_grant`), then floors at zero for display (§6:
+    "displayed balance floors at zero")."""
     ensure_monthly_grant(user)
+    reconcile_plan_grant(user)
     return max(0, _raw_balance(user))
 
 
@@ -280,6 +404,7 @@ def can_spend(user, cost: int) -> bool:
       backstop that replaces the old flat daily-message cap.
     """
     ensure_monthly_grant(user)
+    reconcile_plan_grant(user)
     plan = plan_config(user)
     return _raw_balance(user) > 0 and daily_spent(user) < plan["daily_burst"]
 
@@ -373,6 +498,7 @@ def affordable_residue_threads(user, candidate_threads: int) -> int:
     if candidate_threads <= 0:
         return 0
     ensure_monthly_grant(user)
+    reconcile_plan_grant(user)
     plan = plan_config(user)
     available_balance = max(0, _raw_balance(user))
     daily_left = max(0, plan["daily_burst"] - daily_spent(user))

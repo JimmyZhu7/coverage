@@ -91,6 +91,10 @@
   /* Now a real <label for> on every row that owns a single control (see the
      a11y note in the markup); the class carries the styling either way. */
   .set-row-label { display: block; font-weight: var(--w-med); font-size: var(--fs-m); }
+  /* The Credits card's plan badge (.pill.plan-pro/.plan-free, coverage.css)
+     sits inline after the label text — same margin-left pattern as
+     pricing.html's .cmp-badge. */
+  .set-row-label .pill { margin-left: var(--s2); vertical-align: 1px; }
   .set-row-desc { color: var(--ink-3); font-size: var(--fs-s); margin-top: 2px; }
   .set-row-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: 24px; font-weight: var(--w-med); color: var(--accent-ink); flex: none; }
@@ -1060,7 +1064,17 @@
         <div class="set-body">
           <div class="set-row">
             <div class="set-row-main">
-              <span class="set-row-label">{{ credits.plan_label }} Plan</span>
+              <span class="set-row-label">
+                {{ credits.plan_label }} Plan
+                {% comment %}
+                FIX #2a (walk-in-day bug): a plan flip used to be visible
+                nowhere but this text label. The badge names what changed —
+                plan AND model, read from assistant.plans so it can never
+                drift from ASSISTANT_PLANS — the instant a reload picks up
+                the new `user.plan`.
+                {% endcomment %}
+                <span class="pill plan-{{ credits.plan_label|lower }}">{{ credits.plan_label }} &middot; {{ credits.plan_model_label }}</span>
+              </span>
               <div class="set-row-desc">
                 {{ credits.monthly_grant }} credits refill {{ credits.refill_date|date:"j F" }}.
                 Used {{ credits.month_usage }} so far this month.
