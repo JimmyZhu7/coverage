@@ -421,6 +421,128 @@ def test_get_situation_is_empty_for_a_student_with_no_changes(user):
 
 
 # ---------------------------------------------------------------------------
+# date_facts — the fix for the advisor stating a wrong calendar date from
+# memory ("Labor Day is 1 September 2026" — it's the 7th). Every assertion
+# below is checked against the RULE, not a hardcoded date, so these stay
+# correct after this year the same way the tool itself does.
+# ---------------------------------------------------------------------------
+def test_date_facts_with_a_date_reports_weekday_and_days_until(user):
+    from datetime import date as _date
+
+    today = timezone.localdate()
+    target = today + timedelta(days=15)
+    result, is_error = _call(user, "date_facts", {"query": target.isoformat()})
+
+    assert not is_error
+    assert result["today"] == today.isoformat()
+    assert result["date"] == target.isoformat()
+    assert result["days_until"] == 15
+    assert result["weekday"] == target.strftime("%A")
+    assert _date.fromisoformat(result["date"]) == target
+
+
+def test_date_facts_days_until_a_past_date_is_negative(user):
+    today = timezone.localdate()
+    target = today - timedelta(days=3)
+    result, is_error = _call(user, "date_facts", {"query": target.isoformat()})
+
+    assert not is_error
+    assert result["days_until"] == -3
+
+
+def test_date_facts_with_no_query_is_an_error(user):
+    result, is_error = _call(user, "date_facts", {})
+
+    assert is_error
+    assert "error" in result
+
+
+def test_date_facts_rejects_a_holiday_it_does_not_know(user):
+    result, is_error = _call(user, "date_facts", {"query": "arbor_day"})
+
+    assert is_error
+    assert "error" in result
+
+
+def test_date_facts_labor_day_is_the_first_monday_of_september_not_hardcoded(user):
+    """The bug this tool exists to fix: the advisor once said Labor Day 2026
+    was 1 September (a Tuesday) — it's the 7th, the first Monday. Asserted
+    against the RULE (weekday == Monday, month == September, day <= 7) so
+    this keeps passing in 2027, 2028, ... without editing a stored date."""
+    from datetime import date as _date
+
+    result, is_error = _call(user, "date_facts", {"query": "labor_day"})
+
+    assert not is_error
+    labor_day = _date.fromisoformat(result["date"])
+    assert labor_day.weekday() == 0  # Monday
+    assert labor_day.month == 9
+    assert labor_day.day <= 7  # the FIRST Monday, not just any Monday
+    assert result["weekday"] == "Monday"
+    assert result["days_until"] >= 0  # always the upcoming occurrence
+
+
+@pytest.mark.parametrize(
+    "key,expected_weekday,expected_month",
+    [
+        ("labor_day", 0, 9),      # 1st Monday of September
+        ("mlk_day", 0, 1),        # 3rd Monday of January
+        ("memorial_day", 0, 5),   # last Monday of May
+        ("thanksgiving", 3, 11),  # 4th Thursday of November
+    ],
+)
+def test_date_facts_us_floating_holidays_land_on_the_right_weekday_and_month(
+    user, key, expected_weekday, expected_month
+):
+    from datetime import date as _date
+
+    result, is_error = _call(user, "date_facts", {"query": key})
+
+    assert not is_error
+    d = _date.fromisoformat(result["date"])
+    assert d.weekday() == expected_weekday
+    assert d.month == expected_month
+    assert result["days_until"] >= 0
+
+
+@pytest.mark.parametrize(
+    "key,expected_month,expected_day",
+    [("independence_day", 7, 4), ("christmas", 12, 25), ("new_year", 1, 1)],
+)
+def test_date_facts_us_fixed_date_holidays(user, key, expected_month, expected_day):
+    from datetime import date as _date
+
+    result, is_error = _call(user, "date_facts", {"query": key})
+
+    assert not is_error
+    d = _date.fromisoformat(result["date"])
+    assert (d.month, d.day) == (expected_month, expected_day)
+    assert result["days_until"] >= 0
+
+
+def test_date_facts_lunar_new_year_is_within_the_known_table(user):
+    result, is_error = _call(user, "date_facts", {"query": "lunar_new_year"})
+
+    assert not is_error
+    assert result["holiday"] == "lunar_new_year"
+    assert result["days_until"] >= 0
+
+
+def test_date_facts_lunar_new_year_refuses_a_year_outside_its_table():
+    """No lunisolar formula backs this one — past the table, the tool must
+    say so rather than guess (see the module docstring on `_lunar_new_year`)."""
+    with pytest.raises(tools.ToolError):
+        tools._lunar_new_year(2099)
+
+
+def test_date_facts_query_is_case_and_punctuation_insensitive(user):
+    result, is_error = _call(user, "date_facts", {"query": "Labor Day"})
+
+    assert not is_error
+    assert result["holiday"] == "labor_day"
+
+
+# ---------------------------------------------------------------------------
 # Writes
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db(transaction=True)

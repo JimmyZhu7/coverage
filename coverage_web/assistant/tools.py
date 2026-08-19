@@ -405,6 +405,36 @@ TOOL_SCHEMAS: list[dict] = [
         "input_schema": _schema({}),
     },
     {
+        "name": "date_facts",
+        "description": (
+            "Ground truth for a calendar question — how many days until a "
+            "specific date, or when a recruiting-relevant US or HK public "
+            "holiday next falls. Give query as EITHER a YYYY-MM-DD date "
+            "(returns its weekday and days_until, negative if already past) "
+            "OR a holiday name: labor_day, mlk_day, memorial_day, "
+            "independence_day, thanksgiving, christmas, new_year, "
+            "lunar_new_year (returns that holiday's next upcoming date). "
+            "Call this instead of stating any calendar date, a 'days until' "
+            "figure, or a holiday's date from memory — that kind of "
+            "confident, wrong answer is the one error this product cannot "
+            "afford."
+        ),
+        "strict": True,
+        "input_schema": _schema(
+            {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "A YYYY-MM-DD date, or one of: labor_day, mlk_day, "
+                        "memorial_day, independence_day, thanksgiving, "
+                        "christmas, new_year, lunar_new_year."
+                    ),
+                }
+            },
+            ["query"],
+        ),
+    },
+    {
         "name": "log_touch",
         "description": (
             "Record an interaction that already happened with one contact. "
@@ -1036,6 +1066,155 @@ def _get_situation(user, _args) -> dict:
             row["location"] = _s(e.get("location"), 120)
         events.append(row)
     return {"total": len(events), "events": events}
+
+
+# ---------------------------------------------------------------------------
+# date_facts — ground truth for calendar questions, computed, never guessed.
+#
+# The model must never do date arithmetic or recall a holiday date from
+# memory: "Labor Day is 1 September" is exactly the kind of confident, fluent,
+# wrong answer a language model produces, and a deadlines product cannot
+# afford it. Every US federal holiday below is a genuine RULE (nth weekday of
+# a month, or the last one), computed against `date.today().year` and rolled
+# forward to next year if this year's has already passed — there is no stored
+# 2026 date to go stale. Lunar New Year is the one holiday here with no
+# closed-form rule (it follows the Chinese lunisolar calendar), so it comes
+# from a short table of published official dates instead — refused honestly
+# past the table's range rather than guessed.
+# ---------------------------------------------------------------------------
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """The nth occurrence (1-indexed) of `weekday` (Monday=0 ... Sunday=6,
+    `date.weekday()`'s own numbering) in `month`. Labor Day is `n=1`,
+    weekday=0 in September; MLK Day is `n=3`, weekday=0 in January."""
+    first = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + 7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    """The LAST occurrence of `weekday` in `month` — Memorial Day is the last
+    Monday of May, not a fixed nth one, because May has four Mondays some
+    years and five others; counting from the end of the month is the only
+    version of this rule that is correct every year."""
+    next_month = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    last_day = next_month - timedelta(days=1)
+    offset = (last_day.weekday() - weekday) % 7
+    return last_day - timedelta(days=offset)
+
+
+def _labor_day(year: int) -> date:
+    return _nth_weekday(year, 9, 0, 1)  # 1st Monday of September
+
+
+def _mlk_day(year: int) -> date:
+    return _nth_weekday(year, 1, 0, 3)  # 3rd Monday of January
+
+
+def _memorial_day(year: int) -> date:
+    return _last_weekday(year, 5, 0)  # last Monday of May
+
+
+def _thanksgiving(year: int) -> date:
+    return _nth_weekday(year, 11, 3, 4)  # 4th Thursday of November
+
+
+def _independence_day(year: int) -> date:
+    return date(year, 7, 4)
+
+
+def _christmas(year: int) -> date:
+    return date(year, 12, 25)
+
+
+def _new_year(year: int) -> date:
+    return date(year, 1, 1)
+
+
+# Published official dates — no formula computes these, so this is a table,
+# not a rule. Extend it before it runs out; never extrapolate past the last
+# year it covers (see `_lunar_new_year`'s own refusal below).
+_LUNAR_NEW_YEAR: dict[int, date] = {
+    2024: date(2024, 2, 10),
+    2025: date(2025, 1, 29),
+    2026: date(2026, 2, 17),
+    2027: date(2027, 2, 6),
+    2028: date(2028, 1, 26),
+    2029: date(2029, 2, 13),
+    2030: date(2030, 2, 3),
+    2031: date(2031, 1, 23),
+    2032: date(2032, 2, 11),
+}
+
+
+def _lunar_new_year(year: int) -> date:
+    try:
+        return _LUNAR_NEW_YEAR[year]
+    except KeyError:
+        raise ToolError(
+            f"Lunar New Year has no fixed formula, so this tool only knows the "
+            f"published dates through {max(_LUNAR_NEW_YEAR)} — {year} isn't in "
+            "that table. Say so plainly rather than guessing a date."
+        ) from None
+
+
+# name -> (label shown to the model, year -> date function)
+HOLIDAY_RULES = {
+    "labor_day": ("Labor Day (US)", _labor_day),
+    "mlk_day": ("Martin Luther King Jr. Day (US)", _mlk_day),
+    "memorial_day": ("Memorial Day (US)", _memorial_day),
+    "independence_day": ("Independence Day / July 4th (US)", _independence_day),
+    "thanksgiving": ("Thanksgiving (US)", _thanksgiving),
+    "christmas": ("Christmas Day", _christmas),
+    "new_year": ("New Year's Day", _new_year),
+    "lunar_new_year": ("Lunar New Year (HK)", _lunar_new_year),
+}
+
+
+def _date_facts(user, args) -> dict:
+    """One calendar question, answered from code. `query` is either a
+    YYYY-MM-DD date (days_until relative to the student's own today, negative
+    if it's already past) or one of `HOLIDAY_RULES`' keys, which returns that
+    holiday's NEXT upcoming occurrence — this year's if it hasn't happened
+    yet, otherwise next year's, so "when is Labor Day" always means the one
+    still ahead."""
+    raw = _s(args.get("query"), 40)
+    if not raw:
+        raise ToolError("query is required — a YYYY-MM-DD date, or a holiday name.")
+
+    today = _today(user)
+    base = {"today": today.isoformat(), "today_weekday": today.strftime("%A")}
+
+    try:
+        target = date.fromisoformat(raw)
+    except ValueError:
+        target = None
+
+    if target is not None:
+        return {
+            **base,
+            "date": target.isoformat(),
+            "weekday": target.strftime("%A"),
+            "days_until": (target - today).days,
+        }
+
+    key = raw.lower().strip().replace(" ", "_").replace("-", "_")
+    if key not in HOLIDAY_RULES:
+        raise ToolError(
+            f"{raw!r} is not a YYYY-MM-DD date or a holiday this tool knows. "
+            f"Known holidays: {', '.join(sorted(HOLIDAY_RULES))}."
+        )
+    label, rule = HOLIDAY_RULES[key]
+    occurrence = rule(today.year)
+    if occurrence < today:
+        occurrence = rule(today.year + 1)
+    return {
+        **base,
+        "holiday": key,
+        "holiday_label": label,
+        "date": occurrence.isoformat(),
+        "weekday": occurrence.strftime("%A"),
+        "days_until": (occurrence - today).days,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1681,6 +1860,7 @@ _HANDLERS = {
     "get_calendar": _get_calendar,
     "get_my_pipeline": _get_my_pipeline,
     "get_situation": _get_situation,
+    "date_facts": _date_facts,
     "track_opportunity": _track_opportunity,
     "remember": _remember,
     "add_calendar_event": _add_calendar_event,

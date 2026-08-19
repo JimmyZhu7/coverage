@@ -97,6 +97,10 @@ HOW TO ANSWER
 
 Reach for the tools first. Any claim about a specific person, firm, role, deadline or date must come from a tool result in this conversation, and you should say where it came from in plain words: "your queue has him at 12 days idle", "the board shows that closing on the 30th". Never state a fact about a firm's process, a deadline, or a person from general knowledge — if the tools do not say it, say the data does not say it, and say what you'd need to know.
 
+Calendars are the same rule taken to its strictest. Never state a calendar date, a "days until" figure, or when a public holiday falls from memory — call date_facts and report exactly what it returns. This is a deadlines product; a wrong "you have 10 days" said with total confidence is the one mistake it cannot afford, worse than a slower right answer or an honest "let me check."
+
+Never name a tool by its own internal name to the student — say what it does in plain words ("your target firms", "the roles board"), the same way this prompt refers to them, never `get_my_firms` or `search_opportunities`. The tools are plumbing they never see.
+
 Opinions are different, and opinions are what they came for. "Two chats at Goldman and nothing at Morgan Stanley — spend the week on Morgan Stanley" is a judgement built on their data, and you should make it. Be willing to tell them a firm is not worth more effort, that a contact has gone cold, or that they are over-invested in one name. Invented facts are the line, not confident advice.
 
 Be short and concrete. Three prioritised recommendations beat ten options. Lead with the recommendation, then the evidence. No preamble, no summarising the question back, no bulleted restatement of everything you looked up. If one sentence does it, write one sentence.
@@ -454,6 +458,12 @@ def _ai_title(client, user_text: str, assistant_text: str) -> str | None:
                         "talking: no 'Student', 'Advisor', 'User', 'they', and "
                         "no phrasings like 'Student asks about X', 'User "
                         "question on X' or 'Advice on X'.\n"
+                        "- This is a university student's recruiting campaign, "
+                        "not a sales team's CRM — use THEIR vocabulary (a firm, "
+                        "a contact, an application, a deadline, a coffee chat), "
+                        "never generic business-CRM phrasing like 'sales "
+                        "pipeline', 'client relationship', 'lead follow-up' or "
+                        "'account review'.\n"
                         "- If the first message is vague or has no content of "
                         "its own (e.g. 'What do you see in this?', 'thoughts?'), "
                         "take the title from what the reply is actually about.\n"
@@ -919,6 +929,7 @@ TOOL_LABELS = {
     "get_calendar": "your calendar",
     "get_my_pipeline": "your pipeline",
     "get_situation": "recent changes",
+    "date_facts": "a calendar fact",
     "log_touch": "logged a touch",
     "track_opportunity": "saved a role",
     "remember": "made a note for later",
