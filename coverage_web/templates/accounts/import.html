@@ -29,7 +29,15 @@
     </div>
   {% endif %}
 
-  <form method="post" action="{% url 'accounts:import' %}" enctype="multipart/form-data">
+  {% comment %}
+  The `?from=welcome` flag rides along on the POST target. Without it the
+  upload landed on a page that had forgotten it came from the wizard, so the
+  "Continue setup" link vanished at exactly the moment it was needed — the
+  student finished the import and was offered "Back to settings", a page they
+  had never seen, with no way back into onboarding.
+  {% endcomment %}
+  <form method="post" enctype="multipart/form-data"
+        action="{% url 'accounts:import' %}{% if from_onboarding %}?from=welcome{% endif %}">
     {% csrf_token %}
     <label for="file">CSV file</label>
     <input type="file" name="file" id="file" accept=".csv,text/csv" required>
@@ -41,7 +49,15 @@
 
   <div class="actions">
     {% if from_onboarding %}
-      <a href="{% url 'accounts:onboarding' %}?step=capture">Continue setup →</a>
+      {% comment %}
+      `?step=capture` — no such step. ONBOARDING_STEPS is
+      profile/work_auth/firms/import, and accounts.views.onboarding silently
+      rewrites anything unrecognised to "profile", so the one link out of the
+      import page dropped the student back on step 1 of a wizard they had
+      almost finished. `import` is the step they came from and the one that
+      holds Finish Setup.
+      {% endcomment %}
+      <a href="{% url 'accounts:onboarding' %}?step=import">Continue setup →</a>
     {% else %}
       <a href="{% url 'accounts:settings' %}">Back to settings</a>
     {% endif %}
