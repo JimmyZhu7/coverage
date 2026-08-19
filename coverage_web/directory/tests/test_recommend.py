@@ -798,6 +798,59 @@ def test_warmth_never_outruns_the_class_axis():
     assert ranked[0].candidate.id == 2
 
 
+def test_stacked_signals_can_outrun_the_class_penalty_alone():
+    """`W_CLASS_STATED_MISMATCH` (-25) is a subtraction, not a veto — pinning
+    that here so nobody mistakes it for the hard-exclusion guarantee, which
+    is `Candidate.blocked`'s job (see `recommend`'s 'Never rank what the
+    student cannot have' comment). Enough OTHER signals stacked on top of a
+    title-stated wrong-class role clear MIN_SCORE despite the -25, unless the
+    caller correctly set `blocked=True` — see
+    test_a_title_stated_class_mismatch_is_blocked_end_to_end for the case
+    that actually shipped this way in production, via `directory.views.
+    _eligibility` never reading `Opportunity.class_year`."""
+    prof = replace(JIMMY, warm_firms={1: "warm"})  # firm_id=1 is Jimmy's tier 1
+    wrong_class = _cand(
+        1, firm_id=1, class_year="2026",  # stated, not Jimmy's 2029
+        title="Investment Banking Summer Analyst", region="us",
+    )
+    # blocked=False (the default): the scoring axes alone don't stop it.
+    ranked = recommend(prof, [wrong_class])
+    assert [r.candidate.id for r in ranked] == [1]
+
+    # The caller correctly flagging it, as `_eligibility` now does, is what
+    # actually enforces the hard exclusion.
+    assert recommend(prof, [replace(wrong_class, blocked=True)]) == []
+
+
+@pytest.mark.django_db
+def test_a_title_stated_class_mismatch_is_blocked_end_to_end():
+    """The real gap: `directory.views._eligibility` is the ONLY source of
+    `Candidate.blocked` (see crm/digest.py and directory/views.py's own
+    `track_eligible`/Picked-for-you callers), and until now it read the
+    body-derived `facts.grad` window but never `Opportunity.class_year` — the
+    rarer, MORE authoritative TITLE statement ("Class of 2027") that
+    `recommend._class_fit` already treats as authoritative over the body
+    text. A title-only mismatch therefore never produced a blocking verdict,
+    so `_class_fit`'s -25 alone had to hold the line — and per the test
+    above, stacked against a tier-1 target firm, a stated track match and a
+    warm contact, it doesn't."""
+    from directory.models import Firm, Opportunity
+    from directory.views import _eligibility
+
+    f = Firm.objects.create(slug="ms-eligtest", name="Morgan Stanley Test")
+    o = Opportunity.objects.create(
+        firm=f, url="https://x/eligtest",
+        title="Investment Banking Summer Analyst (Class of 2026)",
+        bucket="internship", status="open", region="us", class_year="2026",
+    )
+    verdict = _eligibility(o, {"class_year": 2029, "work_auth": {}})
+    assert verdict is not None and verdict["blocking"] is True, verdict
+
+    c = Candidate.from_opportunity(o, blocked=verdict["blocking"])
+    prof = replace(JIMMY, warm_firms={f.id: "warm"}, firm_tiers={f.id: 1})
+    assert recommend(prof, [c]) == []
+
+
 def test_a_network_only_profile_is_not_empty():
     """A student who has filled in nothing but has live relationships still
     gets picks — the relationships ARE personalisation signal."""

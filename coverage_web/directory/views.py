@@ -1289,6 +1289,28 @@ def _eligibility(o, profile):
                 "why": ("This posting says it cannot sponsor a visa, and your "
                         "Settings say you need sponsorship in this market")}
     cy = profile["class_year"]
+    # The TITLE's own explicit statement ("Class of 2027") — `Opportunity.
+    # class_year`, extractors.extract_class_year. This is the rarest and most
+    # authoritative signal on the board (~3 rows in 4,000 state one), and
+    # `directory.recommend._class_fit` already treats it as such, checking it
+    # before the body-derived window below. Missing it here left a real gap:
+    # `recommend()`'s own "no combination of tier/track/region may outrank a
+    # stated mismatch" promise is enforced by `Candidate.blocked`, which reads
+    # only THIS function's verdict — so a title-stated wrong-class role at a
+    # firm the student is warm with, tiered, and on-track for could clear
+    # MIN_SCORE and rank as a pick, `_class_fit`'s -25 notwithstanding,
+    # because nothing here ever produced a blocking verdict for it.
+    stated = (o.class_year or "").strip()
+    if cy and stated.isdigit():
+        stated_year = int(stated)
+        if stated_year == cy:
+            return {"kind": "year_ok", "blocking": False,
+                    "label": f"Your year ({cy})",
+                    "why": f"The posting states it is for the Class of {stated_year}."}
+        return {"kind": "year_out", "blocking": True,
+                "label": f"For {stated_year} grads",
+                "why": (f"The posting states it is for the Class of "
+                        f"{stated_year}, not your {cy}.")}
     grad = ((o.raw or {}).get("facts") or {}).get("grad")
     if cy and grad and grad.get("years"):
         years = [int(y) for y in grad["years"]]
