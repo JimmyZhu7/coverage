@@ -113,13 +113,21 @@ class GmailConnection(PrivateModel):
     rescan_status = models.CharField(
         max_length=16, choices=RESCAN_CHOICES, default="none"
     )
-    # When "Scan Now" was pressed. Doubles as two guards: the in-flight one
-    # (the Settings view disables the button whenever `rescan_status` is
-    # `pending`/`running`, so a user can't queue five rescans at once) and
-    # the staleness one gmail_backfill.py's command uses to notice a
-    # "running" row whose process died mid-run and pick it back up rather
-    # than leaving it permanently stuck — see STALE_RUNNING_AFTER there.
+    # When "Scan Now" was pressed. Purely the in-flight-button guard (the
+    # Settings view disables the button whenever `rescan_status` is
+    # `pending`/`running`, so a user can't queue five rescans at once) — NOT
+    # the staleness clock. A rescan can sit `pending` for a while before a
+    # cron tick picks it up, so anchoring staleness here reclaimed (and
+    # double-charged/double-logged) a rescan that was still genuinely
+    # running, just slow — see `rescan_started_at` below for the field that
+    # actually measures run time.
     rescan_requested_at = models.DateTimeField(null=True, blank=True)
+    # When THIS run actually started — set the moment gmail_backfill.py
+    # flips status to "running", mirroring backfill_started_at above. This,
+    # not rescan_requested_at, is what STALE_RUNNING_AFTER measures against:
+    # a process killed mid-run should be reclaimed based on how long it's
+    # actually been running, not how long ago the user clicked the button.
+    rescan_started_at = models.DateTimeField(null=True, blank=True)
     rescan_completed_at = models.DateTimeField(null=True, blank=True)
     # Same shape as backfill_stats, plus the Phase-3 AI residue stage's own
     # counters (see capture/gmail_residue.py) merged in under their own

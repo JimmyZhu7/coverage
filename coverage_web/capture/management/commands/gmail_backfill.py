@@ -30,7 +30,12 @@ and never re-selected — see `connect_gmail`'s comment on why a reconnect
 must not silently re-run a completed backfill.
 
 RESCAN selection: same three-way `pending` / `failed` / stale-`running`
-selection, off `rescan_status` and `rescan_requested_at` instead. Deliberately
+selection, off `rescan_status` and `rescan_started_at` instead (NOT
+`rescan_requested_at` — that's only when the button was pressed, which can
+be a while before a tick actually picks a `pending` row up; anchoring
+staleness there reclaimed rescans that were still genuinely running, just
+slow to start, causing a duplicate `spend_rescan` charge and duplicate
+touch writes on the same mailbox). Deliberately
 a SEPARATE field/query from `backfill_status` — a rescan is a different,
 repeatable action, not the one-time original backfill; see
 `GmailConnection.rescan_status`'s own comment. Runs `gmail_live.run_rescan`,
@@ -108,8 +113,8 @@ class Command(BaseCommand):
             base.filter(
                 Q(rescan_status="pending")
                 | Q(rescan_status="failed")
-                | Q(rescan_status="running", rescan_requested_at__lt=stale_cutoff)
-                | Q(rescan_status="running", rescan_requested_at__isnull=True)
+                | Q(rescan_status="running", rescan_started_at__lt=stale_cutoff)
+                | Q(rescan_status="running", rescan_started_at__isnull=True)
             )
         )
 
@@ -162,7 +167,8 @@ class Command(BaseCommand):
         prefix = "[dry-run] " if dry_run else ""
         if not dry_run:
             connection.rescan_status = "running"
-            connection.save(update_fields=["rescan_status"])
+            connection.rescan_started_at = timezone.now()
+            connection.save(update_fields=["rescan_status", "rescan_started_at"])
 
         try:
             stats = gmail_live.run_rescan(connection, dry_run=dry_run)

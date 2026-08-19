@@ -322,8 +322,8 @@ class TestGmailBackfillCommandRescanSelection:
         from django.utils import timezone
 
         connection.rescan_status = "running"
-        connection.rescan_requested_at = timezone.now() - timedelta(hours=5)
-        connection.save(update_fields=["rescan_status", "rescan_requested_at"])
+        connection.rescan_started_at = timezone.now() - timedelta(hours=5)
+        connection.save(update_fields=["rescan_status", "rescan_started_at"])
 
         client = _fake_gmail_client([], {})
         with patch.object(gmail_live, "_gmail_client", return_value=client), \
@@ -339,8 +339,8 @@ class TestGmailBackfillCommandRescanSelection:
         from django.utils import timezone
 
         connection.rescan_status = "running"
-        connection.rescan_requested_at = timezone.now() - timedelta(minutes=2)
-        connection.save(update_fields=["rescan_status", "rescan_requested_at"])
+        connection.rescan_started_at = timezone.now() - timedelta(minutes=2)
+        connection.save(update_fields=["rescan_status", "rescan_started_at"])
 
         client = _fake_gmail_client([], {})
         with patch.object(gmail_live, "_gmail_client", return_value=client), \
@@ -349,3 +349,34 @@ class TestGmailBackfillCommandRescanSelection:
 
         connection.refresh_from_db()
         assert connection.rescan_status == "running"  # untouched
+
+    def test_a_slow_to_start_but_still_running_rescan_is_not_double_picked_up(
+        self, student, connection
+    ):
+        """Regression test: staleness used to be measured from
+        `rescan_requested_at` (when the user clicked Scan Now) instead of
+        `rescan_started_at` (when a tick actually began running it). A
+        rescan can sit `pending` for a while before a tick claims it, so a
+        request old enough to cross STALE_RUNNING_AFTER but a run that only
+        just started must NOT be reclaimed — reclaiming it would fire a
+        second `run_rescan` on the same mailbox while the first is still
+        genuinely in flight, double-charging `spend_rescan` and double-
+        logging touches."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        connection.rescan_status = "running"
+        connection.rescan_requested_at = timezone.now() - timedelta(hours=5)
+        connection.rescan_started_at = timezone.now() - timedelta(minutes=2)
+        connection.save(
+            update_fields=["rescan_status", "rescan_requested_at", "rescan_started_at"]
+        )
+
+        client = _fake_gmail_client([], {})
+        with patch.object(gmail_live, "_gmail_client", return_value=client), \
+             patch("capture.management.commands.gmail_backfill.gmail_live.is_configured", return_value=True):
+            call_command("gmail_backfill")
+
+        connection.refresh_from_db()
+        assert connection.rescan_status == "running"  # untouched, not re-run
