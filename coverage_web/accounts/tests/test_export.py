@@ -30,8 +30,14 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts import services
+from accounts.models import PushSubscription
 from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
-from crm.models import ChatDebrief, Contact, Task, Touch, UserFirm
+from assistant.models import (
+    AdvisorMemory, ChatConversation, ChatFolder, ChatMessage, DailyBrief,
+)
+from billing.models import CreditLedger
+from capture.models import GmailConnection
+from crm.models import CalendarEvent, ChatDebrief, Contact, Task, Touch, UserFirm
 from directory.models import Firm, Opportunity
 
 User = get_user_model()
@@ -107,6 +113,33 @@ def loaded(student, firm):
         user=student, kind="contacts", filename="mine.csv", row_stats={"created": 2}
     )
     ProductEvent.all_objects.create(user=student, event="touch_logged", props={"source": "manual"})
+    CalendarEvent.all_objects.create(
+        user=student, title="Coffee with Live Person", starts_at=timezone.now(),
+        kind="chat", source="manual", contact=live,
+    )
+    folder = ChatFolder.all_objects.create(user=student, name="BofA prep")
+    conversation = ChatConversation.all_objects.create(
+        user=student, title="Sizing up BofA", folder=folder,
+    )
+    ChatMessage.all_objects.create(
+        user=student, conversation=conversation, role="user",
+        content=[{"type": "text", "text": "How should I prep?"}],
+    )
+    AdvisorMemory.all_objects.create(user=student, text="Targeting HK over US")
+    DailyBrief.all_objects.create(
+        user=student, date=date.today(), text="Two firms are worth a follow-up today."
+    )
+    GmailConnection.all_objects.create(
+        user=student, gmail_address="student@gmail.com",
+        refresh_token_encrypted="ciphertext", status="active",
+    )
+    PushSubscription.all_objects.create(
+        user=student, endpoint="https://fcm.googleapis.com/x", p256dh="key", auth="secret",
+        user_agent="Mozilla/5.0 (test)",
+    )
+    CreditLedger.all_objects.create(
+        user=student, delta=60, kind=CreditLedger.KIND_GRANT, period="2026-08",
+    )
     return live
 
 
@@ -142,6 +175,15 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
         "fit_scores": "fit_scores.csv",
         "imports": "imports.csv",
         "product_events": "product_events.csv",
+        "calendar_events": "calendar_events.csv",
+        "chat_folders": "chat_folders.csv",
+        "chat_conversations": "chat_conversations.csv",
+        "chat_messages": "chat_messages.csv",
+        "advisor_memories": "advisor_memories.csv",
+        "daily_briefs": "daily_briefs.csv",
+        "gmail_connection": "gmail_connection.csv",
+        "push_subscriptions": "push_subscriptions.csv",
+        "credit_ledger": "credit_ledger.csv",
     }
     for label, _model in services._DELETE_ORDER:
         assert label in covered, (
@@ -149,6 +191,47 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
             "claims it. Add a CSV builder, or the export's 'everything' is a lie."
         )
         assert covered[label] in exported
+
+
+def test_every_private_model_is_covered_by_delete_order():
+    """The completeness guard the test above assumes but never checked: that
+    `_DELETE_ORDER` itself lists every `PrivateModel` subclass in the whole
+    codebase, not just the ones some earlier author remembered to add.
+
+    A model left off `_DELETE_ORDER` still gets swept — `delete_user_and_data`
+    ends with `user.delete()`, and every private table's `user` FK is
+    `on_delete=CASCADE` — but invisibly, the same bug `chat_debriefs` used to
+    have (see the comment on `_DELETE_ORDER` above) and the same bug
+    `capture_events` had in reverse (`test_delete_receipt.
+    test_every_receipt_label_names_a_table_that_is_actually_deleted`). Left
+    off `_DELETE_ORDER`, a model is also structurally unreachable through
+    `test_every_deletable_table_is_also_exportable` above, since that test
+    only ever walks `_DELETE_ORDER` — so a table can go missing from "export
+    everything" for years with neither test able to notice, because both
+    tests were only ever checking each other's list, never the actual set of
+    private tables the codebase defines.
+    """
+    from django.apps import apps as django_apps
+
+    from coverage_web.tenancy import PrivateModel
+
+    private_models = {
+        model
+        for model in django_apps.get_models()
+        if issubclass(model, PrivateModel) and not model._meta.abstract
+    }
+    covered_models = {model for _label, model in services._DELETE_ORDER}
+    missing = private_models - covered_models
+    assert not missing, (
+        f"{sorted(m.__name__ for m in missing)} subclass PrivateModel but are "
+        "missing from accounts.services._DELETE_ORDER. Their rows still get "
+        "deleted (via the final user.delete() cascade — every PrivateModel's "
+        "`user` FK is on_delete=CASCADE), but invisibly: the deletion receipt "
+        "undercounts them, and they can never appear in the data export "
+        "either, since that's built by walking this same list. Add each "
+        "missing model to _DELETE_ORDER (in child-before-parent order) and a "
+        "CSV builder to EXPORT_FILES."
+    )
 
 
 def test_the_zip_contains_every_declared_file_and_a_readme(student, loaded):

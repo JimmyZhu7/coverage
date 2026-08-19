@@ -25,11 +25,16 @@ from django.utils import timezone
 
 from analytics.events import record_event
 from analytics.models import FitScore, Import, ProductEvent, UserOpportunity
+from assistant.models import (
+    AdvisorMemory, ChatConversation, ChatFolder, ChatMessage, DailyBrief,
+)
+from billing.models import CreditLedger
 from capture import gmail_live
-from crm.models import ChatDebrief, Contact, Task, Touch, UserFirm
+from capture.models import GmailConnection
+from crm.models import CalendarEvent, ChatDebrief, Contact, Task, Touch, UserFirm
 from directory.models import Firm
 
-from .models import User
+from .models import PushSubscription, User
 
 # The tier assigned to every firm a user picks during onboarding. The plan
 # (docs/build-plan.md §2) declares `user_firms.tier smallint` but leaves its
@@ -400,6 +405,28 @@ FIT_SCORE_EXPORT_COLUMNS = [
 ]
 IMPORT_EXPORT_COLUMNS = ["created", "kind", "filename", "row_stats"]
 PRODUCT_EVENT_EXPORT_COLUMNS = ["ts", "event", "props"]
+CALENDAR_EVENT_EXPORT_COLUMNS = [
+    "title", "description", "starts_at", "ends_at", "all_day", "kind",
+    "source", "contact", "location",
+]
+CHAT_FOLDER_EXPORT_COLUMNS = ["name", "created"]
+CHAT_CONVERSATION_EXPORT_COLUMNS = ["title", "folder", "created", "updated"]
+CHAT_MESSAGE_EXPORT_COLUMNS = ["conversation", "role", "text", "created"]
+ADVISOR_MEMORY_EXPORT_COLUMNS = ["text", "created"]
+DAILY_BRIEF_EXPORT_COLUMNS = ["date", "text", "created"]
+# Deliberately excludes `refresh_token_encrypted` — a bearer credential to the
+# user's own mailbox, not "your data" in the export sense (see
+# `GmailConnection`'s docstring on why it's encrypted at rest at all). Losing
+# this row on export/delete just means reconnecting; it is not a fact about
+# the student.
+GMAIL_CONNECTION_EXPORT_COLUMNS = [
+    "gmail_address", "status", "connected_at", "last_notification_at",
+    "backfill_status", "rescan_status",
+]
+# Deliberately excludes `p256dh`/`auth` — the Push API's own bearer secret for
+# this browser's channel, same posture as the Gmail refresh token above.
+PUSH_SUBSCRIPTION_EXPORT_COLUMNS = ["user_agent", "created"]
+CREDIT_LEDGER_EXPORT_COLUMNS = ["created", "kind", "delta", "period", "props"]
 PROFILE_EXPORT_COLUMNS = [
     "email", "name", "school", "class_year", "target_cycles", "regions",
     "tracks", "work_authorization", "angles", "advocate_target",
@@ -590,6 +617,100 @@ def product_events_csv(user) -> str:
     )
 
 
+def calendar_events_csv(user) -> str:
+    rows = (
+        CalendarEvent.objects.for_user(user).select_related("contact").order_by("starts_at")
+    )
+    return _csv(
+        CALENDAR_EVENT_EXPORT_COLUMNS,
+        (
+            [
+                e.title, e.description, _dt(e.starts_at), _dt(e.ends_at), e.all_day,
+                e.kind, e.source, e.contact.name if e.contact_id else "", e.location,
+            ]
+            for e in rows
+        ),
+    )
+
+
+def chat_folders_csv(user) -> str:
+    rows = ChatFolder.objects.for_user(user).order_by("name")
+    return _csv(CHAT_FOLDER_EXPORT_COLUMNS, ([f.name, _dt(f.created)] for f in rows))
+
+
+def chat_conversations_csv(user) -> str:
+    rows = ChatConversation.objects.for_user(user).select_related("folder")
+    return _csv(
+        CHAT_CONVERSATION_EXPORT_COLUMNS,
+        (
+            [c.title, c.folder.name if c.folder_id else "", _dt(c.created), _dt(c.updated)]
+            for c in rows
+        ),
+    )
+
+
+def chat_messages_csv(user) -> str:
+    """Every turn of every "Talk to Coverage" thread — the export's one
+    genuinely large file for a heavy user, and exactly the kind of thing the
+    privacy policy's "export everything" promise has to mean, since it is a
+    student's own recruiting-strategy conversation, not bookkeeping."""
+    rows = (
+        ChatMessage.objects.for_user(user).select_related("conversation").order_by("created")
+    )
+    return _csv(
+        CHAT_MESSAGE_EXPORT_COLUMNS,
+        (
+            [
+                m.conversation.title or f"Conversation #{m.conversation_id}",
+                m.role, m.text, _dt(m.created),
+            ]
+            for m in rows
+        ),
+    )
+
+
+def advisor_memories_csv(user) -> str:
+    rows = AdvisorMemory.objects.for_user(user)
+    return _csv(ADVISOR_MEMORY_EXPORT_COLUMNS, ([m.text, _dt(m.created)] for m in rows))
+
+
+def daily_briefs_csv(user) -> str:
+    rows = DailyBrief.objects.for_user(user)
+    return _csv(
+        DAILY_BRIEF_EXPORT_COLUMNS,
+        ([d.date.isoformat(), d.text, _dt(d.created)] for d in rows),
+    )
+
+
+def gmail_connection_csv(user) -> str:
+    conn = GmailConnection.objects.for_user(user).first()
+    rows = []
+    if conn is not None:
+        rows = [[
+            conn.gmail_address, conn.status, _dt(conn.connected_at),
+            _dt(conn.last_notification_at), conn.backfill_status, conn.rescan_status,
+        ]]
+    return _csv(GMAIL_CONNECTION_EXPORT_COLUMNS, rows)
+
+
+def push_subscriptions_csv(user) -> str:
+    rows = PushSubscription.objects.for_user(user).order_by("created")
+    return _csv(PUSH_SUBSCRIPTION_EXPORT_COLUMNS, ([p.user_agent, _dt(p.created)] for p in rows))
+
+
+def credit_ledger_csv(user) -> str:
+    """The whole audit trail behind the Settings credit meter — every grant,
+    spend, purchase, and admin adjustment. `props` carries only the audit
+    detail `billing.credits`/`billing.stripe_gateway` write (thread counts,
+    pack keys, Stripe event ids) — never a secret; see `CreditLedger`'s own
+    docstring."""
+    rows = CreditLedger.objects.for_user(user).order_by("created")
+    return _csv(
+        CREDIT_LEDGER_EXPORT_COLUMNS,
+        ([_dt(r.created), r.kind, r.delta, r.period, _json_cell(r.props)] for r in rows),
+    )
+
+
 def profile_csv(user) -> str:
     """The `users` row itself — one header, one row. Everything Settings can
     set, including the answers that feed the fit score (`work_authorization`)
@@ -636,6 +757,26 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("fit_scores.csv", fit_scores_csv,
      "Computed fit scores with the axes behind each one."),
     ("imports.csv", imports_csv, "Your CSV imports and what each one did."),
+    ("calendar_events.csv", calendar_events_csv,
+     "Coffee chats and events on your calendar, captured or hand-added."),
+    ("chat_folders.csv", chat_folders_csv,
+     "Your own groupings of Talk to Coverage conversations."),
+    ("chat_conversations.csv", chat_conversations_csv,
+     "Every Talk to Coverage conversation you've started, with its folder."),
+    ("chat_messages.csv", chat_messages_csv,
+     "Every message in every Talk to Coverage conversation."),
+    ("advisor_memories.csv", advisor_memories_csv,
+     "Facts the advisor has remembered about your search, in its own words."),
+    ("daily_briefs.csv", daily_briefs_csv,
+     "The advisor's daily briefing paragraph, one per day it ran."),
+    ("gmail_connection.csv", gmail_connection_csv,
+     "Your connected Gmail address and its sync status (never the access "
+     "token itself)."),
+    ("push_subscriptions.csv", push_subscriptions_csv,
+     "Browsers/devices subscribed to deadline push alerts (never the "
+     "subscription's own keys)."),
+    ("credit_ledger.csv", credit_ledger_csv,
+     "Every credit grant, spend, purchase, and adjustment on your account."),
     ("product_events.csv", product_events_csv,
      "Your own usage events — which pages and actions you used."),
     ("profile.csv", profile_csv,
@@ -705,10 +846,26 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     ("touches", Touch),
     ("fit_scores", FitScore),
     ("tasks", Task),
+    # References `contact` (CASCADE) — deleted before `contacts` below for the
+    # same "children before parents" reason as everything above it.
+    ("calendar_events", CalendarEvent),
     ("user_firms", UserFirm),
     ("user_opportunities", UserOpportunity),
     ("imports", Import),
     ("contacts", Contact),
+    # Talk to Coverage: messages reference `conversation` (CASCADE), and
+    # `conversation` optionally references `folder` (SET_NULL, so this trio's
+    # OWN relative order among themselves doesn't affect the counts the way
+    # `contact`'s children above do — kept messages-then-conversations-then-
+    # folders anyway, for the same readability the rest of this list follows).
+    ("chat_messages", ChatMessage),
+    ("chat_conversations", ChatConversation),
+    ("chat_folders", ChatFolder),
+    ("advisor_memories", AdvisorMemory),
+    ("daily_briefs", DailyBrief),
+    ("gmail_connection", GmailConnection),
+    ("push_subscriptions", PushSubscription),
+    ("credit_ledger", CreditLedger),
     ("product_events", ProductEvent),
 ]
 
