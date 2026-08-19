@@ -262,6 +262,22 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     transition: background var(--t-fast), border-color var(--t-fast); }
   .scope-act:hover { border-color: var(--accent); }
 
+  /* The bulk-save confirm, disclosed rather than modal — same mechanism as
+     `.variant-fold` elsewhere on this page. `<summary>` wears `.scope-act`'s
+     own look so opening it reads as the same button; the swap to a stated
+     question plus a second, explicit "Yes" button is the whole point: a
+     click can no longer silently become a write. */
+  .scope-confirm { display: inline-flex; }
+  .scope-confirm > summary { list-style: none; }
+  .scope-confirm > summary::-webkit-details-marker { display: none; }
+  .scope-confirm[open] > summary { border-color: var(--accent); }
+  .scope-confirm-form { display: flex; align-items: center; gap: var(--s2);
+    flex-wrap: wrap; margin-top: var(--s2); }
+  .scope-confirm-q { font-size: var(--fs-xs); color: var(--ink-2); }
+  .scope-act--confirm { background: var(--accent); color: var(--paper);
+    border-color: var(--accent); }
+  .scope-act--confirm:hover { background: var(--accent-ink); border-color: var(--accent-ink); }
+
   /* The lazy-load sentinel: a full-width strip at the end of the loaded
      columns. It occupies real height so `revealed` fires before the user
      hits the bottom, and its text is the honest state ("loading", not a

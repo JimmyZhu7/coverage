@@ -18,6 +18,25 @@ show their result — see `directory/views.py::track_opportunity`'s
 this partial and the full-page view both call, so they can never drift).
 {% endcomment %}
 <div id="apps-body">
+{% comment %}
+The bulk-save undo offer. Shown exactly once, right after `track_eligible`
+redirects here — `_my_applications_context` POPS the session batch, so a
+second load of this page (a refresh, a stage-change swap) never shows it
+again, the same one-shot lifetime a flash message gets. Its own form posts
+to `track_eligible_undo`, which only ever removes the ids THIS batch
+created and only if they are still untouched in Saved — a role the student
+has since moved forward, or dismissed, survives even if it was in the
+batch.
+{% endcomment %}
+{% if recent_bulk_save %}
+  <div class="apps-undo" role="status">
+    <span>Saved {{ recent_bulk_save.count }} role{{ recent_bulk_save.count|pluralize }} that name your year.</span>
+    <form method="post" action="{% url 'track_eligible_undo' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn apps-undo-btn">Undo</button>
+    </form>
+  </div>
+{% endif %}
 {% if total %}
   {% comment %}
   The funnel rail: all five stages, sized by how many roles each holds, each
@@ -167,7 +186,26 @@ this partial and the full-page view both call, so they can never drift).
   {% for stage in stages %}
     {% if stage.items %}
       <section class="apps-stage stage-{{ stage.key }}" id="stage-{{ stage.key }}">
-        <h2>{{ stage.label }} <span class="scrub-count">{{ stage.count }}</span></h2>
+        <h2>{{ stage.label }} <span class="scrub-count">{{ stage.count }}</span>
+          {% comment %}
+          Saved only. A bulk save (or a mis-click) floods THIS stage and
+          nowhere else, so this is the one section that ever needs to empty
+          itself in fewer than N clicks — Applied/Interviewing/Offer/Done
+          are real progress and get no bulk-remove. Same inline-confirm
+          pattern as the bulk-save banner: `<details>` states the count
+          before the real, `confirmed=1`-carrying button ever renders.
+          {% endcomment %}
+          {% if stage.key == "saved" and stage.count %}
+            <details class="apps-clear-confirm">
+              <summary class="btn apps-clear-btn">Clear saved</summary>
+              <form method="post" action="{% url 'clear_saved' %}" class="apps-clear-form">
+                {% csrf_token %}
+                <span>Remove all {{ stage.count }} saved role{{ stage.count|pluralize }}? Applied, interviewing, and offer rows are untouched.</span>
+                <button type="submit" name="confirmed" value="1" class="btn apps-clear-confirm-btn">Yes, clear {{ stage.count }}</button>
+              </form>
+            </details>
+          {% endif %}
+        </h2>
         <div class="apps-grid">
           {% for uo in stage.items %}
             <article class="apps-card">

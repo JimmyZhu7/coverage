@@ -71,13 +71,30 @@ wants a click. It was styled as one of the disclosures above and sat between
 two of them, so the eye filed the whole stack as fine print and skipped the
 button with it. Its own treatment now: an accent-tinted band, the sentence
 and the action on one line. A POST — it changes your data, so it must never
-be a GET.{% endcomment %}
+be a GET.
+
+CONFIRM, inline. This used to be a single button that wrote on click — one
+tap dumped every eligible role (207, once, for real) into a 1-role pipeline
+with no warning and no way back. `<details>` is the same disclosure pattern
+`.variant-fold` already uses elsewhere on this page (no JS required, works
+identically with it off): the visible button only ever OPENS a confirm
+sentence naming the exact count; the real submit button — the one that
+carries `confirmed=1`, the field `track_eligible` actually checks — is
+inside, one click further in. Not a modal: this page has no modal pattern,
+and a `<details>` that states the count and sits right where the click
+happened is lighter and just as honest.{% endcomment %}
 {% if eligible_unsaved %}
-  <form class="scope-line scope-line--act" method="post" action="{% url 'track_eligible' %}">
-    {% csrf_token %}
+  <div class="scope-line scope-line--act">
     <span>{{ eligible_unsaved }} open role{{ eligible_unsaved|pluralize }} name{{ eligible_unsaved|pluralize:"s," }} your class year and {{ eligible_unsaved|pluralize:"isn't,aren't" }} saved yet.</span>
-    <button type="submit" class="scope-act">Save {{ eligible_unsaved|pluralize:"it,them all" }}</button>
-  </form>
+    <details class="scope-confirm">
+      <summary class="scope-act">Save {{ eligible_unsaved|pluralize:"it,them all" }}</summary>
+      <form method="post" action="{% url 'track_eligible' %}" class="scope-confirm-form">
+        {% csrf_token %}
+        <span class="scope-confirm-q">Save {{ eligible_unsaved }} role{{ eligible_unsaved|pluralize }} to My Applications?</span>
+        <button type="submit" name="confirmed" value="1" class="scope-act scope-act--confirm">Yes, save {{ eligible_unsaved|pluralize:"it,them all" }}</button>
+      </form>
+    </details>
+  </div>
 {% endif %}
 
 {% comment %}

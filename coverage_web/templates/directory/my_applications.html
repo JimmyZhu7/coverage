@@ -213,6 +213,49 @@
       background-color var(--t-med); }
   .apps-remove:hover { color: var(--danger); border-color: var(--danger-line);
     background: var(--danger-soft); }
+
+  /* The bulk-save undo strip. Shown exactly once — see _apps_body.html's
+     own comment on why `recent_bulk_save` is popped, not just read — so it
+     behaves like every other flash message on the product: one appearance,
+     then gone. Styled like one (accent-tinted, role="status") rather than
+     the danger tone below; undoing a save you just asked for is not itself
+     a warning. */
+  .apps-undo { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+    margin-top: var(--s5); padding: 8px var(--s4) 8px var(--s3);
+    background: var(--accent-soft); border: 1px solid var(--accent-line);
+    border-left: 3px solid var(--accent); border-radius: 10px;
+    color: var(--ink-2); font-size: var(--fs-s); }
+  .apps-undo form { margin: 0; }
+  .apps-undo-btn { border: 1px solid var(--accent-line); background: var(--surface);
+    color: var(--accent-ink); border-radius: 999px; padding: 4px 14px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .apps-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+  /* "Clear saved" — Saved only, see the template's own note on why no other
+     stage gets one. Same disclosed-confirm mechanism as the feed's bulk-save
+     banner (`.scope-confirm` in directory/_styles.html): a `<details>` whose
+     visible control only opens a stated count and a second, explicit button.
+     Danger-toned like `.apps-remove` above, because unlike the undo strip
+     this one IS a warning — it is about to delete rows. */
+  .apps-stage > h2 { flex-wrap: wrap; }
+  .apps-clear-confirm { display: inline-flex; margin-left: auto; }
+  .apps-clear-confirm > summary { list-style: none; }
+  .apps-clear-confirm > summary::-webkit-details-marker { display: none; }
+  .apps-clear-btn { background: transparent; border: 1px solid transparent; color: var(--ink-3);
+    padding: 4px 10px; font-size: var(--fs-xs); font-weight: var(--w-reg);
+    border-radius: 999px; cursor: pointer;
+    transition: color var(--t-fast), border-color var(--t-fast), background-color var(--t-fast); }
+  .apps-clear-btn:hover, .apps-clear-confirm[open] .apps-clear-btn
+    { color: var(--danger); border-color: var(--danger-line); background: var(--danger-soft); }
+  .apps-clear-form { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+    margin-top: var(--s2); font-size: var(--fs-xs); font-weight: var(--w-reg);
+    text-transform: none; letter-spacing: 0; color: var(--ink-2); max-width: 32rem; }
+  .apps-clear-confirm-btn { border: 1px solid var(--danger-line); background: var(--danger-soft);
+    color: var(--danger); border-radius: 999px; padding: 4px 14px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer; flex: none;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .apps-clear-confirm-btn:hover { border-color: var(--danger); }
   /* Done is terminal, so its cards recede rather than compete with live ones —
      but the recession is a dashed border and a stated word as well as a flatter
      background, so "finished" never rests on the tint alone. */
