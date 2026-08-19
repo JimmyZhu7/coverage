@@ -61,14 +61,36 @@
     pointer-events: none;
     background: radial-gradient(120% 130% at 100% 0%,
       color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%); }
-  .plan-badge { position: absolute; top: var(--s4); right: var(--s4);
-    font-family: var(--font-mono); font-size: var(--fs-micro);
-    text-transform: uppercase; letter-spacing: 0.08em;
-    border-radius: 999px; padding: 3px 12px;
-    background: var(--accent-soft); color: var(--accent-ink); }
-  .plan-badge.soon { background: var(--stale-s); color: var(--stale-t); }
+  /* ---- Status badges --------------------------------------------------------
+     These were mono all-caps chips floated into the card's top-right corner,
+     which is a build-status label — the voice of a CI dashboard, not of a
+     page a student is deciding to trust. Three changes, all of them the
+     ordinary product-marketing treatment:
+
+       the UI face in sentence case, so it reads as a phrase rather than a
+         constant;
+       a hairline ring on the soft fill, which is how every other tinted
+         chip in this product is built and is what stops a pale pill from
+         dissolving into a pale card;
+       inline beside the plan name instead of absolutely positioned, so the
+         card opens with one header line — name, then status — rather than a
+         title with something floating near it.
+
+     "Available now" moves from accent to --ok. Green is the product's own
+     word for live (the landing hero's pulse dot is --ok), and it frees the
+     accent to mean emphasis: the Free card is the featured one and was
+     wearing an accent ring and an accent badge at once. */
+  .plan-head { display: flex; align-items: center; flex-wrap: wrap;
+    gap: var(--s2) var(--s3); margin: 0 0 var(--s1); }
+  .plan-badge { flex: none; border-radius: 999px; padding: 3px 11px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); line-height: 1.5;
+    white-space: nowrap;
+    background: var(--ok-soft); color: var(--ok);
+    box-shadow: inset 0 0 0 1px var(--ok-line); }
+  .plan-badge.soon { background: var(--stale-s); color: var(--stale-t);
+    box-shadow: inset 0 0 0 1px var(--stale-l); }
   .plan-name { font: var(--w-black) 22px/1.2 var(--font-display);
-    letter-spacing: -0.01em; margin: 0 0 var(--s1); }
+    letter-spacing: -0.01em; margin: 0; }
   .plan-tagline { color: var(--ink-2); font-size: var(--fs-s); margin: 0 0 var(--s4); }
   .plan-price { display: flex; align-items: baseline; gap: var(--s2);
     margin-bottom: var(--s4); }
@@ -193,10 +215,13 @@
      say the same thing sixteen times and make the table look unfinished; the
      tier itself is unlaunched, so stating it once at the head is both
      cleaner and more honest. */
-  .cmp-badge { font-family: var(--font-mono); font-size: var(--fs-micro);
-    text-transform: uppercase; letter-spacing: 0.08em; border-radius: 999px;
-    padding: 2px 8px; background: var(--stale-s); color: var(--stale-t);
-    margin-left: var(--s2); white-space: nowrap; font-weight: var(--w-reg); }
+  /* Same badge, same voice as the cards' — one step smaller because it sits
+     inline inside a table head rather than on its own header line. */
+  .cmp-badge { font-size: var(--fs-xs); font-weight: var(--w-med);
+    border-radius: 999px; padding: 2px 9px; line-height: 1.5;
+    background: var(--stale-s); color: var(--stale-t);
+    box-shadow: inset 0 0 0 1px var(--stale-l);
+    margin-left: var(--s2); white-space: nowrap; }
 
   .price-honesty { max-width: 640px; margin: var(--s7) auto 0; text-align: center;
     color: var(--ink-2); font-size: var(--fs-s); }
@@ -279,8 +304,10 @@
     <div class="aud-panel panel-ind">
       <div class="price-grid">
         <article class="price-card featured kin-reveal" style="--i:0">
-          <span class="plan-badge">Available now</span>
-          <h2 class="plan-name">Free</h2>
+          <div class="plan-head">
+            <h2 class="plan-name">Free</h2>
+            <span class="plan-badge">Available now</span>
+          </div>
           <p class="plan-tagline">The whole board. No card, no trial clock.</p>
           <p class="plan-price"><span class="amount">$0</span><span class="per">forever, for what's listed here</span></p>
           {% comment %}
@@ -330,8 +357,10 @@
         </article>
 
         <article class="price-card preview kin-reveal" style="--i:1">
-          <span class="plan-badge soon">In the works</span>
-          <h2 class="plan-name">Pro</h2>
+          <div class="plan-head">
+            <h2 class="plan-name">Pro</h2>
+            <span class="plan-badge soon">In the works</span>
+          </div>
           <p class="plan-tagline">For when the replies start coming in.</p>
           <p class="plan-price"><span class="amount">$69</span><span class="per">one cycle, ~6 months</span></p>
           <p class="plan-includes">Everything in Free, plus</p>
@@ -507,8 +536,10 @@
     <div class="aud-panel panel-team">
       <div class="price-grid">
         <article class="price-card kin-reveal" style="--i:0">
-          <span class="plan-badge soon">In the works</span>
-          <h2 class="plan-name">Team</h2>
+          <div class="plan-head">
+            <h2 class="plan-name">Team</h2>
+            <span class="plan-badge soon">In the works</span>
+          </div>
           {% comment %}
           Rewritten 2026-08-20 (founder-decisions §1): Team is a flat club
           workspace on top of Free accounts. Pro seats are bought at the
@@ -543,8 +574,10 @@
         </article>
 
         <article class="price-card kin-reveal" style="--i:1">
-          <span class="plan-badge soon">In the works</span>
-          <h2 class="plan-name">Enterprise</h2>
+          <div class="plan-head">
+            <h2 class="plan-name">Enterprise</h2>
+            <span class="plan-badge soon">In the works</span>
+          </div>
           <p class="plan-tagline">For career centers and business schools supporting whole cohorts.</p>
           <p class="plan-price"><span class="amount">Custom</span><span class="per">scoped to your campus</span></p>
           <p class="plan-includes">Everything in Team, plus</p>
