@@ -179,8 +179,8 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # 2026-07-24, GIC 2026-08-08, both noted as "SuccessFactors — no
     # connector" — on the assumption it was JS-gated. It is not: careers.ey.com
     # serves the full result table as plain HTML with an exact stated total
-    # and honest `startrow` paging. Both of those firms are now buildable and
-    # are on the backlog rather than in this commit.
+    # and honest `startrow` paging. Both of those firms were retested
+    # 2026-08-19 and are now built below, alongside EY.
     # `q=` is relevance-ranked full text, not a filter, so it is used the way
     # OracleBoard's `keywords` already are: one search each, deduped by URL.
     # Measured 2026-08-19 — "internship" 88, "trainee" 32, "student" 59,
@@ -192,6 +192,27 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # below already documents, not a defect.
     ("ey", SuccessFactorsBoard(firm="EY", origin="https://careers.ey.com",
                                keywords=("internship", "trainee", "student"))),  # live-verified 2026-08-19
+    # Janus Henderson — same platform, a much smaller tenant. Of 76 postings
+    # total, exactly one is genuinely campus-facing: "Research Associate -
+    # Early Careers Program 2027" (Denver). Measured 2026-08-19 — "internship"
+    # 2, "graduate" 4, 6 rows after dedupe. Rejected: "intern" (48 — the same
+    # Internal-Audit-style false-positive trap as EY's, here matching
+    # "Internal Sales Consultant"), "student"/"trainee" (0), "early careers"
+    # (76 — identical to the unfiltered board on this tenant, so not a real
+    # filter at all).
+    ("janushenderson", SuccessFactorsBoard(firm="Janus Henderson", origin="https://jobs.janushenderson.com",
+                                           keywords=("internship", "graduate"))),  # live-verified 2026-08-19
+    # GIC — same platform. The whole 172-posting tenant is titled by rank
+    # (Associate/AVP/VP/SVP/MD) rather than by function, and nothing on it is
+    # titled an internship right now — the board is honest and thin at the
+    # internship rung, not broken. "associate" and "analyst" are GIC's own
+    # junior full-time ranks, not keyword noise: measured 2026-08-19, 65 / 30
+    # rows, 84 after dedupe, including the three "Summer 2027 Start" Private
+    # Equity Associate cohort reqs. Rejected: "intern" (82 — the Internal
+    # Audit trap again), "graduate"/"student"/"trainee"/"campus" (single
+    # digits, body-text matches rather than title matches).
+    ("gic", SuccessFactorsBoard(firm="GIC", origin="https://careers.gic.com.sg",
+                                keywords=("associate", "analyst"))),  # live-verified 2026-08-19
 
     # ---- Ported providers (radar-verified 2026-07-22, re-verified on add) ----
     # Oracle Recruiting Cloud — J.P. Morgan's public REST. PostingEndDate is
@@ -305,8 +326,12 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("fidelityintl", WorkdayBoard(firm="Fidelity International", tenant_host="fil.wd3", site="001", search_text="intern")),
 
     # Asset-management expansion (agent-identified + live-verified 2026-07-24).
-    # All Workday except State Street (Phenom, server-rendered JSON). Janus
-    # Henderson (SuccessFactors) and Amundi (Avature) are JS-gated — backlog.
+    # All Workday except State Street (Phenom, server-rendered JSON). Amundi
+    # (Avature) is JS-gated — backlog. Janus Henderson was also filed here as
+    # "(SuccessFactors) ... JS-gated" — wrong, and never retested until now.
+    # jobs.janushenderson.com is a plain RMK /search/ page, the same platform
+    # as EY (see the successfactors connector and its entry above). Its own
+    # board entry lives with the SuccessFactors boards below.
     ("vanguard", WorkdayBoard(firm="Vanguard", tenant_host="vanguard.wd5", site="vanguard_external", search_text="intern")),
     ("troweprice", WorkdayBoard(firm="T. Rowe Price", tenant_host="troweprice.wd5", site="TRowePrice", search_text="intern")),
     ("capitalgroup", WorkdayBoard(firm="Capital Group", tenant_host="capgroup.wd1", site="capitalgroupcareers", search_text="intern")),
@@ -407,8 +432,11 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # Co-op/Summer; broad fetch + classifier is the established posture.
     # Misses this round: Scotiabank/SMBC/Northern Trust (Workday roots 406
     # plain clients; site names undiscoverable without a browser), BNY
-    # (Oracle host not exposed in markup), Natixis/Daiwa (no ATS in markup),
-    # GIC (SuccessFactors — no connector). ----
+    # (Oracle host not exposed in markup), Natixis/Daiwa (no ATS in markup).
+    # GIC was filed here as "SuccessFactors — no connector"; that was wrong
+    # and was never retested until 2026-08-19, when it turned out to be the
+    # same reachable RMK platform as EY. Built as a SuccessFactorsBoard with
+    # the other SuccessFactors boards above, not here.
     ("td", WorkdayBoard(firm="TD Securities", tenant_host="td.wd3", site="TD_Bank_Careers", search_text="intern")),
     ("mufg", WorkdayBoard(firm="MUFG", tenant_host="mufgub.wd3", site="MUFG-Careers", search_text="intern")),
     ("cibc", WorkdayBoard(firm="CIBC", tenant_host="cibc.wd3", site="search", search_text="intern")),
@@ -589,6 +617,11 @@ DEFAULT_TRACKS: dict[str, list[str]] = {
     "accenture": ["consulting"],
     "deloitte": ["consulting"],
     "ey": ["consulting"],
+    # SuccessFactors retest (2026-08-19). Janus Henderson is a traditional
+    # asset manager; GIC is a sovereign wealth fund, tracked as asset
+    # management the same as Bridgewater/AQR/Marshall Wace above.
+    "janushenderson": ["am"],
+    "gic": ["am"],
 }
 
 

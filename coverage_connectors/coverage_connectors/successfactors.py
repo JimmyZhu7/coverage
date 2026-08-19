@@ -16,10 +16,14 @@ careers.ey.com 2026-08-19 (see the live smoke test).
 
 Three properties of the platform this connector is shaped around:
 
-1. **Page size is fixed at 25 and `startrow` is the offset**, not a page
-   number. The site's own pagination links are `?q=…&startrow=25/50/75…`, and
-   an out-of-range startrow returns a short page rather than erroring, so the
-   walk is bounded by the label's stated total, not by probing.
+1. **`startrow` is an offset, not a page number, and the page size is
+   per-tenant, not platform-fixed.** careers.ey.com renders 25 rows per page;
+   careers.gic.com.sg (added 2026-08-19) renders 20 — confirmed by its own
+   pagination links stepping `startrow` by 20, not 25. `fetch()` therefore
+   advances `startrow` by however many rows the last page actually returned,
+   never by a hardcoded constant, and treats an empty page (not a short one)
+   as the end of a keyword's walk; the label's stated total is what actually
+   bounds the walk.
 
 2. **`q=` is a relevance-ranked full-text search, not a filter.** `q=intern`
    on EY returns 3,852 rows because it also matches "Internal Audit" and
@@ -65,10 +69,6 @@ from .http import BOT_BLOCK_PREFIX, bot_challenge_reason, fetch_text
 from .models import FetchResult, Opportunity, SuccessFactorsBoard, VerificationResult
 
 name = "successfactors"
-
-# RMK renders 25 rows per page and does not honour a page-size parameter
-# (verified live: the site's own pagination links step startrow by 25).
-_PAGE_SIZE = 25
 
 # Per-keyword ceiling. A keyword this broad is a config mistake, not a board
 # to page through: `q=intern` alone reports 3,852 rows on EY. The cap bounds
@@ -171,11 +171,11 @@ def fetch(board: SuccessFactorsBoard) -> FetchResult:
                     seen.add(row["url"])
                     rows.append(row)
                 total = _stated_total(html)
-                startrow += _PAGE_SIZE
-                # A page shorter than the page size is the end of THIS
-                # keyword's result set regardless of what the label said.
-                if len(page) < _PAGE_SIZE:
+                # An empty page is the end of THIS keyword's result set
+                # regardless of what the label said.
+                if not page:
                     break
+                startrow += len(page)
                 if total is None:
                     break
                 if startrow >= _MAX_JOBS_PER_KEYWORD:

@@ -190,3 +190,36 @@ def test_successfactors_live_fetch_and_verify():
 
     status = verify(opp.url)
     assert status.result == "verified-open", status.evidence
+
+
+@pytest.mark.live
+def test_successfactors_live_fetch_janus_henderson():
+    """A different RMK tenant than EY's — also confirms fetch() doesn't
+    depend on the page size being 25 (this tenant's is 25 too, but GIC's
+    below is 20, and both must walk correctly)."""
+    board = SuccessFactorsBoard(firm="Janus Henderson", origin="https://jobs.janushenderson.com",
+                                keywords=("internship", "graduate"))
+    result = fetch(board)
+
+    assert result.ok, f"live successfactors fetch failed: {result.error}"
+    assert result.raw_count > 0
+    opp = result.opportunities[0]
+    assert opp.source == "successfactors"
+    assert opp.title and opp.location
+    assert opp.url.startswith("https://jobs.janushenderson.com/")
+
+
+@pytest.mark.live
+def test_successfactors_live_fetch_gic_20_row_page_size():
+    """GIC's tenant renders 20 rows per page, not EY's 25 — the live case
+    that caught fetch() hardcoding _PAGE_SIZE=25 for the startrow walk."""
+    board = SuccessFactorsBoard(firm="GIC", origin="https://careers.gic.com.sg",
+                                keywords=("associate", "analyst"))
+    result = fetch(board)
+
+    assert result.ok, f"live successfactors fetch failed: {result.error}"
+    assert result.raw_count > 20, "walk must not stop after the first 20-row page"
+    opp = result.opportunities[0]
+    assert opp.source == "successfactors"
+    assert opp.title and opp.location
+    assert opp.url.startswith("https://careers.gic.com.sg/")
