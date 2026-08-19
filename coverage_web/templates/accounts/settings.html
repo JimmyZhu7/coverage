@@ -1069,11 +1069,11 @@
                 {% comment %}
                 FIX #2a (walk-in-day bug): a plan flip used to be visible
                 nowhere but this text label. The badge names what changed —
-                plan AND model, read from assistant.plans so it can never
-                drift from ASSISTANT_PLANS — the instant a reload picks up
-                the new `user.plan`.
+                the instant a reload picks up the new `user.plan` — without
+                naming the model (Jimmy, 2026-08-20: keep it to "Pro", the
+                model name is implementation detail).
                 {% endcomment %}
-                <span class="pill plan-{{ credits.plan_label|lower }}">{{ credits.plan_label }} &middot; {{ credits.plan_model_label }}</span>
+                <span class="pill plan-{{ credits.plan_label|lower }}">{{ credits.plan_label }}</span>
                 {% if credits.trial_days_left %}&middot; Pro trial &middot; {{ credits.trial_days_left }} day{{ credits.trial_days_left|pluralize }} left{% endif %}
               </span>
               <div class="set-row-desc">

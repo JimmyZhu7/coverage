@@ -1705,10 +1705,8 @@ element by the next turn.
             el.textContent = data.balance;
             var badge = document.getElementById("as-plan-badge");
             var label = document.getElementById("as-plan-label");
-            var model = document.getElementById("as-plan-model");
             if (badge) badge.className = "pill plan-" + data.plan_label.toLowerCase();
             if (label) label.textContent = data.plan_label;
-            if (model) model.textContent = data.model_label;
           })
           .catch(function () { /* a one-turn-stale credit count is not worth surfacing */ });
       }
