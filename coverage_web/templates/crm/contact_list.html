@@ -80,6 +80,48 @@
           <div class="gap-state">{{ g.label }} ·
             <span title="Your advocate target for this firm ({{ g.target }} per firm) — set in Settings &gt; Cadence.">{{ g.advocates }}/{{ g.target }} advocates</span>
             <span class="gap-exp">· exposure {{ g.exposure }}</span></div>
+          {% comment %}
+          "Who to find": the other half of the card. Everything above it
+          says how exposed this firm is; the button below it says "Add",
+          which is the app asking the student for the one thing it can't
+          supply — a name. This panel is the cheapest honest help short of
+          an import: three role archetypes picked off the student's own
+          tracks (crm/sourcing.py), each with a prefilled LinkedIn people
+          search. We hand over the query, not the person, and the panel
+          says so in one line rather than implying a roster.
+
+          A native <details>, so it opens with no JavaScript at all — the
+          same rule the bulk-action form below follows. The panel is
+          absolutely positioned rather than inline because a gap card is
+          one sixth of the page wide: inline, three labelled rows would
+          wrap to nine lines and shove the whole strip down. As a dropdown
+          it borrows the width it needs and puts nothing back. The script
+          at the bottom of the page only adds the niceties: close the
+          others when one opens, and log the two clicks.
+          {% endcomment %}
+          {% if g.sourcing %}
+            <details class="src" data-firm="{{ g.slug }}">
+              <summary class="src-toggle">Who to find</summary>
+              <div class="src-panel">
+                <p class="src-note">{{ sourcing_note }}</p>
+                <ul class="src-list">
+                  {% for s in g.sourcing %}
+                    <li class="src-row">
+                      {% comment %}"opens LinkedIn search" is stated on the
+                      link itself, not just in the note above, because the
+                      link is the thing being clicked and a student should
+                      never be surprised about leaving the app.{% endcomment %}
+                      <a class="src-link" href="{{ s.linkedin_url }}"
+                         target="_blank" rel="noopener noreferrer"
+                         data-archetype="{{ s.key }}"
+                         title="Opens a LinkedIn search for {{ s.query }}">{{ s.label }}</a>
+                      <span class="src-why">{{ s.why }}</span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </details>
+          {% endif %}
           {% if g.lever %}
             <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Work {{ g.lever.name|smart_title }}</a>
           {% else %}
@@ -494,6 +536,50 @@
             var empty = s.querySelector(".tier-empty");
             if (empty) empty.hidden = s.querySelector(".tier-grid").children.length > 0;
           });
+        });
+      });
+    });
+  })();
+
+  /* "Who to find" panels on the Coverage Gaps cards. The <details> opens
+     and closes on its own; this only adds two things on top.
+
+     1. One at a time. Six absolutely-positioned dropdowns are allowed to
+        overlap each other, and two open at once reads as a rendering bug.
+     2. Instrumentation. Whether students open this panel, and whether
+        they then leave for a search, is the only evidence that separates
+        "the suggestions help" from "the suggestions are decoration" —
+        and the click that leaves is invisible to us by design, since we
+        hand over a query and see nothing after. Fire-and-forget: the
+        response is never read, and a failed POST never blocks the link
+        (`keepalive` so the request survives the page losing focus). */
+  (function () {
+    var panels = document.querySelectorAll(".gap-card .src");
+    if (!panels.length) return;
+
+    function log(firm, kind, archetype) {
+      var body = new URLSearchParams({ firm: firm, kind: kind });
+      if (archetype) body.set("archetype", archetype);
+      try {
+        fetch("{% url 'crm:sourcing_event' %}", {
+          method: "POST", keepalive: true,
+          headers: { "X-CSRFToken": "{{ csrf_token }}",
+                     "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+        }).catch(function () {});
+      } catch (e) { /* instrumentation must never break the panel */ }
+    }
+
+    panels.forEach(function (panel) {
+      var firm = panel.dataset.firm || "";
+      panel.addEventListener("toggle", function () {
+        if (!panel.open) return;
+        panels.forEach(function (other) { if (other !== panel) other.open = false; });
+        log(firm, "panel");
+      });
+      panel.querySelectorAll(".src-link").forEach(function (link) {
+        link.addEventListener("click", function () {
+          log(firm, "search", link.dataset.archetype || "");
         });
       });
     });

@@ -22,7 +22,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count as models_Count, Max as models_Max, Q
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -37,7 +37,9 @@ from crm.forms import ChatDebriefForm, ContactForm
 from directory.classify import REGION_LABELS, TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
 
-from . import ai_brief, ai_summary, coverage, debrief as debrief_svc, services
+from . import (
+    ai_brief, ai_summary, coverage, debrief as debrief_svc, services, sourcing,
+)
 from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
 
 
@@ -617,6 +619,15 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         # right now is a firm worth a contact TODAY, in a way the formula
         # itself has no term for.
         g["open"] = open_by_firm.get(g["firm_id"], 0)
+        # "Who to find" — the other half of the answer. `lever` covers the
+        # firms where the student already knows someone; this covers the
+        # ones where the only verb on the card is "Add" and the card can't
+        # say WHO. Pure, in-memory, no query: `crm.sourcing` reads the
+        # firm's name and two fields off the user, and hands back three
+        # role archetypes with a prefilled LinkedIn search each. Nothing is
+        # fetched and nothing is imported (see that module's docstring) —
+        # these are suggestions and links out.
+        g["sourcing"] = sourcing.suggestions_for(firm, user) if firm else []
 
     # --- Full contact cards ---------------------------------------------
     # Warmth sections, same four as every other scope — School used to
@@ -650,6 +661,9 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "scope": scope,
             "region_scopes": region_scopes,
             "gaps": gaps,
+            # Said once per panel, in the module that builds the links, so
+            # the promise and the code can't drift apart.
+            "sourcing_note": sourcing.DISCLOSURE,
             "adv_target": adv_target,
             "action_groups": action_groups,
             "action_total": len(actions),
@@ -712,6 +726,55 @@ def remove_target_firm(request: HttpRequest) -> HttpResponse:
         return HttpResponse(status=404)
     record_event("firm_target_removed", user=request.user)
     return HttpResponse(status=204)
+
+
+# What the "Who to find" panel is allowed to say happened. Two moments,
+# both of them the student's own click: opening the panel at all, and
+# leaving for one of its searches.
+_SOURCING_EVENTS = {
+    "panel": "sourcing_panel_opened",
+    "search": "sourcing_search_opened",
+}
+
+
+@login_required
+@require_POST
+def sourcing_event(request: HttpRequest) -> HttpResponse:
+    """Log that a student opened a Coverage Gap card's "Who to find" panel,
+    or clicked one of its LinkedIn searches.
+
+    Fire-and-forget, exactly like the assistant's thumbs up/down
+    (`assistant.views.feedback`): one append-only `record_event` row, no
+    model of its own, no migration, and nothing on the page reads it back.
+    A double-click logs two events, which is exactly as fine as two clicks
+    meaning two data points to whoever reads the funnel.
+
+    It exists because "contact sourcing is zero-assist" is a launch-gate
+    question with no evidence behind it either way. Whether students open
+    this panel, and whether they then leave for a search, is the only
+    signal that distinguishes "the suggestions help" from "the suggestions
+    are decoration" — and the click that leaves for LinkedIn is otherwise
+    invisible to us by design (we hand over a query and see nothing after).
+
+    The firm slug arrives in a POST body, so it gets the same `.for_user`
+    treatment every other id in this app gets: a firm the student is not
+    tracking 404s instead of writing a row about somebody else's board.
+    """
+    kind = (request.POST.get("kind") or "").strip()
+    event = _SOURCING_EVENTS.get(kind)
+    if not event:
+        return HttpResponse(status=400)
+    slug = (request.POST.get("firm") or "").strip()
+    if not UserFirm.objects.for_user(request.user).filter(firm__slug=slug).exists():
+        return HttpResponse(status=404)
+    props: dict[str, Any] = {"firm": slug}
+    if kind == "search":
+        # Which of the three rows, e.g. "ib-0" or "alumni" — the whole
+        # point of logging the click. Bounded so a hand-rolled POST can't
+        # write an essay into the props blob.
+        props["archetype"] = (request.POST.get("archetype") or "")[:64]
+    record_event(event, user=request.user, **props)
+    return JsonResponse({"ok": True})
 
 
 @login_required

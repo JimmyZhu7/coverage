@@ -48,6 +48,10 @@ urlpatterns = [
     path("firms/tier/", views.set_firm_tier, name="set_firm_tier"),
     # Settings' Target Firms remove control (POST firm).
     path("firms/remove/", views.remove_target_firm, name="remove_target_firm"),
+    # Fire-and-forget instrumentation for the Coverage Gaps card's "Who to
+    # find" panel: opened, and left for a LinkedIn search. Writes one
+    # product event and nothing else.
+    path("firms/sourcing-event/", views.sourcing_event, name="sourcing_event"),
     path("contacts/<int:pk>/", views.contact_detail, name="contact_detail"),
     path("contacts/<int:pk>/edit/", views.contact_edit, name="contact_edit"),
     # htmx: log a touch, re-render the live panel with visible warmth movement.

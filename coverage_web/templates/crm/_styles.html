@@ -672,6 +672,59 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     text-align: center; white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; display: block; }
 
+  /* ---- "Who to find": role archetypes + prefilled LinkedIn searches ----
+     A native <details> so the panel opens with no JavaScript, and a
+     DROPDOWN rather than an inline block because a gap card is one sixth
+     of the page wide: three labelled rows inline would wrap to nine lines
+     and push the whole board down every time one card opened. Positioned
+     against the card, which is why `.gap-card` is a containing block. */
+  .gap-card { position: relative; }
+  .src-toggle { list-style: none; cursor: pointer; width: fit-content;
+    font-size: var(--fs-xs); color: var(--ink-2); font-weight: var(--w-med);
+    border-bottom: 1px dashed var(--line-strong); padding-bottom: 1px;
+    transition: color var(--t-fast); }
+  .src-toggle::-webkit-details-marker { display: none; }
+  .src-toggle::after { content: " ↓"; font-family: var(--font-mono);
+    font-size: 10px; color: var(--ink-3); }
+  details[open] > .src-toggle::after { content: " ↑"; }
+  .src-toggle:hover, details[open] > .src-toggle { color: var(--ink);
+    border-bottom-color: var(--ink-3); }
+  .src-panel { position: absolute; z-index: 20; top: calc(100% + var(--s2));
+    left: 0; width: max(100%, 250px); max-width: 78vw;
+    background: var(--surface); border: 1px solid var(--line-strong);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-2);
+    padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2);
+    animation: src-drop var(--t-med) ease both; }
+  /* The last two cards in a row would otherwise hang their panel off the
+     right edge of the page. */
+  .gap-row > .gap-card:nth-child(n+5) .src-panel { left: auto; right: 0; }
+  @media (max-width: 1180px) {
+    .gap-row > .gap-card .src-panel { left: 0; right: auto; }
+    .gap-row > .gap-card:nth-child(3n) .src-panel { left: auto; right: 0; }
+  }
+  @media (max-width: 700px) {
+    .gap-row > .gap-card .src-panel { left: 0; right: auto; }
+    .gap-row > .gap-card:nth-child(2n) .src-panel { left: auto; right: 0; }
+  }
+  @keyframes src-drop { from { opacity: 0; transform: translateY(-4px); }
+                        to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .src-panel { animation: none; } }
+  /* Said once, at the top, in plain words: these are guesses and the link
+     leaves the app. The product has no roster and must not look like it
+     does. */
+  .src-note { font-size: var(--fs-micro); color: var(--ink-3); margin: 0;
+    line-height: 1.4; }
+  .src-list { list-style: none; margin: 0; padding: 0; display: flex;
+    flex-direction: column; gap: var(--s2); }
+  .src-row { display: flex; flex-direction: column; gap: 1px;
+    border-top: 1px solid var(--line); padding-top: var(--s2); }
+  .src-link { font-size: var(--fs-xs); font-weight: var(--w-med);
+    color: var(--accent); text-decoration: none; line-height: 1.3; }
+  .src-link:hover { text-decoration: underline; }
+  /* The outbound arrow is the whole warning: this link leaves Coverage. */
+  .src-link::after { content: " ↗"; font-size: 10px; color: var(--ink-3); }
+  .src-why { font-size: var(--fs-micro); color: var(--ink-3); line-height: 1.35; }
+
   /* ---- Network board (radar layout, Coverage light theme) ---- */
   .scope-tabs { margin-top: var(--s3); }
   /* Both columns stretch to the same height; each is a title over a panel
