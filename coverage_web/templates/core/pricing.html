@@ -63,12 +63,12 @@
   /* 960px, not 860, and 32px of padding on all four sides rather than 24 on
      the sides. Both are in service of the same thing: a 13px line of body
      copy wants roughly 55-65 characters, and the old 860px grid gave each
-     card about 370px of text width, which is where a bullet like "Deadline
-     fuses, rolling markers, and a label on every inferred date" broke onto
-     a second line for no reason other than the column being narrow. The
-     measure is the layout problem; shortening the words alone would not
-     have fixed it. 960px is --page-w, so the cards now line up with the
-     page rather than sitting inside it at an arbitrary width. */
+     card about 370px of text width, which is where a bullet of sixty-odd
+     characters broke onto a second line for no reason other than the
+     column being narrow. The measure is the layout problem; shortening the
+     words alone would not have fixed it. 960px is --page-w, so the cards
+     now line up with the page rather than sitting inside it at an
+     arbitrary width. */
   .price-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5);
     max-width: var(--page-w); margin: 0 auto; align-items: stretch; }
   .price-card { border: 1px solid var(--line); border-radius: var(--r-panel);
@@ -115,10 +115,10 @@
     margin: 0 0 var(--s5); max-width: 42ch; }
   /* The price is the answer to a different question than the feature list,
      and the card gave the two the same 16px of air, so the eye ran straight
-     from "$0" into "2435 live campus roles" with nowhere to stop. A hairline
-     and 24px on each side of it is the resting point: everything above is
-     what it costs, everything below is what you get. Every card has a price,
-     so the rule is universal and needs no per-card variant. */
+     out of the amount and into the first bullet with nowhere to stop. A
+     hairline and 24px on each side of it is the resting point: everything
+     above is what it costs, everything below is what you get. Every card
+     has a price, so the rule is universal and needs no per-card variant. */
   .plan-price { display: flex; align-items: baseline; gap: var(--s2);
     margin: 0 0 var(--s5); padding-bottom: var(--s5);
     border-bottom: 1px solid var(--line); }
@@ -152,14 +152,26 @@
   .plan-features li { position: relative; padding-left: 26px;
     font-size: var(--fs-s); color: var(--ink-2); line-height: 1.55;
     text-wrap: pretty; }
+  /* <b> means "this is a measured figure", and only that. A draft of this
+     pass also used it for bold lead-ins ("Gmail Live:", "Talk to Coverage")
+     which looked fine and was wrong twice over: it gave one tag two
+     meanings, and it split copy that core/tests/test_pricing.py pins as
+     contiguous strings, because those sentences are founder decisions the
+     tests exist to hold still. */
   .plan-features li b { color: var(--ink); font-weight: var(--w-med);
     font-variant-numeric: tabular-nums; }
   /* Allowances get their own muted line instead of trailing the sentence.
-     "15 messages a day, 60 a month" is a spec value, not prose, and pinned
-     to the end of a claim it was the thing that pushed the advisor bullet
-     to three lines. The comparison table below already renders its values
-     in mono for exactly this reason (.cmp-val), so the card and the table
-     now say numbers the same way. */
+     A daily-and-monthly ceiling is a spec value, not prose, and pinned to
+     the end of a claim it was the thing that pushed the advisor bullet to
+     three lines. The comparison table below already renders its values in
+     mono for exactly this reason (.cmp-val), so the card and the table now
+     say numbers the same way.
+
+     Note for whoever edits these comments next: CSS comments ship to the
+     browser inside <style>, so core/tests/test_pricing.py sees them. Two of
+     those tests count occurrences of an advisor figure across the whole
+     response body, and an earlier draft of this comment quoted the live
+     numbers and failed them. Describe the copy here; do not quote it. */
   .plan-features .feat-meta { display: block; margin-top: var(--s1);
     font-family: var(--font-mono); font-size: var(--fs-xs);
     color: var(--ink-3); font-variant-numeric: tabular-nums; }
@@ -389,14 +401,14 @@
             <li><b>{{ read_count }}</b> postings read in full</li>
             <li>Deadlines and requirements from the posting, not the board's summary</li>
             <li>Eligibility checked against your class year and visa</li>
-            <li><b>{{ sponsorship_count }}</b> roles answer sponsorship outright,
-              the rest marked not stated, never guessed</li>
+            <li><b>{{ sponsorship_count }}</b> roles answering sponsorship outright
+              and the rest marked not stated, never guessed</li>
             <li>Deadline fuses, rolling markers, and a label on every inferred date</li>
             <li>The Today queue, with one-click logging</li>
             <li>The Network board: warmth lanes and firm tiers</li>
-            <li><b>Talk to Coverage:</b> an advisor that reads your own contacts,
-              firms and deadlines before it answers
-              <span class="feat-meta">{{ advisor_free_cap }} messages a day, {{ advisor_free_grant }} a month</span></li>
+            <li>Talk to Coverage: an advisor that reads your own contacts,
+              firms and deadlines before it answers.
+              <span class="feat-meta">{{ advisor_free_cap }} messages a day, {{ advisor_free_grant }} a month.</span></li>
             <li>CSV import, export, and instant deletion</li>
           </ul>
           <div class="plan-cta">
@@ -428,11 +440,11 @@
             §2d): it is the anchor now, not a footnote after the advisor
             bullet.
             {% endcomment %}
-            <li><b>Gmail Live:</b> real-time sync that logs itself</li>
-            <li>Calendar sync too, only if you connect it</li>
-            <li><b>Talk to Coverage</b> on a stronger model, with sharper
-              judgement on where your week should go
-              <span class="feat-meta">Three times the credits: {{ advisor_pro_grant }} a month</span></li>
+            <li>Gmail Live: real-time sync that logs itself.</li>
+            <li>Calendar sync too, only if you connect it.</li>
+            <li>Talk to Coverage on a stronger model, with sharper
+              judgement on where your week should go.
+              <span class="feat-meta">Three times the credits: {{ advisor_pro_grant }} a month.</span></li>
             <li>Hourly refresh on your Tier 1 firms, instead of every six hours</li>
             <li>LinkedIn contact import</li>
             <li>Multi-cycle archive of past seasons</li>
