@@ -394,9 +394,18 @@ _TWO_A_DAY = {
     "pro": {"model": "test-pro-model", "daily_cap": 5},
 }
 
+# Credit-system equivalent of _TWO_A_DAY (docs/credit-system-plan.md): a
+# 1-credit message cost and a generous daily burst means the MONTHLY grant
+# is what actually caps these tests at "2" / "5" messages, exactly mirroring
+# the shape the old flat daily cap tested.
+_TWO_CREDITS = {
+    "free": {"monthly_grant": 2, "message_cost": 1, "daily_burst": 10},
+    "pro": {"monthly_grant": 5, "message_cost": 1, "daily_burst": 10},
+}
 
-@override_settings(ASSISTANT_PLANS=_TWO_A_DAY)
-def test_the_daily_message_cap_is_a_plain_notice_not_an_error(user, conversation):
+
+@override_settings(ASSISTANT_PLANS=_TWO_A_DAY, CREDIT_PLANS=_TWO_CREDITS)
+def test_zero_credits_is_a_plain_notice_not_an_error(user, conversation):
     # 3, not 2: the first of the two real turns also triggers one retitle
     # call (see the "AI-generated titles" section below) — same client,
     # same flat script, one more item to get through it.
@@ -411,13 +420,36 @@ def test_the_daily_message_cap_is_a_plain_notice_not_an_error(user, conversation
     assert not third.ok
     assert third.reason == "capped"
     assert third.reply.notice == ChatMessage.NOTICE_CAPPED
-    assert "2 messages today" in third.reply.text
-    # A Free student is told what Pro changes; the notice names the plan.
+    assert "last of this month's credits" in third.reply.text
+    # A Free student is told what Pro would change; the notice names the plan.
     assert "Free plan" in third.reply.text
-    assert "Pro raises the limit" in third.reply.text
+    assert "three times the credits" in third.reply.text
     # The student's third question is still in the thread — they can see what
     # they asked when the cap resets.
     assert _turns(user, conversation)[-2].text == "three"
+
+
+@override_settings(ASSISTANT_PLANS=_TWO_A_DAY, CREDIT_PLANS=_TWO_CREDITS)
+def test_the_daily_burst_guard_blocks_with_a_different_notice_than_zero_credits(user, conversation):
+    """A burst-guard trip is NOT the same situation as a genuinely empty
+    monthly pool — the student still has credits, just not today's worth —
+    so it must not say "last of this month's credits" (that would be a lie
+    the moment the calendar rolls over mid-conversation)."""
+    burst_settings = {
+        "free": {"monthly_grant": 100, "message_cost": 1, "daily_burst": 1},
+        "pro": {"monthly_grant": 100, "message_cost": 1, "daily_burst": 1},
+    }
+    with override_settings(CREDIT_PLANS=burst_settings):
+        script = [_response([_text("ok")], "end_turn") for _ in range(2)]
+        client = FakeClient(script)
+        assert agent.run_turn(user, conversation, "one", client=client).ok
+
+        second = agent.run_turn(user, conversation, "two", client=FakeClient([]))
+
+        assert not second.ok
+        assert second.reason == "capped"
+        assert "safety net" in second.reply.text
+        assert "last of this month's credits" not in second.reply.text
 
 
 # ---------------------------------------------------------------------------
@@ -443,8 +475,8 @@ def test_a_pro_student_is_answered_by_the_pro_tier_model(user, conversation):
     assert client.requests[0]["model"] == "test-pro-model"
 
 
-@override_settings(ASSISTANT_PLANS=_TWO_A_DAY)
-def test_a_pro_student_gets_the_pro_cap_and_no_upsell_line(user, conversation):
+@override_settings(ASSISTANT_PLANS=_TWO_A_DAY, CREDIT_PLANS=_TWO_CREDITS)
+def test_a_pro_student_gets_the_pro_grant_and_no_upsell_line(user, conversation):
     user.plan = User.PLAN_PRO
     user.save(update_fields=["plan"])
     # 6, not 5: q0 is the first message and also triggers one retitle call.
@@ -455,9 +487,9 @@ def test_a_pro_student_gets_the_pro_cap_and_no_upsell_line(user, conversation):
     sixth = agent.run_turn(user, conversation, "q5", client=FakeClient([]))
 
     assert sixth.reason == "capped"
-    assert "5 messages today" in sixth.reply.text
+    assert "last of this month's credits" in sixth.reply.text
     assert "Pro plan" in sixth.reply.text
-    assert "raises the limit" not in sixth.reply.text
+    assert "three times the credits" not in sixth.reply.text
 
 
 @override_settings(ASSISTANT_PLANS=_TWO_A_DAY)
@@ -483,6 +515,10 @@ def test_the_shipped_defaults_are_haiku_for_free_and_sonnet_for_pro():
     assert free.model.startswith("claude-haiku")
     assert pro.model.startswith("claude-sonnet")
     assert free.daily_cap < pro.daily_cap
+    # docs/credit-system-plan.md §1: a Sonnet (Pro) message is charged the
+    # honest 3x price ratio over a Haiku (Free) one.
+    assert free.message_cost == 1
+    assert pro.message_cost == 3
 
 
 def test_an_api_failure_is_a_message_in_the_thread_never_a_500(user, conversation):
@@ -750,8 +786,11 @@ def test_streaming_with_no_api_key_yields_one_unconfigured_notice(user, conversa
     assert _turns(user, conversation)[-1].notice == ChatMessage.NOTICE_UNCONFIGURED
 
 
-@override_settings(ASSISTANT_PLANS={"free": {"model": "m", "daily_cap": 1}, "pro": {"model": "m", "daily_cap": 5}})
-def test_streaming_the_daily_cap_is_one_terminal_notice_event(user, conversation):
+@override_settings(CREDIT_PLANS={
+    "free": {"monthly_grant": 1, "message_cost": 1, "daily_burst": 10},
+    "pro": {"monthly_grant": 5, "message_cost": 1, "daily_burst": 10},
+})
+def test_streaming_zero_credits_is_one_terminal_notice_event(user, conversation):
     first = list(agent.stream_turn(user, conversation, "one", client=FakeStreamingClient([([], _response([_text("ok")], "end_turn"))])))
     assert first[-1]["type"] == "done"
 
@@ -760,7 +799,7 @@ def test_streaming_the_daily_cap_is_one_terminal_notice_event(user, conversation
     assert len(second) == 1
     assert second[0]["type"] == "notice"
     assert second[0]["kind"] == "capped"
-    assert "1 messages today" in second[0]["text"]
+    assert "last of this month's credits" in second[0]["text"]
 
 
 def test_a_streaming_api_failure_yields_one_failed_notice_never_raises(user, conversation):
@@ -1025,6 +1064,67 @@ def test_a_streamed_turn_that_never_reaches_the_model_does_not_count_against_the
     list(agent.stream_turn(user, conversation, "hello", client=client))
 
     assert agent.messages_sent_today(user) == 0
+
+
+# ---------------------------------------------------------------------------
+# The same fairness rule, on the credit ledger (docs/credit-system-plan.md
+# §5: "the debit goes exactly where `record_event("assistant_message_sent")`
+# already fires — after round 0 returns successfully")
+# ---------------------------------------------------------------------------
+def _balance(user):
+    from billing import credits as billing_credits
+
+    return billing_credits.balance(user)
+
+
+def test_a_failed_turn_never_debits_credits(user, conversation):
+    before = _balance(user)
+    client = FakeClient([RuntimeError("connection reset")])
+
+    result = agent.run_turn(user, conversation, "hello", client=client)
+
+    assert not result.ok
+    assert _balance(user) == before
+
+
+def test_a_successful_turn_debits_exactly_the_plans_message_cost(user, conversation):
+    before = _balance(user)
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+
+    agent.run_turn(user, conversation, "hello", client=client)
+
+    from assistant import plans
+
+    cost = plans.limits_for(user).message_cost
+    assert _balance(user) == before - cost
+
+
+def test_a_streamed_failed_turn_never_debits_credits(user, conversation):
+    before = _balance(user)
+    client = FakeStreamingClient([RuntimeError("connection reset")])
+
+    list(agent.stream_turn(user, conversation, "hello", client=client))
+
+    assert _balance(user) == before
+
+
+@override_settings(CREDIT_PLANS={
+    "free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15},
+    "pro": {"monthly_grant": 180, "message_cost": 3, "daily_burst": 45},
+})
+def test_a_sonnet_pro_message_costs_three_times_a_haiku_free_one(user, conversation):
+    """docs/credit-system-plan.md §1's core ratio, pinned end-to-end through
+    a real turn rather than just at plans.limits_for."""
+    before_free = _balance(user)
+    agent.run_turn(user, conversation, "hello", client=FakeClient([_response([_text("ok")], "end_turn")]))
+    assert before_free - _balance(user) == 1
+
+    pro = User.objects.create_user(email="pro-student@example.com", password="x", plan=User.PLAN_PRO)
+    pro_conversation = ChatConversation(user=pro)
+    pro_conversation.save()
+    before_pro = _balance(pro)
+    agent.run_turn(pro, pro_conversation, "hello", client=FakeClient([_response([_text("ok")], "end_turn")]))
+    assert before_pro - _balance(pro) == 3
 
 
 # ---------------------------------------------------------------------------

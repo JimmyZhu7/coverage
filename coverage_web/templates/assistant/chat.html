@@ -222,6 +222,13 @@ materials.
   .as-note { flex: none; margin: 0; text-align: center; font-size: var(--fs-xs);
     color: var(--ink-3); }
 
+  /* The composer's quiet credit meter — "quiet" per the plan doc, so this
+     stays a small right-aligned line rather than a banner. */
+  .as-credits { flex: none; margin: 0 0 2px; text-align: right;
+    font-size: var(--fs-xs); color: var(--ink-3); }
+  #as-credits-value { font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; color: var(--ink-2); }
+
   /* ---- The thread itself: log/empty-state flexes, composer stays put ---- */
   .as-thread { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: var(--s3); }
 
@@ -1521,6 +1528,19 @@ element by the next turn.
           .catch(function () { /* a one-turn-stale sidebar title is not worth surfacing */ });
       }
 
+      // The composer's credit meter has the identical problem — a debit
+      // that just happened mid-stream can't swap #as-thread the way a
+      // non-streamed send does (see _thread.html's own comment on this).
+      // Same fix: re-fetch the one number that could have changed.
+      function refreshCredits() {
+        var el = document.getElementById("as-credits-value");
+        if (!el) return;
+        fetch("{% url 'assistant:credits' %}")
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) { if (data) el.textContent = data.balance; })
+          .catch(function () { /* a one-turn-stale credit count is not worth surfacing */ });
+      }
+
       function currentConversationId() {
         var field = composerForm.querySelector('input[name="conversation"]');
         return field ? field.value : "";
@@ -1646,6 +1666,7 @@ element by the next turn.
             if (input && !input.disabled) input.focus();
             scrollLogToEnd();
             refreshHistory(conversationId);
+            refreshCredits();
           });
       }
 

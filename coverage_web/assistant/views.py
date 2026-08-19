@@ -25,12 +25,19 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
-from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, StreamingHttpResponse
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    JsonResponse,
+    StreamingHttpResponse,
+)
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from accounts.middleware import activate_for_user
+from billing import credits as billing_credits
 from coverage_domain.pipeline import CHANNELS, TOUCH_TRANSITIONS
 from crm import services
 from crm.models import Contact, Touch
@@ -259,6 +266,14 @@ def _context(request: HttpRequest, conversation: ChatConversation) -> dict:
         "starters": STARTERS,
         "max_chars": MAX_MESSAGE_CHARS,
         "attach_accept": attachments_mod.ACCEPT_ATTRIBUTE,
+        # The composer's quiet credit meter (docs/credit-system-plan.md §6 —
+        # "the only UI work in the plan beyond the notice copy"). Read on
+        # every non-streamed render so a debit is visible the instant the
+        # reply lands; the streamed path can't re-render this fragment (an
+        # SSE stream isn't HTML to swap from), so chat.html's JS calls
+        # `assistant:credits` once a streamed turn finishes instead — see
+        # that view below.
+        "credit_balance": billing_credits.balance(request.user),
         **_history_context(request.user, conversation),
     }
 
@@ -544,6 +559,16 @@ def history_fragment(request: HttpRequest) -> HttpResponse:
         conversation_id = None
     conversation = _current_conversation(request.user, conversation_id)
     return render(request, "assistant/_history.html", _history_context(request.user, conversation))
+
+
+@login_required
+@require_GET
+def credits_fragment(request: HttpRequest) -> HttpResponse:
+    """The composer's credit meter, GET-able on its own — same reason
+    `history_fragment` exists: a streamed turn's SSE response isn't HTML the
+    client can re-render `_thread.html`'s meter from, so chat.html's JS
+    calls this once a stream finishes and writes the number in directly."""
+    return JsonResponse({"balance": billing_credits.balance(request.user)})
 
 
 @login_required

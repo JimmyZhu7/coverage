@@ -14,7 +14,11 @@ tool calls" will usually comply, and "usually" is not a spend control. So:
   - `MAX_ROUNDS` API round-trips per student message,
   - `MAX_TOOL_CALLS` tool executions across a whole conversation,
   - a 45s SDK timeout (gunicorn's worker timeout is 60s), and
-  - a per-plan daily message cap (assistant/plans.py — Free and Pro differ),
+  - a credit balance check (billing/credits.py — docs/credit-system-plan.md),
+    which replaced the old flat per-plan daily message cap: Free and Pro now
+    differ in what a message COSTS (assistant/plans.py's `message_cost`),
+    not in a fixed count, and a per-plan daily BURST guard is the abuse
+    backstop underneath the monthly pool,
 
 all enforced here. When one binds, the student is told plainly what happened
 rather than being handed a truncated answer that looks like the real one.
@@ -59,6 +63,7 @@ from django.utils import timezone
 
 from analytics.events import record_event
 from analytics.models import ProductEvent
+from billing import credits as billing_credits
 
 from . import attachments as attachments_mod
 from . import plans
@@ -343,6 +348,38 @@ def messages_sent_today(user) -> int:
     )
 
 
+def _credit_block_notice(user, limits: plans.PlanLimits) -> str:
+    """The copy for a turn stopped by the credit system (docs/credit-system-
+    plan.md §6), in the app's existing voice — the same honest, no-link,
+    no-error posture `client.py`'s "isn't switched on yet" and the old cap
+    notice both used.
+
+    Two different reasons land here, and they read differently on purpose:
+    a genuinely empty monthly pool ("that's the last of this month's
+    credits") versus the daily burst guard tripping while the month's
+    balance is still sitting there ("a safety net, not your monthly
+    total") — telling a student with credits left that they have none
+    would be dishonest, not just unclear.
+    """
+    if billing_credits.balance(user) > 0:
+        return (
+            f"That's today's message limit on the {limits.label} plan — a safety "
+            f"net, not your monthly total. It resets at midnight; your credits "
+            f"for the month are still there."
+        )
+    refill = billing_credits.next_refill_date(user)
+    upgrade = (
+        " Pro comes with three times the credits and a stronger model."
+        if limits.plan == plans.FREE
+        else ""
+    )
+    return (
+        f"That's the last of this month's credits on the {limits.label} plan. "
+        f"They refill on {refill:%-d %B} — Today, Network and Opportunities are "
+        f"all still there.{upgrade}"
+    )
+
+
 def _notice(user, conversation, kind: str, text: str) -> ChatMessage:
     return ChatMessage(
         user=user,
@@ -511,24 +548,18 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
         return TurnResult(ok=False, reason="unconfigured", reply=reply)
 
     limits = plans.limits_for(user)
-    cap = limits.daily_cap
-    # The message just persisted counts against today, so the check is > cap.
-    if messages_sent_today(user) >= cap:
-        # Free is told what Pro would change; Pro is just told it resets.
-        # No link and no upsell button: there is nothing to buy yet.
-        upgrade = (
-            " Pro raises the limit and answers on a stronger model."
-            if limits.plan == plans.FREE
-            else ""
-        )
+    # Checked once, before round 0 ever fires — a hard stop before the turn
+    # starts, never mid-turn (docs/credit-system-plan.md §6). The debit
+    # itself happens below, at the exact point round 0 succeeds, preserving
+    # the fairness rule the old daily cap already established: a request the
+    # API never answered must not cost the student anything.
+    if not billing_credits.can_spend(user, limits.message_cost):
         reply = _save(
             _notice(
                 user,
                 conversation,
                 ChatMessage.NOTICE_CAPPED,
-                f"That's {cap} messages today, which is the {limits.label} plan's daily "
-                f"limit on this page. It resets tomorrow — Today, Network and "
-                f"Opportunities are all still there.{upgrade}",
+                _credit_block_notice(user, limits),
             )
         )
         return TurnResult(ok=False, reason="capped", reply=reply)
@@ -559,11 +590,14 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
             return TurnResult(ok=False, reason="failed", rounds=round_no, tool_calls=executed, reply=reply)
 
         if round_no == 0:
-            # Counted against the day's cap only once the API actually
+            # Counted (and, below, charged) only once the API actually
             # answered — not before the call, which used to charge a
             # student's quota for a request that never got a response at
             # all. At Free's 15/day that read as being billed for an error.
             record_event("assistant_message_sent", user=user)
+            billing_credits.spend(
+                user, limits.message_cost, "spend_chat", model=limits.model
+            )
         _log_usage(user, limits.model, response)
         blocks = [_as_dict(b) for b in response.content]
         last_assistant = _save(
@@ -722,18 +756,10 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
         return
 
     limits = plans.limits_for(user)
-    cap = limits.daily_cap
-    if messages_sent_today(user) >= cap:
-        upgrade = (
-            " Pro raises the limit and answers on a stronger model."
-            if limits.plan == plans.FREE
-            else ""
-        )
-        notice_text = (
-            f"That's {cap} messages today, which is the {limits.label} plan's daily "
-            f"limit on this page. It resets tomorrow — Today, Network and "
-            f"Opportunities are all still there.{upgrade}"
-        )
+    # Same hard-stop-before-the-turn-starts rule as run_turn — see that
+    # function's comment on this same check.
+    if not billing_credits.can_spend(user, limits.message_cost):
+        notice_text = _credit_block_notice(user, limits)
         _save(_notice(user, conversation, ChatMessage.NOTICE_CAPPED, notice_text))
         yield {"type": "notice", "kind": "capped", "text": notice_text}
         return
@@ -759,9 +785,12 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
                         yield {"type": "delta", "text": delta}
                 final = stream.get_final_message()
             if round_no == 0:
-                # Same fix as run_turn: counted only once the API actually
-                # answered, not before the call.
+                # Same fix as run_turn: counted and charged only once the
+                # API actually answered, not before the call.
                 record_event("assistant_message_sent", user=user)
+                billing_credits.spend(
+                    user, limits.message_cost, "spend_chat", model=limits.model
+                )
             _log_usage(user, limits.model, final)
             blocks = [_as_dict(b) for b in final.content]
             stop_reason = final.stop_reason

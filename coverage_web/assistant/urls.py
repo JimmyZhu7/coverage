@@ -19,6 +19,7 @@ urlpatterns = [
     # a real turn, and it deletes.
     path("messages/edit/", views.edit_message, name="edit_message"),
     path("history/", views.history_fragment, name="history"),
+    path("credits/", views.credits_fragment, name="credits"),
     path("new/", views.new_conversation, name="new"),
     path("rename/", views.rename_conversation, name="rename"),
     path("delete/", views.delete_conversation, name="delete"),

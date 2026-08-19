@@ -28,6 +28,20 @@ same shape as every AI chat surface a student has already used.
   {% endif %}
 
   {% comment %}
+  The credit meter (docs/credit-system-plan.md §6 — "the only UI work in
+  the plan beyond the notice copy"). Re-rendered with the rest of this
+  fragment on every non-streamed send, so a debit is visible the instant
+  the reply lands. The streamed path can't swap this fragment (an SSE
+  stream isn't HTML the client re-renders from — see chat.html's own
+  refreshHistory for the identical problem with the sidebar title), so
+  chat.html's JS re-fetches assistant:credits once a streamed turn
+  finishes and writes the number into #as-credits-value directly.
+  {% endcomment %}
+  <p class="as-credits" id="as-credits">
+    <span id="as-credits-value">{{ credit_balance }}</span> credit{{ credit_balance|pluralize }} left this month
+  </p>
+
+  {% comment %}
   Double-send is the obvious way to spend twice; the composer locks itself
   for the round trip rather than relying on the student not pressing Send
   again while the dots are up.
