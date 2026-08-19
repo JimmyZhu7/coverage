@@ -108,8 +108,9 @@
   <header class="kin-hero">
     <span class="kin-hero-icon">{% include "_icon.html" with name="home" %}</span>
     <p class="kin-hero-eyebrow">Pricing</p>
-    <h1 class="kin-hero-title">Free while we earn the right to charge.</h1>
-    <p class="kin-hero-sub">Everything Coverage does today is included.</p>
+    <h1 class="kin-hero-title">The board is free. The engine is Pro.</h1>
+    <p class="kin-hero-sub">Every listing, every deadline, free for everyone.
+      Pro adds sync, speed, and a stronger advisor.</p>
   </header>
 
   <div class="aud">
@@ -125,7 +126,7 @@
         <article class="price-card featured kin-reveal" style="--i:0">
           <span class="plan-badge">Available now</span>
           <h2 class="plan-name">Free</h2>
-          <p class="plan-tagline">The full product. No card, no trial clock.</p>
+          <p class="plan-tagline">The whole board. No card, no trial clock.</p>
           <p class="plan-price"><span class="amount">$0</span><span class="per">forever, for what's listed here</span></p>
           {% comment %}
           Every figure here is measured in core.views.pricing, never typed.
@@ -140,13 +141,12 @@
               requirements come from the posting rather than the board's summary</li>
             <li>Eligibility checked against your class year and visa, with
               <b>{{ sponsorship_count }}</b> roles answering sponsorship outright</li>
-            <li>Deadline fuses, rolling markers, and a label on every date we
-              inferred rather than were told</li>
-            <li>The Today queue with one-click logging</li>
-            <li>The Network board: warmth lanes and firm tiers</li>
-            <li>Gmail Live: connect Gmail and it logs itself</li>
+            <li>Deadline fuses, rolling markers, and a label on every inferred date</li>
+            <li>The Today queue and the Network board: warmth lanes, firm tiers,
+              one-click logging</li>
             <li>Talk to Coverage: an advisor that reads your own contacts,
-              firms and deadlines before it answers. {{ advisor_free_cap }} messages a day.</li>
+              firms and deadlines before it answers.
+              {{ advisor_free_cap }} messages a day, {{ advisor_free_grant }} a month.</li>
             <li>CSV import, export, and instant deletion</li>
           </ul>
           <div class="plan-cta">
@@ -165,10 +165,19 @@
           <p class="plan-price"><span class="amount">$39</span><span class="per">one cycle, ~6 months</span></p>
           <p class="plan-includes">Everything in Free, plus</p>
           <ul class="plan-features">
+            {% comment %}
+            Pro sells model quality and the credit pool, never "more
+            messages": a Pro turn costs 3 credits against a 45-credit daily
+            burst, so both plans compute to the same 15 a day today. The 3x
+            is real in the monthly grant (60 vs 180) and nowhere else, so
+            that is the only multiple this card is allowed to claim.
+            {% endcomment %}
             <li>Talk to Coverage on a stronger model, with sharper judgement
-              on where your week should go. {{ advisor_pro_cap }} messages a day.</li>
+              on where your week should go.
+              Three times the credits: {{ advisor_pro_grant }} a month.</li>
+            <li>Gmail Live: real-time sync that logs itself. Calendar sync too,
+              only if you connect it.</li>
             <li>Hourly refresh on your Tier 1 firms, instead of every six hours</li>
-            <li>Optional Gmail and Calendar sync, only if you connect it</li>
             <li>LinkedIn contact import</li>
             <li>Multi-cycle archive of past seasons</li>
           </ul>
@@ -228,11 +237,11 @@
   <section class="price-faq">
     <details>
       <summary>Do I need an account to see opportunities?</summary>
-      <p>No. The feed is public. An account adds the CRM: the Today queue, the Network board, and Gmail Live.</p>
+      <p>No. The feed is public. An account adds the CRM: the Today queue and the Network board.</p>
     </details>
     <details>
       <summary>Will the free plan shrink when paid tiers launch?</summary>
-      <p>No. Everything listed in Free today stays in Free. Paid tiers are new capabilities, not repackaged ones.</p>
+      <p>No. This list is the floor. Free may grow; it will not shrink. Pro is for sync, speed, and heavier AI use, the things that cost real money to run.</p>
     </details>
     <details>
       <summary>What would a Team plan look like for my club?</summary>
