@@ -91,6 +91,31 @@ class TestBounceDetection:
         assert finding["bounced"] is False
         assert finding["replied"] is True
 
+    def test_a_genuine_reply_quoting_bounce_text_is_not_mistaken_for_a_bounce(self):
+        """A real, live contact replying normally — but whose message
+        happens to QUOTE the exact technical wording of a bounce they saw
+        elsewhere ("I tried your old address and got this back...") — must
+        not be reclassified as a bounce of their own, working address. The
+        FROM is a real person, not mailer-daemon/postmaster, and the
+        Subject is an ordinary reply subject; only the body text matches
+        the bounce vocabulary, which used to be enough on its own to flip
+        `_looks_like_bounce` to True and then have `_bounce_recipient` pick
+        Alice's own (correctly working) email out of her message as the
+        "failed" address."""
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL,
+             "Subject": "Re: reaching you"},
+            snippet=(
+                "Hey, I tried your old address last week and got "
+                "'recipient address rejected: 550 5.1.1' - here's my "
+                "current one, alice@firm.com, going forward."
+            ),
+        )
+        finding = gmail_live._classify_message(OWN_EMAIL, message)
+        assert finding["bounced"] is False
+        assert finding["replied"] is True
+        assert finding["email"] == "alice@firm.com"
+
 
 class TestIcsScheduling:
     ICS_TEXT = (

@@ -89,11 +89,6 @@ _BOUNCE_SUBJECT_RE = re.compile(
     r"delivery status notification|undeliverable|delivery has failed",
     re.IGNORECASE,
 )
-_BOUNCE_BODY_RE = re.compile(
-    r"does not exist|550[ -]?5\.1\.1|recipient address rejected|"
-    r"address not found|no such user",
-    re.IGNORECASE,
-)
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _ICS_DTSTART_RE = re.compile(r"DTSTART(?:;TZID=([^:]+))?:(\d{8}T\d{6}Z?)")
 _ICS_SUMMARY_RE = re.compile(r"SUMMARY:(.+)")
@@ -443,11 +438,19 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _looks_like_bounce(message: dict, from_addr: str, subject: str) -> bool:
-    if _BOUNCE_FROM_RE.search(from_addr) or _BOUNCE_SUBJECT_RE.search(subject):
-        return True
-    snippet = message.get("snippet", "")
-    return bool(_BOUNCE_BODY_RE.search(snippet))
+def _looks_like_bounce(from_addr: str, subject: str) -> bool:
+    """True only from the FROM address or the SUBJECT — never from body text
+    alone. A genuine, personal reply can easily QUOTE bounce-style wording
+    ("I tried your old address and got 'recipient address rejected: 550
+    5.1.1'...") about a completely different address, or about nothing at
+    all still relevant; matching that against the body would misclassify
+    the reply itself as a bounce of whichever address `_bounce_recipient`
+    happens to find next in the text — including, in the worst case, the
+    real contact's own working address, since nothing excludes the
+    sender's own `From` from that scan. A real, system-generated bounce
+    reliably carries a mailer-daemon/postmaster sender or a DSN-style
+    subject, so requiring one of those two costs no real detections."""
+    return bool(_BOUNCE_FROM_RE.search(from_addr) or _BOUNCE_SUBJECT_RE.search(subject))
 
 
 def _bounce_recipient(message: dict, own_email: str) -> str | None:
@@ -529,7 +532,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             "occurred_at": occurred_at,
         }
 
-    if _looks_like_bounce(message, from_addr, subject):
+    if _looks_like_bounce(from_addr, subject):
         recipient = _bounce_recipient(message, own_email)
         if not recipient:
             return None
