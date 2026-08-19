@@ -192,3 +192,50 @@ class TestGmailBackfillCommand:
         theirs.refresh_from_db()
         assert mine.backfill_status == "done"
         assert theirs.backfill_status == "pending"  # untouched
+
+    def test_a_running_row_abandoned_by_a_crashed_process_is_retried(self, student):
+        """A process that dies between `backfill_status = "running"` and
+        the try/except that would otherwise mark it "failed" (SIGKILL, OOM,
+        a redeploy) leaves the row parked at "running" forever. Without the
+        staleness check, NO future tick would ever pick it back up — the
+        selection query only ever looked for pending/failed."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        stuck = GmailConnection.all_objects.create(
+            user=student, gmail_address="stuck@example.com",
+            refresh_token_encrypted="x", backfill_status="running",
+            backfill_started_at=timezone.now() - timedelta(hours=5),
+        )
+
+        client = _fake_gmail_client([], {})
+        with patch.object(gmail_live, "_gmail_client", return_value=client), \
+             patch("capture.management.commands.gmail_backfill.gmail_live.is_configured", return_value=True):
+            call_command("gmail_backfill")
+
+        stuck.refresh_from_db()
+        assert stuck.backfill_status == "done"
+
+    def test_a_recently_started_running_row_is_left_alone(self, student):
+        """The flip side: a row that started running two minutes ago is
+        (almost certainly) a real, in-progress run on another worker, not
+        an abandoned one — it must not be picked up and run a second time
+        concurrently."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        in_progress = GmailConnection.all_objects.create(
+            user=student, gmail_address="inprogress@example.com",
+            refresh_token_encrypted="x", backfill_status="running",
+            backfill_started_at=timezone.now() - timedelta(minutes=2),
+        )
+
+        client = _fake_gmail_client([], {})
+        with patch.object(gmail_live, "_gmail_client", return_value=client), \
+             patch("capture.management.commands.gmail_backfill.gmail_live.is_configured", return_value=True):
+            call_command("gmail_backfill")
+
+        in_progress.refresh_from_db()
+        assert in_progress.backfill_status == "running"  # untouched

@@ -18,20 +18,25 @@ flow's redirect and the Settings POST have to stay instant.
     python manage.py gmail_backfill --email you@example.com
     python manage.py gmail_backfill --dry-run
 
-BACKFILL selection: `backfill_status` `pending` (a first run) or `failed`
-(an earlier attempt died partway — Google API hiccups happen over a
+BACKFILL selection: `backfill_status` `pending` (a first run), `failed` (an
+earlier attempt died partway — Google API hiccups happen over a
 multi-minute job, and this retries automatically on the next tick rather
-than leaving a mailbox stuck with no history forever). `done` is sticky
+than leaving a mailbox stuck with no history forever), OR `running` for
+longer than `STALE_RUNNING_AFTER` — a process killed mid-run (SIGKILL, OOM,
+a redeploy) leaves the row parked at `running` with nothing left to finish
+it; without this a stuck row would never be picked up again by ANY future
+tick, since `running` isn't one of the two states above. `done` is sticky
 and never re-selected — see `connect_gmail`'s comment on why a reconnect
 must not silently re-run a completed backfill.
 
-RESCAN selection: `rescan_status` `pending` or `failed`, same retry
-posture. Deliberately a SEPARATE field/query from `backfill_status` — a
-rescan is a different, repeatable action, not the one-time original
-backfill; see `GmailConnection.rescan_status`'s own comment. Runs
-`gmail_live.run_rescan`, which is the deterministic pass over ALL contacts
-followed by the capped Haiku residue stage (`capture.gmail_residue`) —
-never run as part of the BACKFILL selection above, only here.
+RESCAN selection: same three-way `pending` / `failed` / stale-`running`
+selection, off `rescan_status` and `rescan_requested_at` instead. Deliberately
+a SEPARATE field/query from `backfill_status` — a rescan is a different,
+repeatable action, not the one-time original backfill; see
+`GmailConnection.rescan_status`'s own comment. Runs `gmail_live.run_rescan`,
+which is the deterministic pass over ALL contacts followed by the capped
+Haiku residue stage (`capture.gmail_residue`) — never run as part of the
+BACKFILL selection above, only here.
 
 `--dry-run` runs every search, classification, and apply decision for
 BOTH selections and writes nothing — including no status transition and
@@ -43,6 +48,8 @@ to unpick after the fact.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.core.management.base import BaseCommand
 from django.db.models import Q
 from django.utils import timezone
@@ -50,6 +57,16 @@ from django.utils import timezone
 from analytics.models import Import
 from capture import gmail_live
 from capture.models import GmailConnection
+
+# How long a `running` row is trusted to actually still be running before
+# this command treats it as abandoned (a crashed process) and picks it back
+# up. Both jobs are documented as multi-minute at their largest even on a
+# full mailbox; two hours is generous enough that a real long run is never
+# falsely reclaimed, while a genuinely dead one is not stuck forever. A
+# cron tick shorter than this (the module docstring recommends 10-15 min)
+# means a row is checked many times before it's ever reclaimed, not
+# reclaimed on the very next tick after it dies.
+STALE_RUNNING_AFTER = timedelta(hours=2)
 
 
 class Command(BaseCommand):
@@ -74,11 +91,26 @@ class Command(BaseCommand):
         if opts["email"]:
             base = base.filter(user__email=opts["email"])
 
+        stale_cutoff = timezone.now() - STALE_RUNNING_AFTER
         backfill_connections = list(
-            base.filter(Q(backfill_status="pending") | Q(backfill_status="failed"))
+            base.filter(
+                Q(backfill_status="pending")
+                | Q(backfill_status="failed")
+                | Q(backfill_status="running", backfill_started_at__lt=stale_cutoff)
+                # A "running" row with no timestamp at all predates this
+                # field (or something else cleared it) — treat it the same
+                # as stale rather than leaving it stuck for a different
+                # reason.
+                | Q(backfill_status="running", backfill_started_at__isnull=True)
+            )
         )
         rescan_connections = list(
-            base.filter(Q(rescan_status="pending") | Q(rescan_status="failed"))
+            base.filter(
+                Q(rescan_status="pending")
+                | Q(rescan_status="failed")
+                | Q(rescan_status="running", rescan_requested_at__lt=stale_cutoff)
+                | Q(rescan_status="running", rescan_requested_at__isnull=True)
+            )
         )
 
         if not backfill_connections and not rescan_connections:
@@ -95,7 +127,8 @@ class Command(BaseCommand):
         prefix = "[dry-run] " if dry_run else ""
         if not dry_run:
             connection.backfill_status = "running"
-            connection.save(update_fields=["backfill_status"])
+            connection.backfill_started_at = timezone.now()
+            connection.save(update_fields=["backfill_status", "backfill_started_at"])
 
         try:
             result = gmail_live.backfill_connection(connection, dry_run=dry_run)

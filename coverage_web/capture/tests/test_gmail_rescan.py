@@ -308,3 +308,44 @@ class TestGmailBackfillCommandRescanSelection:
         connection.refresh_from_db()
         assert connection.backfill_status == "done"
         assert connection.rescan_status == "none"  # never touched — wasn't queued
+
+    def test_a_running_rescan_abandoned_by_a_crashed_process_is_retried(self, student, connection):
+        """Same failure mode as the backfill side (see
+        test_gmail_backfill.py): a process killed mid-rescan leaves
+        `rescan_status="running"` with nothing left to finish it, and
+        without a staleness check that row is invisible to every future
+        tick — permanently disabling the user's own "Scan Now" button,
+        since the view refuses to queue a second rescan while one reads
+        pending/running."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        connection.rescan_status = "running"
+        connection.rescan_requested_at = timezone.now() - timedelta(hours=5)
+        connection.save(update_fields=["rescan_status", "rescan_requested_at"])
+
+        client = _fake_gmail_client([], {})
+        with patch.object(gmail_live, "_gmail_client", return_value=client), \
+             patch("capture.management.commands.gmail_backfill.gmail_live.is_configured", return_value=True):
+            call_command("gmail_backfill")
+
+        connection.refresh_from_db()
+        assert connection.rescan_status == "done"
+
+    def test_a_recently_started_running_rescan_is_left_alone(self, student, connection):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        connection.rescan_status = "running"
+        connection.rescan_requested_at = timezone.now() - timedelta(minutes=2)
+        connection.save(update_fields=["rescan_status", "rescan_requested_at"])
+
+        client = _fake_gmail_client([], {})
+        with patch.object(gmail_live, "_gmail_client", return_value=client), \
+             patch("capture.management.commands.gmail_backfill.gmail_live.is_configured", return_value=True):
+            call_command("gmail_backfill")
+
+        connection.refresh_from_db()
+        assert connection.rescan_status == "running"  # untouched

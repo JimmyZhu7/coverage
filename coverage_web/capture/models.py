@@ -75,6 +75,17 @@ class GmailConnection(PrivateModel):
     backfill_status = models.CharField(
         max_length=16, choices=BACKFILL_CHOICES, default="none"
     )
+    # Set by gmail_backfill's command the moment it flips a row to
+    # "running" — the ONLY thing that lets a stuck "running" row be told
+    # apart from one that's genuinely still in progress. Without this, a
+    # process killed mid-run (SIGKILL, OOM, a redeploy landing between the
+    # status write and the try/except that would otherwise mark it
+    # "failed") leaves the row parked at "running" forever: the command's
+    # own selection query only ever looks for "pending"/"failed", so a
+    # "running" row with no process behind it is invisible to every future
+    # tick and the connection's first-connect backfill simply never
+    # finishes. See gmail_backfill.py's STALE_RUNNING_AFTER.
+    backfill_started_at = models.DateTimeField(null=True, blank=True)
     backfill_completed_at = models.DateTimeField(null=True, blank=True)
     # The SyncResult.as_stats() dict from the run that finished (or most
     # recently failed) — same shape capture_gmail's Import row stores, so a
@@ -102,9 +113,12 @@ class GmailConnection(PrivateModel):
     rescan_status = models.CharField(
         max_length=16, choices=RESCAN_CHOICES, default="none"
     )
-    # When "Scan Now" was pressed. Also doubles as the in-flight guard: the
-    # Settings view disables the button whenever `rescan_status` is
-    # `pending`/`running`, so a user can't queue five rescans at once.
+    # When "Scan Now" was pressed. Doubles as two guards: the in-flight one
+    # (the Settings view disables the button whenever `rescan_status` is
+    # `pending`/`running`, so a user can't queue five rescans at once) and
+    # the staleness one gmail_backfill.py's command uses to notice a
+    # "running" row whose process died mid-run and pick it back up rather
+    # than leaving it permanently stuck — see STALE_RUNNING_AFTER there.
     rescan_requested_at = models.DateTimeField(null=True, blank=True)
     rescan_completed_at = models.DateTimeField(null=True, blank=True)
     # Same shape as backfill_stats, plus the Phase-3 AI residue stage's own
