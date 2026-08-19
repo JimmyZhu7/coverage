@@ -177,6 +177,62 @@ class TestHandleWebhookEvent:
             stripe_gateway.handle_webhook_event(b"{}", "sig")
         assert CreditLedger.objects.for_user(student).filter(kind=CreditLedger.KIND_PURCHASE).count() == 0
 
+    def test_a_nonexistent_user_id_is_rejected_cleanly_not_a_crash(self, settings):
+        """The checkout session's `metadata.user_id` names a real user at the
+        MOMENT the session is created, but Stripe's delivery isn't
+        instantaneous — a student can delete their Coverage account (a real,
+        hard delete — accounts/services.py::delete_user_and_data) in the
+        window between starting checkout and Stripe delivering the webhook.
+        The handler must reject that delivery the same clean way it rejects
+        an unrecognised pack_key, not raise `User.DoesNotExist` and 500 —
+        which would also roll back the `ProcessedStripeEvent` idempotency
+        row (same `atomic()` block), so Stripe's automatic retry would 500
+        again, forever."""
+        settings.STRIPE_SECRET_KEY = "sk_test_x"
+        settings.STRIPE_WEBHOOK_SECRET = "whsec_x"
+        event = _fake_checkout_completed_event("evt_ghost_user", 999_999, "small")
+
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")  # must not raise
+
+        assert CreditLedger.all_objects.filter(kind=CreditLedger.KIND_PURCHASE).count() == 0
+        assert ProcessedStripeEvent.objects.filter(stripe_event_id="evt_ghost_user").count() == 1
+
+    def test_a_non_numeric_user_id_is_rejected_cleanly_not_a_crash(self, settings):
+        """Malformed metadata (a corrupted session, a hand-crafted test event)
+        must 400, not 500 with an unhandled `ValueError` from `int()`."""
+        settings.STRIPE_SECRET_KEY = "sk_test_x"
+        settings.STRIPE_WEBHOOK_SECRET = "whsec_x"
+        event = {
+            "id": "evt_bad_user_id",
+            "type": "checkout.session.completed",
+            "data": {"object": {"metadata": {"user_id": "not-a-number", "pack_key": "small"}}},
+        }
+
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")  # must not raise
+
+        assert CreditLedger.all_objects.filter(kind=CreditLedger.KIND_PURCHASE).count() == 0
+        assert ProcessedStripeEvent.objects.filter(stripe_event_id="evt_bad_user_id").count() == 1
+
+    def test_the_webhook_view_returns_200_not_500_for_a_deleted_user(self, settings):
+        """End to end through the view: Stripe must see a clean response it
+        won't endlessly retry, never a 500."""
+        settings.STRIPE_SECRET_KEY = "sk_test_x"
+        settings.STRIPE_WEBHOOK_SECRET = "whsec_x"
+        client = Client()
+        event = _fake_checkout_completed_event("evt_ghost_view", 999_999, "small")
+
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            resp = client.post(
+                reverse("billing:webhook"),
+                data=b"{}",
+                content_type="application/json",
+                HTTP_STRIPE_SIGNATURE="sig",
+            )
+
+        assert resp.status_code == 200
+
 
 class ConcurrentWebhookDeliveryTest(TransactionTestCase):
     """A real transactional test (see billing/tests/test_credits.py's own

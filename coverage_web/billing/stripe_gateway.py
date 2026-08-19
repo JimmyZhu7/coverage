@@ -141,11 +141,28 @@ def handle_webhook_event(payload: bytes, sig_header: str) -> None:
     metadata = session.get("metadata") or {}
     user_id = metadata.get("user_id")
     pack_key = metadata.get("pack_key")
-    if not user_id or pack_key not in CREDIT_PACKS:
+    # `int(user_id)` raises `ValueError` on anything non-numeric, and even a
+    # well-formed id can legitimately name nobody: Stripe's delivery isn't
+    # instantaneous, and a student can hard-delete their Coverage account
+    # (accounts/services.py::delete_user_and_data) in the window between
+    # starting checkout and this webhook arriving. Both are "nothing to
+    # grant, nothing to retry" — the same shape as an unrecognised pack_key
+    # below — not a crash: an unhandled exception here would 500, and
+    # because `ProcessedStripeEvent` is written inside the SAME atomic block
+    # as the grant, the 500 would roll that row back too, so Stripe's
+    # automatic retry would hit this exact path and 500 again, forever.
+    user = None
+    if user_id:
+        try:
+            user = get_user_model().objects.filter(pk=int(user_id)).first()
+        except (TypeError, ValueError):
+            user = None
+    if user is None or pack_key not in CREDIT_PACKS:
         # A checkout session Stripe completed that this app didn't create
         # the metadata for (a stray test event, a pack retired since the
-        # session was opened). Nothing to grant, and nothing to retry —
-        # recording it as processed stops it being reconsidered forever.
+        # session was opened, an account deleted mid-flight). Nothing to
+        # grant, and nothing to retry — recording it as processed stops it
+        # being reconsidered forever.
         _mark_processed(event["id"])
         return
 
@@ -157,7 +174,6 @@ def handle_webhook_event(payload: bytes, sig_header: str) -> None:
             # Already handled by an earlier delivery of this same event —
             # the idempotency guarantee this whole function exists for.
             return
-        user = get_user_model().objects.get(pk=int(user_id))
         billing_credits.grant_purchase(user, pack_key, event["id"])
 
 
