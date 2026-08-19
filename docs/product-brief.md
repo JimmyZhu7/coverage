@@ -72,17 +72,21 @@ deliberately rather than by default.
 ## Pricing
 
 - **Free forever** — full opportunities feed, CRM capped at 50 contacts, basic fit score.
-- **Season Pass — $39 one-time per cycle** (hero offer, matches category norm) —
+- **Season Pass — $69 per ~6-month cycle** (repriced 2026-08-20, see
+  `docs/founder-decisions-2026-08-20.md` §2c: the credit grant behind this
+  tier needs $69/cycle to clear the 15-credits-per-dollar margin floor; $39
+  was 45% full-burn margin, below it) —
   unlimited contacts, full fit-score history, staleness automation, instant alerts.
   The "cycle" is a fixed 6-month window from activation, not a literal calendar
   season: actual high-intensity recruiting runs ~5–6 months even though the full arc
-  (EB open through MBB) spans 10–12.
-- **Club Edition — $300–500/year per club** — shared workspace for an e-board:
-  pooled alumni map, club deadline board, analytics. This is the real year-2 thesis.
-  Founding clubs get it free forever in exchange for early adoption.
-- **Secondary options** — ~$12–15/mo, ~$29/3mo, ~$89/yr. For mid-cycle joiners and
-  returning multi-year users. Not positioned as equal peers to the Season Pass,
-  since no competitor validates leading with subscription framing here.
+  (EB open through MBB) spans 10–12. No monthly option alongside it: a
+  cheaper recurring price would cannibalise the cycle commit (§2c).
+- **Team workspace — $299/year flat, up to 25 members** (26–60: $599/year);
+  first 5 founding clubs free for year one, not free forever (repriced
+  2026-08-20, see founder-decisions §1) — shared firm tiers, a club-wide
+  coverage board, and officer-managed seats. Every member is a Free
+  account; Pro seats are $69/cycle each, club-billed at the same price an
+  individual pays, never pooled or discounted.
 
 ## Brand voice
 

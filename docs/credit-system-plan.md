@@ -2,6 +2,21 @@
 
 Status: design for review, nothing built. No code or migrations exist for this yet.
 
+> **Changelog — v4, 2026-08-20 (Pro repriced to $69/cycle; coffee-chat
+> brief metered).** Founder decision (`docs/founder-decisions-2026-08-20.md`
+> §2c, §2b): Pro's monthly-equivalent price moves from **$12/month** to
+> **$69 per ~6-month cycle (≈ $11.50/mo)**, no monthly option alongside it.
+> The 180-credit grant is unchanged, so full-burn margin moves from the
+> exact-ratio 70% to **68.7%** (1.3 points under the planning floor,
+> accepted rather than round up to $72). Every "$12/month" below that named
+> Pro's price is updated to the cycle price; the two one-time top-up packs
+> in §10 ($5→60, $12→160) are unrelated to this change and untouched. Also:
+> the coffee-chat brief (`crm/ai_brief.py`) joins §1's per-action table at
+> 1 credit — it was never actually covered by the "daily brief" line in that
+> list (that line names `assistant/brief.py`'s auto-generated `DailyBrief`,
+> a different feature); this doc now says so explicitly to remove the
+> ambiguity.
+>
 > **Changelog — v3, 2026-08-19 (pay-as-you-go top-ups, Stripe-shaped but
 > inert).** Built `billing/stripe_gateway.py`: two one-time credit packs
 > ($5→60, $12→160 — both priced against §3's governing ratio, see new §10)
@@ -85,6 +100,7 @@ action, set from the real ratios above, not round numbers for their own sake:
 | Chat message on Sonnet (Pro's model) | 3 | ~$0.06 | Honest 3x price ratio |
 | Rescan residue classification | 1 per 10 threads, rounded up | ~$0.02 per 10 | Full 100-thread pass = 10 credits ≈ $0.20 |
 | Deterministic rescan pass, CSV reply-detection | 0 | $0 | No model call, never charged |
+| Coffee-chat brief (`crm/ai_brief.py`) | 1 | ~$0.02 | Added 2026-08-20 (founder-decisions §2b). Same anchor as a Haiku chat message; user-triggered via a POST button, so it is metered rather than joining the not-metered list below. Charged once per successful generation, never on a failed/unconfigured call. |
 
 Notes:
 
@@ -98,12 +114,14 @@ Notes:
   credits, not 10. Charged in one ledger row at the end of the pass with
   `props={"threads": n}`.
 - Deliberately **not** metered (decision, not oversight): the conversation
-  title call (`_TITLE_MODEL`, ~$0.0001), the daily brief, `crm/ai_summary`,
-  and `extract_deadlines_ai`. The first three are bookkeeping calls already
-  gated (once per day, MIN_TOUCHES, POST-behind-a-button) and each costs a
-  fraction of a cent; the last is a founder-run management command. If any
-  of them ever becomes user-triggered at volume, it joins the table — the
-  ledger's `kind` field is built for that.
+  title call (`_TITLE_MODEL`, ~$0.0001), the daily brief
+  (`assistant/brief.py`'s `DailyBrief` — an auto-generated product surface,
+  NOT `crm/ai_brief.py`'s user-triggered coffee-chat brief, which is now
+  metered above), `crm/ai_summary`, and `extract_deadlines_ai`. The first
+  three are bookkeeping calls already gated (once per day, MIN_TOUCHES,
+  POST-behind-a-button) and each costs a fraction of a cent; the last is a
+  founder-run management command. If any of them ever becomes user-triggered
+  at volume, it joins the table — the ledger's `kind` field is built for that.
 
 ## 2. Competitive landscape & pricing
 
@@ -163,9 +181,12 @@ sentisight.ai/ai-price-comparison-gemini-chatgpt-claude-grok.
 pay $24–40/month for career tools, and $20 is the mental slot for "my one AI
 subscription." Coverage should not fight ChatGPT for the $20 slot — the chat
 advisor is the surface most substitutable by ChatGPT — and does not need $30
-career-tool pricing to clear healthy margin. **$12/month** sits under every
-comp that matters, reads as an add-on *next to* a ChatGPT subscription
-rather than instead of it, and supports a 70% full-burn margin (§3).
+career-tool pricing to clear healthy margin. **$69 per ~6-month cycle
+(≈ $11.50/mo)** sits under every comp that matters, reads as an add-on
+*next to* a ChatGPT subscription rather than instead of it, and supports a
+68.7% full-burn margin (§3) — 1.3 points under the 70% floor, accepted in
+favor of a cycle price that reads like a real number rather than the
+exact-ratio $72 (founder-decisions-2026-08-20.md §2c).
 
 ## 3. Margin analysis — deriving the price and the grants
 
@@ -185,15 +206,21 @@ at $10 loses $20. The grants were sized for free dogfooding, not for revenue.
 **The constraint that prices everything.** At the planning cost of
 $0.02/credit, "≥70% gross margin even at full burn" means full-burn model
 spend ≤ 30% of price — i.e. **grant ≤ 15 credits per dollar of monthly
-price**. So: $12 → 180 credits, $15 → 225, $20 → 300. With $12 chosen (§2):
+price**. So: $12 → 180 credits, $15 → 225, $20 → 300. §2c's founder decision
+(2026-08-20) keeps the 180-credit grant but reprices to a **$69/cycle**
+(≈ $11.50/mo) commit rather than a monthly $12 — the exact-ratio price at
+180 credits would be $72/mo-equivalent (15.0 credits/$, 70.0% margin); $69
+runs the ratio to 15.7 credits/$, **1.3 points under the 70% floor**,
+accepted because "$3 of margin at the theoretical ceiling is not worth a
+price that reads like a rounding error."
 
-**Chosen numbers: Pro $12/month, 180 credits. Free 60 credits.**
+**Chosen numbers: Pro $69 per ~6-month cycle (≈ $11.50/mo), 180 credits. Free 60 credits.**
 
-| Scenario | Credits burned | Model spend | Gross margin on $12 |
+| Scenario | Credits burned | Model spend | Gross margin on $11.50/mo |
 |---|---|---|---|
-| Full burn (hard ceiling) | 180 | $3.60 | **70%** |
-| Heavy month (60%) | 108 | $2.16 | 82% |
-| Typical SaaS utilization (30–40%) | 54–72 | $1.08–1.44 | **88–91%** |
+| Full burn (hard ceiling) | 180 | $3.60 | **68.7%** |
+| Heavy month (60%) | 108 | $2.16 | 81% |
+| Typical SaaS utilization (30–40%) | 54–72 | $1.08–1.44 | **87–91%** |
 | Light month (15%) | 27 | $0.54 | 95% |
 
 Markup framing: full burn is a 3.3x markup over model cost — exactly the
@@ -210,9 +237,10 @@ free user costs less per *year* than one month of Pro revenue.
 (or 180 Haiku-priced actions, or mixes with 10-credit full rescans). That is
 $0.20 per Sonnet message versus Lovable's $0.25 per agent message at twice
 the monthly price — and it comes with the rescans and the CRM around it. The
-v1 grant was set before a price existed; once $12 is real, 180 is what
+v1 grant was set before a price existed; once $69/cycle is real, 180 is what
 honest unit economics buys. If more generosity is ever wanted, move the
-price ($15 → 225), never the 15-credits-per-dollar ratio.
+grant (`CREDIT_PRO_MONTHLY_GRANT` down to ~170, per founder-decisions §2c),
+never the price.
 
 ## 4. Allocation per plan
 
@@ -225,14 +253,14 @@ where light users should never feel a wall.
 | Plan | Price | Monthly grant | Buys (examples) | Worst-case model cost / user / month |
 |---|---|---|---|---|
 | Free | $0 | **60 credits** | 60 Haiku messages, or 30 + 3 full rescans | **$1.20** |
-| Pro | **$12/mo** | **180 credits** | 60 Sonnet messages, or 45 + 4 full rescans | **$3.60** |
+| Pro | **$69/cycle (≈ $11.50/mo)** | **180 credits** | 60 Sonnet messages, or 45 + 4 full rescans | **$3.60** |
 
 Sanity against the status quo: the old caps' theoretical ceiling was 450
 Haiku messages/month on Free (~$13.50) and 1,800 Sonnet messages/month on
 Pro (~$162). v1 of this plan cut that to $6 / $30 but was still sized for
 free dogfooding; v2 cuts it to $1.20 / $3.60 because the grants are now
-priced against real revenue (§3) — every credit granted is a credit the $12
-has to cover even if fully burned. The monthly pool still fits the
+priced against real revenue (§3) — every credit granted is a credit the
+cycle price has to cover even if fully burned. The monthly pool still fits the
 product's actual shape better than a daily reset: rescans are bursty, and a
 big scan-and-chat day after connecting Gmail draws from the month, not from
 an arbitrary daily wall.
@@ -432,7 +460,7 @@ should reflect.
 - **A Stripe-billed Pro subscription.** `user.plan` still flips by hand in
   admin ("admin IS the billing system for now" — accounts/admin.py); Stripe
   is only wired up for the one-time top-up packs (§10), not for charging
-  the $12/month Pro price itself or writing `user.plan` from a webhook. That
+  the $69/cycle Pro price itself or writing `user.plan` from a webhook. That
   remains exactly the shape this section originally described: `user.plan`
   admin-set, grants derived from it, no subscription checkout built.
 - Metering the un-metered calls listed in §1.
@@ -446,14 +474,15 @@ clean message, webhook 400s) until `STRIPE_SECRET_KEY` /
 
 ## 9. Cost math at projected scale
 
-50 active Free users + 10 Pro users. Pro revenue at $12/mo: **$120/month.**
+50 active Free users + 10 Pro users. Pro revenue at $69/cycle
+(≈ $11.50/mo): **$115/month.**
 
-| Scenario | Assumption | Monthly model spend | Against $120 revenue |
+| Scenario | Assumption | Monthly model spend | Against $115 revenue |
 |---|---|---|---|
-| Likely early reality | Free ~30 credits used ($0.60); Pro ~65 credits ($1.30) | **~$43** | 64% margin, free fleet included |
-| Quiet month | Half that engagement | **~$22** | 82% margin |
-| Hard ceiling | Every user exhausts every credit | 50 × $1.20 + 10 × $3.60 = **$96** | still $24 positive |
-| v1 grants' ceiling (for comparison) | Full burn on 300/1,500 grants | 50 × $6 + 10 × $30 = **$600** | −$480 at $12/mo |
+| Likely early reality | Free ~30 credits used ($0.60); Pro ~65 credits ($1.30) | **~$43** | 63% margin, free fleet included |
+| Quiet month | Half that engagement | **~$22** | 81% margin |
+| Hard ceiling | Every user exhausts every credit | 50 × $1.20 + 10 × $3.60 = **$96** | still $19 positive |
+| v1 grants' ceiling (for comparison) | Full burn on 300/1,500 grants | 50 × $6 + 10 × $30 = **$600** | −$480 at the v1-era $12/mo this row is illustrating |
 | Old caps' ceiling (for comparison) | Everyone maxes the daily caps | ~50 × $13.50 + 10 × $162 ≈ **$2,300** | — |
 
 The headline: with v2 numbers, ten Pro subscriptions cover the model bill
@@ -563,8 +592,10 @@ concurrency primitive needed beyond the `ProcessedStripeEvent` guard above
 4. Hook the rescan residue loop (coordinate with the worktree building it).
 5. Composer/Settings credit display.
 6. Update accounts/admin.py's plan description text and the pricing page's
-   Pro list — including the $12/month price (§2–3), shown even while
+   Pro list — including the $69/cycle price (§2–3), shown even while
    nothing collects it.
+7. Meter the coffee-chat brief (`crm/ai_brief.py`, §1): `can_spend`/`spend`
+   around `generate_coffee_chat_brief`, new `spend_brief` kind.
 
 Verify per-app (`pytest coverage_web/billing coverage_web/assistant
 coverage_web/capture`) — the full-suite run has a known pre-existing

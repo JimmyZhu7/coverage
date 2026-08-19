@@ -372,6 +372,13 @@ daily allowance for Pro.
 
 ## 9. Flag — the $39 cycle price vs. the governing ratio
 
+**Resolved 2026-08-20** (`docs/founder-decisions-2026-08-20.md` §2c):
+option 2 below. Pro stays at **$69/cycle**, accepting 68.7% full-burn
+margin (1.3 points under the 70% floor) rather than the exact-ratio $72 —
+"$3 of margin at the theoretical ceiling is not worth a price that reads
+like a rounding error." No monthly option alongside it. The rest of this
+section is kept for the record of how that number was reached.
+
 Not this plan's call, but the numbers must be on the record. The credit
 plan's governing ratio (§3 there): **grant ≤ 15 credits per dollar of
 price** to hold ≥ 70% margin at full burn. The page prices Pro at $39 per
