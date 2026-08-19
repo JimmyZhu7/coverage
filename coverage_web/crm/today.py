@@ -535,7 +535,11 @@ def _schedule(user, today) -> list[dict]:
 
     for ev in (CalendarEvent.objects.for_user(user)
                .filter(starts_at__gte=start, starts_at__lt=horizon)
-               .select_related("contact")
+               # `contact__firm`, not just `contact`: _cockpit.html renders
+               # `{% if p.contact.firm %}{{ p.contact.firm.name }}` for every
+               # row _chat_prep builds out of this list, so stopping the join
+               # at `contact` left one firm SELECT per scheduled chat.
+               .select_related("contact", "contact__firm")
                .order_by("starts_at")):
         at = timezone.localtime(ev.starts_at)
         day = at.date()
@@ -572,6 +576,9 @@ def _schedule(user, today) -> list[dict]:
     untimed = (
         Contact.objects.for_user(user)
         .filter(archived=False, thread_state="chat_scheduled")
+        # These rows reach the same `p.contact.firm` render path as the
+        # CalendarEvent branch above — see its comment.
+        .select_related("firm")
         .annotate(
             last_ts=models_Max("touches__ts", filter=~Q(touches__kind=MANUAL_OVERRIDE_KIND))
         )
@@ -764,6 +771,10 @@ def _waiting_on_reply(user, busy_ids: set[int], limit=12) -> dict:
         Contact.objects.for_user(user)
         .filter(archived=False, thread_state="no_reply")
         .exclude(id__in=busy_ids)
+        # _cockpit.html's waiting list renders `{% if c.firm %}{{ c.firm.name }}`
+        # per person, so without this each of the `limit` rows cost its own
+        # firm SELECT — the single largest N+1 on the Today page.
+        .select_related("firm")
         .annotate(
             last_ts=models_Max("touches__ts", filter=~Q(touches__kind=MANUAL_OVERRIDE_KIND))
         )
@@ -790,28 +801,51 @@ def _chat_prep(user, today, schedule) -> list[dict]:
     not new data: who they are, how warm, what the last debrief taught you,
     and whether their firm has a deadline worth raising.
     """
+    rows = [
+        r for r in schedule
+        if r["is_today"] and r["timed"] and r["contact"]
+    ]
+    if not rows:
+        return []
+
+    # Both lookups below used to run per chat (two SELECTs each), so a day
+    # with several chats paid a query per chat for data that is one indexed
+    # read in bulk. Batched into exactly two queries regardless of how many
+    # chats the day holds — "assembly, not new data", as the docstring says.
+    contact_ids = [r["contact"].id for r in rows]
+    firm_ids = {r["contact"].firm_id for r in rows if r["contact"].firm_id}
+
+    # Latest non-dismissed debrief per contact. Ordered oldest-first so the
+    # last write into the dict is the newest row, matching the per-contact
+    # `.order_by("-created").first()` this replaces.
+    learned_by_contact: dict[int, str] = {}
+    for d in (ChatDebrief.objects.for_user(user)
+              .filter(contact_id__in=contact_ids, dismissed=False)
+              .exclude(learned="")
+              .order_by("created")
+              .only("contact_id", "learned")):
+        learned_by_contact[d.contact_id] = d.learned
+
+    # Soonest confirmed date per firm. Ordered latest-first for the same
+    # reason, mirroring `.order_by("date").first()`.
+    firm_date_by_firm: dict[int, FirmDate] = {}
+    if firm_ids:
+        for fd in (FirmDate.objects
+                   .filter(firm_id__in=firm_ids, date__gte=today, confidence=1.0)
+                   .order_by("-date")):
+            firm_date_by_firm[fd.firm_id] = fd
+
     out = []
-    for row in schedule:
-        if not (row["is_today"] and row["timed"] and row["contact"]):
-            continue
+    for row in rows:
         c = row["contact"]
-        last = (ChatDebrief.objects.for_user(user)
-                .filter(contact=c, dismissed=False)
-                .exclude(learned="")
-                .order_by("-created")
-                .first())
-        firm_date = None
-        if c.firm_id:
-            firm_date = (FirmDate.objects
-                         .filter(firm_id=c.firm_id, date__gte=today, confidence=1.0)
-                         .order_by("date")
-                         .first())
+        learned = learned_by_contact.get(c.id, "")
+        firm_date = firm_date_by_firm.get(c.firm_id) if c.firm_id else None
         out.append({
             "contact": c,
             "at": row["at"],
             "when": row["when"],
             "title": row["title"],
-            "learned": last.learned if last else "",
+            "learned": learned,
             "firm_date": firm_date,
             "firm_date_days": (firm_date.date - today).days if firm_date else None,
             "firm_date_label": (
