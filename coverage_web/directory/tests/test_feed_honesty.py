@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from directory.models import Firm, Opportunity
 from directory.views import (
-    _FRESH_DAYS, REGION_NONE, _fresh_label, _sponsorship_tag, _unconfirmed_note,
+    _FRESH_DAYS, REGION_NONE, _fact_chips, _fresh_label, _unconfirmed_note,
     _urgency_feed, _urgency_item,
 )
 
@@ -212,6 +212,18 @@ def test_signed_out_feed_is_not_personalized(client):
 # and a blank region must never borrow a firm-wide answer.
 # ---------------------------------------------------------------------------
 
+def _spon_chip(opp):
+    """The sponsorship answer as it reaches a card, or None.
+
+    Reads `_fact_chips`, which is the single carrier on every surface since
+    the `_sponsorship_tag` pill was retired: the pill only ever rendered on
+    /firms/<slug>/ while the feed built its chip off the raw
+    `Opportunity.sponsorship` column, so a firm-policy row matched the
+    "Sponsors visas" filter and arrived with no sponsorship label at all."""
+    return next((c for c in _fact_chips(opp) if c["label"].startswith(
+        ("Sponsors", "No sponsorship"))), None)
+
+
 @pytest.mark.django_db
 def test_sponsorship_reads_the_regional_dict_not_a_bare_bool():
     firm = _firm(sponsors={"us": True, "hk": "unknown"})
@@ -219,17 +231,16 @@ def test_sponsorship_reads_the_regional_dict_not_a_bare_bool():
     hk_role = _opp(firm, "https://x/2", region="hk")
     # A firm-sourced answer gets its own "· firm policy" label — see
     # directory.sponsorship.effective_sponsorship — never the posting-stated
-    # wording, so the pill cannot be mistaken for a claim the posting made.
-    assert _sponsorship_tag(us_role) == {
-        "label": "Sponsors · firm policy", "css": "spon-known"}
-    assert _sponsorship_tag(hk_role) is None  # "unknown" for hk -> no pill
+    # wording, so the chip cannot be mistaken for a claim the posting made.
+    assert _spon_chip(us_role)["label"] == "Sponsors · firm policy"
+    assert _spon_chip(hk_role) is None  # "unknown" for hk -> no chip
 
 
 @pytest.mark.django_db
 def test_a_firm_sponsoring_one_region_does_not_stamp_another():
     firm = _firm(sponsors={"hk": True})
     us_role = _opp(firm, "https://x/1", region="us")
-    assert _sponsorship_tag(us_role) is None  # HK-only sponsorship != a US pill
+    assert _spon_chip(us_role) is None  # HK-only sponsorship != a US chip
 
 
 @pytest.mark.django_db
@@ -239,22 +250,21 @@ def test_blank_region_never_borrows_a_firm_wide_answer():
     not inherit any of it."""
     firm = _firm(sponsors={"us": True, "hk": True})
     unresolved = _opp(firm, "https://x/1", region="")
-    assert _sponsorship_tag(unresolved) is None
+    assert _spon_chip(unresolved) is None
 
 
 @pytest.mark.django_db
 def test_the_posting_s_own_field_still_wins_over_the_firm_fallback():
     firm = _firm(sponsors={"us": False})
     role = _opp(firm, "https://x/1", region="us", sponsorship="yes")
-    assert _sponsorship_tag(role) == {"label": "Sponsorship", "css": "spon-known"}
+    assert _spon_chip(role)["label"] == "Sponsors visas"
 
 
 @pytest.mark.django_db
-def test_firm_sourced_no_gets_its_own_pill_label():
+def test_firm_sourced_no_gets_its_own_label():
     firm = _firm(sponsors={"us": False})
     role = _opp(firm, "https://x/1", region="us")
-    assert _sponsorship_tag(role) == {
-        "label": "No sponsorship · firm policy", "css": "spon-none"}
+    assert _spon_chip(role)["label"] == "No sponsorship · firm policy"
 
 
 # ---------------------------------------------------------------------------

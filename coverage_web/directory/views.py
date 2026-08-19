@@ -230,32 +230,23 @@ def _class_tag(opp) -> dict | None:
     return {"label": f"Class of {opp.class_year}", "css": "tag-class"}
 
 
-def _sponsorship_tag(opp) -> dict | None:
-    """Sponsorship pill: the posting's own field wins; when it's unknown,
-    fall back to the firm-level fact from the seed. Still unknown -> no pill
-    rather than a hedge.
-
-    Reads `directory.sponsorship.effective_sponsorship`, the one place this
-    precedence (posting beats firm policy beats unknown) is decided — the
-    feed's sponsorship filter, `_eligibility` and the onboarding preview's
-    work-auth bars all read the same function, so this pill can no longer say
-    something the other three surfaces disagree with.
-
-    A firm-sourced answer gets its OWN label ("· firm policy") rather than
-    reusing the posting-stated one: a firm's general policy is a weaker claim
-    about this specific role than the posting's own words, and the pill
-    saying so is what lets `_eligibility` treat a firm-sourced "no" as a
-    warning rather than a wall."""
-    value, source = effective_sponsorship(opp)
-    if value == "yes":
-        if source == "firm":
-            return {"label": "Sponsors · firm policy", "css": "spon-known"}
-        return {"label": "Sponsorship", "css": "spon-known"}
-    if value == "no":
-        if source == "firm":
-            return {"label": "No sponsorship · firm policy", "css": "spon-none"}
-        return {"label": "No Sponsorship", "css": "spon-none"}
-    return None
+# The sponsorship PILL used to live here, as `_sponsorship_tag`. It is gone,
+# not moved: it reached exactly one surface — `/firms/<slug>/`, via `_card`'s
+# tags — while the Opportunities FEED, where the filter runs and the decision
+# actually gets made, built its own sponsorship chip off the raw
+# `Opportunity.sponsorship` column and therefore showed a firm-policy row
+# NOTHING at all. Filtering "Sponsors visas" returned 304 such rows with no
+# label saying why they matched, which is the opposite of the promise the
+# whole four-state design exists to keep. On the firm page the two carriers
+# also collided outright: two Barclays rows printed the pill "No Sponsorship"
+# beside the chip "No sponsorship", one posting field in two visual languages.
+#
+# `_fact_chips` is now the single carrier on every surface, and it keeps the
+# rule the pill established: a firm-sourced answer says "· firm policy" IN THE
+# LABEL rather than borrowing the posting-stated wording, because a firm's
+# general policy is a weaker claim about one specific role than the posting's
+# own words — the same asymmetry that makes `_eligibility` block on one and
+# only warn on the other.
 
 
 # Where a role IS, resolved once for every surface that prints it.
@@ -311,9 +302,13 @@ def _card(opp, *, now, today):
     class_tag = _class_tag(opp)
     if class_tag:
         tags.append(class_tag)
-    spon = _sponsorship_tag(opp)
-    if spon:
-        tags.append(spon)
+    # No sponsorship pill here any more. `_fact_chips` below now carries the
+    # sponsorship answer AND its source on every surface, so appending the
+    # pill as well printed the same fact twice on this page and only this
+    # page: two Barclays rows rendered the pill "No Sponsorship" beside the
+    # chip "No sponsorship", in two different visual languages, for one
+    # posting field. One carrier, both surfaces — see the note at the top of
+    # this module where the pill used to be defined.
     return {
         "id": opp.id,
         "firm_name": opp.firm.name,
@@ -1228,15 +1223,44 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     made = {}
     kind = (verdict or {}).get("kind")
 
-    spon = (o.sponsorship or "unknown").lower()
-    if kind == "visa_out":
+    # SPONSORSHIP, WITH ITS SOURCE. Read through `effective_sponsorship`, not
+    # off `o.sponsorship` — that was the last surface still reading the raw
+    # column, and it is the one surface where the decision actually gets made.
+    #
+    # The consequence, live: the feed's sponsorship filter counts firm-policy
+    # rows (304 of them the day this was found), and every one of those cards
+    # arrived with NO sponsorship chip at all — matched by a fact the card
+    # never showed. A student filtering "Sponsors visas" got rows that looked
+    # identical to unfiltered ones and no way to tell whether the answer came
+    # from the posting or from the firm's general policy. "Never guess, always
+    # show your work" is the whole four-state design; the label existed and
+    # simply was not on the page where it mattered.
+    #
+    # The firm-sourced chip says so IN THE LABEL, not only the tooltip: the
+    # tooltip is hover-only, and this product's students are on phones. A
+    # firm's policy is a weaker claim about one specific role than the
+    # posting's own words — which is exactly why `_eligibility` softens a
+    # firm-sourced "no" to a non-blocking warning — so the card must not let
+    # the two read the same.
+    spon, spon_source = effective_sponsorship(o)
+    if kind in ("visa_out", "visa_firm_no"):
         spon = "unknown"   # the verdict beside it already says this
     if spon == "no":
-        made["sponsorship"] = {"label": "No sponsorship", "css": "fact-wall",
-                               "why": "The posting says it cannot sponsor a visa"}
+        made["sponsorship"] = (
+            {"label": "No sponsorship · firm policy", "css": "fact-wall",
+             "why": ("The posting itself does not say. This firm's stated "
+                     "policy is not to sponsor visas in this market.")}
+            if spon_source == "firm" else
+            {"label": "No sponsorship", "css": "fact-wall",
+             "why": "The posting says it cannot sponsor a visa"})
     elif spon == "yes":
-        made["sponsorship"] = {"label": "Sponsors visas", "css": "fact-ok",
-                               "why": "The posting says sponsorship is available"}
+        made["sponsorship"] = (
+            {"label": "Sponsors · firm policy", "css": "fact-ok",
+             "why": ("The posting itself does not say. This firm's stated "
+                     "policy is to sponsor visas in this market.")}
+            if spon_source == "firm" else
+            {"label": "Sponsors visas", "css": "fact-ok",
+             "why": "The posting says sponsorship is available"})
 
     labels = {
         "pay": lambda f: f["value"],
@@ -1974,7 +1998,10 @@ def opportunities(request):
                 "logo_url": o.firm.logo.url if o.firm.logo else "",
                 "monogram": _monogram(o.firm.name),
                 "category": category,
-                "sponsorship": _sponsorship_tag(o),
+                # No "sponsorship" key. It was `_sponsorship_tag(o)` computed
+                # from whichever role happened to open the cluster — the wrong
+                # granularity for a per-ROLE fact — and no template ever read
+                # it. Each role card carries its own answer via `_fact_chips`.
                 "is_mine": o.firm_id in tier_by_firm,
                 "tier": tier_by_firm.get(o.firm_id),
                 "match": bool(user_regions & {r.lower() for r in (o.firm.regions or [])})

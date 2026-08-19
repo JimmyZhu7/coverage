@@ -154,3 +154,72 @@ def test_no_verdict_at_all_when_neither_side_has_an_answer():
     firm = _firm()
     o = _opp(firm, "https://x/1", region="hk")
     assert _eligibility(o, {"class_year": None, "work_auth": {"hk": "sponsorship"}}) is None
+
+
+# ---------------------------------------------------------------------------
+# The FEED CARD — the surface where the filter runs and the decision is made,
+# and the one that used to show a firm-policy row nothing at all.
+# ---------------------------------------------------------------------------
+
+def _chip_labels(o, verdict=None):
+    from directory.views import _fact_chips
+    return [c["label"] for c in _fact_chips(o, verdict=verdict)]
+
+
+def test_the_card_says_when_a_sponsorship_answer_came_from_firm_policy():
+    """The gap that made "Sponsors visas" a silent filter.
+
+    `_apply_sponsorship_filter` counts firm-policy rows (304 of them live) and
+    `_sponsorship_tag` had a label for them — but the tag only ever rendered on
+    /firms/<slug>/, while the feed's card built its sponsorship chip off the raw
+    `Opportunity.sponsorship` column. So a student filtering "Sponsors visas"
+    got 304 cards with NO sponsorship chip: matched by a fact the card never
+    showed. The label has to be where the decision is."""
+    firm = _firm(sponsors={"us": True})
+    o = _opp(firm, "https://x/1", region="us")   # the posting itself is silent
+    assert _chip_labels(o) == ["Sponsors · firm policy"]
+
+    no_firm = _firm(slug="lazard", name="Lazard", sponsors={"us": False})
+    o2 = _opp(no_firm, "https://x/2", region="us")
+    assert _chip_labels(o2) == ["No sponsorship · firm policy"]
+
+
+def test_a_posting_stated_answer_never_wears_the_firm_policy_label():
+    """The two claims must not read the same: a posting's own words are a
+    statement about THIS role, a firm's policy is a general fact about the
+    firm — which is exactly why `_eligibility` blocks on one and only warns on
+    the other. The source is in the LABEL, not only the tooltip: tooltips are
+    hover-only and this product's students are on phones."""
+    firm = _firm(sponsors={"us": False})
+    o = _opp(firm, "https://x/1", region="us", sponsorship="yes")
+    assert _chip_labels(o) == ["Sponsors visas"]
+
+
+def test_the_chip_stands_down_when_the_verdict_beside_it_already_said_it():
+    """Both visa verdicts, not just the blocking one. `visa_firm_no` renders
+    "Firm policy: may not sponsor here" — printing "No sponsorship · firm
+    policy" next to it is the same sentence twice, and `_FACT_CHIPS_MAX` is 2,
+    so the repeat costs a real fact its slot."""
+    from directory.views import _eligibility
+
+    firm = _firm(sponsors={"us": False})
+    o = _opp(firm, "https://x/1", region="us")
+    verdict = _eligibility(o, {"class_year": None, "work_auth": {"us": "sponsorship"}})
+    assert verdict["kind"] == "visa_firm_no"
+    assert _chip_labels(o, verdict=verdict) == []
+
+
+def test_the_firm_page_states_the_answer_once_not_twice():
+    """/firms/<slug>/ rendered `_card`'s tags AND its facts, so a posting that
+    stated "no" printed the pill "No Sponsorship" beside the chip "No
+    sponsorship" — one field, two visual languages, on two Barclays rows.
+    One carrier now."""
+    from django.utils import timezone
+
+    from directory.views import _card
+
+    firm = _firm()
+    o = _opp(firm, "https://x/1", region="us", sponsorship="no")
+    card = _card(o, now=timezone.now(), today=timezone.localdate())
+    assert [c["label"] for c in card["facts"]] == ["No sponsorship"]
+    assert not [t for t in card["tags"] if "ponsor" in t["label"]]
