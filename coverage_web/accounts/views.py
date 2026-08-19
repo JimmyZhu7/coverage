@@ -32,7 +32,7 @@ from crm.models import Contact, UserFirm
 from directory.models import Firm
 
 from .models import PushSubscription
-from . import services
+from . import onboarding_preview, services
 from .forms import (
     CYCLE_SUGGESTIONS,
     REGION_CHOICES,
@@ -162,7 +162,36 @@ def onboarding(request):
     }
     if step == "firms":
         context.update(_firm_picker_context(request.user))
+    # The live panel's first paint, server-side. Rendering it here rather
+    # than letting htmx fetch it on load is what keeps the wizard working
+    # with JS off: the panel is correct before any script runs, and the
+    # htmx refresh below only ever replaces it with a newer version of the
+    # same partial.
+    context["preview"] = onboarding_preview.build(step, request, request.user)
     return render(request, "accounts/onboarding.html", context)
+
+
+@login_required
+@require_GET
+def onboarding_preview_view(request):
+    """The live panel, on its own — the htmx swap target for step 1's chips,
+    step 2's matrix and step 3's firm tiles.
+
+    Read-only by construction: a GET, no form handling, no writes, and it
+    shares not one line of the step machine above. Everything it renders is
+    a real query (accounts/onboarding_preview.py); if the student's current
+    answers match nothing it renders an empty state rather than the previous
+    answer's rows.
+    """
+    step = request.GET.get("step") or "profile"
+    if step not in ONBOARDING_STEPS:
+        step = "profile"
+    return render(
+        request,
+        "accounts/_onboarding_preview.html",
+        {"preview": onboarding_preview.build(step, request, request.user),
+         "step": step},
+    )
 
 
 def _firm_picker_context(user) -> dict:

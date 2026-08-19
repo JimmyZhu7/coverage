@@ -1,0 +1,175 @@
+{% load textstyle %}
+{% comment %}
+The INNER of the wizard's live preview panel — everything below the panel's
+own frame, which lives in onboarding.html and is not replaced by the swap.
+
+Rendered twice per step: once server-side by `accounts.views.onboarding` (so
+the panel is right before any script runs, and right with JS off), and again
+by `onboarding_preview_view` on every htmx refresh. Same template both
+times, so the two can never disagree.
+
+Every number here came out of accounts/onboarding_preview.py, which queries
+the live `opportunities`/`firms` tables. There is no illustrative row and no
+placeholder count anywhere in this file: when a selection matches nothing,
+the branch that runs is an empty state that says nothing matched.
+
+`.ob-pv-rows` carries the stagger; the `--i` on each row is its index.
+{% endcomment %}
+
+{% if preview.kind == "profile" %}
+  <p class="ob-pv-metric">
+    <strong class="ob-pv-num">{{ preview.count }}</strong>
+    <span class="ob-pv-unit">{{ preview.count|pluralize:"role,roles" }} match</span>
+  </p>
+
+  {% if preview.rows %}
+    <p class="ob-pv-cap">Closing soonest</p>
+    <ul class="ob-pv-rows">
+      {% for r in preview.rows %}
+        <li class="ob-pv-row" style="--i: {{ forloop.counter0 }};">
+          <span class="ob-pv-firm">{{ r.firm|smart_title }}</span>
+          <span class="ob-pv-title">{{ r.title }}</span>
+          <span class="ob-pv-pills">
+            {% if r.region %}<span class="ob-pv-pill">{{ r.region }}</span>{% endif %}
+            {% for t in r.tracks %}<span class="ob-pv-pill">{{ t }}</span>{% endfor %}
+            {% comment %}The eligibility chip is the one pill that is about
+            THIS student rather than about the posting, so it is coloured and
+            the taxonomy pills are not. Absent on most rows, which is honest:
+            `_eligibility` returns a verdict only where both the posting and
+            Settings have stated something.{% endcomment %}
+            {% if r.verdict %}
+              <span class="ob-pv-pill ob-pv-pill--{% if r.verdict.blocking %}out{% else %}ok{% endif %}"
+                    title="{{ r.verdict.why }}">{{ r.verdict.label }}</span>
+            {% endif %}
+          </span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="ob-pv-empty">No live roles match yet. Try adding {{ preview.suggest }}.</p>
+  {% endif %}
+
+  <p class="ob-pv-foot">
+    {% if preview.dims %}
+      Narrowed from {{ preview.total }} live roles by {{ preview.dims }}.
+    {% else %}
+      {% comment %}Nothing has been answered yet, so nothing has been
+      narrowed. Saying "narrowed from 2,435" here would be a caption
+      describing a filter that never ran.{% endcomment %}
+      Every live campus role we track. Pick regions and tracks to narrow it.
+    {% endif %}
+  </p>
+
+{% elif preview.kind == "work" %}
+  <p class="ob-pv-metric">
+    <strong class="ob-pv-num">{{ preview.answered }}</strong>
+    <span class="ob-pv-unit">of {{ preview.count }} answer the visa question</span>
+  </p>
+
+  {% if preview.count %}
+    {% comment %}Three real bars, drawn at their real widths. The "haven't
+    said" bar is the wide one on live data (2,304 of 2,435) and it stays
+    wide — this panel's job on this step is to show the student how thin the
+    answered set actually is, not to flatter it.{% endcomment %}
+    <ul class="ob-pv-bars">
+      <li style="--i: 0;">
+        <span class="ob-pv-bar-lab">Say they sponsor</span>
+        <span class="ob-pv-bar"><span class="ob-pv-bar-fill is-yes" style="--w: {{ preview.yes_pct }}%;"></span></span>
+        <span class="ob-pv-bar-n">{{ preview.yes }}</span>
+      </li>
+      <li style="--i: 1;">
+        <span class="ob-pv-bar-lab">Say they don't</span>
+        <span class="ob-pv-bar"><span class="ob-pv-bar-fill is-no" style="--w: {{ preview.no_pct }}%;"></span></span>
+        <span class="ob-pv-bar-n">{{ preview.no }}</span>
+      </li>
+      <li style="--i: 2;">
+        <span class="ob-pv-bar-lab">Haven't said</span>
+        <span class="ob-pv-bar"><span class="ob-pv-bar-fill is-unk" style="--w: {{ preview.silent_pct }}%;"></span></span>
+        <span class="ob-pv-bar-n">{{ preview.silent }}</span>
+      </li>
+    </ul>
+
+    {% if preview.needs_labels %}
+      {% comment %}The only blocking verdict this step can produce. Drawn
+      only when the student has actually marked a region as needing
+      sponsorship — with nothing marked there is no verdict to report, and a
+      zero here would read as "nothing is ruled out", which is a claim.
+      {% endcomment %}
+      <p class="ob-pv-note{% if preview.blocked %} is-out{% endif %}">
+        {% if preview.blocked %}
+          <strong>{{ preview.blocked }}</strong> of these are ruled out for you:
+          they say no sponsorship in {{ preview.needs_labels }}, where you said you need it.
+        {% else %}
+          None of these say no sponsorship in {{ preview.needs_labels }}. Nothing is ruled out on visa.
+        {% endif %}
+      </p>
+    {% endif %}
+  {% else %}
+    <p class="ob-pv-empty">No live roles match your profile yet, so there is nothing to answer for.</p>
+  {% endif %}
+
+  <p class="ob-pv-foot">Counted over the roles matching your profile. "Haven't
+    said" means the posting never mentioned sponsorship — never that it won't.</p>
+
+{% elif preview.kind == "firms" %}
+  <p class="ob-pv-metric">
+    <strong class="ob-pv-num">{{ preview.roles }}</strong>
+    <span class="ob-pv-unit">live {{ preview.roles|pluralize:"role,roles" }} across
+      {{ preview.picked }} picked {{ preview.picked|pluralize:"firm,firms" }}</span>
+  </p>
+
+  {% if preview.firms %}
+    <ul class="ob-pv-rows">
+      {% for f in preview.firms %}
+        <li class="ob-pv-row ob-pv-row--firm" style="--i: {{ forloop.counter0 }};">
+          <span class="ob-pv-firm">{{ f.name|smart_title }}</span>
+          <span class="ob-pv-title">{{ f.regions|join:" · " }}</span>
+          <span class="ob-pv-count{% if not f.n %} is-zero{% endif %}">{{ f.n }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+    {% if preview.more %}
+      <p class="ob-pv-cap">+ {{ preview.more }} more picked, not shown</p>
+    {% endif %}
+  {% else %}
+    <p class="ob-pv-empty">No firms picked yet. Tick one and it lands here.</p>
+  {% endif %}
+
+  <p class="ob-pv-foot">Open campus roles at each firm today. A firm with none
+    still belongs on your board — it is where its contacts and its cycle dates live.</p>
+
+{% elif preview.kind == "import" %}
+  <p class="ob-pv-metric">
+    <strong class="ob-pv-num">{{ preview.contacts }}</strong>
+    <span class="ob-pv-unit">{{ preview.contacts|pluralize:"contact,contacts" }} on your board</span>
+  </p>
+
+  {% comment %}The Network board's own shape — three tiers and the overflow
+  column — drawn at the size it currently is. For a new account every column
+  is empty, and showing that empty is the point: this is the surface the last
+  step fills. `aria-hidden` because a grid of empty columns read aloud is
+  noise; the sentence under it carries the same fact in words.{% endcomment %}
+  <div class="ob-pv-board" aria-hidden="true">
+    {% for col in "1234" %}
+      <div class="ob-pv-col" style="--i: {{ forloop.counter0 }};">
+        <span class="ob-pv-col-lab">{% if forloop.counter < 4 %}Tier {{ forloop.counter }}{% else %}Unranked{% endif %}</span>
+        <span class="ob-pv-slot"></span>
+        <span class="ob-pv-slot"></span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <p class="ob-pv-note">
+    {% if preview.firms %}
+      Your {{ preview.firms }} target {{ preview.firms|pluralize:"firm,firms" }}
+      {{ preview.firms|pluralize:"is,are" }} already on it.
+      {% if preview.contacts %}Contacts you import join them under their firm.
+      {% else %}Contacts you import land under their firm.{% endif %}
+    {% else %}
+      Nothing on it yet. Firms you pick and contacts you import both land here.
+    {% endif %}
+  </p>
+
+  <p class="ob-pv-foot">The Network board is where firms, contacts and your
+    outreach cadence meet. It is the page you will live on after setup.</p>
+{% endif %}
