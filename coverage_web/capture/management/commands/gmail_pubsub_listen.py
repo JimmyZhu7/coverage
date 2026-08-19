@@ -17,6 +17,11 @@ job like every other capture command in this app.
 Each Pub/Sub message's data is Gmail's own notification payload:
 `{"emailAddress": "...", "historyId": "..."}`, base64-encoded per the Pub/Sub
 wire format (the client library decodes this automatically).
+
+DATABASE CONNECTIONS ARE RECYCLED BY HAND HERE, per notification — see
+`_process` below. Nothing else in this process does it, because this process
+has no request cycle, and `settings/base.py`'s `CONN_MAX_AGE`/
+`CONN_HEALTH_CHECKS` only take effect inside one.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from __future__ import annotations
 import json
 
 from django.core.management.base import BaseCommand
+from django.db import close_old_connections
 
 from capture import gmail_live
 
@@ -60,11 +66,58 @@ class Command(BaseCommand):
             ack/nack, since the two Pub/Sub APIs below expose that
             differently (a synchronous `pull()` result has no .ack()/
             .nack() of its own; the streaming `subscribe()` callback's
-            Message wrapper does)."""
-            payload = json.loads(data.decode("utf-8"))
-            gmail_live.process_notification(
-                payload["emailAddress"], str(payload.get("historyId", ""))
-            )
+            Message wrapper does).
+
+            THE `close_old_connections()` PAIR IS LOAD-BEARING, and is what
+            Django's own request cycle does for every view — it connects the
+            same function to `request_started` and `request_finished`
+            (django/db/__init__.py). This command is the one always-on
+            process in the app, and it has no request cycle at all, so
+            without these two calls nothing here ever recycles the database
+            connection:
+
+              - `CONN_MAX_AGE` (settings/base.py, 60s) is enforced only by
+                `close_if_unusable_or_obsolete()`, which is reachable from
+                those two signals and nowhere else. Un-called, `close_at`
+                is set and never compared, so one connection lives for the
+                whole life of the worker.
+              - `CONN_HEALTH_CHECKS=True` is inert for the same reason.
+                `connect()` sets `health_check_done = True` ("new
+                connections are healthy") and only
+                `close_if_unusable_or_obsolete()` ever sets it back to
+                False, so the pre-query ping in `_cursor()` returns early
+                forever. The health check that is supposed to catch a
+                connection killed server-side never runs even once.
+
+            The failure that combination produces is silent and permanent,
+            which is why it is worth ten lines of comment: this worker can
+            idle for hours between notifications, and a managed Postgres'
+            idle reaper or a database restart drops the connection in that
+            gap. The next notification's first query
+            (`process_notification`'s `GmailConnection.all_objects.get`)
+            then raises `InterfaceError`/`OperationalError` — which
+            `_callback` below catches, nacks, and carries on from. Pub/Sub
+            redelivers, the same dead connection raises again, and Gmail
+            Live stops syncing for EVERY connected mailbox with nothing
+            crashing to say so.
+
+            Calling this at the start is what fixes that (an obsolete or
+            dead connection is dropped and the ORM reconnects); calling it
+            again at the end is what stops the worker from sitting on an
+            idle connection between notifications, and matters a second
+            time because the streaming `subscribe()` callback runs on the
+            Pub/Sub client's own thread pool and Django connections are
+            thread-local — one per callback thread, none of them attached
+            to anything that would otherwise close them.
+            """
+            close_old_connections()
+            try:
+                payload = json.loads(data.decode("utf-8"))
+                gmail_live.process_notification(
+                    payload["emailAddress"], str(payload.get("historyId", ""))
+                )
+            finally:
+                close_old_connections()
 
         if opts["once"]:
             response = subscriber.pull(

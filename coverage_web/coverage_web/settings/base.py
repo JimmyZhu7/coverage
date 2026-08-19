@@ -295,6 +295,20 @@ DATABASES["default"]["TEST"] = {
 # (a DB restart, an idle-timeout reaper) is transparently replaced rather than
 # surfacing as an InterfaceError on a user's page load.
 #
+# READ "REQUEST" ABOVE LITERALLY. Both settings are enforced ONLY by
+# `close_if_unusable_or_obsolete()`, and Django connects that to exactly two
+# things: the `request_started` and `request_finished` signals
+# (django/db/__init__.py). Outside a request — every management command, and
+# above all the always-on `gmail_pubsub_listen` worker (render.yaml) — nothing
+# calls it, so `close_at` is never compared (CONN_MAX_AGE is inert) and
+# `health_check_done`, set True by `connect()`, is never reset (the health
+# check is inert too, so `_cursor()`'s pre-query ping returns early forever).
+# A long-lived process therefore holds ONE connection for its whole life with
+# no ping, and a connection dropped server-side during an idle gap stays
+# broken. Any such process has to call `django.db.close_old_connections()`
+# around each unit of work itself — see that command's `_process` for the
+# pattern and for why the failure it prevents is silent rather than loud.
+#
 # Forced back to 0 under pytest by the repo-root conftest.py — Django does
 # NOT do this itself (verified: CONN_MAX_AGE reads as 60 inside a test
 # without that hook), and a connection held open across tests is exactly what
