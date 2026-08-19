@@ -41,6 +41,18 @@ def _student(class_year=2027, email="student@example.com"):
     return u
 
 
+def _confirm_bulk_save(client, *, follow=False):
+    """Load the feed, then confirm — the sequence a real click makes.
+
+    The GET is not ceremony. `track_eligible` writes the exact ids the banner
+    OFFERED (stashed under `BULK_SAVE_OFFER_SESSION_KEY` when the feed
+    rendered) rather than re-deriving a set of its own, because those two
+    used to be different questions with different answers: the confirm said
+    206, the write made 209. No render, no offer, nothing to honour."""
+    client.get(reverse("opportunities"))
+    return client.post(reverse("track_eligible"), {"confirmed": "1"}, follow=follow)
+
+
 # ---------------------------------------------------------------------------
 # Confirm gate
 # ---------------------------------------------------------------------------
@@ -68,7 +80,7 @@ def test_confirmed_post_saves_every_eligible_role(client):
     _eligible_opp(2)
     client.force_login(user)
 
-    resp = client.post(reverse("track_eligible"), {"confirmed": "1"}, follow=True)
+    resp = _confirm_bulk_save(client, follow=True)
 
     assert resp.status_code == 200
     assert UserOpportunity.objects.for_user(user).count() == 2
@@ -82,11 +94,97 @@ def test_confirmed_save_shows_an_undo_banner_naming_the_count(client):
     _eligible_opp(3)
     client.force_login(user)
 
-    resp = client.post(reverse("track_eligible"), {"confirmed": "1"}, follow=True)
+    resp = _confirm_bulk_save(client, follow=True)
 
     body = resp.content.decode()
     assert "Saved 3 roles that name your year." in body
     assert "Undo" in body
+
+
+# ---------------------------------------------------------------------------
+# The number in the confirm is the number that happens
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_the_confirm_saves_exactly_what_the_banner_counted(client):
+    """The drift, reproduced: one page load, three numbers.
+
+    The banner counted the FEED's materialised rows — folded for duplicates
+    by `directory.dupes.fold_duplicates` — while `track_eligible` re-derived
+    its own set from the whole open table, unfolded. On the live board that
+    was 206 confirmed and 209 written; My Applications then folded them again
+    and its tile read 208.
+
+    Here: one requisition listed twice by the same firm, same title, same
+    location, different URLs — the shape a board scraped twice in one week
+    produces. The feed shows one row. The confirm must write one row."""
+    user = _student()
+    firm = Firm.objects.create(name="Repeat Bank", slug="repeat-bank")
+    for n in (1, 2):
+        Opportunity.objects.create(
+            firm=firm, url=f"https://repeat/{n}", title="Summer Analyst",
+            bucket="internship", status="open", class_year="2027",
+            location="New York")
+    client.force_login(user)
+
+    body = client.get(reverse("opportunities")).content.decode()
+    assert "1 open role names your class year" in body
+
+    resp = _confirm_bulk_save(client, follow=True)
+    assert "Saved 1 role that names your year." in resp.content.decode()
+    assert UserOpportunity.objects.for_user(user).count() == 1
+
+
+@pytest.mark.django_db
+def test_a_confirm_with_no_offer_behind_it_writes_nothing(client):
+    """A POST that never rendered the banner has no number to honour. Same
+    posture as the `confirmed=1` gate: refuse, rather than fall back to a set
+    the student was never shown — which is precisely how the write came to be
+    three rows wider than the confirm."""
+    user = _student()
+    _eligible_opp(1)
+    client.force_login(user)
+
+    resp = client.post(reverse("track_eligible"), {"confirmed": "1"})
+
+    assert resp.status_code == 400
+    assert UserOpportunity.objects.for_user(user).count() == 0
+
+
+@pytest.mark.django_db
+def test_a_role_that_appeared_after_the_banner_rendered_is_not_swept_in(client):
+    """The other half of "exactly what was shown": saving MORE than the
+    confirm named is the product doing something the student never agreed
+    to. A role that lands between the render and the click waits for the
+    next banner."""
+    user = _student()
+    _eligible_opp(1)
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+    latecomer = _eligible_opp(2)
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+
+    saved = set(UserOpportunity.objects.for_user(user)
+                .values_list("opportunity_id", flat=True))
+    assert latecomer.id not in saved
+    assert len(saved) == 1
+
+
+@pytest.mark.django_db
+def test_a_double_submit_does_not_re_run_the_batch(client):
+    """The offer is consumed on use, so a back-then-resubmit (or a
+    double-click) finds nothing left to honour rather than re-running against
+    a batch the student has already acted on."""
+    user = _student()
+    _eligible_opp(1)
+    client.force_login(user)
+
+    _confirm_bulk_save(client)
+    resp = client.post(reverse("track_eligible"), {"confirmed": "1"})
+
+    assert resp.status_code == 400
+    assert UserOpportunity.objects.for_user(user).count() == 1
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +202,7 @@ def test_undo_removes_only_the_batchs_rows_and_leaves_hand_saved_ones(client):
     # A curated, hand-saved role from before the bulk action.
     client.post(reverse("track_opportunity", args=[hand_saved.id]), {"status": "saved"})
 
-    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    _confirm_bulk_save(client)
     assert UserOpportunity.objects.for_user(user).count() == 3
 
     resp = client.post(reverse("track_eligible_undo"), {}, follow=True)
@@ -125,7 +223,7 @@ def test_undo_never_removes_a_row_the_student_has_since_advanced(client):
     o2 = _eligible_opp(2)
     client.force_login(user)
 
-    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    _confirm_bulk_save(client)
     # The student acts fast on one of the two before hitting Undo.
     client.post(reverse("track_opportunity", args=[o1.id]), {"status": "submitted"})
 
@@ -152,12 +250,12 @@ def test_a_second_bulk_save_only_offers_undo_for_the_newest_batch(client):
     user = _student()
     o1 = _eligible_opp(1)
     client.force_login(user)
-    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    _confirm_bulk_save(client)
     # The first batch's undo banner is consumed by visiting My Applications.
     client.get(reverse("my_applications"))
 
     o2 = _eligible_opp(2)
-    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    _confirm_bulk_save(client)
     resp = client.post(reverse("track_eligible_undo"), {}, follow=True)
 
     remaining = UserOpportunity.objects.for_user(user)

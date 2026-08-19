@@ -697,10 +697,17 @@ def test_not_for_me_outranks_your_year(client, student):
 
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
     dismissed = _grad_role(firm, ["2029"], "2029", title="Dismissed Intern")
+    # A second, un-dismissed role so the bulk save has real work to do — a
+    # POST that writes nothing would pass this assertion for the wrong reason.
+    wanted = _grad_role(firm, ["2029"], "2029", title="Wanted Intern")
     UserOpportunity.all_objects.create(user=student, opportunity=dismissed,
                                        dismissed=True)
     client.force_login(student)
+    client.get("/opportunities/")
     client.post("/opportunities/track-eligible/", {"confirmed": "1"})
+
+    assert UserOpportunity.all_objects.filter(
+        user=student, opportunity=wanted).exists(), "sanity: the save ran"
     uo = UserOpportunity.all_objects.get(user=student, opportunity=dismissed)
     assert uo.dismissed is True, "the user said no; a bulk save must not unsay it"
 
@@ -710,6 +717,10 @@ def test_the_offer_disappears_once_everything_is_saved(client, student):
     firm = Firm.objects.create(slug="citi", name="Citi")
     _grad_role(firm, ["2029"], "2029", title="Only Intern")
     client.force_login(student)
+    # The GET first: the confirm writes the ids the banner OFFERED on the last
+    # render (see directory.views.BULK_SAVE_OFFER_SESSION_KEY), so a POST with
+    # no render behind it has no number to honour and writes nothing.
+    client.get("/opportunities/")
     client.post("/opportunities/track-eligible/", {"confirmed": "1"})
     body = client.get("/opportunities/").content.decode()
     assert "names your class year" not in body, "a satisfied offer stops offering"

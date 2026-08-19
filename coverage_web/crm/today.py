@@ -1525,10 +1525,18 @@ def _dashboard_context(user) -> dict:
     )
 
     elig_profile = _eligibility_profile(user)
-    eligible_unsaved = (
-        _eligible_unsaved_count(user, campus, elig_profile)
-        if elig_profile and elig_profile.get("class_year") else 0
-    )
+    # FOLDED FIRST, like the feed. This chip and the Opportunities banner
+    # answer one question ("how many open roles name your year and aren't
+    # saved") and gave two answers to it — 209 here against the feed's 206 —
+    # because the feed counts its materialised rows AFTER `fold_duplicates`
+    # and this counted the raw queryset. A board scraped twice in one week
+    # carries the same requisition twice; it is one role to a student, and
+    # the number that leads them to the "Save them all" banner has to be the
+    # number that banner then states.
+    eligible_unsaved = 0
+    if elig_profile and elig_profile.get("class_year"):
+        folded, _ = fold_duplicates(campus)
+        eligible_unsaved = _eligible_unsaved_count(user, folded, elig_profile)
 
     uo = UserOpportunity.objects.for_user(user)
     funnel = {

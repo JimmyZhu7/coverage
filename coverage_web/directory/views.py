@@ -2211,6 +2211,23 @@ def opportunities(request):
         .order_by("firm__name").values_list("firm__slug", "firm__name").distinct()
     ]
 
+    # THE BULK-SAVE OFFER, resolved to ids here and stashed, so the confirm
+    # dialog's number and the write are the same fact rather than two
+    # separately-derived ones (see `_eligible_unsaved_ids` for the 206/209/208
+    # measurement that forced this). `track_eligible` reads the stash; it no
+    # longer queries for a set of its own.
+    #
+    # Rewritten on EVERY render of this view, htmx swaps included, because the
+    # banner is re-rendered on every one of them: whatever number is on screen
+    # is the offer that is live. Stale offers cannot accumulate — there is one
+    # key and the newest write wins.
+    bulk_save_offer = (
+        _eligible_unsaved_ids(request.user, rows, elig_profile)
+        if elig_profile and elig_profile.get("class_year") else []
+    )
+    if request.user.is_authenticated:
+        request.session[BULK_SAVE_OFFER_SESSION_KEY] = bulk_save_offer
+
     context = {
         # The paged slice renders; the full list still backs every count
         # above, so the strip describes the board, not the loaded fraction.
@@ -2282,8 +2299,7 @@ def opportunities(request):
         # user's year and which they have never touched (tracked or
         # dismissed both count as touched — "not for me" outranks "your
         # year"). Computed over the FULL row set, not the paged slice.
-        "eligible_unsaved": (_eligible_unsaved_count(request.user, rows, elig_profile)
-                             if elig_profile and elig_profile.get("class_year") else 0),
+        "eligible_unsaved": len(bulk_save_offer),
         "hidden_fit": hidden_fit,
         "show_unfit_qs": _qs_without(request, "fit"),
         "hidden_dupes": hidden_dupes,
@@ -2416,18 +2432,49 @@ def role_description(request, pk):
     })
 
 
-def _eligible_unsaved_count(user, rows, profile) -> int:
+def _eligible_unsaved_ids(user, rows, profile) -> list[int]:
+    """The exact roles the "Save them all" banner is offering, as ids.
+
+    Returns the LIST, not a count, and the caller stashes it in the session
+    (`BULK_SAVE_OFFER_SESSION_KEY`) so the confirm writes precisely what the
+    banner named. `track_eligible` used to re-derive its own set from
+    `Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)` —
+    the whole table — while this counted `rows`, which is the FEED's
+    materialised list AFTER `fold_duplicates` and the user's hidden-row
+    exclusions. Two different questions, so two different answers on one page
+    load: measured live on the dev board, the banner said 206 and the save
+    wrote 209, the three extras being repeat listings the feed had folded
+    and the save had not. My Applications then folded them again and its tile
+    read 208 — three numbers for one action, in a confirm dialog, which is
+    the one place a number has to be exact.
+
+    Sorted so the stashed batch is deterministic and two renders of the same
+    board produce the same offer.
+    """
     from analytics.models import UserOpportunity
 
     touched = set(
         UserOpportunity.all_objects.filter(user=user)
         .values_list("opportunity_id", flat=True)
     )
-    return sum(
-        1 for o in rows
+    return sorted(
+        o.id for o in rows
         if o.id not in touched
         and (lambda v: v and v["kind"] == "year_ok")(_eligibility(o, profile))
     )
+
+
+def _eligible_unsaved_count(user, rows, profile) -> int:
+    """How many roles the "Save them all" offer covers, for surfaces that
+    only print the number (Today's chip — `crm.today._cockpit_context`).
+
+    Deliberately `len()` of the id list rather than its own count: this and
+    the banner disagreeing is the same defect one level up, and the Today
+    chip really did read 209 against the feed banner's 206 on the same board.
+    Callers must pass a row list that has already been through
+    `directory.dupes.fold_duplicates`, for the same reason — a repeat listing
+    is one role, and counting it twice here is what made the third number."""
+    return len(_eligible_unsaved_ids(user, rows, profile))
 
 
 # The session key `track_eligible` stashes its batch under, so a redirect to
@@ -2439,6 +2486,16 @@ def _eligible_unsaved_count(user, rows, profile) -> int:
 # after the write, not queried or audited later, and `product_events` (via
 # `record_event` below) already carries the durable count for that.
 BULK_SAVE_SESSION_KEY = "bulk_save_batch"
+
+#: The ids the "Save them all" banner is currently OFFERING — written by
+#: `opportunities` on every render, read by `track_eligible` as the exact set
+#: to write. The point of the stash is that the number in the confirm sentence
+#: and the rows the confirm creates are one fact, resolved once, rather than
+#: two queries that answered slightly different questions (they did: see
+#: `_eligible_unsaved_ids`). Session-backed for the same reason the undo batch
+#: above is — it is meaningful only between the render and the click that
+#: follows it, and nothing later ever needs to query it.
+BULK_SAVE_OFFER_SESSION_KEY = "bulk_save_offer"
 
 
 @login_required
@@ -2467,6 +2524,22 @@ def track_eligible(request):
 
     UNDO. Every id this call creates is stashed in the session (see
     `BULK_SAVE_SESSION_KEY` above) for `track_eligible_undo` to reverse.
+
+    THE SET IS THE BANNER'S, NOT THIS VIEW'S. It used to re-derive its own
+    from `Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)`
+    — the whole table — while the banner counted the FEED's materialised rows,
+    which are folded for duplicates and stripped of the user's hidden rows.
+    One page load therefore produced three numbers for one action: the confirm
+    said 206, the write made 209, and My Applications' tile then read 208. So
+    this reads `BULK_SAVE_OFFER_SESSION_KEY`, the exact ids the banner named
+    when it rendered.
+
+    The per-row checks below still run over that set, and can only ever REMOVE
+    from it: a role dismissed in another tab, or closed by a scrape, between
+    the render and the click must not be saved just because it was offered a
+    moment ago. Saving FEWER than the confirm said is a fact about the last
+    thirty seconds; saving MORE is the product doing something the student
+    never agreed to.
     """
     from analytics.models import UserOpportunity
 
@@ -2477,12 +2550,21 @@ def track_eligible(request):
     if request.POST.get("confirmed") != "1":
         return HttpResponseBadRequest("confirmation required")
 
+    offered = request.session.get(BULK_SAVE_OFFER_SESSION_KEY) or []
+    if not offered:
+        # Nothing was offered on this session's last look at the feed, so
+        # there is no number this call could honour. Same posture as the
+        # confirm gate above: refuse rather than fall back to a set the
+        # student was never shown.
+        return HttpResponseBadRequest("no bulk-save offer to confirm")
+
     touched = dict(
         UserOpportunity.all_objects.filter(user=request.user)
         .values_list("opportunity_id", "dismissed")
     )
     saved_ids: list[int] = []
-    for o in Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS):
+    for o in Opportunity.objects.filter(
+            id__in=offered, status="open", bucket__in=TARGET_BUCKETS):
         v = _eligibility(o, profile)
         if not (v and v["kind"] == "year_ok"):
             continue
@@ -2491,6 +2573,10 @@ def track_eligible(request):
         UserOpportunity.all_objects.create(user=request.user, opportunity=o)
         saved_ids.append(o.id)
     saved = len(saved_ids)
+    # The offer is consumed either way: a second POST of the same confirm
+    # (a double-click, a back-then-resubmit) must not re-run against a batch
+    # the student has already acted on.
+    request.session.pop(BULK_SAVE_OFFER_SESSION_KEY, None)
     if saved:
         record_event("eligible_bulk_saved", user=request.user, count=saved)
         # Overwrites any earlier, presumably-already-seen batch — only the
@@ -2500,7 +2586,8 @@ def track_eligible(request):
 
     messages.success(
         request,
-        f"Saved {saved} role{'' if saved == 1 else 's'} that name your year."
+        (f"Saved {saved} role that names your year." if saved == 1
+         else f"Saved {saved} roles that name your year.")
         if saved else "Nothing new to save: every role naming your year is already tracked.")
     from django.shortcuts import redirect
 
