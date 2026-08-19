@@ -212,6 +212,27 @@ this partial and the full-page view both call, so they can never drift).
                         hx-get="{% url 'role_description' uo.id %}"
                         hx-target="#role-drawer-body" hx-swap="innerHTML">Read the posting</button>
               {% endif %}
+              {% comment %}
+              YOUR PEOPLE AT THIS FIRM, immediately above the stage control.
+
+              PLACEMENT IS THE DECISION. `.apps-foot` below is where the
+              student acts on this row — moves it Saved → Applied, or removes
+              it. This block is the input to that act: "before you mark this
+              Applied, you know Maya here, and you haven't spoken in 24 days."
+              Anywhere higher and it competes with the role's own identity;
+              anywhere lower and it is a footnote under the button it is
+              supposed to inform.
+
+              Two names, not three (see APPS_PEOPLE_MAX): these cards are one
+              cell of a 300px-minimum grid. `uo.net` is None — and nothing is
+              drawn — for a role with no firm to join on, and for a Done row
+              that would only have shown the empty prompt (see `_stage_net`).
+              Every card's people come from ONE page-wide query; see
+              `_people_at_firms`.
+              {% endcomment %}
+              {% if uo.net %}
+                {% include "directory/_role_people.html" with net=uo.net compact=1 %}
+              {% endif %}
               <div class="apps-foot">
                 {% comment %}
                 Both forms below post to `track_opportunity` exactly as

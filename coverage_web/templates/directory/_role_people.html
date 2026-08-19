@@ -1,0 +1,61 @@
+{% load textstyle %}
+{% comment %}
+YOUR PEOPLE HERE — the firm page's "Your Network Here" slice, joined onto one
+ROLE, at the two places the decision is actually made: the posting drawer and
+a tracked role's card on My Applications.
+
+Same vocabulary and the same component look as /firms/<slug>/ deliberately
+(warmth dot, name over role, mono days-since, warmest first) — one pattern for
+"your people at this firm", drawn at three sizes, not three patterns. See
+`_role_people` / `_people_at_firms` in directory/views.py.
+
+Takes `net` ({firm_name, firm_slug, people, total, more}) and an optional
+`compact` flag for the My Applications card, which is one cell of a grid and
+gets the tighter two-name form. `net` is None — and this partial is never
+included — when there is no firm to join on.
+{% endcomment %}
+<div class="rp{% if compact %} rp-compact{% endif %}">
+  {% if net.people %}
+    {% comment %}The sentence the PM review asked for, in the second person
+    and with a number in it. "You know 1 person here" is the whole join said
+    once; the rows under it are who.{% endcomment %}
+    <p class="rp-head">You know {{ net.total }} {{ net.total|pluralize:"person,people" }} at {{ net.firm_name|smart_title }}</p>
+    <div class="rp-people">
+      {% for p in net.people %}
+        {% comment %}Straight to the contact page — that is where Compose,
+        the saved draft and the touch log live. A mailto shortcut from here
+        would send an email the CRM never sees, which is the one thing this
+        product exists to stop happening.{% endcomment %}
+        <a class="rp-person" href="{% url 'crm:contact_detail' p.id %}"
+           title="{{ p.name|smart_title }} · {{ p.warmth_label }}">
+          <span class="rp-dot warmth-dot-{{ p.warmth }}" aria-hidden="true"></span>
+          <span class="rp-id">
+            <b>{{ p.name|smart_title }}</b>
+            {% if p.role %}<span class="rp-role">{{ p.role|smart_title }}</span>{% endif %}
+          </span>
+          {% comment %}Warmth is carried by the dot's colour, by the list's
+          order (warmest first) and by this word — never by the colour alone
+          (ux: color-not-only). The word is off-screen rather than printed
+          because at two names in a 300px card the dot plus the order already
+          say it to anyone who can see them, and the row still has to fit the
+          one number that changes daily.{% endcomment %}
+          <span class="vh">{{ p.warmth_label }}.</span>
+          <span class="rp-when">
+            {% if p.days_since is not None %}{{ p.days_since }}d<span class="vh"> since your last touch</span>{% else %}never<span class="vh"> touched</span>{% endif %}
+          </span>
+        </a>
+      {% endfor %}
+    </div>
+    {% if net.more %}
+      <p class="rp-more"><a href="{% url 'directory:firm_detail' net.firm_slug %}">{{ net.more }} more at {{ net.firm_name|smart_title }}</a></p>
+    {% endif %}
+  {% else %}
+    {% comment %}Empty is a real answer, not a blank. It names the firm (a
+    generic "add a contact" is advice; "add someone at Goldman Sachs" is a
+    next action) and the link pre-fills that firm on the add form — the same
+    `?firm=<slug>` the firm page's own button uses, handled by
+    crm.views.contact_new.{% endcomment %}
+    <p class="rp-none">Nobody at {{ net.firm_name|smart_title }} yet.
+      <a href="{% url 'crm:contact_new' %}?firm={{ net.firm_slug }}">Add someone</a>.</p>
+  {% endif %}
+</div>

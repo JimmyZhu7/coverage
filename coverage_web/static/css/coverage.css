@@ -1674,6 +1674,69 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   border: 1px solid var(--line-strong); box-shadow: none; }
 .drawer-apply.is-closed:hover { background: var(--surface); color: var(--ink); }
 
+/* ---- 14c. "Your people here" — the network slice, on a ROLE ----------------
+   The firm page's "Your Network Here" component (`.fd-*`, directory's
+   _styles.html) drawn at role scale, on the two surfaces where a student
+   actually decides: the posting drawer and a tracked role's card on My
+   Applications. Same parts in the same order — warmth dot, name over role,
+   mono days-since, warmest first — because it is the same fact about the same
+   people, and two visual languages for one idea is how a product stops
+   reading as one product.
+
+   It lives HERE rather than in directory/_styles.html because My Applications
+   inlines its own stylesheet and does not include that file, and because the
+   drawer is drawn on three pages. Colours are the existing warmth tokens
+   (--w-*-bar and friends); nothing new is introduced.
+
+   Motion: the row's hover nudge is the same `translateX(2px)` every row-shaped
+   thing on the product uses, and §17's reduced-motion block already
+   neutralises every transition site-wide, so it needs no local guard. */
+.rp { margin: var(--s3) 0 var(--s4); padding: var(--s3);
+  border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+/* On a My Applications card the surrounding card IS the panel, so the block
+   drops the box and separates with a hairline instead — a panel inside a
+   panel reads as a nested widget rather than as part of the card. */
+.rp-compact { margin: var(--s2) 0 0; padding: var(--s2) 0 0;
+  border: 0; border-top: 1px solid var(--line); border-radius: 0;
+  background: transparent; }
+.rp-head { margin: 0 0 6px; font-size: var(--fs-xs); font-weight: var(--w-med);
+  color: var(--ink-2); }
+.rp-compact .rp-head { font-size: var(--fs-micro); color: var(--ink-3);
+  font-weight: var(--w-reg); text-transform: uppercase; letter-spacing: 0.04em; }
+.rp-people { display: grid; gap: 2px; }
+.rp-person { display: flex; align-items: center; gap: var(--s2);
+  padding: 5px 8px; margin: 0 -8px; border-radius: 8px; text-decoration: none;
+  color: var(--ink); font-size: var(--fs-s);
+  transition: background-color var(--t-fast), transform var(--t-fast); }
+.rp-person:hover { background: var(--surface); text-decoration: none;
+  transform: translateX(2px); }
+.rp-compact .rp-person:hover { background: var(--paper); }
+.rp-person:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Warmth by colour AND by the list's order (strongest first) AND by the
+   off-screen word on every row — never by the colour alone. */
+.rp-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.rp-id { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rp-id b { font-weight: var(--w-med); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.rp-role { color: var(--ink-3); font-size: var(--fs-micro);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-when { font-family: var(--font-mono); font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums; color: var(--ink-3); flex: none; }
+.rp-more { margin: 6px 0 0; font-size: var(--fs-xs); }
+.rp-more a { color: var(--ink-2); }
+/* Empty is a sentence and a way out, never a bare region (ux: empty-states).
+   Quiet on purpose: it is a prompt, not news. */
+.rp-none { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); }
+.rp:not(.rp-compact) .rp-none { font-size: var(--fs-s); color: var(--ink-2); }
+
+/* The warmth dot's four colours. Defined site-wide here (not only in
+   directory/_styles.html, which My Applications does not include) so the same
+   dot means the same thing on the firm page, the drawer and a pipeline card. */
+.warmth-dot-cold     { background: var(--w-cold-bar); }
+.warmth-dot-replied  { background: var(--w-replied-bar); }
+.warmth-dot-chatted  { background: var(--w-chatted-bar); }
+.warmth-dot-advocate { background: var(--w-advocate-bar); }
+
 /* ---- 15. htmx niceties ----------------------------------------------------- */
 #cov-results { transition: opacity var(--t-fast); }
 .filters.htmx-request ~ #cov-results { opacity: 0.55; }

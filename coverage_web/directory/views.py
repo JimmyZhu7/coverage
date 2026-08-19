@@ -2323,9 +2323,19 @@ def role_description(request, pk):
     raw = opp.raw or {}
     facts = raw.get("facts") or {}
     today = timezone.localdate()
+    # One role, one firm, one cheap read — and nothing at all for a signed-out
+    # reader (this view is deliberately not `login_required`; the posting text
+    # is public, a student's contacts are not). See `_people_at_firms`.
+    net = _role_people(
+        opp.firm,
+        _people_at_firms(
+            request.user, [opp.firm_id], today=today, cap=ROLE_PEOPLE_MAX
+        ).get(opp.firm_id),
+    ) if request.user.is_authenticated else None
     return render(request, "directory/_role_drawer.html", {
         "o": opp,
         "firm": opp.firm,
+        "net": net,
         "bucket_label": BUCKET_LABELS.get(opp.bucket, opp.bucket),
         "blocks": paragraphs(raw.get("detail_text")),
         "fetched": bool(raw.get("detail_text")),
@@ -2579,13 +2589,41 @@ def _lens_item(uo, *, today):
     }
 
 
-def _stage_card(uo, *, today) -> dict:
-    """One tracked role as the funnel sections render it."""
+def _stage_net(uo, o, people_by_firm) -> dict | None:
+    """The people block for one funnel card, or None to draw nothing.
+
+    See the `net` comment in `_stage_card`: Done rows suppress the empty
+    prompt but keep the block when there are real names on it — a role you
+    finished at a firm where you know two people is still a relationship the
+    card should not hide.
+    """
+    net = _role_people(o.firm, (people_by_firm or {}).get(o.firm_id))
+    if net and not net["people"] and (uo.applied_status or "saved") == TRACK_CLOSED:
+        return None
+    return net
+
+
+def _stage_card(uo, *, today, people_by_firm=None) -> dict:
+    """One tracked role as the funnel sections render it.
+
+    `people_by_firm` is the ONE grouped read `_my_applications_context` does
+    for the whole page (see `_people_at_firms`); this only looks its own firm
+    up in it. Passing the map rather than the user is what keeps the page at
+    one query for people instead of one per card.
+    """
     o = uo.opportunity
     return {
         "id": o.id,
         "opportunity_id": o.id,
         "firm_name": o.firm.name,
+        # Your people at this firm — the thing that decides whether "Applied"
+        # is the next move or "ping Maya first" is. See `_role_people`.
+        #
+        # A Done row keeps the block only when it has real names on it. The
+        # EMPTY prompt ("Nobody at X yet — add someone") is a call to act on a
+        # role still in play; on a terminal card it is a nag about an
+        # application that is already over, repeated once per finished row.
+        "net": _stage_net(uo, o, people_by_firm),
         "title": o.title,
         # The disambiguator. Firms post the same title per city with the city
         # only in `location` — the first populated-funnel walkthrough had two
@@ -2689,6 +2727,16 @@ def _my_applications_context(request):
     today = timezone.localdate()
     rows = _tracked_rows(request.user)
 
+    # Your people at every firm on this page, in ONE query for the whole page
+    # (see `_people_at_firms`) rather than one per card. A pipeline of 30
+    # roles is 30 cards and, before this, would have been 30 contact reads.
+    people_by_firm = _people_at_firms(
+        request.user,
+        {uo.opportunity.firm_id for uo in rows},
+        today=today,
+        cap=APPS_PEOPLE_MAX,
+    )
+
     # setdefault so any unexpected legacy status can't KeyError the page.
     groups: dict[str, list] = {key: [] for key, _ in _STAGES}
     for uo in rows:
@@ -2710,7 +2758,10 @@ def _my_applications_context(request):
             # could reach nothing else, so the five funnel sections showed
             # strictly less about a role than the two deadline lenses on the
             # same page did about the same row.
-            "items": [_stage_card(uo, today=today) for uo in groups[key]],
+            "items": [
+                _stage_card(uo, today=today, people_by_firm=people_by_firm)
+                for uo in groups[key]
+            ],
             "count": len(groups[key]),
             "pct": round(100 * len(groups[key]) / biggest) if biggest else 0,
         }
@@ -2997,4 +3048,130 @@ def _my_network_at(user, firm, *, today) -> dict:
         "my_advocates": sum(1 for c in rows if c.warmth == "advocate"),
         "my_next": my_next,
         "my_next_restates_top_row": my_next_restates_top_row,
+    }
+
+
+# ---------------------------------------------------------------------------
+# "Your people here" — the firm-page network slice, joined onto a ROLE.
+# ---------------------------------------------------------------------------
+# The landing headline is "the deadline and the person behind it, one place",
+# and until now the two only ever met on /firms/<slug>/ — a page a student
+# reaches by deliberately navigating away from the role they were deciding
+# about. The two surfaces where the decision actually happens (the feed's
+# role drawer, and a saved role's card on My Applications) knew the deadline
+# and knew nothing about the relationship, so the product argued its own
+# thesis on a page nobody visits mid-decision.
+#
+# This is the same slice `_my_network_at` renders on the firm page, in the
+# same vocabulary and the same component look (warmth dot, name, role, mono
+# days-since, warmest first), cut down to the warmest few. The firm page
+# stays the roster; these are the "before you apply, you know Maya here"
+# version of it.
+#
+# WHAT IT DELIBERATELY DOES NOT DO: it does not compute a cadence "due
+# action" and offer Compose. `cadence.due_actions` needs the user's whole
+# contact set, their whole touch history and the shared firm_dates to decide
+# who is due — one grouped query cannot answer it, and a cheaper local
+# approximation would be a SECOND source of truth about who is due, free to
+# disagree with Today. Every row links to the contact page instead, which is
+# where Compose, the saved draft and the touch log already live. The two
+# facts that tell a student whether to act — warmth (tier + position) and how
+# long since the last touch — travel on the row itself.
+
+# The warmth ladder in words, for the row's accessible label and its tooltip.
+# The dot carries it visually and the sort order carries it structurally; a
+# colour is never the only channel (ux: color-not-only).
+_WARMTH_WORDS = {
+    "advocate": "In your corner",
+    "chatted": "You have chatted",
+    "replied": "They replied",
+    "cold": "No reply yet",
+}
+
+# How many names a role shows before it stops being a hint and starts being a
+# roster. The drawer is a full-width panel and can hold three; a My
+# Applications card is one cell of a 300px-minimum grid and can hold two
+# without pushing its own stage control off the bottom.
+ROLE_PEOPLE_MAX = 3
+APPS_PEOPLE_MAX = 2
+
+
+def _people_at_firms(user, firm_ids, *, today, cap) -> dict:
+    """`{firm_id: {"people": [...], "total": n, "more": n}}` for every firm
+    named, in ONE query no matter how many firms are asked about.
+
+    My Applications lists every role a student tracks — a dozen cards across
+    a dozen firms is ordinary — so the obvious per-card `Contact.objects
+    .for_user(user).filter(firm=...)` would be a dozen queries that grow with
+    the pipeline. One `firm_id__in` read plus a Python group-by is flat: the
+    page costs the same one query at 1 card as at 50. `assertNumQueries` in
+    `directory/tests/test_role_people.py` pins that so it cannot regress.
+
+    Tenancy: `Contact` is private-zone, so this goes through `.for_user`
+    (coverage_web/tenancy.py) — `Contact.objects` unscoped raises
+    `TenantScopeError` by construction.
+    """
+    if not getattr(user, "is_authenticated", False):
+        return {}
+    firm_ids = {fid for fid in firm_ids if fid}
+    if not firm_ids:
+        return {}
+
+    rows = list(
+        Contact.objects.for_user(user)
+        .filter(firm_id__in=firm_ids, archived=False)
+        .annotate(last_ts=Max("touches__ts"))
+    )
+    by_firm: dict[int, list] = {}
+    for c in rows:
+        by_firm.setdefault(c.firm_id, []).append(c)
+
+    out = {}
+    for fid, contacts in by_firm.items():
+        # Same ordering the firm page uses (`_my_network_at`): warmth tier
+        # first, name inside a tier. Whoever leads this list is the person to
+        # open, which is why no separate "warmest here" callout is needed at
+        # this size — at a cap of two or three the list IS the callout.
+        contacts.sort(key=lambda c: (_WARMTH_RANK.get(c.warmth, 9), c.name.lower()))
+        out[fid] = {
+            "people": [_person_row(c, today=today) for c in contacts[:cap]],
+            "total": len(contacts),
+            "more": max(0, len(contacts) - cap),
+        }
+    return out
+
+
+def _person_row(c, *, today) -> dict:
+    """One contact as a role surface renders them. `last_ts` is the annotation
+    `_people_at_firms` attached; reading `c.touches` here instead would be the
+    N+1 this helper exists to avoid."""
+    last_ts = getattr(c, "last_ts", None)
+    return {
+        "id": c.id,
+        "name": c.name,
+        "role": c.role,
+        "warmth": c.warmth,
+        "warmth_label": _WARMTH_WORDS.get(c.warmth, c.warmth),
+        "days_since": (today - timezone.localtime(last_ts).date()).days
+        if last_ts else None,
+    }
+
+
+def _role_people(firm, slice_) -> dict | None:
+    """The block one role renders, or None when there is nothing honest to
+    draw.
+
+    `None` means "render no block at all": a role with no firm to join on.
+    An EMPTY block (a firm, no contacts) is a different answer and a real
+    one — it is the product's own pitch addressed to this firm by name, with
+    the add-contact form pre-filled — so it returns a dict with an empty
+    `people` list rather than None.
+    """
+    if firm is None or not getattr(firm, "id", None):
+        return None
+    slice_ = slice_ or {"people": [], "total": 0, "more": 0}
+    return {
+        "firm_name": firm.name,
+        "firm_slug": firm.slug,
+        **slice_,
     }

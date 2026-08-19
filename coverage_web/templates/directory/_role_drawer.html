@@ -21,6 +21,27 @@ last and unmissable — this drawer is for deciding, not for applying.
   </p>
 </header>
 
+{% if net %}
+  {% comment %}
+  YOUR PEOPLE HERE, directly under the title and above everything the posting
+  itself says.
+
+  PLACEMENT IS THE DECISION. This drawer is "for deciding, not for applying"
+  (see the note at the top of this file), and the one thing on it that the
+  firm's own careers page could never tell a student is that they already know
+  someone inside. Below the description it would sit under a median 3,825
+  characters of prose — off-screen on every fetched posting, read after the
+  decision rather than during it. Here it is the second thing after the
+  deadline line, which is the product's landing headline made literal: the
+  deadline and the person behind it, one place.
+
+  Capped at three names and one line when empty, so it never pushes the
+  sticky apply bar out of a student's way. Signed-out readers get nothing —
+  this endpoint is public, their contacts are not (see `role_description`).
+  {% endcomment %}
+  {% include "directory/_role_people.html" %}
+{% endif %}
+
 {% if facts %}
   {% comment %}Every row carries its own evidence. A fact whose sentence we
   cannot show is a fact this product does not state.{% endcomment %}

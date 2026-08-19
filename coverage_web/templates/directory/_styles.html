@@ -979,11 +979,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     transform: translateX(2px); }
   .fd-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   /* Warmth by colour AND by position in the list (sorted strongest first),
-     never colour alone. */
-  .warmth-dot-cold     { background: var(--w-cold-bar); }
-  .warmth-dot-replied  { background: var(--w-replied-bar); }
-  .warmth-dot-chatted  { background: var(--w-chatted-bar); }
-  .warmth-dot-advocate { background: var(--w-advocate-bar); }
+     never colour alone. The four `.warmth-dot-*` colours moved to
+     coverage.css §14c: My Applications inlines its own stylesheet and never
+     includes this file, so the same dot has to be defined site-wide for the
+     role drawer and the pipeline cards to draw it. */
   .fd-person-id { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .fd-person-id b { font-weight: var(--w-med); overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
