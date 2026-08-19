@@ -430,8 +430,8 @@ class Candidate:
     #: need in the market it names. Set by the caller, which owns the profile
     #: pairing (directory.views._eligibility); this module stays pure.
     #:
-    #: A blocked role can never be a pick. The feed's "Fits me" filter already
-    #: hides these, and the bar recommending what the filter hides is the
+    #: A blocked role can never be a pick. The feed's "Eligible only" filter
+    #: already hides these, and the bar recommending what the filter hides is the
     #: product contradicting itself: the first live audit of Jimmy's picks had
     #: FIVE of six carrying a blocking verdict — three wrong-year, two
     #: won't-sponsor — every one of them a role he cannot get, ranked top of

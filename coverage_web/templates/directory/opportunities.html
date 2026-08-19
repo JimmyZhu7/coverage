@@ -219,11 +219,19 @@
       a role that states nothing always shows. Deliberately uncounted (it
       is per-user, and the facet counts are shared); the scope line inside
       the results owns its honesty instead.
+
+      Labelled "Eligible only", not "Fits me": on a 2,295-row feed this
+      toggle clears roles you are structurally BLOCKED from (~5% of them),
+      not roles that suit you — "Fits me" promised a shortlist and handed
+      back a slightly smaller haystack. A real "matches me" shortlist would
+      need to score year + region + track + eligibility together, which is
+      what `directory.recommend.recommend()` already does for Picked for
+      You; that's a second control, not a rename of this one.
       {% endcomment %}
       {% if fit_available %}
         <label class="fit-toggle" title="Hide roles whose own text states a requirement you don't meet. Roles that state nothing always show.">
           <input type="checkbox" name="fit" value="1"{% if fit %} checked{% endif %}>
-          <span>Fits me</span>
+          <span>Eligible only</span>
         </label>
       {% endif %}
 

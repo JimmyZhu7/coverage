@@ -804,8 +804,8 @@ def test_a_non_track_function_claims_no_track_match():
 
 
 def test_a_blocked_role_can_never_be_picked():
-    """The feed's "Fits me" filter hides roles whose own text excludes this
-    student; the bar recommending what the filter hides would be the product
+    """The feed's "Eligible only" filter hides roles whose own text excludes
+    this student; the bar recommending what the filter hides would be the product
     contradicting itself. Hard exclusion, not a penalty — no amount of tier,
     track and region may outweigh the posting saying who it is not for."""
     from directory.recommend import recommend
