@@ -29,7 +29,18 @@
   /* Audience switcher: CSS-only segmented control (hidden radios + labels).
      The checked radio shows its panel via sibling selectors; no JS, and with
      CSS off both panels simply render stacked. */
-  .aud { max-width: 980px; margin: 0 auto; }
+  /* One column for the whole page, 960px wide.
+
+     `.page` is --page-w-full (1440px), so the hero was running to ~1390px
+     over an 860px card grid: a masthead half again as wide as the thing it
+     introduces, with the eye having to re-find the left edge on every
+     section. Every band on this page — hero, cards, table, the honesty
+     note, the FAQ — now shares one measure and one pair of edges. This is
+     scoped to the pricing template's own style block, so no other page that
+     renders .kin-hero is touched. */
+  .page > .kin-hero { max-width: var(--page-w); margin-inline: auto; }
+
+  .aud { max-width: var(--page-w); margin: 0 auto; }
   .aud > input { position: absolute; opacity: 0; pointer-events: none; }
   .seg { display: flex; justify-content: center; align-items: center; gap: 4px;
     width: max-content; margin: 0 auto var(--s6); padding: 4px;
@@ -49,11 +60,20 @@
   #aud-ind:checked ~ .panel-ind { display: block; }
   #aud-team:checked ~ .panel-team { display: block; }
 
+  /* 960px, not 860, and 32px of padding on all four sides rather than 24 on
+     the sides. Both are in service of the same thing: a 13px line of body
+     copy wants roughly 55-65 characters, and the old 860px grid gave each
+     card about 370px of text width, which is where a bullet like "Deadline
+     fuses, rolling markers, and a label on every inferred date" broke onto
+     a second line for no reason other than the column being narrow. The
+     measure is the layout problem; shortening the words alone would not
+     have fixed it. 960px is --page-w, so the cards now line up with the
+     page rather than sitting inside it at an arbitrary width. */
   .price-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5);
-    max-width: 860px; margin: 0 auto; align-items: stretch; }
+    max-width: var(--page-w); margin: 0 auto; align-items: stretch; }
   .price-card { border: 1px solid var(--line); border-radius: var(--r-panel);
     background: var(--surface); box-shadow: var(--shadow-1);
-    padding: var(--s6) var(--s5); display: flex; flex-direction: column;
+    padding: var(--s6); display: flex; flex-direction: column;
     position: relative; overflow: hidden; }
   .price-card.featured { border-color: var(--accent-line);
     box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-2); }
@@ -91,26 +111,47 @@
     box-shadow: inset 0 0 0 1px var(--stale-l); }
   .plan-name { font: var(--w-black) 22px/1.2 var(--font-display);
     letter-spacing: -0.01em; margin: 0; }
-  .plan-tagline { color: var(--ink-2); font-size: var(--fs-s); margin: 0 0 var(--s4); }
+  .plan-tagline { color: var(--ink-2); font-size: var(--fs-s);
+    margin: 0 0 var(--s5); max-width: 42ch; }
+  /* The price is the answer to a different question than the feature list,
+     and the card gave the two the same 16px of air, so the eye ran straight
+     from "$0" into "2435 live campus roles" with nowhere to stop. A hairline
+     and 24px on each side of it is the resting point: everything above is
+     what it costs, everything below is what you get. Every card has a price,
+     so the rule is universal and needs no per-card variant. */
   .plan-price { display: flex; align-items: baseline; gap: var(--s2);
-    margin-bottom: var(--s4); }
+    margin: 0 0 var(--s5); padding-bottom: var(--s5);
+    border-bottom: 1px solid var(--line); }
   .plan-price .amount { font-family: var(--font-mono); font-weight: var(--w-bold);
     font-size: 42px; line-height: 1; color: var(--ink);
     font-variant-numeric: tabular-nums; }
   .plan-price .per { color: var(--ink-3); font-size: var(--fs-s); }
-  .plan-includes { font-size: var(--fs-xs); font-weight: var(--w-med);
-    color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em;
-    margin: 0 0 var(--s2); }
-  .plan-features { list-style: none; margin: 0 0 var(--s5); padding: 0;
-    display: flex; flex-direction: column; gap: var(--s2); flex: 1; }
+  /* Sentence case. "EVERYTHING IN FREE, PLUS" was the third all-caps
+     letter-spaced string on the card, after the two badges; a lead-in to a
+     list is a phrase, and setting it as a constant made the card shout its
+     connective tissue. */
+  .plan-includes { font-size: var(--fs-s); font-weight: var(--w-med);
+    color: var(--ink-3); margin: 0 0 var(--s3); }
+  /* 12px between rows, up from 8. At 8px the gap between two bullets was
+     narrower than the gap between the two lines INSIDE a bullet, so a
+     wrapped bullet and its neighbour fused into one paragraph — which is
+     most of why the list read as prose rather than as a list. */
+  .plan-features { list-style: none; margin: 0 0 var(--s6); padding: 0;
+    display: flex; flex-direction: column; gap: var(--s3); flex: 1; }
   /* The bullet is positioned, not a flex sibling. As `display: flex` the row
      had a gap between EVERY child, so the moment a feature line contained a
      <b> — which the live counts now do — an 8px hole opened on each side of
      the number: "1183   live campus roles across   72   firms". Absolute
      positioning lets the text be ordinary inline content again, which is
      what it always was. */
-  .plan-features li { position: relative; padding-left: 22px;
-    font-size: var(--fs-s); color: var(--ink-2); line-height: 1.5; }
+  /* `text-wrap: pretty` is doing real work here rather than being a nicety.
+     Several of these lines land a word or two over the column, and a bullet
+     whose second line is the single word "date" reads as a mistake in a way
+     a balanced two-line bullet does not. Browsers without it wrap as before;
+     nothing depends on it. */
+  .plan-features li { position: relative; padding-left: 26px;
+    font-size: var(--fs-s); color: var(--ink-2); line-height: 1.55;
+    text-wrap: pretty; }
   .plan-features li b { color: var(--ink); font-weight: var(--w-med);
     font-variant-numeric: tabular-nums; }
   /* Allowances get their own muted line instead of trailing the sentence.
@@ -158,7 +199,7 @@
      re-themes with the rest of the product — the accent wash is mixed FROM
      --accent rather than hardcoded, which is why it survives the dark
      palette's flip from deep navy to light blue. */
-  .price-compare { max-width: 860px; margin: 0 auto; }
+  .price-compare { max-width: var(--page-w); margin: 0 auto; }
   .price-compare h2 { font: var(--w-black) 22px/1.2 var(--font-display);
     letter-spacing: -0.01em; color: var(--ink); text-align: center;
     margin: var(--s7) 0 var(--s4); }
@@ -166,7 +207,7 @@
      squashing sixteen rows into a phone width. min-width is the contract
      that makes the overflow actually happen. */
   .cmp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .cmp { width: 100%; max-width: 860px; min-width: 480px; margin: 0 auto;
+  .cmp { width: 100%; max-width: var(--page-w); min-width: 480px; margin: 0 auto;
     border-collapse: collapse; }
   .cmp td, .cmp th { border-bottom: 1px solid var(--line); }
   .cmp th[scope="row"], .cmp td:first-child { text-align: left;
@@ -239,6 +280,10 @@
 
   @media (max-width: 720px) {
     .price-grid { grid-template-columns: 1fr; }
+    /* 32px of padding costs a phone 18% of its text column, which is where
+       one-line bullets start wrapping again. The vertical rhythm is what
+       carries the card's calm, so that stays; only the sides give way. */
+    .price-card { padding: var(--s5) var(--s4); }
     /* The label column gives up its share first; the two plan columns are
        already at their floor. Together with .cmp's min-width this is what
        makes .cmp-scroll actually scroll rather than crush. */
