@@ -16,6 +16,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from analytics.models import ProductEvent
 from assistant.models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
 from crm.models import Contact, Touch
 from directory.models import Firm
@@ -1166,7 +1167,7 @@ def test_the_thread_offers_copy_on_every_answer_and_edit_on_every_question(signe
     conversation = ChatConversation(user=user)
     conversation.save()
     question = _turn(user, conversation, "user", "who should I chase?")
-    _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+    answer = _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
 
     body = signed_in.get(reverse("assistant:chat_conversation", args=[conversation.id])).content.decode()
 
@@ -1180,6 +1181,29 @@ def test_the_thread_offers_copy_on_every_answer_and_edit_on_every_question(signe
     assert f'name="message" value="{question.id}"' in thread
     # And says plainly what it is about to destroy.
     assert "Everything after this message is deleted" in thread
+    # Retry is a real submit button owned by the QUESTION's own edit form —
+    # no second copy of the rewind machinery, just another door into it.
+    assert f'form="as-edit-form-{question.id}"' in thread
+    assert f'id="as-edit-form-{question.id}"' in thread
+    # Feedback posts the ANSWER's own id, not the question's.
+    assert 'class="as-msg-feedback"' in thread
+    assert f'name="message" value="{answer.id}"' in thread
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_the_very_first_answer_in_a_conversation_still_offers_retry(signed_in, user):
+    """A retry button needs a prior question to resubmit — which every real
+    answer has, including the first one in a brand new chat. This is really a
+    guard against `retry_message_id` being computed off-by-one and pointing
+    at nothing on the very first turn."""
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    question = _turn(user, conversation, "user", "who should I chase?")
+    _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+
+    body = signed_in.get(reverse("assistant:chat_conversation", args=[conversation.id])).content.decode()
+
+    assert f'form="as-edit-form-{question.id}"' in _rendered_thread(body)
 
 
 @override_settings(ANTHROPIC_API_KEY="")
@@ -1196,8 +1220,11 @@ def test_a_notice_gets_no_copy_button(signed_in, user):
 
     body = signed_in.get(reverse("assistant:chat_conversation", args=[conversation.id])).content.decode()
 
+    thread = _rendered_thread(body)
     assert "couldn't reach the model" in body
-    assert 'class="as-msg-btn as-msg-copy"' not in _rendered_thread(body)
+    assert 'class="as-msg-btn as-msg-copy"' not in thread
+    assert 'class="as-msg-btn as-msg-retry"' not in thread
+    assert 'class="as-msg-feedback"' not in thread
 
 
 @override_settings(ANTHROPIC_API_KEY="")
@@ -1212,3 +1239,94 @@ def test_a_stream_that_ends_badly_still_names_the_message_to_edit(signed_in, use
     question = ChatMessage.objects.for_user(user).filter(role="user").first()
     assert '"type": "notice"' in body
     assert f'"user_message_id": {question.id}' in body
+
+
+# ---------------------------------------------------------------------------
+# Feedback: thumbs up/down on one of Coverage's own answers. A fire-and-
+# forget product event (analytics.events.record_event), not a stored rating —
+# these tests are about the write landing with the right shape and the right
+# tenant guard, not about anything the page reads back.
+# ---------------------------------------------------------------------------
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_a_thumbs_up_logs_a_product_event_against_the_answer(signed_in, user):
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    _turn(user, conversation, "user", "who should I chase?")
+    answer = _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+
+    response = signed_in.post(reverse("assistant:feedback"), {"message": answer.id, "rating": "up"})
+
+    assert response.status_code == 200
+    event = ProductEvent.objects.for_user(user).get(event="assistant_feedback")
+    assert event.props["message_id"] == answer.id
+    assert event.props["conversation_id"] == conversation.id
+    assert event.props["rating"] == "up"
+
+
+@override_settings(ANTHROPIC_API_KEY="")
+def test_a_thumbs_down_logs_its_own_rating(signed_in, user):
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    _turn(user, conversation, "user", "who should I chase?")
+    answer = _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+
+    signed_in.post(reverse("assistant:feedback"), {"message": answer.id, "rating": "down"})
+
+    event = ProductEvent.objects.for_user(user).get(event="assistant_feedback")
+    assert event.props["rating"] == "down"
+
+
+def test_feedback_rejects_a_rating_the_client_invented(signed_in, user):
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    _turn(user, conversation, "user", "who should I chase?")
+    answer = _turn(user, conversation, "assistant", "Chase Morgan Stanley.")
+
+    response = signed_in.post(reverse("assistant:feedback"), {"message": answer.id, "rating": "sideways"})
+
+    assert response.status_code == 400
+    assert not ProductEvent.objects.for_user(user).filter(event="assistant_feedback").exists()
+
+
+def test_feedback_rejects_a_user_turn(signed_in, user):
+    """The chip only ever sits under an answer — a message id that names the
+    STUDENT's own turn is not something the client should be able to send,
+    so it 404s exactly like another student's id would."""
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    question = _turn(user, conversation, "user", "who should I chase?")
+
+    response = signed_in.post(reverse("assistant:feedback"), {"message": question.id, "rating": "up"})
+
+    assert response.status_code == 404
+
+
+def test_feedback_on_another_students_answer_404s_and_logs_nothing(client, user):
+    other = User.objects.create_user(email="other@example.com", password="pw12345!")
+    conversation = ChatConversation(user=other)
+    conversation.save()
+    _turn(other, conversation, "user", "who should I chase?")
+    theirs = _turn(other, conversation, "assistant", "their private plan")
+
+    client.force_login(user)
+    response = client.post(reverse("assistant:feedback"), {"message": theirs.id, "rating": "up"})
+
+    assert response.status_code == 404
+    # record_event always logs against the ACTOR (request.user), never the
+    # message's owner — for_user(user) is enough to prove the 404 happened
+    # before any write, without assistant/ ever touching the unscoped
+    # manager itself (test_isolation.py forbids that outright).
+    assert not ProductEvent.objects.for_user(user).filter(event="assistant_feedback").exists()
+
+
+def test_feedback_rejects_a_get(signed_in):
+    assert signed_in.get(reverse("assistant:feedback")).status_code == 405
+
+
+def test_an_anonymous_visitor_cannot_leave_feedback(client):
+    response = client.post(reverse("assistant:feedback"))
+
+    assert response.status_code == 302
+    assert "/accounts/login/" in response["Location"]
