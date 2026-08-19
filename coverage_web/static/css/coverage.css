@@ -1695,8 +1695,16 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
 /* On a My Applications card the surrounding card IS the panel, so the block
    drops the box and separates with a hairline instead — a panel inside a
-   panel reads as a nested widget rather than as part of the card. */
-.rp-compact { margin: var(--s2) 0 0; padding: var(--s2) 0 0;
+   panel reads as a nested widget rather than as part of the card.
+
+   `margin-top: auto` is the placement, not spacing: the cards are a grid and
+   stretch to a common height, so on a sparse card (short title, no chips) the
+   block would otherwise float in the middle with the stage control pinned far
+   below it — and this block only means anything read directly above the
+   control it is advice about. The auto margin eats the slack instead, so it
+   sits against the footer on every card, dense or sparse. The gap above the
+   hairline is `.apps-card`'s own flex `gap`, which still applies. */
+.rp-compact { margin: auto 0 0; padding: var(--s2) 0 0;
   border: 0; border-top: 1px solid var(--line); border-radius: 0;
   background: transparent; }
 .rp-head { margin: 0 0 6px; font-size: var(--fs-xs); font-weight: var(--w-med);
