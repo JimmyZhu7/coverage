@@ -71,6 +71,12 @@ dependencies = [
     # only at call time, which is exactly what `is_configured()` gates. See
     # STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET in settings/base.py.
     "stripe>=11.0",
+    # The client behind django.core.cache.backends.redis.RedisCache, which
+    # settings/base.py selects when REDIS_URL is set. Django ships the cache
+    # backend itself but imports redis-py lazily, so without this dependency
+    # a production deploy that sets REDIS_URL would boot fine and then fail
+    # on the first rate-limit check — declare it, don't discover it.
+    "redis>=5.0",
 ]
 
 # Application, not a library anyone imports — don't build/install it as a

@@ -353,6 +353,38 @@ DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 DATABASES["default"].setdefault("OPTIONS", {})
 DATABASES["default"]["OPTIONS"].setdefault("connect_timeout", 5)
 
+# ---------------------------------------------------------------------------
+# Cache — shared, because the things stored in it are security counters.
+#
+# What lives in this cache is not page fragments. It is django-allauth's
+# brute-force protection (5 failed logins per 5 minutes per identifier, 10
+# per minute per IP, plus signup and password-reset limits) and the app's own
+# `_search_throttled` / `_waitlist_throttled` guards. Every one of those is a
+# count that only means anything if all the workers agree on it.
+#
+# Django's fallback when CACHES is unset is LocMemCache, which is per-process.
+# The Dockerfile runs gunicorn with `--workers 3`, so an attacker gets one
+# full allowance PER WORKER — the "5 attempts" limit becomes 15 in practice,
+# and every deploy resets all three counters to zero. The rate limiting is
+# correctly configured and quietly worthless.
+#
+# So: Redis when REDIS_URL is set, LocMemCache when it isn't. Local dev and
+# CI keep the in-memory behaviour they have today (one process, nothing to
+# share); production sets REDIS_URL and the three workers count together.
+# RedisCache ships with Django 4.2+ — no extra dependency, no django-redis.
+REDIS_URL = env("REDIS_URL", default="")
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+    }
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

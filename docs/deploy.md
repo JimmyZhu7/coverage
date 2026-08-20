@@ -26,6 +26,12 @@ dollars/month; Google OAuth is free.
      (add your custom domain too once you attach one, comma-separated).
    - `DJANGO_CSRF_TRUSTED_ORIGINS` = `https://coverage-web.onrender.com`
      (scheme included; add the custom domain's origin too).
+   - `REDIS_URL` — Render → **New → Key Value**, then paste that store's
+     *internal* connection string here. Do this before real students sign up.
+     This cache holds the failed-login and password-reset counters; blank
+     means each of the three gunicorn workers keeps its own copy, so the
+     "5 failed logins per 5 minutes" limit is really 15 and resets on every
+     deploy. Blank is fine while you are the only user.
    - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (section 3).
    - `GMAIL_LIVE_*` (five keys) — optional; leave blank until you want real-time
      Gmail (section 4, `docs/gmail-live-setup.md`).

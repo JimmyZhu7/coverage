@@ -34,6 +34,14 @@ services:
         sync: false # e.g. coverage-web.onrender.com (+ your custom domain)
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
         sync: false # e.g. https://coverage-web.onrender.com
+      # The rate-limit cache. Create a Render Key-Value store in the dashboard
+      # and paste its internal connection string here. NOT optional in
+      # practice: blank falls back to a per-process in-memory cache, and this
+      # service runs three gunicorn workers, so allauth's failed-login limits
+      # count three separate times and reset on every deploy. See the Cache
+      # section of settings/base.py.
+      - key: REDIS_URL
+        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
