@@ -42,6 +42,13 @@ APIs & Services → OAuth consent screen:
   tier — up to 100 test users, no Google review, no cost.** Only exceeding
   100 or removing the "Testing" publishing status triggers the paid
   verification process.
+- Privacy policy URL: your deployed `/privacy/`. When you do go through
+  verification, a reviewer reads that page looking for the Limited Use
+  representation for `gmail.readonly`. It is there, in the "Google API
+  Limited Use" section, in Google's own required wording — see the
+  DO-NOT-REWORD note at the top of `templates/legal/privacy.html`. The page
+  is still marked DRAFT and still has unfilled placeholders, so it needs the
+  lawyer pass and the entity details before it is submittable.
 
 ## 5. Pub/Sub topic + subscription
 

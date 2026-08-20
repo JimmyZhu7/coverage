@@ -30,6 +30,13 @@ OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
     advisor memories, or calendar events. "Your rights" says so plainly rather
     than overclaiming, but the honest fix is to add them to
     accounts/services.py EXPORT_FILES.
+
+DO NOT REWORD: the "Google API Limited Use" section
+  The first sentence of that section is Google's own required representation,
+  near-verbatim, and Google's OAuth reviewers check for it when an app asks for
+  a restricted scope (Coverage asks for gmail.readonly — settings/base.py's
+  GMAIL_LIVE_SCOPES). Editing it for tone fails verification. The paragraph
+  under it is ours and can be edited freely, as long as it stays true.
 ================================================================================
 {% endcomment %}
 
@@ -67,7 +74,12 @@ OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
     <li><strong>A Gmail account you connect.</strong> If Gmail Live is enabled on this deployment and you complete Google's consent screen, Coverage reads your Gmail with Google's read-only scope in order to log recruiting touches automatically. Be clear about what that means: we do read your mailbox. Read the next paragraph before you connect it.</li>
   </ul>
   <p>On the Gmail path we store a Google refresh token, encrypted at rest, plus the mailbox address and a position marker so we know where we last read. We do not store your messages. What lands in your CRM is the structured result: who the message was from, whether it was a reply or a bounce, any meeting time we found in a calendar invite, and a short piece of evidence text of up to 300 characters, which is normally the subject line or Gmail's own preview snippet. That evidence text is stored on the touch so you can see why Coverage logged what it logged.</p>
+  <p>One part of the Gmail path sends message text to an AI provider. When you press Scan Now, a few messages come back with no clear answer to the one question Coverage cares about: was that a real reply from a person, or an out-of-office. To settle those, and only those, Coverage sends that message's subject line and Gmail's own preview snippet to Anthropic. Never the message body, never an attachment, never the whole mailbox, and never more than 100 messages in one scan. What comes back is one of three fixed answers, and it decides whether the touch gets logged as a reply. This happens only when you press Scan Now, and not at all if no Anthropic key is configured on the deployment.</p>
   <p>You can disconnect Gmail at any time from Settings, which deletes the stored token. You can also revoke Coverage's access directly in your Google account at any time, and that revocation wins.</p>
+
+  <h2>Google API Limited Use</h2>
+  <p>Coverage's use of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+  <p>What that means here, in full: Gmail data is used only to log touches in your own CRM. It is never sold, never used for advertising, never used to build a profile of you, and never used to train any AI model, ours or anyone else's. The only place it goes outside the app is the classification call described above, to answer that one question about that one message. Nobody operating Coverage reads it either, except in the narrow cases that policy allows: you ask us to look at a problem, we are chasing a security issue, or the law requires it.</p>
 
   <h2>What we use it for</h2>
   <p>One thing: running your own CRM for you. Logging touches, moving a contact's warmth, building your weekly list and your fit scores, and answering you when you ask the advisor a question. Your data works for you and no one else.</p>
@@ -86,7 +98,7 @@ OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
   <p>These are the only companies that touch your data, and only for the job named. There is no other list.</p>
   <ul>
     <li><strong>Render</strong> hosts the app and the Postgres database. Everything you store in Coverage sits there.</li>
-    <li><strong>Anthropic</strong> answers when an AI feature runs. This only happens when you set one off: sending a message in Talk to Coverage, generating a coffee-chat brief, or generating a relationship summary on a contact. What leaves the app for that request is the relevant slice of your own CRM, which can include contact names, firms, roles, your private notes, and your logged interactions. Contact email addresses are deliberately excluded: the advisor is told only whether a contact has an email on file, never what it is. If you attach a file to an advisor message, that file goes too. If no Anthropic key is configured on the deployment, every AI feature is dark and nothing is sent.</li>
+    <li><strong>Anthropic</strong> answers when an AI feature runs. This only happens when you set one off, and there are four ways to: sending a message in Talk to Coverage, generating a coffee-chat brief, generating a relationship summary on a contact, or pressing Scan Now on a connected Gmail account. For the first three, what leaves the app is the relevant slice of your own CRM, which can include contact names, firms, roles, your private notes, and your logged interactions. Contact email addresses are deliberately excluded: the advisor is told only whether a contact has an email on file, never what it is. If you attach a file to an advisor message, that file goes too. <strong>Scan Now is different, and it is the one place Gmail content itself leaves Coverage:</strong> for each message the deterministic pass could not classify, capped at 100 per scan, the subject line and Gmail's preview snippet are sent so the model can say whether it was a real reply or an auto-responder. No message body, no attachment, nothing about the messages that classified cleanly. If no Anthropic key is configured on the deployment, every AI feature is dark and nothing is sent.</li>
     <li><strong>Google</strong> receives a sign-in request if you sign in with Google, and serves your mail if you connect Gmail. The sign-in path asks for identity only and can never read mail. Gmail Live is a separate, second consent with its own credentials, and turning it down does not affect your ability to log in.</li>
     <li><strong>Your other sign-in provider,</strong> if the deployment offers Apple, Microsoft or LinkedIn and you choose one. Same identity-only scopes, same rule: no mailbox access.</li>
     <li><strong>An email provider,</strong> when one is configured, to deliver transactional mail such as password resets and deadline digests. It sees the address the mail is going to and what is in that mail.</li>
