@@ -7,6 +7,7 @@ this only proves the wrapper itself records what actually happened.
 from __future__ import annotations
 
 import pytest
+import requests
 
 from ops.models import JobRun
 from ops.tracking import track_job_run
@@ -62,3 +63,68 @@ def test_each_call_is_its_own_row_not_a_shared_singleton():
     assert [r.status for r in runs] == [
         JobRun.STATUS_SUCCESS, JobRun.STATUS_FAILED, JobRun.STATUS_SUCCESS,
     ]
+
+
+# ---------------------------------------------------------------------------
+# healthchecks.io pings — fired from the same wrapper (see the module
+# docstring). `settings.HEALTHCHECK_URLS` is blank for every job by default
+# (settings/base.py), which every test above already relies on implicitly:
+# none of them mock `requests.get`, so if a ping were firing unconfigured it
+# would either raise (a real HTTP call in a test) or hang — the fact they
+# pass is itself proof this feature is off by default.
+# ---------------------------------------------------------------------------
+def test_a_successful_run_pings_its_configured_healthcheck_url(settings, monkeypatch):
+    settings.HEALTHCHECK_URLS = {"scrape": "https://hc-ping.com/fake-scrape-id"}
+    calls = []
+    monkeypatch.setattr(
+        "ops.tracking.requests.get",
+        lambda url, timeout: calls.append((url, timeout)),
+    )
+
+    with track_job_run("scrape"):
+        pass
+
+    assert calls == [("https://hc-ping.com/fake-scrape-id", 5)]
+
+
+def test_a_job_with_no_configured_url_pings_nothing(settings, monkeypatch):
+    settings.HEALTHCHECK_URLS = {"scrape": ""}
+    calls = []
+    monkeypatch.setattr("ops.tracking.requests.get", lambda *a, **kw: calls.append((a, kw)))
+
+    with track_job_run("scrape"):
+        pass
+
+    assert calls == []
+
+
+def test_a_failed_run_does_not_ping_the_healthcheck(settings, monkeypatch):
+    """Success-only, deliberately — see _ping_healthcheck's docstring. A
+    ping here is only meaningful if it means the job actually succeeded."""
+    settings.HEALTHCHECK_URLS = {"scrape": "https://hc-ping.com/fake-scrape-id"}
+    calls = []
+    monkeypatch.setattr("ops.tracking.requests.get", lambda *a, **kw: calls.append((a, kw)))
+
+    with pytest.raises(ValueError):
+        with track_job_run("scrape"):
+            raise ValueError("boom")
+
+    assert calls == []
+
+
+def test_a_ping_failure_does_not_fail_the_job_or_raise(settings, monkeypatch):
+    """healthchecks.io being unreachable is not this job's problem — the
+    JobRun must still read `success`, and the exception from `requests`
+    must not escape `track_job_run` at all."""
+    settings.HEALTHCHECK_URLS = {"scrape": "https://hc-ping.com/fake-scrape-id"}
+
+    def _raise(*a, **kw):
+        raise requests.ConnectionError("no route to host")
+
+    monkeypatch.setattr("ops.tracking.requests.get", _raise)
+
+    with track_job_run("scrape") as run:
+        pass
+
+    run.refresh_from_db()
+    assert run.status == JobRun.STATUS_SUCCESS

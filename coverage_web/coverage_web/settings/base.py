@@ -663,6 +663,41 @@ STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 
 # ---------------------------------------------------------------------------
+# healthchecks.io — one check per render.yaml cron, pinged by
+# ops.tracking.track_job_run on a successful run (see that module). Keyed
+# the same way as ops.tracking.EXPECTED_INTERVALS: render.yaml's cron
+# `name:` minus the "coverage-" prefix.
+#
+# All six blank by default, same off-switch posture as VAPID_*/GMAIL_LIVE_*/
+# STRIPE_* above: track_job_run only pings a job's URL when this dict has a
+# non-empty entry for it, so a deploy with none of these set behaves exactly
+# as it did before this integration existed — JobRun rows and
+# /ops/health/cron/ keep working either way, since neither depends on
+# healthchecks.io at all. Not committed to git as literal URLs — each is a
+# bare, unauthenticated ping endpoint (anyone who has it can ping "success"
+# for that check), so it belongs in the deploy environment, not source
+# control, same reasoning as every other secret-shaped value on this page.
+HEALTHCHECK_URL_GMAIL_BACKFILL = env("HEALTHCHECK_URL_GMAIL_BACKFILL", default="")
+HEALTHCHECK_URL_GMAIL_WATCH_RENEW = env("HEALTHCHECK_URL_GMAIL_WATCH_RENEW", default="")
+HEALTHCHECK_URL_SCRAPE = env("HEALTHCHECK_URL_SCRAPE", default="")
+HEALTHCHECK_URL_PUSH_ALERTS = env("HEALTHCHECK_URL_PUSH_ALERTS", default="")
+HEALTHCHECK_URL_WEEKLY_DIGEST = env("HEALTHCHECK_URL_WEEKLY_DIGEST", default="")
+HEALTHCHECK_URL_PRO_TRIAL_EXPIRE = env("HEALTHCHECK_URL_PRO_TRIAL_EXPIRE", default="")
+
+# Job name (ops.tracking.EXPECTED_INTERVALS' keys) -> the env var above.
+# A plain dict, not one built by string-transforming the job name: an
+# explicit mapping survives a future job whose name doesn't uppercase/
+# underscore cleanly into an env var name, and it's grep-able in one place.
+HEALTHCHECK_URLS = {
+    "gmail-backfill": HEALTHCHECK_URL_GMAIL_BACKFILL,
+    "gmail-watch-renew": HEALTHCHECK_URL_GMAIL_WATCH_RENEW,
+    "scrape": HEALTHCHECK_URL_SCRAPE,
+    "push-alerts": HEALTHCHECK_URL_PUSH_ALERTS,
+    "weekly-digest": HEALTHCHECK_URL_WEEKLY_DIGEST,
+    "pro-trial-expire": HEALTHCHECK_URL_PRO_TRIAL_EXPIRE,
+}
+
+# ---------------------------------------------------------------------------
 # Logging.
 #
 # WHY THIS BLOCK EXISTS: without it, a 500 in production is logged NOWHERE.

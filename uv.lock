@@ -357,6 +357,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pywebpush" },
     { name = "redis" },
+    { name = "requests" },
     { name = "stripe" },
     { name = "whitenoise" },
 ]
@@ -384,6 +385,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pywebpush", specifier = ">=2.0" },
     { name = "redis", specifier = ">=5.0" },
+    { name = "requests", specifier = ">=2.34.2" },
     { name = "stripe", specifier = ">=11.0" },
     { name = "whitenoise", specifier = ">=6.8" },
 ]

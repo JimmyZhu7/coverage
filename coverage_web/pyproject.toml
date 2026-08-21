@@ -80,6 +80,7 @@ dependencies = [
     "defusedcsv>=3.0.0",
     "django-csp>=4.0",
     "django-permissions-policy>=4.33.0",
+    "requests>=2.34.2",
 ]
 
 # Application, not a library anyone imports — don't build/install it as a
