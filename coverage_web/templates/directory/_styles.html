@@ -148,10 +148,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      own hiding mechanism at the width where it actually has to work.
      ====================================================================== */
   .filters-more { display: block; flex: 1 1 100%; min-width: 0; }
+  /* `--r-ctl`, like every other control in this bar. Under 640px this summary
+     IS the four dropdowns — same border, same surface, same lift, same accent
+     hover — and it sits directly under a squared search box, so a pill here
+     would have made the phone the one width where the filter bar still read
+     as two shape families. */
   .filters-more > summary { display: inline-flex; align-items: center; gap: 6px;
     width: fit-content; cursor: pointer; list-style: none;
     padding: 9px 16px 9px 14px; border: 1px solid var(--line);
-    border-radius: 999px; background: var(--surface); color: var(--ink-2);
+    border-radius: var(--r-ctl); background: var(--surface); color: var(--ink-2);
     font-size: var(--fs-s); font-weight: var(--w-med);
     box-shadow: var(--shadow-1);
     transition: border-color var(--t-fast), color var(--t-fast); }
@@ -199,10 +204,19 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* height: 40px matches the styled selects and the Companies button that
      share this row — the search box rendered 4px shorter than every control
      beside it, which read as a misregistration rather than a choice. One
-     stated height beats five paddings agreeing by coincidence. */
+     stated height beats five paddings agreeing by coincidence.
+
+     No border-radius: the base rule in coverage.css already gives every input
+     and select `--r-ctl`, and this override used to take it back to 999px —
+     the same legacy carry-over `.filters .csel-btn` carried, in the one place
+     a grep of the stylesheet does not reach. It matters twice over. The search
+     box is the only row-2 control the custom dropdown does NOT replace, so a
+     pill here left one rounded control among five squared ones; and `select`
+     is the no-JS fallback that `.csel-btn` stands in for, so the two have to
+     agree or the page changes shape when the script is slow. */
   .filters select, .filters input[type="search"] {
     width: auto; min-width: 9rem; font-size: var(--fs-s);
-    border-radius: 999px; border-color: var(--line);
+    border-color: var(--line);
     padding: 8px 15px; box-shadow: var(--shadow-1);
     height: 40px; box-sizing: border-box;
   }
