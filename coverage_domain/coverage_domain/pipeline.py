@@ -96,6 +96,14 @@ as before (dict equality and truthiness only ever look at the mapping
 contents), while the one caller that needs the id of the row just inserted
 (`capture.services._apply_touch_for_event`, to populate `Touch.capture_event`
 after the fact) reads it off `.touch_id`.
+
+A third deliberate additive change (2026-08-22): `TOUCH_TRANSITIONS` gained
+`bulk_received` -> `(None, None)`. It is additive in the strictest sense —
+every kind the original had keeps the transition it had, and the new one
+moves nothing — but it is a real widening of what `apply_touch` accepts, so
+it is recorded here rather than left to be discovered in the dict. It exists
+because "inbound" and "replied to me" had been the same thing in this
+codebase, and they are not: see the kind's own comment below.
 """
 
 from __future__ import annotations
@@ -107,6 +115,11 @@ from typing import Any
 # (psycopg v3, psycopg2, sqlite3 connections, or a test double standing in
 # for one of those).
 DBConnection = Any
+
+# Kind for "inbound, but bulk/automated" — see its TOUCH_TRANSITIONS entry
+# below. Named here rather than spelled as a literal at each call site so
+# `capture.inbound` can re-export the one spelling the ratchet knows.
+BULK_RECEIVED_KIND = "bulk_received"
 
 TOUCH_TRANSITIONS: dict[str, tuple[str | None, str | None]] = {
     # touch kind -> (new warmth if "higher", new thread_state)
@@ -124,6 +137,18 @@ TOUCH_TRANSITIONS: dict[str, tuple[str | None, str | None]] = {
     "thank_you": (None, None),
     "maintain": (None, None),
     "reping": (None, None),
+    # An inbound message that is NOT relationship evidence: a mass
+    # programme invitation, a newsletter, an out-of-office, an application
+    # receipt. `(None, None)` is the whole point — the message is recorded,
+    # so a real deadline or event inside it is not thrown away, but nobody
+    # got warmer because a list sent them something. Before this kind
+    # existed every inbound message became `reply_received`, and a West
+    # Monroe "Sophomore Series" blast on the founder's live account
+    # ratcheted a recruiter he had never written to up to warmth `replied`
+    # and put "ask her for a coffee chat" in his Today queue. See
+    # `capture.inbound` for the deterministic header test that decides
+    # which inbound messages land here.
+    BULK_RECEIVED_KIND: (None, None),
 }
 WARMTH_RANK: dict[str, int] = {"cold": 0, "replied": 1, "chatted": 2, "advocate": 3}
 CHANNELS: tuple[str, ...] = ("email", "linkedin", "coffee_chat", "call", "event", "other")

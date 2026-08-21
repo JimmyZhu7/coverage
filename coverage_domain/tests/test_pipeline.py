@@ -58,19 +58,46 @@ def _state(conn, contact_id):
     return row["warmth"], row["thread_state"], kinds
 
 
+_PORTED_TRANSITIONS = {
+    "outreach": (None, None),
+    "follow_up": (None, None),
+    "reply_received": ("replied", "replied"),
+    "chat": ("chatted", "chat_done"),
+    "chat_scheduled": ("replied", "chat_scheduled"),
+    "thank_you": (None, None),
+    "maintain": (None, None),
+    "reping": (None, None),
+}
+
+# Kinds Coverage added after the port. Listed explicitly, and asserted to
+# be inert, so this file keeps its original job: an entry appearing here
+# without a deliberate edit is still a failure, and an entry here that
+# quietly starts moving warmth or thread_state is also still a failure.
+_COVERAGE_NATIVE_TRANSITIONS = {
+    pipeline.BULK_RECEIVED_KIND: (None, None),
+}
+
+
 def test_vocabularies_match_the_original_verbatim():
     """Structural pin against silent drift: the task's instruction is to
-    port TOUCH_TRANSITIONS, WARMTH_RANK, and the vocabularies verbatim."""
+    port TOUCH_TRANSITIONS, WARMTH_RANK, and the vocabularies verbatim.
+
+    Every PORTED entry must still read exactly as it did — that is the
+    original assertion, unchanged. Additions made since the port are
+    enumerated separately rather than folded into the same literal, so
+    "the port is intact" and "we added a kind on purpose" stay two
+    different, separately-failing claims.
+    """
     assert pipeline.TOUCH_TRANSITIONS == {
-        "outreach": (None, None),
-        "follow_up": (None, None),
-        "reply_received": ("replied", "replied"),
-        "chat": ("chatted", "chat_done"),
-        "chat_scheduled": ("replied", "chat_scheduled"),
-        "thank_you": (None, None),
-        "maintain": (None, None),
-        "reping": (None, None),
+        **_PORTED_TRANSITIONS,
+        **_COVERAGE_NATIVE_TRANSITIONS,
     }
+    for kind in _PORTED_TRANSITIONS:
+        assert pipeline.TOUCH_TRANSITIONS[kind] == _PORTED_TRANSITIONS[kind]
+    # Every Coverage-native kind is inert by construction: it may be
+    # logged, it may never move the ladder.
+    for kind in _COVERAGE_NATIVE_TRANSITIONS:
+        assert pipeline.TOUCH_TRANSITIONS[kind] == (None, None)
     assert pipeline.WARMTH_RANK == {"cold": 0, "replied": 1, "chatted": 2, "advocate": 3}
     assert pipeline.CHANNELS == ("email", "linkedin", "coffee_chat", "call", "event", "other")
     assert pipeline.WARMTH == ("cold", "replied", "chatted", "advocate")
