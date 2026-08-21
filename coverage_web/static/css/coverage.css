@@ -424,16 +424,27 @@ main:focus { outline: none; }
 .wordmark .logo-mark { width: 21px; height: 21px; color: var(--accent);
   transition: transform var(--t-med); }
 .wordmark:hover .logo-mark { transform: translateY(-1px); }
-/* v3.1: the radar-style capsule bar — uppercase tabs inside one rounded
-   container; the active tab is a solid filled pill. */
+/* The tab bar — uppercase tabs inside one bordered container; the active tab
+   is a solid filled block.
+
+   It was a 999px capsule with 999px tabs inside it. `--r-ctl` exists to say
+   what shape a CONTROL is, and the nav ignored it: full-round is the badge
+   token's job (`--r-badge`, whose own comment reserves the pill for state),
+   so a navigation control wearing it blurred the one distinction the shape
+   system makes — "this is an action" vs. "this is a status".
+
+   The tabs take `--r-ctl` MINUS the container's 4px padding, not `--r-ctl`
+   itself. Concentric boxes only look concentric when the inner radius is the
+   outer one less the gap between them; matching both at 10px leaves a visible
+   crescent of container showing through at each corner of the filled tab. */
 .site-nav {
   display: flex; gap: var(--s1); flex-wrap: wrap;
   margin: 0 auto; justify-content: center;
   background: var(--paper); border: 1px solid var(--line);
-  border-radius: 999px; padding: 4px;
+  border-radius: var(--r-ctl); padding: 4px;
 }
 .site-nav a {
-  color: var(--ink-2); padding: 7px 16px; border-radius: 999px;
+  color: var(--ink-2); padding: 7px 16px; border-radius: calc(var(--r-ctl) - 4px);
   font-size: var(--fs-micro); font-weight: var(--w-med);
   text-transform: uppercase; letter-spacing: 0.07em;
   transition: color var(--t-fast), background-color var(--t-fast);
@@ -998,7 +1009,12 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
   display: inline-flex; align-items: center; justify-content: center;
   gap: 0.2em; cursor: pointer;
   font: var(--w-med) var(--fs-s)/1.2 var(--font-ui);
-  padding: 10px 20px; border-radius: 999px;
+  /* `--r-ctl`, not the 999px this carried. The token's own comment names
+     buttons as what it is FOR, and a hardcoded pill here overrode it on every
+     button in the app — which also spent the badge shape (`--r-badge`) on
+     actions, leaving nothing to distinguish a thing you press from a thing
+     that merely reports state. Status chips keep the pill; controls don't. */
+  padding: 10px 20px; border-radius: var(--r-ctl);
   border: 1px solid var(--line-strong);
   background: var(--surface); color: var(--ink);
   transition: border-color var(--t-fast), background-color var(--t-fast),
