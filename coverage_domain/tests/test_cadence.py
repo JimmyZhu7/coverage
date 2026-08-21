@@ -961,6 +961,68 @@ def test_keep_warm_clock_ignores_audit_rows_too():
     )
 
 
+# --------------------------------------------------------------------------
+# C1b (2026-08-22 divergence): branch 5b gates on WARMTH, not on the
+# warmth/thread_state PAIR. C1 closed the chatted dead end for contacts
+# carrying thread_state 'chat_done' and left it open for every other chatted
+# contact — and the two columns drift apart routinely, because warmth is a
+# ratchet and thread_state is not.
+# --------------------------------------------------------------------------
+def test_chatted_contact_outside_chat_done_still_gets_keep_warm():
+    """THE CRACK. warmth ratcheted to 'chatted' (they met you) while
+    thread_state stayed 'no_reply' — reachable via CSV import, via
+    `pipeline.set_state`, and via the backward thread_state move pipeline.py
+    documents. Branch 6 tests warmth 'cold' and branch 7 tests thread_state
+    'replied', so before C1b this contact matched NOTHING and left the cadence
+    permanently."""
+    c = contact(1, warmth="chatted", thread_state="no_reply")
+    touches = [touch(1, "chat", "2026-06-01 10:00")]  # 51d before AS_OF
+    my = [a for a in cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS)
+          if a["contact"]["id"] == 1]
+    assert [a["action"] for a in my] == ["keep_warm"]
+    assert my[0]["ctx"]["days_since"] == 51
+
+
+def test_chatted_contact_in_advocate_thread_state_gets_keep_warm():
+    """The other half of the crack: thread_state promoted to 'advocate' while
+    warmth stayed 'chatted'. Branch 5 tests WARMTH, so it does not claim this
+    contact, and nothing below it did either."""
+    c = contact(1, warmth="chatted", thread_state="advocate")
+    touches = [touch(1, "chat", "2026-06-01 10:00")]
+    assert kinds_for(cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1) == {
+        "keep_warm"
+    }
+
+
+def test_widened_5b_does_not_steal_branch_seven():
+    """`replied` is the one thread_state branch 5b must not claim: branch 7
+    has something strictly better to say about it (C3)."""
+    c = contact(1, warmth="chatted", thread_state="replied")
+    touches = [touch(1, "reply_received", "2026-06-01 10:00")]
+    assert kinds_for(cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1) == {
+        "advance"
+    }
+
+
+def test_widened_5b_does_not_reopen_a_parked_contact():
+    """Branch 4 is a deliberate exit and still returns first. Widening 5b must
+    not turn Park into a button that undoes itself on the next render."""
+    for state in ("parked", "quiet"):
+        c = contact(1, warmth="chatted", thread_state=state)
+        touches = [touch(1, "chat", "2026-06-01 10:00")]
+        assert kinds_for(
+            cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1
+        ) == set(), state
+
+
+def test_widened_5b_still_respects_the_clock_outside_chat_done():
+    """The gate widened; the window did not. A chatted/no_reply contact
+    touched last week is not due."""
+    c = contact(1, warmth="chatted", thread_state="no_reply")
+    touches = [touch(1, "chat", "2026-07-19 10:00")]  # 3d before AS_OF
+    assert kinds_for(cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS), 1) == set()
+
+
 def test_advocates_keep_their_own_slower_clock():
     """5b sits AFTER branch 5 so an advocate whose thread_state is chat_done
     still gets `maintain`, on the advocate window, not `keep_warm`."""
@@ -1040,11 +1102,26 @@ _ALL_THREAD_STATES = ("no_reply", "replied", "chat_scheduled", "chat_done", "adv
 #   ("chatted", "chat_done") -> now fires `keep_warm` (C1). This was the
 #     costliest silence in the table: the people who actually met you.
 #   ("chatted", "replied")   -> now fires `advance` (C3).
+#
+# Two more LEFT it on 2026-08-22 (C1b), and the expected output legitimately
+# changed for both:
+#   ("chatted", "no_reply") -> now fires `keep_warm`.
+#   ("chatted", "advocate") -> now fires `keep_warm`.
+# C1 gated branch 5b on warmth AND thread_state=='chat_done'. Warmth is a
+# ratchet and thread_state is not, so the pair drifts apart routinely (import,
+# `set_state`, and the backward thread_state move pipeline.py documents), and
+# a contact who came out of that drift as chatted/no_reply matched branch 5b's
+# warmth test, failed its thread_state test, and then matched nothing else at
+# all — branch 6 needs warmth 'cold', branch 7 needs thread_state 'replied'.
+# These two rows were not "silences the product chose"; they were the C1 dead
+# end still open one column over. Widening the gate to warmth-with-`replied`-
+# carved-out closes them. ("chatted", "quiet") and ("chatted", "parked") stay
+# on the list and stay silent: branch 4 is a deliberate exit from the cadence
+# and returns long before 5b is reached.
 _INTENTIONALLY_SILENT_COMBOS = {
     ("cold", "chat_done"), ("cold", "advocate"), ("cold", "quiet"), ("cold", "parked"),
     ("replied", "no_reply"), ("replied", "chat_done"), ("replied", "advocate"),
     ("replied", "quiet"), ("replied", "parked"),
-    ("chatted", "no_reply"), ("chatted", "advocate"),
     ("chatted", "quiet"), ("chatted", "parked"),
     ("advocate", "quiet"), ("advocate", "parked"),
 }

@@ -15,8 +15,10 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
          within `pre_deadline_reping_days`, REGION-SCOPED       -> reping
       4. parked / quiet                                         -> (skip)
       5. advocate idle >= advocate_touch_min_weeks             -> maintain
-     5b. chatted + chat_done, idle >= chatted_touch_min_weeks  -> keep_warm
-         (NOT ported — see the 2026-07-30 C1 divergence below)
+     5b. chatted (any thread_state except 'replied', which
+         branch 7 owns), idle >= chatted_touch_min_weeks      -> keep_warm
+         (NOT ported — see the 2026-07-30 C1 / 2026-08-22 C1b
+         divergences below)
       6. cold / no_reply: 0 outbound -> first_outreach; 1 outbound and
          idle >= followup window -> follow_up (the ONLY one — see
          `max_cold_touches`'s comment); else park once max_cold
@@ -120,6 +122,31 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
     belated courtesy. It sits AFTER branch 5 so advocates keep their own,
     slower cadence, and BEFORE branch 6 so it can never be mistaken for
     cold outreach.
+
+  - DIVERGENCE from the original (deliberate, 2026-08-22, "C1b"): branch 5b's
+    gate is now WARMTH plus one carve-out, not warmth AND thread_state. C1
+    above wrote it as `warmth == "chatted" AND thread_state == "chat_done"`,
+    which closed the dead end for the contacts who happened to carry both and
+    left a narrower version of the same dead end open for everyone else.
+
+    The two columns drift, by design and in practice. Warmth is a ratchet that
+    only ever climbs WARMTH_RANK; thread_state has no such guard outside its
+    terminal `advocate` case, and pipeline.py's own docstring records that a
+    late-arriving touch can move it BACKWARD. `set_state` and the CSV import
+    can each write one column without the other. So `chatted` with a
+    thread_state of anything but `chat_done` is an ordinary state, not a
+    corruption — and a contact in it matched NO branch at all: 6 tests warmth
+    'cold', 7 tests thread_state 'replied', and 1-5 had all fallen through.
+    Measured on the founder's account the day this was written, 13 of his 23
+    chatted contacts sat outside `chat_done`; all 13 happened to be `parked`
+    (branch 4's deliberate exit, still respected), so the leak cost him
+    nothing THAT day — but the hole was one `set_state` away from swallowing a
+    tier-1 relationship, and a branch that only covers the states its author
+    happened to test is not a closed dead end.
+
+    `replied` is the one carve-out: branch 7 owns it and has something
+    strictly better to say ("they replied — propose a chat"), the same
+    precedence branch 5 already takes over branch 7 for advocates.
 
   - DIVERGENCE from the original (deliberate, 2026-07-30, "C3"): branch 7's
     warmth set gained `chatted` (was `("replied", "cold")`, now
@@ -637,11 +664,30 @@ def due_actions(
         # and the ported tree had nothing else to say about this person ever
         # again. Same shape as branch 5 above, on its own tighter clock.
         #
-        # Unconditional `continue`, like branch 5: a chatted/chat_done
-        # contact who isn't due yet has no further branch that could match
-        # (6 needs cold/no_reply, 7 needs thread_state 'replied'), so falling
-        # through would only walk two tests that can't fire.
-        if warmth == "chatted" and thread_state == "chat_done":
+        # The gate is WARMTH, with one thread_state carved out (C1b — see the
+        # module docstring). It used to be `warmth == "chatted" AND
+        # thread_state == "chat_done"`, and that second term is what made this
+        # branch a partial fix rather than a whole one: warmth is a RATCHET and
+        # thread_state is not, so the two drift apart routinely (an import or a
+        # `set_state` can write either alone, and pipeline.py documents
+        # thread_state moving BACKWARD off a late-arriving touch). A contact
+        # who came out of that drift as chatted/no_reply matched branch 5b's
+        # first term and failed its second, and then matched nothing else
+        # either: branch 6 needs warmth 'cold', branch 7 needs thread_state
+        # 'replied'. They left the tree entirely — the exact dead end C1 was
+        # written to close, reopened one thread_state over.
+        #
+        # `replied` is excluded because branch 7 OWNS it and says something
+        # strictly better ("they replied — propose a chat" beats "send an
+        # update"); that is the same reason branch 5 returns before 7 for
+        # advocates. Everything else that can still be live at this point
+        # (no_reply, chat_done, advocate) belongs here.
+        #
+        # Unconditional `continue`, like branch 5: a chatted contact who isn't
+        # due yet has no further branch that could match (6 needs cold, 7 needs
+        # thread_state 'replied', which this branch has already excluded), so
+        # falling through would only walk two tests that can't fire.
+        if warmth == "chatted" and thread_state != "replied":
             days = (today - lt_date).days if lt_date else None
             if days is None or days >= chat_min_days:
                 # Range rendered from the params, never hardcoded — the same
