@@ -789,10 +789,37 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      a 13px tick is not enough of a signal to count a selection from. */
   .net-mini.is-picked { border-color: var(--accent-line);
     background: var(--accent-soft); }
+  /* The name WRAPS. It used to be one nowrap line with an ellipsis, and in
+     the four-across action lane that lane is 554px, so a card is 131px and
+     the name gets whatever the fixed chrome leaves: 24px of padding, 2px of
+     border, a 13px checkbox, two 8px gaps and the 12px open-profile glyph —
+     67px of the 131px, leaving 64px for the text.
+
+     Measured on the live board, every visible card was cut, and cut by
+     almost nothing: "Mia Garcia" wanted 65px, "Mason Lee" 66px, "Lucas
+     Silva" 68px. The ellipsis was costing more characters than it saved —
+     the board read "Lucas Si…", "Sofia Re…", "Ethan P…", which is the
+     "unfinished" tell a reader clocks before they read a single word of it.
+
+     Widening the box is not available: the four-across count is itself a
+     considered fix (see the comment on .net-actions .net-minis below, which
+     went from five to four to bring ellipsised names down from 86 of 106 to
+     23), and a fifth pass of the same trade just moves the loss around.
+     So the card gives way instead — "Lucas" over "Silva", both words whole.
+     That is this board's own stated doctrine, written on .firm-card-name:
+     the box gives way, not the text. min-height is a FLOOR, the grid's rows
+     are auto, and the lane scrolls, so a two-line name simply makes its row
+     taller. */
   .net-mini-name { font-size: var(--fs-s); font-weight: var(--w-bold); color: var(--ink);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    overflow-wrap: break-word; }
+  /* The firm line clamps at two rather than wrapping freely: a person has
+     two or three name words, but "Sixth Street Partners" and its like keep
+     going, and an uncapped firm name would set the height of every card in
+     its row. Two lines shows the whole of nearly every firm on the board and
+     still ellipsises honestly when one genuinely doesn't fit. */
   .net-mini-firm { font-size: var(--fs-xs); color: var(--ink-3);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    overflow: hidden; overflow-wrap: break-word; }
   /* Same "No firm listed" placeholder as .opp-firm.is-missing above — this
      card's base color already matches --ink-3, so italic is the only
      signal left to distinguish it from a real (if unranked) firm name. */
@@ -923,9 +950,36 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      existed, which is the bar a new control has to clear. (Three would
      reach zero, at the cost of a third of the lane's density; the lane
      scrolls, but a wall of 83 people is worth keeping scannable.) */
-  .net-actions .net-minis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s2);
-    flex: 1 1 0; min-height: 0; overflow-y: auto; align-content: start; padding-right: var(--s2);
+  /* FLEX, not grid, and the swap is load-bearing — it is what lets the name
+     above wrap at all.
+
+     As a grid this lane sized its rows to 58px and pinned every card there,
+     so a card whose name had wrapped to two lines had its second line cut
+     off by the card's own `overflow: hidden`: the horizontal truncation came
+     back as a vertical one. The row track was not measuring the wrapped
+     height. Asked directly, the card reported a 23px content contribution
+     against the 67-76px it actually occupies at 131px wide, so the track
+     resolved to the `min-height` floor and stopped there; `grid-auto-rows:
+     minmax(58px, auto)`, `align-self`, and dropping `overflow` were each
+     tried against the live board and none of them moved it.
+
+     A flex line's cross size is measured AFTER the item's main size is
+     resolved, which is exactly the order this needs: the card is sized to
+     131px first, the text wraps into that, and the line takes the height
+     that results. Same four columns, same 131px card, same gap — the basis
+     below just states in flex terms what the grid template stated.
+
+     min-height stays a FLOOR so a one-line card keeps the geometry it shares
+     with the firm cards opposite; taller is now allowed, which is the point. */
+  .net-actions .net-minis { display: flex; flex-wrap: wrap; gap: var(--s2);
+    flex: 1 1 0; min-height: 0; overflow-y: auto; align-content: flex-start;
+    padding-right: var(--s2);
     scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  /* Three gaps between four cards; `0 0` so a lane holding one contact draws
+     a quarter-width card rather than one stretched across the whole lane.
+     `min-width: 0` lets a long single word shrink rather than force the lane
+     wider than its column. */
+  .net-actions .net-mini { flex: 0 0 calc((100% - 3 * var(--s2)) / 4); min-width: 0; }
   .net-actions .net-minis::-webkit-scrollbar { width: 8px; }
   .net-actions .net-minis::-webkit-scrollbar-thumb { background: var(--line-strong);
     border-radius: 999px; }
