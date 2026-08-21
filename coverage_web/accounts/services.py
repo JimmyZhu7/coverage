@@ -49,7 +49,10 @@ from assistant.models import (
 from billing.models import CreditLedger, ProWaitlist
 from capture import gmail_live
 from capture.models import GmailConnection
-from crm.models import CalendarEvent, ChatDebrief, Contact, Task, Touch, UserFirm
+from crm.models import (
+    CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact, Task,
+    Touch, UserFirm,
+)
 from directory.models import Firm
 
 from .models import PushSubscription, User
@@ -578,6 +581,12 @@ APPLICATION_EXPORT_COLUMNS = [
     "applied_status", "applied_at", "interview_dates", "dismissed",
 ]
 TASK_EXPORT_COLUMNS = ["title", "why", "due", "kind", "firm", "status", "created"]
+CAMPAIGN_EXPORT_COLUMNS = [
+    "label", "kind", "recipients", "first_sent", "last_sent", "classified_at",
+]
+CAMPAIGN_CONTACT_EXPORT_COLUMNS = [
+    "campaign", "contact", "contact_email", "originates", "sent_at",
+]
 DEBRIEF_EXPORT_COLUMNS = [
     "created", "contact", "learned", "intro_name", "intro_email",
     "tracked_date", "date_note", "advocate_answer", "promoted", "dismissed",
@@ -766,6 +775,46 @@ def tasks_csv(user) -> str:
                 t.firm.name if t.firm_id else "", t.status, _dt(t.created),
             ]
             for t in rows
+        ),
+    )
+
+
+def campaigns_csv(user) -> str:
+    """The bulk sends Coverage detected, and the answer the student gave about
+    each. `kind` is their own word about their own mail — an export that left
+    it out would hand back the detection without the decision."""
+    rows = Campaign.objects.for_user(user)
+    return _csv(
+        CAMPAIGN_EXPORT_COLUMNS,
+        (
+            [
+                c.label, c.kind, c.recipient_count,
+                _dt(c.first_sent), _dt(c.last_sent),
+                _dt(c.classified_at) if c.classified_at else "",
+            ]
+            for c in rows
+        ),
+    )
+
+
+def campaign_contacts_csv(user) -> str:
+    """Who was in each campaign. `originates` carries the whole consequence of
+    the answer (see `crm.models.CampaignContact`), so it is a column rather
+    than something the reader has to re-derive."""
+    rows = (
+        CampaignContact.objects.for_user(user)
+        .select_related("campaign", "contact")
+    )
+    return _csv(
+        CAMPAIGN_CONTACT_EXPORT_COLUMNS,
+        (
+            [
+                m.campaign.label if m.campaign_id else "",
+                m.contact.name if m.contact_id else "",
+                m.contact.email if m.contact_id else "",
+                m.originates, _dt(m.sent_at),
+            ]
+            for m in rows
         ),
     )
 
@@ -991,6 +1040,10 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("tasks.csv", tasks_csv, "Your tasks, open and done."),
     ("chat_debriefs.csv", chat_debriefs_csv,
      "What each coffee chat taught you, in your own words."),
+    ("campaigns.csv", campaigns_csv,
+     "Bulk sends we found in your mail, and what you said each one was."),
+    ("campaign_contacts.csv", campaign_contacts_csv,
+     "Who was in each bulk send, and whose relationship started there."),
     ("fit_scores.csv", fit_scores_csv,
      "Computed fit scores with the axes behind each one."),
     ("imports.csv", imports_csv, "Your CSV imports and what each one did."),
@@ -1082,6 +1135,10 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     # debriefs they'd written. Deleting it explicitly, first, makes the receipt
     # honest; the cascade is now a no-op rather than the mechanism.
     ("chat_debriefs", ChatDebrief),
+    # References both `campaign` and `contact` (CASCADE from either), so it
+    # goes before both — same children-before-parents rule as everything here.
+    ("campaign_contacts", CampaignContact),
+    ("campaigns", Campaign),
     ("touches", Touch),
     ("fit_scores", FitScore),
     ("tasks", Task),

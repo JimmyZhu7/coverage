@@ -48,6 +48,9 @@ urlpatterns = [
     path("firms/tier/", views.set_firm_tier, name="set_firm_tier"),
     # Settings' Target Firms remove control (POST firm).
     path("firms/remove/", views.remove_target_firm, name="remove_target_firm"),
+    # Settings' Campaigns card: answer the one question about a detected bulk
+    # send (POST campaign + kind). See crm/campaigns.py.
+    path("campaigns/classify/", views.classify_campaign, name="classify_campaign"),
     # Fire-and-forget instrumentation for the Coverage Gaps card's "Who to
     # find" panel: opened, and left for a LinkedIn search. Writes one
     # product event and nothing else.

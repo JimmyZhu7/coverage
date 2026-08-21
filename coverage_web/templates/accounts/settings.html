@@ -522,6 +522,7 @@
       <p class="settings-nav-group">How Coverage Paces You</p>
       <a href="#cadence">Cadence</a>
       <a href="#pace">Weekly Pace</a>
+      {% if campaigns %}<a href="#campaigns">Campaigns</a>{% endif %}
       <p class="settings-nav-group">Notifications</p>
       <a href="#notifications">Notifications</a>
       <p class="settings-nav-group">Plan &amp; Credits</p>
@@ -987,6 +988,91 @@
           </form>
         </div>
       </section>
+
+      {% comment %}
+      ---- Campaigns ----
+      One question per bulk send: was that you job hunting, or the other hat
+      you wear. See crm/campaigns.py for the founder's 201-thread club panel
+      mail merge that Coverage read as his recruiting network.
+
+      RENDERED ONLY WHEN THERE IS SOMETHING TO ANSWER. Most students never
+      mail-merge anything, and an empty "Campaigns" card explaining a feature
+      that will never fire for them is a card that makes the page longer and
+      the product harder to understand. No campaigns, no section, no nav link.
+
+      Three buttons, not a toggle, because there are genuinely three states and
+      one of them is "not answered yet" — same reasoning as the contact form's
+      Recruiting-contact field. The current answer renders as a static pill so
+      the user can see what they said without a control implying it is unset.
+      {% endcomment %}
+      {% if campaigns %}
+      <section class="set-card kin-reveal" id="campaigns" style="--i:6.5"
+               aria-labelledby="campaigns-h">
+        <div class="set-head">
+          <h2 id="campaigns-h">Campaigns</h2>
+          <p>Bulk sends we found in your mail. Tell us which ones were your job search.</p>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-desc">
+                A send you say was something else stays in your contacts, your
+                network board, your search and your history. It just stops
+                producing daily actions. Anyone who writes to you still
+                surfaces, whatever the send was.
+              </div>
+            </div>
+          </div>
+          {% for c in campaigns %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">{{ c.label }}</span>
+              <div class="set-row-desc">
+                {{ c.recipient_count }} recipient{{ c.recipient_count|pluralize }},
+                {{ c.first_sent|date:"j M Y" }}.
+                {% comment %}
+                The second number is the one that matters and it is stated
+                plainly rather than folded into the first: a classification
+                only moves contacts whose relationship with you STARTED in
+                this send (crm.models.CampaignContact.originates), so "201
+                recipients" alone would overstate what the answer does.
+                {% endcomment %}
+                {{ c.originating_count }} of them first heard from you here.
+                {% if c.kind == campaign_kind_other %}
+                  <br><strong>Not your recruiting</strong> — off your daily queue.
+                {% elif c.kind == campaign_kind_recruiting %}
+                  <br><strong>Your recruiting</strong> — in your daily queue.
+                {% endif %}
+              </div>
+            </div>
+            <div class="set-row-control">
+              {% if c.is_classified %}
+                <form method="post" action="{% url 'crm:classify_campaign' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="campaign" value="{{ c.id }}">
+                  <input type="hidden" name="kind" value="{{ campaign_kind_unclassified }}">
+                  <button type="submit" class="btn">Change</button>
+                </form>
+              {% else %}
+                <form method="post" action="{% url 'crm:classify_campaign' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="campaign" value="{{ c.id }}">
+                  <input type="hidden" name="kind" value="{{ campaign_kind_recruiting }}">
+                  <button type="submit" class="btn">My recruiting</button>
+                </form>
+                <form method="post" action="{% url 'crm:classify_campaign' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="campaign" value="{{ c.id }}">
+                  <input type="hidden" name="kind" value="{{ campaign_kind_other }}">
+                  <button type="submit" class="btn">Something else</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
 
       {% comment %}
       ---- Notifications ----

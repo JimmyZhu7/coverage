@@ -40,9 +40,12 @@ from directory.classify import REGION_LABELS, TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
 
 from . import (
-    ai_brief, ai_summary, coverage, debrief as debrief_svc, services, sourcing,
+    ai_brief, ai_summary, campaigns, coverage, debrief as debrief_svc,
+    services, sourcing,
 )
-from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
+from .models import (
+    CalendarEvent, Campaign, ChatDebrief, Contact, Touch, UserFirm,
+)
 
 
 # The Today engine lives in crm/today.py; the shared helpers in crm/utils.py.
@@ -1431,3 +1434,53 @@ def contact_ai_summary(request: HttpRequest, pk: int) -> HttpResponse:
         "generated": summary is not None,
         "summary_new_touches": ai_summary.touches_since_summary(contact),
     })
+
+
+# ---------------------------------------------------------------------------
+# Campaigns — the one question the user answers about a bulk send.
+# ---------------------------------------------------------------------------
+@login_required
+@require_POST
+def classify_campaign(request: HttpRequest) -> HttpResponse:
+    """Settings' Campaigns card: record whether one detected bulk send was the
+    user's own recruiting or something else they do. See `crm/campaigns.py`
+    for what a campaign is and the 201-thread club mail merge that made this
+    necessary.
+
+    A full-page POST-redirect-GET rather than an htmx swap, and that is the
+    point rather than a shortcut: answering this question changes who is in
+    tomorrow's queue, and the honest feedback for it is the page coming back
+    with the new answer on it and a message saying how many people moved. A
+    silent in-place toggle would be the smallest possible acknowledgement of
+    the largest change any control on this page makes.
+
+    Re-answering is allowed and expected. `crm.campaigns.classify` is scoped
+    with `.for_user`, so a campaign id belonging to somebody else is simply not
+    found — the same 404-shaped no-op as every other private-zone write here.
+    """
+    try:
+        campaign_id = int(request.POST.get("campaign", ""))
+    except ValueError:
+        return HttpResponse(status=400)
+    kind = request.POST.get("kind", "")
+    campaign = campaigns.classify(request.user, campaign_id, kind)
+    if campaign is None:
+        return HttpResponse(status=404)
+    record_event("campaign_classified", user=request.user, kind=kind)
+    name = campaign.label or "That send"
+    if kind == Campaign.KIND_OTHER:
+        # Counted AFTER the write, off the same function the queue itself
+        # calls, so the number on screen is the number that will be applied
+        # rather than a second opinion about it.
+        moved = len(campaigns.excluded_contact_ids(request.user))
+        messages.success(
+            request,
+            f"Got it. {name} is off your daily queue. {moved} "
+            f"contact{'' if moved == 1 else 's'} affected, all still in your "
+            "network.",
+        )
+    elif kind == Campaign.KIND_RECRUITING:
+        messages.success(request, f"Kept. {name} stays in your daily queue.")
+    else:
+        messages.success(request, f"Cleared. We will ask about {name} again.")
+    return redirect(reverse("accounts:settings") + "#campaigns")

@@ -29,7 +29,8 @@ from billing import credits as billing_credits
 from billing import stripe_gateway as billing_stripe_gateway
 from capture import gmail_live
 from capture.models import GmailConnection
-from crm.models import Contact, UserFirm
+from crm import campaigns as crm_campaigns
+from crm.models import Campaign, Contact, UserFirm
 from directory.models import Firm
 
 from .models import PushSubscription
@@ -500,6 +501,16 @@ def settings_view(request):
             # while you pick.
             "cycle_months": _cycle_months(),
             "gmail_live": _gmail_live_context(request.user),
+            # Bulk sends we detected in this user's own outbound mail, and the
+            # one question they answer about each. Read-only here — the answer
+            # POSTs to crm:classify_campaign. Detection itself is NOT run on a
+            # page load: it walks every outbound touch, and a settings render
+            # is the wrong place to pay for that. It runs at the end of a
+            # capture sync and from `manage.py detect_campaigns`.
+            "campaigns": crm_campaigns.campaign_cards(request.user),
+            "campaign_kind_other": Campaign.KIND_OTHER,
+            "campaign_kind_recruiting": Campaign.KIND_RECRUITING,
+            "campaign_kind_unclassified": Campaign.KIND_UNCLASSIFIED,
             "credits": _credits_context(request.user),
             "gmail_free_rescan_interval_days": django_settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS,
             "target_firm_count": UserFirm.objects.for_user(request.user).count(),
