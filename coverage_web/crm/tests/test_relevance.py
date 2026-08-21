@@ -593,3 +593,72 @@ def test_a_blank_answer_stays_null_rather_than_becoming_false():
     no = ContactForm(data={"name": "A Banker", "recruiting_contact": "no"})
     assert no.is_valid(), no.errors
     assert no.cleaned_data["recruiting_contact"] is False
+
+
+# ---------------------------------------------------------------------------
+# 6. Naming the role a deadline belongs to.
+# ---------------------------------------------------------------------------
+# `firm_openings` has always fetched `Opportunity.title` and the card threw it
+# away, so a surface that HAD looked at the board read like one that had run a
+# query: "A role there closes Sep 30." The title is already in hand and every
+# other clause in this module is read off a row, so this one is too.
+def _role_opening(title, days=30):
+    return {
+        "kind": rel.OPENING_ROLE_DEADLINE,
+        "date": timezone.localdate() + timedelta(days=days),
+        "days": days,
+        "label": "Applications close",
+        "title": title,
+    }
+
+
+def test_a_titled_role_deadline_names_the_role():
+    reason = rel.keep_warm_reason({
+        "contact": {"warmth": "chatted"},
+        "relevance": rel.REL_TIERED,
+        "relevance_tier": 1,
+        "opening": _role_opening("IB Summer Analyst"),
+    })
+    assert "The IB Summer Analyst role closes" in reason
+    assert "A role there closes" not in reason
+
+
+def test_an_untitled_role_deadline_keeps_the_old_wording():
+    """A board row with no title is common enough that this is the fallback,
+    not an error path."""
+    for title in (None, "", "   "):
+        reason = rel.keep_warm_reason({
+            "contact": {"warmth": "chatted"},
+            "relevance": rel.REL_TIERED,
+            "relevance_tier": 1,
+            "opening": _role_opening(title),
+        })
+        assert "A role there closes" in reason
+
+
+def test_an_absurd_scraped_title_falls_back_rather_than_wrapping_the_card():
+    """Bank career sites publish requisition strings, not titles. Naming one
+    buries the date the sentence exists to deliver."""
+    monster = ("2027 Global Markets Summer Analyst Program - Hong Kong - "
+               "Sales and Trading - Requisition 24081")
+    assert len(monster) > rel._MAX_ROLE_TITLE_CHARS
+    reason = rel.keep_warm_reason({
+        "contact": {"warmth": "chatted"},
+        "relevance": rel.REL_TIERED,
+        "relevance_tier": 1,
+        "opening": _role_opening(monster),
+    })
+    assert "A role there closes" in reason
+    assert "Requisition" not in reason
+
+
+def test_a_role_title_is_never_case_folded():
+    """Case-folding would be the one thing here that alters a fact rather than
+    reporting it. A role title is a name."""
+    reason = rel.keep_warm_reason({
+        "contact": {"warmth": "chatted"},
+        "relevance": rel.REL_TIERED,
+        "relevance_tier": 1,
+        "opening": _role_opening("M&A Analyst, TMT"),
+    })
+    assert "The M&A Analyst, TMT role closes" in reason

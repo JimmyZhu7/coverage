@@ -505,6 +505,37 @@ def _on_date(value) -> str:
     return f"{value.strftime('%b')} {value.day}"
 
 
+# How long a role title may be before the card names it. `firm_openings` reads
+# `Opportunity.title` straight off the board, and a scraped title is not always
+# a title: bank career sites publish things like "2027 Global Markets Summer
+# Analyst Program - Hong Kong - Sales and Trading - Requisition 24081". Naming
+# that is worse than not naming it — it buries the date the sentence exists to
+# deliver and wraps the card to four lines. Past this, the untitled wording is
+# the better sentence, so it falls back rather than truncating: a title cut
+# mid-phrase reads like a bug, and "a role there" was never wrong.
+_MAX_ROLE_TITLE_CHARS = 48
+
+
+def _role_clause(opening: dict) -> str:
+    """"The IB summer analyst role closes Oct 30." — or the untitled wording.
+
+    `firm_openings` already fetches the title and this used to discard it,
+    which made a card that had looked at the board read like one that had run a
+    query. Same discipline as everything else in this module: the title is read
+    off an `Opportunity` row, never composed, and where there isn't one the
+    sentence says less rather than inventing more.
+    """
+    title = (opening.get("title") or "").strip()
+    if not title or len(title) > _MAX_ROLE_TITLE_CHARS:
+        return f"A role there closes {_on_date(opening['date'])}."
+    # The sentence around the title is sentence case; the title itself is left
+    # exactly as the firm published it. Case-folding it would be the one thing
+    # in this module that alters a fact rather than reporting it — "IB Summer
+    # Analyst" becomes "iB Summer Analyst" or "ib summer analyst", and "J.P.
+    # Morgan Markets Analyst" becomes nonsense. A role title is a name.
+    return f"The {title} role closes {_on_date(opening['date'])}."
+
+
 def _opening_clause(opening: dict | None) -> str:
     if not opening:
         return ""
@@ -512,7 +543,7 @@ def _opening_clause(opening: dict | None) -> str:
     if kind == OPENING_FIRM_DATE:
         return f"{opening['label']} {_on_date(opening['date'])}."
     if kind == OPENING_ROLE_DEADLINE:
-        return f"A role there closes {_on_date(opening['date'])}."
+        return _role_clause(opening)
     if kind == OPENING_NEW_ROLE:
         return "A role you could apply for opened there this week."
     return ""
