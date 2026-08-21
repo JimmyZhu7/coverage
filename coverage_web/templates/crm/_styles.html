@@ -532,6 +532,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border-color: var(--accent-line); }
   .act-card.act-debrief { border-left-color: var(--accent-ink); }
 
+  /* Proposals lane: people the mailbox found, waiting for one tap. Same
+     capture-prompt tone as Debrief — an offer, not an alarm — with its
+     bulk buttons riding the lane title, right-aligned like the park lane's
+     own bulk control. */
+  .lane-proposals .prio-proposal { background: var(--accent-soft); color: var(--accent-ink);
+    border-color: var(--accent-line); }
+  .act-card.act-proposal { border-left-color: var(--accent-ink); }
+  .lane-proposals .lane-bulk { margin-left: auto; display: flex; gap: var(--s2); }
+
   /* Prep lane: a chat happening in a few hours. The only lane above Debrief,
      and the only one whose card leads with a clock — everything else on this
      page is "sometime today", and this one is not. */

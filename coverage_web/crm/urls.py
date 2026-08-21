@@ -19,6 +19,11 @@ urlpatterns = [
     path("today/<int:pk>/<str:verb>/", views.today_act, name="today_act"),
     # Post-chat debrief, keyed by the `chat` touch it belongs to (one
     # debrief per chat — see crm.models.ChatDebrief).
+    # Contact proposals found in the mailbox (capture.discovery) — one-tap
+    # accept/dismiss from the Today page. Literal "bulk" segment first so the
+    # int converter can't shadow it.
+    path("proposals/bulk/<str:verb>/", views.proposals_bulk, name="proposals_bulk"),
+    path("proposals/<int:pk>/<str:verb>/", views.proposal_act, name="proposal_act"),
     path("debrief/<int:pk>/", views.debrief, name="debrief"),
     path("debrief/<int:pk>/dismiss/", views.debrief_dismiss, name="debrief_dismiss"),
     path("debrief/<int:pk>/promote/", views.debrief_promote, name="debrief_promote"),

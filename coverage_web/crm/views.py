@@ -229,6 +229,64 @@ def debrief_promote(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("crm:contact_detail", pk=row.contact_id)
 
 
+@login_required
+@require_POST
+def proposal_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
+    """One tap on a contact proposal: accept creates the contact through
+    `capture.discovery.accept` (capture_discover's own creation contract —
+    warmth earned via the ratchet, archived matches never resurrected), and
+    dismiss hides it forever. Re-renders the cockpit like every other Today
+    quick action."""
+    from capture import discovery
+    from capture.models import ContactProposal
+
+    if verb not in ("accept", "dismiss"):
+        return HttpResponse(status=400)
+    proposal = get_object_or_404(
+        ContactProposal.objects.for_user(request.user), pk=pk,
+        status=ContactProposal.STATUS_PENDING,
+    )
+    if verb == "accept":
+        contact = discovery.accept(proposal)
+        record_event(
+            "contact_proposal_accepted", user=request.user, source="today",
+            contact_id=contact.id if contact else None,
+        )
+    else:
+        discovery.dismiss(proposal)
+        record_event("contact_proposal_dismissed", user=request.user, source="today")
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+@login_required
+@require_POST
+def proposals_bulk(request: HttpRequest, verb: str) -> HttpResponse:
+    """Accept or dismiss every pending proposal at once. Same per-row paths
+    as the single-tap view — the bulk button is a loop, not a second
+    contract."""
+    from capture import discovery
+    from capture.models import ContactProposal
+
+    if verb not in ("accept", "dismiss"):
+        return HttpResponse(status=400)
+    pending = list(
+        ContactProposal.objects.for_user(request.user).filter(
+            status=ContactProposal.STATUS_PENDING
+        )
+    )
+    for proposal in pending:
+        if verb == "accept":
+            discovery.accept(proposal)
+        else:
+            discovery.dismiss(proposal)
+    if pending:
+        record_event(
+            f"contact_proposals_bulk_{verb}", user=request.user, source="today",
+            count=len(pending),
+        )
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
 
 # ---------------------------------------------------------------------------
 # 2. Contact list + detail.

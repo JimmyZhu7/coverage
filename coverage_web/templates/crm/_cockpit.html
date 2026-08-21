@@ -15,7 +15,7 @@ on every quick action so all of it stays in sync.
     when the QUEUE is empty; saying it while 27 items are pacing out would be
     the page contradicting the line directly beneath it.
     {% endcomment %}
-    {% if not queue_total and not debriefs %}
+    {% if not queue_total and not debriefs and not proposals %}
       <div class="empty">
         {% if contact_count %}
           {% comment %}
@@ -48,7 +48,7 @@ on every quick action so all of it stays in sync.
         {% endcomment %}
         {% if not seeds %}<a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>{% endif %}
       </div>
-    {% elif not lanes and not debriefs %}
+    {% elif not lanes and not debriefs and not proposals %}
       {% comment %}
       The plan is clear but the queue is not. This is the product working, so
       it is styled as a win — and it names what's left rather than implying
@@ -162,6 +162,65 @@ on every quick action so all of it stays in sync.
                           aria-label="Don't ask about the chat with {{ d.contact.name }}"
                           hx-post="{% url 'crm:debrief_dismiss' d.touch.id %}"
                           title="Don't ask about this chat">Skip</button>
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% comment %}
+    Found in your inbox. People the mailbox scan judged worth tracking —
+    proposals, not contacts. Nothing is in the CRM until Add is tapped
+    (capture/discovery.py), and Dismiss is remembered forever. Sits with the
+    debrief lane above the plan: both are about mail that already happened.
+    {% endcomment %}
+    {% if proposals %}
+      <section class="lane lane-proposals">
+        <h2 class="lane-title">
+          Found in your inbox
+          <span class="lane-count" aria-live="polite">{{ proposals|length }}</span>
+          {% if proposals|length > 1 %}
+            <span class="lane-bulk">
+              <button type="button" class="btn act-ghost"
+                      hx-post="{% url 'crm:proposals_bulk' 'accept' %}"
+                      title="Add everyone listed here">Add all</button>
+              <button type="button" class="btn act-ghost"
+                      hx-post="{% url 'crm:proposals_bulk' 'dismiss' %}"
+                      title="Dismiss everyone listed here">Dismiss all</button>
+            </span>
+          {% endif %}
+        </h2>
+        <div class="act-grid">
+          {% for p in proposals %}
+            <article class="act-card kin-reveal act-proposal" style="--i:{{ forloop.counter0 }}">
+              <div class="act-ident">
+                <div class="act-idtext">
+                  <span class="opp-firm">{% if p.firm %}{{ p.firm.name|smart_title }}{% else %}{{ p.email|slice:"-254:" }}{% endif %}</span>
+                  <h3 class="act-name">{{ p.name|smart_title }}</h3>
+                  {% if p.role_hint %}<p class="act-role">{{ p.role_hint|smart_title }}</p>{% elif p.firm %}<p class="act-role">{{ p.email }}</p>{% endif %}
+                </div>
+                <span class="chip warmth-cold">new</span>
+              </div>
+              <div class="act-context">
+                <div class="act-badges">
+                  <span class="prio prio-proposal">Not in your network</span>
+                  {% if p.recruiting_hint %}<span class="prio">Recruiting contact</span>{% endif %}
+                </div>
+                <p class="act-reason">{{ p.evidence }}</p>
+              </div>
+              <div class="act-quick">
+                <div class="act-primary">
+                  <button type="button" class="btn btn-primary act-btn"
+                          aria-label="Add {{ p.name }} to your network"
+                          hx-post="{% url 'crm:proposal_act' p.id 'accept' %}">Add to network</button>
+                </div>
+                <div class="act-ghosts">
+                  <button type="button" class="btn act-ghost"
+                          aria-label="Dismiss {{ p.name }}"
+                          hx-post="{% url 'crm:proposal_act' p.id 'dismiss' %}"
+                          title="Never propose this person again">Dismiss</button>
                 </div>
               </div>
             </article>

@@ -1447,6 +1447,19 @@ def _cockpit_context(user) -> dict:
             "capped": total > len(items),
         })
 
+    # People the mailbox scan judged worth tracking, waiting for a tap.
+    # PROPOSALS, not contacts — nothing exists in the CRM until accept (see
+    # capture/discovery.py). Capped at 24 as a rendering guard only; the
+    # judgment chain keeps real volume far below that.
+    from capture.models import ContactProposal
+
+    proposals = list(
+        ContactProposal.objects.for_user(user)
+        .filter(status=ContactProposal.STATUS_PENDING)
+        .select_related("firm")
+        .order_by("created")[:24]
+    )
+
     # E10: when one contact holds both a debrief and a thank-you, the two
     # cards stop pretending not to know about each other.
     debriefs = debrief_svc.pending(user)
@@ -1514,6 +1527,7 @@ def _cockpit_context(user) -> dict:
 
     return {
         "lanes": lanes,
+        "proposals": proposals,
         "planned_total": len(planned),
         "held": held,
         "held_total": len(held),
