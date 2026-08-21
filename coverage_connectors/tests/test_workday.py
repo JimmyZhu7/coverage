@@ -498,3 +498,112 @@ def test_verify_needs_verification_without_path_or_query():
 ])
 def test_locations_text_is_punctuated_not_guessed_at(raw, expected):
     assert workday.normalize_locations_text(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# The tenacity retry for the five documented-flaky Workday tenants
+# (coverage-firms-backlog memory, 2026-08-08/09: TD Securities/MUFG/CIBC/
+# DBS/Santander intermittently served the CxS endpoint's HTML shell instead
+# of JSON, then recovered on their own). `_fetch_all_retrying` is patched to
+# not actually sleep between attempts, so these run instantly.
+# ---------------------------------------------------------------------------
+_FLAKY_BOARD = WorkdayBoard(firm="TD Securities", tenant_host="td.wd3", site="TD_Bank_Careers")
+_ORDINARY_BOARD = WorkdayBoard(firm="Some Firm", tenant_host="somefirm.wd1", site="Careers")
+_EMPTY_PAGE = {"total": 0, "jobPostings": []}
+
+
+def _no_sleep(monkeypatch):
+    monkeypatch.setattr(workday._fetch_all_retrying.retry, "sleep", lambda s: None)
+
+
+def test_a_flaky_bank_recovers_after_transient_timeouts(monkeypatch):
+    """The documented failure mode: the endpoint answers with a connection
+    reset a couple of times, then a clean page. A board in
+    `_FLAKY_TENANT_HOSTS` should retry past that and come back `ok`."""
+    _no_sleep(monkeypatch)
+    calls = {"n": 0}
+
+    def flaky_post_json(url, payload, **kw):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectionError("connection reset by peer")
+        return _EMPTY_PAGE
+
+    monkeypatch.setattr(workday, "post_json", flaky_post_json)
+    result = workday.fetch(_FLAKY_BOARD)
+
+    assert result.ok
+    assert calls["n"] == 3
+
+
+def test_a_flaky_bank_recovers_from_the_spa_shell_response(monkeypatch):
+    """The other half of the documented failure mode: the CxS endpoint
+    answers 200 with its HTML app shell instead of JSON. `fetch_json`
+    surfaces that as a `ValueError` (see http.py), which is exactly what
+    `_is_transient_workday_error` is written to catch."""
+    _no_sleep(monkeypatch)
+    calls = {"n": 0}
+
+    def spa_shell_then_json(url, payload, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("expected JSON object/array, got str: '<!doctype html>...'")
+        return _EMPTY_PAGE
+
+    monkeypatch.setattr(workday, "post_json", spa_shell_then_json)
+    result = workday.fetch(_FLAKY_BOARD)
+
+    assert result.ok
+    assert calls["n"] == 2
+
+
+def test_a_flaky_bank_still_gives_up_on_a_definitive_404(monkeypatch):
+    """A 404 is a fact about the board, not the network moment -- it must
+    not burn all 4 attempts even on a board in the flaky set."""
+    calls = {"n": 0}
+
+    def raise_404(url, payload, **kw):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(url, 404, "not found", None, None)
+
+    monkeypatch.setattr(workday, "post_json", raise_404)
+    result = workday.fetch(_FLAKY_BOARD)
+
+    assert not result.ok
+    assert calls["n"] == 1
+
+
+def test_a_flaky_bank_stops_at_the_attempt_ceiling(monkeypatch):
+    """4 attempts is the ceiling, not a retry loop -- a board that never
+    recovers is reported honestly rather than retried forever."""
+    _no_sleep(monkeypatch)
+    calls = {"n": 0}
+
+    def always_times_out(url, payload, **kw):
+        calls["n"] += 1
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(workday, "post_json", always_times_out)
+    result = workday.fetch(_FLAKY_BOARD)
+
+    assert not result.ok
+    assert calls["n"] == 4
+
+
+def test_a_board_outside_the_flaky_set_is_not_retried(monkeypatch):
+    """The extra attempts and backoff are scoped to the documented quintet
+    -- every other board keeps today's one-shot-per-call behavior (it still
+    gets the separate, generic one-retry courtesy at `fetch_with_retry`'s
+    layer above this one, but that is a different call, not exercised
+    here)."""
+    calls = {"n": 0}
+
+    def always_resets(url, payload, **kw):
+        calls["n"] += 1
+        raise ConnectionError("connection reset by peer")
+
+    monkeypatch.setattr(workday, "post_json", always_resets)
+    result = workday.fetch(_ORDINARY_BOARD)
+
+    assert not result.ok
+    assert calls["n"] == 1

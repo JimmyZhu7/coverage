@@ -9,6 +9,7 @@ dependencies = [
     # chromium`, done in the Dockerfile). The connector imports it lazily and
     # degrades gracefully, so HTTP-only installs still work if it's absent.
     "playwright>=1.61.0",
+    "tenacity>=9.1.4",
 ]
 
 [dependency-groups]

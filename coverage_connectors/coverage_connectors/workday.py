@@ -53,6 +53,8 @@ import urllib.error
 import urllib.parse
 from datetime import date
 
+import tenacity
+
 from .http import FetchError, fetch_json, fetch_text, post_json
 from .models import FetchResult, Opportunity, VerificationResult, WorkdayBoard
 
@@ -169,6 +171,54 @@ def _fetch_all(tenant_host: str, site: str, search_text: str = "",
     return {**first, "jobPostings": postings}
 
 
+# The five Workday tenants documented (coverage-firms-backlog memory,
+# 2026-08-08/09) as intermittently serving the CxS endpoint's HTML app shell
+# instead of its JSON in the minutes after a clean fetch, then recovering on
+# their own within the day both times it was observed — TD Securities, MUFG,
+# CIBC, DBS, and Santander (`boards.py`'s td/mufg/cibc/dbs/santander
+# entries). A short, jittered retry buys back the freshness a single blip
+# would otherwise cost this specific quintet, without adding retry weight
+# (or the latency it costs on a genuine 404/config error) to the ~140 other
+# boards that have never shown this failure mode.
+_FLAKY_TENANT_HOSTS = frozenset({
+    "td.wd3", "mufgub.wd3", "cibc.wd3", "dbs.wd3", "santander.wd3",
+})
+
+
+def _is_transient_workday_error(exc: BaseException) -> bool:
+    """Transient only: a dropped connection, a timeout, a 5xx, or the CxS
+    endpoint answering with its HTML shell instead of JSON -- the specific
+    shape this quintet of tenants has been seen to flip to and back from
+    within the same day (see `_FLAKY_TENANT_HOSTS` above). A definitive 4xx
+    (auth, not found) is a fact about the request, not the network moment --
+    retrying it would only delay an honest failure by however long the
+    backoff runs.
+    """
+    if isinstance(exc, ValueError):
+        # fetch_json's "expected JSON object/array" -- exactly what a CxS
+        # call gets back when Workday serves the SPA shell instead.
+        return True
+    cause = exc.cause if isinstance(exc, FetchError) else exc
+    if isinstance(cause, urllib.error.HTTPError):
+        return cause.code >= 500
+    return isinstance(cause, (urllib.error.URLError, TimeoutError, ConnectionError))
+
+
+@tenacity.retry(
+    retry=tenacity.retry_if_exception(_is_transient_workday_error),
+    stop=tenacity.stop_after_attempt(4),
+    wait=tenacity.wait_exponential_jitter(initial=1, max=15),
+    reraise=True,
+)
+def _fetch_all_retrying(tenant_host: str, site: str, search_text: str = "",
+                        tenant: str = "", domain: str = "myworkdayjobs.com") -> dict:
+    """`_fetch_all`, with up to 4 attempts and exponential-plus-jitter
+    backoff on a transient failure. Only ever called for
+    `_FLAKY_TENANT_HOSTS` (see `fetch()` below) -- every other board still
+    goes through plain `_fetch_all`, unchanged."""
+    return _fetch_all(tenant_host, site, search_text, tenant, domain)
+
+
 # A house number followed by a word, at the very start: "890 Herron Road,
 # Montreal, Quebec", "1060-1068 Stelton Road, Piscataway, New Jersey".
 # Anchored and bounded so a real place that merely contains digits
@@ -238,8 +288,12 @@ def _normalize(job: dict, board: WorkdayBoard) -> Opportunity:
 
 def fetch(board: WorkdayBoard) -> FetchResult:
     try:
-        data = _fetch_all(board.tenant_host, board.site, board.search_text,
-                          board.tenant, board.domain)
+        # See `_FLAKY_TENANT_HOSTS` above: only this documented quintet pays
+        # for the extra retry attempts and backoff.
+        fetch_all = (_fetch_all_retrying if board.tenant_host in _FLAKY_TENANT_HOSTS
+                     else _fetch_all)
+        data = fetch_all(board.tenant_host, board.site, board.search_text,
+                         board.tenant, board.domain)
         jobs = data.get("jobPostings", [])
         # Kept inside this try — see greenhouse.py's fetch() for why: a
         # normalization failure on one malformed job must not propagate
