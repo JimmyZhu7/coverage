@@ -383,6 +383,12 @@ def test_export_requires_a_login(client):
 # own Subject line; capture/gmail_live.py copies it into Touch.note; the
 # student opens their export in Excel. Everything below exists to keep that
 # last step boring.
+#
+# The escaping itself is `defusedcsv`'s (services.py `from defusedcsv import
+# csv`) plus one supplementary guard for the one lead character it doesn't
+# cover — see `_neutralise_tab_or_cr_lead`'s docstring. Formerly hand-rolled
+# in full as `_safe_cell()`; see git log "Stop a stranger's email subject
+# running as a formula in the export" for that version.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "hostile",
@@ -400,10 +406,44 @@ def test_export_requires_a_login(client):
 def test_a_formula_in_a_cell_exports_as_inert_text(hostile):
     text = services._csv(["note"], [[hostile]])
     cell = list(csv.reader(io.StringIO(text)))[1][0]
-    assert cell == "'" + hostile
-    # The apostrophe is only worth anything if it is genuinely first.
+    # The apostrophe is only worth anything if it is genuinely first --
+    # everything after it is inert to a spreadsheet's formula parser.
     assert cell[0] == "'"
-    assert not cell.startswith(tuple(services._FORMULA_LEAD))
+    # defusedcsv (the library doing the escaping now — see services.py's
+    # import comment) additionally backslash-escapes a literal `|`, a DDE
+    # injection vector distinct from the leading-character one this test is
+    # about. Undo just that before comparing: this test's job is confirming
+    # the LEAD character lost its power, not defusedcsv's whole escaping
+    # surface.
+    assert cell[1:].replace("\\|", "|") == hostile
+
+
+@pytest.mark.parametrize("lead", ["\t", "\r"])
+def test_a_tab_or_cr_led_formula_is_still_neutralised(lead):
+    """The one lead character defusedcsv's own writer does not escape
+    (checked live against the installed version — `writer.writerow` leaves
+    `"\\t=SUM(1+1)"` untouched). A spreadsheet strips a leading tab or
+    carriage return on paste, before its own formula-detection runs, so this
+    is not a theoretical gap. `_neutralise_tab_or_cr_lead` closes it ahead of
+    defusedcsv rather than relying on the library to grow it."""
+    hostile = f"{lead}=SUM(1+1)"
+    text = services._csv(["note"], [[hostile]])
+    cell = list(csv.reader(io.StringIO(text)))[1][0]
+    assert cell == "'" + hostile
+    assert cell[0] == "'"
+
+
+@pytest.mark.parametrize("lead", ["|", "%"])
+def test_defusedcsv_covers_two_lead_characters_the_old_guard_did_not(lead):
+    """Not a regression check — a widening one. The hand-rolled guard this
+    replaced only recognised `=+-@` (plus tab/CR); defusedcsv's own trigger
+    set also catches a leading `|` (DDE) and `%` (some legacy Excel macro
+    contexts), so swapping in the library is a strictly bigger net, not a
+    like-for-like port."""
+    hostile = f"{lead}SUM(1+1)"
+    text = services._csv(["note"], [[hostile]])
+    cell = list(csv.reader(io.StringIO(text)))[1][0]
+    assert cell[0] == "'"
 
 
 def test_a_hostile_subject_line_survives_the_real_touches_export(student, firm):
