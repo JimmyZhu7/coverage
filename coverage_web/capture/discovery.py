@@ -23,9 +23,12 @@ the rest of this pipeline):
 
 1. Bulk verdict (`capture.inbound`, already applied upstream — the finding
    carries `bulk`) -> never propose from a blast.
-2. A sender no human is behind: no-reply-style localparts (`inbound`'s own
-   test), role-account localparts (careers@, info@ — a mailbox, not a
-   person), or a known ESP/transactional sending domain -> stop.
+2. A sender no human is behind, or not a discovery: no-reply-style localparts
+   (`inbound`'s own test), role-account localparts (careers@, info@ — a
+   mailbox, not a person), a known ESP/transactional sending domain, or the
+   user's OWN institution's domain (their school's housing desk replying is
+   a campus relationship, not a networking find — see
+   `_own_institution_domains`) -> stop.
 3. The sender's domain matches a `Firm.domains` entry in the directory ->
    strong signal. (Firms DO store email domains — `Firm.domains` is a real
    ArrayField, 83 of 127 firms populated on live data — so matching is
@@ -135,7 +138,48 @@ _TRANSACTIONAL_DOMAIN_SUFFIXES = (
     "substack.com",
     "beehiiv.com",
     "mailerlite.com",
+    "hirevue.com",
+    "qemailserver.com",
+    "ccsend.com",
+    "mailchimpapp.com",
 )
+
+# Domains where an address IS a person, not an institution — the own-domain
+# exclusion below must never fire for these, or a mailbox connected at
+# gmail.com would exclude every alum on personal email.
+_FREEMAIL_DOMAINS = frozenset({
+    "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
+    "yahoo.com", "icloud.com", "me.com", "aol.com", "proton.me",
+    "protonmail.com", "qq.com", "163.com", "126.com",
+})
+
+
+def _own_institution_domains(user) -> set[str]:
+    """The user's OWN institutional email domains — their account email's and
+    any connected mailbox's, freemail excluded.
+
+    WHY: verified on the founder's real mailbox (2026-08-22, read-only): the
+    two would-be junk proposals the other gates could not stop were both
+    genuine, threaded, personal replies from HIS OWN school's staff — the
+    housing customer-service desk and a university investigator. Someone
+    writing from the student's own institution is a campus relationship (an
+    RA, an advisor, an office), not a networking discovery; a professor worth
+    tracking can always be added by hand. Deterministic, and only as an
+    EXCLUSION — no message is ever promoted by this."""
+    from capture.models import GmailConnection
+
+    domains = set()
+    for address in [getattr(user, "email", "")] + list(
+        GmailConnection.all_objects.filter(user=user).values_list(
+            "gmail_address", flat=True
+        )
+    ):
+        address = (address or "").strip().lower()
+        if "@" in address:
+            domain = address.rsplit("@", 1)[-1]
+            if domain and domain not in _FREEMAIL_DOMAINS:
+                domains.add(domain)
+    return domains
 
 # Display-name separators after which a role/affiliation tends to ride:
 # "Jane Doe, Campus Recruiting", "Jane Doe | Goldman Sachs",
@@ -275,6 +319,13 @@ def consider_finding(
     if inbound.looks_like_noreply(email) or _ROLE_ACCOUNT_LOCALPART_RE.match(localpart):
         return None
     if _is_transactional_domain(email):
+        return None
+    sender_domain = email.rsplit("@", 1)[-1]
+    own_domains = _own_institution_domains(user)
+    if any(
+        sender_domain == own or sender_domain.endswith("." + own)
+        for own in own_domains
+    ):
         return None
 
     firm_domains = firm_domains or FirmDomains()

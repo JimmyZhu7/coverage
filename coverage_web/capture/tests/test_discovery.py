@@ -117,6 +117,26 @@ def test_esp_domain_never_proposes(student, firm):
     ) is None
 
 
+def test_own_institution_domain_never_proposes(firm):
+    """Verified on live data: the two junk proposals nothing else caught
+    were genuine threaded replies from the user's own school's staff. A
+    sender at the user's own institutional domain is a campus relationship,
+    not a discovery."""
+    student = User.objects.create_user(email="jimmy@school.example", password="x")
+    assert consider(
+        student, finding(email="housing.desk@school.example", threaded_reply=True)
+    ) is None
+
+
+def test_freemail_account_does_not_exclude_freemail_senders(firm):
+    """A user whose own account is @gmail.com must still get proposals for
+    alumni replying from gmail — the own-domain rule is institutional only."""
+    student = User.objects.create_user(email="jimmy.disc@gmail.com", password="x")
+    assert consider(
+        student, finding(email="alum.reply@gmail.com", threaded_reply=True)
+    ) == discovery.PROPOSED
+
+
 def test_stranger_with_no_signal_never_proposes(student, firm):
     """No firm-domain match AND no reply pointer: a stranger cold-emailing
     the student is not a networking contact."""
