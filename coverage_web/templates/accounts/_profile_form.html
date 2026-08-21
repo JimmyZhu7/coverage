@@ -1,3 +1,4 @@
+{% load csp %}
 {% comment %}
 Inner fields of ProfileForm — no <form> wrapper, no submit button, so the
 parent (onboarding step 1 / settings page) supplies those. Reused as the
@@ -100,7 +101,7 @@ guarded by `dataset.avatarBound`, because this partial is ALSO an htmx swap
 target on the settings page — an inline listener bound directly to the node
 would be re-bound on every in-place save, stacking duplicates.
 {% endcomment %}
-<script>
+{% script %}
 (function () {
   if (document.documentElement.dataset.avatarBound) return;
   document.documentElement.dataset.avatarBound = "1";
@@ -183,4 +184,4 @@ would be re-bound on every in-place save, stacking duplicates.
     show(f, file);
   });
 })();
-</script>
+{% endscript %}

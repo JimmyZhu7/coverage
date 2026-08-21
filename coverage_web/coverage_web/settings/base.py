@@ -16,6 +16,7 @@ import hashlib
 from pathlib import Path
 
 import environ
+from csp.constants import NONCE, NONE, SELF, UNSAFE_INLINE
 
 # This file lives at coverage_web/coverage_web/settings/base.py.
 # parents[0] = settings/, [1] = coverage_web/ (the Django package dir, also
@@ -62,6 +63,11 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.apple",
     "allauth.socialaccount.providers.microsoft",
     "allauth.socialaccount.providers.linkedin_oauth2",
+    # Registers django-csp's own system checks (warns if an old CSP_* setting
+    # sneaks in instead of the CONTENT_SECURITY_POLICY dict below) — no
+    # models, no urls, no runtime behaviour of its own. django-permissions-
+    # policy needs no app entry; it is middleware-only (no apps.py to load).
+    "csp",
     "core",
     # docs/build-plan.md §2's multi-tenant data model, split by zone:
     "accounts",  # the custom User model (private zone's `users` table)
@@ -221,6 +227,16 @@ AUTH_USER_MODEL = "accounts.User"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Both add response headers only (Content-Security-Policy,
+    # Permissions-Policy) and read nothing session/auth-scoped, so they sit
+    # right behind SecurityMiddleware — as outer as possible, same
+    # reasoning as GZipMiddleware's placement comment just below: earlier in
+    # this list = later to touch the outgoing response. CSPMiddleware also
+    # sets `request.csp_nonce` in its request phase (read by the `{% script
+    # %}` tag — see csp/templatetags/csp.py), which only needs to happen
+    # before a view/template runs, not before any other middleware here.
+    "csp.middleware.CSPMiddleware",
+    "django_permissions_policy.PermissionsPolicyMiddleware",
     # First in the list = last to touch the response = compresses everything
     # below it. The feed serves ~2MB of HTML uncompressed — seconds on
     # cellular for the page most likely to be opened on a phone. (Django's
@@ -249,6 +265,68 @@ MIDDLEWARE = [
     # django-allauth requires this in addition to AuthenticationMiddleware.
     "allauth.account.middleware.AccountMiddleware",
 ]
+
+# ---------------------------------------------------------------------------
+# Content-Security-Policy (CSPMiddleware above).
+#
+# Audited against what the app actually loads, not copied from a template:
+# every `<script src=...>`/`<link href=...>` in templates/ is a static file
+# under this origin (`{% static %}`), and templates/ has no third-party
+# script/font/stylesheet origin at all — no CDN, no Google Fonts, no
+# Stripe.js (billing/stripe_gateway.py drives Checkout server-side via a
+# redirect, never Stripe Elements in the browser), confirmed by grepping
+# every template for an `https://` resource reference. That makes `'self'`
+# sufficient nearly everywhere; the two exceptions below are both real,
+# checked needs rather than a defensive widening:
+#   - `img-src` adds `data:` — a few templates inline a `data:image/...`
+#     source (e.g. accounts/_welcome_head.html, core/pricing.html).
+#   - `style-src` adds `'unsafe-inline'` — Coverage has ~20 templates using
+#     an inline `style="..."` attribute and no nonce plumbing for style-src-
+#     attr (unlike script-src below). Style injection is a real but much
+#     lower-severity class than script injection (no code execution), and
+#     nonce-ing every inline style attribute across that many templates is
+#     out of scope for this pass; tracked as a follow-up tightening, not
+#     silently accepted forever.
+#
+# `script-src` uses a per-request NONCE instead of `'unsafe-inline'`: every
+# inline `<script>` in templates/ was converted to django-csp's `{% script
+# %}...{% endscript %}` tag (see e.g. base.html), which stamps
+# `request.csp_nonce` onto the tag automatically. A `<script src=...>` needs
+# no nonce — it is already same-origin, covered by `'self'`.
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": [SELF],
+        "script-src": [SELF, NONCE],
+        "style-src": [SELF, UNSAFE_INLINE],
+        "img-src": [SELF, "data:"],
+        "font-src": [SELF],
+        "connect-src": [SELF],
+        "object-src": [NONE],
+        "base-uri": [SELF],
+        "form-action": [SELF],
+        # Superset of XFrameOptionsMiddleware's DENY (still enabled below)
+        # in browsers that support this directive — Coverage is never meant
+        # to be framed by anyone, including itself.
+        "frame-ancestors": [NONE],
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Permissions-Policy (django_permissions_policy.PermissionsPolicyMiddleware
+# above). Coverage uses none of these browser features anywhere — no camera/
+# mic (no video chat), no geolocation (region is a manual Settings field,
+# not device location), no on-device payment UI (Stripe Checkout is a
+# redirect, not the Payment Request API). Denying all of them for every
+# origin, including this one, costs the product nothing today and closes
+# off a class of embedded-third-party-content risk if one is ever added
+# later without this file being revisited.
+# ---------------------------------------------------------------------------
+PERMISSIONS_POLICY = {
+    "geolocation": [],
+    "camera": [],
+    "microphone": [],
+    "payment": [],
+}
 
 ROOT_URLCONF = "coverage_web.urls"
 

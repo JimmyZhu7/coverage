@@ -1,3 +1,4 @@
+{% load csp %}
 {% comment %}
 THE POSTING DRAWER — dialog, close button, and the script that opens it.
 
@@ -14,7 +15,7 @@ Native <dialog>: the browser owns the focus trap, Escape, and the top layer.
   <div id="role-drawer-body"></div>
 </dialog>
 
-<script>
+{% script %}
   // ---- The posting drawer ------------------------------------------------
   // Open on click, not on htmx's response: the fetch is fast but not
   // instant, and a button that does nothing for 200ms reads as broken. The
@@ -57,4 +58,4 @@ Native <dialog>: the browser owns the focus trap, Escape, and the top layer.
       });
     }
   })();
-</script>
+{% endscript %}

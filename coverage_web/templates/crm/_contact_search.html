@@ -1,3 +1,4 @@
+{% load csp %}
 {% comment %}
 Shared search + sort toolbar for contact lists (Network's Contacts section,
 Archived Contacts). Included with `target` = the id of the container that
@@ -24,7 +25,7 @@ Archived has no groups and the script quietly treats the whole list as one.
   </select>
 </div>
 <p class="csearch-empty" data-csearch-empty hidden>No contacts match "<span data-csearch-empty-q></span>".</p>
-<script>
+{% script %}
   (function () {
     // The toolbar renders ABOVE the items it searches (better UX than
     // burying it under 130 cards), which means at the moment this inline
@@ -116,4 +117,4 @@ Archived has no groups and the script quietly treats the whole list as one.
     sortSel.addEventListener("change", applySort);
     }
   })();
-</script>
+{% endscript %}

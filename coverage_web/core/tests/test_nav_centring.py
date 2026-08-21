@@ -51,8 +51,15 @@ def _client():
 
 
 def _nav_script(html: str) -> str:
-    """The centring script, by the call only it makes."""
-    for block in re.findall(r"<script>(.*?)</script>", html, re.S):
+    """The centring script, by the call only it makes.
+
+    `[^>]*` on the open tag, not a bare `<script>`, because base.html's
+    inline scripts render through django-csp's `{% script %}` tag (see
+    "Wire django-csp + django-permissions-policy" in git log), which stamps
+    a `nonce="..."` attribute onto the tag -- this test cares which script
+    ran, not what attributes the CSP layer put on it.
+    """
+    for block in re.findall(r"<script[^>]*>(.*?)</script>", html, re.S):
         if 'inline: "center"' in block and "site-nav" in block:
             return block
     raise AssertionError("the nav-centring script is gone from the header")

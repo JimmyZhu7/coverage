@@ -1,3 +1,4 @@
+{% load csp %}
 {% comment %}
 The onboarding wizard's own stylesheet. Nothing here styles body/nav/main —
 the shared shell (static/css/coverage.css) owns those, and every colour, size,
@@ -620,7 +621,7 @@ All this adds is that it stays correct if the masthead ever changes.
 In `<head>`, so it waits for the element to exist. ResizeObserver where it is
 available (every browser this app supports), `resize` as the floor.
 {% endcomment %}
-<script>
+{% script %}
 (function () {
   function wire() {
     var head = document.querySelector(".site-header");
@@ -640,4 +641,4 @@ available (every browser this app supports), `resize` as the floor.
     document.addEventListener("DOMContentLoaded", wire);
   } else { wire(); }
 })();
-</script>
+{% endscript %}

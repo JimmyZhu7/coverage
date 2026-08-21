@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load csp %}
 {% load textstyle %}
 
 {% block title %}Network · Coverage{% endblock %}
@@ -416,7 +417,7 @@
   </section>
 </div>
 
-<script>
+{% script %}
   // Bulk selection on the actions panel. Progressive enhancement only: the
   // checkboxes and the submit buttons are real form controls that work
   // without any of this — the script adds the live count, shift-click
@@ -584,5 +585,5 @@
       });
     });
   })();
-</script>
+{% endscript %}
 {% endblock %}

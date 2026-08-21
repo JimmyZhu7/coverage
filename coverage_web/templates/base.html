@@ -1,4 +1,4 @@
-{% load static %}<!doctype html>
+{% load static %}{% load csp %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -62,13 +62,13 @@
   from the explicit Settings toggle (static/js/push-subscribe.js) — this
   script never requests permission or calls PushManager on its own.{% endcomment %}
   {% if user.is_authenticated %}
-  <script>
+  {% script %}
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         navigator.serviceWorker.register("{% static 'service-worker.js' %}").catch(function () {});
       });
     }
-  </script>
+  {% endscript %}
   {% endif %}
   {% comment %}
   Theme, applied BEFORE the stylesheet so a stored choice never flashes the
@@ -76,7 +76,7 @@
   first paint, which is exactly the frame this exists to fix. No stored
   choice means no attribute, and the media query decides.
   {% endcomment %}
-  <script>
+  {% script %}
     (function () {
       try {
         var t = localStorage.getItem("coverage-theme");
@@ -85,7 +85,7 @@
         }
       } catch (e) {}
     })();
-  </script>
+  {% endscript %}
   <link rel="stylesheet" href="{% static 'css/coverage.css' %}">
   {# Vendored static asset, not a CDN or Node build — see coverage_web/static/vendor/. #}
   <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
@@ -205,7 +205,7 @@ select on.
 
       The pointerdown latch is the manners: once a reader has dragged the
       row themselves, a late reflow must not yank it back.{% endcomment %}
-      <script>
+      {% script %}
         (function () {
           var nav = document.querySelector(".site-nav");
           var here = nav && nav.querySelector("a.active");
@@ -231,7 +231,7 @@ select on.
             });
           }
         })();
-      </script>
+      {% endscript %}
     </div>
   </header>
   {# tabindex="-1" so the skip link's target can actually take focus. #}
@@ -294,7 +294,7 @@ select on.
     filters keep working; with JS off, the styled native control is the
     fallback. New selects arriving via htmx swaps are re-enhanced.
   {% endcomment %}
-  <script>
+  {% script %}
     // Keep an absolutely-positioned dropdown panel inside the viewport.
     //
     // Both dropdowns anchor their panel to the button's LEFT edge, so any
@@ -538,7 +538,7 @@ select on.
       else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });
       document.body.addEventListener("htmx:afterSettle", function (e) { enhanceAll(e.target); });
     })();
-  </script>
+  {% endscript %}
 
   {% comment %}
   .kin-reveal's one-shot entrance animation (coverage.css) never releases the
@@ -567,13 +567,13 @@ select on.
   `.kin-reveal` element already on the page AND every one an htmx swap
   inserts later, with no separate re-scan needed.
   {% endcomment %}
-  <script>
+  {% script %}
     document.addEventListener("animationend", function (e) {
       if (e.animationName === "rise-in" && e.target.classList.contains("kin-reveal")) {
         e.target.style.animation = "none";
       }
     });
-  </script>
+  {% endscript %}
 
   {% comment %}
   Number-input stepper. Same progressive-enhancement shape as the `.csel`
@@ -591,7 +591,7 @@ select on.
   that only moved `.value` would update the number in the box while the
   diagram beside it sat frozen on the old one.
   {% endcomment %}
-  <script>
+  {% script %}
     (function () {
       function enhance(input) {
         if (input.dataset.numStepDone) return;
@@ -639,7 +639,7 @@ select on.
       else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });
       document.body.addEventListener("htmx:afterSettle", function (e) { enhanceAll(e.target); });
     })();
-  </script>
+  {% endscript %}
 
   {% if user.is_authenticated %}
   {% comment %}
@@ -656,7 +656,7 @@ select on.
     <ul id="cmdk-results" role="listbox"></ul>
     <p class="palette-hint">↑↓ move · Enter open · Esc close</p>
   </dialog>
-  <script>
+  {% script %}
     (function () {
       var dlg = document.getElementById("cmdk");
       var input = document.getElementById("cmdk-q");
@@ -773,7 +773,7 @@ select on.
       // Click on the backdrop closes; native <dialog> only closes on Esc.
       dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
     })();
-  </script>
+  {% endscript %}
   {% endif %}
 
   {% if user.is_authenticated and user.timezone_auto %}
@@ -793,7 +793,7 @@ select on.
   because the endpoint answers 200 only when it CHANGED something, and after
   the reload the detected zone equals the stored one and this returns early.
   {% endcomment %}
-  <script>
+  {% script %}
     (function () {
       var detected;
       try { detected = Intl.DateTimeFormat().resolvedOptions().timeZone; }
@@ -810,7 +810,7 @@ select on.
         if (r.status === 200) window.location.reload();
       }).catch(function () {});
     })();
-  </script>
+  {% endscript %}
   {% endif %}
 </body>
 </html>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load csp %}
 {% load textstyle %}
 
 {% block title %}Calendar · Coverage{% endblock %}
@@ -534,12 +535,12 @@ links you can scroll by hand; this only saves the scroll. `instant`, not
 `smooth`: an animation firing on every page load is motion you did not ask
 for, and it fights the browser's own scroll restoration on a back button.
 {% endcomment %}
-<script>
+{% script %}
   (function () {
     var rail = document.getElementById("cal-rail");
     var active = rail && rail.querySelector(".is-active");
     if (!active) return;
     rail.scrollLeft = active.offsetLeft - (rail.clientWidth - active.offsetWidth) / 2;
   })();
-</script>
+{% endscript %}
 {% endblock %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load csp %}
 {% load textstyle %}
 
 {% block title %}Opportunities · Coverage{% endblock %}
@@ -278,7 +279,7 @@ else is htmx and the platform.
 {% endcomment %}
 {% include "directory/_drawer.html" %}
 
-<script>
+{% script %}
   // "Companies" multi-select: toggle the checkbox panel and keep the button
   // label in sync. The checkboxes are real form inputs (name="firm"), so the
   // filter itself is pure htmx — this only manages the panel's open/close.
@@ -424,5 +425,5 @@ else is htmx and the platform.
       sel.dispatchEvent(new Event("change"));
     });
   });
-</script>
+{% endscript %}
 {% endblock %}

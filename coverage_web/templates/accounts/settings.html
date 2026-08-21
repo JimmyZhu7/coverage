@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load csp %}
 {% load static %}
 {% load textstyle %}
 
@@ -666,7 +667,7 @@
           <p class="tf-empty-search" data-tf-no-results hidden>No firms match that search.</p>
         </div>
       </section>
-      <script>
+      {% script %}
       (function () {
         var board = document.querySelector("[data-tf-board]");
         if (!board) return;
@@ -808,7 +809,7 @@
           });
         });
       })();
-      </script>
+      {% endscript %}
 
       {# ---- Work Authorization ---- #}
       <section class="set-card kin-reveal" id="work-auth" style="--i:4"
@@ -1471,7 +1472,7 @@
   </div>
 </div>
 
-<script>
+{% script %}
   // The theme picker. Writes localStorage and flips the attribute the head
   // script reads on the next load; "system" REMOVES the attribute so the
   // media query takes over again rather than freezing today's system value.
@@ -1778,5 +1779,5 @@
       }, { passive: true });
     }
   })();
-</script>
+{% endscript %}
 {% endblock %}

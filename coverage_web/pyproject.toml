@@ -78,6 +78,8 @@ dependencies = [
     # on the first rate-limit check — declare it, don't discover it.
     "redis>=5.0",
     "defusedcsv>=3.0.0",
+    "django-csp>=4.0",
+    "django-permissions-policy>=4.33.0",
 ]
 
 # Application, not a library anyone imports — don't build/install it as a

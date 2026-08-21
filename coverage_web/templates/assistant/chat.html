@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load csp %}
 
 {% block title %}Talk to Coverage · Coverage{% endblock %}
 
@@ -714,7 +715,7 @@ replaces #as-thread — and everything inside it, composer included — on every
 send, so a listener bound to the old textarea would be talking to a detached
 element by the next turn.
 {% endcomment %}
-<script>
+{% script %}
   (function () {
     var shell = document.getElementById("as-shell");
     var app = document.getElementById("as-app");
@@ -1977,5 +1978,5 @@ element by the next turn.
       settle(shell); // reveal the mic on THIS page's already-rendered composer
     }
   })();
-</script>
+{% endscript %}
 {% endblock %}

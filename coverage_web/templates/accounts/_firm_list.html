@@ -1,4 +1,5 @@
 {% load textstyle %}
+{% load csp %}
 {% comment %}
 The firm picker: one tile per firm, a real <input type=checkbox name=firms>
 inside each. Rendered inside onboarding step 3's form.
@@ -50,7 +51,7 @@ Both are progressive enhancements over a form that already works without
 them — with JS off you get every tile, all of them pickable, and a count
 that is simply the server-rendered starting number.
 {% endcomment %}
-<script>
+{% script %}
 (function () {
   var list = document.getElementById("firm-list");
   var box = document.getElementById("firm-filter");
@@ -89,4 +90,4 @@ that is simply the server-rendered starting number.
   });
   recount();
 })();
-</script>
+{% endscript %}
