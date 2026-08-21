@@ -51,6 +51,8 @@ from __future__ import annotations
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
+from ops.tracking import track_job_run
+
 
 class Command(BaseCommand):
     help = "Scrape, classify, enrich, extract, re-verify — the scheduled freshness pass."
@@ -75,65 +77,71 @@ class Command(BaseCommand):
                                  "0 keeps everything).")
 
     def handle(self, *args, **opts):
-        failures = []
-        for label, runner in (
-            ("scrape", lambda: call_command("scrape")),
-            ("reclassify", lambda: call_command("reclassify")),
-            ("enrich_postings", (None if opts["no_enrich"]
-                                 else lambda: call_command("enrich_postings",
-                                                           limit=opts["enrich_limit"]))),
-            # Always runs, even when enrichment is skipped: the extractors
-            # change far more often than the cached text does, and re-deriving
-            # from text we already hold costs nothing but CPU.
-            ("extract_facts", lambda: call_command("extract_facts")),
-            ("reverify", (None if opts["no_reverify"]
-                          else lambda: call_command("reverify", limit=opts["reverify_limit"]))),
-        ):
-            if runner is None:
-                continue
-            self.stdout.write(f"── {label} ──")
-            try:
-                runner()
-            except Exception as exc:  # noqa: BLE001 — carry on; report at the end
-                failures.append((label, str(exc)))
-                self.stderr.write(self.style.WARNING(f"{label} failed: {exc}"))
-        # Housekeeping, and deliberately BEFORE the failure exit below:
-        # stages 1 and 5 both append to `opportunity_changes`, so a pass
-        # that skipped retention because some unrelated board broke would
-        # let the table grow for as long as the breakage lasted — which is
-        # exactly the stretch nobody is watching it.
-        from directory.models import OpportunityChange
+        # "scrape" matches render.yaml's coverage-scrape cron — see
+        # ops/tracking.py. Both `raise SystemExit` calls below already existed
+        # as this command's own failure signal; track_job_run records either
+        # one as `failed` the same as any other exception (SystemExit is a
+        # BaseException) without changing what they do.
+        with track_job_run("scrape"):
+            failures = []
+            for label, runner in (
+                ("scrape", lambda: call_command("scrape")),
+                ("reclassify", lambda: call_command("reclassify")),
+                ("enrich_postings", (None if opts["no_enrich"]
+                                     else lambda: call_command("enrich_postings",
+                                                               limit=opts["enrich_limit"]))),
+                # Always runs, even when enrichment is skipped: the extractors
+                # change far more often than the cached text does, and re-deriving
+                # from text we already hold costs nothing but CPU.
+                ("extract_facts", lambda: call_command("extract_facts")),
+                ("reverify", (None if opts["no_reverify"]
+                              else lambda: call_command("reverify", limit=opts["reverify_limit"]))),
+            ):
+                if runner is None:
+                    continue
+                self.stdout.write(f"── {label} ──")
+                try:
+                    runner()
+                except Exception as exc:  # noqa: BLE001 — carry on; report at the end
+                    failures.append((label, str(exc)))
+                    self.stderr.write(self.style.WARNING(f"{label} failed: {exc}"))
+            # Housekeeping, and deliberately BEFORE the failure exit below:
+            # stages 1 and 5 both append to `opportunity_changes`, so a pass
+            # that skipped retention because some unrelated board broke would
+            # let the table grow for as long as the breakage lasted — which is
+            # exactly the stretch nobody is watching it.
+            from directory.models import OpportunityChange
 
-        pruned = OpportunityChange.prune(
-            older_than_days=opts["prune_changes_older_than"]
-        )
-        if pruned:
-            self.stdout.write(f"pruned {pruned} change record(s) past retention")
-
-        if failures:
-            raise SystemExit(f"refresh finished with failures: {[f[0] for f in failures]}")
-
-        # Freshness sanity check: a "successful" pass that leaves zero open
-        # roles means the scrape silently produced nothing (every connector
-        # broke, or a shared dependency did). Exit non-zero so the scheduler
-        # flags the run — stale data presented as fresh is the one failure
-        # mode this product can't afford.
-        from directory.models import Opportunity
-
-        open_count = Opportunity.objects.filter(status="open").count()
-        if open_count == 0:
-            raise SystemExit(
-                "refresh completed but zero opportunities are open — "
-                "treating as a failed pass (all connectors likely broken)."
+            pruned = OpportunityChange.prune(
+                older_than_days=opts["prune_changes_older_than"]
             )
+            if pruned:
+                self.stdout.write(f"pruned {pruned} change record(s) past retention")
 
-        # Board health, announced where a failure used to hide. These are
-        # warnings, not failures: the pass succeeded, but a board that fails
-        # every run (or has never yielded a row) means specific firms' data
-        # is going stale while the overall run reports green.
-        from directory.health import health_report
+            if failures:
+                raise SystemExit(f"refresh finished with failures: {[f[0] for f in failures]}")
 
-        for line in health_report():
-            self.stderr.write(self.style.WARNING(line))
+            # Freshness sanity check: a "successful" pass that leaves zero open
+            # roles means the scrape silently produced nothing (every connector
+            # broke, or a shared dependency did). Exit non-zero so the scheduler
+            # flags the run — stale data presented as fresh is the one failure
+            # mode this product can't afford.
+            from directory.models import Opportunity
 
-        self.stdout.write(self.style.SUCCESS(f"refresh complete. {open_count} open."))
+            open_count = Opportunity.objects.filter(status="open").count()
+            if open_count == 0:
+                raise SystemExit(
+                    "refresh completed but zero opportunities are open — "
+                    "treating as a failed pass (all connectors likely broken)."
+                )
+
+            # Board health, announced where a failure used to hide. These are
+            # warnings, not failures: the pass succeeded, but a board that fails
+            # every run (or has never yielded a row) means specific firms' data
+            # is going stale while the overall run reports green.
+            from directory.health import health_report
+
+            for line in health_report():
+                self.stderr.write(self.style.WARNING(line))
+
+            self.stdout.write(self.style.SUCCESS(f"refresh complete. {open_count} open."))

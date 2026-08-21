@@ -62,6 +62,7 @@ from django.utils import timezone
 from analytics.models import Import
 from capture import gmail_live
 from capture.models import GmailConnection
+from ops.tracking import track_job_run
 
 # How long a `running` row is trusted to actually still be running before
 # this command treats it as abandoned (a crashed process) and picks it back
@@ -88,45 +89,51 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
-        if not gmail_live.is_configured():
-            self.stdout.write("Gmail Live is not configured — nothing to backfill.")
-            return
+        # Named "gmail-backfill" for /ops/health/cron/ to match render.yaml's
+        # coverage-gmail-backfill cron — see ops/tracking.py. Wraps the WHOLE
+        # tick, including the "nothing pending" no-op: a run that legitimately
+        # found nothing to do is still a run, and the health check is asking
+        # "is this cron ticking at all", not "did it find work".
+        with track_job_run("gmail-backfill"):
+            if not gmail_live.is_configured():
+                self.stdout.write("Gmail Live is not configured — nothing to backfill.")
+                return
 
-        base = GmailConnection.all_objects.filter(status="active")
-        if opts["email"]:
-            base = base.filter(user__email=opts["email"])
+            base = GmailConnection.all_objects.filter(status="active")
+            if opts["email"]:
+                base = base.filter(user__email=opts["email"])
 
-        stale_cutoff = timezone.now() - STALE_RUNNING_AFTER
-        backfill_connections = list(
-            base.filter(
-                Q(backfill_status="pending")
-                | Q(backfill_status="failed")
-                | Q(backfill_status="running", backfill_started_at__lt=stale_cutoff)
-                # A "running" row with no timestamp at all predates this
-                # field (or something else cleared it) — treat it the same
-                # as stale rather than leaving it stuck for a different
-                # reason.
-                | Q(backfill_status="running", backfill_started_at__isnull=True)
+            stale_cutoff = timezone.now() - STALE_RUNNING_AFTER
+            backfill_connections = list(
+                base.filter(
+                    Q(backfill_status="pending")
+                    | Q(backfill_status="failed")
+                    | Q(backfill_status="running", backfill_started_at__lt=stale_cutoff)
+                    # A "running" row with no timestamp at all predates this
+                    # field (or something else cleared it) — treat it the same
+                    # as stale rather than leaving it stuck for a different
+                    # reason.
+                    | Q(backfill_status="running", backfill_started_at__isnull=True)
+                )
             )
-        )
-        rescan_connections = list(
-            base.filter(
-                Q(rescan_status="pending")
-                | Q(rescan_status="failed")
-                | Q(rescan_status="running", rescan_started_at__lt=stale_cutoff)
-                | Q(rescan_status="running", rescan_started_at__isnull=True)
+            rescan_connections = list(
+                base.filter(
+                    Q(rescan_status="pending")
+                    | Q(rescan_status="failed")
+                    | Q(rescan_status="running", rescan_started_at__lt=stale_cutoff)
+                    | Q(rescan_status="running", rescan_started_at__isnull=True)
+                )
             )
-        )
 
-        if not backfill_connections and not rescan_connections:
-            self.stdout.write("Nothing pending.")
-            return
+            if not backfill_connections and not rescan_connections:
+                self.stdout.write("Nothing pending.")
+                return
 
-        for connection in backfill_connections:
-            self._run_backfill(connection, dry_run=opts["dry_run"])
+            for connection in backfill_connections:
+                self._run_backfill(connection, dry_run=opts["dry_run"])
 
-        for connection in rescan_connections:
-            self._run_rescan(connection, dry_run=opts["dry_run"])
+            for connection in rescan_connections:
+                self._run_rescan(connection, dry_run=opts["dry_run"])
 
     def _run_backfill(self, connection, *, dry_run: bool) -> None:
         prefix = "[dry-run] " if dry_run else ""

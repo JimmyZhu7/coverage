@@ -69,6 +69,7 @@ from accounts.models import PushSubscription
 from accounts.push import SubscriptionExpired, is_configured, send_notification
 from directory.deadlines import is_posting_closed
 from directory.views import TRACK_CLOSED, _lens_item, _tracked_rows
+from ops.tracking import track_job_run
 
 #: T-7 and T-2, per the product plan (see this module's docstring).
 DEFAULT_DAYS = (7, 2)
@@ -153,68 +154,73 @@ class Command(BaseCommand):
                  "has-a-subscription gate — for previewing or testing.")
 
     def handle(self, *args, **opts):
-        if not is_configured():
-            self.stdout.write(self.style.WARNING(
-                "VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY are unset — push alerts "
-                "are disabled. Run `manage.py generate_vapid_keys` and set "
-                "them to activate this command."))
-            return
+        # "push-alerts" matches render.yaml's coverage-push-alerts cron — see
+        # ops/tracking.py. Wraps the whole tick, including the unconfigured
+        # no-op below: an unset VAPID key means "nothing to do", not "the
+        # cron didn't run".
+        with track_job_run("push-alerts"):
+            if not is_configured():
+                self.stdout.write(self.style.WARNING(
+                    "VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY are unset — push alerts "
+                    "are disabled. Run `manage.py generate_vapid_keys` and set "
+                    "them to activate this command."))
+                return
 
-        days = tuple(opts["days"]) if opts["days"] else DEFAULT_DAYS
-        dry = opts["dry_run"]
-        tag = "[dry-run] " if dry else ""
-        User = get_user_model()
+            days = tuple(opts["days"]) if opts["days"] else DEFAULT_DAYS
+            dry = opts["dry_run"]
+            tag = "[dry-run] " if dry else ""
+            User = get_user_model()
 
-        if opts["user"]:
-            try:
-                users = [User.objects.get(email__iexact=opts["user"])]
-            except User.DoesNotExist as exc:
-                raise CommandError(f"no user with email {opts['user']!r}") from exc
-        else:
-            users = list(
-                User.objects.filter(deleted_at__isnull=True, pushsubscription__isnull=False)
-                .distinct().order_by("email")
-            )
+            if opts["user"]:
+                try:
+                    users = [User.objects.get(email__iexact=opts["user"])]
+                except User.DoesNotExist as exc:
+                    raise CommandError(f"no user with email {opts['user']!r}") from exc
+            else:
+                users = list(
+                    User.objects.filter(deleted_at__isnull=True, pushsubscription__isnull=False)
+                    .distinct().order_by("email")
+                )
 
-        if not users:
-            self.stdout.write("No users with an active push subscription.")
-            return
+            if not users:
+                self.stdout.write("No users with an active push subscription.")
+                return
 
-        sent = skipped = expired = 0
-        for user in users:
-            try:
-                today = _local_today(user)
-                due = _due_rows(user, today=today, days=days)
-            finally:
-                timezone.deactivate()
+            sent = skipped = expired = 0
+            for user in users:
+                try:
+                    today = _local_today(user)
+                    due = _due_rows(user, today=today, days=days)
+                finally:
+                    timezone.deactivate()
 
-            if not due:
-                skipped += 1
-                self.stdout.write(f"{tag}- {user.email}: nothing due, skipped")
-                continue
-
-            subs = list(PushSubscription.objects.for_user(user))
-            dead_ids: set[int] = set()
-            for item in due:
-                title, body = _notification_text(item)
-                live_subs = [s for s in subs if s.id not in dead_ids]
-                self.stdout.write(
-                    f"{tag}+ {user.email}: {item['firm_name']} / {item['title']} "
-                    f"(T-{item['days_left']}) -> {len(live_subs)} subscription(s)")
-                sent += 1
-                if dry:
+                if not due:
+                    skipped += 1
+                    self.stdout.write(f"{tag}- {user.email}: nothing due, skipped")
                     continue
-                for sub in live_subs:
-                    try:
-                        send_notification(sub, title=title, body=body, url=CLICK_URL)
-                    except SubscriptionExpired:
-                        expired += 1
-                        dead_ids.add(sub.id)
-                        sub.delete()
-                    except Exception as exc:  # noqa: BLE001 — one bad send must not stop the run
-                        self.stderr.write(f"  ! {user.email} push failed: {exc}")
 
-        self.stdout.write(self.style.SUCCESS(
-            f"{tag}{sent} alert(s) {'rendered' if dry else 'sent'} "
-            f"· {skipped} skipped (nothing due) "
-            f"· {expired} expired subscription(s) removed"))
+                subs = list(PushSubscription.objects.for_user(user))
+                dead_ids: set[int] = set()
+                for item in due:
+                    title, body = _notification_text(item)
+                    live_subs = [s for s in subs if s.id not in dead_ids]
+                    self.stdout.write(
+                        f"{tag}+ {user.email}: {item['firm_name']} / {item['title']} "
+                        f"(T-{item['days_left']}) -> {len(live_subs)} subscription(s)")
+                    sent += 1
+                    if dry:
+                        continue
+                    for sub in live_subs:
+                        try:
+                            send_notification(sub, title=title, body=body, url=CLICK_URL)
+                        except SubscriptionExpired:
+                            expired += 1
+                            dead_ids.add(sub.id)
+                            sub.delete()
+                        except Exception as exc:  # noqa: BLE001 — one bad send must not stop the run
+                            self.stderr.write(f"  ! {user.email} push failed: {exc}")
+
+            self.stdout.write(self.style.SUCCESS(
+                f"{tag}{sent} alert(s) {'rendered' if dry else 'sent'} "
+                f"· {skipped} skipped (nothing due) "
+                f"· {expired} expired subscription(s) removed"))

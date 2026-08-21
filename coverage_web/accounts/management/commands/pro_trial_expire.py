@@ -43,22 +43,26 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from analytics.events import record_event
+from ops.tracking import track_job_run
 
 
 class Command(BaseCommand):
     help = "Revert expired Pro trials back to the Free plan."
 
     def handle(self, *args, **opts):
-        User = get_user_model()
-        expired = User.objects.filter(
-            plan=User.PLAN_PRO,
-            pro_trial_ends_at__isnull=False,
-            pro_trial_ends_at__lte=timezone.now(),
-        )
-        count = 0
-        for user in expired:
-            user.plan = User.PLAN_FREE
-            user.save(update_fields=["plan"])
-            record_event("pro_trial_expired", user=user)
-            count += 1
-        self.stdout.write(f"reverted: {count}")
+        # "pro-trial-expire" matches render.yaml's coverage-pro-trial-expire
+        # cron — see ops/tracking.py.
+        with track_job_run("pro-trial-expire"):
+            User = get_user_model()
+            expired = User.objects.filter(
+                plan=User.PLAN_PRO,
+                pro_trial_ends_at__isnull=False,
+                pro_trial_ends_at__lte=timezone.now(),
+            )
+            count = 0
+            for user in expired:
+                user.plan = User.PLAN_FREE
+                user.save(update_fields=["plan"])
+                record_event("pro_trial_expired", user=user)
+                count += 1
+            self.stdout.write(f"reverted: {count}")

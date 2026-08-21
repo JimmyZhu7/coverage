@@ -82,6 +82,8 @@ INSTALLED_APPS = [
     "billing",  # private zone: the credit ledger both assistant and capture spend from
                 # (docs/credit-system-plan.md) — not folded into either app because
                 # it's a third surface's dependency just as much as the first two's
+    "ops",  # shared zone, no PrivateModel: JobRun (cron heartbeats) +
+            # /ops/health/cron/, the staff-only reader over them
 ]
 
 # The scheme+host the app is reachable at, for links that have to be built

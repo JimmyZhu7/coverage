@@ -58,6 +58,9 @@ urlpatterns = [
     # The founder dashboard: staff-only reader over the ProductEvent rows
     # every action has been writing since the cutover.
     path("instrument/", analytics_views.dashboard, name="instrument"),
+    # Staff-only JSON: is every render.yaml cron still actually running,
+    # read from the JobRun rows those commands write via ops/tracking.py.
+    path("ops/", include("ops.urls")),
     path("", include("core.urls")),
 ]
 

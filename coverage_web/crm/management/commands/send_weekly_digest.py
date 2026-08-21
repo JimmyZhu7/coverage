@@ -52,6 +52,7 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 
 from crm.digest import assemble_digest
+from ops.tracking import track_job_run
 
 
 def _local_today(user) -> date:
@@ -104,58 +105,61 @@ class Command(BaseCommand):
                  "previewing or testing a specific user's digest.")
 
     def handle(self, *args, **opts):
-        dry = opts["dry_run"]
-        tag = "[dry-run] " if dry else ""
-        User = get_user_model()
+        # "weekly-digest" matches render.yaml's coverage-weekly-digest cron —
+        # see ops/tracking.py.
+        with track_job_run("weekly-digest"):
+            dry = opts["dry_run"]
+            tag = "[dry-run] " if dry else ""
+            User = get_user_model()
 
-        if opts["user"]:
-            try:
-                users = [User.objects.get(email__iexact=opts["user"])]
-            except User.DoesNotExist as exc:
-                raise CommandError(f"no user with email {opts['user']!r}") from exc
-        else:
-            users = list(
-                User.objects.filter(
-                    onboarded_at__isnull=False, deleted_at__isnull=True,
-                    weekly_digest_opt_out=False,
+            if opts["user"]:
+                try:
+                    users = [User.objects.get(email__iexact=opts["user"])]
+                except User.DoesNotExist as exc:
+                    raise CommandError(f"no user with email {opts['user']!r}") from exc
+            else:
+                users = list(
+                    User.objects.filter(
+                        onboarded_at__isnull=False, deleted_at__isnull=True,
+                        weekly_digest_opt_out=False,
+                    )
+                    .order_by("email")
                 )
-                .order_by("email")
-            )
 
-        if not users:
-            self.stdout.write("No eligible users (onboarded, not deleted, not opted out).")
-            return
+            if not users:
+                self.stdout.write("No eligible users (onboarded, not deleted, not opted out).")
+                return
 
-        site_url = getattr(settings, "SITE_URL", "").rstrip("/")
-        sent = skipped = 0
-        for user in users:
-            try:
-                today = _local_today(user)
-                digest = assemble_digest(user, today=today)
-            finally:
-                timezone.deactivate()
+            site_url = getattr(settings, "SITE_URL", "").rstrip("/")
+            sent = skipped = 0
+            for user in users:
+                try:
+                    today = _local_today(user)
+                    digest = assemble_digest(user, today=today)
+                finally:
+                    timezone.deactivate()
 
-            if digest is None:
-                skipped += 1
-                self.stdout.write(f"{tag}- {user.email}: nothing to report, skipped")
-                continue
+                if digest is None:
+                    skipped += 1
+                    self.stdout.write(f"{tag}- {user.email}: nothing to report, skipped")
+                    continue
 
-            ctx = {"user": user, "digest": digest, "site_url": site_url}
-            subject = _subject(digest)
-            text_body = render_to_string("crm/emails/weekly_digest.txt", ctx)
-            html_body = render_to_string("crm/emails/weekly_digest.html", ctx)
+                ctx = {"user": user, "digest": digest, "site_url": site_url}
+                subject = _subject(digest)
+                text_body = render_to_string("crm/emails/weekly_digest.txt", ctx)
+                html_body = render_to_string("crm/emails/weekly_digest.html", ctx)
 
-            self.stdout.write(
-                f"{tag}+ {user.email}: {len(digest['closing'])} closing, "
-                f"{len(digest['actions'])} to ping, {len(digest['picks'])} new picks")
-            sent += 1
-            if dry:
-                continue
+                self.stdout.write(
+                    f"{tag}+ {user.email}: {len(digest['closing'])} closing, "
+                    f"{len(digest['actions'])} to ping, {len(digest['picks'])} new picks")
+                sent += 1
+                if dry:
+                    continue
 
-            message = EmailMultiAlternatives(subject=subject, body=text_body, to=[user.email])
-            message.attach_alternative(html_body, "text/html")
-            message.send()
+                message = EmailMultiAlternatives(subject=subject, body=text_body, to=[user.email])
+                message.attach_alternative(html_body, "text/html")
+                message.send()
 
-        self.stdout.write(self.style.SUCCESS(
-            f"{tag}{sent} digest(s) {'rendered' if dry else 'sent'} "
-            f"· {skipped} skipped (nothing to report)"))
+            self.stdout.write(self.style.SUCCESS(
+                f"{tag}{sent} digest(s) {'rendered' if dry else 'sent'} "
+                f"· {skipped} skipped (nothing to report)"))
