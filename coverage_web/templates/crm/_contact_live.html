@@ -139,8 +139,14 @@ values.
           TOUCH_TRANSITIONS) since it is the audit trail's own kind for a state
           correction, not a student action. Skipped here so the dropdown never
           offers a choice that always errors.
+
+          "bulk_received" is skipped for the opposite reason: log_touch DOES
+          accept it, so without this it would be a working, choosable option.
+          It is a verdict the capture pipeline reaches from a message's own
+          headers (capture.inbound) — "this was a blast, not a reply" — never
+          something a student did and should be able to claim.
           {% endcomment %}
-          {% for value, label in touch_kinds %}{% if value != "manual_override" %}<option value="{{ value }}"{% if value == preselect_kind %} selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
+          {% for value, label in touch_kinds %}{% if value != "manual_override" and value != "bulk_received" %}<option value="{{ value }}"{% if value == preselect_kind %} selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
         </select>
         <select name="channel" aria-label="Channel">
           {% for value, label in channels %}<option value="{{ value }}">{{ label }}</option>{% endfor %}

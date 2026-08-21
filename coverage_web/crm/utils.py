@@ -53,9 +53,13 @@ WARMTH_ORDER = ["cold", "replied", "chatted", "advocate"]
 # `manual_override` rides at the end on purpose: it is not a real interaction
 # a student logs (log_touch rejects it — see TOUCH_TRANSITIONS), only the
 # audit trail's own kind for a direct state correction (Park, or a fix from
-# the student or their advisor). `_contact_live.html`'s "Interaction" <select>
-# skips this one value explicitly so it never becomes a choosable, always-
-# erroring option; every OTHER reader of this list (Today's activity feed,
+# the student or their advisor). `bulk_received` is here for the opposite
+# reason — log_touch ACCEPTS it, so leaving it out of the <select> is the
+# only thing stopping "Bulk email received" from being something a student
+# can claim happened; it is a verdict the capture pipeline reaches from
+# message headers (capture.inbound), never a thing a person does. Both are
+# skipped by `_contact_live.html`'s "Interaction" <select>; every OTHER
+# reader of this list (Today's activity feed,
 # the contact page's History, the advisor's own tool responses) wants a
 # plain label here rather than falling back to "Manual override" — see
 # crm.views._override_label for the richer, note-aware label History uses
@@ -64,6 +68,7 @@ TOUCH_KIND_LABELS: list[tuple[str, str]] = [
     ("outreach", "Reached out"),
     ("follow_up", "Followed up"),
     ("reply_received", "They replied"),
+    ("bulk_received", "Bulk email received"),
     ("chat_scheduled", "Chat scheduled"),
     ("chat", "Chat happened"),
     ("thank_you", "Sent thank-you"),

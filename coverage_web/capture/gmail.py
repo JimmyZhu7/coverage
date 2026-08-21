@@ -62,6 +62,7 @@ from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
 from capture.providers import AmbiguousContactError, CaptureProvider, InteractionEvent
+from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import services as crm_services
 from crm.models import CalendarEvent, Contact, Touch
 from directory.models import EmailPatternStats
@@ -70,6 +71,10 @@ EXTRACTION_VERSION = "gmail-findings-1"
 TOUCH_CHANNEL = "email"  # every finding here comes from a Gmail thread
 
 # The thread ladder. `outreach` is deliberately absent — it is not a stage.
+# `bulk_received` is absent for a stronger reason: a mass email landing on a
+# thread must never block the genuine reply that arrives on it later, and it
+# must never be treated as a stage that a later finding has to outrank. It
+# gets its own dedup instead (`_bulk_already_logged`).
 THREAD_STAGE_RANK = {"reply_received": 1, "chat_scheduled": 2, "chat": 3}
 _STAGE_NAME = {rank: kind for kind, rank in THREAD_STAGE_RANK.items()}
 
@@ -98,6 +103,13 @@ class SyncResult:
     alternate_emails_noted: int = 0
     outreach_logged: int = 0
     touches_logged: int = 0
+    # Inbound messages recorded as `bulk_received` — a mass invitation, a
+    # newsletter, an out-of-office. Counted SEPARATELY from
+    # `touches_logged` rather than folded into it: `touches_logged` is read
+    # as "how much relationship progress did this run find", and a blast is
+    # not progress. Reporting them together is how "we heard from 12 people
+    # today" came to mean "12 lists mailed you".
+    bulk_logged: int = 0
     # Bounced findings whose address was CLEARED off the contact (was
     # `archived_bounced`, which named an action no automated path performs
     # any more — see the bounce block in `apply_findings`).
@@ -128,6 +140,7 @@ class SyncResult:
             "alternate_emails_noted": self.alternate_emails_noted,
             "outreach_logged": self.outreach_logged,
             "touches_logged": self.touches_logged,
+            "bulk_logged": self.bulk_logged,
             "bounced_cleared": self.bounced_cleared,
             "skipped_not_found": self.skipped_not_found,
             "skipped_already_logged": self.skipped_already_logged,
@@ -147,7 +160,19 @@ class GmailFindingsProvider(CaptureProvider):
         {"contact_id": int|None, "name": str, "email": str|None, "found": bool,
          "bounced": bool, "outreach_sent": bool, "replied": bool,
          "chat_status": "none"|"scheduled"|"completed",
-         "evidence": str|None, "thread_id": str|None}
+         "evidence": str|None, "thread_id": str|None,
+         "bulk": bool, "bulk_reasons": str|None}
+
+    ``bulk`` (optional, defaults False — every finding written before it
+    existed keeps behaving exactly as it did) says the message is a mass or
+    automated one: a programme invitation sent to a list, a newsletter, an
+    out-of-office. It OVERRIDES ``replied``/``chat_status`` (see
+    ``_touch_kind_for``) and produces a ``bulk_received`` touch, which moves
+    neither warmth nor thread_state. ``bulk_reasons`` is the short,
+    human-readable why — it goes in the touch note, because a demotion the
+    user cannot see the reason for is a demotion they cannot argue with.
+    `capture.inbound` produces both for the Gmail Live path; the daily
+    agent-run sync may set them itself.
 
     ``contact_id`` is a *campaign.db* id and is not used for matching here —
     Coverage resolves by email, then name, so the two systems' id spaces never
@@ -409,7 +434,18 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
 
 def _touch_kind_for(finding: dict) -> str | None:
     """The ladder stage a finding represents, or None if it shows no progress.
-    Order matters: a completed chat outranks a mere reply on the same thread."""
+    Order matters: a completed chat outranks a mere reply on the same thread.
+
+    `bulk` is checked FIRST and wins outright over `replied`/`chat_status`.
+    A finding that says "this is a mass/automated message" is making a claim
+    about what the message IS, not about how far along the relationship is,
+    and the whole point of the flag is that no amount of enthusiasm in a
+    blast should climb the ladder. The resulting kind is off the ladder
+    entirely (see THREAD_STAGE_RANK) and its TOUCH_TRANSITIONS entry is
+    `(None, None)`, so it moves neither warmth nor thread_state.
+    """
+    if finding.get("bulk"):
+        return BULK_RECEIVED_KIND
     chat_status = finding.get("chat_status", "none")
     if chat_status == "completed":
         return "chat"
@@ -418,6 +454,30 @@ def _touch_kind_for(finding: dict) -> str | None:
     if finding.get("replied"):
         return "reply_received"
     return None
+
+
+def _bulk_already_logged(user, contact: Contact, thread_id: str, *, reference=None) -> bool:
+    """Dedup for `bulk_received`, which the thread ladder cannot do for it.
+
+    `thread_stage_rank` only knows the three ladder stages, so a bulk touch
+    always ranks 0 there — which is exactly right for "a blast must never
+    block a later genuine reply on the same thread", and exactly useless as
+    a same-message guard. With a thread id, one bulk touch per thread is the
+    rule (a recurring newsletter reuses its Gmail thread, and re-logging it
+    every run would reset `last_touch` daily). Without one, fall back to the
+    same seven-day same-kind window every other unthreaded finding uses.
+    """
+    if thread_id:
+        return (
+            Touch.objects.for_user(user)
+            .filter(
+                contact=contact,
+                kind=BULK_RECEIVED_KIND,
+                note__contains=f"[gmail:{thread_id}]",
+            )
+            .exists()
+        )
+    return _logged_recently(user, contact, BULK_RECEIVED_KIND, reference=reference)
 
 
 # --------------------------------------------------------------------------- #
@@ -549,17 +609,32 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                     f"primary ({current}) kept"
                 )
 
+        is_bulk = bool(finding.get("bulk"))
+
         # A reply is the strongest proof an address format works: the person
         # received the mail and answered. `outreach_sent` alone is weaker —
         # it proves the message left, not that it landed — so only a reply or
         # a chat banks a "delivered". Recorded once per contact ever, guarded
         # by `email_pattern_recorded`.
-        if finding.get("replied") or finding.get("chat_status") in ("scheduled", "completed"):
+        #
+        # A BULK message proves nothing about the format at all: a blast
+        # arriving FROM a firm says their list software can reach the
+        # student, not that the address the student guessed for that person
+        # works. Banking it would let one newsletter raise a whole firm's
+        # shared pattern confidence — and `email_pattern_recorded` means the
+        # contact then never banks the real evidence later.
+        if not is_bulk and (
+            finding.get("replied") or finding.get("chat_status") in ("scheduled", "completed")
+        ):
             if _record_pattern_evidence(contact, delivered=True, dry_run=dry_run):
                 result.pattern_delivered += 1
 
         # A stated time turns a "chat_scheduled" into a dated calendar entry.
-        if finding.get("chat_status") in ("scheduled", "completed"):
+        # Never for a bulk finding: `gmail_live` already blanks `chat_status`
+        # on one, and this second guard covers an externally-supplied finding
+        # that sets both — a webinar on a mass invitation is not "Chat with
+        # <person>" on the student's calendar.
+        if not is_bulk and finding.get("chat_status") in ("scheduled", "completed"):
             if not dry_run:
                 if _upsert_scheduled_chat(user, contact, finding):
                     result.chats_scheduled += 1
@@ -599,7 +674,18 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         if kind is None:
             continue
 
-        if thread_id:
+        if kind == BULK_RECEIVED_KIND:
+            # Off the ladder — see `_bulk_already_logged` for why the thread
+            # ratchet cannot dedup this kind, and why that is deliberate
+            # rather than a gap.
+            if _bulk_already_logged(user, contact, thread_id, reference=finding_time):
+                result.skipped_already_logged += 1
+                result.details.append(
+                    f"{name}: bulk/automated email already recorded for this "
+                    "thread — skipped"
+                )
+                continue
+        elif thread_id:
             staged = thread_stage_rank(user, contact, thread_id)
             if THREAD_STAGE_RANK[kind] <= staged:
                 result.skipped_already_logged += 1
@@ -618,16 +704,33 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
             )
             continue
 
+        # The note is the ONLY place a user ever sees why Coverage called a
+        # message bulk, so the reasons ride along with the evidence rather
+        # than staying in a log line nobody reads. Still no email body: the
+        # reasons are header names, and `evidence` is the subject at most
+        # (§10's "no email bodies in logs/notes").
+        note_text = f"{marker}{evidence}".strip()
+        if kind == BULK_RECEIVED_KIND and finding.get("bulk_reasons"):
+            note_text = f"{note_text} [{finding['bulk_reasons']}]".strip()
+
         updates = {}
         if not dry_run:
             event = provider.build_event(finding, user, kind, occurred_at=finding_time)
             updates = crm_services.log_touch(
                 user.id, contact.id, kind, TOUCH_CHANNEL,
-                note=f"{marker}{evidence}".strip() or None,
+                note=note_text or None,
                 now=finding_time,
                 source="capture",
             )
             _record(user, contact, event, warmth_changed=bool(updates))
+        if kind == BULK_RECEIVED_KIND:
+            result.bulk_logged += 1
+            result.details.append(
+                f"{name}: recorded as a bulk/automated email, not a reply "
+                f"({finding.get('bulk_reasons') or 'flagged by the caller'}) — "
+                "warmth and status unchanged"
+            )
+            continue
         result.touches_logged += 1
         result.details.append(
             f"{name}: {kind} logged" + (f" -> {updates}" if updates else " (warmth already at/above this stage)")

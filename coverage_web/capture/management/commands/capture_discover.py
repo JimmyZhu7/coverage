@@ -31,7 +31,8 @@ WHAT IT REFUSES TO DO
 FINDINGS SHAPE
 --------------
 A JSON array of `{"name", "email", "role_guess", "firm", "outreach_sent",
-"replied", "chat_status", "evidence"}`. `firm` is an optional Coverage slug;
+"replied", "chat_status", "evidence", "bulk", "bulk_reasons"}`. `firm` is an
+optional Coverage slug;
 an unknown one is kept as free text rather than dropped, because
 `Contact.firm_text` exists precisely so capture never blocks on directory
 coverage.
@@ -53,6 +54,14 @@ first: `chat_status == "completed"`, then `chat_status == "scheduled"`, then
 `replied`, then `outreach_sent`. If none is set the contact is still created
 (someone met at an event and added by hand is real) but stays cold with no
 touches.
+
+`bulk` (optional, default False) sits OUTSIDE that ladder and overrides all
+of it. It means "this inbound message was a mass or automated one" — a
+programme invitation to a list, a newsletter, an application receipt, an
+out-of-office. The contact is still created, and a `bulk_received` touch
+still records the message, but warmth and thread_state do not move. See
+`capture.inbound` for the deterministic header test the Gmail Live path uses
+to set it, and `bulk_reasons` for the short why that ends up in the note.
 """
 
 from __future__ import annotations
@@ -65,6 +74,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from capture.providers import normalize_email, normalize_name
+from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import services as crm_services
 from crm.models import Contact
 from directory.models import Firm
@@ -206,15 +216,37 @@ class Command(BaseCommand):
             # Ordering is the ladder's, strongest evidence first: a chat that
             # happened outranks one that is merely booked, outranks a reply,
             # outranks outreach.
+            # `bulk` short-circuits the whole ladder, ahead of `chat_status`
+            # and `replied` alike. A discovery scan finds people the student
+            # has never written to — which is precisely the population whose
+            # inbound mail is most likely to be a blast, and the population
+            # for whom "they replied" is least likely to be true. On
+            # 2026-08-13 this branch logged `reply_received` for Caroline
+            # Baenen (Manager, Talent Acquisition, West Monroe) off a mass
+            # "Sophomore Series" invitation, warming a recruiter the founder
+            # had never emailed and putting a coffee-chat ask in his queue.
+            # A bulk finding still CREATES the contact (the person and their
+            # firm are real information) — it just does not pretend they
+            # answered him.
             chat_status = str(person.get("chat_status", "none") or "none").strip().lower()
-            kind = ("chat" if chat_status == "completed"
+            kind = (BULK_RECEIVED_KIND if person.get("bulk")
+                    else "chat" if chat_status == "completed"
                     else "chat_scheduled" if chat_status == "scheduled"
                     else "reply_received" if person.get("replied")
                     else "outreach" if person.get("outreach_sent") else None)
             if kind:
+                reasons = str(person.get("bulk_reasons") or "").strip()
+                note = "Discovered by mailbox scan"
+                if kind == BULK_RECEIVED_KIND:
+                    note = (
+                        "Discovered by mailbox scan — bulk/automated email, "
+                        "not a reply"
+                    )
+                    if reasons:
+                        note = f"{note} [{reasons}]"
                 crm_services.log_touch(
                     user.id, contact.id, kind, "email",
-                    note="Discovered by mailbox scan", source="capture",
+                    note=note, source="capture",
                 )
                 touched += 1
 
