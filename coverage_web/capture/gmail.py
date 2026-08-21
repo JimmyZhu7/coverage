@@ -63,7 +63,7 @@ from django.utils.dateparse import parse_datetime
 from analytics.events import record_event
 from capture.providers import AmbiguousContactError, CaptureProvider, InteractionEvent
 from coverage_domain.pipeline import BULK_RECEIVED_KIND
-from crm import services as crm_services
+from crm import campaigns as crm_campaigns, services as crm_services
 from crm.models import CalendarEvent, Contact, Touch
 from directory.models import EmailPatternStats
 
@@ -659,12 +659,13 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                     event = provider.build_event(
                         finding, user, "outreach", occurred_at=finding_time
                     )
-                    crm_services.log_touch(
+                    logged = crm_services.log_touch(
                         user.id, contact.id, "outreach", TOUCH_CHANNEL,
                         note=f"{marker}{evidence}".strip() or None,
                         now=finding_time,
                         source="capture",
                     )
+                    _stamp_subject(user, logged, finding)
                     _record(user, contact, event)
                 result.outreach_logged += 1
                 result.details.append(f"{name}: outreach logged (a sent email was never recorded)")
@@ -722,6 +723,7 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                 now=finding_time,
                 source="capture",
             )
+            _stamp_subject(user, updates, finding)
             _record(user, contact, event, warmth_changed=bool(updates))
         if kind == BULK_RECEIVED_KIND:
             result.bulk_logged += 1
@@ -736,7 +738,52 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
             f"{name}: {kind} logged" + (f" -> {updates}" if updates else " (warmth already at/above this stage)")
         )
 
+    # Regroup this user's outbound mail into bulk sends now that the batch has
+    # landed. Here rather than on a page render because it walks every outbound
+    # touch, and here rather than in a nightly cron because a merge sent this
+    # morning should be a question in Settings this afternoon, not tomorrow.
+    #
+    # Idempotent and additive by construction (see `crm.campaigns.detect`): it
+    # never changes an answer the user has given and never removes anybody by
+    # itself. Skipped on a dry run for the obvious reason, and never allowed to
+    # fail the sync — the findings above are already committed, and losing a
+    # whole night's capture because a grouping pass raised would be a far worse
+    # trade than one late campaign card.
+    if not dry_run:
+        try:
+            crm_campaigns.detect(user)
+        except Exception as exc:  # noqa: BLE001 — see the comment above.
+            result.details.append(f"campaign detection skipped: {exc}")
+
     return result
+
+
+def _stamp_subject(user, touch_result, finding: dict) -> None:
+    """Copy the finding's Subject header onto the touch row `log_touch` just
+    created, when the provider supplied one.
+
+    A SECOND STATEMENT rather than a wider INSERT, and deliberately so. The
+    `touches` INSERT lives in `coverage_domain.pipeline.apply_touch`'s raw SQL,
+    which is the pure package's contract with the ported ratchet; widening it
+    to carry a column only the web app reads would push a view concern into the
+    engine for no gain. `apply_touch` already returns the new row's id, so the
+    capture layer can finish the row itself.
+
+    WHY THE SUBJECT IS WORTH STORING AT ALL: a mail merge's one defining fact
+    is that hundreds of threads share one subject line, and until now
+    `gmail_live._classify_message` read that header and dropped it. See
+    `crm/campaigns.py`.
+
+    Silent when there is no subject, no touch id, or the provider is one that
+    never sees headers (the manual findings sync). Never fatal — a missing
+    subject costs one campaign the strong grouping key and falls back to the
+    evidence note, which is the pre-existing behaviour, not a regression.
+    """
+    subject = (finding.get("subject") or "").strip()
+    touch_id = getattr(touch_result, "touch_id", None)
+    if not subject or not touch_id:
+        return
+    Touch.objects.for_user(user).filter(id=touch_id).update(subject=subject[:255])
 
 
 def _record(user, contact: Contact, event: InteractionEvent, *, warmth_changed: bool = False) -> None:

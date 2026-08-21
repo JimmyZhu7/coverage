@@ -11,7 +11,23 @@ CRUD surface with no extra wiring, while application code reaching for
 
 from django.contrib import admin
 
-from .models import ChatDebrief, Contact, Task, Touch, UserFirm
+from .models import (
+    Campaign, CampaignContact, ChatDebrief, Contact, Task, Touch, UserFirm,
+)
+
+
+@admin.register(Campaign)
+class CampaignAdmin(admin.ModelAdmin):
+    list_display = ("label", "user", "kind", "recipient_count", "first_sent")
+    list_filter = ("kind",)
+    search_fields = ("user__email", "label", "signature")
+
+
+@admin.register(CampaignContact)
+class CampaignContactAdmin(admin.ModelAdmin):
+    list_display = ("campaign", "contact", "originates", "sent_at")
+    list_filter = ("originates",)
+    search_fields = ("user__email", "contact__name", "campaign__label")
 
 
 @admin.register(UserFirm)

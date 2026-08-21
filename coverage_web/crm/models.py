@@ -142,6 +142,26 @@ class Contact(PrivateModel):
     # not part of the pipeline ratchet — set directly via the ORM. A contact
     # is hidden from the cadence queue until this passes.
     snoozed_until = models.DateTimeField(null=True, blank=True)
+    # THE PER-CONTACT ESCAPE HATCH from a campaign classification (see
+    # `Campaign` below and `crm.campaigns`). True means "keep this person in my
+    # daily queue whatever the campaign they arrived in is classified as".
+    #
+    # Needed because a campaign answer is one answer about ~200 people and will
+    # occasionally be wrong about one of them: the founder mail-merged a club
+    # panel invitation to alumni across every industry, and one of those alumni
+    # turns out to be an investment banker he genuinely wants to recruit
+    # through. Without this the only way to rescue that person would be to
+    # reclassify the whole campaign and let the other 200 back in.
+    #
+    # A PLAIN BOOLEAN, not the three-state `recruiting_contact` uses, and the
+    # asymmetry is deliberate. `recruiting_contact` has a text fallback, so it
+    # needs "nobody has said" to be distinguishable from "no". This one has no
+    # fallback to defer to — the campaign's own classification IS the default —
+    # so False and "not answered" mean the identical thing and a third state
+    # would be a distinction with no consequence.
+    #
+    # Detection never writes this column. It is the user's word, and it stands.
+    campaign_exempt = models.BooleanField(default=False)
 
     class Meta(PrivateModel.Meta):
         db_table = "contacts"
@@ -213,6 +233,33 @@ class Touch(PrivateModel):
     kind = models.CharField(max_length=64)
     note = models.TextField(null=True, blank=True)
     source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default="manual")
+    # The message's Subject header, when the capture path that produced this
+    # touch actually saw one. Blank everywhere else, and blank is honest — a
+    # hand-logged coffee chat has no subject line.
+    #
+    # WHY IT IS HERE AT ALL: `capture.gmail_live._classify_message` has always
+    # read the Subject header and thrown it away, folding it into the prose of
+    # `evidence` ("Sent: <subject>"). A mail merge's single defining fact is
+    # that 201 threads share one subject, and that fact was being discarded one
+    # line after it was read. `crm.campaigns` groups on this.
+    #
+    # WHY IT IS WRITTEN BY DJANGO AND NOT BY THE PIPELINE. `touches` rows are
+    # INSERTed by `coverage_domain.pipeline.apply_touch`'s raw SQL, whose column
+    # list is part of that package's contract with the ported ratchet (see this
+    # module's own schema-compatibility docstring). Widening that INSERT to
+    # carry a column only the web app cares about would put a view concern
+    # inside the pure engine for no gain: `apply_touch` returns the new row's
+    # id, so the capture layer stamps the subject on straight afterwards. The
+    # `db_default` is load-bearing and not decoration. Django normally emits no
+    # database-level default: `default=""` is applied in Python, so a column
+    # added that way is NOT NULL with nothing behind it, and the FIRST raw
+    # `INSERT INTO touches (...)` that does not name it fails with a
+    # NotNullViolation. Every touch this product writes goes through that
+    # INSERT. The DB default is what keeps this column invisible to the pure
+    # package, which is the whole point of adding it here rather than there.
+    subject = models.CharField(
+        max_length=255, blank=True, default="", db_default=""
+    )
 
     class Meta(PrivateModel.Meta):
         db_table = "touches"
@@ -220,6 +267,144 @@ class Touch(PrivateModel):
 
     def __str__(self) -> str:
         return f"{self.kind} @ {self.ts:%Y-%m-%d %H:%M}"
+
+
+class Campaign(PrivateModel):
+    """One bulk send the user made, and the one question they answer about it.
+
+    WHY THIS TABLE EXISTS. The founder is a USC student recruiting for
+    investment banking. He is ALSO "Associate of External Outreach" for USC's
+    International Consulting Club, and in that role he mail-merged 201 threads
+    with the subject "Fall 2026 ICC Alumni Digital Panel Outreach" — asking
+    alumni across every industry to speak on a club panel. Recipients included
+    an airline, a health insurer, a jeweller, a talent agency and a law firm.
+    Coverage ingested every one of them as his personal recruiting network, and
+    his Today queue filled up with club admin: "Propose a 15-min chat" to a
+    person who had agreed to speak on a panel, "Follow up" with an HR manager
+    who had ignored a panel invitation.
+
+    Nothing about those relationships is wrong in the contact book. The mistake
+    is entirely about WHOSE JOB the relationship is. So the fix is one question,
+    asked once per campaign rather than 201 times per contact: is this bulk send
+    my own recruiting, or something else I do?
+
+    THE ANSWER IS DURABLE AND EDITABLE. `kind` starts at `unclassified`, which
+    behaves exactly as today (everyone stays in the queue) — surfacing the
+    question is the fix, and pre-emptively hiding 201 people on a guess would be
+    a worse bug than the one being fixed. Once the user answers, `classified_at`
+    is set and re-detection never touches `kind` again; only the user's own
+    Settings control changes it.
+
+    `signature` is the detector's grouping key, not a display string — see
+    `crm.campaigns.normalize_subject`. It is unique per user, which is what lets
+    a re-run of the detector find and update the same campaign rather than
+    stacking a second copy of it every night.
+    """
+
+    # Nobody has answered yet. Behaves as `recruiting` for queue purposes (see
+    # `crm.campaigns.excluded_contact_ids`) — the default must never remove
+    # anyone, because a detector that hides contacts before the user has agreed
+    # they should be hidden is a data-loss bug wearing a feature's clothes.
+    KIND_UNCLASSIFIED = "unclassified"
+    # "This was me job hunting." Nothing changes.
+    KIND_RECRUITING = "recruiting"
+    # "This was something else I do" — club work, an event, a survey, research.
+    # Contacts whose relationship with the user STARTED here leave the daily
+    # queue and keep every other surface in the product.
+    KIND_OTHER = "other"
+    KIND_CHOICES = [
+        (KIND_UNCLASSIFIED, "Not answered yet"),
+        (KIND_RECRUITING, "My own recruiting"),
+        (KIND_OTHER, "Something else I do"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    # The normalized grouping key. Not shown to anyone.
+    signature = models.CharField(max_length=255)
+    # What the user reads on the Settings card. The best human-readable form of
+    # the signature the detector could find — a real subject line where one was
+    # stored, the evidence line otherwise. Display only; never matched on.
+    label = models.CharField(max_length=255, blank=True, default="")
+    kind = models.CharField(
+        max_length=16, choices=KIND_CHOICES, default=KIND_UNCLASSIFIED
+    )
+    # NULL until the user answers. The lock that stops re-detection overwriting
+    # a human answer with a machine default — see `crm.campaigns.detect`.
+    classified_at = models.DateTimeField(null=True, blank=True)
+    # The window the detector matched, straight off the touches. Shown on the
+    # card so the user can recognise the send ("3 Aug, 41 people") without
+    # having to remember a subject line.
+    first_sent = models.DateTimeField()
+    last_sent = models.DateTimeField()
+    # Distinct recipients at detection time. Denormalized rather than counted
+    # on every render: the Settings card lists every campaign, and the honest
+    # number is the one the detector actually matched on.
+    recipient_count = models.PositiveIntegerField(default=0)
+    detected_at = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "campaigns"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "signature"], name="uniq_campaigns_user_signature"
+            ),
+        ]
+        ordering = ["-last_sent", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.label or self.signature} ({self.recipient_count})"
+
+    @property
+    def is_classified(self) -> bool:
+        return self.kind != self.KIND_UNCLASSIFIED
+
+
+class CampaignContact(PrivateModel):
+    """One recipient of one campaign.
+
+    `originates` is the field that carries the whole product decision. A
+    campaign's classification applies to every contact whose relationship with
+    the user STARTED in that campaign — not to everyone who happened to receive
+    it. The banker the founder had already been recruiting for a month, who
+    also got the club blast because he is a USC alum, is not club admin: his
+    relationship began somewhere else and it stays in the queue.
+
+    Concretely: the campaign's touch for this contact is also the earliest touch
+    this contact has. Read off the touches, no guessing.
+
+    Detection never deletes rows here and never flips `originates` after the
+    first write. A membership is a historical fact about what happened in the
+    mailbox; re-running the detector on a later day must not be able to rewrite
+    history because a subsequent touch changed which one is earliest.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    campaign = models.ForeignKey(
+        Campaign, on_delete=models.CASCADE, related_name="memberships"
+    )
+    contact = models.ForeignKey(
+        Contact, on_delete=models.CASCADE, related_name="campaign_memberships"
+    )
+    originates = models.BooleanField(default=False)
+    # The campaign touch's own timestamp for this contact — what `originates`
+    # was decided from, kept so the decision is auditable without re-deriving it.
+    sent_at = models.DateTimeField()
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "campaign_contacts"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "campaign", "contact"],
+                name="uniq_campaign_contacts_user_campaign_contact",
+            ),
+        ]
+        indexes = [models.Index(fields=["user", "contact"])]
+        ordering = ["campaign_id", "contact_id"]
+
+    def __str__(self) -> str:
+        return f"{self.campaign_id} -> {self.contact_id}"
 
 
 class ChatDebrief(PrivateModel):

@@ -674,6 +674,12 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
                 else f"Sent: {subject}"
             ),
             "thread_id": thread_id,
+            # The Subject header, kept rather than only folded into the prose
+            # of `evidence` above. `capture.gmail._stamp_subject` writes it to
+            # `Touch.subject`, and `crm.campaigns` groups a mail merge on it —
+            # 201 threads sharing one subject is the whole signal, and it used
+            # to be read on the line above and discarded on the next.
+            "subject": subject,
             "occurred_at": occurred_at,
         }
 
@@ -692,6 +698,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             "chat_scheduled_at": None,
             "evidence": f"Bounced: {subject}",
             "thread_id": thread_id,
+            "subject": subject,
             "occurred_at": occurred_at,
         }
 
@@ -729,6 +736,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
                 or "Bulk/automated email"
             ),
             "thread_id": thread_id,
+            "subject": subject,
             "occurred_at": occurred_at,
         }
 
@@ -748,6 +756,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             else message.get("snippet", "")[:300]
         ),
         "thread_id": thread_id,
+        "subject": subject,
         "occurred_at": occurred_at,
     }
 
