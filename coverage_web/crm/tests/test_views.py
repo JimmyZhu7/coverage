@@ -47,8 +47,13 @@ def test_week_list_renders_actions_ranked_by_priority(client):
 
     # A chat happened 2 days ago with no thank-you yet -> branch 1, OVERDUE
     # (>24h) -> priority 0.
+    # `school_affiliation` on both: the queue's relevance gate (crm.relevance)
+    # only speaks about people at a tiered firm, people who share the student's
+    # school, or people waiting on a reply, and this test is about the ORDER
+    # two cards render in.
     thanks = Contact.all_objects.create(
-        user=user, name="Priya Overdue", warmth="chatted", thread_state="chat_done"
+        user=user, name="Priya Overdue", warmth="chatted", thread_state="chat_done",
+        school_affiliation=True,
     )
     Touch.all_objects.create(
         user=user, contact=thanks, ts=now - timedelta(days=2), kind="chat", channel="coffee_chat"
@@ -56,7 +61,8 @@ def test_week_list_renders_actions_ranked_by_priority(client):
     # A brand-new cold contact, never contacted -> branch 6 first_outreach ->
     # priority 1.
     Contact.all_objects.create(
-        user=user, name="Sam Newcold", warmth="cold", thread_state="no_reply"
+        user=user, name="Sam Newcold", warmth="cold", thread_state="no_reply",
+        school_affiliation=True,
     )
 
     client.force_login(user)
@@ -414,7 +420,13 @@ def test_user_b_cannot_log_touch_on_user_a_contact(client):
 @pytest.mark.django_db
 def test_contact_list_renders(client):
     user = _user()
-    Contact.all_objects.create(user=user, name="Listed Person")
+    # A never-contacted cold contact renders on this board ONLY through the
+    # "Contacts Needing Action" column (the warmth sections below it skip
+    # cold-with-no-touches), and that column now runs behind the queue's
+    # relevance gate. The school tie is what earns the card.
+    Contact.all_objects.create(
+        user=user, name="Listed Person", school_affiliation=True,
+    )
     client.force_login(user)
     resp = client.get(reverse("crm:contact_list"))
     assert resp.status_code == 200

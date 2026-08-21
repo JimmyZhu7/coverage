@@ -29,7 +29,7 @@ from directory.classify import TARGET_BUCKETS
 from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
 
-from . import debrief as debrief_svc, services
+from . import debrief as debrief_svc, relevance as rel, services
 from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
 from .utils import (
     ACTION_LABELS,
@@ -195,6 +195,14 @@ def _build_actions(user):
             # it called eight HSBC bankers alumni.
             "school_affiliation": c.school_affiliation,
             "school": c.school,
+            # Both read by `crm.relevance` to decide what ASK this person can
+            # be given: `role` is the free-text title the recruiting-function
+            # markers are matched against, `recruiting_contact` is the
+            # student's own three-state answer, which always wins over the
+            # text. The engine ignores both — it has no opinion about who a
+            # coffee chat is appropriate for, and shouldn't.
+            "role": c.role,
+            "recruiting_contact": c.recruiting_contact,
         }
         for c in contacts
     ]
@@ -229,6 +237,23 @@ def _build_actions(user):
         prev = last_real.get(t.contact_id)
         if prev is None or t.ts > prev.ts:
             last_real[t.contact_id] = t
+
+    # WHAT IS LIVE AT THE FIRMS WHERE THIS STUDENT KNOWS SOMEBODY WARM.
+    # One FirmDate query and one Opportunity query over the handful of tiered
+    # firms with an advocate or a chatted contact on them — nine, on the
+    # founder's live account, against the 54 on his list. Used twice below: to
+    # give a keep-warm card a reason instead of a day count, and to advance one
+    # that the bare clock has not reached yet.
+    warm_firm_ids = {
+        c.firm_id for c in contacts
+        if c.firm_id in tiers
+        and c.warmth in _WARM_UPKEEP_WARMTHS
+        and c.thread_state not in ("parked", "quiet")
+    }
+    openings = rel.firm_openings(user, warm_firm_ids, today) if warm_firm_ids else {}
+    actions += _opening_keep_warms(
+        contact_dicts, actions, openings, last_real, today, snoozed_ids, firm_meta
+    )
 
     # Deadline chips reuse the engine's own closing-soon index rather than
     # re-deriving one: same confirmed-only bar, same region scoping, same
@@ -290,7 +315,176 @@ def _build_actions(user):
             close = min(by_region.values()) if region is None else by_region.get(region)
         a["closes_on"] = close
 
+        # Do THEY owe you nothing and you owe them? The latest real touch
+        # being an inbound kind is exactly that: they wrote (or proposed a
+        # time) and nothing of yours has landed since. Same set the pace ring
+        # calls inbound, for the same reason.
+        a["owed_reply"] = bool(last and last.kind in rel.INBOUND_TOUCH_KINDS)
+
+    actions = _gate_and_rank(actions, tiers, openings)
     return actions, contacts
+
+
+# The warmths a keep-warm card is ever about: people who have actually met the
+# student. `replied` is not one of them — an email back is not a relationship
+# to maintain yet, and engine branch 7 has a better thing to say about it.
+_WARM_UPKEEP_WARMTHS = ("chatted", "advocate")
+
+# How quiet it has to have been before a live opening at their firm is allowed
+# to raise a keep-warm card the bare clock has not reached. Two working weeks:
+# long enough that the note does not land on top of the last one, short enough
+# that a real deadline is still a deadline when it arrives.
+OPENING_MIN_IDLE_DAYS = 10
+
+
+def _opening_keep_warms(
+    contact_dicts, actions, openings, last_real, today, snoozed_ids, firm_meta
+):
+    """Keep-warm cards raised by something REAL happening at the contact's
+    firm, for warm contacts the engine's own clock has not reached yet.
+
+    WHY THE VIEW RAISES THESE AND THE ENGINE CANNOT. `coverage_domain.cadence`
+    is handed contacts, touches and firm_dates. It has never seen an
+    `Opportunity` row and should not: the board is shared-zone Django data,
+    filtered through the student's tracks, markets, class year and eligibility
+    — four things the engine takes no arguments for. "A role you could apply
+    for opened at their firm this week" is a fact only this layer can state.
+
+    WHY THIS IS NOT SECOND-GUESSING THE STUDENT'S SETTINGS. The keep-warm dial
+    (`chatted_touch_min_weeks`) answers "how long is too long to go quiet on
+    someone", and it still owns that question completely — a contact with no
+    opening waits for it, however warm they are. What it cannot answer is "is
+    there something to say today", and that is the only question this function
+    asks. Measured on the founder's account: he had turned the dial out to six
+    weeks (from a default of three) to stop the hollow prompts, which also
+    silenced ten chatted contacts at tier-1 and tier-2 banks — including the
+    one whose firm had an investment-banking summer deadline on the board.
+
+    THREE GUARDS, so this can never become the nag it replaces:
+      - only a contact the engine produced NO action for, so it can never
+        duplicate or pre-empt a thank-you, a re-ping or a follow-up;
+      - never someone parked, quiet, archived or snoozed;
+      - never inside `OPENING_MIN_IDLE_DAYS` of a real touch.
+    """
+    busy = {a["contact"]["id"] for a in actions}
+    out = []
+    for c in contact_dicts:
+        if c["id"] in busy or c["id"] in snoozed_ids or c.get("archived"):
+            continue
+        if c.get("warmth") not in _WARM_UPKEEP_WARMTHS:
+            continue
+        if c.get("thread_state") in ("parked", "quiet"):
+            continue
+        opening = openings.get(c.get("firm_id"))
+        if not opening:
+            continue
+        last = last_real.get(c["id"])
+        if last is None:
+            # No dateable touch at all. The engine's own branches already fire
+            # for this case (they treat it as maximally stale), so reaching
+            # here would mean the contact was excluded for some other reason —
+            # not a gap for this function to fill in behind them.
+            continue
+        idle = (today - timezone.localtime(last.ts).date()).days
+        if idle < OPENING_MIN_IDLE_DAYS:
+            continue
+        meta = firm_meta.get(c.get("firm_id"), {})
+        out.append({
+            "contact": c,
+            "action": "keep_warm",
+            # Overwritten by `crm.relevance.keep_warm_reason` once the opening
+            # and the relevance are attached; a placeholder here would be a
+            # sentence nobody wrote, so it stays empty instead.
+            "reason": "",
+            # The same ordinal engine branch 5b gives a keep-warm card, read
+            # off the engine rather than chosen here, so the two can never
+            # disagree about what a keep-warm is worth.
+            "priority": 2,
+            "tier": meta.get("tier", 3),
+            "firm_name": meta.get("name") or c.get("firm_text") or c.get("firm_id"),
+            # These only ever exist for a contact at a DIRECTORY firm (the
+            # openings index is keyed by firm_id), so the firm is known by
+            # construction — never the "No firm listed" placeholder.
+            "firm_known": True,
+            "ctx": {"opening": opening["kind"], "days_since": idle},
+            "from_opening": True,
+        })
+    return out
+
+
+def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict) -> list[dict]:
+    """Decide who the queue may speak about, what it may ask them for, and in
+    what order. Everything here is a VIEW decision — see `crm/relevance.py`'s
+    module docstring for why none of it belongs in `coverage_domain.cadence`.
+
+    Three passes, in this order because each one narrows what the next has to
+    load:
+
+      1. RELEVANCE. A contact at a tiered firm, a contact who shares the
+         student's school, or a contact who wrote and is still waiting on an
+         answer. Everyone else is dropped from the QUEUE only — they keep every
+         other surface in the product, including the contact book, the Network
+         page, search and export. Measured on the founder's account the day
+         this landed, 14 of his 16 queue items were people at firms he does not
+         target and eight of those were the same follow-up sentence.
+
+      2. THE ASK. A recruiting-process contact never receives "propose a 15-min
+         chat". They can still be answered, and they can still carry a real
+         process deadline; they cannot be asked to coffee.
+
+      3. WHAT IS HAPPENING NOW. `openings` is already loaded by the caller (it
+         needs it to raise the opening-driven keep-warms in the first place),
+         so a keep-warm card can name a reason instead of a day count. `ev` is
+         then the whole ordering: relevance x relationship x trigger.
+
+    Takes no `user`, and that is worth one line: `tiers` and `openings` are the
+    only two things about the student this decision needs, both already loaded
+    by the caller. Passing the user as well would put a second, unscoped route
+    to their rows inside a function whose whole job is filtering.
+    """
+    kept: list[dict] = []
+    for a in actions:
+        c = a["contact"]
+        relevance = rel.contact_relevance(c, tiers, owed_reply=a["owed_reply"])
+        if relevance is rel.REL_NONE:
+            continue
+        a["relevance"] = relevance
+        a["relevance_tier"] = tiers.get(c.get("firm_id"))
+        a["is_recruiting"] = rel.is_recruiting_contact(c)
+        kept.append(a)
+
+    out: list[dict] = []
+    for a in kept:
+        a["opening"] = openings.get(a["contact"].get("firm_id"))
+
+        if a["is_recruiting"] and a["action"] in rel.CHAT_PROPOSING_ACTIONS:
+            if a["action"] == "advance":
+                if not a["owed_reply"]:
+                    # Nothing left to say that isn't a chat ask. The engine
+                    # fired branch 7 because the thread is warm and quiet, but
+                    # the student has ALREADY written back — measured case, the
+                    # founder's national campus-recruiting manager, who had
+                    # made her introduction and handed him on a fortnight
+                    # earlier. There is no courtesy owed and no deadline
+                    # pending, so the honest card is no card.
+                    continue
+                # They wrote to you; the answer is a reply, not an invitation.
+                a["label"] = rel.RECRUITING_REPLY_LABEL
+                a["reason"] = rel.RECRUITING_REPLY_REASON
+            elif not a["opening"]:
+                # "Keeping a recruiter warm" with nothing in the process to
+                # talk about is the hollow prompt with a different name on it.
+                continue
+            else:
+                a["label"] = rel.RECRUITING_KEEP_WARM_LABEL
+                a["reason"] = rel.keep_warm_reason(a)
+        elif a["action"] in ("keep_warm", "maintain"):
+            a["reason"] = rel.keep_warm_reason(a)
+
+        a["ev"] = rel.expected_value(a)
+        out.append(a)
+
+    return out
 
 
 # Quick-action "Sent" → the touch kind it logs, per cadence action.
@@ -357,7 +551,21 @@ PACE_TOUCH_KINDS = frozenset(TOUCH_TRANSITIONS) - _INBOUND_TOUCH_KINDS
 # Today's plan sizing. Both are reasoned, not measured — revisit against the
 # founder's actual clear-rate after a couple of weeks of dogfood.
 TODAY_PLAN_MIN = 3    # never plan fewer: below this the page stops building momentum
-TODAY_PLAN_MAX = 12   # never plan more: ~6 hours a week is the real ceiling
+# Was 12. Twelve was a ceiling on a queue nobody had ranked: it let a whole
+# afternoon of cold follow-ups onto one screen and, at 500 contacts, would have
+# let forty. With `ev` ordering the list, the top five ARE the five highest-value
+# things available, so a longer list buys volume rather than value — and the
+# remainder is not lost, it is one click away under "Up next" (`held`). Five is
+# a morning's work a student will actually finish, which is the only number a
+# habit loop can be built on.
+TODAY_PLAN_MAX = 5
+
+# How many keep-warm cards with NO live reason behind them may take a plan slot
+# in one day. One, because the honest content of such a card is "this
+# relationship is going quiet and nothing external says why today" — worth
+# saying once, and a wall of them is the hollow queue the founder described.
+# Everything past the first is reachable under "Up next".
+QUIET_UPKEEP_PLAN_MAX = 1
 
 # Display class per cadence action, lower shown first. This is the Today
 # page's ordering, and it lives HERE rather than in the engine on purpose:
@@ -404,13 +612,23 @@ def _is_critical(a: dict) -> bool:
 
 
 def _today_sort_key(a: dict):
-    """(class, cadence priority, tier, longest-silent first, firm name).
+    """(class, expected value desc, cadence priority, tier, longest-silent
+    first, firm name).
+
+    `ev` is the second term and the one that does the work now:
+    relevance x relationship strength x whether something real is happening
+    (`crm.relevance.expected_value`). Class stays first because it is a
+    different question — a confirmed deadline is time-critical whatever it
+    scores, and demoting one because the contact is merely warm rather than an
+    advocate would be the tier-over-momentum inversion this key already exists
+    to prevent, wearing a number.
 
     Tier still breaks ties INSIDE a class — it just no longer outranks the
     relationship. Firm name is last and exists only to make the order stable
     across renders."""
     return (
         _today_class(a),
+        -a.get("ev", 0.0),
         a["priority"],
         a["tier"],
         -a.get("idle_business_days", 0),
@@ -1164,9 +1382,33 @@ def _cockpit_context(user) -> dict:
     # tomorrow. Whatever slots remain fill from class 1 -> 2 -> 3 in sort
     # order, so the oldest-silent cold contacts drain FIFO across the week
     # instead of a 31-card batch landing whole.
+    #
+    # ONE EXCEPTION, and it is the "rare" half of the keep-warm decision (the
+    # reason strings in `crm.relevance` are the "reason-seeking" half). A
+    # keep-warm card whose firm has nothing live at it — no confirmed date, no
+    # deadline on a role this student could apply for, no role opened there
+    # this week — is the product asking for an email it cannot justify. At most
+    # QUIET_UPKEEP_PLAN_MAX of those reach a plan slot on any one day; the rest
+    # pace out under "Up next".
+    #
+    # Capped rather than demoted, deliberately. Sorting them behind everything
+    # else would have put ten cold Citi follow-ups above the one person who
+    # actually sat down with the student — the exact tier-over-momentum
+    # inversion `_TODAY_CLASS` was written to kill, arriving by a different
+    # door. A warm contact still leads a quiet day. There is just never a wall
+    # of them.
     slots = max(0, cap - len(critical))
-    planned = critical + rest[:slots]
-    held = rest[slots:]
+    planned_rest: list[dict] = []
+    held: list[dict] = []
+    quiet_used = 0
+    for a in rest:
+        quiet = a["action"] in ("keep_warm", "maintain") and not a.get("opening")
+        if len(planned_rest) < slots and not (quiet and quiet_used >= QUIET_UPKEEP_PLAN_MAX):
+            planned_rest.append(a)
+            quiet_used += 1 if quiet else 0
+        else:
+            held.append(a)
+    planned = critical + planned_rest
 
     planned_lanes = {key: [] for key, _ in _TODAY_LANES}
     for a in planned:

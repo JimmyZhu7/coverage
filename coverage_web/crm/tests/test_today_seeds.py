@@ -128,7 +128,13 @@ def test_a_working_queue_gets_no_seeds_at_all(client):
     work, which they would only push down the page."""
     user = _user()
     for i in range(6):
-        c = Contact.all_objects.create(user=user, name=f"Due {i:02d}")
+        # `school_affiliation`: the queue's relevance gate (crm.relevance) only
+        # speaks about people at a tiered firm, people who share the student's
+        # school, or people waiting on a reply. This test is about seeds, not
+        # the gate, and the school tie is the cheapest way to have a queue.
+        c = Contact.all_objects.create(
+            user=user, name=f"Due {i:02d}", school_affiliation=True,
+        )
         _touch(user, c, "outreach", days_ago=20)
 
     ctx = _cockpit_context(user)
@@ -153,7 +159,11 @@ def test_a_handled_queue_keeps_the_line_the_student_earned(client):
     """
     user = _user()
     for i in range(30):
-        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        # See the note on `school_affiliation` above: without it the relevance
+        # gate leaves this student no queue at all to pace out.
+        c = Contact.all_objects.create(
+            user=user, name=f"Cold {i:02d}", school_affiliation=True,
+        )
         _touch(user, c, "outreach", days_ago=20)
     Contact.all_objects.filter(user=user).update(
         snoozed_until=timezone.now() + timedelta(days=1)
@@ -199,7 +209,11 @@ def test_seeds_stay_silent_while_the_cap_is_still_pacing_work_out():
     nothing to say, so it must not start suggesting beginner moves."""
     user = _user()
     for i in range(30):
-        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        # See the note on `school_affiliation` above: without it the relevance
+        # gate leaves this student no queue at all to pace out.
+        c = Contact.all_objects.create(
+            user=user, name=f"Cold {i:02d}", school_affiliation=True,
+        )
         _touch(user, c, "outreach", days_ago=20)
 
     ctx = _cockpit_context(user)

@@ -20,7 +20,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
-from crm.models import Contact, Touch
+from crm.models import Contact, Touch, UserFirm
 from directory.models import Firm
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -212,6 +212,10 @@ def test_the_board_renders_checkboxes_and_the_bulk_bar(client):
     user = _user()
     firm = Firm.objects.create(slug="acme", name="Acme")
     c = _contact(user, "Ada", firm=firm)
+    # On the student's list, because the queue's relevance gate (crm.relevance)
+    # will not speak about a contact at a firm they are not chasing — and this
+    # board's "Contacts Needing Action" column is where Ada's checkbox renders.
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
     # Give the cadence engine a reason to queue her: contacted, no reply,
     # well past the follow-up window.
     Touch.all_objects.create(user=user, contact=c, kind="outreach",

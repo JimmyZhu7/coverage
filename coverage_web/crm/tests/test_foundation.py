@@ -28,7 +28,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from crm import views as crm_views
-from crm.models import Contact, Touch
+from crm.models import Contact, Touch, UserFirm
 from directory.models import Firm, FirmDate
 
 User = get_user_model()
@@ -91,6 +91,11 @@ def test_angle_never_leaks_into_mailto_in_the_cadence_queue(client):
         user=user, name="Jane Banker", email="jane@acme.com",
         angle=PRIVATE_ANGLE, opener=DRAFT_OPENER,
         warmth="cold", thread_state="no_reply",
+        # The queue's relevance gate (crm.relevance) only speaks about people
+        # at a tiered firm, people who share the student's school, or people
+        # waiting on a reply. This test needs a card on the page to inspect for
+        # leakage; the school tie is the cheapest way to earn one.
+        school_affiliation=True,
     )
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
@@ -373,6 +378,11 @@ def test_cadence_reping_uses_the_contacts_region_not_its_source(client):
     user = _user()
     today = timezone.localdate()
     firm = Firm.objects.create(slug="dual", name="Dual Firm", regions=["us", "hk"])
+    # On the student's own target list, which is what the queue's relevance
+    # gate (crm.relevance) reads before it will speak about anyone at all. The
+    # realistic fixture for a re-ping test anyway: nobody re-pings ahead of a
+    # deadline at a firm they are not chasing.
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
     FirmDate.objects.create(
         firm=firm, cycle="sa2028", region="hk", event_kind="app_close",
         date=today + timedelta(days=5), precision="day", confidence=1.0,
@@ -482,6 +492,10 @@ def test_user_cadence_params_change_the_queue():
     user = _user()
     contact = Contact.all_objects.create(
         user=user, name="Recently Emailed", warmth="cold", thread_state="no_reply",
+        # See the note in the angle-leak test above: without a relevance claim
+        # the queue does not speak about this contact at all, and a test about
+        # the cadence WINDOW would be silently testing the gate instead.
+        school_affiliation=True,
     )
     Touch.all_objects.create(
         user=user, contact=contact, ts=timezone.now() - timedelta(days=3),
@@ -504,6 +518,10 @@ def test_ignored_cadence_override_leaves_the_default_in_place():
     user = _user()
     contact = Contact.all_objects.create(
         user=user, name="Recently Emailed", warmth="cold", thread_state="no_reply",
+        # See the note in the angle-leak test above: without a relevance claim
+        # the queue does not speak about this contact at all, and a test about
+        # the cadence WINDOW would be silently testing the gate instead.
+        school_affiliation=True,
     )
     Touch.all_objects.create(
         user=user, contact=contact, ts=timezone.now() - timedelta(days=2),

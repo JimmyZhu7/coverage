@@ -154,11 +154,17 @@ def test_closing_items_sort_soonest_first():
 
 # ---------------------------------------------------------------------------
 # Who to ping — crm.today's own queue, not a second cadence formula.
+#
+# `school_affiliation=True` on the fixtures below is exactly that reuse showing
+# through: the queue gained a relevance gate (crm.relevance) and the digest
+# inherits it, which is the point — an email that lists people the student does
+# not target is the same failure as a page that does. The school tie is the
+# cheapest way to be relevant, and none of these tests are about the gate.
 # ---------------------------------------------------------------------------
 
 def test_a_due_follow_up_shows_up_as_something_to_ping():
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace", school_affiliation=True)
     _touch(user, c, "outreach", days_ago=20)  # long enough to clear follow_up's threshold
 
     digest = assemble_digest(user, today=TODAY)
@@ -173,7 +179,7 @@ def test_park_never_shows_up_as_something_to_ping():
     exactly this reason, and the digest must honor that, not just Today's
     lane rendering."""
     user = _user(weekly_touch_goal=14)
-    stale = Contact.all_objects.create(user=user, name="Gone Quiet")
+    stale = Contact.all_objects.create(user=user, name="Gone Quiet", school_affiliation=True)
     _touch(user, stale, "outreach", days_ago=200)
     _touch(user, stale, "follow_up", days_ago=150)
 
@@ -185,7 +191,7 @@ def test_park_never_shows_up_as_something_to_ping():
 def test_actions_are_capped_with_an_honest_overflow_count():
     user = _user(weekly_touch_goal=14)
     for i in range(MAX_ACTIONS + 3):
-        c = Contact.all_objects.create(user=user, name=f"Contact {i:02d}")
+        c = Contact.all_objects.create(user=user, name=f"Contact {i:02d}", school_affiliation=True)
         _touch(user, c, "outreach", days_ago=20)
 
     digest = assemble_digest(user, today=TODAY)
@@ -195,7 +201,10 @@ def test_actions_are_capped_with_an_honest_overflow_count():
 
 def test_actions_carry_a_ready_compose_link():
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace", email="ada@example.com")
+    c = Contact.all_objects.create(
+        user=user, name="Ada Lovelace", email="ada@example.com",
+        school_affiliation=True,
+    )
     _touch(user, c, "outreach", days_ago=20)
 
     digest = assemble_digest(user, today=TODAY)

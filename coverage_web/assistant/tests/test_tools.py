@@ -77,9 +77,15 @@ def opportunity(firm):
 # ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
-def test_today_queue_returns_the_cadence_engine_s_own_rows(user, contact):
+def test_today_queue_returns_the_cadence_engine_s_own_rows(user, contact, firm):
     """The queue is `crm.today._build_actions` wrapped, not re-derived — a
-    brand-new cold contact is a first_outreach in both places."""
+    brand-new cold contact is a first_outreach in both places.
+
+    The `UserFirm` is part of that reuse rather than incidental setup: the
+    queue gained a relevance gate (`crm.relevance`) and the advisor inherits
+    it, deliberately. An assistant that reads out people the student does not
+    target is the same failure as a page that does."""
+    UserFirm(user=user, firm=firm, tier=1).save()
     result, is_error = _call(user, "get_today_queue")
 
     assert not is_error

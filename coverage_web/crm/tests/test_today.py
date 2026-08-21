@@ -41,6 +41,26 @@ def _user(email="today@example.com", **kw):
     )
 
 
+def _contact(*, user, **kw):
+    """A contact the queue is ALLOWED to speak about.
+
+    The Today queue gained a relevance gate on 2026-08-22 (`crm.relevance`): a
+    contact only generates a daily action if they are at one of the student's
+    tiered firms, share the student's school, or wrote and are still waiting on
+    an answer. Every test in this file is about some OTHER rule — the pace
+    ring, the cap, the ordering, the honesty of a number — so the fixtures
+    default to the school tie. It is the cheapest way to be relevant (one
+    boolean, no Firm and no UserFirm row) and it changes nothing else the
+    assertions look at.
+
+    Tests that exercise the gate ITSELF pass `school_affiliation=False`
+    explicitly, which this respects; see the gate's own section at the foot of
+    the file.
+    """
+    kw.setdefault("school_affiliation", True)
+    return Contact.all_objects.create(user=user, **kw)
+
+
 def _touch(user, contact, kind, *, days_ago=0, channel="email"):
     return Touch.all_objects.create(
         user=user, contact=contact, kind=kind, channel=channel,
@@ -57,7 +77,7 @@ def test_a_purely_inbound_week_reads_zero():
     capture pipeline off INBOUND mail, plus the audit rows the system writes
     to itself. A progress meter that fills while you do nothing is worthless."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = _contact(user=user, name="Ada Lovelace")
     for kind in ("reply_received", "chat_scheduled", "chat_scheduled",
                  "chat_scheduled", "reply_received", "chat_scheduled",
                  "chat_scheduled", "chat_scheduled", "manual_override"):
@@ -74,7 +94,7 @@ def test_your_own_work_does_count():
     never moves. Every kind the ratchet knows about counts except the two
     inbound ones."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    c = _contact(user=user, name="Ethan Gao")
     for kind in ("outreach", "follow_up", "thank_you", "maintain", "reping", "chat"):
         _touch(user, c, kind)
 
@@ -93,7 +113,7 @@ def test_manual_override_audit_rows_never_count():
 
 def test_last_weeks_work_does_not_count_toward_this_week():
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Old Work")
+    c = _contact(user=user, name="Old Work")
     _touch(user, c, "outreach", days_ago=14)
     assert _cockpit_context(user)["pace"]["done"] == 0
 
@@ -128,8 +148,13 @@ def test_daily_cap_spreads_the_weekly_goal_over_the_days_left():
     assert _daily_cap(14, 0, date(2026, 7, 29)) == 5
     # Same goal on Monday spreads wider.
     assert _daily_cap(14, 0, date(2026, 7, 27)) == 3
-    # Behind on a Friday: the cap climbs to catch up, like Linear capacity.
-    assert _daily_cap(14, 0, date(2026, 7, 31)) == 12
+    # Behind on a Friday: the cap climbs to catch up, like Linear capacity —
+    # but only as far as TODAY_PLAN_MAX, which came down from 12 to 5 when the
+    # queue learned to rank by expected value. Twelve was a ceiling on an
+    # unranked list; with the top five actually being the five best things
+    # available, a longer plan buys volume rather than value, and the rest is
+    # one click away under "Up next".
+    assert _daily_cap(14, 0, date(2026, 7, 31)) == TODAY_PLAN_MAX == 5
 
 
 def test_daily_cap_respects_its_floor_and_ceiling():
@@ -144,7 +169,7 @@ def test_the_cap_actually_caps_and_the_remainder_is_stated_exactly():
     never dropped."""
     user = _user(weekly_touch_goal=14)
     for i in range(30):
-        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        c = _contact(user=user, name=f"Cold {i:02d}")
         _touch(user, c, "outreach", days_ago=20)
 
     ctx = _cockpit_context(user)
@@ -160,7 +185,7 @@ def test_held_items_are_still_reachable_in_full(client):
     """E3: held is not gone. Show all expands to the complete queue."""
     user = _user(weekly_touch_goal=14)
     for i in range(30):
-        c = Contact.all_objects.create(user=user, name=f"Coldperson {i:02d}")
+        c = _contact(user=user, name=f"Coldperson {i:02d}")
         _touch(user, c, "outreach", days_ago=20)
 
     client.force_login(user)
@@ -174,7 +199,7 @@ def test_a_capped_lane_header_carries_its_denominator(client):
     """E2: never a count that mixes shown with hidden."""
     user = _user(weekly_touch_goal=14)
     for i in range(30):
-        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        c = _contact(user=user, name=f"Cold {i:02d}")
         _touch(user, c, "outreach", days_ago=20)
 
     client.force_login(user)
@@ -197,10 +222,10 @@ def test_a_warm_contact_at_an_unranked_firm_outranks_a_cold_one_at_tier_one():
     UserFirm.all_objects.create(user=user, firm=citi, tier=1)
 
     for i in range(10):
-        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}", firm=citi)
+        c = _contact(user=user, name=f"Cold {i:02d}", firm=citi)
         _touch(user, c, "outreach", days_ago=20)
 
-    warm = Contact.all_objects.create(
+    warm = _contact(
         user=user, name="Warm Alum", firm_text="USC",
         warmth="replied", thread_state="replied",
     )
@@ -227,7 +252,7 @@ def test_within_a_class_the_longest_silent_goes_first():
     """
     user = _user(weekly_touch_goal=14)
     for days in (10, 30, 15):
-        c = Contact.all_objects.create(user=user, name=f"Silent {days:02d}")
+        c = _contact(user=user, name=f"Silent {days:02d}")
         _touch(user, c, "outreach", days_ago=days)
 
     ctx = _cockpit_context(user)
@@ -247,9 +272,9 @@ def test_a_confirmed_deadline_is_never_capped_away():
         date=timezone.localdate() + timedelta(days=5), confidence=1.0, precision="day",
     )
     for i in range(30):
-        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        c = _contact(user=user, name=f"Cold {i:02d}")
         _touch(user, c, "outreach", days_ago=20)
-    warm = Contact.all_objects.create(
+    warm = _contact(
         user=user, name="Deadline Person", firm=firm, region="us",
         warmth="chatted", thread_state="replied",
     )
@@ -268,7 +293,7 @@ def test_a_chatted_contact_reappears_on_today(client):
     """13 of the founder's 14 chatted contacts produced nothing at all: the
     thank-you prompt had expired and no branch covered them afterwards."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Grace Hopper", warmth="chatted", thread_state="chat_done",
     )
     _touch(user, c, "chat", days_ago=40)
@@ -287,10 +312,10 @@ def test_keep_warm_ranks_above_a_cold_follow_up():
     citi = Firm.objects.create(name="Citi", slug="citi")
     UserFirm.all_objects.create(user=user, firm=citi, tier=1)
     for i in range(10):
-        cold = Contact.all_objects.create(user=user, name=f"Cold {i:02d}", firm=citi)
+        cold = _contact(user=user, name=f"Cold {i:02d}", firm=citi)
         _touch(user, cold, "outreach", days_ago=20)
 
-    warm = Contact.all_objects.create(
+    warm = _contact(
         user=user, name="Chatted Human", warmth="chatted", thread_state="chat_done",
     )
     _touch(warm.user, warm, "chat", days_ago=40)
@@ -305,7 +330,7 @@ def test_keep_warm_logs_an_existing_touch_kind_and_moves_no_state(client):
     """`keep_warm` maps to the `maintain` touch kind, whose TOUCH_TRANSITIONS
     entry is (None, None) — the ratchet is untouched by this feature."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Marie Curie", warmth="chatted", thread_state="chat_done",
     )
     _touch(user, c, "chat", days_ago=40)
@@ -326,7 +351,7 @@ def test_keep_warm_logs_an_existing_touch_kind_and_moves_no_state(client):
 # ---------------------------------------------------------------------------
 def test_the_card_renders_the_reason_and_the_last_touch(client):
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    c = _contact(user=user, name="Ethan Gao")
     _touch(user, c, "outreach", days_ago=20)
 
     client.force_login(user)
@@ -342,7 +367,7 @@ def test_a_queue_row_keeps_its_three_zones(client):
     stylesheet lays out — a card that loses one of them silently reverts to
     the poster layout this replaced."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    c = _contact(user=user, name="Ethan Gao")
     _touch(user, c, "outreach", days_ago=20)
 
     client.force_login(user)
@@ -355,7 +380,7 @@ def test_a_queue_row_keeps_its_three_zones(client):
 
 def test_a_contact_with_no_touches_says_so_rather_than_guessing(client):
     user = _user(weekly_touch_goal=14)
-    Contact.all_objects.create(user=user, name="Brand New")
+    _contact(user=user, name="Brand New")
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
     assert "No touches on record" in body
@@ -365,7 +390,7 @@ def test_an_audit_row_is_not_shown_as_a_touch(client):
     """The evidence line reads the same real-touch clock the engine does: a
     state correction is not something you did to the relationship."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Corrected Person")
+    c = _contact(user=user, name="Corrected Person")
     _touch(user, c, "outreach", days_ago=20)
     _touch(user, c, "manual_override", days_ago=1)
 
@@ -380,7 +405,7 @@ def test_an_audit_row_is_not_shown_as_a_touch(client):
 # ---------------------------------------------------------------------------
 def test_the_log_button_does_not_claim_to_have_sent_anything(client):
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    c = _contact(user=user, name="Ethan Gao")
     _touch(user, c, "outreach", days_ago=20)
 
     client.force_login(user)
@@ -393,7 +418,7 @@ def test_the_log_button_does_not_claim_to_have_sent_anything(client):
 
 def test_every_quick_action_names_its_contact_for_a_screen_reader(client):
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ethan Gao", email="e@x.com")
+    c = _contact(user=user, name="Ethan Gao", email="e@x.com")
     _touch(user, c, "outreach", days_ago=20)
 
     client.force_login(user)
@@ -412,7 +437,7 @@ def test_confirm_chat_is_a_two_step_and_never_one_click_logs_a_chat(client):
     """One click asserting a conversation happened is the biggest claim on the
     page, made on the one card that exists because nobody knows if it did."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Rosalind Franklin", warmth="replied", thread_state="chat_scheduled",
     )
     _touch(user, c, "chat_scheduled", days_ago=14)
@@ -433,7 +458,7 @@ def test_compose_flags_a_ready_draft_and_stays_quiet_otherwise(client):
     on every card on the page and distinguished nothing. It now marks the
     exception, which is the state actually worth seeing."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="No Draft", email="nd@x.com")
+    c = _contact(user=user, name="No Draft", email="nd@x.com")
     _touch(user, c, "outreach", days_ago=20)
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
@@ -450,10 +475,10 @@ def test_the_firm_slot_only_says_alum_for_an_actual_alum(client):
     "HSBC". Keying the chip on a missing firm_id labelled eight HSBC bankers
     alumni on the live page."""
     user = _user(weekly_touch_goal=14)
-    alum = Contact.all_objects.create(
+    alum = _contact(
         user=user, name="Kristin Welty", firm_text="USC", school_affiliation=True,
     )
-    banker = Contact.all_objects.create(
+    banker = _contact(
         user=user, name="Hsbc Banker", firm_text="HSBC", school_affiliation=False,
     )
     _touch(user, alum, "outreach", days_ago=20)
@@ -471,7 +496,7 @@ def test_the_firm_slot_only_says_alum_for_an_actual_alum(client):
 # ---------------------------------------------------------------------------
 def test_snooze_hides_the_follow_up_it_was_clicked_on():
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Snoozed Cold")
+    c = _contact(user=user, name="Snoozed Cold")
     _touch(user, c, "outreach", days_ago=20)
     Contact.all_objects.filter(pk=c.pk).update(
         snoozed_until=timezone.now() + timedelta(days=3)
@@ -492,7 +517,7 @@ def test_snooze_cannot_swallow_a_pre_deadline_reping():
         firm=firm, event_kind="app_close", region="us",
         date=timezone.localdate() + timedelta(days=5), confidence=1.0, precision="day",
     )
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Snoozed Warm", firm=firm, region="us",
         warmth="chatted", thread_state="replied",
     )
@@ -513,7 +538,7 @@ def test_skip_dismisses_a_confirm_chat_card_for_the_day():
     2026-08-07). A re-ping guards an external deadline; confirm-chat is a
     question, and "ask me tomorrow" is a legitimate answer to a question."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Cindy So", warmth="replied", thread_state="chat_scheduled",
     )
     _touch(user, c, "chat_scheduled", days_ago=12)
@@ -541,7 +566,7 @@ def test_a_reping_card_offers_no_skip_because_skip_would_lie(client):
         firm=firm, event_kind="app_close", region="us",
         date=timezone.localdate() + timedelta(days=5), confidence=1.0, precision="day",
     )
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Reping Target", firm=firm, region="us",
         warmth="chatted", thread_state="replied",
     )
@@ -571,7 +596,7 @@ def test_an_ordinary_card_offers_park_it_next_to_snooze_and_skip(client):
     control that said so — only Snooze (3 days) and Skip (1 day), both of
     which come back."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Shelby Dibs", warmth="cold", thread_state="no_reply",
     )
     _touch(user, c, "outreach", days_ago=20)
@@ -590,7 +615,7 @@ def test_the_ghost_park_it_button_actually_parks(client):
     button does: the audited override, one manual_override touch, contact
     stays on the board."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Shelby Dibs", warmth="cold", thread_state="no_reply",
     )
     _touch(user, c, "outreach", days_ago=20)
@@ -619,7 +644,7 @@ def test_the_gone_quiet_lane_does_not_get_a_second_park_button(client):
     The new ghost version is gated on `a.action != "park"` specifically so
     that card doesn't show the same verb twice."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Gone Quiet Guy", warmth="advocate",
         thread_state="replied",
     )
@@ -639,7 +664,7 @@ def test_compose_is_a_link_and_writes_nothing(client):
     """A `mailto:` is not a send. Compose must never log a touch, or the ring
     fills and the warmth clock resets for an email that was never written."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ethan Gao", email="e@x.com")
+    c = _contact(user=user, name="Ethan Gao", email="e@x.com")
     _touch(user, c, "outreach", days_ago=20)
 
     client.force_login(user)
@@ -656,7 +681,7 @@ def test_pacing_a_follow_up_out_never_produces_a_second_one(client):
     follow-up #1-and-only. Once it is logged, the next thing that contact can
     ever produce is a park — never another follow-up."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    c = _contact(user=user, name="Ethan Gao")
     _touch(user, c, "outreach", days_ago=40)
 
     ctx = _cockpit_context(user)
@@ -682,7 +707,7 @@ def test_pacing_a_follow_up_out_never_produces_a_second_one(client):
 def test_park_never_occupies_a_plan_slot_and_gets_a_bulk_button(client):
     user = _user(weekly_touch_goal=14)
     for i in range(8):
-        c = Contact.all_objects.create(user=user, name=f"Quiet {i:02d}")
+        c = _contact(user=user, name=f"Quiet {i:02d}")
         _touch(user, c, "outreach", days_ago=40)
         _touch(user, c, "follow_up", days_ago=30)
 
@@ -700,7 +725,7 @@ def test_bulk_park_goes_through_the_audited_override_per_contact(client):
     user = _user(weekly_touch_goal=14)
     made = []
     for i in range(8):
-        c = Contact.all_objects.create(user=user, name=f"Quiet {i:02d}")
+        c = _contact(user=user, name=f"Quiet {i:02d}")
         _touch(user, c, "outreach", days_ago=40)
         _touch(user, c, "follow_up", days_ago=30)
         made.append(c)
@@ -722,7 +747,7 @@ def test_bulk_park_goes_through_the_audited_override_per_contact(client):
 def test_a_small_park_group_gets_no_bulk_button(client):
     user = _user(weekly_touch_goal=14)
     for i in range(2):
-        c = Contact.all_objects.create(user=user, name=f"Quiet {i:02d}")
+        c = _contact(user=user, name=f"Quiet {i:02d}")
         _touch(user, c, "outreach", days_ago=40)
         _touch(user, c, "follow_up", days_ago=30)
     assert _cockpit_context(user)["park_bulk"] is False
@@ -733,7 +758,7 @@ def test_a_small_park_group_gets_no_bulk_button(client):
 def test_bulk_park_is_tenant_scoped(client):
     a = _user("a@example.com")
     b = _user("b@example.com")
-    theirs = Contact.all_objects.create(user=b, name="Not Yours")
+    theirs = _contact(user=b, name="Not Yours")
     _touch(b, theirs, "outreach", days_ago=40)
     _touch(b, theirs, "follow_up", days_ago=30)
 
@@ -751,7 +776,7 @@ def test_done_for_today_is_not_all_caught_up(client):
     with the line beneath it."""
     user = _user(weekly_touch_goal=14)
     for i in range(30):
-        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        c = _contact(user=user, name=f"Cold {i:02d}")
         _touch(user, c, "outreach", days_ago=20)
         Contact.all_objects.filter(pk=c.pk).update(
             snoozed_until=timezone.now() + timedelta(days=1)
@@ -766,7 +791,7 @@ def test_an_empty_plan_with_a_queue_behind_it_says_done_for_today(client):
     user = _user(weekly_touch_goal=14)
     for i in range(8):
         # Parked-eligible contacts: they populate the queue but never the plan.
-        c = Contact.all_objects.create(user=user, name=f"Quiet {i:02d}")
+        c = _contact(user=user, name=f"Quiet {i:02d}")
         _touch(user, c, "outreach", days_ago=40)
         _touch(user, c, "follow_up", days_ago=30)
 
@@ -796,7 +821,7 @@ def _login_and_get(client, user) -> str:
 # ---------------------------------------------------------------------------
 def test_a_scheduled_chat_with_no_event_still_shows_and_claims_no_time(client):
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Grace Hopper", warmth="replied", thread_state="chat_scheduled",
     )
     _touch(user, c, "chat_scheduled", days_ago=1)
@@ -815,7 +840,7 @@ def test_a_scheduled_chat_with_no_event_still_shows_and_claims_no_time(client):
 
 def test_an_event_with_a_real_time_states_it(client):
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Ada Lovelace", warmth="replied", thread_state="chat_scheduled",
     )
     _touch(user, c, "chat_scheduled", days_ago=1)
@@ -835,7 +860,7 @@ def test_a_scheduled_chat_drops_off_the_schedule_once_it_goes_stale():
     """The exact complement of cadence branch 2: past 4 business days this
     stops being upcoming and becomes a confirm_chat action instead."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Stale Chat", warmth="replied", thread_state="chat_scheduled",
     )
     _touch(user, c, "chat_scheduled", days_ago=21)
@@ -856,7 +881,7 @@ def test_the_stats_lead_the_page_and_the_queue_follows_immediately(client):
     between them and the queue, which is the rule that stretch actually
     bought."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ethan Gao")
+    c = _contact(user=user, name="Ethan Gao")
     _touch(user, c, "outreach", days_ago=20)
 
     body = _login_and_get(client, user)
@@ -991,7 +1016,7 @@ def test_waiting_on_reply_names_people_the_queue_is_silent_about(client):
     """The gap between "you sent it" and "the follow-up is due", where the
     cadence engine correctly says nothing and the contact vanished entirely."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Recently Emailed")
+    c = _contact(user=user, name="Recently Emailed")
     _touch(user, c, "outreach", days_ago=1)
 
     ctx = _cockpit_context(user)
@@ -1007,7 +1032,7 @@ def test_waiting_never_repeats_somebody_already_on_the_page():
     """A contact with a card six inches up must not also appear in the quiet
     bucket — the page would be asking and reassuring about one person."""
     user = _user(weekly_touch_goal=14)
-    due = Contact.all_objects.create(user=user, name="Due For Followup")
+    due = _contact(user=user, name="Due For Followup")
     _touch(user, due, "outreach", days_ago=20)
 
     ctx = _cockpit_context(user)
@@ -1020,14 +1045,14 @@ def test_waiting_ignores_people_who_never_got_a_first_note():
     """`no_reply` is also the default for a contact nobody has written to.
     "Waiting on reply" from someone you never emailed is a lie."""
     user = _user(weekly_touch_goal=14)
-    Contact.all_objects.create(user=user, name="Never Contacted")
+    _contact(user=user, name="Never Contacted")
     assert _cockpit_context(user)["waiting"]["total"] == 0
 
 
 def test_waiting_counts_the_overflow_rather_than_truncating_silently():
     user = _user(weekly_touch_goal=14)
     for i in range(15):
-        c = Contact.all_objects.create(user=user, name=f"Sent {i:02d}")
+        c = _contact(user=user, name=f"Sent {i:02d}")
         _touch(user, c, "outreach", days_ago=1)
 
     waiting = _cockpit_context(user)["waiting"]
@@ -1039,7 +1064,7 @@ def test_waiting_counts_the_overflow_rather_than_truncating_silently():
 def test_a_chat_today_gets_a_prep_card_with_what_you_learned_last_time(client):
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace", firm=firm,
+    c = _contact(user=user, name="Ada Lovelace", firm=firm,
                                    warmth="chatted", thread_state="chat_done")
     chat = _touch(user, c, "chat", days_ago=30)
     ChatDebrief.all_objects.create(
@@ -1070,13 +1095,13 @@ def test_a_chat_today_gets_a_prep_card_with_what_you_learned_last_time(client):
 
 def test_prep_only_covers_today_and_only_timed_chats():
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Tomorrow Person")
+    c = _contact(user=user, name="Tomorrow Person")
     tomorrow = timezone.localtime(timezone.now()).replace(
         hour=15, minute=0, second=0, microsecond=0) + timedelta(days=1)
     CalendarEvent.all_objects.create(
         user=user, contact=c, title="Chat with Tomorrow Person",
         starts_at=tomorrow, kind="chat", thread_id="t-1")
-    allday = Contact.all_objects.create(user=user, name="Allday Person")
+    allday = _contact(user=user, name="Allday Person")
     CalendarEvent.all_objects.create(
         user=user, contact=allday, title="Superday",
         starts_at=timezone.localtime(timezone.now()).replace(hour=0, minute=0),
@@ -1089,7 +1114,7 @@ def test_prep_only_covers_today_and_only_timed_chats():
 
 def test_a_dismissed_debrief_is_not_used_as_prep_material():
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = _contact(user=user, name="Ada Lovelace")
     chat = _touch(user, c, "chat", days_ago=30)
     ChatDebrief.all_objects.create(user=user, contact=c, touch=chat,
                                    learned="Should not surface.", dismissed=True)
@@ -1131,7 +1156,7 @@ def test_the_day_track_places_today_on_an_eight_to_eight_axis(client):
     whether it is stacked into one morning or spread across the day."""
     user = _user(weekly_touch_goal=14)
     for hour, minute, name in [(8, 0, "Dawn"), (14, 0, "Midday"), (20, 0, "Dusk")]:
-        c = Contact.all_objects.create(user=user, name=f"{name} Person")
+        c = _contact(user=user, name=f"{name} Person")
         CalendarEvent.all_objects.create(
             user=user, contact=c, title=f"Chat with {name}",
             starts_at=timezone.localtime(timezone.now()).replace(
@@ -1147,7 +1172,7 @@ def test_times_outside_the_window_clamp_instead_of_vanishing():
     """A 7am call is genuinely "first thing". Dropping it to keep the axis
     tidy would lose an event to protect a scale."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Early Bird")
+    c = _contact(user=user, name="Early Bird")
     CalendarEvent.all_objects.create(
         user=user, contact=c, title="Chat with Early Bird",
         starts_at=timezone.localtime(timezone.now()).replace(
@@ -1161,7 +1186,7 @@ def test_times_outside_the_window_clamp_instead_of_vanishing():
 
 def test_the_track_stays_away_when_nothing_is_timed_today():
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="All Day")
+    c = _contact(user=user, name="All Day")
     CalendarEvent.all_objects.create(
         user=user, contact=c, title="Superday", all_day=True,
         starts_at=timezone.localtime(timezone.now()).replace(hour=0, minute=0),
@@ -1176,7 +1201,7 @@ def test_beyond_a_week_the_schedule_names_the_date_not_the_weekday():
     """With 14 days in view there are two Fridays; "Fri" on the second one
     reads as the first. Past a week the date is the only honest label."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Far Out")
+    c = _contact(user=user, name="Far Out")
     at = timezone.localtime(timezone.now()).replace(
         hour=15, minute=0, second=0, microsecond=0) + timedelta(days=10)
     CalendarEvent.all_objects.create(
@@ -1194,7 +1219,7 @@ def test_a_seventh_event_today_still_gets_its_dot_and_its_prep():
     prep card while the rail looked complete."""
     user = _user(weekly_touch_goal=14)
     for i in range(7):
-        c = Contact.all_objects.create(user=user, name=f"Busy {i}")
+        c = _contact(user=user, name=f"Busy {i}")
         CalendarEvent.all_objects.create(
             user=user, contact=c, title=f"Chat with Busy {i}",
             starts_at=timezone.localtime(timezone.now()).replace(
@@ -1244,7 +1269,7 @@ def test_the_thank_you_prompt_speaks_days_once_hours_stop_helping(client):
     `_sentenceize` strips "(within 24h)"/"(OVERDUE)", so the anchor never
     reaches the screen and a bare hour count sits between two day counts."""
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(
+    c = _contact(
         user=user, name="Ellen Chung", warmth="chatted", thread_state="chat_done"
     )
     Touch.all_objects.create(
@@ -1310,7 +1335,7 @@ def test_debrief_and_today_agree_on_days_ago_for_the_same_chat():
 
     hk = ZoneInfo("Asia/Hong_Kong")
     user = _user(email="hk-ellen@example.com", weekly_touch_goal=14, timezone="Asia/Hong_Kong")
-    contact = Contact.all_objects.create(
+    contact = _contact(
         user=user, name="Ellen Chung", warmth="chatted", thread_state="chat_done",
     )
 
@@ -1609,7 +1634,7 @@ def test_the_daily_brief_renders_on_the_full_page(client, monkeypatch, settings)
 
     settings.ANTHROPIC_API_KEY = "sk-test-key"   # otherwise the feature is dark
     user = _user("brief-lazy@example.com", weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = _contact(user=user, name="Ada Lovelace")
     _touch(user, c, "outreach", days_ago=20)
 
     monkeypatch.setattr(
@@ -1634,7 +1659,7 @@ def test_a_cached_brief_renders_inline_and_the_page_stops_asking(client, setting
 
     settings.ANTHROPIC_API_KEY = "sk-test-key"
     user = _user("brief-cached@example.com", weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = _contact(user=user, name="Ada Lovelace")
     _touch(user, c, "outreach", days_ago=20)
     DailyBrief.all_objects.create(
         user=user, date=timezone.localdate(), text="Already written today."
@@ -1651,7 +1676,7 @@ def test_the_page_does_not_ask_for_a_brief_when_the_feature_is_dark(client, sett
     draw a placeholder that would spin forever."""
     settings.ANTHROPIC_API_KEY = ""
     user = _user("brief-dark@example.com", weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = _contact(user=user, name="Ada Lovelace")
     _touch(user, c, "outreach", days_ago=20)
 
     client.force_login(user)
@@ -1668,7 +1693,7 @@ def test_the_today_page_never_waits_on_the_model(client, monkeypatch, settings):
 
     settings.ANTHROPIC_API_KEY = "sk-test-key"
     user = _user("brief-nowait@example.com", weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = _contact(user=user, name="Ada Lovelace")
     _touch(user, c, "outreach", days_ago=20)
 
     def explode(*a, **kw):
@@ -1699,7 +1724,7 @@ def test_the_brief_receives_the_full_uncapped_queue_not_just_the_planned_slice(c
 
     user = _user(weekly_touch_goal=14)
     for i in range(30):
-        c = Contact.all_objects.create(user=user, name=f"Cold {i:02d}")
+        c = _contact(user=user, name=f"Cold {i:02d}")
         _touch(user, c, "outreach", days_ago=20)
 
     seen = {}
@@ -1727,7 +1752,7 @@ def test_the_htmx_partial_refresh_never_calls_the_brief(client, monkeypatch):
     import assistant.brief
 
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = _contact(user=user, name="Ada Lovelace")
     _touch(user, c, "outreach", days_ago=20)
 
     def fail_if_called(*a, **kw):
@@ -1794,7 +1819,7 @@ def test_the_htmx_partial_refresh_never_builds_the_situation_snapshot(client, mo
     import assistant.situation
 
     user = _user(weekly_touch_goal=14)
-    c = Contact.all_objects.create(user=user, name="Ada Lovelace")
+    c = _contact(user=user, name="Ada Lovelace")
     _touch(user, c, "outreach", days_ago=20)
 
     def fail_if_called(*a, **kw):
@@ -1830,7 +1855,7 @@ def _today_query_count(client, user, n_contacts: int) -> int:
     ]
     for i in range(n_contacts):
         # A chat happening today, which is what _chat_prep walks.
-        c = Contact.all_objects.create(
+        c = _contact(
             user=user, name=f"Q {i:03d}", firm=firms[i % 8],
             thread_state=["no_reply", "replied", "chat_scheduled"][i % 3],
         )
@@ -1842,7 +1867,7 @@ def _today_query_count(client, user, n_contacts: int) -> int:
         # Written to recently enough that the cadence engine has no action
         # for them yet — which is exactly the population _waiting_on_reply
         # exists to name, and therefore the one that exercises ITS join.
-        w = Contact.all_objects.create(
+        w = _contact(
             user=user, name=f"W {i:03d}", firm=firms[i % 8],
             thread_state="no_reply",
         )
