@@ -24,6 +24,8 @@ WHAT THIS MODULE DOES **NOT** DO, ON PURPOSE
    chat by this pipeline — that residue still needs the daily agent-run sync
    (or a future, explicitly-scoped LLM-residue pass) to catch. Silently
    guessing here is worse than leaving it for the sync that already exists.
+   The genuine-reply test added in 2026-08 (`capture.inbound`) is held to
+   the same rule: it reads RFC headers and the recipient shape, never prose.
 2. **No new-contact creation.** Mirrors `capture_gmail` (Step 1 of the daily
    sync), not `capture_discover` (Step 2). `apply_findings` only logs
    touches against contacts ALREADY in Coverage; a message from someone not
@@ -65,7 +67,7 @@ from googleapiclient.errors import HttpError
 
 from accounts import trials as pro_trials
 from billing import credits as billing_credits
-from capture import gmail_residue
+from capture import gmail_residue, inbound
 from capture.gmail import apply_findings
 from capture.models import GmailConnection
 from crm.models import Contact, Touch
@@ -695,6 +697,41 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
 
     if not from_addr:
         return None
+
+    # THE GENUINE-REPLY TEST (capture.inbound). Everything inbound and
+    # non-bouncing used to fall straight through to `replied: True` — which
+    # is how a mass "Sophomore Series" invitation from a recruiter the
+    # founder had never written to ratcheted her to warmth `replied` and put
+    # a coffee-chat ask in his Today queue. A bulk message is still recorded
+    # (it may carry a real deadline or event), just not as evidence that
+    # anyone answered him.
+    verdict = inbound.classify_inbound(own_email, message)
+    if verdict.is_bulk:
+        return {
+            "name": from_name or from_addr.split("@")[0],
+            "email": from_addr.lower(),
+            "found": True,
+            "bounced": False,
+            "outreach_sent": False,
+            "replied": False,
+            # Deliberately NOT "scheduled" even when the blast carries an
+            # .ics: a programme webinar on a list invitation is not a chat
+            # with this person, and `_upsert_scheduled_chat` would put
+            # "Chat with Caroline Baenen" on the calendar. The invite's own
+            # summary still rides in `evidence` below, so the date is not
+            # thrown away — it is just not claimed as a relationship.
+            "chat_status": "none",
+            "chat_scheduled_at": None,
+            "bulk": True,
+            "bulk_reasons": verdict.reason_text,
+            "evidence": (
+                f"Bulk/automated email: {ics_summary or subject or ''}".strip()
+                or "Bulk/automated email"
+            ),
+            "thread_id": thread_id,
+            "occurred_at": occurred_at,
+        }
+
     return {
         "name": from_name or from_addr.split("@")[0],
         "email": from_addr.lower(),
@@ -704,6 +741,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         "replied": True,
         "chat_status": "scheduled" if ics_dt else "none",
         "chat_scheduled_at": ics_dt,
+        "bulk": False,
         "evidence": (
             f"Calendar invite received: {ics_summary or subject}"
             if ics_dt
