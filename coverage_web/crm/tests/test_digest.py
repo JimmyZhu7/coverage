@@ -200,7 +200,7 @@ def test_actions_carry_a_ready_compose_link():
 
     digest = assemble_digest(user, today=TODAY)
     action = next(a for a in digest["actions"] if a["contact"]["name"] == "Ada Lovelace")
-    assert action["mailto"].startswith("mailto:")
+    assert action["mailto"].startswith("https://mail.google.com/mail/?")
 
 
 # ---------------------------------------------------------------------------

@@ -98,14 +98,36 @@ ACTION_LABELS: dict[str, str] = {
 
 
 def _mailto(to_email: str, *, subject: str = "", body: str = "") -> str:
-    """A `mailto:` URL with `to` (and optional subject/body) prefilled —
+    """A Gmail compose URL with `to` (and optional subject/body) prefilled —
     composes start from Coverage so a contact's opener is one click away.
-    `quote_via=quote` keeps spaces as %20 and the `@` as %40, which every
-    mail client accepts.
+
+    WHY NOT `mailto:` (changed 2026-08-22): a `mailto:` hands off to whatever
+    the OS has registered as the default mail client, which on a stock Mac is
+    Apple Mail — an app most students here have never opened and never signed
+    into. The click then either launches a blank unconfigured client or does
+    nothing at all, and the draft is simply lost. Every user of this product
+    has Gmail by construction (the whole capture engine reads it), so send
+    them where their mail actually is. The draft opens in Gmail's own
+    composer, they edit and send it there, and it lands in Sent — which the
+    inbox scan already reads, so the outbound touch still gets recorded
+    without this function pretending to know that a send happened.
+
+    The `mailto:` name is kept for now because several call sites and their
+    tests reference it; renaming is a mechanical follow-up, not a behaviour
+    change, and doing it here would collide with concurrent edits to
+    today.py/views.py.
 
     A `bcc` parameter used to live here too, pointed at the user's BCC
     capture address (docs/build-plan.md §5's v1) — retired 2026-08-19 now
     that Gmail Live reads sent mail directly, no BCC habit required.
+
+    MULTI-ACCOUNT CAVEAT: this opens whichever Google account the browser has
+    as its default session. A user signed into several will sometimes land in
+    the wrong one. Fixing that needs the connected Gmail address threaded
+    through to an `authuser` parameter, which means changing this signature
+    and every call site — deliberately deferred rather than adding an unused
+    keyword that looks reachable and isn't (see cadence.py's own note on why
+    a dormant knob is worse than no knob).
 
     PRIVACY: `body` is addressed TO the contact, so only `Contact.opener` — the
     field that exists to be a draft email — may be passed here. `Contact.angle`
@@ -113,14 +135,14 @@ def _mailto(to_email: str, *, subject: str = "", body: str = "") -> str:
     super responsive"), and it used to seed this body, which meant clicking
     Compose pre-filled an email to someone containing the user's assessment of
     them. Pinned by test_angle_never_leaks_into_mailto."""
-    params: list[tuple[str, str]] = []
+    params: list[tuple[str, str]] = [("view", "cm"), ("fs", "1")]
+    if to_email:
+        params.append(("to", to_email))
     if subject:
-        params.append(("subject", subject))
+        params.append(("su", subject))
     if body:
         params.append(("body", body))
-    query = urlencode(params, quote_via=quote)
-    base = f"mailto:{quote(to_email or '')}"
-    return f"{base}?{query}" if query else base
+    return "https://mail.google.com/mail/?" + urlencode(params, quote_via=quote)
 
 
 def _warmth_pct(warmth: str) -> int:

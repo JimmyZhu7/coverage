@@ -33,9 +33,15 @@ from directory.models import Firm, FirmDate
 
 User = get_user_model()
 
-# Every mailto: URL in a rendered page. The href is quoted, so stopping at the
-# closing quote captures the whole URL including its query string.
-_MAILTO_RE = re.compile(r"mailto:[^\"'\s>]*")
+# Every compose URL in a rendered page. The href is quoted, so stopping at the
+# closing quote captures the whole URL including its query string (in rendered
+# HTML the separators arrive as `&amp;`, which this class keeps).
+#
+# These were `mailto:` links until 2026-08-22 and are now Gmail compose URLs —
+# see crm.utils._mailto for why. The privacy guarantee these tests exist to pin
+# is unchanged by that move: whatever scheme the link uses, the user's private
+# `angle` must never ride in a body addressed to the contact.
+_MAILTO_RE = re.compile(r"https://mail\.google\.com/mail/\?[^\"'\s>]*")
 
 
 def _user(email="student@example.com", **kwargs):
@@ -136,7 +142,11 @@ def test_mailto_helper_puts_the_body_it_is_given_in_the_query():
     being added somewhere the route tests above don't cover."""
     url = crm_views._mailto("a@b.com", body="hello there")
     assert "body=hello%20there" in url
-    assert url.startswith("mailto:a%40b.com?")
+    assert url.startswith("https://mail.google.com/mail/?")
+    assert "to=a%40b.com" in url
+    # `view=cm` is what makes Gmail open the composer rather than the inbox;
+    # without it the click lands the user in their mail with no draft at all.
+    assert "view=cm" in url
 
 
 # ---------------------------------------------------------------------------
