@@ -27,6 +27,18 @@ THE THREE JOBS, and the founder dogfood that forced each:
    is basic courtesy and costs one reply; letting a relevance rule swallow it
    would be the tool teaching a bad habit.
 
+   ONE PRIOR QUESTION, added later and asked FIRST: was this outreach even his
+   job search? He is also "Associate of External Outreach" for USC's
+   International Consulting Club and mail-merged 201 alumni — Delta, Humana,
+   Tacori, WME, a law firm — asking them to speak on a club panel. Coverage
+   read all of it as his recruiting network. `crm/campaigns.py` detects the
+   bulk send and asks him one question about it; contacts whose relationship
+   with him STARTED in a send he says was not his recruiting arrive here with
+   `campaign_excluded` set and get no daily action. They keep the contact book,
+   the Network board, search, history and every export, and the inbound
+   override above still applies to them unchanged — a panelist who writes in
+   with a real question is still a person who wrote to him.
+
 2. THE ASK (`is_recruiting_role`). A campus recruiter and a banker are not the
    same relationship, and the queue was proposing coffee chats to both. Two
    live rows on 2026-08-22: a "Manager, Talent Acquisition" whose mass
@@ -117,9 +129,30 @@ def contact_relevance(contact: dict, tiers: dict[int, object], *, owed_reply: bo
     `contact` is the plain dict `crm.today._build_actions` hands the engine, so
     this works identically on a live row and on a fixture.
 
-    Order matters: a tiered firm is the strongest claim, a school tie the next,
-    and the owed-reply override is last because it grants the narrowest thing.
+    Order matters. The campaign gate is FIRST because it answers a different
+    and prior question from the other three: they ask "is this person worth a
+    daily action", it asks "was this even my job". A club panelist at a tier-1
+    bank is a tiered contact by every test below and still does not belong in a
+    recruiting queue — the founder emailed him wearing a different hat, and no
+    amount of tier makes that outreach his job search. Then a tiered firm is
+    the strongest claim, a school tie the next, and the owed-reply override is
+    last because it grants the narrowest thing.
     """
+    if contact.get("campaign_excluded"):
+        # `crm.campaigns.excluded_contact_ids` has already applied the whole
+        # rule (classified `other`, relationship originated there, not exempted
+        # by hand). One bool arrives here so this stays a pure function of the
+        # dict and keeps working on a fixture with no database behind it.
+        #
+        # THE INBOUND OVERRIDE STILL WINS, and it is the same one the module
+        # docstring's rule 1 describes rather than a second mechanism bolted
+        # on: somebody who actually wrote to you and is still waiting on an
+        # answer surfaces whatever else is true about them. A panelist who
+        # sends a real question deserves a reply; a tool that swallowed it
+        # because the send it arrived on was club admin would be teaching a bad
+        # habit with better bookkeeping. It costs one reply and it is the whole
+        # reason this returns REL_INBOUND instead of REL_NONE.
+        return REL_INBOUND if owed_reply else REL_NONE
     if contact.get("firm_id") in tiers:
         return REL_TIERED
     if contact.get("school_affiliation"):
@@ -452,6 +485,13 @@ _LEAD_BY_RELEVANCE = {
     REL_SCHOOL: "Same school",
     REL_INBOUND: "Not a target firm",
 }
+# A campaign contact who wrote in also comes back as REL_INBOUND, and for them
+# "Not a target firm" would be a claim nobody checked: the ICC panel merge
+# reached bankers at J.P. Morgan and BNP Paribas, who are very much on the
+# founder's target list. The reason they are here is the campaign, not their
+# employer, so the lead says that instead of asserting the opposite of his own
+# tier list. See `crm/campaigns.py` for the send this describes.
+_CAMPAIGN_LEAD = "From one of your campaigns"
 _STRENGTH_CLAUSE = {
     "advocate": "they would vouch for you",
     "chatted": "you have already had the conversation",
@@ -485,7 +525,9 @@ def keep_warm_reason(action: dict) -> str:
     tier = action.get("relevance_tier")
     opening = action.get("opening")
 
-    if relevance == REL_TIERED:
+    if contact.get("campaign_excluded"):
+        lead = _CAMPAIGN_LEAD
+    elif relevance == REL_TIERED:
         lead = f"Tier {tier} target" if tier in _TIER_WEIGHT else "On your target list"
     else:
         lead = _LEAD_BY_RELEVANCE.get(relevance, "Warm contact")

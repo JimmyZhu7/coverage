@@ -85,6 +85,17 @@
           {{ form.recruiting_contact }}
           <p class="note">{{ form.recruiting_contact.help_text }}</p>
         </div>
+        {% comment %}
+        The rescue hatch for one person inside a bulk send you have said was
+        not your job search. Sits here rather than on the Campaigns card
+        because the decision is about this person, and the card is about two
+        hundred of them. See crm/campaigns.py.
+        {% endcomment %}
+        <div>
+          <label for="{{ form.campaign_exempt.id_for_label }}">{{ form.campaign_exempt.label }}</label>
+          {{ form.campaign_exempt }}
+          <p class="note">{{ form.campaign_exempt.help_text }}</p>
+        </div>
         {% endif %}
       </div>
 

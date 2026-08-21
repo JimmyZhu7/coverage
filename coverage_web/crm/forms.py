@@ -51,11 +51,24 @@ class ContactForm(forms.ModelForm):
                   "reply to them and track their deadlines.",
     )
 
+    # The per-contact escape hatch from a campaign answer. A plain checkbox and
+    # not a three-state, unlike `recruiting_contact` above: that field has a
+    # text fallback so it needs "nobody has said" to be a distinct state, while
+    # this one's default IS the campaign's own classification, so unticked and
+    # unanswered mean the same thing. See `Contact.campaign_exempt`.
+    campaign_exempt = forms.BooleanField(
+        required=False,
+        label="Always keep in my daily queue",
+        help_text="Use this when one person from a bulk send is genuinely part "
+                  "of your job search.",
+    )
+
     class Meta:
         model = Contact
         fields = [
             "name", "firm", "firm_text", "role", "email", "linkedin",
-            "school", "region", "recruiting_contact", "angle", "opener", "notes",
+            "school", "region", "recruiting_contact", "campaign_exempt",
+            "angle", "opener", "notes",
         ]
         widgets = {
             "angle": forms.Textarea(attrs={"rows": 2}),

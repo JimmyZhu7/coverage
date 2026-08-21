@@ -29,7 +29,7 @@ from directory.classify import TARGET_BUCKETS
 from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
 
-from . import debrief as debrief_svc, relevance as rel, services
+from . import campaigns, debrief as debrief_svc, relevance as rel, services
 from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
 from .utils import (
     ACTION_LABELS,
@@ -141,6 +141,13 @@ def _build_actions(user):
     snoozed_ids = {
         c.id for c in contacts if c.snoozed_until and c.snoozed_until > now
     }
+    # People the user has told us arrived through a bulk send that was not
+    # their own recruiting — a club panel invitation, an event, a survey. Two
+    # queries, both `.for_user`-scoped, and usually zero rows. See
+    # `crm/campaigns.py` for the founder's 201-thread ICC merge that made this
+    # necessary, and `crm/relevance.py` for what the flag is allowed to do
+    # (drop a daily action, and nothing else).
+    campaign_excluded_ids = campaigns.excluded_contact_ids(user)
 
     # Firm metadata: names from the directory, tiers from the user's UserFirm
     # rows. cadence falls back to firm_text / a default tier when a contact's
@@ -203,6 +210,11 @@ def _build_actions(user):
             # coffee chat is appropriate for, and shouldn't.
             "role": c.role,
             "recruiting_contact": c.recruiting_contact,
+            # Read by `crm.relevance.contact_relevance` before anything else it
+            # tests. A plain bool rather than the campaign row, so the relevance
+            # layer stays a pure function of this dict and testable with no
+            # database — same posture as `recruiting_contact` above.
+            "campaign_excluded": c.id in campaign_excluded_ids,
         }
         for c in contacts
     ]
