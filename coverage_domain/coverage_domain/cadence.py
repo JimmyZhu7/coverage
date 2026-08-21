@@ -255,6 +255,23 @@ _OUTBOUND_KINDS = ("outreach", "follow_up")
 # across the module.
 _MANUAL_OVERRIDE_KIND = "manual_override"
 
+# Kinds that must never reset a relationship's idle clock. Both are rows the
+# system wrote about itself rather than evidence that a relationship was
+# maintained — the C2 DIVERGENCE note above is the full argument, and it holds
+# identically for both members:
+#
+#   - `manual_override`: the audit row for a hand correction (C2's original
+#     case — promoting a contact to advocate was restarting the advocate clock
+#     by its own promotion, silencing both of the founder's advocates).
+#   - `bulk_received`: an inbound blast — a programme invite, a newsletter, an
+#     automated notice — that `capture.inbound` judged from message headers.
+#     Added 2026-08-22 alongside that classifier. Without this, a mass mailshot
+#     from a firm would read as "this relationship was maintained" and push the
+#     person back down the queue for another few weeks, which is precisely the
+#     false-evidence problem the classifier exists to end. It is recorded and
+#     visible on the contact; it is simply not a touch.
+_CLOCK_SILENT_KINDS = frozenset({_MANUAL_OVERRIDE_KIND, "bulk_received"})
+
 
 def _merged_params(params: Mapping[str, Any] | None) -> dict[str, int]:
     merged = dict(CADENCE_DEFAULTS)
@@ -534,7 +551,7 @@ def due_actions(
         # most recent. Branch 1 and branch 3 keep reading `ctouches` — they
         # scan for specific kinds ('chat'/'thank_you' and 'reping'), which a
         # manual_override row can never be.
-        real_touches = [t for t in ctouches if t.get("kind") != _MANUAL_OVERRIDE_KIND]
+        real_touches = [t for t in ctouches if t.get("kind") not in _CLOCK_SILENT_KINDS]
         last = real_touches[-1] if real_touches else None
         lt_date = _as_date(last.get("ts")) if last else None
 

@@ -1230,3 +1230,34 @@ def test_priority_ordinal_pinned_per_action_kind():
         [touch(1, "chat", "2026-05-01 10:00")], [], as_of=AS_OF, firms=FIRMS,
     )
     assert prio_of("keep_warm", keep_warm_actions) == expected["keep_warm"]
+
+
+
+def test_a_bulk_blast_does_not_reset_a_relationships_idle_clock():
+    """A mass programme invite is recorded on the contact but is not evidence
+    that anyone maintained a relationship, so it must not push a due contact
+    back down the queue. Same argument the C2 divergence made for
+    `manual_override`: a row the system wrote about itself is not a touch.
+
+    Without this, the capture classifier added 2026-08-22 would have made
+    things WORSE for a firm that mailshots its list — every blast would
+    silently restart the advocate clock, and the contact would go quiet for
+    another cycle each time the firm sent one.
+    """
+    old = (AS_OF - timedelta(days=40)).isoformat()
+    yesterday = (AS_OF - timedelta(days=1)).isoformat()
+    c = {
+        "id": 1, "name": "Ada", "firm": "usfirm",
+        "warmth": "advocate", "thread_state": "advocate", "region": "us",
+    }
+    # The only RECENT row is the blast; the last real touch is 40 days old,
+    # past advocate_touch_min_weeks (4 weeks), so this contact is due.
+    touches = [
+        {"contact_id": 1, "kind": "outreach", "ts": old},
+        {"contact_id": 1, "kind": "bulk_received", "ts": yesterday},
+    ]
+
+    actions = cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS)
+    assert [a["action"] for a in actions] == ["maintain"], (
+        "a bulk blast reset the advocate clock and silenced a due contact"
+    )
