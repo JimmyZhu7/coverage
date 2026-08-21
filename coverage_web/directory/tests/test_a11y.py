@@ -301,3 +301,65 @@ def test_no_rule_dims_text_with_opacity():
             if om and re.search(r"font-size|font-family|color:", body):
                 offenders.append(f"{f.name}: {m.group(1).strip()} opacity {om.group(1)}")
     assert offenders == [], offenders
+
+
+# ---------------------------------------------------------------------------
+# MOTION. An animation that never ends is the one the preference exists for.
+#
+# `.lane-dot` on the Today board pulsed forever with no reduced-motion guard,
+# in a stylesheet where four neighbouring components (.src-panel, .cc-avatar,
+# .adv-socket, .act-moved) each carry one. It was a miss, not a decision — and
+# a sweep found three more: both `kin-sheen` hero washes and `.live-dot`.
+#
+# coverage.css §17 does end with a blanket `animation-duration: 0.01ms` over
+# `*`, so nothing was visibly moving. But that rule keeps the animation
+# *running* — an infinite loop retimed to 100k iterations a second rather than
+# stopped — so it is a backstop, not the guard. The per-component
+# `animation: none` is what actually satisfies WCAG 2.2.2, and this asserts
+# every looping animation has one.
+
+
+def _reduced_motion_selectors(text: str) -> set[str]:
+    """Selectors that `animation: none` inside a reduced-motion query."""
+    guarded = set()
+    for m in re.finditer(r"@media \(prefers-reduced-motion: reduce\)\s*\{", text):
+        depth, i = 1, m.end()
+        while depth and i < len(text):
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", text[m.end():i]):
+            if re.search(r"animation:\s*none", body):
+                guarded |= _split(sel)
+    return guarded
+
+
+def _split(selector: str) -> set[str]:
+    return {" ".join(s.split()) for s in selector.split(",") if s.strip()}
+
+
+def _is_guarded(selector: str, guarded: set[str]) -> bool:
+    # A guard may name the component while the animation is set on a
+    # state-scoped variant of it — `.fuse-fill` covers `.urg-today .fuse-fill`.
+    return any(selector == g or selector.endswith(" " + g) for g in guarded)
+
+
+def test_every_looping_animation_can_be_switched_off():
+    root = pathlib.Path(__file__).resolve().parents[2]
+    files = list((root / "templates").rglob("*.html")) + [root / "static" / "css" / "coverage.css"]
+
+    unguarded = []
+    for f in files:
+        # Comments carry commas and braces of their own, so a prose sentence
+        # sitting above a rule reads as part of its selector list.
+        text = re.sub(r"/\*.*?\*/", "", f.read_text(), flags=re.S)
+        guarded = _reduced_motion_selectors(text)
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", text):
+            if not re.search(r"\banimation(?:-name)?:[^;}]*\binfinite\b", body):
+                continue
+            for one in _split(sel):
+                if not _is_guarded(one, guarded):
+                    unguarded.append(f"{f.name}: {one}")
+
+    assert unguarded == [], (
+        "looping animation with no @media (prefers-reduced-motion: reduce) "
+        f"guard in the same file: {unguarded}")

@@ -143,6 +143,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font-size: var(--fs-s); color: var(--ink-3); }
   .lane-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger);
     flex: none; animation: kin-pulse-ring 1800ms ease-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .lane-dot { animation: none; } }
   /* Semantic lanes. The dot and the tint are secondary signals only — each
      lane carries its name in text, and each card carries its verb badge, so
      colour is never the sole carrier of meaning. */
@@ -1412,6 +1413,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     background-size: 250% 100%; background-repeat: no-repeat;
     animation: kin-sheen 7.5s ease-in-out infinite;
   }
+  @media (prefers-reduced-motion: reduce) { .daily-brief::after { animation: none; } }
   .daily-brief-head { position: relative; display: flex; align-items: center;
     gap: var(--s2); margin-bottom: var(--s2); }
   .daily-brief-icon { flex: none; width: 26px; height: 26px; border-radius: 50%;

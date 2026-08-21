@@ -1879,6 +1879,7 @@ select:focus-visible, input:focus-visible {
   0%, 14%  { background-position: 150% 0; }
   62%, 100% { background-position: -50% 0; }
 }
+@media (prefers-reduced-motion: reduce) { .kin-hero::after { animation: none; } }
 .kin-hero-eyebrow {
   font-family: var(--font-mono); font-size: var(--fs-micro);
   text-transform: uppercase; letter-spacing: 0.1em;
@@ -1952,6 +1953,7 @@ select:focus-visible, input:focus-visible {
   0%   { transform: scale(0.55); opacity: 0.9; }
   100% { transform: scale(2); opacity: 0; }
 }
+@media (prefers-reduced-motion: reduce) { .live-dot::after { animation: none; } }
 
 /* ---- 15d. Custom select — on-brand dropdown ------------------------------
    A native <select>'s open option menu is OS-rendered and cannot be styled
