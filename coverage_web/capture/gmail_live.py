@@ -33,6 +33,16 @@ WHAT THIS MODULE DOES **NOT** DO, ON PURPOSE
    USC-discovery-style new-contact creation onto a live, per-message trigger
    is a materially different scope decision (it write-creates data on every
    unknown sender) and was not asked for here.
+
+   THE ONE SCOPE CHANGE SINCE (2026-08-22, and it is exactly the different
+   decision this point anticipated): `apply_findings`' unmatched branch now
+   also runs `capture.discovery.consider_finding`, which may write a
+   `ContactProposal` — a pending, user-confirmable suggestion, judged by the
+   deterministic chain in that module (bulk verdict, no-reply/role-account/
+   ESP sender tests, firm-domain match or a genuine `In-Reply-To` of the
+   user's own mail). It still never write-creates a Contact or a Touch:
+   only the user's explicit accept on the Today page does, so the rule this
+   point defends — no data created on every unknown sender — holds.
 3. **No push/webhook endpoint.** `users.watch()` needs a Pub/Sub topic, but
    the *subscription* on that topic is a PULL subscription
    (`gmail_pubsub_listen` below), not a push endpoint — deliberately, so this
@@ -750,6 +760,14 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         "chat_status": "scheduled" if ics_dt else "none",
         "chat_scheduled_at": ics_dt,
         "bulk": False,
+        # For the discovery hook (capture.discovery, via apply_findings'
+        # unmatched branch): whether this message carries a real RFC reply
+        # pointer — the "the user emailed them first" evidence — and the
+        # subject, which is the most a proposal card is allowed to show
+        # (§10: subject at most, never a body). Ride-along facts on the same
+        # finding shape; every existing consumer ignores them.
+        "threaded_reply": verdict.threaded_reply,
+        "subject": subject,
         "evidence": (
             f"Calendar invite received: {ics_summary or subject}"
             if ics_dt

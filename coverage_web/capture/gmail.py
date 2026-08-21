@@ -61,6 +61,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
+from capture import discovery
 from capture.providers import AmbiguousContactError, CaptureProvider, InteractionEvent
 from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import campaigns as crm_campaigns, services as crm_services
@@ -117,6 +118,15 @@ class SyncResult:
     skipped_not_found: int = 0
     skipped_already_logged: int = 0
     skipped_unmatched: int = 0
+    # Of the unmatched: senders the judgment chain (capture.discovery) found
+    # worth tracking. A PROPOSAL row each — never a contact; the user's tap
+    # on the Today page is what creates anything. Counted alongside
+    # `skipped_unmatched` rather than instead of it: the finding still did
+    # not land on a contact, and that stays visible.
+    proposals_created: int = 0
+    # Unmatched senders who matched an ARCHIVED contact: reported, never
+    # proposed, never resurrected (capture_discover's rule, held here too).
+    proposals_archived_match: int = 0
     # Distinct from skipped_unmatched: the name matched MORE than one
     # contact (e.g. two "Michael Chen"s at different firms), so there is
     # no correct contact to log this finding against — not zero matches,
@@ -145,6 +155,8 @@ class SyncResult:
             "skipped_not_found": self.skipped_not_found,
             "skipped_already_logged": self.skipped_already_logged,
             "skipped_unmatched": self.skipped_unmatched,
+            "proposals_created": self.proposals_created,
+            "proposals_archived_match": self.proposals_archived_match,
             "skipped_ambiguous": self.skipped_ambiguous,
             "pattern_delivered": self.pattern_delivered,
             "pattern_bounced": self.pattern_bounced,
@@ -515,6 +527,9 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
     """
     result = SyncResult(findings=len(findings))
     provider = GmailFindingsProvider()
+    # Firm-domain map for the discovery hook below — built lazily, at most
+    # once per batch, and only if an unmatched finding actually reaches it.
+    firm_domains = discovery.FirmDomains()
 
     for finding in findings:
         name = (finding.get("name") or "").strip() or "(unnamed)"
@@ -535,6 +550,28 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         if contact is None:
             result.skipped_unmatched += 1
             result.details.append(f"{name}: no matching contact in Coverage — skipped")
+            # THE DISCOVERY HOOK. An unmatched finding used to end here, full
+            # stop — `_match_contact`'s docstring calls it drift, and for the
+            # per-contact daily sync it usually is. But on the live listener
+            # and the whole-mailbox paths it is also exactly where "someone
+            # not in Coverage wrote to you" surfaces. `consider_finding` runs
+            # the deterministic judgment chain and writes at most a PROPOSAL
+            # (see capture/discovery.py) — this function still never creates
+            # a contact, so its contract stands unchanged.
+            outcome = discovery.consider_finding(
+                user, finding, firm_domains=firm_domains, dry_run=dry_run
+            )
+            if outcome == discovery.PROPOSED:
+                result.proposals_created += 1
+                result.details.append(
+                    f"{name}: looks like a real contact — proposed for your confirm"
+                )
+            elif outcome == discovery.ARCHIVED_MATCH:
+                result.proposals_archived_match += 1
+                result.details.append(
+                    f"{name}: matches an archived contact — left alone "
+                    "(unarchive by hand if they should come back)"
+                )
             continue
 
         # When this finding's underlying message actually happened — None

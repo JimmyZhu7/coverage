@@ -29,6 +29,94 @@ from django.db import models
 from coverage_web.tenancy import PrivateModel
 
 
+class ContactProposal(PrivateModel):
+    """Someone the mailbox judged worth tracking, waiting for the user's tap.
+
+    THE CONTRACT THIS MODEL EXISTS TO KEEP. `gmail_live.py`'s docstring
+    (point 2) excluded new-contact creation from the live path because it
+    "write-creates data on every unknown sender", and `capture_discover`
+    insists discovery have "its own door". This row is that door made safe:
+    detection writes a PROPOSAL — never a Contact, never a Touch — and only
+    the user's explicit accept (capture.discovery.accept) creates anything.
+    A dismissed proposal is remembered forever (the unique constraint below
+    plus "dismissed rows are never deleted"), so the same stranger is not
+    re-proposed every week the scan re-sees their thread.
+
+    What it holds is exactly what was OBSERVED, nothing inferred: the display
+    name the message carried, the address, the firm whose email domain
+    matched (if one did), the one-line evidence, and the strongest touch kind
+    the evidence honestly supports — so an accept can log real history
+    through the normal ratchet rather than fabricating warmth.
+    """
+
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_DISMISSED = "dismissed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_ACCEPTED, "Accepted"),
+        # Never deleted. The row itself is the "do not re-propose" memory.
+        (STATUS_DISMISSED, "Dismissed"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name = models.CharField(max_length=255)
+    # Always normalized lowercase (capture.providers.normalize_email) — the
+    # unique constraint below is only a real dedup if the key has one spelling.
+    email = models.EmailField()
+    # The firm whose email domain matched the sender's, when one did. SET_NULL:
+    # a firm leaving the directory does not invalidate the observation.
+    firm = models.ForeignKey(
+        "directory.Firm", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="contact_proposals",
+    )
+    # Parsed off the display name ("Jane Doe, Campus Recruiting" -> the tail),
+    # never guessed from prose. Blank is the common, honest case.
+    role_hint = models.CharField(max_length=255, blank=True, default="")
+    # crm.relevance.is_recruiting_role over the role hint. Recruiters are
+    # still proposed (worth tracking) — accepting sets
+    # Contact.recruiting_contact so the queue never asks them for coffee.
+    recruiting_hint = models.BooleanField(default=False)
+    # One line of why: which message, in what shape. Subject at most — §10's
+    # "no email bodies in logs/notes" applies here like everywhere else.
+    evidence = models.CharField(max_length=300, blank=True, default="")
+    # The strongest touch kind the evidence supports ("reply_received",
+    # "chat_scheduled", "chat"). What accept logs through the ratchet, so the
+    # created contact's warmth is earned history, not a gift.
+    evidence_kind = models.CharField(max_length=32, default="reply_received")
+    thread_id = models.CharField(max_length=128, blank=True, default="")
+    # When the observed message actually happened — rides into log_touch's
+    # `now` on accept so cadence math sees the real date, not the tap date.
+    occurred_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+    # Set on accept — the idempotency marker, same pattern as
+    # ChatDebrief.intro_contact. SET_NULL: deleting the contact later must
+    # not delete the memory that this address was already handled.
+    contact = models.ForeignKey(
+        "crm.Contact", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="proposals",
+    )
+    created = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "contact_proposals"
+        ordering = ["created"]
+        constraints = [
+            # One row per (user, address), whatever its status. This is the
+            # whole "dismiss is permanent" mechanism: detection get-or-skips
+            # on this key, so a dismissed person can never come back.
+            models.UniqueConstraint(
+                fields=["user", "email"], name="uniq_contact_proposal_user_email"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} <{self.email}> ({self.status})"
+
+
 class GmailConnection(PrivateModel):
     STATUS_CHOICES = [
         ("active", "Active"),

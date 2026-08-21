@@ -52,6 +52,27 @@ class TestOutboundVsInbound:
         assert finding["outreach_sent"] is False
         assert finding["email"] == "alice@firm.com"
 
+    def test_genuine_reply_carries_discovery_facts(self):
+        """`threaded_reply` and `subject` ride the finding for the discovery
+        hook (capture.discovery): the reply pointer is the "user emailed them
+        first" evidence, and the subject is the most a proposal card may
+        show."""
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": "jimmy@example.com",
+             "Subject": "Re: Following up",
+             "In-Reply-To": "<sent-by-me@mail.example>"},
+            snippet="Sure, happy to chat!",
+        )
+        finding = gmail_live._classify_message(OWN_EMAIL, message)
+        assert finding["threaded_reply"] is True
+        assert finding["subject"] == "Re: Following up"
+
+        fresh = _message(
+            {"From": "Alice <alice@firm.com>", "To": "jimmy@example.com",
+             "Subject": "Hello"},
+        )
+        assert gmail_live._classify_message(OWN_EMAIL, fresh)["threaded_reply"] is False
+
     def test_outbound_with_no_to_header_is_skipped(self):
         message = _message({"From": OWN_EMAIL, "Subject": "no recipient"})
         assert gmail_live._classify_message(OWN_EMAIL, message) is None
