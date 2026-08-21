@@ -73,6 +73,18 @@
           {{ form.region }}
           {% if form.region.errors %}<p class="cf-err">{{ form.region.errors|striptags }}</p>{% endif %}
         </div>
+        {% comment %}
+        The override for the queue's coffee-chat rule. Three choices rather
+        than a checkbox because the stored value is nullable and blank is a
+        real answer: leave it and Coverage reads the role text, set it and
+        your answer wins either way. Sits next to Role on purpose — it is a
+        question about the same fact.
+        {% endcomment %}
+        <div>
+          <label for="{{ form.recruiting_contact.id_for_label }}">Recruiting contact?</label>
+          {{ form.recruiting_contact }}
+          <p class="note">{{ form.recruiting_contact.help_text }}</p>
+        </div>
         {% endif %}
       </div>
 

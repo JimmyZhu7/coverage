@@ -114,6 +114,24 @@ class Contact(PrivateModel):
     # generated, which is exactly the state a blank `ai_summary` implies.
     ai_summary_generated_at = models.DateTimeField(null=True, blank=True)
     school_affiliation = models.BooleanField(default=False)
+    # Is this person part of the RECRUITING PROCESS rather than someone you
+    # network with? Campus recruiters, talent acquisition, HR coordinators,
+    # program and event coordinators. They are real, worth tracking, and worth
+    # answering — but "propose a 15-min chat" is the wrong ask to make of them,
+    # and the queue used to make it. Reported by the founder 2026-08-22 on two
+    # live rows: a "Manager, Talent Acquisition" whose mass programme invite
+    # the capture pipeline read as a reply, and a national campus-recruiting
+    # manager who had already made the introduction and handed him off.
+    #
+    # THREE-STATE ON PURPOSE. NULL means "nobody has said", and the queue then
+    # reads `role` for one of a small set of unambiguous markers
+    # (crm.relevance.is_recruiting_role). True/False is the user's own word and
+    # always wins, in both directions: it is the override for the banker whose
+    # title happens to contain a recruiting phrase AND for the recruiter whose
+    # title says nothing at all. A two-state boolean could not express "not
+    # answered yet" and would have had to default one way, which means
+    # defaulting to a guess about every contact ever imported.
+    recruiting_contact = models.BooleanField(null=True, blank=True, default=None)
     # Display facts ported from the founder's campaign.db (both optional).
     school = models.CharField(max_length=64, blank=True, default="")
     gender = models.CharField(max_length=16, blank=True, default="")

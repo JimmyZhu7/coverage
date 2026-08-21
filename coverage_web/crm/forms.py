@@ -34,11 +34,28 @@ class ContactForm(forms.ModelForm):
         required=False,
     )
 
+    # The override for "is this person part of the recruiting process?". Three
+    # choices, not a checkbox, because the model column is nullable and NULL is
+    # a real state: nobody has said, so the queue reads the role text. A
+    # checkbox would collapse "not answered" into "no" for every contact ever
+    # imported and quietly turn a guess into a stored fact.
+    recruiting_contact = forms.ChoiceField(
+        choices=[
+            ("", "Work it out from their role"),
+            ("yes", "Yes, recruiting contact"),
+            ("no", "No, a normal networking contact"),
+        ],
+        required=False,
+        label="Recruiting contact?",
+        help_text="Recruiters never get a coffee-chat prompt. You can still "
+                  "reply to them and track their deadlines.",
+    )
+
     class Meta:
         model = Contact
         fields = [
             "name", "firm", "firm_text", "role", "email", "linkedin",
-            "school", "region", "angle", "opener", "notes",
+            "school", "region", "recruiting_contact", "angle", "opener", "notes",
         ]
         widgets = {
             "angle": forms.Textarea(attrs={"rows": 2}),
@@ -51,6 +68,21 @@ class ContactForm(forms.ModelForm):
             "opener": "Opener",
             "linkedin": "LinkedIn URL",
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        stored = getattr(self.instance, "recruiting_contact", None)
+        self.initial["recruiting_contact"] = (
+            "" if stored is None else ("yes" if stored else "no")
+        )
+
+    def clean_recruiting_contact(self):
+        """"" back to None, so a blank answer keeps the column NULL and the
+        queue keeps reading the role text — rather than storing False, which
+        would be the student asserting something they never said."""
+        return {"yes": True, "no": False}.get(
+            self.cleaned_data.get("recruiting_contact") or "", None
+        )
 
     def clean(self):
         cleaned = super().clean()
