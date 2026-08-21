@@ -1915,14 +1915,23 @@ select:focus-visible, input:focus-visible {
   animation-delay: min(calc(var(--i, 0) * 55ms), 330ms);
 }
 
-/* Live pulse dot — a "live now / fresh" marker with an expanding ring. */
+/* Live dot — a quiet "live now / fresh" marker.
+
+   It used to fire an expanding ring out of an ::after, forever, and that
+   pulse is what put "READING 2478 LIVE ROLES RIGHT NOW" in the same family
+   as the "12 people are viewing this now" badge on every SaaS landing page.
+   The count is real and worth stating; the animation was the part asking to
+   be believed rather than read, and an annual report does not blink at you.
+
+   The ring is gone rather than merely stopped: held still at its first
+   keyframe it is a 14px circle drawn around an 8px dot, which reads as a
+   target, not a marker. The dot alone still says live.
+
+   `kin-pulse-ring` stays defined below — the Today board's `.lane-dot`
+   (crm/_styles.html) is a different component and still uses it. */
 .live-dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--ok); position: relative; flex: none;
-}
-.live-dot::after {
-  content: ""; position: absolute; inset: -3px; border-radius: 50%;
-  border: 1.5px solid var(--ok); animation: kin-pulse-ring 1800ms ease-out infinite;
 }
 @keyframes kin-pulse-ring {
   0%   { transform: scale(0.55); opacity: 0.9; }
