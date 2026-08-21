@@ -1,0 +1,53 @@
+name: pip-audit
+
+# Known-vulnerability scan of the resolved dependency set, separate from
+# ci.yml so a new CVE can fail this workflow without blocking a push/PR on
+# code that hasn't changed. Runs on every push/PR (catches a dependency bump
+# that pulls in something vulnerable) plus a weekly schedule (catches a CVE
+# published against a dependency that was already pinned and unchanged).
+#
+# `pypa/gh-action-pip-audit` has no uv-aware mode (checked: its inputs are
+# requirements-file/venv/pyproject only, and `locked: true` targets PEP 751
+# `pylock.*.toml`, not `uv.lock`), so the export happens by hand with the
+# same `uv` this repo already standardizes on in ci.yml, then the action
+# audits the exported file.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+
+      - name: Install Python (from .python-version)
+        run: uv python install
+
+      # Locked to what uv.lock actually resolved (--locked fails the step
+      # instead of silently re-resolving if the lockfile is stale), and the
+      # workspace's own packages (coverage-web/-domain/-connectors) are
+      # excluded — they're this repo's own code, not a third-party
+      # dependency with a CVE database entry, and including them as
+      # unpinned local paths would make pip-audit try to resolve them from
+      # PyPI and fail the export's consumer for the wrong reason.
+      - name: Export locked dependencies (uv.lock -> requirements.txt)
+        run: >
+          uv export --all-packages --locked --no-emit-workspace
+          --format requirements.txt -o requirements-audit.txt
+
+      - name: Audit exported requirements
+        uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: requirements-audit.txt
