@@ -449,6 +449,79 @@ def test_proposals_render_on_today(student, firm, client):
 
 
 # --------------------------------------------------------------------------- #
+# End to end: the live path, message dicts to a tapped contact
+# --------------------------------------------------------------------------- #
+
+def test_end_to_end_live_path(client):
+    """A throwaway account, a synthetic Gmail batch through the REAL
+    classify -> apply -> propose -> view-accept/dismiss -> re-detect loop,
+    then deleted. The whole feature in one pass."""
+    from capture import gmail_live
+
+    user = User.objects.create_user(email="e2e-throwaway@example.test", password="x")
+    firm = Firm.objects.create(
+        slug="e2e-firm", name="E2E Firm", domains=["e2efirm.example"]
+    )
+    own = "student@example.test"
+
+    def msg(headers, snippet="", thread="t-1"):
+        return {
+            "threadId": thread, "snippet": snippet,
+            "internalDate": "1755600000000",
+            "payload": {"headers": [
+                {"name": k, "value": v} for k, v in headers.items()
+            ]},
+        }
+
+    batch = [
+        msg({"From": "Pat Analyst <pat.analyst@e2efirm.example>", "To": own,
+             "Subject": "Re: quick intro", "In-Reply-To": "<mine@ex>"},
+            snippet="Happy to find time.", thread="t-1"),
+        msg({"From": "Riley Recruiter <riley.recruiter@e2efirm.example>",
+             "To": own, "Subject": "Sophomore Series: join us",
+             "List-Id": "<blast.example>", "Precedence": "bulk"},
+            thread="t-2"),
+        msg({"From": "Alum Friend <alum.e2e@gmail.com>", "To": own,
+             "Subject": "Re: USC coffee", "In-Reply-To": "<mine2@ex>"},
+            thread="t-3"),
+        msg({"From": "Digest <digest@mail.beehiiv.com>", "To": own,
+             "Subject": "This week"}, thread="t-4"),
+    ]
+    findings = [
+        f for f in (gmail_live._classify_message(own, m) for m in batch) if f
+    ]
+    result = apply_findings(user, findings)
+    assert result.proposals_created == 2  # the blast and the ESP never qualify
+
+    rows = pending(user)
+    firm_p = next(p for p in rows if p.firm_id == firm.id)
+    personal_p = next(p for p in rows if p.firm_id is None)
+
+    client.force_login(user)
+    assert client.post(
+        reverse("crm:proposal_act", args=[firm_p.id, "accept"])
+    ).status_code == 200
+    contact = Contact.objects.for_user(user).get(email="pat.analyst@e2efirm.example")
+    assert contact.warmth == "replied"
+    touch = Touch.objects.for_user(user).get(contact=contact)
+    assert touch.kind == "reply_received" and "[gmail:t-1]" in touch.note
+
+    assert client.post(
+        reverse("crm:proposal_act", args=[personal_p.id, "dismiss"])
+    ).status_code == 200
+
+    # Same batch again: the accept deduped, the dismiss held.
+    again = apply_findings(user, findings)
+    assert again.proposals_created == 0
+    assert pending(user) == []
+
+    user_id = user.id
+    user.delete()
+    assert not Contact.all_objects.filter(user_id=user_id).exists()
+    assert not ContactProposal.all_objects.filter(user_id=user_id).exists()
+
+
+# --------------------------------------------------------------------------- #
 # Display-name parsing
 # --------------------------------------------------------------------------- #
 
