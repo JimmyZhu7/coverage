@@ -1296,6 +1296,28 @@ def test_a_fresh_chat_keeps_its_hours():
     )
 
 
+def test_a_reping_reason_speaks_the_date_the_chip_already_speaks():
+    """WATCHED LIVE (audit 2026-08-23): one card said "Closes Aug 30" in its
+    chip and "app closes 2026-08-30" in its sentence — the engine's
+    `close.isoformat()` reaching the screen raw. `_prose_dates` rewrites it
+    at the same presentation layer `_age_in_days` uses; the year survives
+    only when it is not this year."""
+    from datetime import date
+
+    from crm.today import _prose_dates
+
+    today = date(2026, 8, 23)
+    assert _prose_dates(
+        "Nomura app closes 2026-08-30. Re-ping before you submit.", today=today
+    ) == "Nomura app closes Aug 30. Re-ping before you submit."
+    assert _prose_dates(
+        "Nomura app closes 2027-01-15. Re-ping before you submit.", today=today
+    ) == "Nomura app closes Jan 15, 2027. Re-ping before you submit."
+    # Not a real calendar date -> left alone rather than mangled.
+    assert _prose_dates("code 2026-99-99 stays", today=today) == "code 2026-99-99 stays"
+    assert _prose_dates("", today=today) == ""
+
+
 def test_the_day_count_comes_from_the_calendar_not_from_dividing_by_24():
     """"2d ago" here has to mean the same thing it means on the Debrief card
     two cards up, which counts calendar days. 57.6h / 24 rounds to 2 by luck;

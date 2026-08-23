@@ -280,11 +280,11 @@ def _build_actions(user):
         # The age is read from the engine's own `ctx`, not scraped back out of
         # its prose, so the rewrite can never disagree with the number that
         # produced the sentence.
-        a["reason"] = _age_in_days(
+        a["reason"] = _prose_dates(_age_in_days(
             _sentenceize(a.get("reason", "")),
             (a.get("ctx") or {}).get("hours"),
             now=now,
-        )
+        ), today=today)
         a["warmth_pct"] = _warmth_pct(c.get("warmth", "cold"))
         # Compose surface: the opener seeds the draft body so the weekly list
         # doubles as the place outreach starts (§5).
@@ -1737,6 +1737,35 @@ def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 
 _PAREN = _re.compile(r"\s*\([^)]*\)")
 _HOURS_AGO = _re.compile(r"\b\d+h ago\b")
+_ISO_DATE = _re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+
+
+def _prose_dates(reason: str, *, today=None) -> str:
+    """Rewrite the engine's `close.isoformat()` as the date the rest of the
+    card already speaks: "app closes 2026-08-30" -> "app closes Aug 30".
+
+    The reping card was the one place on the page saying a date in ISO — its
+    own deadline chip two lines up says "Closes Aug 30" for the same row, so
+    one card spoke the same date two ways. Same posture as `_age_in_days`:
+    the engine's raw fragment stays untouched at the source (coverage_domain
+    is another workstream), and this is purely presentation. The year is kept
+    only when it is not this year — a January queue looking at an August
+    close needs it, today's queue does not."""
+    if not reason:
+        return reason
+    this_year = (today or timezone.localdate()).year
+
+    def _fmt(match: _re.Match) -> str:
+        from datetime import date as _date
+
+        try:
+            d = _date(int(match[1]), int(match[2]), int(match[3]))
+        except ValueError:
+            return match[0]
+        base = f"{d.strftime('%b')} {d.day}"
+        return base if d.year == this_year else f"{base}, {d.year}"
+
+    return _ISO_DATE.sub(_fmt, reason)
 # Past this, an hour count stops being a measurement and starts being
 # arithmetic homework. The thank-you window is 24h, so anything inside two
 # days still earns hours; beyond that the surface speaks days like everything
