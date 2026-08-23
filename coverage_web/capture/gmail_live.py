@@ -741,6 +741,14 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             "chat_scheduled_at": None,
             "bulk": True,
             "bulk_reasons": verdict.reason_text,
+            # Gmail's own preview line, for `capture.appmail` only. Bulk
+            # mail is where application-status mail lives, and a rejection's
+            # subject is routinely the neutral "Your application to X" —
+            # the decision sentence is in the body or nowhere. Read at
+            # classification time and never stored: what an
+            # `ApplicationEvent` keeps is the subject (§10), and every other
+            # consumer of this dict ignores the key.
+            "snippet": (message.get("snippet") or "")[:600],
             "evidence": (
                 f"Bulk/automated email: {ics_summary or subject or ''}".strip()
                 or "Bulk/automated email"
@@ -768,6 +776,10 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         # finding shape; every existing consumer ignores them.
         "threaded_reply": verdict.threaded_reply,
         "subject": subject,
+        # Same ride-along as the bulk branch above, for `capture.appmail`:
+        # plenty of banks send confirmations from a `campus@firm.com`
+        # address that carries no list headers at all.
+        "snippet": (message.get("snippet") or "")[:600],
         "evidence": (
             f"Calendar invite received: {ics_summary or subject}"
             if ics_dt

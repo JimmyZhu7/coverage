@@ -61,7 +61,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
-from capture import discovery
+from capture import appmail, discovery
 from capture.providers import AmbiguousContactError, CaptureProvider, InteractionEvent
 from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import campaigns as crm_campaigns, services as crm_services
@@ -127,6 +127,18 @@ class SyncResult:
     # Unmatched senders who matched an ARCHIVED contact: reported, never
     # proposed, never resurrected (capture_discover's rule, held here too).
     proposals_archived_match: int = 0
+    # Application-status mail (capture.appmail): an ATS saying a role moved.
+    # Counted on its own axis rather than inside the touch counters because
+    # it is about the APPLICATION pipeline, not about a relationship — and
+    # like a contact proposal it writes only a pending row the user must
+    # confirm. `unresolved` is the honest residue: mail we recognised as
+    # application-status but could not pin to one role, which is REPORTED
+    # rather than guessed (directory.applications' rule).
+    app_events_proposed: int = 0
+    app_events_unresolved: int = 0
+    # Detected, matched, and already at or past the stage the mail claims —
+    # the ATS's own reminder about something the board already knows.
+    app_events_already: int = 0
     # Distinct from skipped_unmatched: the name matched MORE than one
     # contact (e.g. two "Michael Chen"s at different firms), so there is
     # no correct contact to log this finding against — not zero matches,
@@ -157,6 +169,9 @@ class SyncResult:
             "skipped_unmatched": self.skipped_unmatched,
             "proposals_created": self.proposals_created,
             "proposals_archived_match": self.proposals_archived_match,
+            "app_events_proposed": self.app_events_proposed,
+            "app_events_unresolved": self.app_events_unresolved,
+            "app_events_already": self.app_events_already,
             "skipped_ambiguous": self.skipped_ambiguous,
             "pattern_delivered": self.pattern_delivered,
             "pattern_bounced": self.pattern_bounced,
@@ -530,6 +545,9 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
     # Firm-domain map for the discovery hook below — built lazily, at most
     # once per batch, and only if an unmatched finding actually reaches it.
     firm_domains = discovery.FirmDomains()
+    # Same lazy shape, for the application-mail hook below: a batch with no
+    # ATS mail in it builds nothing and queries nothing.
+    appmail_resolver = appmail.Resolver(user)
 
     for finding in findings:
         name = (finding.get("name") or "").strip() or "(unnamed)"
@@ -537,6 +555,31 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         if not finding.get("found"):
             result.skipped_not_found += 1
             continue
+
+        # THE APPLICATION-MAIL HOOK. Deliberately here — before contact
+        # matching, and applied to EVERY finding — rather than beside the
+        # discovery hook in the unmatched branch below.
+        #
+        # Discovery's question is "is this sender a person worth tracking",
+        # so the unmatched branch is exactly its population. This one's
+        # question is "did one of my applications move", which has nothing
+        # to do with whether the sender is in the contact book: an ATS
+        # sender usually isn't, but a firm that mails confirmations from the
+        # same `campus@` address a student HAS saved would be the one case
+        # this feature silently skipped. Writes at most one pending
+        # `ApplicationEvent` and never touches the pipeline — see
+        # capture/appmail.py.
+        outcome = appmail.consider_finding(
+            user, finding, resolver=appmail_resolver, dry_run=dry_run
+        )
+        if outcome.result == appmail.PROPOSED:
+            result.app_events_proposed += 1
+        elif outcome.result == appmail.UNRESOLVED:
+            result.app_events_unresolved += 1
+        elif outcome.result == appmail.ALREADY_AHEAD:
+            result.app_events_already += 1
+        if outcome.detail:
+            result.details.append(outcome.detail)
 
         try:
             contact = _match_contact(user, finding)
