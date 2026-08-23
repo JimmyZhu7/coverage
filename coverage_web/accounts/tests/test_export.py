@@ -175,6 +175,7 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
         "campaigns": "campaigns.csv",
         "campaign_contacts": "campaign_contacts.csv",
         "contact_proposals": "contact_proposals.csv",
+        "application_events": "application_events.csv",
         "fit_scores": "fit_scores.csv",
         "imports": "imports.csv",
         "product_events": "product_events.csv",

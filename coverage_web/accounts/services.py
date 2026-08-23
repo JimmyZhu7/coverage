@@ -48,7 +48,7 @@ from assistant.models import (
 )
 from billing.models import CreditLedger, ProWaitlist
 from capture import gmail_live
-from capture.models import ContactProposal, GmailConnection
+from capture.models import ApplicationEvent, ContactProposal, GmailConnection
 from crm.models import (
     CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact, Task,
     Touch, UserFirm,
@@ -596,6 +596,10 @@ CONTACT_PROPOSAL_EXPORT_COLUMNS = [
     "thread_subject", "threaded_reply",
     "status", "occurred_at", "created", "resolved_at",
 ]
+APPLICATION_EVENT_EXPORT_COLUMNS = [
+    "firm", "role", "event", "target_status", "evidence", "match_reason",
+    "detected_by", "status", "occurred_at", "created", "resolved_at",
+]
 DEBRIEF_EXPORT_COLUMNS = [
     "created", "contact", "learned", "intro_name", "intro_email",
     "tracked_date", "date_note", "advocate_answer", "promoted", "dismissed",
@@ -849,6 +853,31 @@ def contact_proposals_csv(user) -> str:
     )
 
 
+def application_events_csv(user) -> str:
+    """What the inbox said about each application, and what the user did
+    about it. Dismissed rows are the "don't ask again" memory (see
+    `capture.models.ApplicationEvent`), and `detected_by` is here on purpose:
+    a student auditing a wrong row deserves to know whether a phrase list or
+    a model read it."""
+    rows = (
+        ApplicationEvent.objects.for_user(user)
+        .select_related("firm", "opportunity")
+    )
+    return _csv(
+        APPLICATION_EVENT_EXPORT_COLUMNS,
+        (
+            [
+                e.firm.name if e.firm_id else e.firm_text,
+                e.opportunity.title if e.opportunity_id else "",
+                e.get_event_type_display(), e.target_status, e.evidence,
+                e.match_reason, e.detected_by, e.status,
+                _dt(e.occurred_at), _dt(e.created), _dt(e.resolved_at),
+            ]
+            for e in rows
+        ),
+    )
+
+
 def chat_debriefs_csv(user) -> str:
     """What each coffee chat actually taught the student. Free text they wrote
     once and would have no other way to get back."""
@@ -1076,6 +1105,8 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
      "Who was in each bulk send, and whose relationship started there."),
     ("contact_proposals.csv", contact_proposals_csv,
      "People your inbox scan suggested, and what you decided about each."),
+    ("application_events.csv", application_events_csv,
+     "Application updates found in your mail, and what you decided about each."),
     ("fit_scores.csv", fit_scores_csv,
      "Computed fit scores with the axes behind each one."),
     ("imports.csv", imports_csv, "Your CSV imports and what each one did."),
@@ -1182,6 +1213,12 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     # "never propose this address again" memory, which is the user's data
     # like everything else here.
     ("contact_proposals", ContactProposal),
+    # References `opportunity` (CASCADE) and `firm` (SET_NULL) — before
+    # `user_opportunities` below only for readability's sake (they are
+    # siblings, not parent and child), and it holds the "don't propose this
+    # role update again" memory, which is the user's data like everything
+    # else here.
+    ("application_events", ApplicationEvent),
     ("user_firms", UserFirm),
     ("user_opportunities", UserOpportunity),
     ("imports", Import),
