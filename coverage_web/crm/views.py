@@ -1529,8 +1529,19 @@ def classify_campaign(request: HttpRequest) -> HttpResponse:
     if kind == Campaign.KIND_OTHER:
         # Counted AFTER the write, off the same function the queue itself
         # calls, so the number on screen is the number that will be applied
-        # rather than a second opinion about it.
-        moved = len(campaigns.excluded_contact_ids(request.user))
+        # rather than a second opinion about it — intersected with THIS
+        # campaign's own originating members, because the sentence names this
+        # send. It used to state the total across every campaign classified
+        # `other`: with the 9-recipient ICC merge already answered, answering
+        # an 8-recipient send said "17 contacts affected".
+        from .models import CampaignContact
+
+        members = set(
+            CampaignContact.objects.for_user(request.user)
+            .filter(campaign=campaign, originates=True)
+            .values_list("contact_id", flat=True)
+        )
+        moved = len(members & campaigns.excluded_contact_ids(request.user))
         messages.success(
             request,
             f"Got it. {name} is off your daily queue. {moved} "

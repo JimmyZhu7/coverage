@@ -586,3 +586,18 @@ RECRUITING_REPLY_REASON = (
 )
 RECRUITING_REPLY_LABEL = "Reply"
 RECRUITING_KEEP_WARM_LABEL = "Check in"
+
+# The same one sentence for a campaign-excluded contact's inbound message —
+# and it exists for the same reason. Measured on the audit account
+# (2026-08-23): Nick Tehle, whose only relationship with the founder is the
+# ICC panel merge, replied about the panel; the moment the campaign was
+# classified "not my recruiting" his card should have become this — instead
+# the engine's own action survived the gate untouched, and the card read
+# "J.P. Morgan app closes 2026-08-30. Re-ping before you submit." A person
+# the user has SAID is not their recruiting must never be handed a recruiting
+# ask; the inbound override grants exactly one thing (see rule 1 above), and
+# this is the sentence for it.
+CAMPAIGN_REPLY_REASON = (
+    "They wrote to you. Answer the note. From a send that was not your recruiting."
+)
+CAMPAIGN_REPLY_LABEL = "Reply"

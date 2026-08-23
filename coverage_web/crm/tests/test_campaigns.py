@@ -406,7 +406,13 @@ def test_a_campaign_contact_who_wrote_in_still_surfaces():
     replier = people[0]
     Touch.all_objects.create(
         user=user, contact=replier, kind="reply_received", channel="email",
-        ts=timezone.now() - timedelta(days=4),
+        # Six calendar days, not four: the surfacing action is engine branch
+        # 7, which needs the reply idle >= 3 BUSINESS days. Four calendar
+        # days back is only 2 business days when the test runs on a Sunday,
+        # and this test failed every weekend until the audit run of
+        # 2026-08-23 (a Sunday) caught it. Six calendar days is at least
+        # four business days from any day of the week.
+        ts=timezone.now() - timedelta(days=6),
     )
     # `Touch.all_objects.create` writes the row without running the pipeline
     # ratchet, so the state it would have moved is set here — same as
@@ -474,6 +480,127 @@ def test_a_campaign_contact_is_never_told_they_are_not_a_target_firm():
 
     assert "Not a target firm" not in reason
     assert reason.startswith("From one of your campaigns")
+
+
+def test_a_campaign_contact_who_wrote_in_is_asked_for_a_reply_not_a_chat():
+    """WATCHED LIVE (audit 2026-08-23). The surfaced panelist's card kept the
+    engine's own action — branch 7's "they replied — propose a 15-min chat" —
+    which is the exact ask the classification existed to stop. The override
+    grants an answer and nothing else, so the card is a Reply."""
+    user = _user()
+    firm = _target_firm(user)
+    people = _merge(user, n=10, firm=firm, days_ago=20)
+    campaign = camp.detect(user)[0]
+    camp.classify(user, campaign.id, Campaign.KIND_OTHER)
+
+    replier = people[0]
+    Touch.all_objects.create(
+        user=user, contact=replier, kind="reply_received", channel="email",
+        ts=timezone.now() - timedelta(days=6),
+    )
+    replier.warmth = "replied"
+    replier.thread_state = "replied"
+    replier.save(update_fields=["warmth", "thread_state"])
+
+    a = _actions_by_name(user)[replier.name]
+    assert a["label"] == rel.CAMPAIGN_REPLY_LABEL
+    assert a["reason"] == rel.CAMPAIGN_REPLY_REASON
+    assert a["action"] == "advance"
+
+
+def test_a_campaign_contact_never_carries_a_reping():
+    """The worse variant, also watched live: the panelist's firm had a
+    confirmed close inside the re-ping window, so his card read "app closes
+    2026-08-30. Re-ping before you submit" — a priority-0 recruiting ask, in
+    "Don't lose these", snooze-exempt, about a relationship the user had just
+    said was not their recruiting. The deadline chip goes with it: the close
+    date still lives on every surface that IS about their recruiting."""
+    from directory.models import FirmDate
+
+    user = _user()
+    firm = _target_firm(user)
+    people = _merge(user, n=10, firm=firm, days_ago=20)
+    FirmDate.objects.create(
+        firm=firm, event_kind="app_close", region="us",
+        date=timezone.localdate() + timedelta(days=7), confidence=1.0,
+    )
+    campaign = camp.detect(user)[0]
+    camp.classify(user, campaign.id, Campaign.KIND_OTHER)
+
+    replier = people[0]
+    Touch.all_objects.create(
+        user=user, contact=replier, kind="reply_received", channel="email",
+        ts=timezone.now() - timedelta(days=4),
+    )
+    replier.warmth = "replied"
+    replier.thread_state = "replied"
+    replier.region = "us"
+    replier.save(update_fields=["warmth", "thread_state", "region"])
+
+    a = _actions_by_name(user)[replier.name]
+    assert a["action"] == "advance"
+    assert a["label"] == rel.CAMPAIGN_REPLY_LABEL
+    assert a["priority"] == 1
+    assert a["closes_on"] is None
+    assert "Re-ping" not in a["reason"]
+
+
+def test_waiting_on_reply_does_not_hold_campaign_contacts_forever():
+    """On the founder's real account the ICC merge alone would fill the
+    "Waiting on reply" strip with 190-odd club recipients, drowning every
+    genuine recruiting wait. Once the send is classified `other`, its
+    originating contacts leave that strip along with the queue — and come
+    back the moment the answer is changed."""
+    from crm.today import _cockpit_context
+
+    user = _user()
+    # No firm on purpose: at a non-target employer these contacts never had a
+    # queue card (the relevance gate drops them), so "Waiting on reply" was
+    # the ONE surface still holding them — which is exactly the leak.
+    people = _merge(user, n=10, days_ago=20)
+    for c in people:
+        c.thread_state = "no_reply"
+        c.save(update_fields=["thread_state"])
+    campaign = camp.detect(user)[0]
+
+    names = {p.name for p in people}
+    waiting = {c.name for c in _cockpit_context(user)["waiting"]["people"]}
+    assert names & waiting  # unclassified: status quo, they are listed
+
+    camp.classify(user, campaign.id, Campaign.KIND_OTHER)
+    waiting = {c.name for c in _cockpit_context(user)["waiting"]["people"]}
+    assert not (names & waiting)
+
+    camp.classify(user, campaign.id, Campaign.KIND_RECRUITING)
+    waiting = {c.name for c in _cockpit_context(user)["waiting"]["people"]}
+    assert names & waiting
+
+
+def test_classify_message_counts_only_this_campaign(client):
+    """WATCHED LIVE (audit 2026-08-23): with a 9-recipient merge already
+    classified `other`, answering an 8-recipient send flashed "17 contacts
+    affected". The sentence names one send, so the number is that send's."""
+    from django.urls import reverse
+
+    user = _user("counts@example.com")
+    firm = _target_firm(user, slug="counts-bank", name="Counts Bank")
+    _merge(user, n=10, firm=firm, days_ago=20)
+    _merge(user, n=8, subject="Speaker series invitation", days_ago=10,
+           prefix="Guest")
+    detected = camp.detect(user)
+    big = next(c for c in detected if c.recipient_count == 10)
+    small = next(c for c in detected if c.recipient_count == 8)
+    client.force_login(user)
+
+    client.post(reverse("crm:classify_campaign"),
+                {"campaign": big.id, "kind": Campaign.KIND_OTHER})
+    resp = client.post(
+        reverse("crm:classify_campaign"),
+        {"campaign": small.id, "kind": Campaign.KIND_OTHER}, follow=True,
+    )
+    body = resp.content.decode()
+    assert "8 contacts affected" in body
+    assert "18 contacts affected" not in body
 
 
 # ---------------------------------------------------------------------------

@@ -469,7 +469,30 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict) -> list[dic
     for a in kept:
         a["opening"] = openings.get(a["contact"].get("firm_id"))
 
-        if a["is_recruiting"] and a["action"] in rel.CHAT_PROPOSING_ACTIONS:
+        if a["contact"].get("campaign_excluded"):
+            # A campaign-excluded contact is only ever here because they wrote
+            # and are still owed an answer (`contact_relevance` returns
+            # REL_INBOUND or drops them entirely). The inbound override grants
+            # exactly one thing — the answer — so whatever the engine wanted
+            # (a re-ping about their firm's deadline, "propose a 15-min chat")
+            # is rewritten to the one honest ask. Measured before this branch
+            # existed: the ICC panelist who replied about the PANEL kept his
+            # priority-0 "Re-ping before you submit" card after the founder
+            # had already said the send was not his recruiting.
+            #
+            # `advance` rather than the engine's own action, so the card logs
+            # an `outreach` touch (an email you sent), sits in the momentum
+            # lane rather than "Don't lose these", and offers Snooze/Skip —
+            # a club note is never snooze-exempt. The deadline chip is
+            # cleared for the same reason the action is: the user said this
+            # relationship is not their recruiting, and the firm's close date
+            # still lives on every surface that IS about their recruiting.
+            a["action"] = "advance"
+            a["priority"] = 1
+            a["closes_on"] = None
+            a["label"] = rel.CAMPAIGN_REPLY_LABEL
+            a["reason"] = rel.CAMPAIGN_REPLY_REASON
+        elif a["is_recruiting"] and a["action"] in rel.CHAT_PROPOSING_ACTIONS:
             if a["action"] == "advance":
                 if not a["owed_reply"]:
                     # Nothing left to say that isn't a chat ask. The engine
@@ -1524,6 +1547,16 @@ def _cockpit_context(user) -> dict:
     busy_ids = {a["contact"]["id"] for a in planned + held + park}
     busy_ids |= debrief_contact_ids
     busy_ids |= {r["contact"].id for r in schedule if r["contact"]}
+    # Campaign-excluded contacts are excluded here too. "Waiting on reply" is
+    # a daily anxiety surface ("did I drop anything?"), and a reply to a club
+    # panel invitation was never owed in the recruiting sense. Measured on the
+    # audit account: classifying the ICC merge "not my recruiting" emptied the
+    # queue and left all 16 unanswered panelists sitting under "Waiting on
+    # reply, nothing due yet" forever — on the founder's real account that is
+    # 190-odd club recipients drowning every genuine recruiting wait. They
+    # keep the contact book, the Network board, search and every export, same
+    # as the queue rule (`crm/campaigns.py`).
+    busy_ids |= campaigns.excluded_contact_ids(user)
 
     return {
         "lanes": lanes,
