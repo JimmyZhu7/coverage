@@ -157,6 +157,136 @@ class ContactProposal(PrivateModel):
         return f"{self.name} <{self.email}> ({self.status})"
 
 
+class ApplicationEvent(PrivateModel):
+    """Something an ATS said about one of your applications, waiting for a tap.
+
+    THE SAME DOOR `ContactProposal` OPENS, FOR THE OTHER HALF OF THE MAILBOX.
+    Application mail is bulk mail — no-reply senders, `List-Unsubscribe`,
+    campaign ids — which is exactly why `capture.inbound` can spot it and
+    exactly why it never becomes a contact. What it IS good for is the
+    pipeline: "Thank you for applying" is the fact My Applications was
+    always waiting for, and `directory/management/commands/
+    capture_applications.py` already proved the matching works. What that
+    command lacks is a gate: it writes `UserOpportunity.applied_status`
+    straight from a findings file. This row is that gate.
+
+    NOTHING IS WRITTEN TO THE PIPELINE UNTIL THE USER ACCEPTS. That is not
+    UX polish, it is the Limited Use posture the B2B plan rests on: mail
+    read on a student's behalf may PROPOSE, and only the student's own tap
+    may change their record. `capture.appmail.accept` is the only path from
+    here to `UserOpportunity`, and it is reached from one POST.
+
+    WHY `opportunity` IS NOT NULLABLE. A row here means "we know which role
+    this is about" — `directory.applications.match_application` said so, by
+    the same one-believable-candidate rule that command already refuses to
+    bend. A confirmation we cannot pin to a role is counted and reported by
+    the sync (see `SyncResult.app_events_unresolved`) and never carded: a
+    card that names a firm but no role has nothing the user could accept.
+    """
+
+    # The vocabulary is the EMAIL's, not the pipeline's — see
+    # `capture.appmail.TARGET_STATUS` for how each one maps onto the coarser
+    # five-state funnel `directory.views._TRACK_STATES` owns, and why an
+    # assessment invite deliberately does not claim "Interviewing".
+    APPLIED = "applied"
+    ASSESSMENT = "assessment"
+    VIDEO_INTERVIEW = "video_interview"
+    INTERVIEW = "interview"
+    REJECTED = "rejected"
+    OFFER = "offer"
+    EVENT_CHOICES = [
+        (APPLIED, "Application received"),
+        (ASSESSMENT, "Online assessment invite"),
+        (VIDEO_INTERVIEW, "Video interview invite"),
+        (INTERVIEW, "Interview scheduling"),
+        # Stored under its true name; NEVER rendered as one. See
+        # `capture.appmail.EVENT_LABELS` — the card says "Not moving
+        # forward" and the button says "Mark done", because a student
+        # reading their own rejection back off a dashboard does not need
+        # the product to say it twice.
+        (REJECTED, "Decision received"),
+        (OFFER, "Offer"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_DISMISSED = "dismissed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_ACCEPTED, "Accepted"),
+        # Never deleted, exactly as on ContactProposal: the row IS the
+        # "don't ask me about this again" memory.
+        (STATUS_DISMISSED, "Dismissed"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    # CASCADE, matching `analytics.UserOpportunity.opportunity`: this row is
+    # about one posting and is meaningless without it, and the unique
+    # constraint below is keyed on it.
+    opportunity = models.ForeignKey(
+        "directory.Opportunity", on_delete=models.CASCADE,
+        related_name="application_events",
+    )
+    # Denormalized off the opportunity so the card renders (and the export
+    # reads) without a second join, and so a merged firm doesn't silently
+    # rewrite history. SET_NULL for the same reason ContactProposal.firm is.
+    firm = models.ForeignKey(
+        "directory.Firm", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="application_events",
+    )
+    # What the EMAIL called the firm, before matching — kept whether or not
+    # `firm` resolved, because it is the observation and `firm` is the
+    # conclusion.
+    firm_text = models.CharField(max_length=255, blank=True, default="")
+    event_type = models.CharField(max_length=32, choices=EVENT_CHOICES)
+    # The `applied_status` an accept would write. Stored rather than derived
+    # at accept time so a later change to the mapping cannot silently
+    # re-point a card the user is already looking at.
+    target_status = models.CharField(max_length=32)
+    # One line of why: the SUBJECT, at most. §10's "no email bodies" rule,
+    # held here the same way `capture.discovery._evidence_line` holds it —
+    # and it binds the optional AI path too, whose grounded quote is used to
+    # VERIFY an answer and then thrown away, never stored.
+    evidence = models.CharField(max_length=300, blank=True, default="")
+    # "rules" or "ai" — which layer produced the classification. The
+    # deterministic layer is the product; the AI layer is the long tail, and
+    # a founder auditing a wrong card needs to know which one to fix.
+    detected_by = models.CharField(max_length=16, default="rules")
+    # `directory.applications.Match.reason`, verbatim ("title match (83%)",
+    # "the only role you had saved at this firm"). Shown on the card: a
+    # match a student cannot check is a match they cannot trust.
+    match_reason = models.CharField(max_length=200, blank=True, default="")
+    thread_id = models.CharField(max_length=128, blank=True, default="")
+    # When the message actually arrived — rides into `applied_at` on accept
+    # so the funnel's dates are the mail's, not the tap's.
+    occurred_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+    created = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "application_events"
+        ordering = ["created"]
+        constraints = [
+            # ONE row per (user, role, event kind), whatever its status.
+            # This is both halves of the dedup the brief asks for: the same
+            # message seen twice (a re-run, an overlapping history window)
+            # resolves to the same triple, and so does the ATS's own
+            # re-notification — Workday sends "we received your
+            # application" and then a reminder about the same application,
+            # and a student should be asked once.
+            models.UniqueConstraint(
+                fields=["user", "opportunity", "event_type"],
+                name="uniq_application_event_user_opp_kind",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.firm_text or self.firm_id} {self.event_type} ({self.status})"
+
+
 class GmailConnection(PrivateModel):
     STATUS_CHOICES = [
         ("active", "Active"),

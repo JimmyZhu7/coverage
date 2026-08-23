@@ -315,6 +315,118 @@ def extract_sponsorship_ai(
     return SponsorshipGuess(value=value, phrase=quote, confidence=0.5)
 
 
+# ---------------------------------------------------------------------------
+# APPLICATION-MAIL CLASSIFICATION — the long tail of `capture.appmail`
+#
+# Same argument as the two passes above, one surface over: the deterministic
+# layer in `capture/appmail.py` types application mail from a list of phrases
+# the ATSs send verbatim, and it will always have a tail. "We've reviewed your
+# candidacy and have decided to pursue other applicants for this position" is
+# a rejection in a phrasing no list had; a subject that says only "Update on
+# your application" is unreadable without the body.
+#
+# SCOPE, and it is what makes the cost defensible: this is reached ONLY for a
+# message that has already passed `appmail`'s gate (a known ATS/assessment
+# vendor, or a bulk/no-reply sender with an application-shaped subject) AND
+# that the phrase lists could not type. Everything else — every newsletter,
+# every job alert, every human reply, and the large majority of real
+# application mail — is classified for free and never reaches this function.
+#
+# The input is a subject line and Gmail's own short snippet, not a message
+# body: a few hundred characters, an order of magnitude smaller than the
+# posting text the deadline pass sends. And the grounding rule is the same —
+# the quote must be a real substring of what the model was shown, or the whole
+# answer is discarded. The caller uses the quote to verify and then drops it;
+# §10 means an `ApplicationEvent` stores the subject and nothing else.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ApplicationEventGuess:
+    value: str           # applied | assessment | video_interview | interview | rejected | offer
+    phrase: str          # the exact sentence the model quoted, verified as a substring
+    confidence: float    # 0.5 — same second-pass tier as the two guesses above
+
+
+_APPLICATION_EVENT_PROMPT = """You are reading one email a student received while applying for internships. Answer ONLY from the text given -- never from general knowledge about the employer.
+
+QUESTION: Is this email an automated APPLICATION-STATUS message about an application the student already submitted, and if so which kind?
+
+The kinds, and what each one means:
+- "applied": the employer confirms it received an application.
+- "assessment": an invitation to complete an online/coding/numerical assessment or test (HackerRank, Codility, CodeSignal, SHL, pymetrics...).
+- "video_interview": an invitation to record a one-way or on-demand video interview (HireVue, Spark Hire...).
+- "interview": an invitation to, or the scheduling of, an interview with people -- including an assessment centre or superday.
+- "rejected": the employer states the student is not being taken forward.
+- "offer": the employer offers the role.
+
+Respond with EXACTLY this JSON shape and nothing else:
+{"event": "<one of the six kinds above>", "quote": "<the exact sentence from the text that shows this, copied verbatim, unmodified>"}
+
+If the email is NOT an application-status message about this student's own application -- a job alert, a marketing email, a newsletter, an event invitation, a request that they apply, or anything ambiguous -- respond with EXACTLY:
+{"event": null, "quote": null}
+
+The "quote" field, when present, MUST be an exact, verbatim substring of the text below -- do not paraphrase, summarize, or fix typos in it. If you cannot quote it exactly, answer null instead of guessing.
+
+TEXT:
+\"\"\"
+{text}
+\"\"\"
+"""
+
+_APPLICATION_EVENT_KINDS = frozenset({
+    "applied", "assessment", "video_interview", "interview", "rejected", "offer",
+})
+
+
+def extract_application_event_ai(
+    subject: str | None,
+    snippet: str | None = "",
+    *,
+    model: str = DEFAULT_MODEL,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    retries: int = DEFAULT_RETRIES,
+) -> ApplicationEventGuess | None:
+    """One gated message's subject + snippet in, a grounded event kind out
+    (or `None`). Never raises for a "no answer" case; an API failure is
+    swallowed rather than surfaced, because this runs inside a mailbox sync
+    whose job is to keep going — an unclassified message is already a
+    supported outcome (`capture.appmail` reports it as unresolved)."""
+    if not is_configured():
+        return None
+    text = "\n".join(part for part in [(subject or "").strip(), (snippet or "").strip()] if part)
+    if not text:
+        return None
+    text = text[:MAX_INPUT_CHARS]
+
+    prompt = _APPLICATION_EVENT_PROMPT.replace("{text}", text)
+    try:
+        response = _post_json(
+            {
+                "model": model,
+                "max_tokens": 200,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=timeout,
+            retries=retries,
+        )
+    except AIExtractError:
+        return None
+    raw = _extract_response_text(response).strip()
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+    value = parsed.get("event")
+    quote = parsed.get("quote")
+    if value not in _APPLICATION_EVENT_KINDS or not quote:
+        return None
+    if not _grounded(quote, text):
+        return None
+    return ApplicationEventGuess(value=value, phrase=quote, confidence=0.5)
+
+
 DEFAULT_TEXT_MODEL = "claude-sonnet-5"
 
 
