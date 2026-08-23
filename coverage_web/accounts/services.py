@@ -48,7 +48,7 @@ from assistant.models import (
 )
 from billing.models import CreditLedger, ProWaitlist
 from capture import gmail_live
-from capture.models import GmailConnection
+from capture.models import ContactProposal, GmailConnection
 from crm.models import (
     CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact, Task,
     Touch, UserFirm,
@@ -587,6 +587,10 @@ CAMPAIGN_EXPORT_COLUMNS = [
 CAMPAIGN_CONTACT_EXPORT_COLUMNS = [
     "campaign", "contact", "contact_email", "originates", "sent_at",
 ]
+CONTACT_PROPOSAL_EXPORT_COLUMNS = [
+    "name", "email", "firm", "role_hint", "recruiting_hint", "evidence",
+    "status", "occurred_at", "created", "resolved_at",
+]
 DEBRIEF_EXPORT_COLUMNS = [
     "created", "contact", "learned", "intro_name", "intro_email",
     "tracked_date", "date_note", "advocate_answer", "promoted", "dismissed",
@@ -819,6 +823,26 @@ def campaign_contacts_csv(user) -> str:
     )
 
 
+def contact_proposals_csv(user) -> str:
+    """People the mailbox scan proposed, and what the user said. Dismissed
+    rows are the "never propose this person again" memory (see
+    `capture.models.ContactProposal`), so they are data the user gave the
+    product one tap at a time — exported, never silently dropped."""
+    rows = ContactProposal.objects.for_user(user).select_related("firm")
+    return _csv(
+        CONTACT_PROPOSAL_EXPORT_COLUMNS,
+        (
+            [
+                p.name, p.email,
+                p.firm.name if p.firm_id else "",
+                p.role_hint, p.recruiting_hint, p.evidence,
+                p.status, _dt(p.occurred_at), _dt(p.created), _dt(p.resolved_at),
+            ]
+            for p in rows
+        ),
+    )
+
+
 def chat_debriefs_csv(user) -> str:
     """What each coffee chat actually taught the student. Free text they wrote
     once and would have no other way to get back."""
@@ -1044,6 +1068,8 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
      "Bulk sends we found in your mail, and what you said each one was."),
     ("campaign_contacts.csv", campaign_contacts_csv,
      "Who was in each bulk send, and whose relationship started there."),
+    ("contact_proposals.csv", contact_proposals_csv,
+     "People your inbox scan suggested, and what you decided about each."),
     ("fit_scores.csv", fit_scores_csv,
      "Computed fit scores with the axes behind each one."),
     ("imports.csv", imports_csv, "Your CSV imports and what each one did."),
@@ -1145,6 +1171,11 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     # References `contact` (CASCADE) — deleted before `contacts` below for the
     # same "children before parents" reason as everything above it.
     ("calendar_events", CalendarEvent),
+    # References `contact` (SET_NULL, so the order doesn't move the counts —
+    # kept child-before-parent anyway, like the trio below), and it holds the
+    # "never propose this address again" memory, which is the user's data
+    # like everything else here.
+    ("contact_proposals", ContactProposal),
     ("user_firms", UserFirm),
     ("user_opportunities", UserOpportunity),
     ("imports", Import),
