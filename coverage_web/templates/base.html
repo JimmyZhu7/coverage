@@ -776,6 +776,64 @@ select on.
   {% endscript %}
   {% endif %}
 
+  {% comment %}
+  htmx failure feedback. Two dead ends, both watched live on the Today page
+  (audit 2026-08-23), both previously silent:
+
+  1. EXPIRED SESSION. htmx POSTs go through login_required; the 302 to
+     /accounts/login/ is followed transparently by the XHR, and the 200 that
+     comes back is the sign-in page — which htmx then swapped INTO the
+     cockpit div, rendering a second nav bar and a "Welcome Back" form inside
+     the app chrome while the header still said the user's name. The guard
+     cancels that swap and reloads instead: the reload hits login_required as
+     a normal navigation, lands on the real sign-in page with next= set, and
+     the user comes back to the page they were on.
+
+  2. NETWORK/SERVER FAILURE. htmx's default on a dropped connection or a 500
+     is to swap nothing — the click just does nothing visible, and a student
+     who tapped "Log it" walks away believing the touch is recorded. One
+     small toast, one sentence, auto-dismissed.
+  {% endcomment %}
+  {% script %}
+    (function () {
+      function toast(text) {
+        var el = document.getElementById("hx-toast");
+        if (!el) {
+          el = document.createElement("div");
+          el.id = "hx-toast";
+          el.setAttribute("role", "status");
+          el.setAttribute("aria-live", "polite");
+          el.style.cssText =
+            "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);" +
+            "z-index:200;padding:10px 16px;border-radius:8px;font-size:14px;" +
+            "background:var(--surface,#1c1f1a);color:var(--ink,#e8e6df);" +
+            "border:1px solid var(--line,#3a3d36);box-shadow:0 4px 16px rgba(0,0,0,.35);";
+          document.body.appendChild(el);
+        }
+        el.textContent = text;
+        clearTimeout(el._t);
+        el._t = setTimeout(function () { el.remove(); }, 5000);
+      }
+      document.body.addEventListener("htmx:beforeSwap", function (e) {
+        var xhr = e.detail.xhr;
+        if (xhr && xhr.responseURL && xhr.responseURL.indexOf("/accounts/login") !== -1) {
+          e.detail.shouldSwap = false;
+          window.location.reload();
+          return;
+        }
+        if (xhr && xhr.status >= 400) {
+          e.detail.shouldSwap = false;
+          // A 4xx here is almost always a stale card — the thing it points
+          // at was already handled in another tab. A refresh shows the truth.
+          toast("That didn't go through. Refresh the page and try again.");
+        }
+      });
+      document.body.addEventListener("htmx:sendError", function () {
+        toast("That didn't save. Check your connection and try again.");
+      });
+    })();
+  {% endscript %}
+
   {% if user.is_authenticated and user.timezone_auto %}
   {% comment %}
   Timezone follow. The server cannot know where somebody is — an IP guess is
