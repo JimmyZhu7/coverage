@@ -1483,6 +1483,26 @@ def _cockpit_context(user) -> dict:
         .order_by("created")[:24]
     )
 
+    # The other half of "found in your inbox": an ATS saying one of the
+    # student's applications moved. PROPOSALS again — nothing is written to
+    # UserOpportunity until the tap (see capture/appmail.py). Same rendering
+    # cap and the same reasoning; the one-believable-role rule keeps real
+    # volume far below it.
+    from capture.appmail import EVENT_LABELS
+    from capture.models import ApplicationEvent
+
+    app_events = []
+    for row in (
+        ApplicationEvent.objects.for_user(user)
+        .filter(status=ApplicationEvent.STATUS_PENDING)
+        .select_related("firm", "opportunity")
+        .order_by("created")[:24]
+    ):
+        label, action = EVENT_LABELS.get(
+            row.event_type, (row.get_event_type_display(), "Update")
+        )
+        app_events.append({"row": row, "label": label, "action": action})
+
     # E10: when one contact holds both a debrief and a thank-you, the two
     # cards stop pretending not to know about each other.
     debriefs = debrief_svc.pending(user)
@@ -1561,6 +1581,7 @@ def _cockpit_context(user) -> dict:
     return {
         "lanes": lanes,
         "proposals": proposals,
+        "app_events": app_events,
         "planned_total": len(planned),
         "held": held,
         "held_total": len(held),

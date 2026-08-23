@@ -1,0 +1,57 @@
+{% load textstyle %}
+{% comment %}
+From your applications. What an ATS said about a role you applied to —
+PROPOSALS, not pipeline writes. Nothing reaches UserOpportunity until the
+button is tapped (capture/appmail.py), and Dismiss is remembered forever.
+
+Sits beside the contact-proposal lane, not inside it: both are mail that
+already happened, but one is about a person and one is about a role, and the
+buttons say different things. Its own file so the two lanes can be edited
+independently.
+
+The rejection card carries the same weight as every other: `Not moving
+forward`, then `Mark done`. It states the fact once, in sentence case, and
+does not repeat a word the student has already read in their own inbox.
+{% endcomment %}
+{% if app_events %}
+  <section class="lane lane-appevents">
+    <h2 class="lane-title">
+      From your applications
+      <span class="lane-count" aria-live="polite">{{ app_events|length }}</span>
+    </h2>
+    <div class="act-grid">
+      {% for e in app_events %}
+        <article class="act-card kin-reveal act-appevent" style="--i:{{ forloop.counter0 }}">
+          <div class="act-ident">
+            <div class="act-idtext">
+              <span class="opp-firm">{% if e.row.firm %}{{ e.row.firm.name|smart_title }}{% else %}{{ e.row.firm_text|smart_title }}{% endif %}</span>
+              <h3 class="act-name">{{ e.row.opportunity.title|smart_title }}</h3>
+              <p class="act-role">{{ e.row.match_reason }}</p>
+            </div>
+            <span class="chip">{{ e.label }}</span>
+          </div>
+          <div class="act-context">
+            <div class="act-badges">
+              <span class="prio prio-proposal">Found in your inbox</span>
+              {% if e.row.detected_by == "ai" %}<span class="prio">AI-read, check it</span>{% endif %}
+            </div>
+            <p class="act-reason">{{ e.row.evidence }}</p>
+          </div>
+          <div class="act-quick">
+            <div class="act-primary">
+              <button type="button" class="btn btn-primary act-btn"
+                      aria-label="{{ e.action }} for {{ e.row.opportunity.title }}"
+                      hx-post="{% url 'crm:app_event_act' e.row.id 'accept' %}">{{ e.action }}</button>
+            </div>
+            <div class="act-ghosts">
+              <button type="button" class="btn act-ghost"
+                      aria-label="Dismiss the update for {{ e.row.opportunity.title }}"
+                      hx-post="{% url 'crm:app_event_act' e.row.id 'dismiss' %}"
+                      title="Don't ask about this again">Dismiss</button>
+            </div>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}

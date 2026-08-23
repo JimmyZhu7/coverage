@@ -15,7 +15,7 @@ on every quick action so all of it stays in sync.
     when the QUEUE is empty; saying it while 27 items are pacing out would be
     the page contradicting the line directly beneath it.
     {% endcomment %}
-    {% if not queue_total and not debriefs and not proposals %}
+    {% if not queue_total and not debriefs and not proposals and not app_events %}
       <div class="empty">
         {% if contact_count %}
           {% comment %}
@@ -48,7 +48,7 @@ on every quick action so all of it stays in sync.
         {% endcomment %}
         {% if not seeds %}<a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>{% endif %}
       </div>
-    {% elif not lanes and not debriefs and not proposals %}
+    {% elif not lanes and not debriefs and not proposals and not app_events %}
       {% comment %}
       The plan is clear but the queue is not. This is the product working, so
       it is styled as a win — and it names what's left rather than implying
@@ -273,6 +273,13 @@ on every quick action so all of it stays in sync.
         </div>
       </section>
     {% endif %}
+
+    {% comment %}
+    From your applications — the pipeline half of "found in your inbox".
+    Its own file (crm/_application_lane.html) so it and the contact-proposal
+    lane above can be edited without touching each other.
+    {% endcomment %}
+    {% include "crm/_application_lane.html" %}
 
     {% comment %}
     Today's plan. Only non-empty lanes render. A capped lane says "N of M

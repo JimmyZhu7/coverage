@@ -30,6 +30,11 @@ urlpatterns = [
     path("proposals/undo/", views.proposals_undo, name="proposals_undo"),
     path("proposals/<int:pk>/restore/", views.proposal_restore, name="proposal_restore"),
     path("proposals/<int:pk>/<str:verb>/", views.proposal_act, name="proposal_act"),
+    # Application-status mail (capture.appmail) — the other half of the same
+    # door: a proposed pipeline move, committed only on the tap. No bulk
+    # verb; each card is a different role at a different stage, and "accept
+    # all" over a student's whole funnel is not a decision worth batching.
+    path("applications/<int:pk>/<str:verb>/", views.app_event_act, name="app_event_act"),
     path("debrief/<int:pk>/", views.debrief, name="debrief"),
     path("debrief/<int:pk>/dismiss/", views.debrief_dismiss, name="debrief_dismiss"),
     path("debrief/<int:pk>/promote/", views.debrief_promote, name="debrief_promote"),

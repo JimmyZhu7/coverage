@@ -410,6 +410,36 @@ def proposal_restore(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect(reverse("accounts:settings") + "#dismissed-proposals")
 
 
+def app_event_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
+    """One tap on an application-status card. Accept writes the pipeline
+    move through `capture.appmail.accept` — the ONLY path from a detected
+    email to `UserOpportunity`, and it holds capture_applications' refusals
+    (never backwards, never over the student's own Done). Dismiss is
+    remembered forever. Re-renders the cockpit like every other quick
+    action."""
+    from capture import appmail
+    from capture.models import ApplicationEvent
+
+    if verb not in ("accept", "dismiss"):
+        return HttpResponse(status=400)
+    event = get_object_or_404(
+        ApplicationEvent.objects.for_user(request.user), pk=pk,
+        status=ApplicationEvent.STATUS_PENDING,
+    )
+    if verb == "accept":
+        appmail.accept(event)
+        record_event(
+            "application_event_accepted", user=request.user, source="today",
+            event_type=event.event_type, status=event.target_status,
+        )
+    else:
+        appmail.dismiss(event)
+        record_event(
+            "application_event_dismissed", user=request.user, source="today",
+            event_type=event.event_type,
+        )
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
 
 # ---------------------------------------------------------------------------
 # 2. Contact list + detail.
