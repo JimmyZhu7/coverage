@@ -28,7 +28,7 @@ from assistant.plans import limits_for as assistant_limits_for
 from billing import credits as billing_credits
 from billing import stripe_gateway as billing_stripe_gateway
 from capture import gmail_live
-from capture.models import GmailConnection
+from capture.models import ContactProposal, GmailConnection
 from crm import campaigns as crm_campaigns
 from crm.models import Campaign, Contact, UserFirm
 from directory.models import Firm
@@ -508,6 +508,20 @@ def settings_view(request):
             # is the wrong place to pay for that. It runs at the end of a
             # capture sync and from `manage.py detect_campaigns`.
             "campaigns": crm_campaigns.campaign_cards(request.user),
+            # People the user dismissed from the "Found in your inbox" lane.
+            # THE ONLY PLACE THEY EXIST AFTER THE TAP: dismissal is permanent
+            # for the scan (capture.models.ContactProposal), so without a
+            # surface like this one a mis-tap buries somebody with no name, no
+            # date, and no way back. Newest first — a mis-tap is noticed
+            # within minutes, not months. Capped at 100 as a rendering guard;
+            # the export carries the full list either way. Restore POSTs to
+            # crm:proposal_restore.
+            "dismissed_proposals": list(
+                ContactProposal.objects.for_user(request.user)
+                .filter(status=ContactProposal.STATUS_DISMISSED)
+                .select_related("firm")
+                .order_by("-resolved_at", "-id")[:100]
+            ),
             "campaign_kind_other": Campaign.KIND_OTHER,
             "campaign_kind_recruiting": Campaign.KIND_RECRUITING,
             "campaign_kind_unclassified": Campaign.KIND_UNCLASSIFIED,

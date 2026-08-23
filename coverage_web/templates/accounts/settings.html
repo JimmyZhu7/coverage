@@ -523,6 +523,7 @@
       <a href="#cadence">Cadence</a>
       <a href="#pace">Weekly Pace</a>
       {% if campaigns %}<a href="#campaigns">Campaigns</a>{% endif %}
+      {% if dismissed_proposals %}<a href="#dismissed-proposals">Dismissed</a>{% endif %}
       <p class="settings-nav-group">Notifications</p>
       <a href="#notifications">Notifications</a>
       <p class="settings-nav-group">Plan &amp; Credits</p>
@@ -1067,6 +1068,79 @@
                   <button type="submit" class="btn">Something else</button>
                 </form>
               {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% comment %}
+      ---- Dismissed from your inbox ----
+      Every person the user tapped Dismiss on in Today's "Found in your inbox"
+      lane, and the way back.
+
+      WHY IT LIVES HERE AND NOT IN THE LANE. It is the same shape as the
+      Campaigns card directly above: a durable list of decisions the user made
+      once, kept somewhere they can go and change their mind, deliberately
+      away from the daily surface. A collapsed "dismissed" section inside the
+      lane itself would put yesterday's answered questions back on the page
+      that exists to hold today's unanswered ones — the Today page is a queue,
+      and re-showing resolved work on it is the exact failure the lane's own
+      cap and the "Waiting on reply" strip are designed to avoid. Settings is
+      also where the user already goes to undo a durable classification, so
+      there is one habit to learn rather than two.
+
+      SAME RENDER RULE AS CAMPAIGNS: nothing dismissed, no card, no nav link.
+      An empty card explaining a feature that has never fired is a longer page
+      and a harder product.
+      {% endcomment %}
+      {% if dismissed_proposals %}
+      <section class="set-card kin-reveal" id="dismissed-proposals" style="--i:6.7"
+               aria-labelledby="dismissed-proposals-h">
+        <div class="set-head">
+          <h2 id="dismissed-proposals-h">Dismissed From Your Inbox</h2>
+          <p>People you told Coverage not to propose. Restore any of them.</p>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-desc">
+                A dismissed person is never proposed again by a scan. That
+                stands until you restore them here, which puts them back on
+                Today waiting for your tap. Nothing was written to your
+                network either way.
+              </div>
+            </div>
+          </div>
+          {% for p in dismissed_proposals %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">{{ p.name|smart_title }}</span>
+              <div class="set-row-desc">
+                {{ p.email }}{% if p.firm %} · {{ p.firm.name|smart_title }}{% endif %}
+                {% comment %}
+                The evidence that triggered the proposal, in the same three
+                honest states the Today card uses (see crm/_cockpit.html) —
+                the surface where a decision gets REVERSED has to show at
+                least what the surface where it was made showed.
+                {% endcomment %}
+                <br>
+                {% if p.thread_subject %}
+                  Replied to: <strong>{{ p.thread_subject }}</strong>
+                {% elif p.threaded_reply %}
+                  Replied to an email you sent. No subject line on it.
+                {% else %}
+                  {{ p.evidence }}
+                {% endif %}
+                {% if p.resolved_at %}<br>Dismissed {{ p.resolved_at|date:"j M Y" }}.{% endif %}
+              </div>
+            </div>
+            <div class="set-row-control">
+              <form method="post" action="{% url 'crm:proposal_restore' p.id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn">Restore</button>
+              </form>
             </div>
           </div>
           {% endfor %}

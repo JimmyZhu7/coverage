@@ -541,6 +541,36 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .act-card.act-proposal { border-left-color: var(--accent-ink); }
   .lane-proposals .lane-bulk { margin-left: auto; display: flex; gap: var(--s2); }
 
+  /* What they replied to. The card's most decision-changing line, so the
+     subject itself is the emphasised half and the "Replied to:" label is
+     the quiet one — the reverse of how it reads if both are the same
+     weight. Clamped to two lines: a real subject can be long, and this is
+     one line of context, not a preview pane. */
+  .act-replied { color: var(--ink-3); }
+  .act-replied-subj { color: var(--ink); font-weight: var(--w-med);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; }
+  /* The honest blank. Same muted weight as the label, because "we don't
+     know" must never look like a fact about the sender. */
+  .act-replied-none { color: var(--ink-3); font-style: italic; }
+
+  /* The dismiss Undo strip. Same shape and tokens as My Applications'
+     bulk-save undo (`.apps-undo`) — one row, accent-soft, a pill button —
+     because it is the same promise: you just did something big, here is the
+     way back. Sits where the card was. */
+  .prop-undo { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+    margin-bottom: var(--s5); padding: 8px var(--s4) 8px var(--s3);
+    background: var(--accent-soft); border: 1px solid var(--accent-line);
+    border-left: 3px solid var(--accent); border-radius: 10px;
+    color: var(--ink-2); font-size: var(--fs-s); }
+  .prop-undo-said { flex: 1 1 auto; }
+  .prop-undo-note { color: var(--ink-3); }
+  .prop-undo-btn { border: 1px solid var(--accent-line); background: var(--surface);
+    color: var(--accent-ink); border-radius: 999px; padding: 4px 14px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .prop-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+
   /* Prep lane: a chat happening in a few hours. The only lane above Debrief,
      and the only one whose card leads with a clock — everything else on this
      page is "sometime today", and this one is not. */

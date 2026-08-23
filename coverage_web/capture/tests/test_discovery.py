@@ -590,3 +590,320 @@ def test_end_to_end_live_path(client):
 )
 def test_split_display_name(raw, name, hint):
     assert discovery.split_display_name(raw) == (name, hint)
+
+
+# --------------------------------------------------------------------------- #
+# What the person replied TO — the card's triggering context.
+#
+# The bug these pin: a reply to the founder's club mail merge ("Fall 2026 ICC
+# Alumni Digital Panel Outreach", see crm.models.Campaign) and a reply to
+# genuine networking outreach produced IDENTICAL cards. Campaign-aware
+# suppression only fires when the campaign was DETECTED, which needs the
+# outbound sends in the database — so when it doesn't fire, the subject line
+# is the only thing that tells a club panelist from a banker.
+# --------------------------------------------------------------------------- #
+
+def test_threaded_reply_stores_the_subject_it_replied_to(student, firm):
+    consider(student, finding(subject="Re: Fall 2026 ICC Alumni Digital Panel Outreach"))
+    (p,) = pending(student)
+    # Reply prefix stripped: the thread is the club send, not "Re: the club
+    # send". `threaded_reply` is kept as its own fact so the card can tell a
+    # missing subject apart from a message that was never a reply.
+    assert p.thread_subject == "Fall 2026 ICC Alumni Digital Panel Outreach"
+    assert p.threaded_reply is True
+
+
+def test_a_firm_first_contact_stores_no_replied_to_subject(student, firm):
+    """"Replied to" is a false sentence about someone who wrote to you first.
+    The subject is not repurposed into a line that misdescribes it."""
+    consider(student, finding(threaded_reply=False, subject="Sophomore Series"))
+    (p,) = pending(student)
+    assert p.thread_subject == ""
+    assert p.threaded_reply is False
+
+
+def test_a_reply_with_no_subject_header_records_the_reply_and_no_subject(
+    student, firm
+):
+    """Degrade honestly: the reply is still a fact, the subject is not
+    invented, and the two are stored separately so the card can say so."""
+    consider(student, finding(subject=""))
+    (p,) = pending(student)
+    assert p.thread_subject == ""
+    assert p.threaded_reply is True
+
+
+@pytest.mark.parametrize(
+    "raw,shown",
+    [
+        ("Re: Fall 2026 Outreach", "Fall 2026 Outreach"),
+        ("RE: Re: Fwd: Fall 2026 Outreach", "Fall 2026 Outreach"),
+        ("Re[2]: Fall 2026 Outreach", "Fall 2026 Outreach"),
+        ("回复: 秋招", "秋招"),
+        # Case, digits and punctuation survive — this is a line a human
+        # reads, not crm.campaigns' blunt grouping key.
+        ("Q3 2026 Analyst Program - Intro", "Q3 2026 Analyst Program - Intro"),
+        ("", ""),
+        (None, ""),
+    ],
+)
+def test_display_subject(raw, shown):
+    assert discovery.display_subject(raw) == shown
+
+
+def test_the_card_names_the_thread_the_person_replied_to(student, firm, client):
+    consider(student, finding(subject="Re: Fall 2026 ICC Alumni Digital Panel Outreach"))
+    client.force_login(student)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Replied to:" in body
+    assert "Fall 2026 ICC Alumni Digital Panel Outreach" in body
+
+
+def test_the_card_says_so_when_there_is_no_subject_to_show(student, firm, client):
+    consider(student, finding(subject=""))
+    client.force_login(student)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Replied to an email you sent" in body
+    assert "No subject line on it" in body
+    # And never a bare label with nothing after it. Asserted on the span the
+    # subject would render INTO rather than on the label text or the bare
+    # class name: `_styles.html` is inlined into this same page and both its
+    # comment and its rule mention "Replied to:" / `act-replied-subj`, so a
+    # looser check would pass for the wrong reason.
+    assert '<span class="act-replied-subj">' not in body
+
+
+# --------------------------------------------------------------------------- #
+# Undo a dismissal, and the durable restore surface.
+# --------------------------------------------------------------------------- #
+
+def test_dismiss_offers_an_undo_in_the_same_swap(student, firm, client):
+    consider(student, finding())
+    (p,) = pending(student)
+    client.force_login(student)
+    body = client.post(
+        reverse("crm:proposal_act", args=[p.id, "dismiss"])
+    ).content.decode()
+    assert "Dismissed Alex Banker." in body
+    assert reverse("crm:proposals_undo") in body
+
+
+def test_the_undo_offer_does_not_survive_the_next_render(student, firm, client):
+    """One-shot by construction: the offer rides in the response to the
+    dismissal and nowhere else, so a later action or a reload cannot show a
+    stale Undo pointing at a decision the user has already moved past."""
+    consider(student, finding())
+    (p,) = pending(student)
+    client.force_login(student)
+    client.post(reverse("crm:proposal_act", args=[p.id, "dismiss"]))
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Dismissed Alex Banker." not in body
+
+
+def test_undo_puts_the_person_back_on_today(student, firm, client):
+    consider(student, finding())
+    (p,) = pending(student)
+    client.force_login(student)
+    client.post(reverse("crm:proposal_act", args=[p.id, "dismiss"]))
+    resp = client.post(reverse("crm:proposals_undo"), {"ids": str(p.id)})
+    assert resp.status_code == 200
+    p.refresh_from_db()
+    assert p.status == "pending"
+    assert p.resolved_at is None
+    assert "Alex Banker" in resp.content.decode()
+
+
+def test_bulk_dismiss_offers_one_undo_for_the_whole_batch(student, firm, client):
+    consider(student, finding())
+    consider(student, finding(
+        email="jordan.lee@northbank.example", name="Jordan Lee", thread_id="t-2"
+    ))
+    client.force_login(student)
+    body = client.post(
+        reverse("crm:proposals_bulk", args=["dismiss"])
+    ).content.decode()
+    assert "Dismissed 2 people." in body
+    ids = ",".join(
+        str(p.id) for p in ContactProposal.objects.for_user(student).order_by("id")
+    )
+    resp = client.post(reverse("crm:proposals_undo"), {"ids": ids})
+    assert resp.status_code == 200
+    assert len(pending(student)) == 2
+
+
+def test_undo_is_scoped_to_the_signed_in_user(student, firm, client):
+    other = User.objects.create_user(email="disc-other3@example.com", password="x")
+    consider(student, finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    client.force_login(other)
+    client.post(reverse("crm:proposals_undo"), {"ids": str(p.id)})
+    p.refresh_from_db()
+    assert p.status == "dismissed"
+
+
+def test_undo_never_reverses_an_accept(student, firm, client):
+    """The ids arrive from the client, so the status filter is the real
+    guard: an accepted proposal is real work and undo must not eat it."""
+    consider(student, finding())
+    (p,) = pending(student)
+    client.force_login(student)
+    client.post(reverse("crm:proposal_act", args=[p.id, "accept"]))
+    client.post(reverse("crm:proposals_undo"), {"ids": str(p.id)})
+    p.refresh_from_db()
+    assert p.status == "accepted"
+
+
+def test_undo_rejects_junk_ids(student, firm, client):
+    client.force_login(student)
+    assert client.post(
+        reverse("crm:proposals_undo"), {"ids": "abc, ,"}
+    ).status_code == 400
+
+
+# --- The Settings restore surface ------------------------------------------ #
+
+def test_settings_lists_dismissed_people_with_their_evidence(student, firm, client):
+    consider(student, finding(subject="Re: Fall 2026 ICC Alumni Digital Panel Outreach"))
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    client.force_login(student)
+    body = client.get(reverse("accounts:settings")).content.decode()
+    assert "Dismissed From Your Inbox" in body
+    assert "Alex Banker" in body
+    assert "Fall 2026 ICC Alumni Digital Panel Outreach" in body
+    assert reverse("crm:proposal_restore", args=[p.id]) in body
+
+
+def test_settings_hides_the_card_when_nothing_was_dismissed(student, firm, client):
+    consider(student, finding())
+    client.force_login(student)
+    body = client.get(reverse("accounts:settings")).content.decode()
+    assert "Dismissed From Your Inbox" not in body
+
+
+def test_restore_from_settings_returns_the_person_to_pending(student, firm, client):
+    consider(student, finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    client.force_login(student)
+    resp = client.post(reverse("crm:proposal_restore", args=[p.id]), follow=True)
+    assert resp.status_code == 200
+    p.refresh_from_db()
+    assert p.status == "pending"
+    assert len(pending(student)) == 1
+
+
+def test_restore_is_scoped_by_user(student, firm, client):
+    other = User.objects.create_user(email="disc-other4@example.com", password="x")
+    consider(student, finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    client.force_login(other)
+    assert client.post(
+        reverse("crm:proposal_restore", args=[p.id])
+    ).status_code == 404
+    p.refresh_from_db()
+    assert p.status == "dismissed"
+
+
+# --- Restore reconciles rather than duplicating ---------------------------- #
+
+def test_restore_reconciles_onto_a_contact_added_in_the_meantime(student, firm):
+    """Dismissal is permanent, so the gap before a restore is unbounded and
+    the person may have arrived by another door. Restoring must not put a
+    "Not in your network" card on Today for somebody who is in it."""
+    consider(student, finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    hand_added = Contact.all_objects.create(
+        user=student, name="Alex Banker", email="alex.banker@northbank.example",
+    )
+    outcome, contact = discovery.restore(p)
+    assert outcome == discovery.ALREADY_A_CONTACT
+    assert contact == hand_added
+    p.refresh_from_db()
+    assert p.status == "accepted"
+    assert p.contact_id == hand_added.id
+    assert pending(student) == []
+    assert Contact.objects.for_user(student).count() == 1
+
+
+def test_restore_matches_on_name_when_the_address_differs(student, firm):
+    """The same match rule accept and consider_finding use — email first,
+    then normalized name — so the three cannot disagree about who is a
+    duplicate."""
+    consider(student, finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    Contact.all_objects.create(
+        user=student, name="alex  banker", email="a.banker@personal.example",
+    )
+    outcome, _ = discovery.restore(p)
+    assert outcome == discovery.ALREADY_A_CONTACT
+    assert Contact.objects.for_user(student).count() == 1
+
+
+def test_restore_refuses_to_resurrect_an_archived_contact(student, firm):
+    """capture_discover's rule, unchanged: archiving was a deliberate user
+    action and a restore is not consent to undo it."""
+    consider(student, finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    Contact.all_objects.create(
+        user=student, name="Alex Banker", email="alex.banker@northbank.example",
+        archived=True,
+    )
+    outcome, contact = discovery.restore(p)
+    assert outcome == discovery.RESTORE_ARCHIVED
+    assert contact is None
+    p.refresh_from_db()
+    assert p.status == "dismissed"
+
+
+def test_restore_is_idempotent(student, firm):
+    consider(student, finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    assert discovery.restore(p)[0] == discovery.RESTORED
+    assert discovery.restore(p)[0] == discovery.RESTORE_NOOP
+    p.refresh_from_db()
+    assert p.status == "pending"
+
+
+def test_a_scan_still_never_re_proposes_a_dismissed_person(student, firm):
+    """The guarantee undo must not weaken: restoring is a USER action, and
+    nothing automatic ever writes `pending` back. A dismissed row still blocks
+    re-proposal on the mere existence of the row, whatever its status."""
+    consider(student, finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    assert consider(student, finding(thread_id="t-later")) is None
+    p.refresh_from_db()
+    assert p.status == "dismissed"
+    assert pending(student) == []
+
+
+def test_a_restored_person_can_be_accepted_normally(student, firm, client):
+    consider(student, finding())
+    (p,) = pending(student)
+    client.force_login(student)
+    client.post(reverse("crm:proposal_act", args=[p.id, "dismiss"]))
+    client.post(reverse("crm:proposals_undo"), {"ids": str(p.id)})
+    client.post(reverse("crm:proposal_act", args=[p.id, "accept"]))
+    p.refresh_from_db()
+    assert p.status == "accepted"
+    contact = Contact.objects.for_user(student).get(
+        email="alex.banker@northbank.example"
+    )
+    # Warmth still earned through the ratchet, never gifted by the round trip.
+    assert Touch.objects.for_user(student).filter(contact=contact).exists()
+
+
+def test_the_export_carries_the_replied_to_subject(student, firm):
+    from accounts import services as account_services
+
+    consider(student, finding(subject="Re: Fall 2026 ICC Alumni Digital Panel Outreach"))
+    csv = account_services.contact_proposals_csv(student)
+    assert "thread_subject" in csv.splitlines()[0]
+    assert "Fall 2026 ICC Alumni Digital Panel Outreach" in csv

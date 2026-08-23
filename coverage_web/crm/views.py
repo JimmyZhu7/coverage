@@ -229,14 +229,43 @@ def debrief_promote(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("crm:contact_detail", pk=row.contact_id)
 
 
+def _dismiss_undo_offer(proposals: list) -> dict:
+    """The one-shot Undo strip the cockpit draws right after a dismissal.
+
+    IN THE RESPONSE, NOT IN THE SESSION — deliberately, and unlike
+    `directory.views.BULK_SAVE_SESSION_KEY`. That batch had to survive a
+    redirect to a different page, so it needed somewhere to live; this one is
+    handed straight back in the same htmx swap that removed the card, so the
+    ids can just ride in the markup. The consequence is the right lifetime for
+    free: the offer exists for exactly as long as this render of the cockpit,
+    and any later action (or a refresh) replaces it with a cockpit that has no
+    strip. Nothing goes stale because nothing is stored.
+
+    The durable path is `accounts` Settings > Dismissed from your inbox, which
+    is what the strip's second sentence points at. This is the in-the-moment
+    fix for a mis-tap, not the archive.
+    """
+    return {
+        "ids": ",".join(str(p.pk) for p in proposals),
+        "count": len(proposals),
+        # Named while there is one name to say. Beyond that the count carries
+        # it — "Dismissed 9 people" is a fact; listing nine names is a wall.
+        "who": proposals[0].name if len(proposals) == 1 else "",
+    }
+
+
 @login_required
 @require_POST
 def proposal_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     """One tap on a contact proposal: accept creates the contact through
     `capture.discovery.accept` (capture_discover's own creation contract —
     warmth earned via the ratchet, archived matches never resurrected), and
-    dismiss hides it forever. Re-renders the cockpit like every other Today
-    quick action."""
+    dismiss hides it from every future scan. Re-renders the cockpit like every
+    other Today quick action.
+
+    A dismissal comes back with the Undo strip in the same swap (see
+    `_dismiss_undo_offer`). Dismissal is permanent for the SCAN by design, so
+    the one thing it must not also be is silent."""
     from capture import discovery
     from capture.models import ContactProposal
 
@@ -246,6 +275,7 @@ def proposal_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
         ContactProposal.objects.for_user(request.user), pk=pk,
         status=ContactProposal.STATUS_PENDING,
     )
+    context = None
     if verb == "accept":
         contact = discovery.accept(proposal)
         record_event(
@@ -255,7 +285,11 @@ def proposal_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     else:
         discovery.dismiss(proposal)
         record_event("contact_proposal_dismissed", user=request.user, source="today")
-    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+        context = _cockpit_context(request.user)
+        context["dismiss_undo"] = _dismiss_undo_offer([proposal])
+    return render(
+        request, "crm/_cockpit.html", context or _cockpit_context(request.user)
+    )
 
 
 @login_required
@@ -263,7 +297,9 @@ def proposal_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 def proposals_bulk(request: HttpRequest, verb: str) -> HttpResponse:
     """Accept or dismiss every pending proposal at once. Same per-row paths
     as the single-tap view — the bulk button is a loop, not a second
-    contract."""
+    contract. "Dismiss all" is the single most destructive tap in this lane,
+    so it comes back with the same Undo strip a one-by-one dismiss does,
+    naming the count it just buried."""
     from capture import discovery
     from capture.models import ContactProposal
 
@@ -284,7 +320,94 @@ def proposals_bulk(request: HttpRequest, verb: str) -> HttpResponse:
             f"contact_proposals_bulk_{verb}", user=request.user, source="today",
             count=len(pending),
         )
+    context = _cockpit_context(request.user)
+    if verb == "dismiss" and pending:
+        context["dismiss_undo"] = _dismiss_undo_offer(pending)
+    return render(request, "crm/_cockpit.html", context)
+
+
+@login_required
+@require_POST
+def proposals_undo(request: HttpRequest) -> HttpResponse:
+    """Undo the dismissal the Undo strip is offering — those ids and no
+    others.
+
+    Scoped three ways, because the ids arrive from the client: `.for_user`
+    (another tenant's id 404s into nothing, same as a missing one), the
+    `dismissed` status filter inside `discovery.restore` (an accepted row is
+    real work and undo must never eat it), and the parse below, which drops
+    anything that isn't an integer rather than letting it reach the ORM.
+
+    `restore` does the reconciling — a person added by another door since the
+    dismissal comes back as already-in-your-network rather than as a duplicate
+    card. See its docstring."""
+    from capture import discovery
+    from capture.models import ContactProposal
+
+    ids = []
+    for raw in (request.POST.get("ids") or "").split(","):
+        raw = raw.strip()
+        if raw.isdigit():
+            ids.append(int(raw))
+    if not ids:
+        return HttpResponse(status=400)
+
+    rows = list(
+        ContactProposal.objects.for_user(request.user).filter(
+            id__in=ids, status=ContactProposal.STATUS_DISMISSED
+        )
+    )
+    restored = sum(
+        1 for row in rows if discovery.restore(row)[0] == discovery.RESTORED
+    )
+    if rows:
+        record_event(
+            "contact_proposals_dismiss_undone", user=request.user, source="today",
+            count=restored,
+        )
     return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+@login_required
+@require_POST
+def proposal_restore(request: HttpRequest, pk: int) -> HttpResponse:
+    """Restore one dismissed proposal from Settings > Dismissed from your
+    inbox — the durable half of the same undo, for the mis-tap nobody caught
+    in the moment.
+
+    Flashes what actually happened rather than a blanket "restored": the row
+    may reconcile onto a contact that already exists, or refuse because the
+    match is archived, and the user is owed the real sentence in both cases
+    (see `capture.discovery.restore`)."""
+    from capture import discovery
+    from capture.models import ContactProposal
+
+    proposal = get_object_or_404(
+        ContactProposal.objects.for_user(request.user), pk=pk,
+        status=ContactProposal.STATUS_DISMISSED,
+    )
+    outcome, contact = discovery.restore(proposal)
+    record_event(
+        "contact_proposal_restored", user=request.user, source="settings",
+        outcome=outcome,
+    )
+    if outcome == discovery.RESTORED:
+        messages.success(
+            request, f"{proposal.name} is back on Today, waiting for your tap."
+        )
+    elif outcome == discovery.ALREADY_A_CONTACT:
+        messages.info(
+            request,
+            f"{proposal.name} is already in your network"
+            + (f" as {contact.name}." if contact else "."),
+        )
+    elif outcome == discovery.RESTORE_ARCHIVED:
+        messages.info(
+            request,
+            f"{proposal.name} matches an archived contact. Unarchive them from "
+            "Archived Contacts if you want them back.",
+        )
+    return redirect(reverse("accounts:settings") + "#dismissed-proposals")
 
 
 

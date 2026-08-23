@@ -23,6 +23,12 @@ urlpatterns = [
     # accept/dismiss from the Today page. Literal "bulk" segment first so the
     # int converter can't shadow it.
     path("proposals/bulk/<str:verb>/", views.proposals_bulk, name="proposals_bulk"),
+    # The in-the-moment Undo strip (ids in the POST body, see
+    # crm.views._dismiss_undo_offer) and the durable Settings restore. Both
+    # literal segments, declared ahead of the int converter for the same
+    # reason "bulk" is.
+    path("proposals/undo/", views.proposals_undo, name="proposals_undo"),
+    path("proposals/<int:pk>/restore/", views.proposal_restore, name="proposal_restore"),
     path("proposals/<int:pk>/<str:verb>/", views.proposal_act, name="proposal_act"),
     path("debrief/<int:pk>/", views.debrief, name="debrief"),
     path("debrief/<int:pk>/dismiss/", views.debrief_dismiss, name="debrief_dismiss"),

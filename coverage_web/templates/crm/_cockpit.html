@@ -173,9 +173,30 @@ on every quick action so all of it stays in sync.
     {% comment %}
     Found in your inbox. People the mailbox scan judged worth tracking —
     proposals, not contacts. Nothing is in the CRM until Add is tapped
-    (capture/discovery.py), and Dismiss is remembered forever. Sits with the
+    (capture/discovery.py), and Dismiss is remembered forever by the SCAN —
+    never again proposed automatically, always restorable by hand (the Undo
+    strip above, and Settings > Dismissed from your inbox). Sits with the
     debrief lane above the plan: both are about mail that already happened.
     {% endcomment %}
+    {% comment %}
+    The Undo strip. Present only in the response to a dismissal (see
+    crm.views._dismiss_undo_offer) — any later swap re-renders this cockpit
+    without it, which is the whole intended lifetime. Above the lane so it is
+    where the card just was, and it names the durable surface so the user
+    learns there is one before they need it.
+    {% endcomment %}
+    {% if dismiss_undo %}
+      <div class="prop-undo" role="status">
+        <span class="prop-undo-said">
+          {% if dismiss_undo.who %}Dismissed {{ dismiss_undo.who|smart_title }}.{% else %}Dismissed {{ dismiss_undo.count }} people.{% endif %}
+          <span class="prop-undo-note">They won't be proposed again. Restore anytime in Settings.</span>
+        </span>
+        <button type="button" class="btn prop-undo-btn"
+                hx-post="{% url 'crm:proposals_undo' %}"
+                hx-vals='{"ids": "{{ dismiss_undo.ids }}"}'>Undo</button>
+      </div>
+    {% endif %}
+
     {% if proposals %}
       <section class="lane lane-proposals">
         <h2 class="lane-title">
@@ -208,7 +229,31 @@ on every quick action so all of it stays in sync.
                   <span class="prio prio-proposal">Not in your network</span>
                   {% if p.recruiting_hint %}<span class="prio">Recruiting contact</span>{% endif %}
                 </div>
-                <p class="act-reason">{{ p.evidence }}</p>
+                {% comment %}
+                WHAT THEY REPLIED TO — one line, and the one that decides the
+                tap. A reply to a club mail merge and a reply to real
+                networking outreach used to render identically here; the
+                subject alone tells them apart. Three honest states, never a
+                fabricated fourth:
+
+                  * subject known  -> "Replied to: <subject>", reply prefixes
+                    already stripped by capture.discovery.display_subject.
+                  * a reply with no subject on it -> say that, and say
+                    nothing about what it was.
+                  * not a reply at all (a firm-domain first contact) -> the
+                    stored evidence line, which is exactly what was observed.
+
+                Rows created before thread_subject existed fall to the third
+                branch, where `evidence` still carries the subject in its own
+                prose. Older, wordier, and true.
+                {% endcomment %}
+                {% if p.thread_subject %}
+                  <p class="act-reason act-replied">Replied to: <span class="act-replied-subj">{{ p.thread_subject }}</span></p>
+                {% elif p.threaded_reply %}
+                  <p class="act-reason act-replied">Replied to an email you sent. <span class="act-replied-none">No subject line on it.</span></p>
+                {% else %}
+                  <p class="act-reason">{{ p.evidence }}</p>
+                {% endif %}
               </div>
               <div class="act-quick">
                 <div class="act-primary">
@@ -220,7 +265,7 @@ on every quick action so all of it stays in sync.
                   <button type="button" class="btn act-ghost"
                           aria-label="Dismiss {{ p.name }}"
                           hx-post="{% url 'crm:proposal_act' p.id 'dismiss' %}"
-                          title="Never propose this person again">Dismiss</button>
+                          title="No scan will propose this person again. Undo right after, or restore from Settings.">Dismiss</button>
                 </div>
               </div>
             </article>
