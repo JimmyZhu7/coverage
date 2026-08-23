@@ -333,6 +333,27 @@ def consider_finding(
     if firm_id is None and not finding.get("threaded_reply"):
         return None
 
+    # CAMPAIGN-AWARE SUPPRESSION. A reply to a mail merge the user has already
+    # said was NOT their recruiting must not become a "Found in your inbox"
+    # card: the subject the reply carries is the campaign's own signature, and
+    # the user has answered the question about that send once. Without this, a
+    # merge recipient who was never in Coverage (the outbound predates the
+    # Gmail connection, say) gets proposed off their reply, and accepting them
+    # quietly re-imports a person from a send the user explicitly declassified.
+    # Only an explicit `other` answer suppresses — an undetected or unanswered
+    # campaign changes nothing here, the same rule `crm/campaigns.py` holds for
+    # the queue. Deterministic: one signature lookup, no guessing from prose.
+    subject = (finding.get("subject") or "").strip()
+    if subject:
+        from crm.campaigns import normalize_subject
+        from crm.models import Campaign
+
+        signature = normalize_subject(subject)
+        if signature and Campaign.objects.for_user(user).filter(
+            signature=signature, kind=Campaign.KIND_OTHER
+        ).exists():
+            return None
+
     # -- existing rows: never duplicate, never resurrect -------------------- #
     if ContactProposal.objects.for_user(user).filter(email=email).exists():
         return None

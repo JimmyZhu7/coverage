@@ -348,6 +348,37 @@ def test_unmatched_genuine_finding_proposes(student, firm):
     assert Contact.objects.for_user(student).count() == 0
 
 
+def test_a_reply_to_a_declassified_campaign_is_never_proposed(student, firm):
+    """The campaign-aware suppression gap, closed. A merge recipient who was
+    never in Coverage replies; their subject IS the campaign's signature. If
+    the user has classified that send "not my recruiting", proposing the
+    replier would quietly re-import a person from a send the user explicitly
+    declassified — and accepting the card would make them a permanent
+    queue-eligible contact `crm.campaigns` can never exclude (no outbound
+    touch of theirs carries the signature). An unanswered or `recruiting`
+    campaign changes nothing: status quo, still proposed."""
+    from crm.campaigns import normalize_subject
+    from crm.models import Campaign
+
+    panel = "Fall 2026 ICC Alumni Digital Panel Outreach"
+    now = timezone.now()
+    campaign = Campaign.all_objects.create(
+        user=student, signature=normalize_subject(panel), label=panel,
+        kind=Campaign.KIND_OTHER, first_sent=now, last_sent=now,
+        recipient_count=10,
+    )
+    f = finding(subject=f"Re: {panel}")
+
+    assert consider(student, f) is None
+    assert pending(student) == []
+
+    # The same reply against an unanswered campaign is proposed — suppression
+    # requires the user's explicit answer, never the detector's.
+    campaign.kind = Campaign.KIND_UNCLASSIFIED
+    campaign.save(update_fields=["kind"])
+    assert consider(student, f) == discovery.PROPOSED
+
+
 def test_unmatched_bulk_finding_does_not_propose(student, firm):
     result = apply_findings(student, [finding(bulk=True, replied=False)])
     assert result.proposals_created == 0
