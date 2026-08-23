@@ -53,6 +53,27 @@ RULES HONORED FROM THE TWO REFUSALS ABOVE:
 - Recruiting-looking senders are still proposed (they are worth tracking),
   carrying `recruiting_hint` so accept sets `Contact.recruiting_contact` and
   the queue never proposes coffee to them (`crm.relevance`).
+
+WHAT THE CARD HAS TO SAY, AND WHY IT NOW SAYS IT. A proposal exists because
+somebody replied to something the user sent. Which thing they replied to is
+the whole decision, and the card used to fold it into one run-on evidence
+sentence or, when the header was empty, drop it entirely. The founder is also
+his club's outreach lead: a reply to "Fall 2026 ICC Alumni Digital Panel
+Outreach" and a reply to genuine networking outreach produced the same card,
+and the campaign gate below only catches the first when the campaign was
+DETECTED — which needs the outbound sends in the database. So the thread
+subject is stored on its own (`ContactProposal.thread_subject`, stripped of
+reply prefixes by `display_subject`) and rendered as its own line. When there
+is no subject to show, the card says the reply was a reply and says nothing
+about a subject — see `templates/crm/_cockpit.html`. Nothing is invented.
+
+AND DISMISS IS NO LONGER A TRAPDOOR. The never-re-propose guarantee is about
+the SCAN, not about the user: `consider_finding` still refuses on the mere
+existence of a row for that address whatever its status, and no automatic path
+writes `pending`. `restore` (below) is the only way back, reached from the
+Undo strip on Today and the Dismissed card in Settings, and it reconciles
+against the same match rule `accept` uses so a person added by another door in
+the meantime is never duplicated.
 """
 
 from __future__ import annotations
@@ -263,6 +284,42 @@ def split_display_name(raw: str) -> tuple[str, str]:
     return name or raw, hint[:255]
 
 
+def display_subject(raw: str | None) -> str:
+    """A Subject header made fit to READ on a card: reply/forward prefixes
+    stripped (all of them — "Re: Fwd: Re:" is one thread, not three), inner
+    whitespace collapsed, nothing else touched.
+
+    Deliberately NOT `crm.campaigns.normalize_subject`: that one lowercases
+    and drops every digit and symbol because it is a grouping KEY, and
+    "fall  icc alumni digital panel outreach" is not a line to show a human.
+    This shares only the prefix regex with it, so the two agree about what a
+    prefix is.
+    """
+    from crm.campaigns import _REPLY_PREFIX_RE
+
+    text = (raw or "").strip()
+    while True:
+        stripped = _REPLY_PREFIX_RE.sub("", text, count=1).strip()
+        if stripped == text:
+            break
+        text = stripped
+    return " ".join(text.split())[:255]
+
+
+def _match_existing(user, email: str, name: str) -> Contact | None:
+    """The contact this address-or-name already is, across EVERY row
+    including archived ones. Email first (the strong key), then normalized
+    name (the weak one) — the exact order and scope `capture_discover` uses,
+    lifted out of `consider_finding`/`accept` so `restore` reconciles by the
+    same rule instead of growing a third opinion about who is a duplicate."""
+    everyone = Contact.objects.for_user(user)
+    match = everyone.filter(email__iexact=email).first()
+    if match is None:
+        target = normalize_name(name)
+        match = next((c for c in everyone if normalize_name(c.name) == target), None)
+    return match
+
+
 def _evidence_kind(finding: dict) -> str:
     chat_status = str(finding.get("chat_status", "none") or "none").strip().lower()
     if chat_status == "completed":
@@ -361,13 +418,7 @@ def consider_finding(
     raw_name = (finding.get("name") or "").strip() or localpart
     name, role_hint = split_display_name(raw_name)
 
-    everyone = Contact.objects.for_user(user)
-    match = everyone.filter(email__iexact=email).first()
-    if match is None:
-        target = normalize_name(name)
-        match = next(
-            (c for c in everyone if normalize_name(c.name) == target), None
-        )
+    match = _match_existing(user, email, name)
     if match is not None:
         if match.archived:
             # capture_discover's rule, kept exactly: archiving was a
@@ -397,6 +448,14 @@ def consider_finding(
             recruiting_hint=is_recruiting_role(role_hint),
             evidence=_evidence_line(finding, firm_matched=firm_id is not None),
             evidence_kind=_evidence_kind(finding),
+            # Only for a genuine threaded reply: the card labels this line
+            # "Replied to", and that sentence is false for a firm-domain
+            # first contact. Blank there, and the evidence line already says
+            # what shape THAT message was.
+            thread_subject=(
+                display_subject(subject) if finding.get("threaded_reply") else ""
+            ),
+            threaded_reply=bool(finding.get("threaded_reply")),
             thread_id=(finding.get("thread_id") or "").strip()[:128],
             occurred_at=occurred_at,
         )
@@ -428,13 +487,7 @@ def accept(proposal: ContactProposal) -> Contact | None:
         return proposal.contact
 
     user = proposal.user
-    everyone = Contact.objects.for_user(user)
-    match = everyone.filter(email__iexact=proposal.email).first()
-    if match is None:
-        target = normalize_name(proposal.name)
-        match = next(
-            (c for c in everyone if normalize_name(c.name) == target), None
-        )
+    match = _match_existing(user, proposal.email, proposal.name)
 
     if match is not None and match.archived:
         _resolve(proposal, ContactProposal.STATUS_DISMISSED)
@@ -484,10 +537,64 @@ def accept(proposal: ContactProposal) -> Contact | None:
 
 
 def dismiss(proposal: ContactProposal) -> None:
-    """Hide forever. The row stays — it IS the do-not-re-propose memory."""
+    """Hide. The row stays — it IS the do-not-re-propose memory, and no scan
+    will ever ask about this address again. `restore` below is the way back,
+    and only a person can reach it."""
     if proposal.status != ContactProposal.STATUS_PENDING:
         return
     _resolve(proposal, ContactProposal.STATUS_DISMISSED)
+
+
+# What `restore` did, for the caller's message. The user tapped a button and
+# is owed a sentence saying what actually happened, which is not always
+# "it's back".
+RESTORED = "restored"
+ALREADY_A_CONTACT = "already_a_contact"
+RESTORE_ARCHIVED = "archived"
+RESTORE_NOOP = "noop"
+
+
+def restore(proposal: ContactProposal) -> tuple[str, Contact | None]:
+    """Undo a dismissal: put the row back to `pending` so the card returns to
+    the Today lane. Returns `(outcome, contact)`.
+
+    WHY THIS IS NOT A ONE-LINE STATUS FLIP. Dismissal is permanent by design,
+    so the gap between the dismiss and the restore can be arbitrarily long,
+    and in that gap the person may have entered Coverage by another door —
+    hand-added, imported, or accepted from a different proposal. Flipping the
+    row back to `pending` there would put a "Not in your network" card on the
+    Today page for somebody who demonstrably IS in the network, and one tap on
+    Add would then run `accept`, which would match them and… do nothing, after
+    asking. So this reconciles against the SAME match rule accept and
+    consider_finding use (`_match_existing`: email, then normalized name,
+    across every row including archived):
+
+    - Live contact already exists -> the proposal's question is answered, not
+      pending. Recorded as `accepted` against that contact, exactly the state
+      `accept`'s own already-a-contact branch writes. No duplicate, no card.
+    - The match is ARCHIVED -> stays dismissed. Archiving was a deliberate
+      user action and `capture_discover`'s rule has always been that a later
+      pass is not consent to undo it; unarchiving stays a by-hand decision on
+      the contact's own page.
+    - No match -> `pending`, `resolved_at` cleared. The card comes back.
+
+    Idempotent: a row that is not `dismissed` is left exactly as it is.
+    """
+    if proposal.status != ContactProposal.STATUS_DISMISSED:
+        return RESTORE_NOOP, proposal.contact
+
+    match = _match_existing(proposal.user, proposal.email, proposal.name)
+    if match is not None:
+        if match.archived:
+            return RESTORE_ARCHIVED, None
+        proposal.contact = match
+        _resolve(proposal, ContactProposal.STATUS_ACCEPTED, extra=["contact"])
+        return ALREADY_A_CONTACT, match
+
+    proposal.status = ContactProposal.STATUS_PENDING
+    proposal.resolved_at = None
+    proposal.save(update_fields=["status", "resolved_at"])
+    return RESTORED, None
 
 
 def _resolve(proposal: ContactProposal, status: str, *, extra: list[str] | None = None) -> None:

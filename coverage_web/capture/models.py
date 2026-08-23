@@ -42,6 +42,15 @@ class ContactProposal(PrivateModel):
     plus "dismissed rows are never deleted"), so the same stranger is not
     re-proposed every week the scan re-sees their thread.
 
+    REMEMBERED FOREVER IS NOT THE SAME AS UNRECOVERABLE. The memory exists to
+    stop the SCAN re-asking; it was never meant to stop the USER changing
+    their mind. `capture.discovery.restore` puts a dismissed row back to
+    `pending` on an explicit tap (the Undo strip on Today, or the Dismissed
+    card in Settings), and nothing automatic ever does — `consider_finding`
+    still refuses on the mere existence of a row for that address, whatever
+    its status. So the guarantee is intact and a mis-tap is no longer a
+    person buried without a trace.
+
     What it holds is exactly what was OBSERVED, nothing inferred: the display
     name the message carried, the address, the firm whose email domain
     matched (if one did), the one-line evidence, and the strongest touch kind
@@ -80,6 +89,37 @@ class ContactProposal(PrivateModel):
     # One line of why: which message, in what shape. Subject at most — §10's
     # "no email bodies in logs/notes" applies here like everywhere else.
     evidence = models.CharField(max_length=300, blank=True, default="")
+    # WHAT THIS PERSON REPLIED TO — the subject of the thread, reply/forward
+    # prefixes stripped, and the single most decision-changing fact on the
+    # card. Set only for a genuine threaded reply (`threaded_reply` on the
+    # finding); blank everywhere else, and blank is honest.
+    #
+    # WHY IT IS A COLUMN AND NOT READ OFF `evidence`. The founder is also his
+    # club's outreach lead and mail-merged 201 alumni with the subject "Fall
+    # 2026 ICC Alumni Digital Panel Outreach" (see crm.models.Campaign). A
+    # panelist's reply and a genuine banker's reply produce IDENTICAL cards
+    # today: same name shape, same "Not in your network" badge, same
+    # "Replied to your email" line. Campaign-aware suppression
+    # (capture.discovery.consider_finding) only fires when the campaign was
+    # DETECTED, and detection needs the outbound sends in the database — if
+    # the merge predates the Gmail connection there is no campaign, no
+    # suppression, and the club panelist walks into the CRM as a real
+    # relationship on one tap. The subject alone makes that send self-evident,
+    # so it gets its own field and its own line rather than being buried in
+    # the prose of `evidence`, which a display change would then have to parse
+    # back out.
+    thread_subject = models.CharField(max_length=255, blank=True, default="")
+    # Whether the message carried a real RFC reply pointer (In-Reply-To /
+    # References of something the user sent) — `capture.inbound`'s
+    # `threaded_reply`, the other half of the judgment chain's final gate.
+    #
+    # Stored so the card can tell "they replied and the subject line was
+    # empty" apart from "they wrote to you first from a firm address". Those
+    # need different sentences, and the only alternative was pattern-matching
+    # the prose of `evidence`, which is a display string that a copy edit is
+    # allowed to change. A fact the finding already knew, kept instead of
+    # re-derived.
+    threaded_reply = models.BooleanField(default=False)
     # The strongest touch kind the evidence supports ("reply_received",
     # "chat_scheduled", "chat"). What accept logs through the ratchet, so the
     # created contact's warmth is earned history, not a gift.

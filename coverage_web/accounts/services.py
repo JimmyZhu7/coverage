@@ -589,6 +589,11 @@ CAMPAIGN_CONTACT_EXPORT_COLUMNS = [
 ]
 CONTACT_PROPOSAL_EXPORT_COLUMNS = [
     "name", "email", "firm", "role_hint", "recruiting_hint", "evidence",
+    # What the person replied to, and whether it was a reply at all. Observed
+    # off their message like every other column here, and the one that
+    # explains WHY a row exists — an export that dropped it would be a list of
+    # names with the reason removed.
+    "thread_subject", "threaded_reply",
     "status", "occurred_at", "created", "resolved_at",
 ]
 DEBRIEF_EXPORT_COLUMNS = [
@@ -836,6 +841,7 @@ def contact_proposals_csv(user) -> str:
                 p.name, p.email,
                 p.firm.name if p.firm_id else "",
                 p.role_hint, p.recruiting_hint, p.evidence,
+                p.thread_subject, p.threaded_reply,
                 p.status, _dt(p.occurred_at), _dt(p.created), _dt(p.resolved_at),
             ]
             for p in rows
