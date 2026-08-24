@@ -204,6 +204,57 @@ def test_ordinary_titles_are_not(role):
     assert not rel.is_recruiting_role(role)
 
 
+@pytest.mark.parametrize("role", [
+    # How the founder's 2026-08-23 full-history refresh actually spelled it:
+    # ten campus recruiters at Bain, BCG, PwC and KPMG arrived with this exact
+    # role, read by `capture.discovery.split_display_name` off signatures like
+    # "Keith Bevans, Recruiting". The function is the whole seat.
+    "Recruiting",
+    "recruiting",
+    "Recruitment",
+    "  Recruiting  ",   # split_display_name trims, but the rule must not rely on it
+])
+def test_a_role_that_is_nothing_but_recruiting_is_recognised(role):
+    assert rel.is_recruiting_role(role)
+
+
+@pytest.mark.parametrize("role", [
+    # The false positive the bare-substring rejection exists to prevent, and
+    # must KEEP preventing: a banker whose longer title merely contains the
+    # word. Silencing this person's coffee chat would be invisible and worse
+    # than any wrong prompt.
+    "Analyst, recruiting",
+    "IB Analyst - recruiting team liaison",
+    "Recruiting the next generation of traders",  # leads with it, still not a seat
+])
+def test_recruiting_inside_a_longer_role_still_does_not_match_bare(role):
+    """The whole-string carve-out must stay a whole-string carve-out. None of
+    these are caught by the marker list either, so a regression here means the
+    anchor leaked into a substring match."""
+    assert not rel.is_recruiting_role(role)
+
+
+def test_a_bare_recruiting_recruiter_who_wrote_gets_a_reply_not_a_chat_invitation():
+    """The 2026-08-23 resurfacing of the founder's 2026-08-22 complaint: a
+    Bain campus recruiter with role exactly "Recruiting", warmth `replied` off
+    a real inbound note, was headed for "they replied, propose a 15-min chat"
+    because the classifier only rejected the bare word as a substring and had
+    no whole-string rule."""
+    user = _user()
+    firm = _target_firm(user, slug="bain", name="Bain & Company", tier=2)
+    c = Contact.all_objects.create(
+        user=user, name="Campus Recruiter Signed Bare", firm=firm,
+        role="Recruiting", warmth="replied", thread_state="replied",
+    )
+    _touch(user, c, "reply_received", days_ago=8)
+
+    a = _actions_by_name(user)["Campus Recruiter Signed Bare"]
+    assert a["is_recruiting"] is True
+    assert a["label"] == rel.RECRUITING_REPLY_LABEL
+    assert "not a coffee chat" in a["reason"]
+    assert "15-min chat" not in a["reason"]
+
+
 def test_a_recruiter_who_wrote_to_you_gets_a_reply_not_a_chat_invitation():
     """The measured card: a "Manager, Talent Acquisition" whose mass programme
     invite had been logged as a reply, answered with "they replied, propose a

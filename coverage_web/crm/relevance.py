@@ -190,11 +190,14 @@ def relevance_weight(relevance, tier) -> float:
 #     networking contact who happens to work in HR, not a gatekeeper standing
 #     between him and a job. The distinction this list draws is the person's
 #     relationship to HIM, not their department.
-#   - a bare "recruiting" / "recruitment": banking analysts routinely carry
-#     campus-recruiting duty in their title ("IB Analyst, campus recruiting
-#     captain"). The `campus recruit` entry below catches the actual recruiter
-#     titles without catching the analyst, because a recruiter's title leads
-#     with the function and an analyst's leads with the seat.
+#   - a bare "recruiting" / "recruitment" AS A SUBSTRING: banking analysts
+#     routinely carry campus-recruiting duty in their title ("IB Analyst,
+#     campus recruiting captain"). The `campus recruit` entry below catches the
+#     actual recruiter titles without catching the analyst, because a
+#     recruiter's title leads with the function and an analyst's leads with the
+#     seat. The one carve-out is `_WHOLE_ROLE_RECRUITING_RE` below: a role that
+#     is NOTHING BUT the word names the function alone and has no seat this
+#     rejection could be protecting.
 #   - "professor", "advisor", "faculty": a professor is a perfectly good coffee
 #     chat. They are not part of the recruiting process.
 _RECRUITING_ROLE_MARKERS: tuple[str, ...] = (
@@ -215,6 +218,27 @@ _RECRUITING_ROLE_RE = re.compile(
     r"\b(?:" + "|".join(_RECRUITING_ROLE_MARKERS) + r")\b", re.IGNORECASE
 )
 
+# The one exception to the bare-"recruiting" rejection above, and it is
+# deliberately narrower than the thing that was rejected. The rejection was
+# about SUBSTRINGS: "IB Analyst, campus recruiting captain" contains the word
+# but names a banker, and a false positive there silences a real banker's
+# coffee chat invisibly. That reasoning stands untouched — a bare "recruiting"
+# still matches nothing as a substring.
+#
+# This matches only when the function is the WHOLE role string. Measured on
+# the founder's own 2026-08-23 full-history refresh: ten campus recruiters at
+# Bain, BCG, PwC and KPMG arrived with role exactly "Recruiting", because
+# `capture.discovery.split_display_name` read it off how they sign their own
+# mail — "Keith Bevans, Recruiting". A sender whose signature names the
+# function and nothing else has told you their seat IS the function; the
+# banker the rejection protects signs "Jane Doe, IB Analyst" and carries any
+# recruiting duty inside a longer string, which this anchored match can never
+# reach. No ends-with or leads-with variant, on purpose: "IB Analyst, campus
+# recruiting" ends with the word and is still a banker.
+_WHOLE_ROLE_RECRUITING_RE = re.compile(
+    r"^\s*(?:recruiting|recruitment)\s*$", re.IGNORECASE
+)
+
 
 def is_recruiting_role(role: str | None) -> bool:
     """Does this free-text role name a recruiting-process function?
@@ -222,7 +246,11 @@ def is_recruiting_role(role: str | None) -> bool:
     Text only — this is the fallback consulted when nobody has answered the
     question on the contact itself. `is_recruiting_contact` is the one to call.
     """
-    return bool(role and _RECRUITING_ROLE_RE.search(role))
+    if not role:
+        return False
+    if _WHOLE_ROLE_RECRUITING_RE.match(role):
+        return True
+    return bool(_RECRUITING_ROLE_RE.search(role))
 
 
 def is_recruiting_contact(contact: dict) -> bool:
