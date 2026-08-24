@@ -416,6 +416,66 @@ else is htmx and the platform.
     check();
   })();
 
+  // The bulk-save peek. CSS already opens the panel on hover and on keyboard
+  // focus (see `.peek` in _styles.html), so this adds only the three things a
+  // stylesheet cannot do: latch it open on a tap, where hover never fires;
+  // close it on Escape; and keep `aria-expanded` telling the truth.
+  //
+  // DELEGATED, on the document, registered once. The banner lives inside
+  // #cov-results, which htmx replaces wholesale on every filter keystroke —
+  // per-element listeners bound here would be attached to a node that is
+  // thrown away on the first swap, and re-binding after each swap would stack
+  // duplicates. Nothing here holds a reference to an element across a swap.
+  (function () {
+    function sync(peek) {
+      var btn = peek.querySelector(".peek-toggle");
+      if (btn) btn.setAttribute(
+        "aria-expanded", peek.dataset.peekState === "open" ? "true" : "false");
+    }
+    function shut(peek) { peek.dataset.peekState = "shut"; sync(peek); }
+    function clear(peek) { delete peek.dataset.peekState; sync(peek); }
+
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest && e.target.closest(".peek-toggle");
+      if (!btn) return;
+      var peek = btn.closest(".peek");
+      if (peek.dataset.peekState === "open") shut(peek);
+      else { peek.dataset.peekState = "open"; sync(peek); }
+    });
+
+    // Escape closes and leaves focus on the button that opened it — the same
+    // contract the Companies panel above keeps. `shut` rather than `clear`
+    // because focus is still inside the peek at this point, and the CSS
+    // `:focus-within` rule would otherwise reopen it the instant we let go.
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      var peek = document.querySelector('.peek[data-peek-state="open"]');
+      if (!peek && document.activeElement && document.activeElement.closest) {
+        peek = document.activeElement.closest(".peek");
+      }
+      if (!peek) return;
+      e.preventDefault();
+      shut(peek);
+      var btn = peek.querySelector(".peek-toggle");
+      if (btn) btn.focus();
+    });
+
+    // Leaving by keyboard or by pointer both return the panel to its default
+    // (hover/focus) behaviour, so an Escape earlier in the session cannot
+    // leave it permanently unhoverable.
+    document.addEventListener("focusin", function (e) {
+      document.querySelectorAll(".peek").forEach(function (peek) {
+        if (!peek.contains(e.target)) clear(peek);
+      });
+    });
+    document.addEventListener("mouseout", function (e) {
+      var peek = e.target.closest && e.target.closest(".peek");
+      if (peek && !peek.contains(e.relatedTarget) && !peek.contains(document.activeElement)) {
+        clear(peek);
+      }
+    });
+  })();
+
   document.body.addEventListener("htmx:afterSettle", function () {
     document.querySelectorAll(".filters select").forEach(function (sel) {
       var i = Array.prototype.findIndex.call(sel.options, function (o) {

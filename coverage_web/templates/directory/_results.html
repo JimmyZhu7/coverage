@@ -83,9 +83,64 @@ carries `confirmed=1`, the field `track_eligible` actually checks — is
 inside, one click further in. Not a modal: this page has no modal pattern,
 and a `<details>` that states the count and sits right where the click
 happened is lighter and just as honest.{% endcomment %}
+{% comment %}
+THE PEEK, between the sentence and the button. The banner named a number and
+then asked for a commitment against it — "9 open roles ... [Save them all]" —
+without ever saying WHICH nine, so the only way to find out what you were
+agreeing to was to agree to it and then read My Applications. The confirm
+disclosure below made the click deliberate; it did not make it informed.
+
+Its rows come from `bulk_save_peek`, which is built from the very id list the
+session stash hands `track_eligible` (see `_bulk_save_peek`). Not a second
+query: a panel that named a role the save then skipped would be a worse bug
+than the count mismatch that stash exists to prevent.
+
+Capped, and it says so. The offer runs past 200 roles on a wide board, and
+the tail is counted rather than printed — never silently cut.
+
+A button, not `<details>`: this one also opens on hover, and the UA's own
+hiding of a closed `<details>` is not something CSS can reliably reopen for a
+hover state. So the disclosure is spelled out — `aria-expanded` on the
+button, `aria-controls` to the panel — and the script in opportunities.html
+adds only what the platform does not give us for free: Escape, and keeping
+that attribute true while the panel is open. Hover and keyboard focus are
+pure CSS, so the panel opens with the script broken or still loading.
+{% endcomment %}
 {% if eligible_unsaved %}
   <div class="scope-line scope-line--act">
     <span>{{ eligible_unsaved }} open role{{ eligible_unsaved|pluralize }} name{{ eligible_unsaved|pluralize:"s," }} your class year and {{ eligible_unsaved|pluralize:"isn't,aren't" }} saved yet.</span>
+    <div class="peek" data-peek>
+      <button type="button" class="peek-toggle" aria-expanded="false" aria-controls="bulk-save-peek">Which ones?</button>
+      <div class="peek-panel" id="bulk-save-peek">
+        <p class="peek-head">Closing soonest first</p>
+        <ul class="peek-list">
+          {% for r in bulk_save_peek.rows %}
+            <li class="peek-row">
+              <span class="peek-firm">{{ r.firm_name }}</span>
+              <span class="peek-title">{{ r.title }}</span>
+              {% comment %}The role card's own deadline treatment, class for
+              class — `.meta-status` plus the level tint, the dotted rule and
+              hidden "(reported)" when the date was read out of the posting's
+              prose rather than published as a field, "Rolling" only where the
+              posting says so, and "No date posted" where nothing does. A peek
+              that softened any of that would be a second, more confident
+              vocabulary for the same dates.{% endcomment %}
+              {% if r.dated %}
+                <span class="meta-status peek-when meta-{{ r.level }}{% if r.reported %} is-reported{% endif %}"
+                      {% if r.reported %}title="{{ r.reported.why }}"{% endif %}>{{ r.countdown }}{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
+              {% elif r.rolling_stated %}
+                <span class="meta-status peek-when meta-rolling" title="{{ r.rolling_why }}">Rolling</span>
+              {% else %}
+                <span class="meta-status peek-when meta-undated">No date posted</span>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        {% if bulk_save_peek.more %}
+          <p class="peek-more">+ {{ bulk_save_peek.more }} more not shown</p>
+        {% endif %}
+      </div>
+    </div>
     <details class="scope-confirm">
       <summary class="scope-act">Save {{ eligible_unsaved|pluralize:"it,them all" }}</summary>
       <form method="post" action="{% url 'track_eligible' %}" class="scope-confirm-form">

@@ -1981,6 +1981,11 @@ def opportunities(request):
     # their cards are collected during the same pass rather than re-queried.
     pick_ids = {p["id"] for p in picks}
     pick_items: dict[int, dict] = {}
+    # Every feed item by role id, so the bulk-save peek can show the rows the
+    # banner is offering without building or querying a second set. The dicts
+    # here are the SAME objects the firm columns render, held by reference —
+    # see `_bulk_save_peek`, which is the only reader.
+    item_by_id: dict[int, dict] = {}
     for o in rows:
         cl = clusters.get(o.firm_id)
         if cl is None:
@@ -2014,6 +2019,7 @@ def opportunities(request):
                              profile=elig_profile)
         cl.setdefault("_opps", []).append(o)
         cl["roles"].append(item)
+        item_by_id[o.id] = item
         # Kept by reference here; the Picked column takes its COPY further
         # down, after the track-status annotation has run over these dicts.
         # Copying at this point would freeze a pre-annotation snapshot and
@@ -2227,6 +2233,10 @@ def opportunities(request):
     )
     if request.user.is_authenticated:
         request.session[BULK_SAVE_OFFER_SESSION_KEY] = bulk_save_offer
+    # The same list again, resolved to the rows already on the page, so the
+    # banner can show WHICH roles it is offering before the student commits.
+    # Derived from `bulk_save_offer` and nothing else — see `_bulk_save_peek`.
+    bulk_save_peek = _bulk_save_peek(bulk_save_offer, item_by_id)
 
     context = {
         # The paged slice renders; the full list still backs every count
@@ -2300,6 +2310,9 @@ def opportunities(request):
         # dismissed both count as touched — "not for me" outranks "your
         # year"). Computed over the FULL row set, not the paged slice.
         "eligible_unsaved": len(bulk_save_offer),
+        # The peek panel behind that number: `rows` (capped), `more` (what the
+        # cap left out) and `total` (== `eligible_unsaved`, by construction).
+        "bulk_save_peek": bulk_save_peek,
         "hidden_fit": hidden_fit,
         "show_unfit_qs": _qs_without(request, "fit"),
         "hidden_dupes": hidden_dupes,
@@ -2462,6 +2475,62 @@ def _eligible_unsaved_ids(user, rows, profile) -> list[int]:
         if o.id not in touched
         and (lambda v: v and v["kind"] == "year_ok")(_eligibility(o, profile))
     )
+
+
+#: How many of the offered roles the peek panel prints before it stops naming
+#: them and starts counting them. The offer runs to 223 roles on the live dev
+#: board; a panel that rendered all of them would be a page, not a peek, and
+#: would scroll past the button it is meant to explain. Eight is what fits
+#: above the fold at 375px without the panel needing its own scrollbar, and
+#: it is enough rows to see WHAT KIND of roles the offer is made of — which
+#: is the question a student actually has before clicking "Save them all".
+#: The remainder is never silently dropped: the panel says how many it did
+#: not print.
+BULK_SAVE_PEEK_MAX = 8
+
+
+def _bulk_save_peek(offer_ids, item_by_id, *, cap=BULK_SAVE_PEEK_MAX):
+    """The first few roles behind the "Save them all" banner, for its peek.
+
+    THE SET IS THE OFFER'S. `offer_ids` is the very list `_eligible_unsaved_ids`
+    produced and `opportunities` stashes under `BULK_SAVE_OFFER_SESSION_KEY`
+    for `track_eligible` to write — so what the panel names, what the confirm
+    counts and what the click saves are one fact resolved once. Re-deriving
+    the rows from a second query is precisely the mistake that put 206, 209
+    and 208 on one page load (see `_eligible_unsaved_ids`), and it would be a
+    worse mistake here: a count that disagrees is an error, but a NAMED role
+    that never gets saved is a promise broken by name.
+
+    It costs no query either. `item_by_id` holds the feed items the firm
+    columns already built for these same rows, so the panel reads what is on
+    the page rather than asking the database a fourth question about it.
+
+    Sorted by what a student is deciding on: dated roles soonest-first, then
+    passed deadlines and undated ones, then alphabetically. That order is what
+    makes the cap honest — the roles the cap hides are the ones with the least
+    to say about acting today.
+    """
+    def _key(r):
+        dated = r["dated"] and r["level"] != "passed"
+        return (
+            0 if dated else 1,
+            r["days_left"] if dated else 0,
+            (r["firm_name"] or "").lower(),
+            (r["title"] or "").lower(),
+        )
+
+    # `if i in item_by_id` is belt-and-braces, not a filter: every offered id
+    # came out of the same `rows` these items were built from. It is here so a
+    # future caller passing a narrower item map degrades to a shorter list
+    # rather than a 500.
+    rows = sorted((item_by_id[i] for i in offer_ids if i in item_by_id), key=_key)
+    return {
+        "rows": rows[:cap],
+        # Stated, never implied. A panel that just stopped at eight would be
+        # telling a student the offer is eight roles.
+        "more": max(0, len(rows) - cap),
+        "total": len(rows),
+    }
 
 
 def _eligible_unsaved_count(user, rows, profile) -> int:

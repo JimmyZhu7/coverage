@@ -278,6 +278,108 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     border-color: var(--accent); }
   .scope-act--confirm:hover { background: var(--accent-ink); border-color: var(--accent-ink); }
 
+  /* THE PEEK — which roles the offer covers, before you agree to it.
+
+     Opens three ways because three kinds of visitor exist: hover (mouse),
+     focus-within (keyboard), and a latched click (touch, where hover is not
+     a thing). The first two are pure CSS so the panel works with the script
+     broken; the third and Escape are the script's whole job.
+
+     `visibility`, not `display`: it keeps the closed panel out of the
+     accessibility tree and out of the tab order the same way `display: none`
+     would, while still being a property a transition can animate. */
+  .peek { position: relative; display: inline-flex; }
+  /* A control, so `--r-ctl` — the pill is `--r-badge`'s and reserved for
+     state. The dotted underline is not decoration either: `.scope-hidden a`
+     already spends it on the links that reveal rows in place rather than
+     navigate, and this reveals rows in place. Between the two marks it reads
+     as a different KIND of thing from the filled pill beside it, which is
+     the honest distinction — one shows you the offer, the other writes it. */
+  .peek-toggle { border: 1px solid transparent; background: none;
+    color: var(--accent-ink); border-radius: var(--r-ctl); padding: 4px 8px;
+    font: inherit; font-size: var(--fs-xs); font-weight: var(--w-med);
+    cursor: pointer; text-decoration: underline dotted currentColor;
+    text-underline-offset: 3px;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .peek-toggle:hover { background: var(--surface); border-color: var(--accent-line); }
+  .peek-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .peek-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+    width: min(36rem, calc(100vw - 2 * var(--s4)));
+    padding: var(--s3); border: 1px solid var(--line-strong);
+    border-radius: var(--r-panel); background: var(--paper);
+    box-shadow: var(--shadow-2);
+    opacity: 0; visibility: hidden; transform: translateY(-2px);
+    transition: opacity var(--t-fast), transform var(--t-fast),
+      visibility var(--t-fast); }
+  @media (hover: hover) and (pointer: fine) {
+    .peek:hover > .peek-panel { opacity: 1; visibility: visible; transform: none; }
+  }
+  .peek:focus-within > .peek-panel,
+  .peek[data-peek-state="open"] > .peek-panel { opacity: 1; visibility: visible;
+    transform: none; }
+  /* Escape's state, and it has to outrank both rules above: a keyboard user
+     who dismissed the panel still has it focused, and a mouse user who
+     dismissed it may not have moved the pointer off yet. Cleared as soon as
+     focus or the pointer leaves, so the next hover behaves normally. */
+  .peek[data-peek-state="shut"] > .peek-panel { opacity: 0; visibility: hidden;
+    transform: translateY(-2px); }
+  @media (prefers-reduced-motion: reduce) {
+    .peek-panel { transition: none; transform: none; }
+    .peek[data-peek-state="shut"] > .peek-panel { transform: none; }
+  }
+
+  .peek-head { margin: 0 0 var(--s2); font-family: var(--font-mono);
+    font-size: var(--fs-nano); letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-3); }
+  .peek-list { margin: 0; padding: 0; list-style: none; }
+  /* One line per role: firm, title, when. The title is the elastic column and
+     the only one allowed to clip — the firm is how you scan the list and the
+     date is why you would act on it, so neither may lose characters. */
+  .peek-row { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+    gap: 0 var(--s2); align-items: baseline; padding: 5px 0;
+    font-size: var(--fs-xs); line-height: 1.35; }
+  .peek-row + .peek-row { border-top: 1px solid var(--line); }
+  .peek-firm { color: var(--ink); font-weight: var(--w-med);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .peek-title { color: var(--ink-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .peek-when { justify-self: end; }
+  .peek-more { margin: var(--s2) 0 0; padding-top: var(--s2);
+    border-top: 1px solid var(--line); font-size: var(--fs-xs);
+    color: var(--ink-3); }
+
+  /* Phones: hover does not exist, and a floating panel anchored to a button
+     that has wrapped to its own line is a panel half off the screen. So it
+     stops floating and expands in flow under the sentence — the same shape
+     the mobile Filters disclosure takes. The band is `flex-wrap: wrap`, so
+     a 100% basis is all it takes to give the peek its own row. */
+  @media (max-width: 640px) {
+    /* `display: contents` so the button and the panel become flex items of
+       the band itself: the button stays on the same row as "Save them all"
+       (a wrapper with `flex: 1 0 100%` would push it onto a line of its own
+       and make a three-deck band out of a two-deck one), while the panel
+       takes a full row under both. The disclosure selectors below still
+       match — `display: contents` changes boxes, not the DOM tree. */
+    .peek { display: contents; }
+    /* `display`, not just visibility, once the panel is in the flow: an
+       invisible-but-laid-out panel would hold 200px of empty band open under
+       the sentence at every width where nobody has opened it. */
+    /* `order: 1` puts the opened panel LAST in the band, under "Save them
+       all", instead of between the toggle and it. In DOM order it sits
+       between the two, which on a phone shoved the button this whole feature
+       exists to inform a screen and a half below the sentence that asks for
+       it. Reading it before you can reach the button is the point; having to
+       scroll back up for the button is not. */
+    .peek-panel { position: static; display: none; order: 1; flex: 1 0 100%;
+      width: auto; margin-top: 0; box-shadow: none; transform: none; }
+    .peek:focus-within > .peek-panel,
+    .peek[data-peek-state="open"] > .peek-panel { display: block; }
+    .peek[data-peek-state="shut"] > .peek-panel { display: none; }
+    .peek-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .peek-title { grid-column: 1 / -1; }
+  }
+
   /* The lazy-load sentinel: a full-width strip at the end of the loaded
      columns. It occupies real height so `revealed` fires before the user
      hits the bottom, and its text is the honest state ("loading", not a
