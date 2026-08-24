@@ -30,6 +30,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Case, Count, F, IntegerField, Max, Q, Value, When
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.timesince import timesince
 from django.views.decorators.http import require_POST
@@ -1617,7 +1618,7 @@ def _last_checked() -> str:
     return timesince(latest.started, depth=1) if latest else ""
 
 
-def opportunities(request):
+def opportunities(request, *, dismiss_undo=None, scope_only=False):
     """The Opportunities page (public, no login): open campus roles joined
     to firms, sorted by deadline proximity (nulls last), with querystring
     filters for role type / region / track / provider / firm / free-text.
@@ -1632,7 +1633,13 @@ def opportunities(request):
 
     htmx: the filter bar re-fetches this same URL and swaps only the results
     list; an HX-Request gets the list partial, a plain GET gets the full
-    page. Works with JS off, too (the form is a normal GET form)."""
+    page. Works with JS off, too (the form is a normal GET form).
+
+    `dismiss_undo` is the one thing this view does not compute for itself: the
+    "you just said not for me / Undo" strip, handed in by `_refresh_feed` when
+    a dismissal is what triggered this render. `scope_only` asks for the scope
+    block alone. Both are keyword-only and defaulted, so the URLconf still
+    calls this with a request and nothing else."""
     now = timezone.now()
     today = timezone.localdate()
 
@@ -1889,6 +1896,13 @@ def opportunities(request):
     # keyed the skip on the cursor alone, so exactly the no-JS fallback the
     # sentinel carries for honesty was the request that crashed on feed=None.
     cols_fragment = bool(cols_from) and bool(request.headers.get("HX-Request"))
+    # The mirror-image fragment: `scope_only` asks for the scope block alone
+    # (see `scope_context` and the early return that uses it, far below). A
+    # KEYWORD, not a querystring flag like `cols=`, because nothing about it
+    # belongs in a URL: `_refresh_feed` is its only caller, and a `?scope=1`
+    # in the address bar would leak into every "show me the hidden ones" link
+    # this very block builds out of the live request.
+    scope_fragment = scope_only and bool(request.headers.get("HX-Request"))
 
     elig_profile = _eligibility_profile(request.user)
     fit = request.GET.get("fit", "").strip() == "1" and elig_profile is not None
@@ -2238,14 +2252,67 @@ def opportunities(request):
     # Derived from `bulk_save_offer` and nothing else — see `_bulk_save_peek`.
     bulk_save_peek = _bulk_save_peek(bulk_save_offer, item_by_id)
 
+    # THE SCOPE BLOCK — every sentence at the top of the results that states
+    # what this board is NOT showing you, plus the "Save them all" offer and
+    # its peek. Assembled as its own dict because it is swappable on its own:
+    # a "Not for me" click on a card 600 rows down changes both the hidden
+    # count and the offer, and neither is anywhere near the card. See
+    # `_scope.html` and the `scope_only` return below.
+    scope_context = {
+        "hidden_count": len(hidden_ids),
+        "hidden_other": hidden_other,
+        "show_all_qs": show_all_qs,
+        "hidden_region": hidden_region,
+        "show_unregioned_qs": show_unregioned_qs,
+        "hidden_fit": hidden_fit,
+        "show_unfit_qs": _qs_without(request, "fit"),
+        "hidden_dupes": hidden_dupes,
+        "show_dupes_qs": show_dupes_qs,
+        # The lens→pipeline bridge's trigger: open roles whose text names the
+        # user's year and which they have never touched (tracked or
+        # dismissed both count as touched — "not for me" outranks "your
+        # year"). Computed over the FULL row set, not the paged slice.
+        "eligible_unsaved": len(bulk_save_offer),
+        # The peek panel behind that number: `rows` (capped), `more` (what the
+        # cap left out) and `total` (== `eligible_unsaved`, by construction).
+        "bulk_save_peek": bulk_save_peek,
+        # Present only on the render a dismissal caused (see `_refresh_feed`).
+        # Every other render — a filter keystroke, a reload, a lazy-loaded
+        # column — draws no strip, which is the whole intended lifetime of a
+        # one-shot undo. Nothing is stored, so nothing goes stale; same
+        # posture as `crm.views._dismiss_undo_offer`.
+        "dismiss_undo": dismiss_undo,
+    }
+
+    # ---- The scope block alone, for an out-of-band swap. --------------------
+    # A `scope_only` call is a dismissal that happened somewhere ELSE on the
+    # page (a role card deep inside a firm column) asking this view to restate
+    # the two things that dismissal just changed: how many roles are hidden,
+    # and what the "Save them all" offer now covers.
+    #
+    # It stops HERE, after the session stash above has been rewritten, and that
+    # ordering is the whole point. The number on screen, the number in the
+    # confirm sentence and the ids `track_eligible` will actually write are one
+    # fact resolved once (see `_eligible_unsaved_ids` for the 206/209/208
+    # measurement that forced that). A dismissal that updated only the number
+    # on screen — or only the stash — would put the three back out of
+    # agreement by a new route, and a subtler one than the original.
+    if scope_fragment:
+        return render(request, "directory/_scope.html",
+                      {**scope_context, "oob": True})
+
     context = {
+        # Every "here is what this board is not showing you" sentence, the
+        # bulk-save offer and its peek, resolved once above and spread here so
+        # the full page and the `scope_only` fragment can never state two
+        # different versions of the same counts.
+        **scope_context,
         # The paged slice renders; the full list still backs every count
         # above, so the strip describes the board, not the loaded fraction.
         "clusters": cluster_page,
         "all_cluster_count": len(cluster_list),
         "cols_next": cols_next,
         "cols_qs": _qs_without(request, "cols"),
-        "hidden_count": len(hidden_ids),
         # When the scrape last ran. The strip's pulsing dot said "live"
         # while the data is radar-cadence; naming the age is what makes the
         # pulse honest.
@@ -2282,10 +2349,6 @@ def opportunities(request):
         "role_segments": role_segments,
         "role_optin_segment": role_optin_segment,
         "year_facet": year_facet,
-        "hidden_other": hidden_other,
-        "show_all_qs": show_all_qs,
-        "hidden_region": hidden_region,
-        "show_unregioned_qs": show_unregioned_qs,
         # How many of the row-2 controls are engaged. Drives the mobile
         # disclosure's "Filters · 2" summary AND the decision to server-render
         # it open, so a deep-linked filter is never invisible at 375px.
@@ -2305,18 +2368,6 @@ def opportunities(request):
         # and how many rows it hid this request.
         "fit": fit,
         "fit_available": elig_profile is not None,
-        # The lens→pipeline bridge's trigger: open roles whose text names the
-        # user's year and which they have never touched (tracked or
-        # dismissed both count as touched — "not for me" outranks "your
-        # year"). Computed over the FULL row set, not the paged slice.
-        "eligible_unsaved": len(bulk_save_offer),
-        # The peek panel behind that number: `rows` (capped), `more` (what the
-        # cap left out) and `total` (== `eligible_unsaved`, by construction).
-        "bulk_save_peek": bulk_save_peek,
-        "hidden_fit": hidden_fit,
-        "show_unfit_qs": _qs_without(request, "fit"),
-        "hidden_dupes": hidden_dupes,
-        "show_dupes_qs": show_dupes_qs,
         # `_results.html` is included on a full render and returned bare on an
         # htmx swap. The out-of-band count fragment must only ship on the
         # second: on a full page load the counts are already correct in the
@@ -2744,6 +2795,86 @@ def clear_saved(request):
     return redirect("my_applications")
 
 
+#: Fields a feed POST carries that describe the ACTION rather than the board.
+#: Everything else in the body arrived via the dismiss control's
+#: `hx-include=".filters"` — the live filter bar, verbatim — and is exactly
+#: what the re-render needs as its querystring.
+_ACTION_FIELDS = ("csrfmiddlewaretoken", "status", "from", "next", "show_firm")
+
+
+def _refresh_feed(request, *, scope_only=False, dismiss_undo=None):
+    """Re-render the Opportunities feed (or just its scope block) after a
+    write that changed what the board is allowed to offer.
+
+    WHY RE-RENDER RATHER THAN PATCH THE NUMBER. Dismissing a role changes four
+    things at once: the hidden count, the "Save them all" sentence, the peek
+    behind it, and the id list stashed in the session for `track_eligible` to
+    write. Decrementing the visible number and leaving the stash alone is the
+    206/209/208 bug (see `_eligible_unsaved_ids`) reintroduced from the other
+    end — the screen and the write disagreeing, only now the screen is the one
+    that is wrong. Running the real view is what keeps all four one fact,
+    because the real view is where that fact is computed.
+
+    THE FILTERS RIDE IN THE POST. The dismiss controls carry
+    `hx-include=".filters"`, so the live filter bar is in `request.POST` and
+    the board this rebuilds is the board the student is actually looking at —
+    not the unfiltered default, which would count roles their filters had
+    already excluded. Everything that is not a filter is dropped by name
+    above; a stray field would land in the querystring and be ignored by
+    `_apply_filters` anyway, but it would also travel into the "show me the
+    hidden ones" links this render builds out of the request.
+    """
+    filters = request.POST.copy()
+    for field in _ACTION_FIELDS:
+        filters.pop(field, None)
+    request.GET = filters
+    return opportunities(request, dismiss_undo=dismiss_undo, scope_only=scope_only)
+
+
+def _dismiss_undo_offer(opp, *, source):
+    """The one-shot "Not for me / Undo" strip a dismissal comes back with.
+
+    IN THE RESPONSE, NOT IN THE SESSION, for the same reason
+    `crm.views._dismiss_undo_offer` chose that: the offer is handed back in
+    the very swap that removed the role, so it can ride in the markup and get
+    the right lifetime for free. Any later render of this page — a filter
+    keystroke, a reload — draws no strip. Nothing is stored, so nothing goes
+    stale.
+
+    `source` is where the click happened, and the peek reads it to stay open
+    across the swap: a student pruning a list of eight roles should not have
+    to reopen the panel between each one.
+    """
+    return {"id": opp.id, "firm_name": opp.firm.name, "title": opp.title,
+            "source": source}
+
+
+def _one_rolecard(request, opp, *, show_firm=False):
+    """One feed card, rebuilt on its own — the undo half of a card dismissal.
+
+    Uses `_urgency_item`, the same builder the feed's own loop uses, so the
+    card that comes back is the card that left rather than a second, thinner
+    rendering of the same role. `track_status` is None by construction: undo
+    deletes the row outright (see `track_opportunity`'s `undismiss` branch),
+    so the card returns untracked, which is what it was before the click.
+
+    `show_firm` travels from the dismissed card's own markup rather than being
+    re-derived: it is true only for the copy pinned in the Picked column, and
+    the server has no way to know which of a role's two possible copies was
+    the one clicked.
+    """
+    item = _urgency_item(
+        opp, now=timezone.now(), today=timezone.localdate(),
+        my_firm_ids=set(
+            UserFirm.objects.for_user(request.user).values_list("firm_id", flat=True)
+        ),
+        profile=_eligibility_profile(request.user),
+    )
+    item["track_status"] = None
+    item["show_firm"] = show_firm
+    return render_to_string("directory/_rolecard.html", {"r": item}, request=request)
+
+
 @login_required
 @require_POST
 def track_opportunity(request, pk):
@@ -2790,8 +2921,14 @@ def track_opportunity(request, pk):
         uo.save(update_fields=["applied_status", "applied_at", "dismissed"])
         record_event("opportunity_tracked", user=request.user, status=status)
 
-    # Three callers, three response shapes:
+    # Five callers, five response shapes:
     #  - the feed swaps just the one card's control;
+    #  - a "Not for me" on a card swaps that card for its own Undo stub, and
+    #    brings the scope block back out of band (`from=card`);
+    #  - a "Not for me" inside the bulk-save peek re-renders the whole results
+    #    body (`from=peek`), because the peek lives at the top of the page
+    #    where there is no scroll position to lose and every count on the
+    #    board just moved;
     #  - My Applications' own forms swap the whole funnel+lenses+stages
     #    partial, because a status change MOVES a row between sections
     #    rather than just changing it in place (see `_apps_body.html`'s own
@@ -2802,13 +2939,50 @@ def track_opportunity(request, pk):
     is_my_applications = request.POST.get("next", "").rstrip("/").endswith(
         resolve_url("my_applications").rstrip("/")
     )
+    origin = request.POST.get("from", "")
+    undone = status in ("dismiss", "undismiss")
     if request.headers.get("HX-Request"):
         if is_my_applications:
             return render(request, "directory/_apps_body.html", _my_applications_context(request))
+        if origin == "peek" and undone:
+            return _refresh_feed(
+                request,
+                dismiss_undo=(_dismiss_undo_offer(opp, source="peek")
+                              if status == "dismiss" else None),
+            )
+        if origin == "card" and undone:
+            # TWO fragments in one response. The card's own target is
+            # `closest .rolecard`, so the first replaces the card in place —
+            # with the Undo stub on a dismissal, with the real card again on
+            # an undo. The second is an out-of-band swap of the scope block,
+            # which is at the top of the page and states two things this
+            # click just changed: how many roles are hidden, and how many the
+            # "Save them all" offer now covers. Patching only the card would
+            # leave the banner promising a number the confirm can no longer
+            # honour.
+            #
+            # The undo lives ON the stub rather than in that scope block on
+            # purpose: a strip at the top of the page is invisible to someone
+            # who just clicked a card 600 rows down, and an undo you cannot
+            # see is not an undo.
+            show_firm = request.POST.get("show_firm") == "1"
+            card = (
+                render_to_string(
+                    "directory/_rolecard_dismissed.html",
+                    {"r": _dismiss_undo_offer(opp, source="card"),
+                     "show_firm": show_firm},
+                    request=request,
+                )
+                if status == "dismiss"
+                else _one_rolecard(request, opp, show_firm=show_firm)
+            )
+            scope = _refresh_feed(request, scope_only=True)
+            return HttpResponse(card + scope.content.decode(scope.charset))
         if status == "dismiss":
-            # The card's own target is `closest .rolecard`, so an empty body
-            # removes the row from the feed. Anything else here would leave a
-            # control behind on a card the user just said was not for them.
+            # No `from` — an older card, or any other caller. The card's own
+            # target is `closest .rolecard`, so an empty body removes the row.
+            # Anything else here would leave a control behind on a card the
+            # user just said was not for them.
             return HttpResponse("")
         return _track_control(request, opp)
     from django.shortcuts import redirect

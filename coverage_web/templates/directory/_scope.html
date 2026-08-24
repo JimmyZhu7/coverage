@@ -1,0 +1,225 @@
+{% load textstyle %}
+{% comment %}
+THE SCOPE BLOCK — every sentence at the top of the results that says what this
+board is NOT showing you, plus the "Save them all" offer and the peek behind
+it. Split out of `_results.html` because it is swappable ON ITS OWN: a "Not
+for me" click on a card 600 rows down changes the hidden count AND the offer,
+and neither of those is anywhere near the card that was clicked.
+
+`oob` is set only when this is handed back as htmx's out-of-band half of a
+dismissal response (see `directory.views.track_opportunity`). On a normal
+render the attribute must NOT be there — an `hx-swap-oob` element sitting in
+the initial document is inert noise, the same reason the count fragment
+further down `_results.html` ships only on a swap.
+
+Its context comes from `scope_context` in `directory.views.opportunities`: one
+dict, used by both the full render and the fragment, so the two can never
+state two versions of the same count.
+{% endcomment %}
+{% comment %}`hx-headers` on the WRAPPER, not on each button: the peek's rows
+and the undo strip are all POSTs, and the `.firmcols` element that carries the
+token for the role cards is a sibling further down this file — nothing inside
+this block inherits from it.{% endcomment %}
+<div id="cov-scope"{% if oob %} hx-swap-oob="true"{% endif %}{% if request.user.is_authenticated %} hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'{% endif %}>
+
+{% comment %}
+THE UNDO STRIP. Present only in the response to a dismissal made from the peek
+panel — a card dismissal carries its own undo, in place, because a strip at
+the top of the page is invisible to someone who just clicked a card 600 rows
+down (see `_rolecard_dismissed.html`). Gone again on the next render of this
+block, which is the whole intended lifetime of a one-shot undo.
+
+It names the durable surface as well as offering the immediate reversal, so a
+student learns there IS one before the day they need it — the same two-part
+shape as the contact-proposal strip on Today.
+{% endcomment %}
+{% if dismiss_undo %}
+  <div class="scope-undo" role="status">
+    <span class="scope-undo-said">Not interested in {{ dismiss_undo.firm_name|smart_title }} &mdash; {{ dismiss_undo.title|smart_title }}.
+      <span class="scope-undo-note">It won't be suggested again. Everything you've hidden is on <a href="{% url 'my_applications' %}#hidden">My Applications</a>.</span>
+    </span>
+    <button type="button" class="btn scope-undo-btn"
+            hx-post="{% url 'track_opportunity' dismiss_undo.id %}"
+            hx-vals='{"status": "undismiss", "from": "peek"}'
+            hx-include=".filters"
+            hx-target="#cov-results" hx-swap="innerHTML">Undo</button>
+  </div>
+{% endif %}
+
+{% comment %}
+THE SUBSET SENTENCE, at the top. It used to render at the BOTTOM of this file,
+below 56 firm cards — so the single most important fact about the default view
+("this is not everything") was stated only to people who had already finished
+reading.
+
+ONE line now, not four. Each hide used to own a paragraph, and since they are
+all conditional they stacked exactly when the board was narrowed hardest: the
+live account reads two lines by default, four under `?fit=1&region=us`, and a
+fifth once the Year hint is counted. The more precisely you filtered, the more
+grey you read before the first role — backwards, and it buried the one line on
+this page that wants a click.
+
+What is NOT collapsed is the undo. Each hide has a different reversal (role
+scope, the eligibility lens, the region filter, your own dismissals) and no
+single "show everything" can honestly stand for all four — dropping someone's
+region filter because they wanted to see unregioned rows would be a different
+promise than the one the link makes. So: one sentence, one link per reason,
+each link naming the count it reveals so it is unambiguous read aloud.
+
+Every querystring is built from the LIVE request in views.py, never hardcoded:
+the bare-`?` version of this bug shipped once already on "Show everything" and
+sent people to the very page that hid what it promised to reveal.
+
+It says what it excludes in plain words: no "premium", no lock icon, no
+"unlock" — the everything mode is free, one click away, and just noisier
+data. It lives INSIDE #cov-results so its numbers refresh with the filters.
+{% endcomment %}
+{% if hidden_other or hidden_fit or hidden_region or hidden_count or hidden_dupes %}
+  <p class="scope-line scope-hidden">
+    {% comment %}
+    Separators are SPANS with their own padding, not "·" characters leaning on
+    template whitespace. The newline before the link collapsed to nothing
+    rather than to a space, so the line rendered "hidden ·Show everything" —
+    measured at 2.41px narrower than the same markup with a real space. A
+    separator whose spacing depends on where the template happens to wrap is
+    a separator that will lose its space again the next time this is edited.
+    {% endcomment %}
+    {% if hidden_other %}Showing campus roles only<span class="scope-sep">·</span>{{ hidden_other }} experienced role{{ hidden_other|pluralize }} hidden<span class="scope-sep">·</span><a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a>{% endif %}
+    {% if hidden_fit or hidden_region or hidden_count or hidden_dupes %}
+      {% if hidden_other %}<span class="scope-sep">·</span>Also hidden:{% else %}Hidden:{% endif %}
+      {% if hidden_fit %}<a href="{% url 'opportunities' %}?{{ show_unfit_qs }}"
+        >{{ hidden_fit }} you don't qualify for</a>{% if hidden_region or hidden_count or hidden_dupes %},{% endif %}{% endif %}
+      {% if hidden_region %}<a href="{% url 'opportunities' %}?{{ show_unregioned_qs }}"
+        >{{ hidden_region }} with no tracked region</a>{% if hidden_count or hidden_dupes %},{% endif %}{% endif %}
+      {% if hidden_count %}<a href="{% url 'my_applications' %}#hidden"
+        >{{ hidden_count }} you marked "not for me"</a>{% if hidden_dupes %},{% endif %}{% endif %}
+      {% comment %}Duplicates get the same treatment as every other hide: a
+      count and its own undo. A firm that files one job as two requisitions is
+      showing you one thing to do, but Coverage does not get to decide for you
+      that the second copy is noise — the link says how many were folded and
+      brings every copy back.{% endcomment %}
+      {% if hidden_dupes %}<a href="{% url 'opportunities' %}?{{ show_dupes_qs }}"
+        >{{ hidden_dupes }} repeat listing{{ hidden_dupes|pluralize }}</a>{% endif %}
+    {% endif %}
+  </p>
+{% endif %}
+
+{% comment %}The lens→pipeline bridge, and the only line in this block that
+wants a click. It was styled as one of the disclosures above and sat between
+two of them, so the eye filed the whole stack as fine print and skipped the
+button with it. Its own treatment now: an accent-tinted band, the sentence
+and the action on one line. A POST — it changes your data, so it must never
+be a GET.
+
+CONFIRM, inline. This used to be a single button that wrote on click — one
+tap dumped every eligible role (207, once, for real) into a 1-role pipeline
+with no warning and no way back. `<details>` is the same disclosure pattern
+`.variant-fold` already uses elsewhere on this page (no JS required, works
+identically with it off): the visible button only ever OPENS a confirm
+sentence naming the exact count; the real submit button — the one that
+carries `confirmed=1`, the field `track_eligible` actually checks — is
+inside, one click further in. Not a modal: this page has no modal pattern,
+and a `<details>` that states the count and sits right where the click
+happened is lighter and just as honest.{% endcomment %}
+{% comment %}
+THE PEEK, between the sentence and the button. The banner named a number and
+then asked for a commitment against it — "9 open roles ... [Save them all]" —
+without ever saying WHICH nine, so the only way to find out what you were
+agreeing to was to agree to it and then read My Applications. The confirm
+disclosure below made the click deliberate; it did not make it informed.
+
+Its rows come from `bulk_save_peek`, which is built from the very id list the
+session stash hands `track_eligible` (see `_bulk_save_peek`). Not a second
+query: a panel that named a role the save then skipped would be a worse bug
+than the count mismatch that stash exists to prevent.
+
+Capped, and it says so. The offer runs past 200 roles on a wide board, and
+the tail is counted rather than printed — never silently cut.
+
+A button, not `<details>`: this one also opens on hover, and the UA's own
+hiding of a closed `<details>` is not something CSS can reliably reopen for a
+hover state. So the disclosure is spelled out — `aria-expanded` on the
+button, `aria-controls` to the panel — and the script in opportunities.html
+adds only what the platform does not give us for free: Escape, and keeping
+that attribute true while the panel is open. Hover and keyboard focus are
+pure CSS, so the panel opens with the script broken or still loading.
+{% endcomment %}
+{% if eligible_unsaved %}
+  <div class="scope-line scope-line--act">
+    <span>{{ eligible_unsaved }} open role{{ eligible_unsaved|pluralize }} name{{ eligible_unsaved|pluralize:"s," }} your class year and {{ eligible_unsaved|pluralize:"isn't,aren't" }} saved yet.</span>
+    {% comment %}
+    `data-peek-state="open"` on the render a peek dismissal caused, so the
+    panel is still open when the swap lands. Pruning a list of eight roles
+    should not mean reopening the panel between each one — and on a keyboard
+    the focused button has just been replaced, so `:focus-within` cannot hold
+    it open on its own.
+    {% endcomment %}
+    <div class="peek" data-peek{% if dismiss_undo.source == "peek" %} data-peek-state="open"{% endif %}>
+      <button type="button" class="peek-toggle" aria-expanded="{% if dismiss_undo.source == "peek" %}true{% else %}false{% endif %}" aria-controls="bulk-save-peek">Which ones?</button>
+      <div class="peek-panel" id="bulk-save-peek">
+        <p class="peek-head">Closing soonest first</p>
+        <ul class="peek-list">
+          {% for r in bulk_save_peek.rows %}
+            <li class="peek-row">
+              <span class="peek-firm">{{ r.firm_name }}</span>
+              <span class="peek-title">{{ r.title }}</span>
+              {% comment %}The role card's own deadline treatment, class for
+              class — `.meta-status` plus the level tint, the dotted rule and
+              hidden "(reported)" when the date was read out of the posting's
+              prose rather than published as a field, "Rolling" only where the
+              posting says so, and "No date posted" where nothing does. A peek
+              that softened any of that would be a second, more confident
+              vocabulary for the same dates.{% endcomment %}
+              {% if r.dated %}
+                <span class="meta-status peek-when meta-{{ r.level }}{% if r.reported %} is-reported{% endif %}"
+                      {% if r.reported %}title="{{ r.reported.why }}"{% endif %}>{{ r.countdown }}{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
+              {% elif r.rolling_stated %}
+                <span class="meta-status peek-when meta-rolling" title="{{ r.rolling_why }}">Rolling</span>
+              {% else %}
+                <span class="meta-status peek-when meta-undated">No date posted</span>
+              {% endif %}
+              {% comment %}
+              THE ROW'S OWN VETO. The panel names what "Save them all" is
+              about to write, and until now that was all it could do: a
+              student who read the list and recognised one role as wrong for
+              them had two options, take all of it or none of it. So each row
+              carries the same verb the feed's cards do, with the same words.
+
+              It re-renders the whole results body rather than just deleting
+              the row, because this click moves four things at once — the
+              sentence's count, the confirm sentence's count, this list, and
+              the id set stashed for the confirm to write. Decrementing the
+              number on screen and leaving the stash alone would be the
+              206/209/208 bug from the other end (see `_eligible_unsaved_ids`
+              and `_refresh_feed`). The peek sits above the board, so there is
+              no scroll position for a full swap to cost.
+
+              `hx-include=".filters"` sends the live filter bar with the POST:
+              the board that comes back has to be the board the student is
+              looking at, not the unfiltered default.
+              {% endcomment %}
+              <button type="button" class="peek-hide"
+                      hx-post="{% url 'track_opportunity' r.id %}"
+                      hx-vals='{"status": "dismiss", "from": "peek"}'
+                      hx-include=".filters"
+                      hx-target="#cov-results" hx-swap="innerHTML"
+                      title="Won't suggest this role again">Not for me</button>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if bulk_save_peek.more %}
+          <p class="peek-more">+ {{ bulk_save_peek.more }} more not shown</p>
+        {% endif %}
+      </div>
+    </div>
+    <details class="scope-confirm">
+      <summary class="scope-act">Save {{ eligible_unsaved|pluralize:"it,them all" }}</summary>
+      <form method="post" action="{% url 'track_eligible' %}" class="scope-confirm-form">
+        {% csrf_token %}
+        <span class="scope-confirm-q">Save {{ eligible_unsaved }} role{{ eligible_unsaved|pluralize }} to My Applications?</span>
+        <button type="submit" name="confirmed" value="1" class="scope-act scope-act--confirm">Yes, save {{ eligible_unsaved|pluralize:"it,them all" }}</button>
+      </form>
+    </details>
+  </div>
+{% endif %}
+</div>
