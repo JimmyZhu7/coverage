@@ -72,6 +72,49 @@ def test_a_firm_answering_one_region_does_not_answer_another():
 # firm_policy_map / firm_policy_q — the bulk companions
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The legacy blanket flag — `sponsors` as a bare bool rather than a per-region
+# dict. Two live firms (Morgan Stanley, J.P. Morgan) carry `true` from an
+# older seed shape. Reading it crashed every caller in this module, which
+# 500'd the Today page and the feed's sponsorship filter.
+# ---------------------------------------------------------------------------
+
+def test_a_blanket_true_never_crashes_and_answers_nothing():
+    """A bare `true` says the firm sponsors somewhere, not that it sponsors in
+    THIS role's region. It resolves to unknown rather than an over-broad yes:
+    a wrong yes sends an international student at a role they cannot hold."""
+    firm = _firm(sponsors=True)
+    opp = _opp(firm, "https://x/1", region="us")
+    assert effective_sponsorship(opp) == ("unknown", "unknown")
+
+
+def test_a_blanket_false_answers_nothing_either():
+    firm = _firm(sponsors=False)
+    opp = _opp(firm, "https://x/2", region="us")
+    assert effective_sponsorship(opp) == ("unknown", "unknown")
+
+
+def test_a_postings_own_answer_still_wins_over_a_blanket_flag():
+    firm = _firm(sponsors=True)
+    opp = _opp(firm, "https://x/3", region="us", sponsorship="no")
+    assert effective_sponsorship(opp) == ("no", "posting")
+
+
+def test_firm_policy_map_skips_a_blanket_flag_instead_of_raising():
+    """`exclude(sponsors={})` keeps a bare `true`; iterating it raised
+    TypeError and took down the feed filter for every user at once."""
+    _firm(slug="ms", name="Morgan Stanley", sponsors=True)
+    _firm(slug="jefferies", name="Jefferies", sponsors={"us": True})
+    assert firm_policy_map() == {(Firm.objects.get(slug="jefferies").id, "us"): "yes"}
+
+
+def test_the_sponsorship_filter_survives_a_blanket_flag():
+    firm = _firm(slug="jpm", name="J.P. Morgan", sponsors=True)
+    _opp(firm, "https://x/4", region="us")
+    rows = _apply_sponsorship_filter(Opportunity.objects.all(), "yes")
+    assert list(rows) == []
+
+
 def test_firm_policy_map_only_carries_resolved_answers():
     firm = _firm(sponsors={"us": True, "hk": "unknown", "sg": False})
     policy = firm_policy_map()

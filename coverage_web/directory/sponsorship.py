@@ -42,16 +42,35 @@ from django.db.models import Q
 SILENT = ("", "unknown")
 
 
-def _resolve_firm_fact(sponsors: dict | None, region: str) -> str:
+def _resolve_firm_fact(sponsors, region: str) -> str:
     """"yes" / "no" / "unknown" from one firm's `sponsors` blob for one
-    region. `sponsors` is `{"us": True, "hk": "unknown"}` — never a bare
-    bool — so this always looks a REGION up, never tests the dict itself as
-    truthy. Values are Python bool after the JSONField round-trip, but the
+    region. The intended shape is `{"us": True, "hk": "unknown"}`, so this
+    always looks a REGION up and never tests the blob itself as truthy.
+    Values are Python bool after the JSONField round-trip, but the
     "true"/"false" string forms are also accepted defensively (the seed data
-    has carried both shapes historically)."""
+    has carried both shapes historically).
+
+    A NON-MAPPING blob answers nothing. This module's docstring used to
+    promise `sponsors` is "never a bare bool"; live data disagreed — firms 2
+    and 3 (Morgan Stanley, J.P. Morgan, the two largest on the board) carry a
+    blanket `true` from an older seed shape, which crashed every caller here
+    with `AttributeError: 'bool' object has no attribute 'get'`. That took
+    down the whole Today page (`_new_at_your_firms` -> `_eligibility`) and
+    the feed's sponsorship filter (`firm_policy_map`).
+
+    "unknown" is the right answer for that shape, not "yes". A bare `true`
+    says the firm sponsors SOMEWHERE; it does not say it sponsors in the
+    region this role is in, and a firm that sponsors HK visas but not US ones
+    is the exact case the dict exists to express. For an international
+    student a wrong "yes" is the expensive error — it sends them at a role
+    they cannot hold — so a blob that carries no region cannot clear a
+    region-scoped question. Legacy blanket flags need a real per-region
+    answer before they mean anything here."""
     if not region:
         return "unknown"
-    fact = (sponsors or {}).get(region)
+    if not isinstance(sponsors, dict):
+        return "unknown"
+    fact = sponsors.get(region)
     if fact is True or fact == "true":
         return "yes"
     if fact is False or fact == "false":
@@ -100,7 +119,13 @@ def firm_policy_map() -> dict[tuple[int, str], str]:
 
     out: dict[tuple[int, str], str] = {}
     for firm_id, sponsors in Firm.objects.exclude(sponsors={}).values_list("id", "sponsors"):
-        for region in sponsors or {}:
+        # `exclude(sponsors={})` keeps any non-empty JSON, including the
+        # legacy blanket `true` described in `_resolve_firm_fact`. Iterating
+        # that raised `TypeError: 'bool' object is not iterable` and 500'd
+        # the feed filter. A blob with no regions in it contributes no pairs.
+        if not isinstance(sponsors, dict):
+            continue
+        for region in sponsors:
             value = _resolve_firm_fact(sponsors, region)
             if value in ("yes", "no"):
                 out[(firm_id, region)] = value
