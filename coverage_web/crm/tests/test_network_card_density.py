@@ -54,25 +54,35 @@ def _rule(css: str, selector: str) -> str:
 
 def test_the_card_keeps_its_vertical_padding_tight():
     """8px of padding top and bottom on a 33px stack of text is a card
-    gallery's proportion, not a pick-list's. The floor came down with it:
-    58px of min-height guaranteed 25px of nothing under a one-line name."""
+    gallery's proportion, not a pick-list's — that is what the tightened
+    pass fixed, and this guard is against sliding all the way back to it.
+
+    The floor itself moved off its tightest value on request: the first
+    pass read as cramped rather than compact, and got a small deliberate
+    bump back up (padding var(--s1) -> 6px, floor 38px -> 44px). This test
+    pins a ceiling under `var(--s2)` (8px) / 58px — the ORIGINAL
+    proportions this board moved away from — not the exact tightened
+    numbers, which are allowed to breathe a little without failing a test
+    that was written to catch a regression, not to freeze a constant."""
     block = _rule(_network_styles(), ".net-mini")
 
     padding = re.search(r"padding:\s*([^;]+);", block)
     assert padding, f"the card no longer states its padding: {block.strip()}"
     vertical = padding.group(1).split()[0]
-    assert vertical == "var(--s1)", (
-        f"the card's vertical padding is {vertical}, not the 4px var(--s1) "
-        "this board was tightened to. At var(--s2) the card carries 8px of "
-        "air above and below a 33px stack of text."
+    assert vertical != "var(--s2)", (
+        f"the card's vertical padding is back at the full var(--s2) (8px) "
+        "the tightened pass moved away from — 8px of air above and below "
+        "a 33px stack of text is a card gallery's proportion again."
     )
 
     floor = re.search(r"min-height:\s*(\d+)px", block)
     assert floor, f"the card no longer states a min-height floor: {block.strip()}"
-    assert int(floor.group(1)) <= 40, (
-        f"the card's min-height floor is back up at {floor.group(1)}px. A "
-        "one-line name plus a one-line firm is 33px of text; a floor above "
-        "40px is padding the box past what it holds."
+    assert int(floor.group(1)) <= 50, (
+        f"the card's min-height floor is back up at {floor.group(1)}px, "
+        "past the small bump this was asked for — a one-line name plus a "
+        "one-line firm is 33px of text; a floor this far above it is "
+        "padding the box past what it holds, not just giving it room to "
+        "breathe."
     )
 
 

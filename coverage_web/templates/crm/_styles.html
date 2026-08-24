@@ -805,7 +805,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      appears in any template. Stated once, in the terms that actually run. */
   .net-minis { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
   .net-mini { background: var(--paper); border: 1px solid var(--line);
-    border-radius: var(--r-ctl); padding: var(--s1) var(--s2); min-height: 38px;
+    border-radius: var(--r-ctl); padding: 6px var(--s2); min-height: 44px;
     display: flex; flex-direction: column; gap: 1px; justify-content: center;
     text-decoration: none; box-shadow: var(--shadow-1); overflow: hidden;
     transition: border-color var(--t-fast), background-color var(--t-fast),
@@ -1008,10 +1008,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      often into three pieces, and every card in that row stretched to match:
      80/99/120/141px, avg 111.6px a contact.
 
-     Density is height per contact, not cards per row. Three cards of ~44px
-     costs a third of what four cards of 111px did, and the row that used to
-     be the tallest is now the one that fits on one line. The lost column is
-     paid back several times over by the rows that no longer exist. */
+     Density is height per contact, not cards per row. Three flat one-line
+     cards cost a fraction of what four wrapped ones did (111.6px avg), and
+     the row that used to be the tallest is now the one that fits on one
+     line. The lost column is paid back several times over by the rows that
+     no longer exist. Padding and the height floor got a small bump back up
+     from the tightest fit — asked for directly, after the first pass read
+     as cramped rather than compact. */
   /* FLEX, not grid, and the swap is load-bearing — it is what lets the name
      above wrap at all.
 
@@ -1052,14 +1055,21 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .net-actions .net-group.is-empty { flex: 0 0 auto; }
   .net-actions .net-group.is-empty .net-none { flex: none; padding: var(--s2) 0; }
 
-  .net-legend { display: flex; gap: var(--s4); flex-wrap: wrap; font-size: var(--fs-s);
-    color: var(--ink-2); margin-bottom: var(--s3); }
+  .net-legend { display: flex; gap: var(--s4); flex-wrap: wrap; align-items: center;
+    font-size: var(--fs-s); color: var(--ink-2); margin-bottom: var(--s3); }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     margin-right: 4px; }
   .dot-cold { background: var(--w-cold-bar); }
   .dot-replied { background: var(--w-replied-bar); }
   .dot-chatted { background: var(--w-chatted-bar); }
   .dot-advocate { background: var(--w-advocate-bar); }
+  /* "SP" reads as an acronym only on the card, where a 10px chip has no
+     room for a whole word. The legend is where it earns that shorthand —
+     spelled out once, in the same place the warmth dots already are, so a
+     first-time reader never has to guess what a two-letter pill means. The
+     swatch is the actual chip, not a copy of its color, so a change to
+     `.fc-spon` can never drift from what the legend shows. */
+  .net-legend .fc-spon { margin-right: 4px; }
 
   /* Tier rows (radar layout): the TIER label sits above a full-width row of
      firm cards that packs as many columns as the panel allows. */
@@ -1104,10 +1114,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* flex: none on the head and foot — the two rows that must never absorb a
      squeeze. With the badge row gone there is nothing inside a card left to
      give, and with minmax rows nothing should need to. */
-  /* Name and deadline share one row: the name takes what is left after the
-     tag, which is `flex: none` because a date must never be the thing that
-     truncates. Cards without a close date are unchanged — the row is just
-     the name. */
+  /* Name, sponsorship chip and deadline share one row: the name takes what
+     is left after them, both of which are `flex: none` because neither may
+     be the thing that truncates. Cards carrying neither are unchanged — the
+     row is just the name. */
   .firm-card-head { flex: none; display: flex; align-items: baseline;
     gap: var(--s2); min-width: 0; }
   .firm-card-head .gap-due-tag { flex: none; }
@@ -1119,15 +1129,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* One pill left on this card, and it is not a count: whether the firm
      sponsors. `fc-open`, `fc-soon` and `fc-act` went with the count badges
-     they styled — and so did the wrapping, the `align-content`, the
-     `overflow: hidden` and the compact re-sizing that existed only because
-     four pills could not fit one 156px line. A single pill needs none of it.
-     Sized down to the card's own rhythm, same as the gap strip does. */
-  .firm-card-badges { display: flex; flex: none; }
-  .firm-card-badges .pill { font-size: 10px; padding: 2px var(--s2);
-    line-height: 1.5; }
+     they styled, and this one used to sit on a row of its own below the
+     name — a card carrying both a sponsorship answer and a close date was
+     four lines for two facts. Shortened to "SP" and folded into the head
+     row next to the date tag instead (`flex: none`, same as the tag, so
+     the name is still the only thing that can give). The abbreviation is
+     spelled out once, in `.net-legend` above the grid — see there before
+     assuming a two-letter chip needs to explain itself on its own. */
+  .firm-card-head .fc-spon { flex: none; }
   .pill.fc-spon { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line);
-    align-self: flex-start; }
+    font-size: 10px; padding: 2px var(--s2); line-height: 1.5; }
   /* The card's bottom row: warmth bar + the advocate sockets, side by side.
      Deliberately ONE row rather than a new line — this card is meant to be
      read at a glance, and a stacked line spends a whole row saying what fits
@@ -1292,8 +1303,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      across three and four lines. Measured at 375px before this rule existed
      (the four-across basis applied unconditionally, phone included): cards
      67px wide and 245-536px TALL, one letter-stack per contact. One per row
-     instead. A full-width card gives the name and the firm a whole line each
-     and lands flat at 43px, the same height the desktop board reads at. */
+     instead. A full-width card gives the name and the firm a whole line
+     each and lands flat, at the same small height the desktop board reads
+     at — `.net-mini`'s own min-height and padding, not a phone-specific
+     value. */
   @media (max-width: 560px) {
     .net-actions .net-mini { flex: 0 0 100%; }
   }

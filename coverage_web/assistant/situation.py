@@ -113,7 +113,15 @@ def _deadline_moved_events(tracked_ids: list[int], since, limit: int) -> list[di
     """`OpportunityChange` rows on a tracked opportunity where the stated
     deadline itself moved, most recent first, at most one row per
     opportunity — a role that moved twice in the window is reported once,
-    old-to-newest, not as two disagreeing cards."""
+    old-to-newest, not as two disagreeing cards.
+
+    A posting that is CLOSED right now is skipped, the same live-truth test
+    `_role_closed_events` already applies. A moved deadline is a promise
+    about a window still open; on a dead posting it is a stale row the
+    scraper has already overtaken. Reported directly, pointing at two cards
+    for one Bank of America forum: one saying it closed and would not take
+    applications, the other saying its deadline had moved to a date nine
+    days out. Both were true rows; together they were nonsense."""
     if not tracked_ids:
         return []
     rows = (
@@ -127,8 +135,11 @@ def _deadline_moved_events(tracked_ids: list[int], since, limit: int) -> list[di
     for row in rows:
         if row.opportunity_id in seen:
             continue
-        seen.add(row.opportunity_id)
         opp = row.opportunity
+        if is_posting_closed(opp):
+            seen.add(row.opportunity_id)
+            continue
+        seen.add(row.opportunity_id)
         events.append({
             "kind": "deadline_moved",
             "opportunity_id": opp.id,
@@ -320,6 +331,12 @@ def build_situation(user) -> dict:
     `role_closed` leads, then `deadline_moved`, then `new_role_at_known_firm`,
     each internally most-recent-first.
 
+    That same order is also the PRECEDENCE for the flat list's one-card-per-
+    role rule: a role appearing in more than one kind is reported once, by
+    the most urgent kind that claims it. The per-kind lists are left whole —
+    a caller asking for `role_closed` wants every close, not the ones that
+    survived a merge — so only `events` is deduplicated.
+
     Never raises — see the module docstring. Any failure returns the same
     empty shape a student with nothing to report gets, so a bug here can
     never turn into a broken Today page."""
@@ -337,7 +354,28 @@ def build_situation(user) -> dict:
         deadline_moved = _deadline_moved_events(tracked_ids, since, MAX_PER_TYPE)
         new_roles = _new_role_events(user, since, MAX_PER_TYPE)
 
-        events = (role_closed + deadline_moved + new_roles)[:MAX_TOTAL_EVENTS]
+        # ONE CARD PER ROLE. Each helper above dedupes inside its own kind
+        # and none of them could see the others, so a single role could
+        # surface twice with two different sentences — which is exactly what
+        # shipped: a Bank of America forum reported as closed AND as having
+        # moved its deadline to a date in the future, side by side.
+        #
+        # The precedence is the list order, already argued below: a role
+        # that closed is terminal news and outranks a window that moved,
+        # which outranks a role that merely appeared. Fixing only the
+        # closed/moved pair at its source (see `_deadline_moved_events`)
+        # would leave the same trap set for the next event kind added here,
+        # so the guarantee lives at the merge where it can be stated once.
+        events: list[dict] = []
+        claimed: set[int] = set()
+        for event in role_closed + deadline_moved + new_roles:
+            opportunity_id = event.get("opportunity_id")
+            if opportunity_id in claimed:
+                continue
+            claimed.add(opportunity_id)
+            events.append(event)
+            if len(events) >= MAX_TOTAL_EVENTS:
+                break
 
         return {
             "deadline_moved": deadline_moved,

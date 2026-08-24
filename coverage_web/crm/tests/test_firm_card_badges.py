@@ -38,10 +38,13 @@ pytestmark = pytest.mark.django_db
 
 
 def _tier_board(body: str) -> str:
-    """Just the tier board. The Coverage Gaps strip above it names the same
-    firms and legitimately still carries an "N Open" badge, so a whole-body
-    search would prove the opposite of what these tests claim."""
-    start = body.index('<h2 class="strip-title" title="Tier drives your action')
+    """Just the tier cards, not the board around them. The Coverage Gaps
+    strip above it names the same firms and legitimately still carries an
+    "N Open" badge, and `.net-legend` (also inside this section) explains
+    the "SP" chip once with a live sample of it — so a whole-section search
+    for `fc-spon` can never tell a real card's pill apart from the legend's.
+    Starting at the first tier lane skips both and leaves only the cards."""
+    start = body.index('<div class="tier-section"')
     return body[start : body.index("</section>", start)]
 
 
@@ -93,13 +96,20 @@ def test_the_sponsors_pill_is_not_a_count_and_stays(client, student):
     """The ask was about COUNTS. "Sponsors" is a yes/no about the student —
     whether this firm is open to them at all — and no other surface on this
     board answers it. Removing it as collateral would drop information, not
-    noise."""
+    noise. Shortened to "SP" on the card itself (a 10px chip has no room for
+    a word), with the full claim in its title attribute and spelled out once
+    in the legend above the grid — see `test_the_legend_explains_the_sp_chip`
+    for that half."""
     _busy_firm(student, sponsors=True)
     board = _board(client, student)
 
-    assert "pill fc-spon" in board and "Sponsors" in board, (
+    assert "pill fc-spon" in board and ">SP<" in board, (
         "the Sponsors pill went with the count badges. It is not a count, "
         "and it was not what was asked to be removed."
+    )
+    assert "Sponsors visas" in board, (
+        "the card's chip carries no explanation of what SP means — it "
+        "should say so in its title attribute."
     )
 
 
@@ -231,3 +241,21 @@ def test_the_removed_counts_still_decide_which_firm_reads_first(client, student)
         "With the 'Act Now' badge gone, this ordering is the only thing left "
         "pointing a student at the card that needs them."
     )
+
+
+def test_the_legend_explains_the_sp_chip(client, student):
+    """The legend, not the card, is where "SP" earns the right to be an
+    abbreviation. It has to hold both the same chip a card wears (so the two
+    can never drift apart) and the words that spell out what it means — a
+    reader who has never hovered a card should still be able to learn "SP"
+    from the board itself, the same way the warmth dots already are."""
+    client.force_login(student)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+    legend = body[
+        body.index('<div class="net-legend"') : body.index("</div>", body.index('<div class="net-legend"'))
+    ]
+
+    assert "pill fc-spon" in legend and ">SP<" in legend, (
+        "the legend doesn't show the actual SP chip, only refers to it."
+    )
+    assert "Sponsors visas" in legend

@@ -263,6 +263,7 @@
         <span><i class="dot dot-replied"></i> Replied</span>
         <span><i class="dot dot-chatted"></i> Chatted</span>
         <span><i class="dot dot-advocate"></i> Advocate</span>
+        <span><span class="pill fc-spon">SP</span> Sponsors visas</span>
       </div>
       {% for section in tier_sections %}
         <div class="tier-section" data-tier="{{ section.tier|default:'' }}">
@@ -297,7 +298,13 @@
                 "Sponsors" is not a count and stays. It answers a question
                 about the student rather than about the week — whether this
                 firm is open to them at all — and nothing else on this board
-                answers it.
+                answers it. Shortened to "SP" and moved into the head row,
+                beside the close date rather than on a row of its own — a
+                card with both used to be four lines for two facts. The
+                board's own legend spells it out once, in `.net-legend`
+                above the tier grid, the same place the warmth dots are
+                explained, so the abbreviation never has to guess at being
+                self-explanatory on a 10px chip.
 
                 One removed badge did NOT survive as a sort key, so it moved
                 up to the name row instead of quietly going with the rest:
@@ -311,13 +318,13 @@
                 {% endcomment %}
                 <div class="firm-card-head">
                   <div class="firm-card-name">{{ fc.firm.name|smart_title }}</div>
+                  {% if fc.sponsors %}
+                    <span class="pill fc-spon" title="Sponsors visas — see Opportunities for which regions">SP</span>
+                  {% endif %}
                   {% if fc.close_label %}
                     <span class="gap-due-tag" title="{{ fc.close_title }}">{{ fc.close_label }}</span>
                   {% endif %}
                 </div>
-                {% if fc.sponsors %}
-                  <div class="firm-card-badges"><span class="pill fc-spon">Sponsors</span></div>
-                {% endif %}
                 {% comment %}
                 Bar + advocate sockets share one row — the card is a short
                 grid cell and a stacked line would push the bar out of view

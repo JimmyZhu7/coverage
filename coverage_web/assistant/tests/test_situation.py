@@ -409,10 +409,109 @@ def test_events_are_ordered_role_closed_then_deadline_moved_then_new_role():
     _track(user, moved)
     _change(moved, "deadline", "2026-08-01", "2026-08-20")
 
-    _opp(firm, url="https://example.com/new", first_seen=timezone.now())
+    # The new role belongs to a SECOND known firm, and the fixture is
+    # poorer for it having ever been otherwise. `_new_role_events` keeps
+    # one role per firm and picks the firm's newest, so when every role
+    # here shared a firm that slot was won by `moved` — and this test
+    # passed while asserting a three-card list whose second and third
+    # cards were the same role, said two different ways. That is the
+    # duplicate the flat list now refuses, so the fixture has to stop
+    # depending on it to produce a third kind.
+    other = _firm(name="Morgan Stanley", slug="morgan-stanley")
+    Contact(user=user, firm=other, name="Another Banker").save()
+    _opp(other, url="https://example.com/other-old",
+         first_seen=timezone.now() - timedelta(days=60))
+    _opp(other, url="https://example.com/new", first_seen=timezone.now())
 
     result = situation.build_situation(user)
 
     assert [e["kind"] for e in result["events"]] == [
         "role_closed", "deadline_moved", "new_role_at_known_firm",
     ]
+    ids = [e["opportunity_id"] for e in result["events"]]
+    assert len(ids) == len(set(ids)), "the ordering fixture is reporting one role twice"
+
+
+# ---------------------------------------------------------------------------
+# One card per role. Reported directly, with a screenshot of two cards side by
+# side for the same Bank of America forum: one saying it had closed and would
+# not accept applications, the other saying its deadline had moved to a date
+# nine days out. Each helper deduped inside its own kind and none could see
+# the others, so a role changing in two ways surfaced twice, contradicting
+# itself.
+# ---------------------------------------------------------------------------
+
+def test_a_role_that_closed_and_moved_its_deadline_reports_once_as_closed():
+    """The exact shipped bug. Both rows were real; together they were
+    nonsense. Closed is the terminal fact and wins."""
+    user = _user()
+    firm = _firm(name="Bank of America", slug="bank-of-america")
+    opp = _opp(
+        firm,
+        title="Campus Insight Forum: The Power to Lead - Fall 2026",
+        status="closed",
+    )
+    _track(user, opp)
+    _change(opp, "status", "open", "closed")
+    _change(opp, "deadline", "2026-08-21", "2026-08-31")
+
+    result = situation.build_situation(user)
+
+    kinds = [e["kind"] for e in result["events"]]
+    assert kinds == ["role_closed"], (
+        f"one role produced {len(kinds)} cards ({kinds}). A student saw the "
+        "same forum reported as closed and as having moved its deadline into "
+        "the future, side by side."
+    )
+    ids = [e["opportunity_id"] for e in result["events"]]
+    assert len(ids) == len(set(ids)), "the flat events list repeats a role"
+
+
+def test_a_moved_deadline_on_a_closed_posting_is_not_reported_at_all():
+    """Fixed at the source too, not only at the merge: a deadline is a
+    promise about a window still open, and on a dead posting it is a stale
+    row the scraper has already overtaken. So it is absent from the
+    per-kind list as well, which the merge alone would not have done."""
+    user = _user()
+    opp = _opp(_firm(), status="closed")
+    _track(user, opp)
+    _change(opp, "deadline", "2026-08-21", "2026-08-31")
+
+    result = situation.build_situation(user)
+
+    assert result["deadline_moved"] == [], (
+        "a closed posting is still advertising a moved deadline."
+    )
+
+
+def test_a_moved_deadline_on_a_still_open_posting_is_untouched():
+    """The guard is about DEAD postings only. An open role that moved its
+    deadline is the whole point of the event type and must still report."""
+    user = _user()
+    opp = _opp(_firm(), status="open")
+    _track(user, opp)
+    _change(opp, "deadline", "2026-08-21", "2026-08-31")
+
+    result = situation.build_situation(user)
+
+    assert len(result["deadline_moved"]) == 1
+    assert result["deadline_moved"][0]["opportunity_id"] == opp.id
+
+
+def test_the_per_kind_lists_are_not_pruned_by_the_merge():
+    """Only the flat `events` list is deduplicated. A caller asking for
+    `role_closed` wants every close, not the ones that survived a merge."""
+    user = _user()
+    firm = _firm()
+    closed_and_moved = _opp(firm, url="https://example.com/both", status="closed")
+    _track(user, closed_and_moved)
+    _change(closed_and_moved, "status", "open", "closed")
+
+    other_closed = _opp(firm, url="https://example.com/other", status="closed")
+    _track(user, other_closed)
+    _change(other_closed, "status", "open", "closed")
+
+    result = situation.build_situation(user)
+
+    assert len(result["role_closed"]) == 2
+    assert len(result["events"]) == 2
