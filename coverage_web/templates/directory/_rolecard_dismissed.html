@@ -1,0 +1,35 @@
+{% load textstyle %}
+{% comment %}
+WHAT A DISMISSED CARD TURNS INTO — the immediate undo, standing exactly where
+the card stood.
+
+The card used to swap to an empty body, and the row simply vanished. That is
+the right outcome and the wrong moment to make it permanent: "Not for me" sits
+one pixel from Save, the columns scroll, and a mis-aimed click removed a role
+with nothing on screen to say what had just happened or how to take it back.
+
+IN PLACE, not at the top of the page. The scope block above has an undo strip
+of its own for dismissals made from the peek panel, and it works there because
+the peek IS at the top. A student who clicked a card 600 rows down would never
+see it. So this occupies the card's own grid slot — the column does not jump,
+and the reversal is under the cursor that caused it.
+
+It keeps `.rolecard` in its class list on purpose: the column's grid sizes its
+children, and a differently-shaped element here would reflow every card below
+it for as long as the stub is on screen.
+
+`r` is `_dismiss_undo_offer`'s dict (id, firm_name, title). The undo POSTs
+`undismiss`, which deletes the row outright, and comes back as the real card
+again via `_one_rolecard` — untracked, which is what it was before the click.
+{% endcomment %}
+<div class="rolecard rolecard-dismissed" role="status">
+  <p class="rcd-said">Not for me.</p>
+  <p class="rcd-what">{% if show_firm %}{{ r.firm_name|smart_title }} &mdash; {% endif %}{{ r.title|smart_title }}</p>
+  <p class="rcd-note">Won't be suggested again. All of them are on
+    <a href="{% url 'my_applications' %}#hidden">My Applications</a>.</p>
+  <button type="button" class="rcd-undo"
+          hx-post="{% url 'track_opportunity' r.id %}"
+          hx-vals='{"status": "undismiss", "from": "card", "show_firm": "{% if show_firm %}1{% else %}0{% endif %}"}'
+          hx-include=".filters"
+          hx-target="closest .rolecard" hx-swap="outerHTML">Undo</button>
+</div>

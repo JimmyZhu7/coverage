@@ -336,10 +336,24 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* One line per role: firm, title, when. The title is the elastic column and
      the only one allowed to clip — the firm is how you scan the list and the
      date is why you would act on it, so neither may lose characters. */
-  .peek-row { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+  /* Four columns now, not three: the veto is the fourth. It gets `auto` like
+     the date, so the elastic title is still the only column allowed to clip
+     — the whole point of the row's original split. */
+  .peek-row { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr) auto auto;
     gap: 0 var(--s2); align-items: baseline; padding: 5px 0;
     font-size: var(--fs-xs); line-height: 1.35; }
   .peek-row + .peek-row { border-top: 1px solid var(--line); }
+  /* "Not for me", inside the peek. Same words and the same quiet weight as
+     the card's own `.track-hide` — one verb, one vocabulary — but drawn
+     always rather than revealed on hover: the panel itself is already a
+     hover state, and hiding a control inside a control is how you get a
+     live target with nothing painted in it (see `.track-hide`'s note). */
+  .peek-hide { justify-self: end; border: 0; background: none; padding: 2px 4px;
+    cursor: pointer; font: inherit; font-size: var(--fs-nano);
+    color: var(--ink-3); border-radius: 6px; white-space: nowrap;
+    transition: color var(--t-fast); }
+  .peek-hide:hover { color: var(--danger); }
+  .peek-hide:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .peek-firm { color: var(--ink); font-weight: var(--w-med);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .peek-title { color: var(--ink-2);
@@ -376,9 +390,31 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     .peek:focus-within > .peek-panel,
     .peek[data-peek-state="open"] > .peek-panel { display: block; }
     .peek[data-peek-state="shut"] > .peek-panel { display: none; }
-    .peek-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .peek-row { grid-template-columns: minmax(0, 1fr) auto auto; }
     .peek-title { grid-column: 1 / -1; }
+    /* No hover on a phone, so the veto is a real tap target rather than a
+       4px-padded word: 44px wide and 32px tall is the floor the rest of this
+       page's touch controls hold to. */
+    .peek-hide { padding: 7px 10px; min-width: 44px; text-align: right; }
   }
+
+  /* THE PEEK'S UNDO STRIP. Same shape and tokens as Today's dismissed-proposal
+     strip (`.prop-undo`) and My Applications' bulk-save undo (`.apps-undo`),
+     because it is the same promise made in the same words: you just hid
+     something, here is the way back, and here is where they all live. */
+  .scope-undo { display: flex; align-items: center; gap: var(--s3);
+    flex-wrap: wrap; margin-bottom: var(--s3);
+    padding: 8px var(--s4) 8px var(--s3);
+    background: var(--accent-soft); border: 1px solid var(--accent-line);
+    border-left: 3px solid var(--accent); border-radius: 10px;
+    color: var(--ink-2); font-size: var(--fs-s); }
+  .scope-undo-said { flex: 1 1 auto; }
+  .scope-undo-note { color: var(--ink-3); }
+  .scope-undo-btn { border: 1px solid var(--accent-line); background: var(--surface);
+    color: var(--accent-ink); border-radius: 999px; padding: 4px 14px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .scope-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
 
   /* The lazy-load sentinel: a full-width strip at the end of the loaded
      columns. It occupies real height so `revealed` fires before the user
@@ -1131,6 +1167,34 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     .track-hide:focus-visible { opacity: 1; pointer-events: auto; }
   }
   .track-hide:hover { color: var(--danger); }
+
+  /* WHAT A DISMISSED CARD TURNS INTO. Keeps `.rolecard`'s box — same fixed
+     height, same border radius, same grid slot — so a column does not reflow
+     around a stub that is on screen for four seconds. Quieter than a live
+     card in every channel: no accent, no fuse, dashed border, muted ground.
+     It is a receipt, not a role. */
+  .rolecard-dismissed { justify-content: center; gap: 3px;
+    border-style: dashed; border-left-color: var(--line);
+    background: var(--surface); }
+  .rolecard-dismissed:hover { border-color: var(--line); box-shadow: none;
+    transform: none; }
+  .rcd-said { margin: 0; font-size: var(--fs-s); font-weight: var(--w-med);
+    color: var(--ink-2); }
+  /* WHICH role, said out loud. A stub that only said "Not for me" would be
+     ambiguous the moment two of them are on screen, and Undo is a button you
+     press because you recognise what you just hid. Clamped to one line for
+     the same reason every other slot on this card is. */
+  .rcd-what { margin: 0; font-size: var(--fs-xs); color: var(--ink-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rcd-note { margin: 0 0 2px; font-size: var(--fs-nano); color: var(--ink-3);
+    line-height: 1.35; }
+  .rcd-undo { align-self: flex-start; border: 1px solid var(--accent-line);
+    background: var(--paper); color: var(--accent-ink); border-radius: 999px;
+    padding: 4px 14px; font: inherit; font-size: var(--fs-xs);
+    font-weight: var(--w-med); cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .rcd-undo:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .rcd-undo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* The reversal list on My Applications. */
   .apps-hidden { display: flex; flex-direction: column; gap: 2px; }

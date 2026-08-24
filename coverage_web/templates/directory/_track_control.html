@@ -25,9 +25,30 @@ in document order.
     </button>
     {% comment %}Save's opposite. Without it the only verbs were "act on
     this" and "scroll past it forever", so a feed of 894 roles never got
-    smaller no matter how many decisions the student made.{% endcomment %}
+    smaller no matter how many decisions the student made.
+
+    THREE FIELDS RIDE WITH IT, and each closes something the plain version
+    could not:
+
+      `from: card` asks for the two-fragment response — the Undo stub in
+      place of this card, plus the scope block out of band. The card used to
+      swap to an empty body and nothing else, which left the "Save them all"
+      banner above still promising a number the confirm could no longer
+      honour, and left the dismissal itself with no way back short of finding
+      My Applications.
+
+      `show_firm` is the one thing the server cannot re-derive: a role in the
+      pinned Picked column prints its firm name and the same role in that
+      firm's own column does not, and undo has to put back the copy that
+      left, not the other one.
+
+      `hx-include=".filters"` sends the live filter bar, so the counts that
+      come back describe the board actually on screen.
+    {% endcomment %}
     <button type="button" class="track-hide"
-            hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "dismiss"}'
+            hx-post="{% url 'track_opportunity' r.id %}"
+            hx-vals='{"status": "dismiss", "from": "card", "show_firm": "{% if r.show_firm %}1{% else %}0{% endif %}"}'
+            hx-include=".filters"
             hx-target="closest .rolecard" hx-swap="outerHTML swap:120ms"
             title="Won't suggest this role again">Not for me</button>
   {% elif r.track_status == "saved" %}
