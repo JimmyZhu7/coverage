@@ -335,3 +335,179 @@ def test_clear_saved_leaves_dismissed_rows_alone(client):
 
     row = UserOpportunity.all_objects.get(user=user, opportunity=dismissed)
     assert row.dismissed is True
+
+
+# ---------------------------------------------------------------------------
+# The peek — which roles the banner is offering, before you agree to it
+# ---------------------------------------------------------------------------
+#
+# The banner named a number and asked for a commitment against it without ever
+# saying WHICH roles. These pin the one property that makes the panel worth
+# having: it is a view of the SAME id list the confirm writes
+# (`BULK_SAVE_OFFER_SESSION_KEY`), not a second answer to the same question.
+# A count that disagrees is a bug; a role named in the panel and then not
+# saved would be a promise broken by name.
+
+
+def _peek(client):
+    """The peek context off a fresh feed render, with the live offer beside
+    it — the two facts every test in this section compares."""
+    resp = client.get(reverse("opportunities"))
+    return resp, resp.context["bulk_save_peek"], client.session["bulk_save_offer"]
+
+
+@pytest.mark.django_db
+def test_the_peek_lists_exactly_the_roles_in_the_offer(client):
+    user = _student()
+    offered = [_eligible_opp(n) for n in (1, 2, 3)]
+    client.force_login(user)
+
+    resp, peek, offer = _peek(client)
+
+    assert set(offer) == {o.id for o in offered}
+    assert {r["id"] for r in peek["rows"]} == set(offer)
+    assert peek["total"] == resp.context["eligible_unsaved"] == 3
+    body = resp.content.decode()
+    for o in offered:
+        assert o.title in body
+
+
+@pytest.mark.django_db
+def test_the_peek_never_names_a_role_the_offer_excludes(client):
+    """Three exclusions the banner's own count already makes, held to the
+    same standard now that the roles are named on screen: a role whose text
+    names another class year, one the student already tracks, and one they
+    dismissed. "Not for me" outranks "your year" in the panel too."""
+    user = _student()
+    mine = _eligible_opp(1)
+    other_year = _eligible_opp(2, class_year="2031")
+    already = _eligible_opp(3)
+    dismissed = _eligible_opp(4)
+    client.force_login(user)
+    client.post(reverse("track_opportunity", args=[already.id]), {"status": "saved"})
+    client.post(reverse("track_opportunity", args=[dismissed.id]), {"status": "dismiss"})
+
+    resp, peek, offer = _peek(client)
+
+    assert [r["id"] for r in peek["rows"]] == [mine.id]
+    assert set(offer) == {mine.id}
+    body = resp.content.decode()
+    for gone in (other_year, already, dismissed):
+        assert f'class="peek-title">{gone.title}<' not in body
+
+
+@pytest.mark.django_db
+def test_the_peek_caps_its_rows_and_says_how_many_it_left_out(client):
+    """A 200-row offer is a page, not a peek. The cap is fine; a cap that
+    read as the whole offer would not be — so the remainder is stated."""
+    from directory.views import BULK_SAVE_PEEK_MAX
+
+    user = _student()
+    extra = 4
+    for n in range(BULK_SAVE_PEEK_MAX + extra):
+        _eligible_opp(n)
+    client.force_login(user)
+
+    resp, peek, offer = _peek(client)
+
+    assert len(peek["rows"]) == BULK_SAVE_PEEK_MAX
+    assert peek["total"] == len(offer) == BULK_SAVE_PEEK_MAX + extra
+    assert peek["more"] == extra
+    assert f"+ {extra} more not shown" in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_a_peek_that_fits_says_nothing_about_more(client):
+    user = _student()
+    for n in (1, 2):
+        _eligible_opp(n)
+    client.force_login(user)
+
+    resp, peek, _ = _peek(client)
+
+    assert peek["more"] == 0
+    assert "more not shown" not in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_the_peek_puts_the_soonest_deadline_first(client):
+    """The cap only stays honest if the rows it keeps are the ones with the
+    most to say about acting today. Dated roles lead, soonest first; undated
+    ones follow, because "no date posted" is the least urgent thing a row
+    can say."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    user = _student()
+    today = timezone.localdate()
+    undated = _eligible_opp(1)
+    far = _eligible_opp(2)
+    near = _eligible_opp(3)
+    Opportunity.objects.filter(pk=far.pk).update(deadline=today + timedelta(days=30))
+    Opportunity.objects.filter(pk=near.pk).update(deadline=today + timedelta(days=2))
+    client.force_login(user)
+
+    _, peek, _ = _peek(client)
+
+    assert [r["id"] for r in peek["rows"]] == [near.id, far.id, undated.id]
+
+
+@pytest.mark.django_db
+def test_the_peek_folds_a_repeat_listing_exactly_as_the_confirm_does(client):
+    """The 206/209/208 defect, asked of the panel. One requisition listed
+    twice is one role: the feed folds it, the confirm writes one row, and the
+    panel must name it once — otherwise the student reads two promises and
+    gets one."""
+    user = _student()
+    firm = Firm.objects.create(name="Repeat Bank", slug="repeat-bank")
+    for n in (1, 2):
+        Opportunity.objects.create(
+            firm=firm, url=f"https://repeat/{n}", title="Summer Analyst",
+            bucket="internship", status="open", class_year="2027",
+            location="New York")
+    client.force_login(user)
+
+    resp, peek, offer = _peek(client)
+
+    assert len(peek["rows"]) == peek["total"] == len(offer) == 1
+    assert resp.content.decode().count('class="peek-title"') == 1
+
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    written = set(UserOpportunity.objects.for_user(user)
+                  .values_list("opportunity_id", flat=True))
+    assert written == {r["id"] for r in peek["rows"]}
+
+
+@pytest.mark.django_db
+def test_what_the_panel_named_is_what_the_click_saves(client):
+    """The whole invariant in one assertion, for an offer small enough that
+    the panel names all of it: panel contents == offer set == what gets
+    written."""
+    user = _student()
+    for n in (1, 2, 3):
+        _eligible_opp(n)
+    client.force_login(user)
+
+    _, peek, offer = _peek(client)
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+
+    written = set(UserOpportunity.objects.for_user(user)
+                  .values_list("opportunity_id", flat=True))
+    assert {r["id"] for r in peek["rows"]} == set(offer) == written
+
+
+@pytest.mark.django_db
+def test_the_peek_is_a_disclosure_a_keyboard_can_reach(client):
+    """Hover is not an interface for everyone. The toggle is a real button
+    wired to the panel it opens, so focus and a tap both work and a screen
+    reader is told what the control does."""
+    user = _student()
+    _eligible_opp(1)
+    client.force_login(user)
+
+    body = client.get(reverse("opportunities")).content.decode()
+
+    assert ('class="peek-toggle" aria-expanded="false" '
+            'aria-controls="bulk-save-peek"') in body
+    assert 'id="bulk-save-peek"' in body
