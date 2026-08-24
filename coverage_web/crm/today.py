@@ -1034,11 +1034,24 @@ def _new_at_your_firms(user, limit=5) -> dict:
         .values("firm_id").annotate(oldest=Min("first_seen"))
         if row["oldest"] and row["oldest"] >= since
     }
+    # NOT A ROLE THE STUDENT ALREADY WAVED AWAY. "Not for me" is a decision
+    # about the role, not about the surface it was shown on, and this card
+    # was the last one still arguing with it: a role dismissed in the feed on
+    # Monday came back on Tuesday as news from the firm. Same exclusion its
+    # sibling `assistant.situation._new_role_events` already applies to the
+    # identical question.
+    dismissed_ids = set(
+        UserOpportunity.objects.for_user(user)
+        .filter(dismissed=True)
+        .values_list("opportunity_id", flat=True)
+    )
     qs = (Opportunity.objects
           .filter(status="open", bucket__in=TARGET_BUCKETS,
                   firm_id__in=[f for f in firm_ids if f not in debut],
                   first_seen__gte=since)
           .select_related("firm").order_by("-first_seen"))
+    if dismissed_ids:
+        qs = qs.exclude(id__in=dismissed_ids)
     # The same repeat-listing problem the Opportunities feed already solves
     # (directory.dupes.fold_duplicates): a board scraped twice in one week
     # posts the same requisition twice, and this card showed both — J.P.
@@ -2004,7 +2017,21 @@ def _dashboard_context(user) -> dict:
     closing_10 = campus.filter(deadline__range=(today, today + timedelta(days=9))).count()
 
     firm_ids = set(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
-    at_your_firms = campus.filter(firm_id__in=firm_ids).count() if firm_ids else 0
+    # Minus the ones this student has said are not for them. This cell is a
+    # personal number — "open roles at the firms YOU target" — and it links
+    # to a feed that hides those rows, so counting them here made the ribbon
+    # promise more than the board it sends you to could show. `closing_10`
+    # beside it is deliberately NOT filtered: it is a board-wide figure about
+    # the market's calendar, not a list of things for this student to do.
+    dismissed_ids = set(
+        UserOpportunity.objects.for_user(user)
+        .filter(dismissed=True)
+        .values_list("opportunity_id", flat=True)
+    )
+    at_your_firms = (
+        campus.filter(firm_id__in=firm_ids).exclude(id__in=dismissed_ids).count()
+        if firm_ids else 0
+    )
 
     # Local import: directory.views owns the eligibility verdict and the
     # Opportunities-page count it feeds; crm.today borrows the same function
