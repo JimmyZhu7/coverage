@@ -410,6 +410,17 @@ main:focus { outline: none; }
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
+  /* Safari/WebKit clips a `position: sticky` element that also carries
+     `backdrop-filter`: it composites the blur against the element's
+     PRE-stuck layer bounds, so once the header sticks, its top slice
+     renders as cut off — the nav row and wordmark shave off, cleanly, as
+     if someone took scissors to the header. Forcing this element onto its
+     own compositing layer (`translateZ(0)`) makes WebKit recompute the
+     layer at its stuck position instead of the stale one. Desktop Chrome
+     and Firefox never showed this — it's WebKit-only, which is why it
+     reads as "the top is cut off" on Safari/iPadOS and looks fine
+     everywhere else. */
+  transform: translateZ(0);
 }
 .site-header-inner {
   max-width: var(--page-w-wide); margin: 0 auto; padding: var(--s3) var(--s5);
