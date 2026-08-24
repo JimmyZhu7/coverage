@@ -298,9 +298,9 @@ def _build_actions(user):
 
         last = last_real.get(c["id"])
         a["last_kind"] = kind_labels.get(last.kind, last.kind) if last else None
+        a["last_on"] = timezone.localtime(last.ts).date() if last else None
         a["last_business_days"] = (
-            cadence.business_days_since(timezone.localtime(last.ts).date(), today)
-            if last else None
+            cadence.business_days_since(a["last_on"], today) if last else None
         )
         # Inbound movement this week: THEY did something recently (a reply, a
         # chat happening or landing on the calendar). The queue's cards
@@ -642,8 +642,95 @@ def _today_class(a: dict) -> int:
 def _is_critical(a: dict) -> bool:
     """Never capped, never snoozed away: a confirmed deadline, a dying chat
     thread, or anything the engine itself called priority 0 (which is how an
-    OVERDUE thank-you gets in here without needing its own class)."""
+    OVERDUE thank-you gets in here without needing its own class).
+
+    Says only that the card is critical IN KIND. Whether it still earns the
+    exemption today is `_stale_critical`'s question — see it."""
     return _today_class(a) == 0 or a["priority"] == 0
+
+
+# How long a critical prompt with no deadline behind it may go unanswered
+# before it stops holding a critical slot. Business days since the last real
+# touch, the same clock the card's own copy already prints.
+#
+# THE MEASURED CASE (founder's live queue, 2026-08-24). Daily cap 3, and all
+# three slots went to class 0. Two of them were `confirm_chat` cards — Leo
+# Ziqiang Yuan at HSBC and William Zhang at Macquarie — asking the identical
+# question, "chat was scheduled 16 business days ago, did it happen?", word
+# for word, for the sixteenth consecutive working day. Because criticals are
+# never capped, those two occupied 2 of 3 slots permanently, and Katy Chen —
+# tier 1, already chatted, a role at her firm closing Sep 30, tied for the
+# highest expected value in the entire queue — sat in the held list behind
+# them with no day on which she could ever come out. Every morning rendered
+# the same three cards.
+#
+# A question nobody has answered in three working weeks is not urgent, it is
+# stuck, and the exemption exists for urgency. 15 business days is three full
+# working weeks of silence; branch 2 starts asking at 5, so by then the page
+# has put the same sentence in front of the student on roughly ten straight
+# working days. Ten refusals is evidence. The card does not go away — it moves
+# to the "Still open" strip, which costs no plan slot (see `_cockpit_context`).
+CRITICAL_STALE_BUSINESS_DAYS = 15
+
+
+def _stale_critical(a: dict, today) -> bool:
+    """Has this critical card stopped earning its never-capped exemption?
+
+    DECAY IS BY UNANSWERED AGE, NEVER BY A BLANKET TIMER, and the split is the
+    whole design:
+
+      - A card with a LIVE deadline behind it never decays by age. Nick
+        Tehle's re-ping was 7 business days idle against a confirmed Aug 30
+        close, and it would still deserve the top slot at 70: the clock that
+        makes it critical belongs to the world, not to how long the student
+        has been ignoring us. Only the deadline passing can retire it.
+      - A card with NO deadline behind it — `confirm_chat`, an overdue
+        thank-you — is a question the product chose to ask. Its whole claim on
+        a slot is that it is live, and an unanswered question ages out of that
+        claim.
+
+    The passed-deadline test is belt-and-braces and known to be unreachable
+    from here today: `cadence._closing_soon` already drops a close before
+    `today`, so `closes_on` is either None or in the future by the time an
+    action exists. It is written anyway because the invariant it depends on
+    lives in another module: if that filter is ever loosened, a card pointing
+    at an application that has already closed must not inherit a permanent
+    exemption on the strength of a date that is over.
+
+    An UNKNOWN age never decays. `last_business_days` is None when the contact
+    carries no dateable touch at all, and the honest reading of that is "we
+    cannot say how long this has been unanswered", not "forever" — the same
+    care the engine takes with its own `bd is None` branches. It keeps the
+    slot; nothing here may retire a prompt on a number it does not have.
+    """
+    if not _is_critical(a):
+        return False
+    close = a.get("closes_on")
+    if close is not None:
+        return close < today
+    idle = a.get("last_business_days")
+    return idle is not None and idle >= CRITICAL_STALE_BUSINESS_DAYS
+
+
+def _stale_critical_reason(a: dict) -> str:
+    """The copy a stuck prompt gets INSTEAD of repeating itself.
+
+    Two identical cards reading "Chat was scheduled 16 business days ago. Did
+    it happen?" render as two separate emergencies, and neither sentence says
+    the one thing that is actually true about them: this has been open since
+    the first of the month and asking again has not worked. Naming the date
+    the thread went quiet turns a nag into a fact the student can act on, and
+    it stops the copy pretending each morning is the first time.
+
+    `last_on` is set by `_build_actions` off the same latest-real-touch row
+    the idle clock reads, so the date here and the age that demoted the card
+    can never disagree.
+    """
+    since = a.get("last_on")
+    when = f" from {rel._on_date(since)}" if since else ""
+    if a["action"] == "confirm_chat":
+        return f"Still unresolved{when}. Log the chat or reschedule."
+    return f"Still open{when}. Nothing has moved since."
 
 
 def _today_sort_key(a: dict):
@@ -1408,8 +1495,53 @@ def _cockpit_context(user) -> dict:
         a["snoozable"] = a["action"] not in _SNOOZE_EXEMPT_ACTIONS
 
     ordered = sorted(actions, key=_today_sort_key)
+
+    # STALENESS DECAY FOR THE CRITICAL LANE (see `_stale_critical`). A critical
+    # prompt that has gone unanswered for three working weeks stops holding a
+    # critical slot and moves to its own strip.
+    #
+    # WHY IT GOES TO A STRIP RATHER THAN BACK INTO THE RANKED PLAN. Demoting a
+    # stuck card into `rest` would rank it on `ev`, and `ev` measures the
+    # RELATIONSHIP, not the freshness of the prompt: Leo Ziqiang Yuan scores
+    # 7.2 because he is a tier-1 contact who has chatted, and a three-week-old
+    # "did it happen?" would have walked straight back into the plan ahead of
+    # real work with one extra step in between. The card is not worth a slot;
+    # it is worth being findable. So it keeps its full controls and its own
+    # heading, and costs the day nothing.
+    #
+    # WHY IT IS NOT ARCHIVED, SNOOZED OR AUTO-RESOLVED. The question is still
+    # open — somebody scheduled a chat and nobody wrote down what happened —
+    # and only the student can answer it. Deciding on their behalf that the
+    # chat did or did not happen is the single largest claim this page can
+    # make (the same reason `_ACTION_TOUCH` refuses to map `confirm_chat` to a
+    # one-click "chat"). Decay changes where the card sits, never what is true.
+    #
+    # WHY HERE AND NOT IN `coverage_domain.cadence`. The layering rule is
+    # engine says what is DUE, this layer says what is worth TODAY. The chat
+    # IS still unconfirmed, so branch 2 is right to keep returning it and must
+    # keep returning it — suppressing it there would delete the only record
+    # that an unresolved scheduled chat exists, and would need a golden-fixture
+    # rewrite for a question the engine was never asked. "How long has this
+    # prompt been on screen unanswered" is not a property of the contact; it is
+    # a property of the queue's own asking, and the engine has no notion of
+    # having asked. It is also this layer that grants the exemption in the
+    # first place (`_is_critical`, `_TODAY_CLASS`), so the qualifier belongs
+    # beside it. No engine change, no fixture change.
+    for a in ordered:
+        a["stale_critical"] = _stale_critical(a, today)
+        if a["stale_critical"]:
+            a["reason"] = _stale_critical_reason(a)
+
     park = [a for a in ordered if _today_class(a) == 4]
-    critical = [a for a in ordered if _today_class(a) != 4 and _is_critical(a)]
+    still_open = [
+        a for a in ordered if _today_class(a) != 4 and a["stale_critical"]
+    ]
+    critical = [
+        a for a in ordered
+        if _today_class(a) != 4 and _is_critical(a) and not a["stale_critical"]
+    ]
+    # Unchanged by the decay: `_stale_critical` can only ever be true for a
+    # card `_is_critical` already covers, so nothing new falls in here.
     rest = [a for a in ordered if _today_class(a) != 4 and not _is_critical(a)]
 
     # Fill rule: class 0 is always shown in full, even past the cap — a
@@ -1507,7 +1639,7 @@ def _cockpit_context(user) -> dict:
     # cards stop pretending not to know about each other.
     debriefs = debrief_svc.pending(user)
     debrief_contact_ids = {d["contact"].id for d in debriefs}
-    for a in planned + held:
+    for a in planned + held + still_open:
         a["pairs_with_debrief"] = (
             a["action"] == "thank_you" and a["contact"]["id"] in debrief_contact_ids
         )
@@ -1554,9 +1686,17 @@ def _cockpit_context(user) -> dict:
     # happens inside this branch, so a student with a working queue — the
     # common case, and the one a perf pass just cleaned up — pays exactly
     # nothing for this feature.
+    #
+    # `still_open` IS in the test, and that is the line between it and `park`.
+    # A parked contact is a decision the student already made; a stale
+    # `confirm_chat` is a question they still owe an answer to. A queue holding
+    # nothing but stuck prompts is not a silent queue, and telling that student
+    # to go add three people at Goldman would talk straight past the two things
+    # actually waiting on them.
     seeds = (
         _starter_seeds(user, today)
         if (not lanes and not debriefs and not chat_prep and not held
+            and not still_open
             and len(contacts) < SEED_NETWORK_FLOOR)
         else []
     )
@@ -1564,7 +1704,7 @@ def _cockpit_context(user) -> dict:
     # Every contact the queue is already speaking about. "Waiting on reply" is
     # the page's silent bucket, so it must not re-list somebody who has a card
     # six inches above it.
-    busy_ids = {a["contact"]["id"] for a in planned + held + park}
+    busy_ids = {a["contact"]["id"] for a in planned + held + park + still_open}
     busy_ids |= debrief_contact_ids
     busy_ids |= {r["contact"].id for r in schedule if r["contact"]}
     # Campaign-excluded contacts are excluded here too. "Waiting on reply" is
@@ -1585,6 +1725,13 @@ def _cockpit_context(user) -> dict:
         "planned_total": len(planned),
         "held": held,
         "held_total": len(held),
+        # Criticals that aged out of the exemption. Not `held` — held is work
+        # queued for a day soon and paces out at the cap; these are questions
+        # already overdue that the plan has stopped budgeting for. Filing them
+        # under "more queued" would promise a morning on which they arrive,
+        # and there is no such morning.
+        "still_open": still_open,
+        "still_open_total": len(still_open),
         "park_actions": park,
         "park_total": len(park),
         # >5 is where one-by-one parking stops being a decision and starts

@@ -53,11 +53,16 @@ on every quick action so all of it stays in sync.
       The plan is clear but the queue is not. This is the product working, so
       it is styled as a win — and it names what's left rather than implying
       the database is empty.
+
+      `still_open` is named here for the same reason `held` and `park` are: a
+      "Done for today" that stays silent about two three-week-old unanswered
+      questions is the page marking its own homework.
       {% endcomment %}
       <div class="empty empty--done">
         <h2>Done for today.</h2>
         <p>
           {% if held_total %}{{ held_total }} more {% if held_total == 1 %}is{% else %}are{% endif %} pacing out over the coming days. {% endif %}
+          {% if still_open_total %}{{ still_open_total }} {% if still_open_total == 1 %}question is{% else %}questions are{% endif %} still open below. {% endif %}
           {% if park_total %}{{ park_total }} {% if park_total == 1 %}contact has{% else %}contacts have{% endif %} gone quiet; park them below when you're ready. {% endif %}
           That's {{ pace.done }} of {{ pace.goal }} this week.
         </p>
@@ -314,6 +319,26 @@ on every quick action so all of it stays in sync.
           {% for a in held %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
         </div>
       </details>
+    {% endif %}
+
+    {% comment %}
+    Still open. Critical prompts that have gone unanswered so long they stopped
+    being urgent and started being stuck (crm.today._stale_critical). They keep
+    every control a card has — the student is the only one who can say whether
+    the chat happened — they just stop spending a plan slot to ask it again.
+    Above the gone-quiet strip because these are unfinished work; parks are
+    exits.
+    {% endcomment %}
+    {% if still_open_total %}
+      <section class="lane lane-stale">
+        <h2 class="lane-title">
+          Still open <span class="lane-count" aria-live="polite">{{ still_open_total }}</span>
+          <span class="lane-note">no longer taking a slot</span>
+        </h2>
+        <div class="act-grid">
+          {% for a in still_open %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+        </div>
+      </section>
     {% endif %}
 
     {% comment %}

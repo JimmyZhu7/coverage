@@ -140,6 +140,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .lane-critical .act-card { border-left-color: var(--danger); }
   .lane-momentum .act-card { border-left-color: var(--ok); }
   .lane-park .act-card { border-left-color: var(--line-strong); }
+  /* Still open: a critical that aged out of its slot. Muted rather than red —
+     it was urgent and is now merely unfinished, and leaving it in the critical
+     tint would say the opposite of why it was moved. */
+  .lane-stale .act-card { border-left-color: var(--ink-3); }
+  .lane-note { font-size: var(--fs-xs); color: var(--ink-3);
+    font-weight: var(--w-reg); }
   .lane-title .park-all { margin-left: auto; }
 
   /* The day-one seed lane (crm/_seed_lane.html). Deliberately
