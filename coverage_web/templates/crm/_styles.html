@@ -706,17 +706,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .gap-name { font-weight: var(--w-bold); font-size: var(--fs-s); line-height: 1.25;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden; }
-  /* The one thing that tells two TIED cards apart: same tier and same gap
-     state score identically on purpose (that is the formula being honest,
-     not a bug), so "No contacts · 0/2 advocates · exp 12" alone used to
-     repeat six times over. Open role count doesn't feed the score, but it
-     answers the different, real question "which of these do I open
-     first" — colours borrowed from `.pill.fc-open` below (not firm-card-
-     scoped, so this doesn't duplicate the palette), sized down to this
-     card's own rhythm the way `.firm-card-badges .pill` is sized for its
-     card just below. */
-  .gap-badges { display: flex; gap: var(--s1); margin: 1px 0; }
-  .gap-badges .pill { font-size: 10px; padding: 2px var(--s2); line-height: 1.5; }
+  /* No "N Open" pill here any more — asked for directly, pointing at a card
+     in this strip. What it was for is still done: same-tier, same-gap-state
+     firms tie on exposure, and the open-role count now breaks that tie in
+     `rank_gaps`'s sort instead of on the card's face. The tied cards read
+     the same and sit in the right order, which is the answer the count was
+     standing in for. `.pill.fc-open` went with the pill. */
   .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
   /* The one number worth showing without a hover: not the whole formula
      (tier weight × gap points + bonus — that still lives in the card's
@@ -1075,20 +1070,25 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s3);
     display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
   .tier-empty { margin: var(--s2) 0; text-align: left; }
-  /* Standardized geometry: every firm card is one grid row, 92px as the
-     FLOOR — `minmax(92px, auto)`, not a fixed 92px. The fixed version
-     shipped this board's third clipping bug: a firm carrying three badges
-     (Morgan Stanley: open + soon + act-now) wrapped its badge row, the row
-     could not grow, and `overflow: hidden` plus default flex-shrink squeezed
-     the card until the TITLE's glyphs clipped mid-letter. Grid rows stretch
-     row-mates together, so cards in one row still match each other; a row
-     with a wrapped badge line is simply taller than its neighbours, which is
-     the truthful shape of holding more. Same doctrine as the feed's role
-     card: the box gives way, not the text. */
+  /* The 92px floor was the height of a card carrying a badge row, and there
+     is no badge row any more. What a card holds now is a name, a 6px bar
+     with its advocate sockets, and one short suggestion line — 62px measured
+     with all three present. 64px is the floor that fits that and nothing
+     spare.
+
+     `minmax(64px, auto)` and not a fixed 64px, and the reason is NOT the one
+     the old comment gave. Wrapped badges were what used to overflow a fixed
+     row, get squeezed by `overflow: hidden`, and clip the title mid-letter;
+     that failure is designed out rather than absorbed. The floor stays a
+     floor because a row still mixes cards that carry a suggestion line with
+     covered firms that don't, and because the deadline tag can push a long
+     firm name onto its own line — a row is as tall as its tallest card, and
+     that is the truthful shape of holding more. Same doctrine as the feed's
+     role card: the box gives way, not the text. */
   /* Each tier is bounded (~2 rows) and scrolls its own firms, so a tier with
      many firms doesn't stretch the whole coverage panel. */
   .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    grid-auto-rows: minmax(92px, auto); gap: var(--s3); max-height: 200px; overflow-y: auto;
+    grid-auto-rows: minmax(64px, auto); gap: var(--s3); max-height: 200px; overflow-y: auto;
     padding-right: 4px; scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent; }
   .tier-grid::-webkit-scrollbar { width: 8px; }
@@ -1101,44 +1101,42 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     transition: box-shadow var(--t-med), transform var(--t-med), opacity var(--t-fast); }
   .firm-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
   .firm-card.dragging { opacity: 0.5; cursor: grabbing; }
-  /* flex: none on the name and foot — the two rows that must never absorb a
-     squeeze. If anything gives inside a card it is the badge area, and with
-     minmax rows nothing should need to give at all. */
-  .firm-card-name { flex: none; font-weight: var(--w-bold); font-size: var(--fs-s);
-    /* One line, ellipsised. A long firm name used to wrap to two lines and
-       push the badges past the fixed 92px card, which is what made the row
-       heights look ragged. */
+  /* flex: none on the head and foot — the two rows that must never absorb a
+     squeeze. With the badge row gone there is nothing inside a card left to
+     give, and with minmax rows nothing should need to. */
+  /* Name and deadline share one row: the name takes what is left after the
+     tag, which is `flex: none` because a date must never be the thing that
+     truncates. Cards without a close date are unchanged — the row is just
+     the name. */
+  .firm-card-head { flex: none; display: flex; align-items: baseline;
+    gap: var(--s2); min-width: 0; }
+  .firm-card-head .gap-due-tag { flex: none; }
+  .firm-card-name { flex: 1 1 auto; min-width: 0;
+    font-weight: var(--w-bold); font-size: var(--fs-s);
+    /* One line, ellipsised. A long firm name that wrapped used to push the
+       rest of the card past its row, which is what made the row heights look
+       ragged. */
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* Badges must fit the space the name leaves inside a 92px card. At the
-     default pill size two badges measured 156px against 156px of inner width
-     — wrapping to a second row on the exact tie, which overflowed the card
-     (116px of content in a 90px box), clipped the pills mid-shape against
-     `overflow:hidden`, and pushed the warmth bar out of view entirely. These
-     compact pills are firm-card-only: the global `.pill` keeps its size
-     everywhere else, so nothing outside this board shifts. */
-  .firm-card-badges { display: flex; gap: var(--s1); flex-wrap: wrap;
-    align-content: flex-start; min-height: 0; overflow: hidden; }
+  /* One pill left on this card, and it is not a count: whether the firm
+     sponsors. `fc-open`, `fc-soon` and `fc-act` went with the count badges
+     they styled — and so did the wrapping, the `align-content`, the
+     `overflow: hidden` and the compact re-sizing that existed only because
+     four pills could not fit one 156px line. A single pill needs none of it.
+     Sized down to the card's own rhythm, same as the gap strip does. */
+  .firm-card-badges { display: flex; flex: none; }
   .firm-card-badges .pill { font-size: 10px; padding: 2px var(--s2);
     line-height: 1.5; }
-  .pill.fc-open { background: var(--conf-low-s); color: var(--conf-low-t); border-color: var(--conf-low-l); }
-  .pill.fc-soon { background: var(--stale-s); color: var(--stale-t); border-color: var(--stale-l); }
-  .pill.fc-act  { background: var(--w-advocate-s); color: var(--w-advocate-t); border-color: var(--w-advocate-l); }
   .pill.fc-spon { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line);
     align-self: flex-start; }
-  /* The card's bottom row: warmth bar + the advocate fraction, side by
-     side. Deliberately ONE row rather than a new line — the card is a fixed
-     92px grid cell with roughly 3px of slack, so a stacked line would push
-     the bar out of view (the exact failure the badge sizing above exists to
-     prevent). The row is as tall as the 11px fraction; the bar stays 6px and
-     centres in it, so total card content height moves by ~5px, absorbed by
-     the tightened gap below. */
+  /* The card's bottom row: warmth bar + the advocate sockets, side by side.
+     Deliberately ONE row rather than a new line — this card is meant to be
+     read at a glance, and a stacked line spends a whole row saying what fits
+     beside the bar. The row is as tall as the 10px sockets; the bar stays
+     6px and centres in it. */
   .firm-card { gap: 6px; }
   .firm-card-foot { display: flex; align-items: center; gap: var(--s2);
     margin-top: auto; flex: none; }
-  /* 10px/1 matches the compact firm-card pills and keeps the foot row a
-     flat 10px. Measured: card content 63.8px inside 66px of inner box, so
-     the card has MORE slack than it did before this row existed (1.2px) —
-     the 92px geometry is preserved with room to spare. */
+  /* 10px/1 keeps the foot row a flat 10px, same as the sockets beside it. */
   .fc-adv { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: 10px; line-height: 1; color: var(--ink-3); white-space: nowrap;
     flex: none; }
@@ -1168,11 +1166,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      "who to work next" the Coverage Gaps strip computes for its worst 6,
      extended to the whole board. Deliberately NOT `.gap-act`'s full button
      chrome: 55-odd of 69 cards show this, and the strip's tall button would
-     have pushed the 92px-floor grid rows well past what a status board
-     should cost. A quiet link, sized to the compact firm-card pills next
-     to it, adds one short line — the grid's `minmax(92px, auto)` rows
-     already absorb that per the badge-wrap doctrine above; a row mixing
-     covered and uncovered firms is simply as tall as its tallest card. */
+     have pushed the grid rows well past what a status board should cost. A
+     quiet 10px link adds one short line — the grid's `minmax(64px, auto)`
+     rows absorb it, and a row mixing covered firms (no line) with uncovered
+     ones (a line) is simply as tall as its tallest card. Now that the badges
+     are gone this line is the card's ONLY verb, which is the point: the ask
+     was to leave the progress bar and the suggestion. */
   .firm-card-act { flex: none; margin-top: -2px; }
   .fc-act-link { display: block; font-size: 10px; font-weight: var(--w-med);
     color: var(--accent-ink); text-decoration: none; white-space: nowrap;

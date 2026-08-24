@@ -157,7 +157,17 @@ def rank_gaps(
             contacts at that firm), `app_close` (a `date` for the soonest
             CONFIRMED official close, or None — the caller does the
             confidence filtering, exactly as the cadence engine's caller
-            does).
+            does), and `open` (count of open campus roles, optional).
+            `open` does NOT enter the exposure formula and never will —
+            hiring volume is not a coverage gap. It breaks TIES, and only
+            after exposure and tier have both said nothing. Same-tier,
+            same-gap-state firms score identically on purpose, which is the
+            formula being honest and also the point at which it stops
+            helping; before this the tie fell through to alphabetical, so
+            "Apollo" outranked a firm with 64 seats open on the strength of
+            its first letter. The strip used to print the count on the card
+            to break the tie by eye. It was asked to stop, so the ranking
+            does the comparing instead.
         today: the as-of date. Drives deadline proximity only.
         target: advocates-per-firm yardstick (see `advocate_target`).
         limit: how many gaps to return. "The worst handful", not a report.
@@ -197,9 +207,10 @@ def rank_gaps(
                 "gap_points": points,
                 "deadline_bonus": bonus,
                 "exposure": TIER_WEIGHT[tier] * points + bonus,
+                "open": int(f.get("open") or 0),
             }
         )
-    ranked.sort(key=lambda g: (-g["exposure"], g["tier"], g["name"]))
+    ranked.sort(key=lambda g: (-g["exposure"], g["tier"], -g["open"], g["name"]))
     return ranked[:limit]
 
 

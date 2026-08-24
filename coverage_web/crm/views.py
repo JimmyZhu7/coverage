@@ -698,15 +698,19 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     open_by_firm = dict(
         campus.values_list("firm_id").annotate(n=models_Count("id")).values_list("firm_id", "n")
     )
-    soon_by_firm = dict(
-        campus.filter(deadline__range=(today, today + timedelta(days=14)))
-        .values_list("firm_id").annotate(n=models_Count("id")).values_list("firm_id", "n")
-    )
+    # The soonest CONFIRMED close per firm. Computed here rather than further
+    # down because the firm cards need it too now — the Coverage Gaps strip
+    # below is no longer its only reader. Only CONFIRMED official close dates
+    # count toward urgency, the same bar `cadence._closing_soon` holds:
+    # anything rumored or merely reported must not raise an alarm.
+    closes: dict[int, Any] = {}
     for fd in FirmDate.objects.filter(
-        firm_id__in=firm_ids, precision="day",
-        date__range=(today, today + timedelta(days=30)),
+        firm_id__in=firm_ids, event_kind="app_close", date__gte=today
     ):
-        soon_by_firm[fd.firm_id] = soon_by_firm.get(fd.firm_id, 0) + 1
+        if _confidence_label(fd.confidence) != cadence.CONFIRMED:
+            continue
+        if fd.firm_id not in closes or fd.date < closes[fd.firm_id]:
+            closes[fd.firm_id] = fd.date
     act_by_firm: dict[int, int] = {}
     for a in actions:
         fid = a["contact"].get("firm_id")
@@ -731,13 +735,62 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         ]
         advocates = sum(1 for c in cs if c.warmth == "advocate")
         adv_met = advocates >= adv_target
+        close = closes.get(uf.firm_id)
+        days_out = (close - today).days if close else None
         return {
             "firm": uf.firm,
             "tier": uf.tier,
+            # `open` and `act_now` no longer render — they sort. The card used
+            # to wear both as count badges ("48 Open", "1 Act Now") and the
+            # ask was to take them off it: a status board should read as
+            # progress and a next step, not as a scoreboard. Neither number is
+            # LOST by coming off the card. Open roles are the Opportunities
+            # feed's whole job and the Coverage Gaps strip above still names
+            # the count for its worst four; every contact behind `act_now` is
+            # listed BY NAME in the action lanes to the left of these cards,
+            # on this same page. What the numbers still do is decide which
+            # firm a student's eye lands on first, in the sort below.
             "open": open_by_firm.get(uf.firm_id, 0),
-            "soon": soon_by_firm.get(uf.firm_id, 0),
             "act_now": act_by_firm.get(uf.firm_id, 0),
+            # NOT a count, and it stayed on the card when the counts came
+            # off: this answers a question about the STUDENT — is this firm
+            # open to me at all — rather than about the week, and no other
+            # surface on this board answers it.
+            #
+            # CORRECT AS-IS, and deliberately not reconciled here. Two firms
+            # carry a legacy blanket `true` in this column where the schema
+            # documents a per-region dict, and `directory.sponsorship
+            # .effective_sponsorship` now resolves that same blanket shape to
+            # "unknown" (60b7998). So the two surfaces disagree for exactly
+            # those two firms. Which reading is factually right is not
+            # decidable from a bare `true` — it is a data question, and the
+            # founder's call.
             "sponsors": uf.firm.sponsors is True or uf.firm.sponsors == "true",
+            # The one thing that had no other home. A count of roles closing
+            # "soon" was inventory with a date attached; a CONFIRMED close
+            # date is a deadline, and a deadline is the one signal a progress
+            # bar structurally cannot carry — the bar says how far along you
+            # are, never how long you have. Same 30-day window the old badge
+            # used, and the same red mono countdown the Coverage Gaps strip
+            # above already draws, so the board keeps one vocabulary for a
+            # deadline rather than inventing a second.
+            #
+            # Just "6d" here where the strip says "6d to close": this card is
+            # 190px and shares its top line with the firm's name, and at the
+            # strip's full wording the name is what gave way ("Goldman S…").
+            # The sentence lives in `close_title` for the hover.
+            "close_label": (
+                None if days_out is None or days_out > 30
+                else "today" if days_out == 0
+                else f"{days_out}d"
+            ),
+            "close_title": (
+                None if days_out is None or days_out > 30
+                else "Applications close today (confirmed date)."
+                if days_out == 0
+                else f"Applications close in {days_out} day"
+                     f"{'' if days_out == 1 else 's'} (confirmed date)."
+            ),
             "contact_count": len(cs),
             "segments": segments,
             # "1/2 advocates" against the user's target. `met` is the whole
@@ -790,18 +843,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             })
 
     # --- Coverage Gaps strip (top of the page) ---------------------------
-    # Only CONFIRMED official close dates count toward urgency — the same
-    # bar cadence._closing_soon holds. Anything rumored or merely reported
-    # must not move a firm up the strip.
-    closes: dict[int, Any] = {}
-    for fd in FirmDate.objects.filter(
-        firm_id__in=firm_ids, event_kind="app_close", date__gte=today
-    ):
-        if _confidence_label(fd.confidence) != cadence.CONFIRMED:
-            continue
-        if fd.firm_id not in closes or fd.date < closes[fd.firm_id]:
-            closes[fd.firm_id] = fd.date
-
+    # `closes` is computed above, with the firm-card inputs — the strip and
+    # the cards read the same dict and the same CONFIRMED-only bar.
     gaps = coverage.rank_gaps(
         [
             {
@@ -810,6 +853,11 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 "tier": uf.tier,
                 "warmths": [c.warmth for c in by_firm_contacts.get(uf.firm_id, [])],
                 "app_close": closes.get(uf.firm_id),
+                # Goes IN to the ranking now rather than being attached to
+                # the result afterwards, because it decides ORDER now rather
+                # than being printed on the card. See `rank_gaps` — it breaks
+                # ties and touches nothing else.
+                "open": open_by_firm.get(uf.firm_id, 0),
             }
             for uf in user_firms
         ],
@@ -825,16 +873,10 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         firm = firms_by_id.get(g["firm_id"])
         g["slug"] = firm.slug if firm else ""
         g["lever"] = _pick_lever(by_firm_contacts.get(g["firm_id"], []))
-        # Same reuse `firm_card`'s own comment describes, in the other
-        # direction: `open_by_firm` is already computed above for the full
-        # 69-firm board, at zero extra cost to attach here too. It exists on
-        # the strip because the exposure score alone left every no-contact
-        # Tier 1 firm reading identically ("No contacts · 0/2 advocates ·
-        # exp 12", six times over) — real, but not a reason to open ONE of
-        # them before another. Open role count is: a Tier 1 firm hiring
-        # right now is a firm worth a contact TODAY, in a way the formula
-        # itself has no term for.
-        g["open"] = open_by_firm.get(g["firm_id"], 0)
+        # `g["open"]` is set by `rank_gaps` from the input above — it is a
+        # ranking input now, not a display field bolted on afterwards. The
+        # card no longer prints it; it shows up as the card's POSITION among
+        # equally-exposed firms, and as one clause in the card's title=.
         # "Who to find" — the other half of the answer. `lever` covers the
         # firms where the student already knows someone; this covers the
         # ones where the only verb on the card is "Add" and the card can't

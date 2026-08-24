@@ -354,17 +354,26 @@ def test_the_gap_strip_shows_its_score_without_a_hover(client):
 
 
 @pytest.mark.django_db
-def test_tied_gap_cards_carry_a_real_open_role_count_to_tell_them_apart(client):
+def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
     """Two Tier 1 firms with no contacts are genuinely TIED on exposure (both
-    score 12) — the redesign's whole point is that a real, non-formula signal
-    still tells them apart on the card: which one is actually hiring right
-    now. Reuses `open_by_firm`, already computed for the full board, so this
-    costs the strip nothing extra."""
+    score 12) — that is the formula being honest, and also the point at which
+    it stops helping. Tied cards read as identical text, so something real
+    has to tell them apart.
+
+    That something used to be an "N Open" badge printed on the card. The
+    badge was asked for and removed (see contact_list.html), so the count
+    does the same job by ORDERING the tied cards instead: the firm with seats
+    open right now is the one worth a contact today, in a way the exposure
+    formula has no term for.
+
+    Named so that the OLD tie-break would get this wrong: alphabetically
+    "Zeta" comes last, and it is the one that has to come first.
+    """
     from directory.models import Opportunity
 
     user = User.objects.create_user(email="open@example.com", password="x")
-    hiring = Firm.objects.create(slug="hiring-co", name="Hiring Co")
-    quiet = Firm.objects.create(slug="quiet-co", name="Quiet Co")
+    hiring = Firm.objects.create(slug="zeta-co", name="Zeta Co")
+    quiet = Firm.objects.create(slug="alpha-co", name="Alpha Co")
     UserFirm.all_objects.create(user=user, firm=hiring, tier=1)
     UserFirm.all_objects.create(user=user, firm=quiet, tier=1)
     for n in range(3):
@@ -379,12 +388,19 @@ def test_tied_gap_cards_carry_a_real_open_role_count_to_tell_them_apart(client):
 
     # Both tied at exposure 12 (Tier 1 × no_contacts = 3 × 4)...
     assert gap_block.count("· exposure 12") == 2
-    # ...but only the firm that's actually hiring gets the badge, and it
-    # names the real count, not a guess.
-    hiring_card = gap_block[gap_block.index("Hiring Co"):gap_block.index("Quiet Co")]
-    quiet_card = gap_block[gap_block.index("Quiet Co"):]
-    assert '<span class="pill fc-open">3 Open</span>' in hiring_card
-    assert "pill fc-open" not in quiet_card
+    # ...and the tie is broken by who is hiring, not by the alphabet.
+    assert gap_block.index("Zeta Co") < gap_block.index("Alpha Co"), (
+        "the firm with three seats open sorts below a firm with none, on the "
+        "strength of its first letter. With the open-count badge gone from "
+        "the card, this ordering is the only thing left telling two "
+        "identically-scored cards apart."
+    )
+    # The count itself is not printed on any card, but it is still legible
+    # in the card's own arithmetic tooltip.
+    assert "pill fc-open" not in gap_block, (
+        "the open-role badge is back on a Coverage Gaps card."
+    )
+    assert "3 open roles right now" in gap_block
 
 
 # ---------------------------------------------------------------------------

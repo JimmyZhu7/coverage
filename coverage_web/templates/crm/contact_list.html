@@ -42,27 +42,29 @@
     <div class="gap-row">
       {% for g in gaps %}
         <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"
-             title="Tier {{ g.tier }} (×{{ g.tier_weight }}) × {{ g.label|lower }} ({{ g.gap_points }}){% if g.deadline_bonus %} + deadline in {{ g.days_out }}d ({{ g.deadline_bonus }}){% endif %} = exposure {{ g.exposure }}">
+             title="Tier {{ g.tier }} (×{{ g.tier_weight }}) × {{ g.label|lower }} ({{ g.gap_points }}){% if g.deadline_bonus %} + deadline in {{ g.days_out }}d ({{ g.deadline_bonus }}){% endif %} = exposure {{ g.exposure }}{% if g.open %} · {{ g.open }} open role{{ g.open|pluralize }} right now, which breaks ties on equal exposure{% endif %}">
           <div class="gap-head">
             <span class="gap-tier-tag">T{{ g.tier }}</span>
             {% if g.deadline_bonus %}<span class="gap-due-tag">{{ g.days_out }}d to close</span>{% endif %}
           </div>
           <div class="gap-name">{{ g.name|smart_title }}</div>
           {% comment %}
+          No "N Open" badge here either. Asked for directly, pointing at a
+          card in this strip: take the open count off all of these.
+
+          It was doing a real job and the job survives without the pill.
           Same-tier, same-gap-state firms are genuinely TIED on the ranking
-          formula — that's honest, not a display bug — but tied cards used
-          to read as literally identical text ("No contacts · 0/2 advocates
-          · exp 12" six times over), which answers "how did the algorithm
-          rank these" without answering "which one do I actually open
-          first". Open role count is that second answer: it doesn't feed
-          the formula, but it's real, it varies firm to firm even among
-          ties, and it's the same `.pill.fc-open` badge the full board uses
-          below — one vocabulary for "this firm is hiring right now",
-          not a second one invented for this strip.
+          formula — that's honest, not a display bug — and tied cards used to
+          read as literally identical text ("No contacts · 0/2 advocates ·
+          exposure 12", six times over), which answers "how did the algorithm
+          rank these" without answering "which one do I open first". The open
+          count answered the second question. It now answers it by ORDERING
+          the tied cards rather than printing on them (`rank_gaps` sorts on
+          it after exposure and tier), which is the same answer delivered by
+          position instead of by a number the reader has to compare across
+          six cards. The count itself is in this card's `title=`, beside the
+          rest of the arithmetic it already shows there.
           {% endcomment %}
-          {% if g.open %}
-            <div class="gap-badges"><span class="pill fc-open">{{ g.open }} Open</span></div>
-          {% endif %}
           {% comment %}
           The state and the score share one line rather than two: the tier
           is already the border colour, so restating "T1 ×3" in a second
@@ -280,16 +282,46 @@
               <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
                    style="--i:{{ forloop.counter0 }}"
                    title="Drag to another tier. Tier drives your action priorities.">
-                <div class="firm-card-name">{{ fc.firm.name|smart_title }}</div>
-                <div class="firm-card-badges">
-                  {% if fc.open %}<span class="pill fc-open">{{ fc.open }} Open</span>{% endif %}
-                  {% if fc.soon %}<span class="pill fc-soon">{{ fc.soon }} Soon</span>{% endif %}
-                  {% if fc.act_now %}<span class="pill fc-act">{{ fc.act_now }} Act Now</span>{% endif %}
-                  {% if fc.sponsors %}<span class="pill fc-spon">Sponsors</span>{% endif %}
-                </div>
                 {% comment %}
-                Bar + advocate fraction share one row so the card's fixed
-                92px geometry is unchanged (see _styles.html).
+                The COUNT badges are gone. Asked for directly: take the
+                counts off these cards and leave the progress bar and the
+                reach-out suggestion. "48 Open" is inventory — the
+                Opportunities feed is where a student shops for roles. "1 Act
+                Now" counted contacts who are listed BY NAME in the action
+                lanes to the left of these cards; the card was restating its
+                own page back at itself. Neither changes what a student does
+                next, which is what a status board owes them, and neither is
+                lost: both still decide which firm sorts first in its tier
+                (see firm_card in views.py).
+
+                "Sponsors" is not a count and stays. It answers a question
+                about the student rather than about the week — whether this
+                firm is open to them at all — and nothing else on this board
+                answers it.
+
+                One removed badge did NOT survive as a sort key, so it moved
+                up to the name row instead of quietly going with the rest:
+                a real deadline. "N Soon" counted roles closing inside two
+                weeks, and a progress bar says how far along you are while
+                structurally unable to say how long you have. Only the
+                CONFIRMED close date qualifies (see firm_card), and it wears
+                the same red mono countdown the gap strip above draws — the
+                full sentence is in its title, because a 190px card shares
+                this line with the firm's name.
+                {% endcomment %}
+                <div class="firm-card-head">
+                  <div class="firm-card-name">{{ fc.firm.name|smart_title }}</div>
+                  {% if fc.close_label %}
+                    <span class="gap-due-tag" title="{{ fc.close_title }}">{{ fc.close_label }}</span>
+                  {% endif %}
+                </div>
+                {% if fc.sponsors %}
+                  <div class="firm-card-badges"><span class="pill fc-spon">Sponsors</span></div>
+                {% endif %}
+                {% comment %}
+                Bar + advocate sockets share one row — the card is a short
+                grid cell and a stacked line would push the bar out of view
+                (see _styles.html).
                 {% endcomment %}
                 <div class="firm-card-foot">
                   <div class="firm-bar" title="{{ fc.contact_count }} contact{{ fc.contact_count|pluralize }}">
