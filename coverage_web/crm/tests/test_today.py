@@ -867,7 +867,14 @@ def test_a_scheduled_chat_drops_off_the_schedule_once_it_goes_stale():
 
     ctx = _cockpit_context(user)
     assert ctx["schedule"] == []
-    actions = [a for lane in ctx["lanes"] for a in lane["items"]]
+    # Read off the whole page, not just the plan lanes. 21 calendar days is 15
+    # business days, which is exactly where staleness decay moves a `confirm_chat`
+    # out of the critical lane and into the "Still open" strip (see
+    # CRITICAL_STALE_BUSINESS_DAYS and its own tests at the foot of this file).
+    # That is a different rule than the one under test here: this case is about
+    # branch 2 firing at all and the chat leaving the schedule, and the card
+    # existing is the whole of that claim.
+    actions = [a for lane in ctx["lanes"] for a in lane["items"]] + ctx["still_open"]
     assert [a["action"] for a in actions] == ["confirm_chat"]
 
 
@@ -1913,3 +1920,286 @@ def test_today_does_not_run_more_queries_as_the_network_grows(client):
         f"count that grows with the network is an N+1. Check select_related on "
         f"_waiting_on_reply / _schedule and the batched lookups in _chat_prep."
     )
+
+
+# ---------------------------------------------------------------------------
+# Staleness decay for the critical lane.
+#
+# THE MEASURED BUG (founder's live queue, 2026-08-24). Daily cap 3, and all
+# three slots went to class 0 every single morning: one genuine re-ping
+# against a confirmed Aug 30 close, plus two `confirm_chat` cards — HSBC and
+# Macquarie — asking the identical question, "chat was scheduled 16 business
+# days ago, did it happen?", for the sixteenth consecutive working day.
+# Criticals are never capped, so those two held 2 of 3 slots permanently and
+# nothing behind them could ever come out. A question unanswered for three
+# working weeks is not urgent, it is stuck.
+#
+# Every fixture below reproduces that exact shape: two aged `confirm_chat`
+# criticals, one re-ping with a live deadline, one high-value keep-warm
+# waiting behind them.
+# ---------------------------------------------------------------------------
+from coverage_domain.cadence import business_days_since          # noqa: E402
+from crm.today import (                                          # noqa: E402
+    CRITICAL_STALE_BUSINESS_DAYS,
+    _stale_critical,
+)
+
+
+def _bd_ago(n: int) -> date:
+    """The date exactly `n` business days before today.
+
+    Walks back until `business_days_since` — the engine's own counter, and the
+    one the queue's idle clock reads — actually returns `n`. Computed rather
+    than assumed because "n weekdays back" and "n business days since" are not
+    the same date when today is itself a weekend, and these are boundary tests:
+    they are worthless if the fixture is one day off on a Saturday CI run.
+    """
+    today = timezone.localdate()
+    d = today
+    while business_days_since(d, today) < n:
+        d -= timedelta(days=1)
+    return d
+
+
+def _touch_bd_ago(user, contact, kind, n: int):
+    from datetime import datetime, time as _time
+
+    at = timezone.make_aware(datetime.combine(_bd_ago(n), _time(12, 0)))
+    return Touch.all_objects.create(
+        user=user, contact=contact, kind=kind, channel="email", ts=at,
+    )
+
+
+def _stuck_queue(*, confirm_idle: int):
+    """The founder's shape, with the two stuck prompts at `confirm_idle`
+    business days of silence.
+
+    `weekly_touch_goal=3` pins the daily cap at 3 on every weekday: `_daily_cap`
+    floors at TODAY_PLAN_MIN, and ceil(3 / workdays-left) never exceeds it. A
+    goal of 10 would have made the cap 5 on a Friday and 3 on a Monday, which
+    would have made this suite pass or fail depending on the day it ran.
+
+    `chatted_touch_min_weeks=6` is the founder's own dial, deliberately turned
+    out from the default 3 to stop hollow prompts, and it is reproduced here
+    rather than defaulted: it is what keeps engine branch 5b silent about Katy,
+    so her card comes from `_opening_keep_warms` — priority 2, raised by a real
+    date at her firm. Her position in the queue has nothing to do with the dial
+    being wrong, and this fixture is what proves it.
+    """
+    user = _user(weekly_touch_goal=3, cadence_params={"chatted_touch_min_weeks": 6})
+    today = timezone.localdate()
+
+    # 1. The genuine critical: a confirmed close six days out.
+    jpm = Firm.objects.create(name="J.P. Morgan", slug="jpm-stale")
+    UserFirm.all_objects.create(user=user, firm=jpm, tier=1)
+    FirmDate.objects.create(
+        firm=jpm, event_kind="app_close", region="us",
+        date=today + timedelta(days=6), confidence=1.0, precision="day",
+    )
+    nick = _contact(user=user, name="Nick Tehle", firm=jpm, region="us",
+                    warmth="chatted", thread_state="replied")
+    _touch_bd_ago(user, nick, "outreach", 7)
+
+    # 2 + 3. The two stuck prompts. The `chat_scheduled` row is what put them
+    # in the state; the later `outreach` is the last REAL touch, so the idle
+    # clock — and therefore the decay — is measured off a send of the
+    # student's own, exactly as on the live rows.
+    for name, firm_name, slug, tier in (
+        ("Leo Ziqiang Yuan", "HSBC", "hsbc-stale", 1),
+        ("William Zhang", "Macquarie", "macq-stale", 2),
+    ):
+        firm = Firm.objects.create(name=firm_name, slug=slug)
+        UserFirm.all_objects.create(user=user, firm=firm, tier=tier)
+        c = _contact(user=user, name=name, firm=firm, warmth="chatted",
+                     thread_state="chat_scheduled")
+        _touch_bd_ago(user, c, "chat_scheduled", confirm_idle + 3)
+        _touch_bd_ago(user, c, "outreach", confirm_idle)
+
+    # 4. Katy: tier 1, already chatted, a confirmed date at her firm five weeks
+    # out. Five weeks is inside `relevance.OPENING_HORIZON_DAYS` (45) and well
+    # outside the engine's `pre_deadline_reping_days` (14), so it is a live
+    # reason to write without being a re-ping — which is what the live row is.
+    nomura = Firm.objects.create(name="Nomura", slug="nomura-stale")
+    UserFirm.all_objects.create(user=user, firm=nomura, tier=1)
+    FirmDate.objects.create(
+        firm=nomura, event_kind="app_close", region="us",
+        date=today + timedelta(days=37), confidence=1.0, precision="day",
+    )
+    katy = _contact(user=user, name="Katy Chen", firm=nomura, region="us",
+                    warmth="chatted", thread_state="chat_done")
+    _touch_bd_ago(user, katy, "chat", 16)
+    return user
+
+
+def _named(items):
+    return [a["contact"]["name"] for a in items]
+
+
+def _lane(ctx, key):
+    for lane in ctx["lanes"]:
+        if lane["key"] == key:
+            return lane["items"]
+    return []
+
+
+def test_the_measured_bug_reproduces_one_day_below_the_threshold():
+    """The boundary, low side. At one business day under the threshold the two
+    prompts are still treated as urgent, they still hold two of the three
+    slots, and Katy is still behind them. This is the live queue as it was."""
+    user = _stuck_queue(confirm_idle=CRITICAL_STALE_BUSINESS_DAYS - 1)
+    ctx = _cockpit_context(user)
+
+    assert ctx["daily_cap"] == 3
+    assert _named(_lane(ctx, "critical")) == [
+        "Nick Tehle", "Leo Ziqiang Yuan", "William Zhang",
+    ]
+    assert ctx["still_open_total"] == 0
+    assert "Katy Chen" in _named(ctx["held"]), (
+        "the fixture must reproduce the bug before the fix can be said to fix "
+        "anything"
+    )
+
+
+def test_one_day_past_the_threshold_the_stuck_prompts_release_their_slots():
+    """The boundary, high side. Three working weeks of silence and the two
+    prompts stop being emergencies: the critical lane holds only the card with
+    a real deadline behind it, and the slots they were sitting on go to the
+    queue."""
+    user = _stuck_queue(confirm_idle=CRITICAL_STALE_BUSINESS_DAYS)
+    ctx = _cockpit_context(user)
+
+    assert _named(_lane(ctx, "critical")) == ["Nick Tehle"]
+    assert _named(ctx["still_open"]) == ["Leo Ziqiang Yuan", "William Zhang"]
+
+
+def test_katy_chen_reaches_the_plan_once_the_nags_stop_holding_the_slots():
+    """The acceptance case. A tier-1 contact who has actually had the chat,
+    with a confirmed date at her firm five weeks out, must not be permanently
+    invisible behind two prompts nobody has answered since the start of the
+    month."""
+    user = _stuck_queue(confirm_idle=CRITICAL_STALE_BUSINESS_DAYS)
+    ctx = _cockpit_context(user)
+
+    planned = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert "Katy Chen" in _named(planned)
+    assert "Katy Chen" not in _named(ctx["held"])
+
+
+def test_a_stuck_prompt_never_silently_vanishes():
+    """Decay moves a card; it never resolves one. Nobody but the student can
+    say whether the chat happened, so the question stays on the page with every
+    control it had — it just stops spending a plan slot to ask again."""
+    user = _stuck_queue(confirm_idle=CRITICAL_STALE_BUSINESS_DAYS)
+    ctx = _cockpit_context(user)
+
+    assert ctx["still_open_total"] == 2
+    for a in ctx["still_open"]:
+        assert a["action"] == "confirm_chat", "the ask is unchanged"
+        assert a["snoozable"] is True
+        assert a["touch_kind"] is None, (
+            "confirm_chat still refuses to log a chat in one click"
+        )
+    # Not folded into the paced remainder: "more queued" promises a morning on
+    # which they arrive, and there is no such morning.
+    assert "Leo Ziqiang Yuan" not in _named(ctx["held"])
+
+
+def test_a_stuck_prompt_stops_repeating_itself():
+    """Two cards reading the identical "chat was scheduled 16 business days
+    ago, did it happen?" render as two separate emergencies and say nothing
+    true about either. The second telling names the date instead."""
+    user = _stuck_queue(confirm_idle=CRITICAL_STALE_BUSINESS_DAYS)
+    ctx = _cockpit_context(user)
+
+    since = _bd_ago(CRITICAL_STALE_BUSINESS_DAYS)
+    expected = f"Still unresolved from {since.strftime('%b')} {since.day}."
+    for a in ctx["still_open"]:
+        assert a["reason"].startswith(expected), a["reason"]
+        assert "did it happen" not in a["reason"].lower()
+
+
+def test_the_plan_never_grows_past_the_cap_because_of_a_stuck_prompt():
+    """The strip is free. Whatever lands in it must not come out of the day's
+    budget, or the fix has moved the cost rather than removed it."""
+    user = _stuck_queue(confirm_idle=CRITICAL_STALE_BUSINESS_DAYS)
+    ctx = _cockpit_context(user)
+
+    assert ctx["planned_total"] <= ctx["daily_cap"]
+    still_open_ids = {a["contact"]["id"] for a in ctx["still_open"]}
+    planned_ids = {
+        a["contact"]["id"] for lane in ctx["lanes"] for a in lane["items"]
+    }
+    assert not (still_open_ids & planned_ids), "a card cannot be in both"
+
+
+def test_a_live_deadline_never_decays_however_long_it_has_been_quiet():
+    """Requirement the whole design turns on: decay is by UNANSWERED AGE, not a
+    blanket timer. The clock behind a re-ping belongs to the world, not to how
+    long the student has been ignoring us, so silence cannot retire it."""
+    user = _stuck_queue(confirm_idle=CRITICAL_STALE_BUSINESS_DAYS)
+    nick = Contact.all_objects.get(user=user, name="Nick Tehle")
+    Touch.all_objects.filter(contact=nick).delete()
+    _touch_bd_ago(user, nick, "outreach", CRITICAL_STALE_BUSINESS_DAYS * 3)
+
+    ctx = _cockpit_context(user)
+    assert _named(_lane(ctx, "critical")) == ["Nick Tehle"]
+    assert "Nick Tehle" not in _named(ctx["still_open"])
+
+
+def test_a_deadline_that_has_passed_confers_no_exemption():
+    """A card pointing at an application that has already closed is not
+    time-critical, it is over. Unreachable from the live path today —
+    `cadence._closing_soon` drops a past close before an action exists — so it
+    is pinned here directly: the invariant lives in another module, and a
+    loosening there must not hand a dead date a permanent front-row slot."""
+    today = timezone.localdate()
+    yesterday = {"action": "reping", "priority": 0,
+                 "closes_on": today - timedelta(days=1), "last_business_days": 1}
+    tomorrow = {"action": "reping", "priority": 0,
+                "closes_on": today + timedelta(days=1), "last_business_days": 999}
+    assert _stale_critical(yesterday, today) is True
+    assert _stale_critical(tomorrow, today) is False
+
+
+def test_an_unknown_age_never_decays():
+    """`last_business_days` is None when the contact carries no dateable touch
+    at all. That reads "we cannot say how long this has been unanswered", never
+    "forever" — nothing may retire a prompt on a number it does not have."""
+    today = timezone.localdate()
+    a = {"action": "confirm_chat", "priority": 1, "closes_on": None,
+         "last_business_days": None}
+    assert _stale_critical(a, today) is False
+
+
+def test_decay_only_ever_touches_cards_that_were_critical():
+    """The demotion is a qualifier on the never-capped exemption, so it can
+    only subtract from the set that holds it. A cold follow-up silent for a
+    year is paced by the cap like every other one; it does not acquire a strip
+    of its own."""
+    today = timezone.localdate()
+    cold = {"action": "follow_up", "priority": 1, "closes_on": None,
+            "last_business_days": 400}
+    assert _stale_critical(cold, today) is False
+
+
+def test_a_queue_of_only_stuck_prompts_is_not_a_silent_queue(client):
+    """The seeds gate. A parked contact is a decision the student already made;
+    an unanswered "did it happen?" is a question they still owe. Telling that
+    student to go add three people would talk straight past the two things
+    actually waiting on them."""
+    user = _user(weekly_touch_goal=3)
+    firm = Firm.objects.create(name="HSBC", slug="hsbc-silent")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    c = _contact(user=user, name="Leo Ziqiang Yuan", firm=firm,
+                 warmth="chatted", thread_state="chat_scheduled")
+    _touch_bd_ago(user, c, "outreach", CRITICAL_STALE_BUSINESS_DAYS)
+
+    ctx = _cockpit_context(user)
+    assert ctx["still_open_total"] == 1
+    assert ctx["lanes"] == []
+    assert ctx["seeds"] == [], "a stuck question is not an empty account"
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Still open" in body
+    assert "Leo Ziqiang Yuan" in body
