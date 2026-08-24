@@ -99,18 +99,34 @@ def test_the_action_lane_lets_a_card_grow_to_fit_its_name():
     )
 
 
-def test_the_lane_still_lays_four_cards_across():
-    """The four-across count is a considered density decision (see the CSS's
-    own comment); the flex rewrite has to preserve it, not quietly reflow."""
+def test_the_lane_lays_three_cards_across_and_the_basis_counts_its_gaps():
+    """The column count is a density decision, and it moved five → four →
+    three. Four was chosen to stop names ELLIPSISING; once the name was
+    allowed to wrap instead, four became the thing that made wrapping
+    expensive — 131px of card, 64px of name, and the ordinary names on this
+    board measure 65-71px, so nearly every card wrapped and many came down in
+    three pieces. Every card in a flex line stretches to the tallest, so one
+    three-line name set the height of its whole row: 80/99/120/141px, 111.6px
+    a contact on average. Reported directly: "these are too big."
+
+    Three gives 177px of card and ~118px of name — one line is the normal
+    case, two the exception — and the lane measures 43-59px a card. Density
+    is height per contact, not cards per row.
+    """
     block = _rule(_network_styles(), ".net-actions .net-mini")
 
     basis = re.search(r"flex:\s*0 0 calc\(\(100% - (\d+) \* var\(--s2\)\) / (\d+)\)", block)
     assert basis, (
-        "the card's flex basis is no longer the explicit four-across "
-        f"quarter: {block.strip()}"
+        "the card's flex basis is no longer the explicit three-across "
+        f"third: {block.strip()}"
     )
     gaps, columns = int(basis.group(1)), int(basis.group(2))
-    assert columns == 4, f"the lane now lays out {columns} across, not four"
+    assert columns == 3, (
+        f"the lane now lays out {columns} across, not three. At four the card "
+        "is 131px and the name gets 64px, which is less than the names on "
+        "this board measure — every card wraps, some to three lines, and the "
+        "row stretches to the tallest."
+    )
     assert gaps == columns - 1, (
         f"{columns} cards have {columns - 1} gaps between them, but the basis "
         f"subtracts {gaps}; the last card in each row will not fit."

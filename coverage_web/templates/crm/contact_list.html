@@ -209,7 +209,15 @@
                          aria-label="Select {{ a.contact.name|smart_title }}">
                   <span class="net-mini-text">
                     <span class="net-mini-name">{{ a.contact.name|smart_title }}</span>
-                    <span class="net-mini-firm{% if not a.firm_known %} is-missing{% endif %}">{{ a.firm_name|smart_title }}</span>
+                    {% comment %}
+                    The firm line is one line and may ellipsise (see
+                    .net-mini-firm). Its own `title` is what makes that
+                    honest — the card's title carries the action reason,
+                    not the firm, so without this the cut-off half of
+                    "Sixth Street Partners" had nowhere to be read.
+                    {% endcomment %}
+                    <span class="net-mini-firm{% if not a.firm_known %} is-missing{% endif %}"
+                          title="{{ a.firm_name|smart_title }}">{{ a.firm_name|smart_title }}</span>
                   </span>
                   <a class="net-mini-open" href="{% url 'crm:contact_detail' a.contact.id %}"
                      aria-label="Open {{ a.contact.name|smart_title }}'s profile"
