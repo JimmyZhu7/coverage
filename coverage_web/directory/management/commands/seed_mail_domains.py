@@ -55,15 +55,28 @@ WHAT IT GUARANTEES
   changes nothing. Safe against a database that already has the fix.
 - **Additive.** Domains are appended to the existing list. Nothing is
   replaced, and a domain someone added by hand is never dropped.
-- **Create-or-update by slug.** The four firms in `CREATABLE_FIRMS` are
-  created when missing and adopted when present — never duplicated. A firm
-  already present under the same NAME is adopted too, whatever its slug:
-  the founder's database carries a "Citadel Securities" row with an EMPTY
-  slug (a defect predating this work), and keying on slug alone would have
-  minted a second Citadel row beside it. `ingest._FirmResolver` resolves by
-  exact name before creating for the same reason.
+- **Create-or-update by slug.** The firms in `CREATABLE_FIRMS` are created
+  when missing and adopted when present — never duplicated. A firm already
+  present under the same NAME is adopted too, whatever its slug: the
+  founder's database carried a "Citadel Securities" row with an EMPTY slug
+  (a defect predating this work, fixed by `directory.0011`, which also made
+  blank impossible), and keying on slug alone would have minted a second
+  Citadel row beside it. The fallback stays for the general case — a
+  hand-added row under a slug `_mail_domains.py` does not predict is still
+  the same firm. `ingest._FirmResolver` resolves by exact name before
+  creating for the same reason.
 - **Never renames, never re-slugs, never overwrites.** `tracks`/`regions`
   are filled in only when the firm has none; an existing value stands.
+
+WHAT IT CANNOT DO, AND WHERE THAT BITES
+---------------------------------------
+Append-only cuts both ways: a domain already on a firm is never removed, so a
+WRONG one already in a database stays there and this command cannot correct
+it. That happened once — `citadel.com` (Citadel LLC's) sat on the "Citadel
+Securities" row, and re-pointing the entry at `citadelsecurities.com` only
+added the right domain beside the wrong one. Splitting a firm, or correcting a
+domain rather than adding one, is a one-off fix against the affected database;
+this command's job is only to guarantee a fresh environment starts correct.
 """
 
 from __future__ import annotations
@@ -85,6 +98,11 @@ class Command(BaseCommand):
         tag = "[dry-run] " if dry else ""
 
         resolved: dict[str, Firm | None] = {}
+        # Slugs a real run WOULD create. In dry mode nothing is inserted, so
+        # the domain pass below would otherwise re-resolve them to nothing and
+        # report "? no firm with slug ..." for a firm it had just announced it
+        # was creating — hiding the domains that are the point of the command.
+        would_create: set[str] = set()
         firms_created = 0
 
         # ------------------------------------------------------------ firms
@@ -92,6 +110,7 @@ class Command(BaseCommand):
             firm = self._resolve(slug, spec["name"])
             if firm is None:
                 firms_created += 1
+                would_create.add(slug)
                 self.stdout.write(f"{tag}+    firm {spec['name']} ({slug})")
                 if not dry:
                     firm = Firm.objects.create(
@@ -125,14 +144,17 @@ class Command(BaseCommand):
             firm = resolved.get(slug)
             if firm is None:
                 firm = self._resolve(slug, None)
-            if firm is None:
+            if firm is None and slug not in would_create:
                 # A directory this command may not invent a row for — a
                 # connector firm absent from this environment, most likely.
                 # Reported, never created: see the module docstring.
                 unknown += 1
                 self.stdout.write(f"{tag}?    no firm with slug {slug!r}")
                 continue
-            existing = list(firm.domains or [])
+            # `firm is None` here only in dry mode, for a row the real run
+            # would have just created: it starts with no domains.
+            label = firm.name if firm else CREATABLE_FIRMS[slug]["name"]
+            existing = list(firm.domains or []) if firm else []
             have = {(d or "").strip().lower() for d in existing}
             new = [d for d in domains if d.strip().lower() not in have]
             if not new:
@@ -141,7 +163,7 @@ class Command(BaseCommand):
             added += len(new)
             where = "first domain" if not existing else "appended"
             self.stdout.write(
-                f"{tag}+    {firm.name}: {', '.join(new)} ({where})"
+                f"{tag}+    {label}: {', '.join(new)} ({where})"
             )
             if not dry:
                 # APPEND, never replace. The same list carries the career-site

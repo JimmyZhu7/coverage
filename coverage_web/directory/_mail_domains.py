@@ -53,12 +53,17 @@ MAIL_DOMAINS: dict[str, list[str]] = {
     "bnpparibas": ["bnpparibas.com"],
     "td": ["tdsecurities.com"],
     "truist": ["truist.com"],
-    # Named "Citadel Securities" in the directory but carrying Citadel LLC's
-    # own domain, as the founder's database has it. The two are sibling firms
-    # (Citadel Securities' people generally write from citadelsecurities.com),
-    # so this is reproduced rather than "corrected" — changing it is a
-    # directory decision, not a loader decision.
-    "citadel-securities": ["citadel.com"],
+    # Two firms, not one. Citadel LLC is the hedge fund; Citadel Securities is
+    # the market maker. They are separate legal entities that recruit
+    # separately, and their people write from separate domains — so a single
+    # row named "Citadel Securities" carrying `citadel.com` (as the founder's
+    # database had it, and as this file first reproduced) is not a cosmetic
+    # mismatch: it hands a Citadel LLC sender to the student as a Citadel
+    # Securities contact, stated as fact on the proposal card. That is exactly
+    # the misattribution this file's own bar for adding a row forbids, so the
+    # pair is split rather than reproduced.
+    "citadel": ["citadel.com"],
+    "citadel-securities": ["citadelsecurities.com"],
     # The three boutiques created by the same fix. Their rows are defined in
     # CREATABLE_FIRMS below so a fresh environment gets the firm too, not just
     # a domain with nowhere to attach.
@@ -101,8 +106,12 @@ MAIL_DOMAINS: dict[str, list[str]] = {
 # in `boards.py`'s catalog and inventing a second one would fork the row.
 #
 # `name` is also the fallback identity: a firm already present under this name
-# is adopted rather than duplicated, whatever its slug (the founder's database
-# carries a "Citadel Securities" row with an EMPTY slug — see the command).
+# is adopted rather than duplicated, whatever its slug. That mattered literally
+# once — the founder's database carried a "Citadel Securities" row with an
+# EMPTY slug, so keying on slug alone would have minted a second one beside it.
+# `directory.0011` gave that row its real slug and the `firm_slug_not_blank`
+# constraint stops another appearing, but the fallback stays: a hand-added row
+# under a slug this file does not predict is still the same firm.
 # ---------------------------------------------------------------------------
 CREATABLE_FIRMS: dict[str, dict] = {
     "qatalyst": {
@@ -126,6 +135,15 @@ CREATABLE_FIRMS: dict[str, dict] = {
     "citadel-securities": {
         "name": "Citadel Securities",
         "tracks": ["st"],
+        "regions": ["us"],
+        "status": "active",
+    },
+    # The sibling the split above names. Tracked like the other multi-strategy
+    # funds already in the directory (Point72, Millennium, Schonfeld): a
+    # student networks into both the trading and the investing side.
+    "citadel": {
+        "name": "Citadel",
+        "tracks": ["st", "am"],
         "regions": ["us"],
         "status": "active",
     },

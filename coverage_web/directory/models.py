@@ -16,6 +16,16 @@ from django.utils import timezone
 
 
 class Firm(models.Model):
+    # Unique, and never blank. `unique=True` alone permits exactly one blank
+    # row, which is legal-but-useless: `Firm.objects.get(slug=...)` can never
+    # address it, `seed_directory`'s `update_or_create(slug=...)` would collide
+    # with it, and it silently drops out of every slug-keyed map in the app.
+    # One such row existed (id 218, "Citadel Securities") — not from any code
+    # path in this repo, all of which pass an explicit slug, but from a
+    # `manage.py shell` insert that simply omitted the field and got Django's
+    # implicit "" for it. Nothing in code could have prevented that, which is
+    # why the guard is a database constraint rather than a validator: see
+    # `Meta.constraints` below and migration `0011`.
     slug = models.SlugField(max_length=128, unique=True)
     name = models.CharField(max_length=255)
     # One list, two readers, and the difference between them is load-bearing.
@@ -61,6 +71,16 @@ class Firm(models.Model):
     class Meta:
         db_table = "firms"
         ordering = ["name"]
+        constraints = [
+            # Enforced in Postgres so it holds for `manage.py shell`, `dbshell`
+            # and a raw `INSERT` too — the paths that produced the one blank
+            # slug this table ever carried. A model validator would only fire
+            # in a ModelForm, i.e. nowhere near where the row came from.
+            models.CheckConstraint(
+                condition=~models.Q(slug=""),
+                name="firm_slug_not_blank",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name

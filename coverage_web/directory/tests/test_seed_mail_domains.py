@@ -122,14 +122,33 @@ def test_a_firm_that_already_exists_by_slug_is_updated_not_duplicated():
 
 
 def test_a_firm_present_under_the_same_name_is_adopted_whatever_its_slug():
-    """The founder's database carries a blank-slug "Citadel Securities" row.
-    Keying on slug alone would mint a second one beside it."""
-    stray = Firm.objects.create(slug="", name="Citadel Securities", tracks=["st"])
+    """The founder's database carried a "Citadel Securities" row under a slug
+    this file does not predict (a blank one, until `directory.0011` filled it
+    in and the `firm_slug_not_blank` constraint made blank impossible). Keying
+    on slug alone would mint a second Citadel Securities beside it."""
+    stray = Firm.objects.create(
+        slug="citadel-securities-us", name="Citadel Securities", tracks=["st"]
+    )
     _seed()
     assert Firm.objects.filter(name="Citadel Securities").count() == 1
     stray.refresh_from_db()
-    assert stray.slug == ""          # never re-slugged behind anyone's back
-    assert "citadel.com" in stray.domains
+    # Never re-slugged behind anyone's back: the row keeps the slug it had.
+    assert stray.slug == "citadel-securities-us"
+    assert "citadelsecurities.com" in stray.domains
+
+
+def test_citadel_and_citadel_securities_are_two_firms_with_two_domains():
+    """Separate legal entities that recruit separately and write from separate
+    domains. Collapsing them attributes a Citadel LLC sender to Citadel
+    Securities on a card that states it as fact."""
+    _seed()
+    fund = Firm.objects.get(slug="citadel")
+    market_maker = Firm.objects.get(slug="citadel-securities")
+    assert fund.name == "Citadel" and fund.domains == ["citadel.com"]
+    assert market_maker.name == "Citadel Securities"
+    assert market_maker.domains == ["citadelsecurities.com"]
+    # The domain that caused the mix-up belongs to exactly one of them.
+    assert "citadel.com" not in market_maker.domains
 
 
 def test_an_unknown_slug_is_skipped_not_invented():
