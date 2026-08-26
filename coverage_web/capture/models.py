@@ -189,6 +189,14 @@ class ApplicationEvent(PrivateModel):
     # five-state funnel `directory.views._TRACK_STATES` owns, and why an
     # assessment invite deliberately does not claim "Interviewing".
     APPLIED = "applied"
+    # "Congratulations on advancing in the Campus Insight Forum process." Its
+    # own kind rather than a second flavour of APPLIED because the two mails
+    # say different things and the dedup constraint below is keyed on the
+    # kind: a firm that confirms an application and later announces an
+    # advance has sent two facts, and a student should see both. Both still
+    # claim `submitted` — see `capture.appmail.TARGET_STATUS` for the
+    # under-claim and why it is the honest one.
+    ADVANCED = "advanced"
     ASSESSMENT = "assessment"
     VIDEO_INTERVIEW = "video_interview"
     INTERVIEW = "interview"
@@ -196,6 +204,7 @@ class ApplicationEvent(PrivateModel):
     OFFER = "offer"
     EVENT_CHOICES = [
         (APPLIED, "Application received"),
+        (ADVANCED, "Advanced in the process"),
         (ASSESSMENT, "Online assessment invite"),
         (VIDEO_INTERVIEW, "Video interview invite"),
         (INTERVIEW, "Interview scheduling"),
@@ -260,6 +269,21 @@ class ApplicationEvent(PrivateModel):
     # When the message actually arrived — rides into `applied_at` on accept
     # so the funnel's dates are the mail's, not the tap's.
     occurred_at = models.DateTimeField(null=True, blank=True)
+    # A deadline the MAIL stated, in words, with a year — "complete the
+    # Program Preference Survey by August 30, 2026". Null is the common and
+    # honest case: `capture.appmail._due_on` refuses numeric dates, refuses a
+    # missing year, and refuses a date with no obligation word in front of it,
+    # so nothing here is ever inferred.
+    #
+    # A DATE, DELIBERATELY, not a datetime. The mail said "11:59 PM EST" and
+    # the founder's account is anchored to Asia/Hong_Kong; storing the clock
+    # time would mean choosing a timezone for a fact whose timezone we read
+    # off prose. The day is the part a student acts on.
+    #
+    # This is also the one thing on the row a STAGE cannot express, which is
+    # why `consider_finding` will card an event that moves no stage but
+    # carries a date still ahead of today.
+    due_on = models.DateField(null=True, blank=True)
     status = models.CharField(
         max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING
     )

@@ -597,8 +597,9 @@ CONTACT_PROPOSAL_EXPORT_COLUMNS = [
     "status", "occurred_at", "created", "resolved_at",
 ]
 APPLICATION_EVENT_EXPORT_COLUMNS = [
-    "firm", "role", "event", "target_status", "evidence", "match_reason",
-    "detected_by", "status", "occurred_at", "created", "resolved_at",
+    "firm", "role", "event", "target_status", "due_on", "evidence",
+    "match_reason", "detected_by", "status", "occurred_at", "created",
+    "resolved_at",
 ]
 DEBRIEF_EXPORT_COLUMNS = [
     "created", "contact", "learned", "intro_name", "intro_email",
@@ -870,7 +871,8 @@ def application_events_csv(user) -> str:
             [
                 e.firm.name if e.firm_id else e.firm_text,
                 e.opportunity.title if e.opportunity_id else "",
-                e.get_event_type_display(), e.target_status, e.evidence,
+                e.get_event_type_display(), e.target_status,
+                e.due_on.isoformat() if e.due_on else "", e.evidence,
                 e.match_reason, e.detected_by, e.status,
                 _dt(e.occurred_at), _dt(e.created), _dt(e.resolved_at),
             ]
