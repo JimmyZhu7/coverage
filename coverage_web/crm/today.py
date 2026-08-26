@@ -29,7 +29,7 @@ from directory.classify import TARGET_BUCKETS
 from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
 
-from . import campaigns, debrief as debrief_svc, relevance as rel, services
+from . import campaigns, debrief as debrief_svc, recruitment, relevance as rel, services
 from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
 from .utils import (
     ACTION_LABELS,
@@ -158,9 +158,28 @@ def _build_actions(user):
         for uf in UserFirm.objects.for_user(user)
         if uf.firm_id
     }
-    firm_names = dict(
-        Firm.objects.filter(id__in=firm_ids).values_list("id", "name")
-    )
+    firm_names = {}
+    firm_tracks = {}
+    for fid, name, tracks in Firm.objects.filter(id__in=firm_ids).values_list(
+        "id", "name", "tracks"
+    ):
+        firm_names[fid] = name
+        firm_tracks[fid] = tracks or []
+    # People who are not part of the user's recruiting AT ALL — the founder's
+    # 2026-08-25 rule, decided per PERSON off the row's own text by
+    # `crm.recruitment` (see that module for why neither firm tier nor school
+    # tie is the test). Computed here from rows already in hand — zero extra
+    # queries (`tracks` rides the firm query above) — and carried into the
+    # contact dicts as one bool, exactly like `campaign_excluded`, so
+    # `crm.relevance` stays a pure function of the dict.
+    recruitment_hidden_ids = {
+        c.id
+        for c in contacts
+        if recruitment.contact_verdict(
+            c, tiers=tiers, firm_tracks=firm_tracks,
+            firm_label=firm_names.get(c.firm_id, ""),
+        ).verdict == recruitment.HIDE
+    }
     firm_meta = {
         fid: {"name": firm_names.get(fid, fid), "tier": tiers.get(fid, 3)}
         for fid in firm_ids
@@ -215,6 +234,11 @@ def _build_actions(user):
             # layer stays a pure function of this dict and testable with no
             # database — same posture as `recruiting_contact` above.
             "campaign_excluded": c.id in campaign_excluded_ids,
+            # Same shape, prior question: is this PERSON part of the user's
+            # recruiting at all (`crm/recruitment.py`)? Gated in
+            # `crm.relevance.contact_relevance` right after the campaign
+            # bool, with the same inbound override.
+            "recruitment_hidden": c.id in recruitment_hidden_ids,
         }
         for c in contacts
     ]
@@ -492,6 +516,21 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict) -> list[dic
             a["closes_on"] = None
             a["label"] = rel.CAMPAIGN_REPLY_LABEL
             a["reason"] = rel.CAMPAIGN_REPLY_REASON
+        elif a["contact"].get("recruitment_hidden"):
+            # Same one-thing override for a recruitment-hidden contact
+            # (`crm/recruitment.py`): they are only ever here because they
+            # wrote and are owed an answer, so the engine's own ask — which
+            # is by construction a recruiting move — is rewritten to the
+            # reply and nothing else. Same mechanics as the campaign branch
+            # above, its own sentence, because "you said this send was not
+            # your recruiting" and "this person is not part of your
+            # recruiting" are different claims and the card must make the
+            # right one.
+            a["action"] = "advance"
+            a["priority"] = 1
+            a["closes_on"] = None
+            a["label"] = rel.UNRELATED_REPLY_LABEL
+            a["reason"] = rel.UNRELATED_REPLY_REASON
         elif a["is_recruiting"] and a["action"] in rel.CHAT_PROPOSING_ACTIONS:
             if a["action"] == "advance":
                 if not a["owed_reply"]:
@@ -1731,6 +1770,11 @@ def _cockpit_context(user) -> dict:
     # queue rule (`crm/campaigns.py`). The Network board hides them and says
     # so; nothing anywhere deletes them.
     busy_ids |= campaigns.excluded_contact_ids(user)
+    # And the recruitment-hidden, for the identical reason: a reply the WRIT
+    # 150 professor never sent was never owed in the recruiting sense, and
+    # "Waiting on reply" listing them forever would be the queue rule
+    # (`crm/recruitment.py`) disagreeing with its own board.
+    busy_ids |= recruitment.hidden_contact_ids(user)
 
     return {
         "lanes": lanes,

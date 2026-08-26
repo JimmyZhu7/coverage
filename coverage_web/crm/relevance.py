@@ -154,6 +154,21 @@ def contact_relevance(contact: dict, tiers: dict[int, object], *, owed_reply: bo
         # habit with better bookkeeping. It costs one reply and it is the whole
         # reason this returns REL_INBOUND instead of REL_NONE.
         return REL_INBOUND if owed_reply else REL_NONE
+    if contact.get("recruitment_hidden"):
+        # THE PERSON THEMSELVES IS NOT PART OF THE USER'S RECRUITING — the
+        # founder's 2026-08-25 rule ("any unrelated should not show up"),
+        # decided by `crm.recruitment.contact_verdict` off the row's own text
+        # and carried in as one bool for the same purity reason as
+        # `campaign_excluded` above. Judged BEFORE the school tie below on
+        # purpose: the blanket school exemption was an earlier deliberate
+        # decision and the founder has overridden it — a WRIT 150 professor
+        # shares his school and still has nothing to do with recruiting, so
+        # REL_SCHOOL is only ever reached by people the recruitment rule kept.
+        #
+        # The inbound override is the campaign gate's, unchanged and for the
+        # same reason: a professor who wrote and is still waiting is owed one
+        # reply, and a rule that swallowed it would be teaching a bad habit.
+        return REL_INBOUND if owed_reply else REL_NONE
     if contact.get("firm_id") in tiers:
         return REL_TIERED
     if contact.get("school_affiliation"):
@@ -630,3 +645,14 @@ CAMPAIGN_REPLY_REASON = (
     "They wrote to you. Answer the note. From a send that was not your recruiting."
 )
 CAMPAIGN_REPLY_LABEL = "Reply"
+
+# And the same one sentence for a recruitment-hidden contact's inbound
+# message (`crm/recruitment.py`) — the professor who writes with a real
+# question gets an answer, never a recruiting ask: the inbound override
+# grants exactly one thing, and the engine's own action (a re-ping, a chat
+# proposal) would be a recruiting move aimed at somebody the rule just said
+# is not part of the user's recruiting.
+UNRELATED_REPLY_REASON = (
+    "They wrote to you. Answer the note. Not part of your recruiting."
+)
+UNRELATED_REPLY_LABEL = "Reply"
