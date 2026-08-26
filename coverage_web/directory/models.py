@@ -18,11 +18,28 @@ from django.utils import timezone
 class Firm(models.Model):
     slug = models.SlugField(max_length=128, unique=True)
     name = models.CharField(max_length=255)
+    # One list, two readers, and the difference between them is load-bearing.
+    # A MAIL domain is one the firm's PEOPLE send from (`gs.com`); a
+    # CAREER-SITE domain is where its postings live (`careers.bcg.com`,
+    # `jobs.rbc.com`, `blackstone.wd1.myworkdayjobs.com`). Board connectors
+    # only ever knew the second kind, so for a long time this column held
+    # almost nothing but career sites — and `capture.discovery.FirmDomains`,
+    # which matches a human's From: address against this list, refused real
+    # bankers because of it. Both kinds live here together on purpose (logo
+    # lookup and board resolution want the career hosts), so nothing may
+    # REPLACE this list to fix one reader: append, and see
+    # `directory/_mail_domains.py` + `manage.py seed_mail_domains`.
     domains = ArrayField(
         models.CharField(max_length=255),
         default=list,
         blank=True,
-        help_text="Email domains associated with this firm, e.g. ['jpmorgan.com'].",
+        help_text=(
+            "Domains associated with this firm — both the MAIL domains its "
+            "people send from (e.g. 'gs.com', used to match an email address "
+            "to the firm) and the CAREER-SITE hosts its postings live on "
+            "(e.g. 'careers.bcg.com'). Nobody sends mail from a career site: "
+            "adding one here will not make an address resolve."
+        ),
     )
     regions = ArrayField(models.CharField(max_length=64), default=list, blank=True)
     tracks = ArrayField(models.CharField(max_length=64), default=list, blank=True)
