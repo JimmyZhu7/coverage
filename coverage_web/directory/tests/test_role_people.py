@@ -76,13 +76,21 @@ def _contact(user, firm, name, *, warmth="cold", role="", days_ago=None):
 @pytest.mark.django_db
 def test_one_query_covers_every_firm_asked_about(django_assert_num_queries):
     """The whole point of the helper: N firms, one read. A per-firm loop would
-    be six queries here and one per card on a real pipeline."""
+    be six queries here and one per card on a real pipeline.
+
+    TWO, not one, since campaign-hidden contacts came off these rosters: the
+    second is `crm.campaigns.excluded_contact_ids`, which is one
+    `CampaignContact` read that returns nothing and short-circuits on every
+    account that has never classified a bulk send. The invariant this test
+    exists for is untouched — neither number grows with the firm count, which
+    is what `test_drawer_costs_one_query_for_its_people` pins from the other
+    direction."""
     user = _user()
     firms = [_firm(slug=f"f{i}", name=f"Firm {i}") for i in range(6)]
     for f in firms:
         _contact(user, f, f"Person at {f.name}", days_ago=3)
 
-    with django_assert_num_queries(1):
+    with django_assert_num_queries(2):
         out = _people_at_firms(
             user, [f.id for f in firms], today=timezone.localdate(), cap=3
         )

@@ -90,7 +90,7 @@ from accounts.models import WORK_AUTH
 from analytics.events import record_event
 from analytics.models import UserOpportunity
 from coverage_domain.pipeline import CHANNELS, THREAD_STATES, TOUCH_TRANSITIONS, WARMTH
-from crm import services
+from crm import campaigns as crm_campaigns, services
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
 from crm.today import TUNABLE_CADENCE_PARAMS, _build_actions
 from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS
@@ -288,7 +288,10 @@ TOOL_SCHEMAS: list[dict] = [
             "Find people in the student's own network by name, firm, or role. "
             "Always returns contact ids — you need one for get_contact and "
             "log_touch. If more than one person matches, the result says so; "
-            "ask the student which one before any write."
+            "ask the student which one before any write. A row flagged "
+            "not_my_recruiting arrived on a bulk send the student told us was "
+            "something else they do, like a club event: answer questions about "
+            "them normally, but never propose reaching out to them."
         ),
         "strict": True,
         "input_schema": _schema(
@@ -740,6 +743,13 @@ def _search_contacts(user, args) -> dict:
         if prev is None or t.ts > prev:
             last_touch[t.contact_id] = t.ts
 
+    # SEARCH STILL FINDS THEM. Campaign-hidden contacts come off the Network
+    # board, the firm page and `get_firm`, but a student who types a name is
+    # asking about that person, not asking for a recommendation, and a search
+    # that cannot find somebody in your own contact book is a search that is
+    # broken. They come back FLAGGED instead, so the advisor can answer the
+    # question without turning the answer into a suggestion to email them.
+    hidden = crm_campaigns.excluded_contact_ids(user)
     now = timezone.now()
     rows = [
         {
@@ -751,6 +761,7 @@ def _search_contacts(user, args) -> dict:
             "thread_state": c.thread_state,
             "region": c.region or "unknown",
             "last_touch_days": _days_since(last_touch.get(c.id), now=now),
+            "not_my_recruiting": c.id in hidden,
         }
         for c in contacts
     ]
@@ -915,9 +926,16 @@ def _get_firm(user, args) -> dict:
         for fd in FirmDate.objects.filter(firm_id=firm.id, date__gte=today).order_by("date")[:MAX_ROWS]
     ]
 
+    # "My contacts at this firm" is the same claim the Network board and the
+    # firm page make, so it answers it the same way: people whose relationship
+    # started in a send the student said was not their recruiting are out. The
+    # advisor recommending a coffee chat with a club panelist is the exact
+    # failure `crm/campaigns.py` was written for, one tool call further along.
+    # `search_contacts` deliberately still returns them — see there.
     contacts = list(
         Contact.objects.for_user(user)
         .filter(archived=False, firm_id=firm.id)
+        .exclude(id__in=crm_campaigns.excluded_contact_ids(user))
         .order_by("name")[:MAX_ROWS]
     )
     warmth_rank = {"advocate": 0, "chatted": 1, "replied": 2, "cold": 3}
@@ -964,8 +982,17 @@ def _get_my_firms(user, _args) -> dict:
         return {"firms": [], "note": "No target firms tiered yet — set tiers on the Network page."}
 
     firm_ids = [r.firm_id for r in rows]
+    # Same exclusion as `get_firm` above, and it matters more here because
+    # this tool is pure counts: `contact_count` and `warmest_contact` are what
+    # the advisor reasons over when it decides which firm the student is
+    # covered at, and nine club alumni at one bank would tell it the opposite
+    # of the truth.
     contacts_by_firm: dict[int, list[Contact]] = {}
-    for c in Contact.objects.for_user(user).filter(archived=False, firm_id__in=firm_ids):
+    for c in (
+        Contact.objects.for_user(user)
+        .filter(archived=False, firm_id__in=firm_ids)
+        .exclude(id__in=crm_campaigns.excluded_contact_ids(user))
+    ):
         contacts_by_firm.setdefault(c.firm_id, []).append(c)
 
     open_counts: dict[int, int] = {}

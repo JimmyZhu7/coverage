@@ -161,6 +161,7 @@ def _new_for_you(user, *, today: date) -> list[dict]:
     excludes this student) are passed through to `recommend()` rather than
     filtered here, so the exclusion rule lives in exactly one place."""
     from analytics.models import UserOpportunity
+    from crm import campaigns
     from crm.models import Contact, UserFirm
     from directory.classify import TARGET_BUCKETS
     from directory.dupes import fold_duplicates
@@ -176,11 +177,16 @@ def _new_for_you(user, *, today: date) -> list[dict]:
     # this mirrors (kept duplicated rather than extracted because it is four
     # lines of ORM, not a rule that can drift the way a date/cadence formula
     # can).
+    # The campaign exclusion is part of the mirrored logic, not an extra:
+    # an alum who answered a club panel invitation is a real reply and a fake
+    # foothold, and letting it warm their bank would aim this student's weekly
+    # role picks at a firm he has no recruiting relationship at. `campaigns`.
     warm_by_firm: dict[int, str] = {}
     for fid, warmth in (
         Contact.objects.for_user(user)
         .filter(archived=False, firm__isnull=False,
                 warmth__in=("replied", "chatted", "advocate"))
+        .exclude(id__in=campaigns.excluded_contact_ids(user))
         .values_list("firm_id", "warmth")
     ):
         rank = "warm" if warmth in ("chatted", "advocate") else "replied"

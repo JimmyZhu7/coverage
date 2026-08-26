@@ -39,6 +39,7 @@ from analytics.events import record_event
 # Read-only, cross-app import (build-plan.md §2's private zone). directory
 # never writes crm rows; the opportunities feed only reads UserFirm via the
 # tenant-scoped manager. No import cycle: crm.models imports directory.models.
+from crm import campaigns as crm_campaigns
 from crm.models import Contact, UserFirm
 from directory.classify import (
     BUCKET_LABELS, ENTRY_LEVEL, INSIGHT, INTERNSHIP, OTHER, REGION_LABELS,
@@ -1946,11 +1947,18 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # firm. "warm" = a conversation actually happened (chatted or
         # advocate); "replied" = they answered but no chat yet. Cold and
         # archived rows stay out — a contact you added and never reached is
-        # not a relationship, and an archived one is a closed door.
+        # not a relationship, and an archived one is a closed door. So do
+        # campaign-hidden rows, for the same reason one step further back: an
+        # alum who answered a club panel invitation genuinely replied, and
+        # counting that as a relationship at their bank would push this
+        # student's role recommendations toward a firm he has no recruiting
+        # foothold at at all. `crm/campaigns.py`.
         warm_by_firm: dict[int, str] = {}
         for fid, warmth in (Contact.objects.for_user(request.user)
                             .filter(archived=False, firm__isnull=False,
                                     warmth__in=("replied", "chatted", "advocate"))
+                            .exclude(id__in=crm_campaigns.excluded_contact_ids(
+                                request.user))
                             .values_list("firm_id", "warmth")):
             rank = "warm" if warmth in ("chatted", "advocate") else "replied"
             if warm_by_firm.get(fid) != "warm":
@@ -3531,9 +3539,17 @@ def _my_network_at(user, firm, *, today) -> dict:
     if not user.is_authenticated:
         return {"my_contacts": [], "my_total": 0, "my_advocates": 0, "my_next": None}
 
+    # Campaign-hidden people are out, same as the Network board
+    # (`crm.views.contact_list`). This block answers "who do I know here",
+    # which is the identical claim the board makes about the identical
+    # people — a firm page that says "4 contacts, warmest here: Ayda Yang"
+    # after the student answered that Ayda arrived on his club panel blast is
+    # the board's bug relocated one click to the right. `my_total` and
+    # `my_advocates` are counted off this same list, so they move with it.
     rows = list(
         Contact.objects.for_user(user)
         .filter(firm=firm, archived=False)
+        .exclude(id__in=crm_campaigns.excluded_contact_ids(user))
         .annotate(last_ts=Max("touches__ts"))
         .order_by("name")
     )
@@ -3638,9 +3654,16 @@ def _people_at_firms(user, firm_ids, *, today, cap) -> dict:
     if not firm_ids:
         return {}
 
+    # Same exclusion the firm page and the Network board apply, for the same
+    # reason: "Your people here" on a role card and in My Applications is a
+    # claim about the student's recruiting network, and somebody he told us
+    # was not part of it must not be the person a role card offers him. Costs
+    # one extra `.for_user` read that returns nothing on every account that
+    # has never classified a send.
     rows = list(
         Contact.objects.for_user(user)
         .filter(firm_id__in=firm_ids, archived=False)
+        .exclude(id__in=crm_campaigns.excluded_contact_ids(user))
         .annotate(last_ts=Max("touches__ts"))
     )
     by_firm: dict[int, list] = {}
