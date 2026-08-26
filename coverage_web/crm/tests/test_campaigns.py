@@ -378,6 +378,33 @@ def test_a_reply_to_the_campaign_does_not_cancel_originating():
     ).originates is True
 
 
+def test_a_prior_relationship_stamped_the_same_midnight_does_not_originate():
+    """THE SECOND MISSING VALUE. 96 of the founder's 117 outbound touches carry
+    a date-only midnight stamp, so "same day" and "same instant" are the same
+    number in this column. A banker he had already been working, whose earlier
+    touch was imported at that same midnight, must not be read as somebody the
+    blast introduced him to."""
+    user = _user()
+    midnight = (timezone.now() - timedelta(days=20)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    people = _merge(user, n=10, at=midnight)
+    Touch.all_objects.create(
+        user=user, contact=people[0], kind="outreach", channel="email",
+        ts=midnight, subject="Coffee chat after the info session",
+    )
+
+    campaign = camp.detect(user)[0]
+
+    assert CampaignContact.objects.for_user(user).get(
+        campaign=campaign, contact=people[0]
+    ).originates is False
+    # Everyone the campaign really did introduce is untouched by this.
+    assert CampaignContact.objects.for_user(user).filter(
+        campaign=campaign, originates=True
+    ).count() == 9
+
+
 # ---------------------------------------------------------------------------
 # 3. Classification and the queue.
 # ---------------------------------------------------------------------------

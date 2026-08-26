@@ -505,13 +505,32 @@ def _record(user, signature, group, earliest, first_outside, now) -> None:
                 contact_id=contact_id,
                 sent_at=touch.ts,
                 # Nothing outside this campaign reached this person first, so
-                # this is where the relationship began. `<=` rather than `<`
-                # because two touches can share a timestamp to the microsecond
-                # when a sync writes a batch, and a tie should count as the
-                # start rather than silently not. A contact with no entry in
-                # `first_outside` has no history outside the campaign at all,
-                # which is the strongest possible yes.
-                originates=touch.ts <= first_outside.get(contact_id, touch.ts),
+                # this is where the relationship began. A contact with NO
+                # entry in `first_outside` has no history outside the campaign
+                # at all, which is the strongest possible yes — the default
+                # below makes that comparison true by construction.
+                #
+                # STRICTLY EARLIER, not "earlier or equal", and the difference
+                # is the same missing-value trap the note fallback was. This
+                # column's precision is mostly fictional: 96 of the founder's
+                # 117 outbound touches carry a date-only midnight stamp
+                # because that is all the bulk-import path knew. So a genuine
+                # prior relationship logged on the SAME CALENDAR DAY as the
+                # blast does not compare earlier — it compares equal, because
+                # the clock that would have separated them was never written
+                # down. `<=` read that absent clock as "the campaign came
+                # first" and silenced the person; `<` reads a tie as what it
+                # is, unknowable, and leaves them in the queue.
+                #
+                # Which is this module's own asymmetry applied to itself: a
+                # false negative here costs the status quo, a false positive
+                # removes a real banker from the daily plan. Measured on the
+                # live account 2026-08-25: zero ties today, so this changes
+                # nothing that currently exists and closes the case that would
+                # have been silent when it did.
+                originates=touch.ts < first_outside.get(
+                    contact_id, touch.ts + timedelta(microseconds=1)
+                ),
             )
             for contact_id, touch in earliest.items()
             if contact_id not in existing
