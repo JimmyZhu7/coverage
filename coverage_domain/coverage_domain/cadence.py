@@ -44,7 +44,10 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
   - Region scoping (branch 3): an HK app_close never re-pings a US contact
     at the same firm, and vice versa. A contact whose region is unknown keeps
     the both-regions fallback: it matches on the soonest close date across any
-    region for the firm.
+    region for the firm. A contact explicitly OUTSIDE both markets (region
+    "other", added 2026-08-25 with the third Network bucket) matches no us/hk
+    close at all — that is knowledge, not ignorance, so the conservative
+    fallback would be wrong for them.
 
   - DIVERGENCE from the original (deliberate, 2026-07-25, tightened
     2026-07-27): a contact's region is read from an EXPLICIT `region` key and
@@ -307,7 +310,10 @@ def contact_region(contact: Mapping[str, Any]) -> str | None:
     Only the explicit `region` key answers. Blank means UNKNOWN, and unknown
     is a real answer here — branch 3 handles it by matching the soonest close
     across any region for the firm, which is the conservative behaviour the
-    whole design documents.
+    whole design documents. "other" (known to be outside both us and hk) is
+    returned verbatim: it names no per-region close bucket, so branch 3
+    scopes such a contact to no us/hk deadline — deliberately distinct from
+    the unknown fallback.
 
     `infer_region(source)` is deliberately NOT consulted (see that function).
     While it was, this returned a confident region 100% of the time and the
@@ -466,10 +472,10 @@ def due_actions(
     Args:
         contacts: contact dicts. Keys used: `id`, `firm_id` (or `firm`),
             `firm_text` (display fallback when firm_id is None), `warmth`,
-            `thread_state`, `region` ("us" / "hk" / blank-or-absent for
-            unknown — the ONLY key consulted for region; see
-            `contact_region`), `archived` (optional; truthy rows are
-            skipped).
+            `thread_state`, `region` ("us" / "hk" / "other" for known to
+            be outside both markets / blank-or-absent for unknown — the
+            ONLY key consulted for region; see `contact_region`),
+            `archived` (optional; truthy rows are skipped).
         touches: touch dicts across those contacts. Keys used: `contact_id`,
             `ts`, `kind`.
         firm_dates: shared firm_date dicts. Keys used: `firm_id`,

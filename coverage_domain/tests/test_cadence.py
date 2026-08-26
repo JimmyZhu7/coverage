@@ -193,6 +193,18 @@ def test_explicit_region_excludes_other_regions_close():
     assert "reping" not in kinds_for(actions, 1)
 
 
+def test_other_region_contact_matches_no_us_hk_close():
+    """A contact explicitly OUTSIDE both markets (region "other" — the third
+    Network bucket, 2026-08-25) is knowledge, not ignorance: a person in
+    London must not be re-pinged for a Hong Kong close, and must not inherit
+    the unknown row's both-regions fallback either."""
+    c = contact(1, firm_id="dualfirm", warmth="chatted", thread_state="replied",
+                region="other")
+    actions = cadence.due_actions([c], [touch(1, "chat", "2026-06-01 10:00")],
+                                  _hk_close_firm_dates(), as_of=AS_OF, firms=FIRMS)
+    assert "reping" not in kinds_for(actions, 1)
+
+
 def test_hand_added_contact_is_not_guessed_us_from_source():
     """The bug this field exists for: a hand-added contact is written with
     source="manual", which `infer_region` read as 'us' — so an HK contact was

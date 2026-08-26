@@ -472,8 +472,19 @@ _WARMTH_SECTIONS = [
 # directory.classify.TRACKED_REGIONS ("cn"/"jp" have no scope tab yet — no
 # board has ever asked for one) — kept as its own tuple, not a slice of
 # TRACKED_REGIONS, so a future market added there doesn't silently grow a
-# board tab nobody designed the layout for.
-NETWORK_SCOPE_REGIONS = ("hk", "us", "sg", "eu")
+# board tab nobody designed the layout for. "other" is the founder's third
+# bucket (2026-08-25: "accurate sorting between united states and hongkong
+# and other countries") — the tab for a person KNOWN to sit outside both
+# markets, backed by Contact.region="other", never a dumping ground for
+# unknowns (those stay guesses, flagged as such, in the tabs their firm
+# suggests).
+NETWORK_SCOPE_REGIONS = ("hk", "us", "sg", "eu", "other")
+
+# Firm-region codes that place a firm's footprint unambiguously OUTSIDE both
+# deadline markets — the only firm evidence the "other" tab's unknown-contact
+# fallback accepts. "apac" is deliberately absent: Jane Street carries
+# ['us', 'apac'] and APAC contains Hong Kong, so it is evidence of nothing.
+_OTHER_FIRM_REGIONS = frozenset({"sg", "eu", "cn", "jp", "other"})
 
 # Warmest-first tie-break for "who to work next at this firm" — chatted
 # beats replied beats cold, an advocate is never a candidate (there's
@@ -538,15 +549,25 @@ def _in_scope(c, scope: str) -> bool:
     never asserts a region nobody set.
     """
     # Singapore and Europe are tabs the FIRM directory supports but the contact
-    # vocabulary does not: `Contact.REGION_CHOICES` is us/hk only, so a person
-    # can never resolve to "sg" and asking their region would empty those tabs
-    # for everyone. There the firm is the only evidence that exists, so it stays
-    # the whole test — which is also exactly how these tabs behaved before.
+    # vocabulary does not: a person can never resolve to "sg" and asking their
+    # region would empty those tabs for everyone. There the firm is the only
+    # evidence that exists, so it stays the whole test — which is also exactly
+    # how these tabs behaved before.
     if scope not in Contact.REGION_VALUES:
         return bool(c.firm and scope in (c.firm.regions or []))
     region = contact_region(c)
     if region is not None:
         return region == scope
+    # Unknown-region fallbacks, per tab. For "other" the firm evidence is any
+    # footprint code that sits unambiguously outside both deadline markets
+    # (see _OTHER_FIRM_REGIONS) — a bulge bracket's ['us', 'hk'] says nothing
+    # about a third country, so its unknowns stay out of this tab.
+    if scope == "other":
+        return bool(
+            c.firm and _OTHER_FIRM_REGIONS & {
+                (r or "").strip().lower() for r in (c.firm.regions or [])
+            }
+        )
     return bool(c.firm and scope in (c.firm.regions or []))
 
 
@@ -697,10 +718,17 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # nothing" — silence still shows every tab, same as an unset filter
     # elsewhere on this site never hides data, it just can't narrow it yet.
     interested_regions = set(user.regions or [])
+    # "other" is exempt from the interest gate: it is not a market a student
+    # declares in Settings (same split directory.classify.REGION_ORDER makes —
+    # a place a person can BE, never a place you choose to target), and its
+    # label says countries because people sit in countries; the directory's
+    # "Other Markets" wording belongs to postings.
     region_scopes = [
-        {"code": code, "label": REGION_LABELS[code]}
+        {"code": code,
+         "label": "Other countries" if code == "other" else REGION_LABELS[code]}
         for code in NETWORK_SCOPE_REGIONS
-        if not interested_regions or code in interested_regions
+        if code == "other"
+        or not interested_regions or code in interested_regions
     ]
 
     # --- Contacts Needing Action (left column) -------------------------

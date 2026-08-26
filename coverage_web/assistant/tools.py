@@ -114,7 +114,10 @@ MAX_STR = 300
 DEFAULT_ROWS = 10
 MAX_ROWS = 25
 
-# The regions this product models (Contact.REGION_CHOICES' vocabulary).
+# The two deadline markets a posting search can filter by — the us/hk subset
+# of Contact.REGION_CHOICES. That vocabulary also carries "other" (a person
+# known to sit outside both markets), but "other" is a place a person can be,
+# not a market postings are filed under, so it stays out of this enum.
 REGIONS = ("us", "hk")
 
 # How many contacts one `set_contact_status` call may move. Same number and

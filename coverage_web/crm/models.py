@@ -49,13 +49,30 @@ class UserFirm(PrivateModel):
 
 
 class Contact(PrivateModel):
-    # The recruiting regions the product models. Deliberately NOT the same
-    # vocabulary as `Firm.regions` (which also carries sg/eu): these two are
-    # the only regions the cadence engine's deadline scoping and the
-    # sponsorship rules actually reason about, so a contact only ever carries
-    # one of them or blank ("unknown", the honest default).
-    REGION_CHOICES = [("us", "United States"), ("hk", "Hong Kong")]
+    # The regions a PERSON can carry. Deliberately NOT the same vocabulary as
+    # `Firm.regions` (which also carries sg/eu): us and hk are the only two
+    # markets the cadence engine's deadline scoping and the sponsorship rules
+    # actually reason about. "other" is the third real answer — the founder's
+    # network holds people in London and Singapore who used to have nowhere to
+    # sit (reported 2026-08-25: "accurate sorting between united states and
+    # hongkong and other countries"). It means "known to be OUTSIDE both
+    # markets", the same stated-but-untracked meaning `directory.classify`'s
+    # opportunity vocabulary gives the word — and it is NOT a synonym for
+    # blank. Blank stays "unknown", the honest default: we don't know, so the
+    # engine keeps its both-regions fallback and the board keeps saying it's
+    # a guess. Backfills must never collapse the two.
+    REGION_CHOICES = [
+        ("us", "United States"),
+        ("hk", "Hong Kong"),
+        ("other", "Other countries"),
+    ]
     REGION_VALUES = frozenset(value for value, _ in REGION_CHOICES)
+    # The subset the deadline machinery scopes by. A contact marked "other"
+    # matches NO us/hk close date (the engine's per-region bucket simply has
+    # no entry for them) — which is correct: a person in London should not be
+    # re-pinged because a Hong Kong deadline is near. Only an unknown keeps
+    # the conservative match-either fallback.
+    DEADLINE_MARKETS = frozenset({"us", "hk"})
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
@@ -78,7 +95,10 @@ class Contact(PrivateModel):
     # used to infer that by substring-matching "hk" inside `source` — which
     # made every hand-added contact (source="manual") silently a US contact.
     # Blank means "unknown", and unknown is a real answer: the engine falls
-    # back to matching either region rather than guessing.
+    # back to matching either region rather than guessing. "other" means the
+    # opposite of blank — we DO know, and the answer is neither market — so
+    # the engine skips deadline scoping for them entirely (see
+    # DEADLINE_MARKETS above).
     region = models.CharField(
         max_length=8, blank=True, default="", choices=REGION_CHOICES
     )
@@ -172,17 +192,22 @@ class Contact(PrivateModel):
 
     def default_region_from_firm(self) -> str:
         """The region this contact's firm implies, or "" when it implies
-        nothing. Only an UNAMBIGUOUS firm answers: exactly one modeled region
+        nothing. Only an UNAMBIGUOUS firm answers: exactly one deadline market
         (us/hk) on the firm. A firm that recruits in both, in neither, or only
         in a region this product doesn't model yields "" — guessing there is
         exactly the bug this field exists to kill, and a blank keeps the
-        cadence engine's conservative both-regions fallback."""
+        cadence engine's conservative both-regions fallback.
+
+        Intersects DEADLINE_MARKETS, not REGION_VALUES: a firm's non-us/hk
+        footprint ("sg", "eu", Jane Street's "apac") describes where the FIRM
+        operates, never where this person sits, so it must not auto-pin
+        anyone to "other"."""
         if self.firm_id is None:
             return ""
         known = {
             (r or "").strip().lower()
             for r in (self.firm.regions or [])
-        } & self.REGION_VALUES
+        } & self.DEADLINE_MARKETS
         return next(iter(known)) if len(known) == 1 else ""
 
     def save(self, *args, **kwargs):
