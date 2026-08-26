@@ -859,7 +859,7 @@ def test_classify_rejects_an_unknown_kind_and_another_tenants_campaign():
 
 
 # ---------------------------------------------------------------------------
-# 7. The Network board.
+# 8. The Network board.
 #
 # THE COMPLAINT, from the founder reading his own board after answering the
 # question in Settings: "why are there still icc people in my network?" The
@@ -1152,3 +1152,151 @@ def test_the_firm_page_and_its_rosters_hide_them_too(client):
     for c in people:
         assert c.name not in body
 
+# ---------------------------------------------------------------------------
+# 9. Retiring a campaign the evidence no longer supports.
+#
+# Detection is append-only, so the fix to `_signature_for` stops campaign 3
+# being made again and cannot un-make the row that already exists on the
+# founder's account. `--retire` is the clean-up, and its whole design is the
+# list of things it refuses to do.
+# ---------------------------------------------------------------------------
+def _boilerplate_campaign(user, *, n=41):
+    """A campaign 3: `n` unrelated contacts grouped on Coverage's own note,
+    forced into the table the way detection used to put it there."""
+    at = timezone.now() - timedelta(days=30)
+    campaign = Campaign.all_objects.create(
+        user=user, signature="outreach sent no reply yet",
+        label="outreach sent 2026-07-24, no reply yet",
+        first_sent=at, last_sent=at, recipient_count=n,
+    )
+    for i in range(n):
+        c = Contact.all_objects.create(user=user, name=f"Banker {i}")
+        Touch.all_objects.create(
+            user=user, contact=c, kind="outreach", channel="email", ts=at,
+            subject=f"HK Jul 29-31 | Firm {i} | IBD - USC Student Coffee Chat",
+            note="Outreach sent 2026-07-24, no reply yet",
+        )
+        CampaignContact.all_objects.create(
+            user=user, campaign=campaign, contact=c, sent_at=at, originates=True,
+        )
+    return campaign
+
+
+def test_a_campaign_whose_signature_no_longer_qualifies_is_retirable():
+    user = _user()
+    campaign = _boilerplate_campaign(user)
+
+    retirable, held_back = camp.stale_campaigns(user)
+
+    assert [c.id for c in retirable] == [campaign.id]
+    assert held_back == []
+
+
+def test_retire_writes_nothing_on_a_dry_run():
+    user = _user()
+    campaign = _boilerplate_campaign(user)
+
+    retired, _ = camp.retire_stale(user, dry_run=True)
+
+    assert [c.id for c in retired] == [campaign.id]
+    assert Campaign.objects.for_user(user).get(id=campaign.id).retired_at is None
+    assert len(camp.campaign_cards(user)) == 1
+
+
+def test_retiring_hides_the_card_and_keeps_every_row():
+    user = _user()
+    campaign = _boilerplate_campaign(user)
+
+    camp.retire_stale(user, dry_run=False)
+
+    assert camp.campaign_cards(user) == []
+    stored = Campaign.objects.for_user(user).get(id=campaign.id)
+    assert stored.retired_at is not None
+    # Nothing deleted: the row, its label and all 41 memberships survive.
+    assert stored.label == "outreach sent 2026-07-24, no reply yet"
+    assert CampaignContact.objects.for_user(user).filter(
+        campaign=campaign
+    ).count() == 41
+
+
+def test_a_retired_campaign_can_no_longer_be_answered():
+    """The dangerous POST: a Settings page loaded before the retirement,
+    submitting "not my recruiting" against 41 people who were never one."""
+    user = _user()
+    campaign = _boilerplate_campaign(user)
+    camp.retire_stale(user, dry_run=False)
+
+    assert camp.classify(user, campaign.id, Campaign.KIND_OTHER) is None
+    assert Campaign.objects.for_user(user).get(
+        id=campaign.id
+    ).kind == Campaign.KIND_UNCLASSIFIED
+    assert camp.excluded_contact_ids(user) == set()
+
+
+def test_retirement_never_touches_a_campaign_the_user_answered_by_hand():
+    """The lock is `classified_at`, the same one `detect` respects. A stale
+    campaign carrying a human answer is reported and left standing."""
+    user = _user()
+    campaign = _boilerplate_campaign(user)
+    camp.classify(user, campaign.id, Campaign.KIND_RECRUITING)
+
+    retirable, held_back = camp.stale_campaigns(user)
+    retired, _ = camp.retire_stale(user, dry_run=False)
+
+    assert retirable == [] and retired == []
+    assert [c.id for c in held_back] == [campaign.id]
+    assert Campaign.objects.for_user(user).get(id=campaign.id).retired_at is None
+
+
+def test_a_real_campaign_is_never_retired():
+    """The ICC merge's signature is still produced by its touches, so the
+    weakest possible staleness test leaves it exactly alone."""
+    user = _user()
+    _merge(user, n=12)
+    campaign = camp.detect(user)[0]
+
+    retirable, held_back = camp.stale_campaigns(user)
+
+    assert retirable == [] and held_back == []
+    assert Campaign.objects.for_user(user).get(id=campaign.id).retired_at is None
+
+
+def test_detection_un_retires_a_signature_that_qualifies_again():
+    """The second half of "reversible": a retirement made on today's evidence
+    does not outlive the evidence."""
+    user = _user()
+    _merge(user, n=12)
+    campaign = camp.detect(user)[0]
+    Campaign.objects.for_user(user).filter(id=campaign.id).update(
+        retired_at=timezone.now()
+    )
+    assert camp.campaign_cards(user) == []
+
+    camp.detect(user)
+
+    assert Campaign.objects.for_user(user).get(id=campaign.id).retired_at is None
+    assert len(camp.campaign_cards(user)) == 1
+
+
+def test_the_command_retires_only_with_the_flag_and_reports_what_it_did():
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    user = _user("retire-cmd@example.com")
+    campaign = _boilerplate_campaign(user, n=9)
+
+    out = StringIO()
+    call_command("detect_campaigns", user=user.email, stdout=out)
+    assert Campaign.objects.for_user(user).get(id=campaign.id).retired_at is None
+
+    out = StringIO()
+    call_command("detect_campaigns", user=user.email, retire=True,
+                 dry_run=True, stdout=out)
+    assert "RETIRED" in out.getvalue()
+    assert Campaign.objects.for_user(user).get(id=campaign.id).retired_at is None
+
+    out = StringIO()
+    call_command("detect_campaigns", user=user.email, retire=True, stdout=out)
+    assert "RETIRED" in out.getvalue()
+    assert Campaign.objects.for_user(user).get(id=campaign.id).retired_at is not None

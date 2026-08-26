@@ -474,6 +474,12 @@ def _record(user, signature, group, earliest, first_outside, now) -> None:
     campaign.first_sent = min(sent)
     campaign.last_sent = max(sent)
     campaign.recipient_count = len(earliest)
+    # Reaching this line means the signature qualifies again, which is the
+    # exact condition retirement was recorded against — so the retirement
+    # undoes itself rather than needing a person to notice. `retire_stale`
+    # only ever hides a card the evidence no longer supports; evidence that
+    # comes back brings the card back with it.
+    campaign.retired_at = None
     # `kind` and `classified_at` are deliberately absent from this list. See
     # `detect`'s docstring — a user answer is never overwritten by a re-run,
     # and naming the columns explicitly is what guarantees it rather than
@@ -481,7 +487,7 @@ def _record(user, signature, group, earliest, first_outside, now) -> None:
     if campaign.pk:
         campaign.save(
             update_fields=["label", "first_sent", "last_sent",
-                           "recipient_count", "updated"]
+                           "recipient_count", "retired_at", "updated"]
         )
     else:
         campaign.save()
@@ -542,7 +548,93 @@ def _record(user, signature, group, earliest, first_outside, now) -> None:
 
 
 def _all_campaigns(user) -> list[Campaign]:
-    return list(Campaign.objects.for_user(user))
+    return list(Campaign.objects.for_user(user).filter(retired_at__isnull=True))
+
+
+# ---------------------------------------------------------------------------
+# 2b. Retiring a campaign the evidence no longer supports.
+# ---------------------------------------------------------------------------
+
+
+def _live_signatures(user) -> set[str]:
+    """Every signature the detector can still produce from this user's
+    outbound touches. The same `_signature_for` the detector uses, so the
+    answer cannot drift from what a real run would decide."""
+    live = set()
+    for t in (
+        Touch.objects.for_user(user)
+        .filter(kind__in=OUTBOUND_KINDS)
+        .only("id", "note", "subject")
+    ):
+        sig = _signature_for(t)
+        if sig:
+            live.add(sig)
+    return live
+
+
+def stale_campaigns(user) -> tuple[list[Campaign], list[Campaign]]:
+    """`(retirable, held_back)` — live campaigns whose signature no detector
+    run could produce today, split by whether the user has answered them.
+
+    A campaign is a claim about the mailbox: "these N messages shared this
+    key". `detect` can only ever add to that claim — it is append-only by
+    design, so that a touch logged next week cannot rewrite what happened in
+    the mailbox on one day. The cost of that design is that a claim built on
+    a key which has since stopped qualifying stays on the Settings card
+    forever with its question still attached.
+
+    Campaign 3 on the founder's account is the case that made this necessary:
+    41 contacts grouped on `outreach sent no reply yet`, a string
+    `_signature_for` now refuses. The fix stops the row being made again; it
+    cannot un-make the row.
+
+    "NO LONGER QUALIFIES" IS DELIBERATELY THE WEAKEST TEST AVAILABLE: the
+    signature is not produced by ANY outbound touch of this user's any more.
+    Not "fewer recipients than the card says", not "the burst shrank" —
+    those are readings that legitimately drift, and `detect` already refreshes
+    them on every run. A signature that has vanished outright is the only case
+    where the row is about nothing at all, and this function is not allowed a
+    second opinion beyond that.
+
+    HELD BACK: a campaign the user has answered by hand. `classified_at` is
+    the same lock `detect` respects and for the same reason — their answer is
+    the one thing in this table no machine reading may overrule. A stale
+    campaign carrying one is reported, never retired: tidying away a question
+    they have already engaged with is worse than leaving a stale card up.
+    """
+    live = _live_signatures(user)
+    retirable, held_back = [], []
+    for c in Campaign.objects.for_user(user).filter(retired_at__isnull=True):
+        if c.signature in live:
+            continue
+        if c.classified_at is not None or c.kind != Campaign.KIND_UNCLASSIFIED:
+            held_back.append(c)
+        else:
+            retirable.append(c)
+    return retirable, held_back
+
+
+def retire_stale(user, *, dry_run: bool = True) -> tuple[list[Campaign], list[Campaign]]:
+    """Retire what `stale_campaigns` calls retirable. Returns its pair.
+
+    Writes nothing when `dry_run`, which is the default — the caller has to
+    ask for the write, not remember to suppress it.
+
+    REVERSIBLE TWO WAYS. By hand, `retired_at = None` puts the card straight
+    back; nothing else about the campaign or its 41 memberships is touched.
+    By itself, `_record` clears the timestamp the moment the signature
+    qualifies again, so a retirement made on today's evidence cannot outlive
+    the evidence.
+    """
+    retirable, held_back = stale_campaigns(user)
+    if not dry_run and retirable:
+        now = timezone.now()
+        Campaign.objects.for_user(user).filter(
+            id__in=[c.id for c in retirable]
+        ).update(retired_at=now)
+        for c in retirable:
+            c.retired_at = now
+    return retirable, held_back
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +706,16 @@ def classify(user, campaign_id: int, kind: str) -> Campaign | None:
     """
     if kind not in dict(Campaign.KIND_CHOICES):
         return None
-    campaign = Campaign.objects.for_user(user).filter(id=campaign_id).first()
+    # Retired campaigns are not offered and cannot be answered. The card is
+    # gone from Settings, so the only way to reach one is a stale page posted
+    # after a retirement — and the answer that page would submit is the exact
+    # one campaign 3 was dangerous for: "not my recruiting" against 41 people
+    # who were never a campaign.
+    campaign = (
+        Campaign.objects.for_user(user)
+        .filter(id=campaign_id, retired_at__isnull=True)
+        .first()
+    )
     if campaign is None:
         return None
     campaign.kind = kind
@@ -635,7 +736,10 @@ def campaign_cards(user) -> list[dict]:
     there is a different decision from one where 190 were already in the queue
     for other reasons, and a single "201 contacts" would hide that.
     """
-    campaigns = list(Campaign.objects.for_user(user))
+    # Retired campaigns are absent, and absence is the whole point: the card
+    # is a question, and a question about a send that never happened is the
+    # bug `retire_stale` exists to clear. The row survives for the export.
+    campaigns = _all_campaigns(user)
     if not campaigns:
         return []
     originating: dict[int, int] = {}

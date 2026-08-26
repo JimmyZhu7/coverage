@@ -341,6 +341,20 @@ class Campaign(PrivateModel):
     # number is the one the detector actually matched on.
     recipient_count = models.PositiveIntegerField(default=0)
     detected_at = models.DateTimeField(auto_now_add=True)
+    # NULL for every live campaign. Set when a detector run can no longer
+    # produce this signature from any touch — i.e. the grouping key that
+    # created the row has stopped qualifying, so the question on the card is
+    # about a send that was never a send.
+    #
+    # WHY A COLUMN AND NOT A DELETE. Campaign 3 on the founder's account was
+    # 41 people the detector had grouped out of Coverage's own boilerplate
+    # (see `crm.campaigns`). Deleting it would have thrown away the record of
+    # what the product asked him and which 41 contacts it asked about. A
+    # timestamp retires the card and keeps the row: clearing it back to NULL
+    # is a one-line reversal, and re-detection clears it by itself the moment
+    # the signature qualifies again. Nothing reads a retired campaign except
+    # the export, which is the user's own history and keeps everything.
+    retired_at = models.DateTimeField(null=True, blank=True)
     updated = models.DateTimeField(auto_now=True)
 
     class Meta(PrivateModel.Meta):
