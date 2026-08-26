@@ -51,6 +51,26 @@ class ContactForm(forms.ModelForm):
                   "reply to them and track their deadlines.",
     )
 
+    # The override for "is this person related to my recruitment at all?"
+    # (crm/recruitment.py — the rule that hides professors, campus offices
+    # and off-track roles from the board and the queue). Three choices for
+    # the same reason `recruiting_contact` above has three: the rule is the
+    # fallback, so "let the rule decide" must stay distinguishable from an
+    # explicit no. This is the hide-by-hand half of the override; the hidden
+    # ledger's "Bring back" button is the keep-by-hand half. Both write this
+    # one column, and no automated path ever does.
+    recruitment_related = forms.ChoiceField(
+        choices=[
+            ("", "Work it out from their role and firm"),
+            ("yes", "Yes, part of my recruiting"),
+            ("no", "No — hide from my board and queue"),
+        ],
+        required=False,
+        label="Related to your recruiting?",
+        help_text="Hidden contacts keep their page, history, search and "
+                  "exports. Your answer here beats the rule permanently.",
+    )
+
     # The per-contact escape hatch from a campaign answer. A plain checkbox and
     # not a three-state, unlike `recruiting_contact` above: that field has a
     # text fallback so it needs "nobody has said" to be a distinct state, while
@@ -67,8 +87,8 @@ class ContactForm(forms.ModelForm):
         model = Contact
         fields = [
             "name", "firm", "firm_text", "role", "email", "linkedin",
-            "school", "region", "recruiting_contact", "campaign_exempt",
-            "angle", "opener", "notes",
+            "school", "region", "recruiting_contact", "recruitment_related",
+            "campaign_exempt", "angle", "opener", "notes",
         ]
         widgets = {
             "angle": forms.Textarea(attrs={"rows": 2}),
@@ -87,6 +107,18 @@ class ContactForm(forms.ModelForm):
         stored = getattr(self.instance, "recruiting_contact", None)
         self.initial["recruiting_contact"] = (
             "" if stored is None else ("yes" if stored else "no")
+        )
+        related = getattr(self.instance, "recruitment_related", None)
+        self.initial["recruitment_related"] = (
+            "" if related is None else ("yes" if related else "no")
+        )
+
+    def clean_recruitment_related(self):
+        """Same ""-back-to-None rule as `clean_recruiting_contact` below, for
+        the same reason: a blank answer keeps the column NULL and the rule
+        deciding, rather than storing a False the user never asserted."""
+        return {"yes": True, "no": False}.get(
+            self.cleaned_data.get("recruitment_related") or "", None
         )
 
     def clean_recruiting_contact(self):

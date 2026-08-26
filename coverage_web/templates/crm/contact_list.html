@@ -38,6 +38,14 @@
     {% if hidden_any %}
       <a href="{% url 'crm:contact_campaign_hidden' %}">Not recruiting</a>
     {% endif %}
+    {% comment %}
+    The third way off the board: the person themselves is not related to the
+    user's recruiting (crm/recruitment.py). Same render-only-when-somebody-is-
+    hidden rule as the campaign tab above, for the same reason.
+    {% endcomment %}
+    {% if unrelated_any %}
+      <a href="{% url 'crm:contact_unrelated' %}">Not recruitment</a>
+    {% endif %}
   </nav>
 
   {% comment %}
@@ -55,6 +63,18 @@
       {{ hidden_total }} hidden from this board. They came in on a send you
       said was not your recruiting.
       <a href="{% url 'crm:contact_campaign_hidden' %}">Show them</a>
+    </p>
+  {% endif %}
+  {% comment %}
+  Same count-reason-link discipline for the recruitment-relevance gate
+  (crm/recruitment.py): the board must say what it is hiding and why, and
+  the number goes through the same scope filter as the board it caveats.
+  {% endcomment %}
+  {% if unrelated_total %}
+    <p class="net-caveat net-caveat--board">
+      {{ unrelated_total }} hidden from this board. Nothing on their row
+      relates them to your recruiting.
+      <a href="{% url 'crm:contact_unrelated' %}">Show them</a>
     </p>
   {% endif %}
 

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Not Recruitment · Coverage{% endblock %}
+
+{% block head %}{% include "crm/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page">
+  {% comment %}One link back to the board this list is a caveat about — same
+  single crumb Archived and Not Your Recruiting use.{% endcomment %}
+  <nav class="subnav standalone">
+    <a href="{% url 'crm:contact_list' %}">← Network</a>
+  </nav>
+
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <p class="pagehead-eyebrow">Network</p>
+      <h1 class="pagehead-title">Not Related to Recruitment</h1>
+      <p class="pagehead-sub">
+        Nothing on these rows connects the person to the tracks you recruit
+        in — professors, campus offices, roles outside the industry. They are
+        off your board and out of your queue. Nothing is deleted: every touch
+        stays on the record, they still turn up in search, and one click
+        below overrides the rule for good.
+      </p>
+    </div>
+  </header>
+
+  {% if not contacts %}
+    <div class="empty">
+      <p>Nobody is hidden.</p>
+      <p><a href="{% url 'crm:contact_list' %}">Back to Network</a></p>
+    </div>
+  {% else %}
+    {% comment %}
+    The same ledger row Archived and Not Your Recruiting use (`.arch-*`),
+    because it answers the same shape of question: who left the board, why,
+    and the one button that brings them back. The middle column carries the
+    RULE'S CITED REASON — always a quote of the row's own text, never an
+    inference — so the user is checking the rule's work, not taking it on
+    faith.
+    {% endcomment %}
+    <div class="panel" id="unrelated-contacts">
+      <p class="sec-label">{{ contact_total }} hidden</p>
+      {% include "crm/_contact_search.html" with target="unrelated-contacts" %}
+      <div class="arch-list">
+        {% for c in contacts %}
+          <div class="arch-row" data-searchable data-order="{{ forloop.counter0 }}"
+               data-name="{{ c.name }}"
+               data-firm="{% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %}"
+               data-touch="{% if c.last_touch_ts %}{{ c.last_touch_ts|date:'U' }}{% endif %}"
+               data-search="{{ c.name }} {% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %} {{ c.role }} {{ c.email }}">
+            <div class="arch-id">
+              <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
+              <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}</span>
+            </div>
+            <span class="arch-when">
+              {{ c.hide_reason|truncatechars:64 }}
+            </span>
+            {% comment %}
+            Writes `Contact.recruitment_related = True` — the user's own word,
+            which the rule puts above every test it runs, permanently. It
+            returns them to the board AND to the daily queue, so the button
+            says so.
+            {% endcomment %}
+            <form method="post" action="{% url 'crm:contact_unrelated_keep' c.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn"
+                      title="Put {{ c.name }} back on your board and in your daily queue. The rule never touches them again.">Bring back</button>
+            </form>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

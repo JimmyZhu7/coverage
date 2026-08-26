@@ -63,6 +63,14 @@ urlpatterns = [
          name="contact_campaign_hidden"),
     path("contacts/<int:pk>/keep/", views.contact_campaign_keep,
          name="contact_campaign_keep"),
+    # And the third way off the board: the person themselves is not related
+    # to the user's recruiting (crm/recruitment.py — the founder's "any
+    # unrelated should not show up" rule). Same ledger-plus-one-click-back
+    # shape as the two lists above.
+    path("contacts/unrelated/", views.contact_unrelated,
+         name="contact_unrelated"),
+    path("contacts/<int:pk>/recruitment-keep/", views.contact_unrelated_keep,
+         name="contact_unrelated_keep"),
     # Multi-select bulk verbs from the Network board (snooze / park /
     # archive). Same literal-before-converter ordering as the line above.
     path("contacts/bulk/", views.contacts_bulk, name="contacts_bulk"),

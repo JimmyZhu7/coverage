@@ -41,7 +41,7 @@ from directory.models import Firm, FirmDate, Opportunity
 
 from . import (
     ai_brief, ai_summary, campaigns, coverage, debrief as debrief_svc,
-    services, sourcing,
+    recruitment, services, sourcing,
 )
 from .models import (
     CalendarEvent, Campaign, ChatDebrief, Contact, Touch, UserFirm,
@@ -683,6 +683,43 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     hidden = [c for c in contacts if c.id in hidden_ids]
     contacts = [c for c in contacts if c.id not in hidden_ids]
 
+    # ALSO OFF THE BOARD: people who are not related to the user's recruiting
+    # at all — the founder's 2026-08-25 rule, decided per PERSON by
+    # `crm/recruitment.py` (a professor, the campus advising office, an AWS
+    # account manager; see that module for why neither firm tier nor the
+    # school tie is the test, and for the deliberate reversal of the old
+    # school-tie exemption). Removed at the same point as the campaign
+    # gate above and for the same reason: every count below — the header
+    # total, the tier board, Coverage Gaps, the action lanes, the warmth
+    # sections — derives from this one list, so nothing can disagree with
+    # what renders. And exactly like the campaign gate, the hidden are KEPT,
+    # counted, and listed at `crm:contact_unrelated` with a one-click way
+    # back — a board that quietly shrinks is the bug class this repo has now
+    # fixed three times.
+    unrelated_tiers = {
+        uf.firm_id: uf.tier
+        for uf in UserFirm.objects.for_user(user)
+        if uf.firm_id
+    }
+    unrelated_tracks = {
+        c.firm_id: (c.firm.tracks or []) for c in contacts if c.firm_id and c.firm
+    }
+    unrelated_verdicts = {
+        c.id: recruitment.contact_verdict(
+            c, tiers=unrelated_tiers, firm_tracks=unrelated_tracks,
+            firm_label=(c.firm.name if c.firm else ""),
+        )
+        for c in contacts
+    }
+    unrelated = [
+        c for c in contacts
+        if unrelated_verdicts[c.id].verdict == recruitment.HIDE
+    ]
+    contacts = [
+        c for c in contacts
+        if unrelated_verdicts[c.id].verdict == recruitment.KEEP
+    ]
+
     scope = request.GET.get("scope", "").strip().lower()
 
     def _scoped(rows):
@@ -701,6 +738,10 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # list, and a way back that vanishes on the School tab because none of the
     # hidden nine went to USC is a dead end rather than a filter.
     hidden_any = bool(hidden)
+    # Same pair for the recruitment-relevance gate: a scoped count for the
+    # caveat, an unscoped bool for the way back.
+    unrelated_total = len(_scoped(unrelated))
+    unrelated_any = bool(unrelated)
     # How many of the shown contacts are here on a guess rather than a set
     # region. Rendered as a one-line caveat under the Contacts header so a
     # region tab never silently passes off "unknown" as "confirmed".
@@ -1015,6 +1056,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "unconfirmed_total": unconfirmed_total,
             "hidden_total": hidden_total,
             "hidden_any": hidden_any,
+            "unrelated_total": unrelated_total,
+            "unrelated_any": unrelated_any,
         },
     )
 
@@ -1428,6 +1471,82 @@ def contact_campaign_keep(request: HttpRequest, pk: int) -> HttpResponse:
         f"{contact.name} is back on your board and in your daily queue.",
     )
     return redirect("crm:contact_campaign_hidden")
+
+
+@login_required
+def contact_unrelated(request: HttpRequest) -> HttpResponse:
+    """The people the board is hiding because nothing about THEM relates to
+    the user's recruiting — the recruitment-relevance twin of
+    `contact_campaign_hidden`, and deliberately the same plain ledger:
+    somewhere to check the board's arithmetic and put one person back.
+
+    The middle column carries the RULE'S OWN CITED REASON for each person
+    ("Campus role, not recruiting: 'Professor (USC Dornsife, WRIT 150)'"),
+    because "these eight are hidden" is a fact about the software and the
+    quoted role text is the fact the user can check against the row. Nothing
+    here is hidden anywhere else: detail page, touch history, search and
+    every export all keep working.
+
+    `archived=False` and campaign-hidden people excluded, same
+    one-list-per-person rule as the other ledgers: somebody who is both is
+    already accounted for on the list that hid them first.
+    """
+    tiers = {
+        uf.firm_id: uf.tier
+        for uf in UserFirm.objects.for_user(request.user)
+        if uf.firm_id
+    }
+    campaign_ids = campaigns.excluded_contact_ids(request.user)
+    rows = [
+        c
+        for c in Contact.objects.for_user(request.user)
+        .filter(archived=False)
+        .select_related("firm")
+        .annotate(last_touch_ts=models_Max("touches__ts"))
+        .order_by("name")
+        if c.id not in campaign_ids
+    ]
+    firm_tracks = {
+        c.firm_id: (c.firm.tracks or []) for c in rows if c.firm_id and c.firm
+    }
+    contacts = []
+    for c in rows:
+        v = recruitment.contact_verdict(
+            c, tiers=tiers, firm_tracks=firm_tracks,
+            firm_label=(c.firm.name if c.firm else ""),
+        )
+        if v.verdict == recruitment.HIDE:
+            c.hide_reason = v.reason
+            contacts.append(c)
+    return render(
+        request,
+        "crm/contact_unrelated.html",
+        {"contacts": contacts, "contact_total": len(contacts)},
+    )
+
+
+@login_required
+@require_POST
+def contact_unrelated_keep(request: HttpRequest, pk: int) -> HttpResponse:
+    """Put one person the recruitment rule hid back on the board.
+
+    Writes `Contact.recruitment_related = True` — the user's own word, which
+    `crm.recruitment.contact_verdict` puts above every rung of its ladder, so
+    this survives every future re-run of the rule permanently. The mirror of
+    `contact_campaign_keep`, for the same reason it exists: a rule over a
+    hundred-odd people will occasionally be wrong about one, and the rescue
+    for that one must not be loosening the rule for everybody.
+    """
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    if contact.recruitment_related is not True:
+        contact.recruitment_related = True
+        contact.save(update_fields=["recruitment_related"])
+        record_event("unrelated_contact_kept", user=request.user)
+    messages.success(
+        request,
+        f"{contact.name} is back on your board and in your daily queue.",
+    )
+    return redirect("crm:contact_unrelated")
 
 
 @login_required

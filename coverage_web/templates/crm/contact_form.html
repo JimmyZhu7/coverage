@@ -86,6 +86,18 @@
           <p class="note">{{ form.recruiting_contact.help_text }}</p>
         </div>
         {% comment %}
+        The override for the recruitment-relevance rule (crm/recruitment.py):
+        the rule hides professors, campus offices and off-track roles from
+        the board and queue; this is where the user's own word beats it, in
+        either direction, permanently. Same three-choice shape as the field
+        above, for the same nullable-column reason.
+        {% endcomment %}
+        <div>
+          <label for="{{ form.recruitment_related.id_for_label }}">{{ form.recruitment_related.label }}</label>
+          {{ form.recruitment_related }}
+          <p class="note">{{ form.recruitment_related.help_text }}</p>
+        </div>
+        {% comment %}
         The rescue hatch for one person inside a bulk send you have said was
         not your job search. Sits here rather than on the Campaigns card
         because the decision is about this person, and the card is about two
