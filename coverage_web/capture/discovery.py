@@ -133,7 +133,7 @@ from django.utils import timezone
 from capture import inbound
 from capture.models import ContactProposal
 from capture.providers import normalize_email, normalize_name
-from crm import services as crm_services
+from crm import recruitment, services as crm_services
 from crm.models import Contact
 from crm.relevance import is_recruiting_role
 from directory.models import Firm
@@ -681,6 +681,23 @@ def consider_finding(
 
     raw_name = (finding.get("name") or "").strip() or localpart
     name, role_hint = split_display_name(raw_name)
+
+    # RECRUITMENT RELEVANCE, the same person-level rule the Network board
+    # and the daily queue apply (`crm.recruitment` — the founder's
+    # 2026-08-25 "any unrelated should not show up"). A sender whose own
+    # signature names a campus or off-track seat ("Jane Doe, Account
+    # Manager", "Prof. X") must not become a proposal the user then has to
+    # dismiss so the board can hide the result: an unrelated person should
+    # not get IN in the first place, and the two gates must agree rather
+    # than fight. Deliberately the SAME function, run on exactly the
+    # evidence a proposal has (the role hint) — pure text, no query — and
+    # keep-biased the same way: a hint that names a track or a recruiting
+    # function passes before any off-track word is consulted, and a hint
+    # that says nothing refuses nobody. This complements the firm-domain
+    # bar above rather than replacing it: that one asks "is this mail his
+    # recruiting world", this one asks "is this PERSON".
+    if role_hint and recruitment.role_hint_disqualified(role_hint):
+        return None
 
     match = _match_existing(user, email, name)
     if match is not None:
