@@ -426,15 +426,18 @@
       Replied/Chatted/Advocates are small and worth seeing at a glance, so
       they open by default like every other section here always has.
       Emailed-No-Reply is the one that's routinely 90+ cards deep and
-      genuinely does swamp the board — that one alone defaults collapsed.
+      genuinely does swamp the board — that one alone defaults collapsed, and
+      so does Not-Contacted-Yet for the same reason and at the same size.
       Empty sections stay collapsed regardless (nothing to show).
       {% endcomment %}
-      <details class="warmth-section" data-group{% if section.cards and section.key != "no_reply" %} open{% endif %}>
+      <details class="warmth-section" data-group{% if section.cards and section.key != "no_reply" and section.key != "not_contacted" %} open{% endif %}>
         <summary class="net-group-head">
           {% comment %}Every section is a warmth bucket now — School scope
           used to have a fifth kind of section (grouped by university, no
-          dot) here, which is what this conditional was guarding against.{% endcomment %}
-          <span><i class="dot dot-{% if section.key == 'no_reply' %}cold{% else %}{{ section.key }}{% endif %}"></i> {{ section.label }}</span>
+          dot) here, which is what this conditional was guarding against.
+          Both cold halves wear the cold dot: `no_reply` and `not_contacted`
+          are the same warmth split by whether anything was ever sent.{% endcomment %}
+          <span><i class="dot dot-{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"></i> {{ section.label }}</span>
           <span class="scrub-count" data-group-count>{{ section.cards|length }}</span>
         </summary>
         {% if section.cards %}

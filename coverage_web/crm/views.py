@@ -458,6 +458,14 @@ _WARMTH_SECTIONS = [
     ("chatted", "Chatted"),
     ("advocate", "Advocates"),
     ("no_reply", "Emailed, No Reply"),
+    # FOUND WHILE AUDITING THE BOARD'S COUNTS (2026-08-25), and it is the same
+    # class of bug as the one that audit was for: `no_reply` is cold AND
+    # touched, so a contact who is cold and has never been touched matched no
+    # section at all and rendered nowhere — while still being counted in
+    # "Contacts N" at the top. On the demo account that was 24 of 61 people
+    # present in the header and absent from the page. They are the ones a
+    # student most needs to see, too: a name they added and never wrote to.
+    ("not_contacted", "Not Contacted Yet"),
 ]
 
 # The Network board's region scope tabs, in display order. A subset of
@@ -940,6 +948,13 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     for key, label in _WARMTH_SECTIONS:
         if key == "no_reply":
             members = [c for c in contacts if c.warmth == "cold" and c.touch_count]
+        elif key == "not_contacted":
+            # The other half of cold. Together these two partition it, which is
+            # what makes the sections sum to `contact_total` — see
+            # `_WARMTH_SECTIONS`.
+            members = [
+                c for c in contacts if c.warmth == "cold" and not c.touch_count
+            ]
         else:
             members = [c for c in contacts if c.warmth == key]
         sections.append({

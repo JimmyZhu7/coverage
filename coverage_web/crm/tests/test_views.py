@@ -420,10 +420,13 @@ def test_user_b_cannot_log_touch_on_user_a_contact(client):
 @pytest.mark.django_db
 def test_contact_list_renders(client):
     user = _user()
-    # A never-contacted cold contact renders on this board ONLY through the
-    # "Contacts Needing Action" column (the warmth sections below it skip
-    # cold-with-no-touches), and that column now runs behind the queue's
-    # relevance gate. The school tie is what earns the card.
+    # A never-contacted cold contact used to render on this board ONLY through
+    # the "Contacts Needing Action" column, because the warmth sections below
+    # it skipped cold-with-no-touches — so this fixture needed a school tie to
+    # earn a card at all. It has its own section now (see
+    # `test_the_warmth_sections_account_for_every_contact_the_header_counts`),
+    # and the school tie stays because the relevance gate on that column is
+    # still worth exercising here.
     Contact.all_objects.create(
         user=user, name="Listed Person", school_affiliation=True,
     )
@@ -431,6 +434,33 @@ def test_contact_list_renders(client):
     resp = client.get(reverse("crm:contact_list"))
     assert resp.status_code == 200
     assert "Listed Person" in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_the_warmth_sections_account_for_every_contact_the_header_counts(client):
+    """FOUND AUDITING THE BOARD'S COUNTS (2026-08-25). "Emailed, No Reply" is
+    cold AND touched, so a contact who was added and never written to matched
+    no section and rendered nowhere — while still being counted in "Contacts
+    N" at the top. 24 of 61 people on the demo account. A number in a header
+    with no cards under it is the same class of bug as a card with no number.
+    """
+    user = _user()
+    never = Contact.all_objects.create(user=user, name="Never Written To")
+    emailed = Contact.all_objects.create(user=user, name="Emailed Once")
+    Touch.all_objects.create(
+        user=user, contact=emailed, kind="outreach", channel="email",
+        ts=timezone.now() - timedelta(days=9),
+    )
+    client.force_login(user)
+
+    resp = client.get(reverse("crm:contact_list"))
+    body = resp.content.decode()
+
+    assert resp.context["contact_total"] == 2
+    assert sum(len(s["cards"]) for s in resp.context["sections"]) == 2
+    assert body.count('class="contact-card') == 2
+    assert never.name in body and emailed.name in body
+    assert "Not Contacted Yet" in body
 
 
 @pytest.mark.django_db
