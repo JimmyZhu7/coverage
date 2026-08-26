@@ -775,6 +775,13 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         # (§10: subject at most, never a body). Ride-along facts on the same
         # finding shape; every existing consumer ignores them.
         "threaded_reply": verdict.threaded_reply,
+        # Whether the sender actually put the user on To:/Cc: — the other
+        # half of "someone wrote to YOU". A reply-all into a thread the user
+        # was only Bcc'd or list-delivered into carries In-Reply-To and is
+        # still not addressed to them; discovery refuses on an explicit
+        # False and treats absence as unknown (older findings keep behaving
+        # exactly as they did).
+        "addressed_to_user": verdict.addressed_to_user,
         "subject": subject,
         # Same ride-along as the bulk branch above, for `capture.appmail`:
         # plenty of banks send confirmations from a `campus@firm.com`

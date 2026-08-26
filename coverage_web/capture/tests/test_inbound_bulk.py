@@ -318,3 +318,70 @@ class TestBulkFindingsThroughApplyFindings:
         apply_findings(student, [legacy])
         contact.refresh_from_db()
         assert contact.warmth == "replied"
+
+
+# --------------------------------------------------------------------------- #
+# addressed_to_user — the To:/Cc: half of "someone wrote to YOU".
+#
+# Live case (2026-08-25, founder's mailbox, read-only): a West Monroe
+# coordinator's "RE:" follow-up to their own mass invite carried In-Reply-To
+# (it threads) and named only the firm's own people on To:/Cc:. The verdict
+# reports the addressing fact on its own so contact discovery can make it
+# decisive without re-parsing headers.
+# --------------------------------------------------------------------------- #
+
+class TestAddressedToUser:
+    def test_a_reply_addressed_to_the_user_reports_true(self):
+        verdict = inbound.classify_inbound(OWN, _message({
+            "From": "Lily Liu <lily.liu@barclays.com>",
+            "To": OWN,
+            "Subject": "RE: USC | HSBC | Barclays - Coffee Chat Request",
+            "In-Reply-To": "<mine@usc.edu>",
+        }))
+        assert verdict.is_bulk is False
+        assert verdict.addressed_to_user is True
+
+    def test_a_threaded_reply_that_never_names_the_user_reports_false(self):
+        verdict = inbound.classify_inbound(OWN, _message({
+            "From": "Coordinator <ttrinh@westmonroe.com>",
+            "To": "campusrecruiting@westmonroe.com",
+            "Cc": "cbaenen@westmonroe.com",
+            "Subject": "RE: You're Invited: Ask Me Anything",
+            "In-Reply-To": "<blast@westmonroe.com>",
+        }))
+        # One weak signal alone is not bulk, and the reply pointer holds —
+        # but the addressing fact is reported for stricter surfaces.
+        assert verdict.threaded_reply is True
+        assert verdict.addressed_to_user is False
+
+    def test_empty_recipients_default_open(self):
+        """Absence of To:/Cc: is absence of evidence, not evidence of
+        absence — an undisclosed-recipients message must not flip the fact
+        to False."""
+        verdict = inbound.classify_inbound(OWN, _message({
+            "From": "Someone <someone@bank.example>",
+            "Subject": "Re: hello",
+            "In-Reply-To": "<mine@usc.edu>",
+        }))
+        assert verdict.addressed_to_user is True
+
+    def test_cc_counts_as_addressed(self):
+        verdict = inbound.classify_inbound(OWN, _message({
+            "From": "Banker <banker@bank.example>",
+            "To": "colleague@bank.example",
+            "Cc": OWN,
+            "Subject": "Re: intro",
+            "In-Reply-To": "<mine@usc.edu>",
+        }))
+        assert verdict.addressed_to_user is True
+
+    def test_the_live_finding_carries_the_fact(self):
+        finding = gmail_live._classify_message(OWN, _message({
+            "From": "Coordinator <ttrinh@westmonroe.com>",
+            "To": "campusrecruiting@westmonroe.com",
+            "Subject": "RE: You're Invited",
+            "In-Reply-To": "<blast@westmonroe.com>",
+        }, internalDate="1787604316000"))
+        assert finding is not None
+        assert finding["replied"] is True
+        assert finding["addressed_to_user"] is False

@@ -129,6 +129,19 @@ class InboundVerdict:
     # `References`), i.e. someone hit Reply on something. Reported even for
     # a bulk verdict, because it is the fact the override rules turn on.
     threaded_reply: bool = False
+    # True when the account owner is actually on To:/Cc: (or the headers
+    # named nobody at all, which proves nothing either way and defaults
+    # open). A reply pointer says "someone hit Reply"; it does NOT say they
+    # hit Reply on something the user sent — a colleague replying-all into
+    # a thread the user was only ever Bcc'd or list-delivered into carries
+    # In-Reply-To just the same. Verified on the founder's live mailbox
+    # (2026-08-25, read-only): a West Monroe coordinator's "RE:" follow-up
+    # to their own mass invite threaded onto the first blast and named only
+    # the firm's own people on To:/Cc: — a reply, and not to him. Tier 3
+    # already treats "not on To:/Cc:" as half a bulk signal; this reports
+    # the same fact on its own so a stricter surface (contact discovery)
+    # can make it decisive without re-parsing headers.
+    addressed_to_user: bool = True
 
     @property
     def reason_text(self) -> str:
@@ -192,6 +205,10 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
     own = (own_email or "").strip().lower()
 
     threaded = bool(headers.get("in-reply-to") or headers.get("references"))
+    all_recipients = _recipient_addresses(headers)
+    # Open by default: empty To:/Cc: or an unknown own address is absence of
+    # evidence, not evidence of absence.
+    addressed = (not all_recipients) or (not own) or (own in all_recipients)
 
     # --- tier 1: nothing rescues these ------------------------------------ #
     always: list[str] = []
@@ -216,7 +233,7 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
         always.append("mailing-list headers (" + ", ".join(present_list) + ")")
 
     if always:
-        return InboundVerdict(True, tuple(always), threaded)
+        return InboundVerdict(True, tuple(always), threaded, addressed)
 
     # --- tier 2: strong, overridden by a genuine reply pointer ------------- #
     strong: list[str] = []
@@ -234,7 +251,7 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
 
     # --- tier 3: weak, and only ever counted in pairs ---------------------- #
     weak: list[str] = []
-    recipients = _recipient_addresses(headers)
+    recipients = all_recipients
     if recipients and own and own not in recipients:
         weak.append("you are not on To: or Cc:")
     if len(recipients) > BULK_RECIPIENT_COUNT:
@@ -242,6 +259,6 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
 
     reasons = strong + (weak if len(weak) >= 2 else [])
     if reasons and not threaded:
-        return InboundVerdict(True, tuple(reasons), threaded)
+        return InboundVerdict(True, tuple(reasons), threaded, addressed)
 
-    return InboundVerdict(False, (), threaded)
+    return InboundVerdict(False, (), threaded, addressed)
