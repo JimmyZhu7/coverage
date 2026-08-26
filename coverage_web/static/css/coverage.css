@@ -1295,6 +1295,10 @@ a.pill:hover { text-decoration: underline; }
 .prio.prio-0 { background: var(--w-advocate-s); color: var(--w-advocate-t); }
 .prio.prio-1 { background: var(--w-replied-s);  color: var(--w-replied-t); }
 .prio.prio-2, .prio.prio-3 { background: var(--band-cold-s); color: var(--band-cold-t); }
+/* A stated deadline on an application card. Warm, not hot: the date is a
+   thing to do, not a thing that has gone wrong, and hot is spoken for by the
+   score bands below. Both themes come free — the tokens already flip. */
+.prio.prio-due { background: var(--band-warm-s); color: var(--band-warm-t); }
 
 /* ---- 9. Score bands + axis bars ------------------------------------------- */
 .band {

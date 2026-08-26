@@ -29,10 +29,39 @@ COMPOSING WITH `capture.inbound`, NOT FIGHTING IT
 Application mail IS bulk mail. It comes from `no-reply@`, it carries
 `List-Unsubscribe` and campaign ids, and `classify_inbound` correctly calls
 it bulk — which is precisely what makes it findable. So the gate below wants
-one of two things: a sender on a known ATS domain, or a message the bulk
-classifier already flagged (or a no-reply sender) whose subject is about an
-application. A genuine human reply is neither, and never reaches the rest of
-this module.
+one of three things: a sender on a known ATS domain; a message the bulk
+classifier already flagged (or a no-reply sender) whose SUBJECT is about an
+application; or an unattended address on a firm's OWN domain, where the
+subject may be silent and the body carries the signal. A genuine human reply
+is none of the three, and never reaches the rest of this module.
+
+WHY THE THIRD ARM EXISTS — a real miss, 2026-08-24
+---------------------------------------------------
+`noreply@campuscareers.bofa.com` sent "Bank of America Action Required:
+Indicate Your Top Choices for Campus Insight Forum". Body: "Bank of America
+Application Update / Congratulations on advancing in the Campus Insight Forum
+process! To move forward, you must complete the Program Preference Survey by
+August 30, 2026 at 11:59 PM EST."
+
+Two arms both refused it. `campuscareers.bofa.com` is not an ATS vendor, and
+the subject carries no application word — the words are all in the body. So
+an advancement notice from the bank's own campus-recruiting system, naming a
+hard deadline six days out, was filed as bulk noise. That is precisely the
+failure this module exists to prevent.
+
+THE ARM IS THE SENDER PLUS THE WORD, NOT THE SENDER ALONE. It would have been
+easier to gate on the sender by itself: an unattended address on a domain the
+directory registers for a firm is a strong signal on its own. It is also
+exactly the address a bank mails its marketing from, and gating on it alone
+would hand every "an evening with our traders" blast to the paid model for a
+guaranteed "not an application event". So the arm keeps the application-word
+test and only changes its SCOPE: for a firm's own unattended address, the
+word may come from the body. Nothing else about the gate moves, and marketing
+with no application word anywhere is refused exactly as before.
+
+A gate is not a verdict, either way. Everything that gets through still has to
+be TYPED by the phrase layer below, and a message the phrases cannot type
+produces a report line and no row.
 
 THE DETERMINISTIC LAYER IS THE PRODUCT. THE LLM IS THE LONG TAIL.
 ------------------------------------------------------------------
@@ -62,12 +91,26 @@ WHAT IT REFUSES TO DO, inherited from `directory.applications`
   under-claims.
 - Ask twice. One row per (user, role, event kind) — the ATS's own reminder
   about an application it already confirmed resolves to the same triple.
+- Infer a date. `_due_on` reads a deadline only where the mail STATES one, in
+  words, with a year. "By Friday", "within 5 days", "08/30" — all refused.
+
+THE ONE THING A STAGE CANNOT SAY
+--------------------------------
+`_advances` exists because a card that would change nothing is noise: the
+ATS re-confirming an application the board already has is exactly the mail a
+student should not be asked about twice. But the BofA message above changes
+no stage at all — the founder had already marked that role submitted by hand
+— and it is still the most important message in the batch, because it names
+a dated thing he must DO. So the suppression tests the stage AND the date:
+an event carrying a deadline the board has no way of knowing says something
+the stage does not, and is carded even when the stage stands still.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 from django.utils import timezone
 
@@ -164,7 +207,7 @@ def sender_kind(email: str) -> str | None:
     """Which kind of system this address belongs to: "assessment", "video",
     "ats", or None for everything else (including a firm's own domain —
     plenty of banks mail confirmations from `careers@firm.com`, and those
-    get in through the subject gate instead)."""
+    get in through the subject gate, or through `firm_own_sender` below)."""
     domain = _domain_of(email)
     if not domain:
         return None
@@ -175,6 +218,34 @@ def sender_kind(email: str) -> str | None:
     if _suffix_match(domain, _ATS_DOMAINS):
         return "ats"
     return None
+
+
+def firm_own_sender(email: str, firm_domains=None) -> bool:
+    """Is this an unattended address on a domain the DIRECTORY already
+    registers for a firm?
+
+    Both halves matter and neither is enough alone. `looks_like_noreply` is
+    `capture.inbound`'s own localpart test — the same one that makes a
+    message bulk — so a human at the bank is never this. And the domain test
+    is `capture.discovery.FirmDomains`, reused rather than re-derived: it
+    already resolves a subdomain to its registered parent (`mail.jpmorgan.com`
+    to a registered `jpmorgan.com`, and `campuscareers.bofa.com` to `bofa.com`)
+    and never the reverse, so a registered subdomain cannot claim a parent it
+    was not given.
+
+    Deliberately NOT a hardcoded list of campus-recruiting hostnames. Every
+    bank spells its own differently (`campuscareers.`, `campus.`, `recruiting.`,
+    `earlycareers.`) and a list of them would be permanently one bank behind.
+    The directory's firm domains are already maintained for other reasons and
+    are the same fact stated once.
+    """
+    if not inbound.looks_like_noreply(email):
+        return False
+    if firm_domains is None:
+        from capture.discovery import FirmDomains
+
+        firm_domains = FirmDomains()
+    return firm_domains.match(email) is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -189,13 +260,27 @@ def sender_kind(email: str) -> str | None:
 # body prose is how "if you progress, you will be invited to an online
 # assessment" turns a confirmation into an interview invite.
 #
-# `rejected` and `offer` are read from the subject AND the snippet, because
-# they are body-shaped: the classic rejection subject is the neutral "Your
-# application to X". The phrases below are correspondingly strict — every one
-# of them is a sentence that CANNOT occur in a confirmation. In particular a
-# bare "unfortunately" is not on this list: confirmations say "unfortunately
-# we cannot respond to every applicant", and closing a live application on
-# that word would be the worst mistake this module could make.
+# `rejected`, `offer` and `advanced` are read from the subject AND the
+# snippet, because they are body-shaped: the classic rejection subject is the
+# neutral "Your application to X", and the BofA advancement notice's subject
+# was "Action Required: Indicate Your Top Choices". The phrases below are
+# correspondingly strict — every one of them is a sentence that CANNOT occur
+# in a confirmation. In particular a bare "unfortunately" is not on this list:
+# confirmations say "unfortunately we cannot respond to every applicant", and
+# closing a live application on that word would be the worst mistake this
+# module could make.
+#
+# WHY `advanced` IS SAFE TO READ FROM PROSE AND `interview` IS NOT. The danger
+# the scope rule guards against is CONDITIONAL prose: "if you progress, you
+# will be invited to an online assessment" sits in the body of half the
+# confirmations ever sent, and reading it as an invite turns a confirmation
+# into an interview. The `advanced` phrases below are second-person
+# assertions in the past or present about THIS candidate, and — this is the
+# part that makes the scope safe rather than merely careful — they claim
+# `submitted`, the same floor every confirmation claims. A wrong read costs
+# nothing a "thank you for applying" would not already have cost. A wrong
+# `interview` read invents a stage nobody reached, which is why that one stays
+# in the subject.
 _SUBJECT_PATTERNS: tuple[tuple[str, str], ...] = (
     (ApplicationEvent.APPLIED, r"thank(?:s| you) for applying"),
     (ApplicationEvent.APPLIED, r"thank(?:s| you) for your application"),
@@ -223,6 +308,22 @@ _SUBJECT_PATTERNS: tuple[tuple[str, str], ...] = (
 )
 
 _BODY_PATTERNS: tuple[tuple[str, str], ...] = (
+    # Advancement. Every one of these names the candidate and a completed
+    # move; none of them can be read off a conditional. "Congratulations" is
+    # never on its own — banks congratulate students on being admitted to a
+    # mailing list.
+    (ApplicationEvent.ADVANCED,
+     r"congratulations on (?:advancing|progressing|moving forward|being selected)"),
+    (ApplicationEvent.ADVANCED,
+     r"you (?:have |'ve )?(?:been )?(?:advanced|progressed|moved forward) "
+     r"(?:to|in|into)\b"),
+    (ApplicationEvent.ADVANCED,
+     r"advanc(?:ed|ing) to the next (?:stage|round|step|phase)"),
+    (ApplicationEvent.ADVANCED,
+     r"(?:selected|chosen) to (?:move forward|continue|advance)\b"),
+    (ApplicationEvent.ADVANCED,
+     r"pleased to (?:inform|share|tell) you that you have (?:advanced|progressed)"),
+
     (ApplicationEvent.REJECTED, r"regret to inform"),
     (ApplicationEvent.REJECTED, r"not (?:be )?(?:moving|going) forward with your\b"),
     (ApplicationEvent.REJECTED, r"(?:will |have decided )?not (?:to )?(?:be )?(?:progress|proceed|advanc)\w*\s+(?:with )?your\b"),
@@ -247,6 +348,11 @@ _BODY_RES = tuple((kind, re.compile(p, re.IGNORECASE)) for kind, p in _BODY_PATT
 # thanks you for applying and regrets to inform you is the rejection.
 _PRECEDENCE = (
     ApplicationEvent.APPLIED,
+    # Above `applied` (it says more than "we got it") and below every named
+    # stage (it says less than "here is your assessment"). A mail that both
+    # congratulates you on advancing and invites you to a HireVue IS the
+    # HireVue invite.
+    ApplicationEvent.ADVANCED,
     ApplicationEvent.ASSESSMENT,
     ApplicationEvent.VIDEO_INTERVIEW,
     ApplicationEvent.INTERVIEW,
@@ -273,11 +379,23 @@ _PRECEDENCE = (
 #   is what it claims. The precise fact survives on the `ApplicationEvent`
 #   row itself, which is kept after accept and is in the data export.
 #
+#   advanced -> submitted, and this is the second deliberate under-claim.
+#   "Congratulations on advancing in the Campus Insight Forum process" is real
+#   forward motion and it is NOT an interview: nobody has interviewed anybody,
+#   and the mail's own next step was a preference survey. It is not a rejection
+#   and it is obviously not an offer. What it proves beyond argument is that
+#   the application is live and was submitted, so `submitted` is what it
+#   claims — the same argument, for the same reason, as `assessment` above.
+#   The precise fact survives on the ApplicationEvent row and in the export;
+#   what does NOT survive an over-claim is a student's trust in a board that
+#   told them they were interviewing when they were filling in a form.
+#
 #   video_interview -> interview. An on-demand HireVue is an interview in the
 #   only sense the funnel means: the firm has moved you into its interview
 #   process. No under-claim needed.
 TARGET_STATUS = {
     ApplicationEvent.APPLIED: "submitted",
+    ApplicationEvent.ADVANCED: "submitted",
     ApplicationEvent.ASSESSMENT: "submitted",
     ApplicationEvent.VIDEO_INTERVIEW: "interview",
     ApplicationEvent.INTERVIEW: "interview",
@@ -292,8 +410,15 @@ TARGET_STATUS = {
 # nobody wants to read twice — no repetition of the word the email already
 # used. `Not moving forward` states the fact; `Mark done` is an action about
 # a list, not a verdict about a person.
+#
+# `Next step required` rather than the mirror-image `Moving forward`: that
+# would sit one word away from `Not moving forward` in the same lane, and the
+# two cards a student most needs to tell apart at a glance are exactly those
+# two. It also says the useful half — there is something to DO — which is the
+# whole reason this card exists when the stage has not moved.
 EVENT_LABELS = {
     ApplicationEvent.APPLIED: ("Application received", "Mark applied"),
+    ApplicationEvent.ADVANCED: ("Next step required", "Mark applied"),
     ApplicationEvent.ASSESSMENT: ("Assessment invite", "Mark applied"),
     ApplicationEvent.VIDEO_INTERVIEW: ("Video interview invite", "Move to interviewing"),
     ApplicationEvent.INTERVIEW: ("Interview invite", "Move to interviewing"),
@@ -311,6 +436,91 @@ def action_label(event_type: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# The dated requirement
+# --------------------------------------------------------------------------- #
+#
+# The single most valuable line in the message that started all this was not
+# the status at all: it was "by August 30, 2026 at 11:59 PM EST". A stage a
+# student can read off their own board; a date they cannot act on after it
+# passes is the thing a CRM is for.
+#
+# READ, NEVER INFERRED — the same confirmed-vs-rumoured discipline
+# `directory.models.Opportunity.deadline_precision` draws over postings:
+#
+#   - Named months only. `August 30, 2026` and `30 August 2026` are read;
+#     `08/30/2026` is not, because a numeric date is a guess about which
+#     country wrote it and a card that names the wrong day is worse than a
+#     card with no day. The one thing that cannot be misread is a spelled
+#     month.
+#   - The year must be written. "by August 30" would need the year inferred
+#     from the message date, and an inference is not a stated deadline.
+#   - There must be an obligation word in front of it. "by", "before", "no
+#     later than", "due". A date on its own is an event date, a start date, a
+#     posted-on date — this module has no way to tell which, so it reads none
+#     of them.
+#   - The date may not predate the message. A deadline behind the mail that
+#     announced it is a misparse, not a deadline.
+#
+# So "by the end of next week", "within 5 days", "by Friday", "08/30" and a
+# bare "August 30, 2026" all attach nothing, and attaching nothing is the
+# honest outcome. NO MODEL IS ASKED. The deterministic layer is the product
+# here exactly as it is above, and §10's read-then-discard rule cuts harder
+# for a date than for a status: what lands in the database is one DateField,
+# never the sentence it was read from.
+_MONTHS = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sept": 9, "sep": 9,
+    "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12,
+    "dec": 12,
+}
+_MONTH_ALT = "|".join(sorted(_MONTHS, key=len, reverse=True))
+_OBLIGATION = r"(?:by|before|no later than|due(?:\s+(?:by|on))?|deadline(?:\s+is)?)"
+
+_DUE_RES = (
+    # "by August 30, 2026" / "before Aug 30 2026"
+    re.compile(
+        rf"\b{_OBLIGATION}\s*:?\s+(?:the\s+)?"
+        rf"(?P<month>{_MONTH_ALT})\.?\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?"
+        rf"\s*,?\s+(?P<year>20\d{{2}})\b",
+        re.IGNORECASE,
+    ),
+    # "by 30 August 2026" / "no later than 30th September, 2026"
+    re.compile(
+        rf"\b{_OBLIGATION}\s*:?\s+(?:the\s+)?"
+        rf"(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<month>{_MONTH_ALT})\.?"
+        rf"\s*,?\s+(?P<year>20\d{{2}})\b",
+        re.IGNORECASE,
+    ),
+)
+
+# Two years. A stated deadline further out than that is not a deadline this
+# mail is asking anybody to meet; it is a misparse or a copyright line.
+_MAX_DUE_DAYS = 730
+
+
+def _due_on(text: str, sent_on: date | None) -> date | None:
+    """The stated deadline in `text`, or None. See the rules above."""
+    for pattern in _DUE_RES:
+        match = pattern.search(text or "")
+        if match is None:
+            continue
+        try:
+            found = date(
+                int(match.group("year")),
+                _MONTHS[match.group("month").lower().rstrip(".")],
+                int(match.group("day")),
+            )
+        except (ValueError, KeyError):
+            continue
+        floor = sent_on or timezone.localdate()
+        if found < floor or found > floor + timedelta(days=_MAX_DUE_DAYS):
+            continue
+        return found
+    return None
+
+
+# --------------------------------------------------------------------------- #
 # Detection
 # --------------------------------------------------------------------------- #
 
@@ -325,6 +535,9 @@ class Detection:
     event_type: str | None = None
     detected_by: str = "rules"
     reasons: tuple[str, ...] = ()
+    # The stated deadline this mail carries, when it states one. Never set on
+    # a rejection: a closed application has nothing left to be due.
+    due_on: date | None = None
 
 
 def _snippet_of(finding: dict) -> str:
@@ -335,15 +548,25 @@ def _snippet_of(finding: dict) -> str:
     return (finding.get("snippet") or "")[:600]
 
 
-def detect(finding: dict, *, allow_ai: bool = True) -> Detection:
+def detect(
+    finding: dict, *, allow_ai: bool = True, firm_domains=None
+) -> Detection:
     """Classify one finding as an application-status message, or not.
 
     Cheap tests first, and the expensive one only ever last:
-      1. Is the sender an ATS/assessment/video vendor, or is this a bulk or
-         no-reply message whose subject is about an application? If neither,
-         stop — no gate, no phrases, no model.
+      1. Is the sender an ATS/assessment/video vendor; is this a bulk or
+         no-reply message whose SUBJECT is about an application; or is it an
+         unattended address on a firm's own domain with an application word
+         anywhere in it? If none of the three, stop — no gate, no phrases,
+         no model.
       2. Do the phrase lists type it? If so, done, free.
       3. Otherwise, and only otherwise, ask the model (if one is configured).
+
+    `firm_domains` is `capture.discovery.FirmDomains`, shared across a batch
+    by `Resolver`. Passing it is an optimization, not a requirement — omitted,
+    the third arm builds its own. Either way the map is loaded lazily, so a
+    batch with no unattended senders in it never queries for firm domains at
+    all.
     """
     email = (finding.get("email") or "").strip().lower()
     subject = (finding.get("subject") or "").strip()
@@ -357,12 +580,26 @@ def detect(finding: dict, *, allow_ai: bool = True) -> Detection:
     kind = sender_kind(email)
     machine = bool(finding.get("bulk")) or inbound.looks_like_noreply(email)
     about_application = bool(_APPLICATION_WORD_RE.search(subject))
+    body_text = f"{subject}\n{snippet}"
 
     # -- gate ---------------------------------------------------------- #
     if kind is None:
-        if not (machine and about_application):
+        if machine and about_application:
+            reasons = ("automated sender, application subject",)
+        elif firm_own_sender(email, firm_domains):
+            # THE THIRD ARM (see the module docstring). The sender is the
+            # firm's own unattended recruiting address, so the subject is
+            # allowed to be silent — but the message still has to be about an
+            # application SOMEWHERE, or every marketing blast from the same
+            # address would gate in and cost a model call to say so.
+            if not _APPLICATION_WORD_RE.search(body_text):
+                return Detection()
+            reasons = (
+                f"unattended address on the firm's own domain "
+                f"({_domain_of(email)})",
+            )
+        else:
             return Detection()
-        reasons = ("automated sender, application subject",)
     else:
         # An ATS also sends job alerts and newsletters. Vendors whose whole
         # business is one funnel stage don't, so they skip this test.
@@ -375,7 +612,6 @@ def detect(finding: dict, *, allow_ai: bool = True) -> Detection:
     for event_type, pattern in _SUBJECT_RES:
         if pattern.search(subject):
             hits.add(event_type)
-    body_text = f"{subject}\n{snippet}"
     for event_type, pattern in _BODY_RES:
         if pattern.search(body_text):
             hits.add(event_type)
@@ -388,7 +624,10 @@ def detect(finding: dict, *, allow_ai: bool = True) -> Detection:
 
     if hits:
         best = max(hits, key=_PRECEDENCE.index)
-        return Detection(True, best, "rules", reasons + (f"phrasing says {best}",))
+        return Detection(
+            True, best, "rules", reasons + (f"phrasing says {best}",),
+            _due_for(best, body_text, finding),
+        )
 
     # -- the long tail ------------------------------------------------- #
     if allow_ai:
@@ -397,9 +636,23 @@ def detect(finding: dict, *, allow_ai: bool = True) -> Detection:
         guess = ai_extract.extract_application_event_ai(subject, snippet)
         if guess is not None and guess.value in TARGET_STATUS:
             return Detection(
-                True, guess.value, "ai", reasons + ("classified by AI",)
+                True, guess.value, "ai", reasons + ("classified by AI",),
+                _due_for(guess.value, body_text, finding),
             )
     return Detection(True, None, "rules", reasons + ("kind unclear",))
+
+
+def _due_for(event_type: str, body_text: str, finding: dict) -> date | None:
+    """The stated deadline, for the event kinds that can have one.
+
+    A rejection is excluded by name, not by luck: a closed application has
+    nothing left that is due, and a "respond by" sentence in a rejection is
+    boilerplate about a survey nobody has to fill in.
+    """
+    if event_type == ApplicationEvent.REJECTED:
+        return None
+    when = _occurred_at(finding)
+    return _due_on(body_text, timezone.localdate(when) if when else None)
 
 
 # --------------------------------------------------------------------------- #
@@ -577,7 +830,10 @@ def consider_finding(
     if not finding.get("found"):
         return Outcome()
 
-    detection = detect(finding, allow_ai=allow_ai)
+    resolver = resolver or Resolver(user)
+    detection = detect(
+        finding, allow_ai=allow_ai, firm_domains=resolver.domains
+    )
     if not detection.gated:
         return Outcome()
 
@@ -589,7 +845,6 @@ def consider_finding(
             detection.reasons,
         )
 
-    resolver = resolver or Resolver(user)
     firm, firm_text = resolve_firm(finding, resolver)
     if firm is None:
         return Outcome(
@@ -621,7 +876,15 @@ def consider_finding(
     # ratchet `capture_applications` uses, generalized to any target stage:
     # the row's current position already knows at least as much as this
     # email does.
-    if not _advances(user, opportunity, target):
+    #
+    # UNLESS THE MAIL CARRIES A DATE. A stage says where you are; it cannot
+    # say that a preference survey is due on the 30th. The BofA advancement
+    # notice landed on a role the founder had already marked submitted by
+    # hand, so the stage test alone would have thrown away the deadline along
+    # with the card — the same message lost twice, for a different reason the
+    # second time. A deadline still ahead of today is something the board
+    # genuinely does not know, so it earns the card on its own.
+    if not _advances(user, opportunity, target) and not _still_due(detection):
         return Outcome(
             ALREADY_AHEAD,
             f"{firm.name} — {opportunity.title}: already at or past "
@@ -651,13 +914,20 @@ def consider_finding(
             match_reason=match.reason[:200],
             thread_id=(finding.get("thread_id") or "").strip()[:128],
             occurred_at=_occurred_at(finding),
+            due_on=detection.due_on,
         )
+    due = f" — due {detection.due_on.isoformat()}" if detection.due_on else ""
     return Outcome(
         PROPOSED,
-        f"{firm.name} — {opportunity.title}: {event_label(detection.event_type)} "
-        f"({match.reason}) — proposed for your confirm",
+        f"{firm.name} — {opportunity.title}: {event_label(detection.event_type)}"
+        f"{due} ({match.reason}) — proposed for your confirm",
         detection.reasons,
     )
+
+
+def _still_due(detection: Detection) -> bool:
+    """Whether this detection carries a deadline that has not passed."""
+    return detection.due_on is not None and detection.due_on >= timezone.localdate()
 
 
 def _occurred_at(finding: dict):

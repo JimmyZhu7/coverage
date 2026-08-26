@@ -86,6 +86,327 @@ def only(user) -> ApplicationEvent:
 
 
 # --------------------------------------------------------------------------- #
+# The live miss, 2026-08-24 — a firm's own campus-recruiting sender
+# --------------------------------------------------------------------------- #
+#
+# Everything in this block is the real message, verbatim, and the real
+# marketing it has to be told apart from. `campuscareers.bofa.com` is a
+# subdomain of a domain the directory registers; the subject carries no
+# application word at all; the words are in the body. See the third gate arm
+# in capture/appmail.py.
+
+@pytest.fixture
+def bank(db):
+    """A firm the directory knows by domain, the way Bank of America is."""
+    return Firm.objects.create(
+        slug="bofa-test", name="Bank of America",
+        domains=["bankofamerica.com", "bofa.com"],
+    )
+
+
+@pytest.fixture
+def forum(bank):
+    return Opportunity.objects.create(
+        firm=bank, title="Bank of America Campus Insight Forum: The Power to "
+                         "Lead - Fall 2026",
+        status="open", url="https://bofa.example/jobs/forum",
+    )
+
+
+def bofa(**over):
+    """The exact message that was filed as bulk noise."""
+    base = {
+        "name": "Bank of America Campus Careers",
+        "email": "noreply@campuscareers.bofa.com",
+        "subject": "Bank of America Action Required: Indicate Your Top "
+                   "Choices for Campus Insight Forum",
+        "snippet": "Bank of America Application Update. Congratulations on "
+                   "advancing in the Campus Insight Forum process! To move "
+                   "forward, you must complete the Program Preference Survey "
+                   "by August 30, 2026 at 11:59 PM EST.",
+        "thread_id": "1a034cf0a88ac917",
+        "occurred_at": "2026-08-24T17:23:36+00:00",
+        "bulk_reasons": "automated no-reply sender, application status update",
+    }
+    base.update(over)
+    return ats(**base)
+
+
+def test_the_firms_own_noreply_gates_on_a_subject_with_no_application_word(bank):
+    """THE MISS. `campuscareers.bofa.com` is not an ATS vendor and the subject
+    says nothing about an application, so both old arms refused it — and an
+    advancement notice naming a deadline six days out was filed as bulk."""
+    finding = bofa()
+    assert appmail._APPLICATION_WORD_RE.search(finding["subject"]) is None
+
+    detection = appmail.detect(finding, allow_ai=False)
+    assert detection.gated is True
+    assert detection.event_type == ApplicationEvent.ADVANCED
+    assert "own domain" in " ".join(detection.reasons)
+
+
+def test_advancing_claims_submitted_not_interviewing(bank):
+    """The second deliberate under-claim. Advancing into a forum whose next
+    step is a preference survey is not a rejection, is not an offer, and is
+    emphatically not an interview — nobody has interviewed anybody."""
+    assert appmail.TARGET_STATUS[ApplicationEvent.ADVANCED] == "submitted"
+    detection = appmail.detect(bofa(), allow_ai=False)
+    assert appmail.TARGET_STATUS[detection.event_type] == "submitted"
+
+
+def test_the_stated_deadline_is_attached(bank):
+    from datetime import date
+
+    assert appmail.detect(bofa(), allow_ai=False).due_on == date(2026, 8, 30)
+
+
+@pytest.mark.parametrize("finding", [
+    # Marketing from the same unattended campus address. No application word
+    # anywhere, so the third arm refuses it exactly as the old gate did.
+    ats(email="noreply@campuscareers.bofa.com",
+        name="Bank of America Campus Careers",
+        subject="Bank of America Sophomore Series: an evening with our traders",
+        snippet="Join us on campus for drinks and a markets panel. Register "
+                "by August 30, 2026."),
+    # A firm newsletter from the same shape of address.
+    ats(email="no-reply@insights.bofa.com",
+        name="Bank of America Insights",
+        subject="Bank of America insights: the year ahead",
+        snippet="Read our 2027 outlook."),
+    # An event reminder. "Programme" is not "application", here either.
+    ats(email="donotreply@campuscareers.bofa.com",
+        name="Bank of America Campus Careers",
+        subject="Reminder: Step into Finance insight day",
+        snippet="Your seat is confirmed for Thursday."),
+])
+def test_marketing_from_the_same_firm_sender_is_still_refused(bank, finding):
+    """The whole risk of the third arm in one test. A bank mails its
+    marketing from exactly this address, and gating on the sender ALONE
+    would have handed every blast to the paid model."""
+    assert appmail.detect(finding, allow_ai=False).gated is False
+
+
+def test_a_human_at_the_firm_is_still_never_gated(bank):
+    """The third arm tests the LOCALPART through `capture.inbound`, so a real
+    recruiter on the same domain is not a no-reply and never gates."""
+    human = ats(
+        name="Dana Recruiter", email="dana.recruiter@campuscareers.bofa.com",
+        bulk=False, replied=True,
+        subject="Following up on the forum",
+        snippet="Congratulations on advancing! Let me know when you are free.",
+    )
+    human.pop("bulk_reasons")
+    assert appmail.detect(human, allow_ai=False).gated is False
+
+
+def test_an_unknown_firms_noreply_does_not_get_the_body_scope(db):
+    """The arm is the sender AND the directory. A no-reply address on a
+    domain no firm registers falls back to the old subject-only rule."""
+    finding = bofa(email="noreply@campuscareers.unknownbank.example")
+    assert appmail.detect(finding, allow_ai=False).gated is False
+
+
+def test_marketing_from_the_firm_sender_never_reaches_the_model(bank, monkeypatch):
+    """The cost half of the same argument, asserted rather than assumed."""
+    from directory import ai_extract
+
+    calls = []
+    monkeypatch.setattr(
+        ai_extract, "extract_application_event_ai",
+        lambda *a, **k: calls.append(a) or None,
+    )
+    appmail.detect(ats(
+        email="noreply@campuscareers.bofa.com",
+        name="Bank of America Campus Careers",
+        subject="Bank of America Sophomore Series: an evening with our traders",
+        snippet="Join us on campus for drinks and a markets panel.",
+    ))
+    assert calls == []
+
+
+def test_the_bofa_message_now_proposes_end_to_end(student, forum):
+    result = apply_findings(student, [bofa()])
+
+    assert result.app_events_proposed == 1
+    row = only(student)
+    assert row.event_type == ApplicationEvent.ADVANCED
+    assert row.target_status == "submitted"
+    assert row.opportunity_id == forum.id
+    assert row.due_on.isoformat() == "2026-08-30"
+    assert row.detected_by == "rules"
+    # §10 holds through the new path too: the subject, never the body — even
+    # though the body is what typed it and what carried the date.
+    assert "Congratulations" not in row.evidence
+    assert "Program Preference Survey" not in row.evidence
+    # And still nothing in the pipeline until the tap.
+    assert not UserOpportunity.all_objects.filter(user=student).exists()
+
+
+def test_a_dated_event_is_carded_even_when_the_stage_stands_still(student, forum):
+    """The founder had already marked this role submitted by hand. The stage
+    test alone would have thrown the deadline away with the card — the same
+    message lost twice, for a different reason the second time.
+
+    The date is written relative to the clock rather than pinned to the real
+    message's August 30: this rule turns on the deadline being STILL AHEAD,
+    and a test that quietly stops testing that in September is worse than no
+    test.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    ahead = timezone.localdate() + timedelta(days=6)
+    UserOpportunity.all_objects.create(
+        user=student, opportunity=forum, applied_status="submitted"
+    )
+    result = apply_findings(student, [bofa(
+        occurred_at=timezone.now().isoformat(),
+        snippet="Bank of America Application Update. Congratulations on "
+                "advancing in the Campus Insight Forum process! Complete the "
+                f"Program Preference Survey by {ahead:%B} {ahead.day}, "
+                f"{ahead.year} at 11:59 PM EST.",
+    )])
+
+    assert result.app_events_already == 0
+    assert result.app_events_proposed == 1
+    assert only(student).due_on == ahead
+
+
+def test_an_undated_event_that_moves_no_stage_is_still_suppressed(student, forum):
+    """The relaxation is the DATE, not a general loosening. Strip the
+    deadline sentence and the same mail is noise again."""
+    UserOpportunity.all_objects.create(
+        user=student, opportunity=forum, applied_status="submitted"
+    )
+    result = apply_findings(student, [bofa(
+        snippet="Bank of America Application Update. Congratulations on "
+                "advancing in the Campus Insight Forum process! Watch your "
+                "inbox for next steps.",
+    )])
+
+    assert result.app_events_proposed == 0
+    assert result.app_events_already == 1
+    assert not ApplicationEvent.all_objects.filter(user=student).exists()
+
+
+def test_a_passed_deadline_does_not_resurrect_a_settled_card(student, forum):
+    """A date behind today is not a reason to ask again."""
+    UserOpportunity.all_objects.create(
+        user=student, opportunity=forum, applied_status="submitted"
+    )
+    result = apply_findings(student, [bofa(
+        occurred_at="2024-01-02T09:00:00+00:00",
+        snippet="Bank of America Application Update. Congratulations on "
+                "advancing! Complete the Program Preference Survey by "
+                "January 10, 2024.",
+    )])
+    assert result.app_events_already == 1
+    assert not ApplicationEvent.all_objects.filter(user=student).exists()
+
+
+def test_the_due_date_rides_the_card_onto_today(client, student, forum):
+    apply_findings(student, [bofa()])
+    client.force_login(student)
+    body = client.get(reverse("crm:week")).content.decode()
+
+    assert "Next step required" in body
+    assert "Due Aug 30" in body
+
+
+# --------------------------------------------------------------------------- #
+# Reading a date: only one that is written down
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("text,expected", [
+    ("complete the survey by August 30, 2026 at 11:59 PM EST", "2026-08-30"),
+    ("Please respond before Sept 3, 2026.", "2026-09-03"),
+    ("Submissions are due by 30 September 2026", "2026-09-30"),
+    ("no later than the 3rd of... ", None),
+    ("Your response is due on October 1, 2026", "2026-10-01"),
+    ("deadline: November 15, 2026", "2026-11-15"),
+])
+def test_a_stated_deadline_is_read(text, expected):
+    from datetime import date
+
+    got = appmail._due_on(text, date(2026, 8, 24))
+    assert (got.isoformat() if got else None) == expected
+
+
+@pytest.mark.parametrize("text", [
+    # Vague. The most common shape, and the one that must attach nothing.
+    "please complete the survey by the end of next week",
+    "you have 5 days to respond",
+    "respond by Friday",
+    # A year we would have to infer is a year we do not have.
+    "complete the survey by August 30",
+    # Numeric, and therefore a guess about which country wrote it.
+    "complete the survey by 08/30/2026",
+    "complete the survey by 2026-08-30",
+    # A date with no obligation in front of it: an event date, a start date,
+    # a posted-on date. This module cannot tell which, so it reads none.
+    "The Campus Insight Forum takes place on August 30, 2026",
+    "Copyright 2026 Bank of America. Sent September 1, 2026.",
+    # Behind the message that announced it.
+    "complete the survey by August 1, 2026",
+])
+def test_a_vague_or_inferred_deadline_is_refused(text):
+    from datetime import date
+
+    assert appmail._due_on(text, date(2026, 8, 24)) is None
+
+
+def test_a_rejection_never_carries_a_deadline(student, forum):
+    """A closed application has nothing left that is due."""
+    apply_findings(student, [bofa(
+        subject="Update on your Bank of America application",
+        snippet="We regret to inform you that we will not be moving forward "
+                "with your application. Please share feedback by "
+                "September 30, 2026.",
+    )])
+    row = only(student)
+    assert row.event_type == ApplicationEvent.REJECTED
+    assert row.target_status == "closed"
+    assert row.due_on is None
+
+
+def test_a_named_stage_still_beats_an_advancement_phrase(bank):
+    """Precedence. A mail that both congratulates you on advancing and books
+    the HireVue IS the HireVue invite."""
+    detection = appmail.detect(bofa(
+        subject="Bank of America: complete your HireVue digital interview",
+    ), allow_ai=False)
+    assert detection.event_type == ApplicationEvent.VIDEO_INTERVIEW
+
+
+def test_a_bare_congratulations_never_advances_an_application(bank):
+    """Banks congratulate students on joining a mailing list. The phrase list
+    wants the verb, not the pleasantry."""
+    detection = appmail.detect(bofa(
+        snippet="Congratulations! You are now subscribed to Bank of America "
+                "campus recruiting updates. Applications open in September.",
+    ), allow_ai=False)
+    assert detection.event_type != ApplicationEvent.ADVANCED
+
+
+def test_the_citadel_confirmation_still_types_as_applied():
+    """The other real message in the same batch, unchanged by any of this:
+    a firm's own no-reply whose SUBJECT already carried the word, typed by
+    the first arm exactly as before."""
+    detection = appmail.detect(ats(
+        name="Citadel", email="no-reply@citadel.com",
+        subject="Your application for Citadel's Citadel Associate Program | "
+                "Pitch Competition Interest Form 2026 role has been received.",
+        snippet="Thank you for your interest in Citadel | Citadel Securities. "
+                "We've received your application, and our hiring team will "
+                "carefully review your skills and experience.",
+    ), allow_ai=False)
+    assert detection.gated is True
+    assert detection.event_type == ApplicationEvent.APPLIED
+    assert detection.reasons[0] == "automated sender, application subject"
+
+
+# --------------------------------------------------------------------------- #
 # What each ATS actually sends
 # --------------------------------------------------------------------------- #
 
