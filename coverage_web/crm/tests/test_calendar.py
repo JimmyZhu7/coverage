@@ -555,9 +555,20 @@ def test_the_feed_needs_no_session(client, user):
 # two surfaces that exist to warn you.
 # ---------------------------------------------------------------------------
 
-def _tracked_role(user, *, days, title="Summer Analyst", status="", dismissed=False,
+def _tracked_role(user, *, day, title="Summer Analyst", status="", dismissed=False,
                   firm=None, url=None, posting_status="open"):
-    """`status` is the STUDENT's funnel stage (`applied_status`);
+    """`day` is a day of THIS month, the same anchoring `_firm_date` uses.
+
+    It used to be `days`, an offset from today, which reads better and is
+    wrong: the grid and the month rail are both bounded by `_month_bounds`,
+    so in the last week of any month `today + 7 days` files the fixture under
+    NEXT month and the assertion goes looking for it on a page the test never
+    asked for. Nothing about these tests is actually relative to today —
+    `_tracked_deadlines` has no past/future filter and `is_posting_closed`
+    reads `Opportunity.status`, not the date — so the month is pinned instead.
+    Days 15-18 are used throughout: every month has them.
+
+    `status` is the STUDENT's funnel stage (`applied_status`);
     `posting_status` is the POSTING's own (`Opportunity.status`, written by the
     nightly reverify pass). Both spell "closed" and they mean different
     things — see directory/deadlines.py's `is_posting_closed`."""
@@ -568,15 +579,15 @@ def _tracked_role(user, *, days, title="Summer Analyst", status="", dismissed=Fa
         slug="gs", name="Goldman Sachs")
     opp = Opportunity.objects.create(
         firm=firm, title=title, status=posting_status,
-        deadline=timezone.localdate() + timedelta(days=days),
-        url=url or f"https://gs.com/{title.lower().replace(' ', '-')}-{days}")
+        deadline=timezone.localdate().replace(day=day),
+        url=url or f"https://gs.com/{title.lower().replace(' ', '-')}-{day}")
     UserOpportunity.all_objects.create(
         user=user, opportunity=opp, applied_status=status, dismissed=dismissed)
     return opp
 
 
 def test_a_tracked_roles_deadline_lands_on_the_calendar(logged_in, client):
-    _tracked_role(logged_in, days=5, title="Summer Analyst")
+    _tracked_role(logged_in, day=15, title="Summer Analyst")
     body = client.get("/app/calendar/").content.decode()
     assert "Summer Analyst" in body
 
@@ -587,34 +598,36 @@ def test_an_untracked_roles_deadline_stays_off_the_calendar(logged_in, client):
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
     Opportunity.objects.create(
         firm=firm, title="Nobody Tracks This", status="open",
-        deadline=timezone.localdate() + timedelta(days=5),
+        # In-month, per `_tracked_role`: a deadline that drifts off this
+        # month's grid would pass this assertion for the wrong reason.
+        deadline=timezone.localdate().replace(day=15),
         url="https://ms.com/untracked")
     body = client.get("/app/calendar/").content.decode()
     assert "Nobody Tracks This" not in body
 
 
 def test_a_dismissed_role_stays_off_the_calendar(logged_in, client):
-    _tracked_role(logged_in, days=5, title="Not For Me", dismissed=True)
+    _tracked_role(logged_in, day=15, title="Not For Me", dismissed=True)
     body = client.get("/app/calendar/").content.decode()
     assert "Not For Me" not in body
 
 
 def test_a_finished_application_stops_showing_its_deadline(logged_in, client):
-    _tracked_role(logged_in, days=5, title="Already Done", status="closed")
+    _tracked_role(logged_in, day=15, title="Already Done", status="closed")
     body = client.get("/app/calendar/").content.decode()
     assert "Already Done" not in body
 
 
 def test_one_users_tracked_deadline_is_not_anothers(client, user, django_user_model):
     other = django_user_model.objects.create_user(email="other-uo@x.com", password="x")
-    _tracked_role(other, days=5, title="Their Saved Role")
+    _tracked_role(other, day=15, title="Their Saved Role")
     client.force_login(user)
     body = client.get("/app/calendar/").content.decode()
     assert "Their Saved Role" not in body
 
 
 def test_the_feed_carries_tracked_deadlines_with_alarms(client, user):
-    _tracked_role(user, days=6, title="Summer Analyst",
+    _tracked_role(user, day=16, title="Summer Analyst",
                   url="https://gs.com/sa-2028")
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
     assert "Summer Analyst closes" in body
@@ -641,7 +654,7 @@ def test_a_prose_read_deadline_is_marked_on_the_calendar(logged_in, client):
     date is worth showing even when we read it out of prose rather than a
     published field (92 of 121 dated open roles). It is MARKED instead of
     withheld, on the grid and in the feed a phone subscribes to."""
-    opp = _tracked_role(logged_in, days=7, title="Reported Analyst")
+    opp = _tracked_role(logged_in, day=17, title="Reported Analyst")
     opp.confidence = 0.6
     opp.save(update_fields=["confidence"])
 
@@ -654,7 +667,7 @@ def test_a_prose_read_deadline_is_marked_on_the_calendar(logged_in, client):
 
 
 def test_a_provider_stated_deadline_is_not_marked(logged_in, client):
-    opp = _tracked_role(logged_in, days=7, title="Stated Analyst")
+    opp = _tracked_role(logged_in, day=17, title="Stated Analyst")
     opp.confidence = 1.0
     opp.save(update_fields=["confidence"])
 
@@ -723,7 +736,7 @@ def test_a_curated_firm_name_is_not_recased_by_the_calendar(client, logged_in):
     opp = Opportunity.objects.create(
         firm=firm, title="summer analyst programme", bucket="internship",
         status="open", url="https://pimco.com/sa",
-        deadline=timezone.localdate() + timedelta(days=3),
+        deadline=timezone.localdate().replace(day=15),
     )
     UserOpportunity.all_objects.create(user=logged_in, opportunity=opp)
 
@@ -740,13 +753,14 @@ def test_a_curated_firm_name_is_not_recased_by_the_calendar(client, logged_in):
 # finding this fix addresses.
 # ---------------------------------------------------------------------------
 
-def _duplicate_pair(user, *, days, status_a="", status_b=""):
+def _duplicate_pair(user, *, day, status_a="", status_b=""):
+    """`day` is a day of this month, for the reason `_tracked_role` gives."""
     from analytics.models import UserOpportunity
     from directory.models import Opportunity
 
     firm = Firm.objects.filter(slug="bofa-dup").first() or Firm.objects.create(
         slug="bofa-dup", name="Bank of America")
-    deadline = timezone.localdate() + timedelta(days=days)
+    deadline = timezone.localdate().replace(day=day)
     opp_a = Opportunity.objects.create(
         firm=firm, title="Campus Insight Forum", location="New York, NY",
         bucket="event", status="open", deadline=deadline,
@@ -765,7 +779,7 @@ def test_a_tracked_identity_duplicate_shows_once_on_the_grid(logged_in, client):
     includes each day's events twice (the grid cell and the narrow-screen
     agenda), so a raw text count would double even a correctly-folded
     single event."""
-    _duplicate_pair(logged_in, days=5)
+    _duplicate_pair(logged_in, day=15)
     resp = client.get("/app/calendar/")
     tracked = [e for week in resp.context["weeks"] for cell in week
                for e in cell["events"] if e["source"] == "tracked"]
@@ -776,11 +790,11 @@ def test_a_tracked_identity_duplicate_shows_once_on_the_grid(logged_in, client):
 def test_the_month_rail_count_does_not_double_count_the_duplicate(logged_in, client):
     """Layer 4's rail count used a raw .annotate()/Count("id") over
     _tracked_deadlines(), which has no idea two rows are one posting."""
-    _duplicate_pair(logged_in, days=5)
+    _duplicate_pair(logged_in, day=15)
     # A second, genuinely distinct tracked deadline in the same month, so a
     # fold that swallowed everything (the UserOpportunity trap) would also
     # be caught by this count, not just an unfolded duplicate.
-    _tracked_role(logged_in, days=6, title="Distinct Analyst Role")
+    _tracked_role(logged_in, day=16, title="Distinct Analyst Role")
 
     resp = client.get("/app/calendar/")
     this_month = next(m for m in resp.context["rail"] if m["is_now"])
@@ -791,7 +805,7 @@ def test_the_ics_feed_carries_the_duplicate_once(client, logged_in):
     """Counted by VEVENT, not by substring: each event's two VALARMs repeat
     the summary text in their own DESCRIPTION, so a bare substring count
     would read 3 even for one correctly-folded event."""
-    _duplicate_pair(logged_in, days=6)
+    _duplicate_pair(logged_in, day=16)
     body = client.get(
         reverse("crm:calendar_ics", args=[logged_in.calendar_token])
     ).content.decode()
@@ -802,7 +816,7 @@ def test_the_progressed_duplicate_wins_on_the_calendar(logged_in, client):
     """Applied on one address, only saved on the other: the applied copy is
     what the student actually acted on, so it is the one that should
     survive the fold rather than an arbitrary tie-break."""
-    opp_a, opp_b = _duplicate_pair(logged_in, days=5, status_a="saved", status_b="submitted")
+    opp_a, opp_b = _duplicate_pair(logged_in, day=15, status_a="saved", status_b="submitted")
     resp = client.get("/app/calendar/")
     events = [e for day in resp.context["weeks"] for cell in day
               for e in cell["events"] if e["source"] == "tracked"]
@@ -912,7 +926,7 @@ def test_an_opening_still_reaches_the_subscribed_feed_without_an_alarm(client, l
 def test_a_closed_posting_raises_no_alarm_in_the_subscribed_feed(client, user):
     """The harm being fixed. A VALARM is a phone waking someone up to act, and
     a pulled posting leaves nothing to act on."""
-    _tracked_role(user, days=6, title="Dead Role", posting_status="closed",
+    _tracked_role(user, day=16, title="Dead Role", posting_status="closed",
                   url="https://gs.com/dead")
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
 
@@ -925,7 +939,7 @@ def test_a_closed_posting_keeps_its_event_rather_than_vanishing(client, user):
     SUBSCRIBED, so the event is already in the student's own calendar app;
     omitting it would delete it from their week at the next refresh, silently.
     It stays on its day and says what happened instead."""
-    _tracked_role(user, days=6, title="Dead Role", posting_status="closed",
+    _tracked_role(user, day=16, title="Dead Role", posting_status="closed",
                   url="https://gs.com/dead")
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
 
@@ -938,7 +952,7 @@ def test_a_closed_postings_summary_leads_with_closed_not_a_tensed_verb(client, u
     """The marker rides at the FRONT of the SUMMARY because a lock-screen
     notification shows the summary and nothing else, and "closes" against
     "closed" is one character of difference in that position."""
-    _tracked_role(user, days=6, title="Dead Role", posting_status="closed")
+    _tracked_role(user, day=16, title="Dead Role", posting_status="closed")
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
 
     assert "SUMMARY:Closed: Goldman Sachs · Dead Role" in body
@@ -947,7 +961,7 @@ def test_a_closed_postings_summary_leads_with_closed_not_a_tensed_verb(client, u
 
 def test_a_closed_posting_stops_claiming_to_close_on_the_grid(client, logged_in):
     """The in-app month grid told the same lie in its own tense."""
-    _tracked_role(logged_in, days=5, title="Dead Role", posting_status="closed")
+    _tracked_role(logged_in, day=15, title="Dead Role", posting_status="closed")
     body = client.get("/app/calendar/").content.decode()
 
     assert "Dead Role" in body, "the student's own tracked row is never dropped"
@@ -958,9 +972,9 @@ def test_a_closed_posting_stops_claiming_to_close_on_the_grid(client, logged_in)
 def test_an_open_posting_beside_a_closed_one_keeps_its_alarms(client, user):
     """The over-reach guard: one dead row must not strip the alarms off the
     live rows sharing the feed."""
-    _tracked_role(user, days=6, title="Dead Role", posting_status="closed",
+    _tracked_role(user, day=16, title="Dead Role", posting_status="closed",
                   url="https://gs.com/dead")
-    _tracked_role(user, days=8, title="Live Role", url="https://gs.com/live")
+    _tracked_role(user, day=18, title="Live Role", url="https://gs.com/live")
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
 
     assert "SUMMARY:Goldman Sachs · Live Role closes" in body
@@ -972,7 +986,7 @@ def test_a_posting_the_scraper_never_rechecked_still_alarms(client, user):
     """The over-filtering guard. `Opportunity.status` defaults to "" and most
     rows have never been reverified, so the rule is `== "closed"` rather than
     `!= "open"` — otherwise the feed would go silent for nearly everyone."""
-    _tracked_role(user, days=6, title="Unchecked Role", posting_status="")
+    _tracked_role(user, day=16, title="Unchecked Role", posting_status="")
     body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
 
     assert "Unchecked Role closes" in body
