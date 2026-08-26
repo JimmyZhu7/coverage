@@ -72,6 +72,28 @@ sometimes an agent's one-sentence summary. It is a weaker key than a header —
 prose varies where a header does not — but it is a real, stored, deterministic
 string, and normalizing it recovers exactly the groups a subject would have.
 Subject first, note second, one normalizer over both.
+
+WHAT THE FALLBACK MAY NOT DO, and the incident that drew the line. On
+2026-08-23 detection recorded campaign 3 on the founder's account: 41
+recipients, all 41 originating, signature `outreach sent no reply yet`. That
+string is not a subject anybody typed. It is COVERAGE'S OWN WRITING — the
+placeholder the pre-`subject` import wrote onto every outreach row it could
+not describe ("Outreach sent 2026-07-24, no reply yet"; see `crm/health.py`
+for that phrase's history). Forty of those 41 touches carried `subject=''`
+because the column post-dates them, so every one fell through to the note,
+and the note was identical across them BY CONSTRUCTION rather than because
+one message went to forty people. Their real subjects, stamped later, are
+forty different personalised lines: "HK Jul 29-31 | Nomura | IBD - USC
+Student Coffee Chat Request", "HK Jul 29-31 | CLSA | CICC - ...", one per
+banker. Absence of evidence had become evidence of a blast.
+
+That is the expensive direction of the asymmetry `BULK_MIN_RECIPIENTS`
+argues below, at its maximum: one tap on "not my recruiting" would have
+silenced 41 genuine target-firm relationships at once. So the fallback now
+carries a precondition — the note has to contain something the SENDER wrote.
+See `_is_app_authored`. The ICC detection the fallback exists for is
+unaffected, because a note that echoes a real subject says something Coverage
+could not have said by itself.
 """
 
 from __future__ import annotations
@@ -131,6 +153,85 @@ def normalize_subject(text: str | None) -> str:
     return " ".join(s.split())[:_SIGNATURE_MAX]
 
 
+# ---------------------------------------------------------------------------
+# 1b. Whose words is this note, anyway.
+# ---------------------------------------------------------------------------
+
+# Every note Coverage composes ITSELF, copied from the call sites that write
+# them. Interpolated values (dates, counts, names, thread markers) are left
+# out on purpose: `normalize_subject` already drops digits, and anything else
+# that varies per message is exactly the content this list must not swallow.
+#
+#   `capture_discover`            -> "Discovered by mailbox scan…"
+#   `crm.today` / `crm.views`     -> the park audit rows
+#   `capture.reclassify`          -> the bulk-demotion correction row
+#   `crm.debrief`                 -> the advocate promotion row
+#   the pre-`subject` agent import -> "Outreach sent …, no reply yet"
+#
+# Keep this list in step with those call sites. `test_campaigns.py` asserts
+# every entry here is rejected, so a template that drifts out of the list
+# still gets caught the moment someone writes a test for it — and the cost of
+# missing one is a false NEGATIVE, which is the cheap direction.
+_APP_AUTHORED_NOTES = (
+    "Discovered by mailbox scan",
+    "Discovered by mailbox scan — bulk/automated email, not a reply",
+    "Parked from the Today queue",
+    "Parked from the Today queue (bulk)",
+    "Parked from the Network board (bulk)",
+    "Correction: inbound messages recorded as a reply turned out to be bulk "
+    "or automated mail. Status recalculated from the remaining evidence.",
+    "Promoted to advocate from the chat debrief on "
+    "(they said they'd advocate for you).",
+    "Outreach sent, no reply yet",
+    "Follow-up outreach sent, no reply yet",
+)
+
+# Grammar, not content. Present so that a REWORDING of one of the templates
+# above — same status words, different glue — is still recognised as this
+# app's prose rather than a person's. Deliberately contains no nouns: every
+# word that could name a firm, an event or a subject line has to come from a
+# real message.
+_GLUE_WORDS = frozenset(
+    "a an and any are as at be been but by for from had has have her his in "
+    "into is it its no not of on or our so still that the their them then "
+    "there they this to was were when with you your".split()
+)
+
+# The closed vocabulary Coverage writes status notes out of.
+_APP_VOCABULARY = frozenset(
+    word
+    for template in _APP_AUTHORED_NOTES
+    for word in normalize_subject(template).split()
+) | _GLUE_WORDS
+
+
+def _is_app_authored(normalized_note: str) -> bool:
+    """True when every word in a normalized note comes from Coverage's own
+    vocabulary — i.e. the note says nothing the sender said.
+
+    A WORD SET RATHER THAN A PHRASE DENYLIST, because the failure mode is a
+    string that is identical across unrelated contacts BY CONSTRUCTION, and
+    what makes it identical is that the app assembled it out of a fixed
+    vocabulary. Matching phrases would catch exactly the templates listed
+    above and miss the next one somebody writes; matching the vocabulary
+    catches anything built from the same words in any order, which is what a
+    reworded template is. It also composes correctly the one way that matters
+    and a denylist could not: "Follow-up
+    outreach sent for ICC alumni panel, no reply yet" is boilerplate WRAPPED
+    AROUND a real send, `icc`/`alumni`/`panel` are outside the vocabulary, and
+    it groups — which is exactly how the ICC merge was detected before
+    subjects existed.
+
+    The error this makes is the cheap one. A note whose only content words
+    happen to all be Coverage's ("Sent: follow up") is refused a signature and
+    its contacts stay in the queue, which is the status quo. The error it
+    refuses to make is the expensive one: manufacturing a 41-person campaign
+    out of a column that had not been invented yet.
+    """
+    words = normalized_note.split()
+    return bool(words) and all(w in _APP_VOCABULARY for w in words)
+
+
 def _signature_for(touch) -> str:
     """Subject if the capture path stored one, evidence note otherwise.
 
@@ -138,8 +239,17 @@ def _signature_for(touch) -> str:
     Subject header is what the sender actually typed once and the mail merge
     repeated 201 times, while a note is what this app wrote about the message
     afterwards. See the module docstring for why the second exists at all.
+
+    THE SUBJECT IS NEVER GATED. A header is the sender's own text by
+    definition; if forty of them match, forty messages really did carry one
+    line. Only the note — the half this app may have written — has to prove it
+    is quoting somebody.
     """
-    return normalize_subject(touch.subject) or normalize_subject(touch.note)
+    subject = normalize_subject(touch.subject)
+    if subject:
+        return subject
+    note = normalize_subject(touch.note)
+    return "" if _is_app_authored(note) else note
 
 
 # ---------------------------------------------------------------------------

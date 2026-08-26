@@ -168,6 +168,119 @@ def test_detection_falls_back_to_the_evidence_note_when_no_subject_is_stored():
     assert "gmail" not in found[0].signature
 
 
+# ---------------------------------------------------------------------------
+# 1b. …and the fallback's precondition: the note has to be somebody's words.
+#
+# CAMPAIGN 3, live account, 2026-08-23: 41 recipients, all 41 originating,
+# signature `outreach sent no reply yet`. Not a subject line — Coverage's own
+# placeholder, on 40 touches whose `subject` column had not been invented when
+# they were written. One answer of "not my recruiting" would have silenced 41
+# genuine target-firm bankers whose real subjects, stamped later, were 40
+# different personalised lines.
+# ---------------------------------------------------------------------------
+_HK_SUBJECTS = [
+    "HK Jul 29-31 | Nomura | IBD - USC Student Coffee Chat Request",
+    "HK Jul 29-31 | CLSA | CICC - USC Student Coffee Chat Request",
+    "HK Jul 29-31 | Goldman Sachs | Nomura - USC Student Coffee Chat Request",
+    "HK Jul 29-31 | HSBC | BNP Paribas - USC Student Coffee Chat Request",
+    "HK Jul 29-31 | Lazard | CICC - USC Student Coffee Chat Request",
+    "HK Jul 29-31 | CITIC | ICBC - USC Student Coffee Chat Request",
+    "HK Jul 29-31 | Citi | Blackstone - USC Student Coffee Chat Request",
+    "HK Jul 29-31 | Greenhill | UBS - USC Student Coffee Chat Request",
+]
+
+
+def test_coverages_own_boilerplate_note_never_forms_a_campaign():
+    """THE CAMPAIGN 3 BUG. Forty subject-less touches sharing nothing but the
+    placeholder this app wrote onto all of them. Identical by construction is
+    not evidence of a shared send."""
+    user = _user()
+    at = timezone.now() - timedelta(days=30)
+    for i in range(40):
+        c = Contact.all_objects.create(user=user, name=f"Banker {i}")
+        Touch.all_objects.create(
+            user=user, contact=c, kind="outreach", channel="email",
+            # Date-only midnight, the bulk-import path's stamp: 96 of the
+            # founder's 117 outbound touches carry one, so all 40 land in a
+            # single burst and clear the floor five times over.
+            ts=at.replace(hour=0, minute=0, second=0, microsecond=0),
+            note="Outreach sent 2026-07-24, no reply yet",
+        )
+
+    assert camp.detect(user) == []
+    assert CampaignContact.objects.for_user(user).count() == 0
+
+
+def test_the_same_people_still_do_not_group_once_their_real_subjects_land():
+    """The follow-on half. The subject backfill gives those touches their
+    actual headers, which are forty different personalised lines — so the
+    right answer stays "no campaign" for a second, independent reason."""
+    user = _user()
+    at = timezone.now() - timedelta(days=30)
+    for i, subject in enumerate(_HK_SUBJECTS * 5):
+        c = Contact.all_objects.create(user=user, name=f"Banker {i}")
+        Touch.all_objects.create(
+            user=user, contact=c, kind="outreach", channel="email",
+            ts=at, subject=f"{subject} [{i}]",
+            note="Outreach sent 2026-07-24, no reply yet",
+        )
+
+    assert camp.detect(user) == []
+
+
+@pytest.mark.parametrize("note", [
+    "Outreach sent 2026-07-24, no reply yet",
+    "Follow-up outreach sent 2026-08-03, no reply yet",
+    "Discovered by mailbox scan",
+    "Discovered by mailbox scan — bulk/automated email, not a reply",
+    "Parked from the Today queue",
+    "Parked from the Today queue (bulk)",
+    "Parked from the Network board (bulk)",
+    "Correction: 3 inbound messages recorded as a reply turned out to be "
+    "bulk or automated mail. Status recalculated from the remaining evidence.",
+    "Promoted to advocate from the chat debrief on 2026-08-01 "
+    "(they said they'd advocate for you).",
+])
+def test_every_note_this_app_composes_is_refused_a_signature(note):
+    """One case per call site that writes a `Touch.note`. Keep this list in
+    step with `campaigns._APP_AUTHORED_NOTES` and with the writers it names."""
+    assert camp._is_app_authored(camp.normalize_subject(note))
+
+
+@pytest.mark.parametrize("note", [
+    "Fall 2026 ICC Alumni Digital Panel Outreach",
+    "Sent: HK Jul 29-31 | Nomura | IBD - USC Student Coffee Chat Request",
+    "Follow-up outreach sent for the ICC alumni panel, no reply yet",
+    "ICC alumni panel outreach backfilled from Gmail",
+])
+def test_a_note_carrying_the_senders_words_keeps_its_signature(note):
+    """Boilerplate WRAPPED AROUND a real send still groups — that composition
+    is how the ICC merge was found before `Touch.subject` existed."""
+    assert not camp._is_app_authored(camp.normalize_subject(note))
+
+
+def test_the_icc_merge_still_detects_through_notes_alone():
+    """The detection the fallback exists for, in the shape it actually had:
+    twelve recipients, no subject stored anywhere, the club's real subject
+    surviving only inside an evidence line this app wrote around it."""
+    user = _user()
+    at = timezone.now() - timedelta(days=20)
+    for i in range(12):
+        c = Contact.all_objects.create(user=user, name=f"Alum {i}")
+        Touch.all_objects.create(
+            user=user, contact=c, kind="outreach", channel="email",
+            ts=at + timedelta(seconds=i),
+            note=f"[gmail:19fbcd1fe531{i:04d}] Outreach sent 2026-07-06 for "
+                 f"the Fall 2026 ICC Alumni Digital Panel, no reply yet",
+        )
+
+    found = camp.detect(user)
+
+    assert len(found) == 1
+    assert found[0].recipient_count == 12
+    assert "icc" in found[0].signature
+
+
 def test_detection_is_idempotent():
     user = _user()
     _merge(user, n=12)
