@@ -1,21 +1,50 @@
-"""seed_directory — one-time (idempotent) importer of the founder's SHARED firm
-facts into the `firms` and `firm_dates` tables.
+"""seed_directory — idempotent importer of the SHARED firm facts into the
+`firms` and `firm_dates` tables. The step that makes a fresh deploy non-empty.
 
-Reads (READ-ONLY) the founder's personal-tool data:
-  - `<campaign>/firms.yaml`            -> firms
-  - `<campaign>/kb/timeline_us.yaml`   -> firm_dates (region us)
-  - `<campaign>/kb/timeline_hk.yaml`   -> firm_dates (region hk)
-
-Only firm-level FACTS cross over. Per build-plan §4 this is shared data (facts
-about firms, not about one student), so there is no `user_id` and the
-single-user `tier` curation is deliberately dropped — it is one student's
-targeting, not a property of the firm. Re-running updates rows in place
-(`update_or_create` on the natural keys), never duplicating.
+Reads (READ-ONLY) three YAML files that ship inside this package:
+  - `directory/seeds/firms.yaml`        -> firms
+  - `directory/seeds/timeline_us.yaml`  -> firm_dates (region us)
+  - `directory/seeds/timeline_hk.yaml`  -> firm_dates (region hk)
 
 Usage:
     python manage.py seed_directory
     python manage.py seed_directory --firms-file <path> --timeline-dir <dir>
     python manage.py seed_directory --dry-run
+
+WHY THE SEEDS LIVE IN THE PACKAGE AND NOT IN `data/`
+----------------------------------------------------
+They used to live in `data/seeds/`, and this docstring used to claim that a
+fresh clone could therefore seed itself. That claim was false: `.gitignore`
+excludes the whole `data/` directory under its "this repo is PUBLIC" block, so
+none of the three files was ever committed. On Render — or any fresh clone —
+`firms.yaml` simply did not exist, this command printed "firms file not found"
+and returned, and the app came up with zero firms and zero firm dates.
+`seed_mail_domains` (2026-08-25) hit the identical problem scoped to one
+column, and fixed it the same way: move the data into a tracked module under
+`directory/`. This is that fix applied to the seed corpus itself.
+
+The tracked copy is SCRUBBED, which is why `data/` did not simply get a
+`!data/seeds/` negation. The founder's `firms.yaml` carries a hand-curated
+`tier: 1/2/3` ranking of employers plus paragraphs reasoning about which banks
+are prestigious — that is precisely the "founder's own target list" the ignore
+rule names. Nothing is lost by dropping it: `tier` was ALREADY discarded on
+import (per build-plan §4 these rows are facts about firms, not about one
+student), and the only tier in the product is `UserFirm.tier`, which each
+student sets for themselves. The tracked file also regroups its rows by
+industry segment so the ORDER carries no ranking either. Every remaining
+column — name, tracks, regions, status, domains, sponsors — is a public fact
+about the firm. The two timeline files needed no scrubbing at all.
+
+`directory/seeds/*.yaml` is now the canonical copy. If `data/seeds/` still
+exists on this machine it is a pre-2026-08-25 archive, no longer read; the
+command warns when its firm list has drifted from the tracked one, because a
+silent divergence between the two is exactly what produced the mail-domain
+bug.
+
+Re-running updates rows in place (`update_or_create` on the natural keys),
+never duplicating. Note that it REPLACES `domains` from the YAML, which is why
+`seed_mail_domains` and `seed_logo_domains` exist as separate append-only
+commands and why deploy order matters — see `docs/deploy.md` §2.
 """
 
 from __future__ import annotations
@@ -30,12 +59,17 @@ from django.db import transaction
 from directory.models import Firm, FirmDate
 from directory.seed_parsers import parse_firms_yaml, parse_timeline_yaml
 
-# The seed data used to be read live out of the founder's pre-Coverage
-# project folder. That system is retired and its folder deleted (final
-# archive: ~/Desktop/recruitment-opportunities-final-archive-2026-08-02.zip),
-# so the canonical copies now live in THIS repo — which also means a fresh
-# clone can seed itself without any external directory existing.
-_DEFAULT_SEEDS = Path(__file__).resolve().parents[4] / "data" / "seeds"
+# The seed data used to be read live out of the founder's pre-Coverage project
+# folder, then out of `data/seeds/`. That folder is retired (final archive:
+# ~/Desktop/recruitment-opportunities-final-archive-2026-08-02.zip) and `data/`
+# is gitignored, so the canonical copies now sit INSIDE this Django app, where
+# git tracks them and a fresh clone genuinely can seed itself. See the module
+# docstring for what was stripped on the way in.
+_DEFAULT_SEEDS = Path(__file__).resolve().parents[2] / "seeds"
+
+# Pre-2026-08-25 location. Not read any more; only checked for drift, and only
+# when it happens to exist (it never does on a deploy — `data/` is ignored).
+_LEGACY_SEEDS = Path(__file__).resolve().parents[4] / "data" / "seeds"
 
 # The founder's timeline confidence is a string label (see confidence.py's
 # rumor < reported < confirmed_official ladder). The shared `firm_dates.confidence`
@@ -89,7 +123,7 @@ def _sponsors_blob(firm: dict) -> dict:
 
 
 class Command(BaseCommand):
-    help = "Seed shared firms + firm_dates from the founder's firms.yaml and kb/timeline_*.yaml (idempotent)."
+    help = "Seed shared firms + firm_dates from directory/seeds/*.yaml (idempotent)."
 
     def add_arguments(self, parser):
         parser.add_argument("--firms-file", default=str(_DEFAULT_SEEDS / "firms.yaml"))
@@ -103,11 +137,20 @@ class Command(BaseCommand):
         dry = opts["dry_run"]
 
         if not firms_path.exists():
-            self.stderr.write(self.style.ERROR(f"firms file not found: {firms_path}"))
+            # Tracked and shipped inside the package, so this should be
+            # unreachable on a normal checkout. It stays a hard error rather
+            # than a warning: seeding nothing leaves the whole app empty, and
+            # that used to happen SILENTLY enough to survive to production.
+            self.stderr.write(self.style.ERROR(
+                f"firms file not found: {firms_path}\n"
+                "Expected it to ship with the package at directory/seeds/. "
+                "Pass --firms-file to point somewhere else."
+            ))
             return
 
         firm_rows = parse_firms_yaml(firms_path.read_text(encoding="utf-8"))
         timeline_files = [timeline_dir / "timeline_us.yaml", timeline_dir / "timeline_hk.yaml"]
+        self._warn_if_legacy_drifted(firms_path, firm_rows)
 
         with transaction.atomic():
             f_created, f_updated = self._seed_firms(firm_rows, dry)
@@ -123,6 +166,43 @@ class Command(BaseCommand):
         ))
         if dry:
             self.stdout.write(self.style.WARNING("--dry-run: rolled back, nothing written."))
+
+    # ------------------------------------------------------------------ drift
+
+    def _warn_if_legacy_drifted(self, firms_path: Path, firm_rows: list[dict]) -> None:
+        """Report a `data/seeds/firms.yaml` whose firm list no longer matches the
+        tracked one.
+
+        The archive is never read, so a divergence changes nothing this run —
+        the point is to make it VISIBLE. Editing the private copy and assuming
+        the deploy picked it up is exactly the mistake behind the mail-domain
+        bug (`_mail_domains.py`): a hand fix landed in the founder's database
+        and in the gitignored YAML, and nowhere git could carry it.
+
+        Compares slugs only. `tier` and the row ORDER are expected to differ —
+        stripping them is the whole reason the tracked copy exists.
+        """
+        legacy = _LEGACY_SEEDS / "firms.yaml"
+        # Only meaningful when this run is actually reading the tracked copy.
+        if firms_path.resolve() != (_DEFAULT_SEEDS / "firms.yaml").resolve():
+            return
+        if not legacy.exists():
+            return
+        try:
+            old = {str(r.get("id", "")).strip()
+                   for r in parse_firms_yaml(legacy.read_text(encoding="utf-8"))}
+        except OSError:
+            return
+        new = {str(r.get("id", "")).strip() for r in firm_rows}
+        only_legacy, only_tracked = sorted(old - new), sorted(new - old)
+        if not only_legacy and not only_tracked:
+            return
+        self.stderr.write(self.style.WARNING(
+            f"{legacy} has drifted from the tracked seeds and is NOT read.\n"
+            + (f"  only in the archive: {', '.join(only_legacy)}\n" if only_legacy else "")
+            + (f"  only in {_DEFAULT_SEEDS.name}/: {', '.join(only_tracked)}\n" if only_tracked else "")
+            + f"  Edit {firms_path} — that is the copy git ships."
+        ))
 
     # ------------------------------------------------------------------ firms
 

@@ -1,0 +1,136 @@
+# Coverage's shipped firm directory: the employers every student's Opportunities
+# feed, firm-coverage tiles and networking targets are drawn from.
+#
+# Read by `manage.py seed_directory` on a fresh deploy. THIS FILE IS THE
+# CANONICAL COPY — it is tracked in git precisely so a fresh clone can seed
+# itself. See that command's docstring for why it does not live under `data/`.
+#
+# Columns
+# -------
+#   id       slug; the natural key. `firm_dates` entries in timeline_*.yaml
+#            reference it, so renaming one orphans its dates.
+#   name     display name.
+#   tracks   ib / st / pe / am / consulting / corp-strat.
+#   regions  us / hk — which market's recruiting calendar the firm runs on.
+#   status   active, or anything else to keep the row out of the active
+#            directory (`on_campus` below).
+#   domains  the firm's official domains; a source on one of these gets
+#            confidence `confirmed_official`. These are a MIXED list by
+#            design — career-site hosts land here from the board connectors,
+#            mail domains from `seed_mail_domains`. Never replace the list,
+#            only append; see `directory/_mail_domains.py`.
+#   sponsors true / unknown — does the firm customarily sponsor work
+#            authorization for these programmes? Drives the "Sponsors" badge.
+#            `true` means well-established market knowledge for the firm's
+#            HOME market (US H-1B for us-track firms, HK employer sponsorship
+#            for hk-track firms), not a per-posting verified fact — the same
+#            evidence bar the confidence ladder uses. `unknown` is used where
+#            that market knowledge genuinely is not solid: the
+#            China-domestic-oriented names and the smaller purely regional
+#            HK/China brokerages. No firm here is marked a confirmed
+#            non-sponsor.
+#
+# ORDER AND GROUPING CARRY NO RANKING. Rows are grouped by industry segment
+# and sorted by id within a group, purely so the file stays readable. Coverage
+# ranks no employer above another: the only tier in the product is
+# `UserFirm.tier`, which each student sets for themselves on the Network page.
+
+firms:
+
+  # ---- Global & bulge-bracket banks
+  #      Full-service banks running IB and/or S&T programmes in both markets.
+  - {id: bofa,     name: Bank of America,     tracks: [ib, st], regions: [us],     status: active, domains: [bankofamerica.com, bofaml.com, bofa.com, baml.com],        sponsors: true}
+  - {id: barclays, name: Barclays,            tracks: [ib],     regions: [us],     status: active, domains: [barclays.com, search.jobs.barclays, barclays.avature.net], sponsors: true}
+  - {id: citi,     name: Citi,                tracks: [ib, st], regions: [us, hk], status: active, domains: [citi.com, citigroup.com],                                  sponsors: true}
+  - {id: db,       name: Deutsche Bank,       tracks: [ib],     regions: [hk],     status: active, domains: [db.com],                                                   sponsors: true}
+  - {id: gs,       name: Goldman Sachs,       tracks: [ib, st], regions: [us, hk], status: active, domains: [goldmansachs.com, gs.com],                                 sponsors: true}
+  - {id: hsbc,     name: HSBC,                tracks: [ib],     regions: [hk],     status: active, domains: [hsbc.com],                                                 sponsors: true}
+  - {id: jpm,      name: J.P. Morgan,         tracks: [ib, st], regions: [us, hk], status: active, domains: [jpmorgan.com, jpmorganchase.com, jpmc.fa.oraclecloud.com], sponsors: true}
+  - {id: ms,       name: Morgan Stanley,      tracks: [ib, st], regions: [us, hk], status: active, domains: [morganstanley.com, morganstanley.tal.net],                 sponsors: true}
+  - {id: rbc,      name: RBC Capital Markets, tracks: [ib],     regions: [us],     status: active, domains: [jobs.rbc.com],                                             sponsors: true}
+  - {id: ubs,      name: UBS,                 tracks: [ib],     regions: [us, hk], status: active, domains: [ubs.com],                                                  sponsors: true}
+  - {id: wf,       name: Wells Fargo,         tracks: [ib, st], regions: [us],     status: active, domains: [wellsfargojobs.com, wellsfargo.com],                       sponsors: true}
+
+  # ---- Advisory boutiques
+  #      Independent M&A / restructuring advisers, US-listed programmes.
+  - {id: allen-company, name: Allen & Company,   tracks: [ib], regions: [us],     status: active, domains: [allenco.com]}
+  - {id: centerview,    name: Centerview,        tracks: [ib], regions: [us],     status: active, domains: [centerview.com],                                     sponsors: true}
+  - {id: evercore,      name: Evercore,          tracks: [ib], regions: [us],     status: active, domains: [evercore.com, evercore.tal.net],                     sponsors: true}
+  - {id: guggenheim,    name: Guggenheim,        tracks: [ib], regions: [us],     status: active, domains: [guggenheimpartners.com, guggenheimsecurities.com],   sponsors: true}
+  - {id: hl,            name: Houlihan Lokey,    tracks: [ib], regions: [us],     status: active, domains: [hl.com],                                             sponsors: true}
+  - {id: jefferies,     name: Jefferies,         tracks: [ib], regions: [us, hk], status: active, domains: [jefferies.com, jefferies.tal.net],                   sponsors: true}
+  - {id: lazard,        name: Lazard,            tracks: [ib], regions: [us],     status: active, domains: [lazard.com, icbpjb.fa.ocs.oraclecloud.com],          sponsors: true}
+  - {id: liontree,      name: LionTree,          tracks: [ib], regions: [us],     status: active, domains: [liontree.com]}
+  - {id: moelis,        name: Moelis,            tracks: [ib], regions: [us],     status: active, domains: [moelis.com, moelis-careers.tal.net],                 sponsors: true}
+  - {id: pwp,           name: Perella Weinberg,  tracks: [ib], regions: [us],     status: active, domains: [pwpartners.com],                                     sponsors: true}
+  - {id: pjt,           name: PJT Partners,      tracks: [ib], regions: [us],     status: active, domains: [pjtpartners.com, pjtpartners.wd1.myworkdayjobs.com], sponsors: true}
+  - {id: qatalyst,      name: Qatalyst Partners, tracks: [ib], regions: [us],     status: active, domains: [qatalyst.com]}
+  - {id: rothschild,    name: Rothschild & Co,   tracks: [ib], regions: [us],     status: active, domains: [rothschildandco.com],                                sponsors: true}
+
+  # ---- US middle-market IB
+  - {id: baird,           name: Baird,            tracks: [ib], regions: [us], status: active, domains: [], sponsors: true}
+  - {id: pipersandler,    name: Piper Sandler,    tracks: [ib], regions: [us], status: active, domains: [], sponsors: true}
+  - {id: raymondjames,    name: Raymond James,    tracks: [ib], regions: [us], status: active, domains: [], sponsors: true}
+  - {id: solomonpartners, name: Solomon Partners, tracks: [ib], regions: [us], status: active, domains: [], sponsors: true}
+  - {id: williamblair,    name: William Blair,    tracks: [ib], regions: [us], status: active, domains: [], sponsors: true}
+
+  # ---- HK / APAC banks & brokerages
+  #      Regional programmes recruiting on the HK calendar (see timeline_hk.yaml).
+  - {id: bnpparibas,     name: BNP Paribas,         tracks: [ib, st], regions: [hk], status: active, domains: [apac.bnpparibas, bnpparibas.com], sponsors: true}
+  - {id: boci,           name: BOCI,                tracks: [ib],     regions: [hk], status: active, domains: [bocigroup.com],                   sponsors: unknown}
+  - {id: cicc,           name: CICC,                tracks: [ib],     regions: [hk], status: active, domains: [cicc.com],                        sponsors: unknown}
+  - {id: clsa,           name: CLSA,                tracks: [st],     regions: [hk], status: active, domains: [clsatalent.citics.com],           sponsors: unknown}
+  - {id: cmbi,           name: CMB International,   tracks: [ib],     regions: [hk], status: active, domains: [cmbi.com.hk],                     sponsors: unknown}
+  - {id: creditagricole, name: Crédit Agricole CIB, tracks: [ib],     regions: [hk], status: active, domains: [],                                sponsors: true}
+  - {id: gtja,           name: Guotai Junan Intl,   tracks: [ib],     regions: [hk], status: active, domains: [gtjai.com],                       sponsors: unknown}
+  - {id: huatai,         name: Huatai,              tracks: [ib],     regions: [hk], status: active, domains: [job.htsc.com.cn],                 sponsors: unknown}
+  - {id: macquarie,      name: Macquarie,           tracks: [ib],     regions: [hk], status: active, domains: [macquarie.com],                   sponsors: true}
+  - {id: mizuho,         name: Mizuho,              tracks: [ib],     regions: [hk], status: active, domains: [],                                sponsors: true}
+  - {id: nomura,         name: Nomura,              tracks: [ib, st], regions: [hk], status: active, domains: [nomura.com],                      sponsors: true}
+  - {id: socgen,         name: Société Générale,    tracks: [st],     regions: [hk], status: active, domains: [],                                sponsors: true}
+  - {id: stanchart,      name: Standard Chartered,  tracks: [ib],     regions: [hk], status: active, domains: [sc.com],                          sponsors: true}
+
+  # ---- Private equity & alternatives
+  - {id: apollo,      name: Apollo,       tracks: [pe], regions: [us],     status: active, domains: [],                                                 sponsors: true}
+  - {id: ares,        name: Ares,         tracks: [pe], regions: [us],     status: active, domains: [],                                                 sponsors: true}
+  - {id: baincapital, name: Bain Capital, tracks: [pe], regions: [us],     status: active, domains: [],                                                 sponsors: true}
+  - {id: blackstone,  name: Blackstone,   tracks: [pe], regions: [us, hk], status: active, domains: [blackstone.com, blackstone.wd1.myworkdayjobs.com], sponsors: true}
+  - {id: blueowl,     name: Blue Owl,     tracks: [pe], regions: [us],     status: active, domains: [],                                                 sponsors: true}
+  - {id: brookfield,  name: Brookfield,   tracks: [pe], regions: [us],     status: active, domains: [],                                                 sponsors: true}
+  - {id: carlyle,     name: Carlyle,      tracks: [pe], regions: [us],     status: active, domains: [],                                                 sponsors: true}
+  - {id: kkr,         name: KKR,          tracks: [pe], regions: [us],     status: active, domains: [kkr.com],                                          sponsors: true}
+  - {id: oaktree,     name: Oaktree,      tracks: [pe], regions: [us],     status: active, domains: [],                                                 sponsors: true}
+  - {id: tpg,         name: TPG,          tracks: [pe], regions: [us],     status: active, domains: [],                                                 sponsors: true}
+
+  # ---- Asset management
+  - {id: blackrock,    name: BlackRock,              tracks: [am], regions: [us, hk], status: active, domains: [careers.blackrock.com], sponsors: true}
+  - {id: fidelityintl, name: Fidelity International, tracks: [am], regions: [hk],     status: active, domains: [],                      sponsors: true}
+  - {id: invesco,      name: Invesco,                tracks: [am], regions: [hk],     status: active, domains: [],                      sponsors: true}
+  - {id: pimco,        name: PIMCO,                  tracks: [am], regions: [us],     status: active, domains: [],                      sponsors: true}
+  - {id: schroders,    name: Schroders,              tracks: [am], regions: [hk],     status: active, domains: [],                      sponsors: true}
+  - {id: wellington,   name: Wellington,             tracks: [am], regions: [us],     status: active, domains: [],                      sponsors: true}
+
+  # ---- Consulting
+  - {id: bain,     name: Bain & Company,     tracks: [consulting], regions: [us, hk], status: active, domains: [bain.com],        sponsors: true}
+  - {id: bcg,      name: BCG,                tracks: [consulting], regions: [us, hk], status: active, domains: [careers.bcg.com], sponsors: true}
+  - {id: mckinsey, name: McKinsey & Company, tracks: [consulting], regions: [us, hk], status: active, domains: [mckinsey.com],    sponsors: true}
+
+  # ---- Corporate strategy & technology
+  - {id: alibaba,   name: Alibaba,   tracks: [corp-strat], regions: [hk], status: active, domains: [talent.alibaba.com],    sponsors: unknown}
+  - {id: amazon,    name: Amazon,    tracks: [corp-strat], regions: [us], status: active, domains: [amazon.jobs],           sponsors: true}
+  - {id: apple,     name: Apple,     tracks: [corp-strat], regions: [us], status: active, domains: [jobs.apple.com],        sponsors: true}
+  - {id: bytedance, name: ByteDance, tracks: [corp-strat], regions: [hk], status: active, domains: [jobs.bytedance.com],    sponsors: unknown}
+  - {id: google,    name: Google,    tracks: [corp-strat], regions: [us], status: active, domains: [google.com],            sponsors: true}
+  - {id: meta,      name: Meta,      tracks: [corp-strat], regions: [us], status: active, domains: [metacareers.com],       sponsors: true}
+  - {id: microsoft, name: Microsoft, tracks: [corp-strat], regions: [us], status: active, domains: [careers.microsoft.com], sponsors: true}
+  - {id: nvidia,    name: Nvidia,    tracks: [corp-strat], regions: [us], status: active, domains: [nvidia.com],            sponsors: true}
+  - {id: tencent,   name: Tencent,   tracks: [corp-strat], regions: [hk], status: active, domains: [careers.tencent.com],   sponsors: unknown}
+
+  # ---- On-campus pseudo-firm — NOT a recruiting target.
+  #      Exists only so school-affiliation-only contacts (career services,
+  #      professors, coffee-chatted peers) have a valid `firm` value: the
+  #      schema requires `firm NOT NULL`. `status: on_campus` is anything
+  #      other than `active`, which keeps the row out of every active-firm
+  #      query, so it never appears as a real recruiting target on the US/HK
+  #      pages or in firm-coverage counts.
+  - {id: usc, name: USC (on-campus), tracks: [], regions: [us], status: on_campus, domains: [usc.edu]}

@@ -21,13 +21,27 @@ under the "this repo is PUBLIC" block: it holds real people's names, private
 assessments of them, and the founder's own hand-tiered target list). So none
 of it was under version control and a fresh deploy would have regressed to
 the broken state. `firms.yaml` was NOT un-ignored to fix that: its firm rows
-carry the founder's personal `tier: 1/2/3` curation and several paragraphs
+carried the founder's personal `tier: 1/2/3` curation and several paragraphs
 reasoning about which employers are prestigious, which is exactly the
 "founder's own target list" the ignore rule names. The mail domains
-themselves are public facts about firms, so they move to a tracked module
+themselves are public facts about firms, so they moved to a tracked module
 instead — `directory/_mail_domains.py`, mirroring `_logo_domains.py` and its
 `seed_logo_domains` command, which solved the same shape of problem (a
 hand-curated firm→domain map that must survive a fresh clone) the same way.
+
+Later the same day the seed corpus turned out to have the identical problem
+whole rather than one column of it: `seed_directory` read `data/seeds/` too,
+so a fresh deploy got no firms at all. It was fixed the same way and for the
+same reason — a SCRUBBED copy at `directory/seeds/*.yaml`, with `tier` and the
+prestige prose left behind in the private archive. That does not fold this
+command into that one. `seed_directory` knows only the firms in the seed
+corpus, replaces their `domains` outright, and runs BEFORE `scrape`; the firms
+this command creates and the connector firms it appends to are not in that
+corpus at all. Of the eleven slugs here that do have a row in it, seven now
+carry their mail domain there already and are skipped as present; the other
+four (bcg, blackrock, rbc, socgen) still get theirs from here. The overlap is
+left rather than tidied away, so this file stays the single place to look up
+what a human at a given firm sends mail from.
 
 `seed_directory` is deliberately NOT the mechanism. It calls
 `update_or_create(slug=..., defaults={"domains": ...})`, i.e. it REPLACES the

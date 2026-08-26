@@ -41,8 +41,12 @@ from __future__ import annotations
 MAIL_DOMAINS: dict[str, list[str]] = {
     # -- The 2026-08-25 fix: the firms whose real bankers the capture pipeline
     #    was refusing. These were applied by hand to the founder's database
-    #    (and to the gitignored `data/seeds/firms.yaml`, which is why they are
-    #    restated here — see this module's counterpart command).
+    #    (and to a then-gitignored `data/seeds/firms.yaml`, which is why they
+    #    are restated here — see this module's counterpart command). The seed
+    #    corpus has since moved to the tracked `directory/seeds/`, carrying the
+    #    hand-applied domains with it, so those entries now arrive twice over.
+    #    This command finds them already present and skips them, which is
+    #    exactly what append-and-skip is built for.
     "gs": ["gs.com"],
     "bofa": ["bofa.com", "baml.com"],
     "wf": ["wellsfargo.com"],

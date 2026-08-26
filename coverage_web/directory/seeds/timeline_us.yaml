@@ -1,0 +1,170 @@
+# Tracked canonical copy, read by `manage.py seed_directory` on a fresh
+# deploy. `key:` is `<firm-id>/<cycle>/<event_kind>`; the firm-id half must
+# match an `id` in firms.yaml or the entry is skipped as unknown.
+#
+# US SA 2028 cycle. Seeded 2026-07-03 from historical cycle patterns —
+# every seed is precision: estimated / confidence: reported until a research
+# run confirms it. Only confirmed_official dates generate tasks.
+cycle: SA 2028
+region: us
+phases:
+- id: sophomore_positioning
+  name: Sophomore positioning
+  start: 2026-06-01
+  end: 2026-12-31
+  focus: Build the networking base; 2+ advocates per Tier 1 firm; apply to sophomore/insight 
+    programs as they open
+- id: insight_programs
+  name: Insight & early-ID programs
+  start: 2026-09-01
+  end: 2027-03-31
+  focus: Sophomore insight programs run and early-ID lists form; convert chats to advocates
+- id: apps_open
+  name: Applications open (EBs first)
+  start: 2026-12-01
+  end: 2027-06-30
+  focus: Apply day-one with referrals lined up; elite boutiques open earliest, BBs follow
+- id: interviews_offers
+  name: Interviews & offers (rolling)
+  start: 2027-03-01
+  end: 2027-09-30
+  focus: HireVues, superdays, rolling offers — pipeline shifts from outreach to conversion
+
+firm_dates:
+- key: blackstone/sa2028_pe/app_open
+  date: 2026-12
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: Historically the earliest mover of any firm — has opened ~18 months ahead in recent cycles
+- key: evercore/sa2028_ib/app_open
+  date: '2026-12'
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: EBs opened Dec–Feb in recent cycles; Evercore among the earliest
+- key: moelis/sa2028_ib/app_open
+  date: 2026-12
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: Historically an early opener among EBs
+- key: centerview/sa2028_ib/app_open
+  date: 2027-01
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: pjt/sa2028_ib/app_open
+  date: 2027-01
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: lazard/sa2028_ib/app_open
+  date: 2027-01
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: pwp/sa2028_ib/app_open
+  date: 2027-02
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: guggenheim/sa2028_ib/app_open
+  date: 2027-02
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: jefferies/sa2028_ib/app_open
+  date: 2027-02
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: jpm/sa2028_ib/app_open
+  date: 2027-02
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: BBs typically open Jan–Apr; JPM tends earlier among BBs
+- key: gs/sa2028_ib/app_open
+  date: 2027-03
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: ms/sa2028_ib/app_open
+  date: 2027-03
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: bofa/sa2028_ib/app_open
+  date: 2027-03
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: citi/sa2028_ib/app_open
+  date: 2027-03
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: hl/sa2028_ib/app_open
+  date: 2027-03
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: rothschild/sa2028_ib/app_open
+  date: 2027-03
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: barclays/sa2028_ib/app_open
+  date: 2027-04
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: kkr/sa2028_pe/app_open
+  date: 2027-01
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: Analyst program recruits early, close behind Blackstone
+- key: gs/sa2028_ib/insight_open
+  date: 2026-09
+  precision: month
+  confidence: confirmed_official
+  source: 
+    https://www.goldmansachs.com/careers/students/programs-and-internships/americas/emerging-leaders-series
+  found: '2026-07-03'
+  note: "Goldman Sachs Emerging Leaders Series (sophomore program, Americas) for students graduating December
+    2028 - June 2029 (the SA 2028 cohort): official page states 'Applications will open in the fall 2026'
+    (2026-09 normalizes 'fall 2026'; no exact day posted). Program runs December 2026, virtual with potential
+    in-person component, open to all majors."

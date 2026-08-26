@@ -1,0 +1,91 @@
+# Tracked canonical copy, read by `manage.py seed_directory` on a fresh
+# deploy. `key:` is `<firm-id>/<cycle>/<event_kind>`; the firm-id half must
+# match an `id` in firms.yaml or the entry is skipped as unknown.
+#
+# HK/APAC SA 2028 cycle — tracked separately from the US. APAC recruits later
+# and closer to the internship: apps typically open Aug–Nov of junior year.
+# Seeded 2026-07-03 from historical patterns; all estimates until researched.
+cycle: SA 2028
+region: hk
+phases:
+- id: relationship_building
+  name: HK relationship building
+  start: 2026-06-01
+  end: 2027-06-30
+  focus: Mandarin-desk networking runs all year; HK converts networking to interviews later than US
+- id: spring_insights
+  name: Spring week / insight programs (APAC)
+  start: 2026-10-01
+  end: 2027-04-30
+  focus: APAC spring insights and early-ID programs — sophomore-accessible, apps often close by Jan
+- id: apps_open
+  name: HK SA applications open
+  start: 2027-08-01
+  end: 2027-12-31
+  focus: Main HK SA 2028 window — apply first week open; assessments (SHL/HireVue) follow fast
+- id: interviews_offers
+  name: Interviews & offers
+  start: 2027-10-01
+  end: 2028-02-28
+  focus: First rounds and superdays run Oct–Jan; offers into Feb
+
+firm_dates:
+- key: gs/sa2028_hk/app_open
+  date: 2027-09
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: ms/sa2028_hk/app_open
+  date: 2027-09
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: jpm/sa2028_hk/app_open
+  date: 2027-09
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: ubs/sa2028_hk/app_open
+  date: 2027-09
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: hsbc/sa2028_hk/app_open
+  date: 2027-09
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: citi/sa2028_hk/app_open
+  date: 2027-09
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: ''
+- key: cicc/sa2028_hk/app_open
+  date: 2027-10
+  precision: estimated
+  confidence: reported
+  source: 'seed:historical-pattern'
+  found: '2026-07-03'
+  note: CICC HK summer intake also feeds from mainland campus cycle — watch both
+- key: ms/insight/insight_open
+  date: '2026-07-16'
+  precision: day
+  confidence: reported
+  source: https://morganstanley.tal.net/candidate/jobboard/vacancy/2/adv/
+  found: '2026-07-03'
+  note: "2026 Morgan Stanley Asia Virtual Event Series kicks off with 'Aspire and Achieve | 2027 Internship
+    Recruitment Processes and Tips' on 16 Jul 2026 8:00pm HKT, followed by Divisional Spotlights: IB 22
+    Jul, S&T 30 Jul, GCM 6 Aug, Tech 11 Aug 2026. Registration is open now on the official MS campus events
+    board, plus a 'Register Your Interest: Morgan Stanley Internships 2027' interest list."

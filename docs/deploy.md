@@ -53,17 +53,27 @@ On the web service's **Shell** tab:
 
 ```bash
 uv run --package coverage-web python coverage_web/manage.py createsuperuser
-uv run --package coverage-web python coverage_web/manage.py seed_directory   # 68 firms + firm dates
+uv run --package coverage-web python coverage_web/manage.py seed_directory   # 71 firm rows + SA 2028 firm dates
 uv run --package coverage-web python coverage_web/manage.py scrape            # first opportunities pull
 uv run --package coverage-web python coverage_web/manage.py seed_logo_domains  # firm front doors, for logos
 uv run --package coverage-web python coverage_web/manage.py seed_mail_domains  # the domains bankers email FROM
 ```
 
-`seed_mail_domains` runs **after** `scrape` on purpose: it appends to firms the
-catalog has already created, and it never invents a connector firm. It is also
-the one seed step that does not read `data/seeds/` — that directory is
-gitignored (private), so the mail domains live in the tracked
-`directory/_mail_domains.py` instead. Without this step `capture.discovery`
+Every seed file these commands read is **tracked in git and ships inside the
+`directory` app** — `directory/seeds/*.yaml` for the firms and firm dates,
+`directory/_logo_domains.py` and `directory/_mail_domains.py` for the two
+domain maps. None of them reads `data/`, which is gitignored (it holds the
+founder's private research and would not exist on Render anyway). Until
+2026-08-25 `seed_directory` read `data/seeds/firms.yaml`, so this section's
+first deploy would have printed "firms file not found" and left you with an
+empty directory; if you are following an older copy of these instructions,
+that is the bug.
+
+Order matters. `seed_mail_domains` runs **after** `scrape` because it appends
+to firms the catalog has already created and never invents a connector firm,
+whereas `seed_directory` *replaces* each firm's `domains` list from the YAML —
+run it last and it would drop everything the connectors and the two domain
+commands had added. Without `seed_mail_domains` specifically, `capture.discovery`
 matches almost nothing: the domains a board connector stores are career-site
 hosts (`careers.bcg.com`, `jobs.rbc.com`), and nobody sends mail from one.
 
