@@ -127,6 +127,10 @@ class SyncResult:
     # Unmatched senders who matched an ARCHIVED contact: reported, never
     # proposed, never resurrected (capture_discover's rule, held here too).
     proposals_archived_match: int = 0
+    # Pending outreach-evidence proposals upgraded in place because the
+    # person wrote back later in the window. Not new rows — counted apart
+    # from `proposals_created` so "N people found" stays true.
+    proposals_upgraded: int = 0
     # Application-status mail (capture.appmail): an ATS saying a role moved.
     # Counted on its own axis rather than inside the touch counters because
     # it is about the APPLICATION pipeline, not about a relationship — and
@@ -169,6 +173,7 @@ class SyncResult:
             "skipped_unmatched": self.skipped_unmatched,
             "proposals_created": self.proposals_created,
             "proposals_archived_match": self.proposals_archived_match,
+            "proposals_upgraded": self.proposals_upgraded,
             "app_events_proposed": self.app_events_proposed,
             "app_events_unresolved": self.app_events_unresolved,
             "app_events_already": self.app_events_already,
@@ -545,6 +550,10 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
     # Firm-domain map for the discovery hook below — built lazily, at most
     # once per batch, and only if an unmatched finding actually reaches it.
     firm_domains = discovery.FirmDomains()
+    # Batch-level facts the discovery hook needs per finding: which
+    # addresses bounced in THIS batch, and how many distinct recipients
+    # each outbound subject fanned out to. See discovery.BatchContext.
+    batch_context = discovery.BatchContext(findings)
     # Same lazy shape, for the application-mail hook below: a batch with no
     # ATS mail in it builds nothing and queries nothing.
     appmail_resolver = appmail.Resolver(user)
@@ -602,12 +611,18 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
             # (see capture/discovery.py) — this function still never creates
             # a contact, so its contract stands unchanged.
             outcome = discovery.consider_finding(
-                user, finding, firm_domains=firm_domains, dry_run=dry_run
+                user, finding, firm_domains=firm_domains, dry_run=dry_run,
+                batch=batch_context,
             )
             if outcome == discovery.PROPOSED:
                 result.proposals_created += 1
                 result.details.append(
                     f"{name}: looks like a real contact — proposed for your confirm"
+                )
+            elif outcome == discovery.UPGRADED:
+                result.proposals_upgraded += 1
+                result.details.append(
+                    f"{name}: they wrote back — pending proposal upgraded"
                 )
             elif outcome == discovery.ARCHIVED_MATCH:
                 result.proposals_archived_match += 1

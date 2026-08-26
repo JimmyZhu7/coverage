@@ -251,8 +251,21 @@ on every quick action so all of it stays in sync.
                 Rows created before thread_subject existed fall to the third
                 branch, where `evidence` still carries the subject in its own
                 prose. Older, wordier, and true.
+
+                An OUTREACH proposal (evidence_kind "outreach") is the user's
+                own deliberate send with nothing back yet, so its sentence
+                leads with their act, not the counterparty's — "Replied to:"
+                would be a false sentence about somebody who has never
+                written. Checked first because outreach rows also store the
+                thread's subject in thread_subject.
                 {% endcomment %}
-                {% if p.thread_subject %}
+                {% if p.evidence_kind == "outreach" %}
+                  {% if p.thread_subject %}
+                    <p class="act-reason act-replied">You reached out: <span class="act-replied-subj">{{ p.thread_subject }}</span></p>
+                  {% else %}
+                    <p class="act-reason act-replied">You wrote to them. <span class="act-replied-none">No subject line on it.</span></p>
+                  {% endif %}
+                {% elif p.thread_subject %}
                   <p class="act-reason act-replied">Replied to: <span class="act-replied-subj">{{ p.thread_subject }}</span></p>
                 {% elif p.threaded_reply %}
                   <p class="act-reason act-replied">Replied to an email you sent. <span class="act-replied-none">No subject line on it.</span></p>

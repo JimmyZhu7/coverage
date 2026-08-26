@@ -39,8 +39,56 @@ the rest of this pipeline):
    emailed them first, from outside Coverage.
 
 No firm match and no reply pointer -> not a candidate. That is the whole
-threshold, and it is why a newsletter, a job-board digest, or a stranger
-cold-emailing the student never becomes a card.
+threshold for INBOUND mail, and it is why a newsletter, a job-board digest,
+or a stranger cold-emailing the student never becomes a card.
+
+THE OUTBOUND REVISION (2026-08-25), and why a documented refusal moved
+-----------------------------------------------------------------------
+This module used to refuse every outreach-only finding outright: "an
+outreach-only finding is the user's own sent mail to someone they chose not
+to track — not this feature's call to make." That sentence assumed the
+student adds people to Coverage BEFORE emailing them. Measured on the
+founder's own mailbox (read-only, 2026-08-25), the assumption is false: he
+works in Gmail, and in two days he sent ~50 personalised coffee-chat
+requests to bankers at directory firms — of which Coverage captured exactly
+the two who replied within minutes. The other people he deliberately chose
+to build a relationship with had no card, no follow-up clock, no presence.
+The product's core loop did not run on the founder's own recruiting.
+
+So an outreach-only finding is now a candidate — under a bar deliberately
+HIGHER than the inbound one, because the counterparty has done nothing yet
+and the only evidence is the user's own act:
+
+  - The recipient must be at a `Firm.domains` address. No threaded-reply
+    escape hatch here: writing to an alum on gmail is real, but "sent one
+    email to a personal address" is exactly the "anyone he ever emailed"
+    shape this module must never propose from. A directory-firm address is
+    the deterministic line between "outreach into the industry he tracks"
+    and "mail he happened to send".
+  - Everything the inbound ladder refuses stays refused: bulk, bounces,
+    no-reply and role-account localparts, ESP/ATS domains, the user's own
+    institution.
+  - A recipient whose address BOUNCED anywhere in the same batch is
+    refused: the send provably did not reach a person (see `BatchContext`).
+  - A merge-shaped send never proposes. Two guards, because campaign
+    detection needs outbound touches in the database and an all-unmatched
+    merge writes none: (a) more than `MERGE_RECIPIENT_LIMIT` distinct
+    recipients sharing one normalized subject in one batch is a mail merge
+    (his real coffee-chat bursts personalise the subject per person, so
+    they pass); (b) a subject whose signature matches a DETECTED `Campaign`
+    proposes only if the user has classified that campaign as their own
+    recruiting. Note the deliberate asymmetry with the inbound rule below:
+    an inbound REPLY from an unanswered campaign still proposes (a human
+    engaged; suppression there needs the user's explicit "not my
+    recruiting"), while outreach-only evidence from an unanswered campaign
+    is exactly the mass send the open question is about, so it waits for
+    the answer.
+
+What an accepted outreach proposal creates is also smaller: one `outreach`
+touch through the same `crm.services.log_touch` ratchet — which moves
+neither warmth nor thread_state, so the contact lands cold with the
+follow-up clock running from the send's own date. No warmth is fabricated
+from the user's own enthusiasm; the ratchet holds.
 
 RULES HONORED FROM THE TWO REFUSALS ABOVE:
 - An ARCHIVED contact matching the sender is never proposed and never
@@ -93,6 +141,19 @@ from directory.models import Firm
 # Outcomes `consider_finding` reports back to the caller's counters.
 PROPOSED = "proposed"
 ARCHIVED_MATCH = "archived_match"
+# A pending outreach-evidence proposal whose person then wrote back: the row
+# was upgraded in place to carry the stronger evidence. Not a new proposal —
+# the unique (user, email) row is the same row — but not nothing either, so
+# the caller's counters can say it happened.
+UPGRADED = "upgraded"
+
+# More distinct recipients than this sharing one normalized subject inside a
+# single batch is a mail merge, not personal outreach. Three, not one: the
+# founder's genuine bursts personalise the subject per person ("USC |
+# <connection> | <firm> - ..."), but he does occasionally send the same
+# subject to two or three people at one firm, and a real merge is an order
+# of magnitude past this (the ICC panel send was 201).
+MERGE_RECIPIENT_LIMIT = 3
 
 # Localparts that name a mailbox rather than a person. A proposal is an offer
 # to track a HUMAN, so these never qualify — distinct from
@@ -212,6 +273,48 @@ _PARENTHETICAL_RE = re.compile(r"\s*\(([^)]*)\)\s*")
 _PRONOUN_RE = re.compile(r"^(?:she|he|they)\b", re.IGNORECASE)
 
 
+class BatchContext:
+    """What one finding cannot know about the batch it arrived in.
+
+    Two of the outbound refusals are facts about the WHOLE batch, not about
+    one finding: whether this recipient's address bounced (the bounce is its
+    own separate finding, usually seconds behind the send), and whether this
+    subject went to enough distinct recipients to be a merge. Built once per
+    `apply_findings` batch and handed down; a caller running a single
+    finding (tests, mostly) may pass none, and both guards simply don't
+    fire — the campaign-signature guard still does, because that one reads
+    the database.
+
+    A bounce in a LATER batch is a known, accepted gap: nothing here
+    dismisses an already-pending proposal, because no automated path writes
+    proposal status — that rule outranks the tidiness. In practice bounces
+    land seconds after the send and share its batch (both real bounces in
+    the founder's 2026-08-24 burst did).
+    """
+
+    def __init__(self, findings: list[dict]):
+        from collections import Counter
+
+        from crm.campaigns import normalize_subject
+
+        self.bounced_emails: set[str] = {
+            normalize_email(str(f.get("email") or ""))
+            for f in findings
+            if f.get("bounced") and f.get("email")
+        }
+        counts: Counter[str] = Counter()
+        seen: set[tuple[str, str]] = set()
+        for f in findings:
+            if not f.get("outreach_sent") or f.get("replied"):
+                continue
+            email = normalize_email(str(f.get("email") or ""))
+            signature = normalize_subject(str(f.get("subject") or ""))
+            if email and signature and (signature, email) not in seen:
+                seen.add((signature, email))
+                counts[signature] += 1
+        self.outbound_subject_recipients: dict[str, int] = dict(counts)
+
+
 class FirmDomains:
     """Lazy `{domain: firm_id}` map over `Firm.domains`, built at most once
     per batch. Shared-zone read (no user column on firms), reached only to
@@ -320,7 +423,19 @@ def _match_existing(user, email: str, name: str) -> Contact | None:
     return match
 
 
-def _evidence_kind(finding: dict) -> str:
+def _evidence_kind(finding: dict, *, outbound_only: bool = False) -> str:
+    """The strongest touch kind the evidence honestly supports.
+
+    An outreach-only finding is ALWAYS `outreach` — even when it carries a
+    `chat_status` of "scheduled" off a calendar invite the user themselves
+    attached. An invite the user sent an unknown person is still only the
+    user's own act; logging `chat_scheduled` off it would gift warmth
+    `replied` to somebody who has never typed a word. (For matched
+    contacts the pipeline does count an outbound .ics as a scheduled chat;
+    a proposal is a stricter surface.)
+    """
+    if outbound_only:
+        return "outreach"
     chat_status = str(finding.get("chat_status", "none") or "none").strip().lower()
     if chat_status == "completed":
         return "chat"
@@ -329,12 +444,16 @@ def _evidence_kind(finding: dict) -> str:
     return "reply_received"
 
 
-def _evidence_line(finding: dict, *, firm_matched: bool) -> str:
+def _evidence_line(
+    finding: dict, *, firm_matched: bool, outbound_only: bool = False
+) -> str:
     """One line of why, subject at most — never a body, never a snippet.
     (`finding["evidence"]` on the live path is a snippet; a proposal card is
     a new surface and keeps to §10's stricter reading.)"""
     subject = (finding.get("subject") or "").strip()
-    if finding.get("threaded_reply"):
+    if outbound_only:
+        base = "You wrote to them"
+    elif finding.get("threaded_reply"):
         base = "Replied to your email"
     elif firm_matched:
         base = "Wrote to you from a firm address"
@@ -343,30 +462,53 @@ def _evidence_line(finding: dict, *, firm_matched: bool) -> str:
     return (f"{base}: {subject}" if subject else base)[:300]
 
 
+def _parse_occurred_at(finding: dict):
+    """The finding's own timestamp as an aware datetime, or None. Naive
+    strings are anchored to UTC, same as `capture.gmail._finding_occurred_at`."""
+    raw = (finding.get("occurred_at") or "").strip()
+    if not raw:
+        return None
+    from django.utils.dateparse import parse_datetime
+
+    when = parse_datetime(raw)
+    if when is not None and timezone.is_naive(when):
+        when = timezone.make_aware(when, timezone.utc)
+    return when
+
+
 def consider_finding(
     user, finding: dict, *, firm_domains: FirmDomains | None = None,
-    dry_run: bool = False,
+    dry_run: bool = False, batch: BatchContext | None = None,
 ) -> str | None:
     """Run the judgment chain over one UNMATCHED finding. Returns `PROPOSED`
-    when a proposal was created (or would be, under `dry_run`),
-    `ARCHIVED_MATCH` when the sender is an archived contact (reported, never
-    resurrected), and None when the finding simply isn't a candidate.
+    when a proposal was created (or would be, under `dry_run`), `UPGRADED`
+    when a pending outreach-evidence proposal for this address was upgraded
+    in place by stronger inbound evidence, `ARCHIVED_MATCH` when the sender
+    is an archived contact (reported, never resurrected), and None when the
+    finding simply isn't a candidate.
 
     Callers reach this from `apply_findings`' `skipped_unmatched` branch —
     the one place both capture paths (the live listener and every
     backfill/rescan) already agree means "a real message from someone not in
     Coverage". Writes ONE row at most, and only ever a `ContactProposal`.
+
+    `batch` carries the two facts one finding cannot know alone (same-batch
+    bounces, same-batch subject fan-out) — see `BatchContext`.
     """
     # -- the ladder of refusals, cheapest first ----------------------------- #
     if finding.get("bulk") or finding.get("bounced"):
         return None
-    # Inbound evidence only: a proposal answers "someone wrote to you".
-    # An outreach-only finding is the user's own sent mail to someone they
-    # chose not to track — not this feature's call to make.
-    if not (
+    # Two kinds of evidence, two bars — see the module docstring's outbound
+    # revision. Inbound: the counterparty did something (replied, or a chat
+    # got scheduled/completed). Outbound-only: the user deliberately wrote
+    # to this person and nothing has come back yet — a candidate since
+    # 2026-08-25, under the stricter firm-domain-only bar below.
+    outbound_only = bool(finding.get("outreach_sent")) and not finding.get("replied")
+    inbound_evidence = not outbound_only and (
         finding.get("replied")
         or str(finding.get("chat_status", "none")).lower() in ("scheduled", "completed")
-    ):
+    )
+    if not (inbound_evidence or outbound_only):
         return None
 
     email = normalize_email(str(finding.get("email") or ""))[:254]
@@ -387,7 +529,27 @@ def consider_finding(
 
     firm_domains = firm_domains or FirmDomains()
     firm_id = firm_domains.match(email)
-    if firm_id is None and not finding.get("threaded_reply"):
+    if outbound_only:
+        # Outbound bar: a directory-firm address, nothing less. No
+        # threaded-reply escape (there is no reply), no personal domains —
+        # see the module docstring for why this is the line between "his
+        # recruiting" and "anyone he ever emailed".
+        if firm_id is None:
+            return None
+        if batch is not None and email in batch.bounced_emails:
+            # The send provably never reached a person. The bounce finding
+            # itself is refused above; this refuses the SEND it bounced off.
+            return None
+    elif firm_id is None and not finding.get("threaded_reply"):
+        return None
+    elif finding.get("addressed_to_user") is False:
+        # A reply pointer proves someone hit Reply; only To:/Cc: proves it
+        # was aimed at the user. A reply-all into a thread the user was
+        # Bcc'd or list-delivered into (a coordinator's "RE:" on a mass
+        # invite, live case 2026-08-25) threads without ever addressing
+        # them. Explicit False only — a finding that doesn't carry the fact
+        # (every finding written before it existed) behaves as it always
+        # did.
         return None
 
     # CAMPAIGN-AWARE SUPPRESSION. A reply to a mail merge the user has already
@@ -401,18 +563,88 @@ def consider_finding(
     # campaign changes nothing here, the same rule `crm/campaigns.py` holds for
     # the queue. Deterministic: one signature lookup, no guessing from prose.
     subject = (finding.get("subject") or "").strip()
+    signature = ""
     if subject:
         from crm.campaigns import normalize_subject
-        from crm.models import Campaign
 
         signature = normalize_subject(subject)
-        if signature and Campaign.objects.for_user(user).filter(
-            signature=signature, kind=Campaign.KIND_OTHER
-        ).exists():
+    if signature:
+        from crm.models import Campaign
+
+        if inbound_evidence:
+            # Only an explicit `other` answer suppresses a REPLY — an
+            # undetected or unanswered campaign changes nothing here, the
+            # same rule `crm/campaigns.py` holds for the queue. A human
+            # engaged; the user's explicit word is what un-persons them.
+            if Campaign.objects.for_user(user).filter(
+                signature=signature, kind=Campaign.KIND_OTHER
+            ).exists():
+                return None
+        else:
+            # Outbound is the OTHER side of the same asymmetry: the only
+            # evidence is the send, and a send that groups into a detected
+            # campaign is a mass send unless the user has said that
+            # campaign IS their recruiting. `other` refuses, and so does
+            # `unclassified` — the open question is about this exact mail.
+            if Campaign.objects.for_user(user).filter(
+                signature=signature
+            ).exclude(kind=Campaign.KIND_RECRUITING).exists():
+                return None
+    if outbound_only and signature and batch is not None:
+        # The in-batch half of the merge guard, for the send whose campaign
+        # cannot have been detected yet: an all-unmatched merge writes no
+        # outbound touches, so `crm.campaigns.detect` never sees it. The
+        # fan-out in front of us is evidence enough.
+        if batch.outbound_subject_recipients.get(signature, 0) > MERGE_RECIPIENT_LIMIT:
             return None
 
     # -- existing rows: never duplicate, never resurrect -------------------- #
-    if ContactProposal.objects.for_user(user).filter(email=email).exists():
+    existing = ContactProposal.objects.for_user(user).filter(email=email).first()
+    if existing is not None:
+        # THE ONE WRITE TO AN EXISTING ROW, and it only ever moves upward: a
+        # PENDING outreach-evidence proposal whose person has now actually
+        # written back gets its evidence upgraded in place. Without this,
+        # batch order decides what the card says — the sent mail is scanned
+        # before the reply that answered it, so the weaker row would both
+        # mis-describe the person ("You wrote to them" about somebody who
+        # replied) and make `accept` log the weaker touch, losing the reply
+        # forever (the finding is consumed; the contact doesn't exist yet
+        # for the ladder to catch it later). Dismissed and accepted rows
+        # are untouched — dismissal stays permanent, and nothing here
+        # changes status, ever.
+        if (
+            existing.status == ContactProposal.STATUS_PENDING
+            and existing.evidence_kind == "outreach"
+            and inbound_evidence
+        ):
+            if not dry_run:
+                existing.evidence_kind = _evidence_kind(finding)
+                existing.evidence = _evidence_line(
+                    finding, firm_matched=firm_id is not None
+                )
+                existing.threaded_reply = bool(finding.get("threaded_reply"))
+                existing.thread_subject = (
+                    display_subject(subject)
+                    if finding.get("threaded_reply") else ""
+                )
+                thread_id = (finding.get("thread_id") or "").strip()[:128]
+                if thread_id:
+                    existing.thread_id = thread_id
+                occurred_at = _parse_occurred_at(finding)
+                if occurred_at is not None:
+                    existing.occurred_at = occurred_at
+                if not existing.role_hint:
+                    raw_name = (finding.get("name") or "").strip()
+                    _, role_hint = split_display_name(raw_name)
+                    if role_hint:
+                        existing.role_hint = role_hint
+                        existing.recruiting_hint = is_recruiting_role(role_hint)
+                existing.save(update_fields=[
+                    "evidence_kind", "evidence", "threaded_reply",
+                    "thread_subject", "thread_id", "occurred_at",
+                    "role_hint", "recruiting_hint",
+                ])
+            return UPGRADED
         return None
 
     raw_name = (finding.get("name") or "").strip() or localpart
@@ -431,14 +663,6 @@ def consider_finding(
         return None
 
     if not dry_run:
-        occurred_at = None
-        raw_ts = (finding.get("occurred_at") or "").strip()
-        if raw_ts:
-            from django.utils.dateparse import parse_datetime
-
-            occurred_at = parse_datetime(raw_ts)
-            if occurred_at is not None and timezone.is_naive(occurred_at):
-                occurred_at = timezone.make_aware(occurred_at, timezone.utc)
         ContactProposal.all_objects.create(
             user=user,
             name=name[:255],
@@ -446,18 +670,24 @@ def consider_finding(
             firm_id=firm_id,
             role_hint=role_hint,
             recruiting_hint=is_recruiting_role(role_hint),
-            evidence=_evidence_line(finding, firm_matched=firm_id is not None),
-            evidence_kind=_evidence_kind(finding),
-            # Only for a genuine threaded reply: the card labels this line
-            # "Replied to", and that sentence is false for a firm-domain
-            # first contact. Blank there, and the evidence line already says
-            # what shape THAT message was.
+            evidence=_evidence_line(
+                finding, firm_matched=firm_id is not None,
+                outbound_only=outbound_only,
+            ),
+            evidence_kind=_evidence_kind(finding, outbound_only=outbound_only),
+            # For a genuine threaded reply ("Replied to: …") and for the
+            # user's own outreach ("You reached out: …") — the two cases
+            # where the thread's subject is the sentence's object. Blank for
+            # a firm-domain first contact, where "Replied to" would be a
+            # false sentence and the evidence line already says what shape
+            # that message was.
             thread_subject=(
-                display_subject(subject) if finding.get("threaded_reply") else ""
+                display_subject(subject)
+                if (finding.get("threaded_reply") or outbound_only) else ""
             ),
             threaded_reply=bool(finding.get("threaded_reply")),
             thread_id=(finding.get("thread_id") or "").strip()[:128],
-            occurred_at=occurred_at,
+            occurred_at=_parse_occurred_at(finding),
         )
     return PROPOSED
 
@@ -510,7 +740,12 @@ def accept(proposal: ContactProposal) -> Contact | None:
         # filled in later.
         recruiting_contact=True if proposal.recruiting_hint else None,
         notes=(
-            f"Found in your inbox · {timezone.localdate():%b %d, %Y}"
+            (
+                "Found in your sent mail"
+                if proposal.evidence_kind == "outreach"
+                else "Found in your inbox"
+            )
+            + f" · {timezone.localdate():%b %d, %Y}"
             + (f"\n{proposal.evidence}" if proposal.evidence else "")
         ),
     )

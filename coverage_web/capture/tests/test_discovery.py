@@ -91,10 +91,17 @@ def test_bounce_never_proposes(student, firm):
     assert consider(student, finding(bounced=True)) is None
 
 
-def test_outreach_only_never_proposes(student, firm):
-    """The user's own sent mail to someone they chose not to track is not
-    this feature's call to make."""
-    assert consider(student, finding(replied=False, outreach_sent=True)) is None
+def test_outreach_to_a_non_firm_address_never_proposes(student, firm):
+    """The outbound revision (module docstring) moved the old blanket
+    refusal, not the principle behind it: sent mail to an address outside
+    the firm directory is still "someone they chose not to track" — a
+    vendor, a professor, a friend on gmail — and still not this feature's
+    call to make. Only a directory-firm recipient clears the outbound bar
+    (see the section below)."""
+    assert consider(student, finding(
+        replied=False, outreach_sent=True, threaded_reply=False,
+        email="somebody@randomvendor.example",
+    )) is None
 
 
 def test_noreply_sender_never_proposes(student, firm):
@@ -907,3 +914,341 @@ def test_the_export_carries_the_replied_to_subject(student, firm):
     csv = account_services.contact_proposals_csv(student)
     assert "thread_subject" in csv.splitlines()[0]
     assert "Fall 2026 ICC Alumni Digital Panel Outreach" in csv
+
+
+# --------------------------------------------------------------------------- #
+# The outbound revision: people the user deliberately reached out to.
+#
+# The gap these pin, measured on the founder's real mailbox (read-only,
+# 2026-08-25): two days, ~50 personalised coffee-chat requests to bankers at
+# directory firms — and Coverage captured exactly the two who replied within
+# minutes, because this module demanded inbound evidence. The other people he
+# chose to build relationships with had no card and no follow-up clock. The
+# bar for outbound is HIGHER than inbound (firm domain only, no threaded
+# escape, merge- and bounce-guarded); everything the inbound ladder refuses
+# stays refused.
+# --------------------------------------------------------------------------- #
+
+def outreach_finding(**over):
+    """The canonical outbound coffee-chat request: the user's own sent mail
+    to a banker at a directory firm, nothing back yet."""
+    base = {
+        "name": "Alex Banker",
+        "email": "alex.banker@northbank.example",
+        "found": True,
+        "bounced": False,
+        "outreach_sent": True,
+        "replied": False,
+        "chat_status": "none",
+        "bulk": False,
+        "threaded_reply": False,
+        "subject": "USC | Beta Sigma | North Bank - USC Student Coffee Chat Request",
+        "evidence": "Sent: USC | Beta Sigma | North Bank - USC Student Coffee Chat Request",
+        "thread_id": "t-out-1",
+        "occurred_at": "2026-08-24T15:08:00+00:00",
+    }
+    base.update(over)
+    return base
+
+
+def test_outreach_to_a_firm_banker_proposes(student, firm):
+    assert consider(student, outreach_finding()) == discovery.PROPOSED
+    (p,) = pending(student)
+    assert p.firm_id == firm.id
+    assert p.evidence_kind == "outreach"
+    assert p.threaded_reply is False
+    # The card leads with the user's own act and names the thread.
+    assert p.thread_subject == (
+        "USC | Beta Sigma | North Bank - USC Student Coffee Chat Request"
+    )
+    assert p.evidence.startswith("You wrote to them")
+    # A proposal writes NOTHING to the CRM.
+    assert Contact.objects.for_user(student).count() == 0
+    assert Touch.objects.for_user(student).count() == 0
+
+
+def test_accepting_an_outreach_proposal_starts_the_clock_not_the_warmth(
+    student, firm
+):
+    """Accept logs one `outreach` touch at the send's own time through the
+    normal ratchet: the contact lands COLD (no fabricated warmth — the
+    counterparty has done nothing) and the cadence engine's follow-up clock
+    runs from the real send date."""
+    consider(student, outreach_finding())
+    (p,) = pending(student)
+    contact = discovery.accept(p)
+    assert contact is not None
+    contact.refresh_from_db()
+    assert contact.warmth == "cold"
+    touches = list(Touch.objects.for_user(student).filter(contact=contact))
+    assert [t.kind for t in touches] == ["outreach"]
+    assert "[gmail:t-out-1]" in touches[0].note
+    assert touches[0].ts.date() == timezone.datetime(2026, 8, 24).date()
+    assert "Found in your sent mail" in contact.notes
+
+
+def test_outreach_with_a_calendar_invite_still_logs_only_outreach(student, firm):
+    """An .ics the USER attached is still only the user's own act — logging
+    chat_scheduled off it would gift warmth `replied` to somebody who has
+    never typed a word."""
+    consider(student, outreach_finding(chat_status="scheduled"))
+    (p,) = pending(student)
+    assert p.evidence_kind == "outreach"
+
+
+def test_outreach_to_role_accounts_never_proposes(student, firm):
+    for local in ("careers", "campus.recruiting", "info", "events"):
+        assert consider(student, outreach_finding(
+            email=f"{local}@northbank.example"
+        )) is None
+
+
+def test_outreach_that_bounced_in_the_same_batch_never_proposes(student, firm):
+    """Both real bounces in the founder's 2026-08-24 burst arrived seconds
+    behind their sends, in the same batch: the send finding must not
+    propose a person the bounce proves does not exist."""
+    send = outreach_finding()
+    bounce = outreach_finding(
+        bounced=True, outreach_sent=False,
+        evidence="Bounced", thread_id="t-out-1",
+    )
+    result = apply_findings(student, [send, bounce])
+    assert result.proposals_created == 0
+    assert pending(student) == []
+
+
+def test_a_merge_shaped_burst_never_proposes_but_personalised_sends_do(
+    student, firm
+):
+    """More than MERGE_RECIPIENT_LIMIT distinct recipients on ONE normalized
+    subject is a mail merge (the ICC panel send was 201); the founder's real
+    bursts personalise the subject per person and pass."""
+    merge = [
+        outreach_finding(
+            email=f"person{i}@northbank.example", name=f"Person {i}",
+            subject="Fall 2026 ICC Alumni Digital Panel Outreach",
+            thread_id=f"t-merge-{i}",
+        )
+        for i in range(5)
+    ]
+    personal = outreach_finding(
+        email="solo.banker@northbank.example", name="Solo Banker",
+        subject="USC | Chess Club | North Bank - USC Student Coffee Chat Request",
+        thread_id="t-solo",
+    )
+    result = apply_findings(student, merge + [personal])
+    assert result.proposals_created == 1
+    (p,) = pending(student)
+    assert p.email == "solo.banker@northbank.example"
+
+
+def test_outreach_from_a_declassified_campaign_never_proposes(student, firm):
+    from crm.campaigns import normalize_subject
+    from crm.models import Campaign
+
+    panel = "Fall 2026 ICC Alumni Digital Panel Outreach"
+    now = timezone.now()
+    Campaign.all_objects.create(
+        user=student, signature=normalize_subject(panel), label=panel,
+        kind=Campaign.KIND_OTHER, first_sent=now, last_sent=now,
+        recipient_count=201,
+    )
+    assert consider(student, outreach_finding(subject=panel)) is None
+
+
+def test_outreach_from_an_unanswered_campaign_waits_for_the_answer(
+    student, firm
+):
+    """The asymmetry with inbound, pinned: a REPLY from an unanswered
+    campaign still proposes (a human engaged), but outreach-only evidence
+    from one is exactly the mass send the open question is about."""
+    from crm.campaigns import normalize_subject
+    from crm.models import Campaign
+
+    panel = "Fall 2026 ICC Alumni Digital Panel Outreach"
+    now = timezone.now()
+    campaign = Campaign.all_objects.create(
+        user=student, signature=normalize_subject(panel), label=panel,
+        kind=Campaign.KIND_UNCLASSIFIED, first_sent=now, last_sent=now,
+        recipient_count=10,
+    )
+    assert consider(student, outreach_finding(subject=panel)) is None
+
+    # The user says the campaign IS their recruiting: its recipients at firm
+    # domains are their recruiting network, and the send now proposes.
+    campaign.kind = Campaign.KIND_RECRUITING
+    campaign.save(update_fields=["kind"])
+    assert consider(
+        student, outreach_finding(subject=panel)
+    ) == discovery.PROPOSED
+
+
+def test_outreach_never_duplicates_and_dismiss_still_holds(student, firm):
+    assert consider(student, outreach_finding()) == discovery.PROPOSED
+    assert consider(student, outreach_finding()) is None
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    assert consider(student, outreach_finding(thread_id="t-later")) is None
+    assert pending(student) == []
+
+
+def test_outreach_to_an_archived_contact_is_reported_not_resurrected(
+    student, firm
+):
+    Contact.all_objects.create(
+        user=student, name="Alex Banker",
+        email="alex.banker@northbank.example", archived=True,
+    )
+    assert consider(student, outreach_finding()) == discovery.ARCHIVED_MATCH
+    assert pending(student) == []
+
+
+def test_outreach_to_an_existing_contact_never_proposes(student, firm):
+    Contact.all_objects.create(
+        user=student, name="Alex Banker", email="alex.banker@northbank.example"
+    )
+    assert consider(student, outreach_finding()) is None
+
+
+def test_outreach_dry_run_reports_without_writing(student, firm):
+    assert discovery.consider_finding(
+        student, outreach_finding(), dry_run=True
+    ) == discovery.PROPOSED
+    assert ContactProposal.all_objects.filter(user=student).count() == 0
+
+
+def test_the_card_says_you_reached_out(student, firm, client):
+    consider(student, outreach_finding())
+    client.force_login(student)
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "You reached out:" in body
+    assert "USC Student Coffee Chat Request" in body
+    # And never the reply sentence: "Replied to:" appears in this page only
+    # inside _styles.html's own commentary, not on any card. Asserted on the
+    # rendered paragraph, since the class rides both sentences.
+    assert '>Replied to: <span class="act-replied-subj">' not in body
+
+
+# --------------------------------------------------------------------------- #
+# The upgrade: outreach proposal, then the person writes back.
+# --------------------------------------------------------------------------- #
+
+def test_a_reply_upgrades_a_pending_outreach_proposal_in_place(student, firm):
+    """Batch order must not decide what the card says: the sent mail is
+    scanned before the reply that answered it. One row, upgraded evidence,
+    and accept logs the reply — warmth `replied`, earned."""
+    result = apply_findings(student, [
+        outreach_finding(),
+        finding(
+            subject="Re: USC | Beta Sigma | North Bank - USC Student Coffee Chat Request",
+            thread_id="t-out-1",
+        ),
+    ])
+    assert result.proposals_created == 1
+    assert result.proposals_upgraded == 1
+    (p,) = pending(student)
+    assert p.evidence_kind == "reply_received"
+    assert p.threaded_reply is True
+    assert p.thread_subject == (
+        "USC | Beta Sigma | North Bank - USC Student Coffee Chat Request"
+    )
+    contact = discovery.accept(p)
+    contact.refresh_from_db()
+    assert contact.warmth == "replied"
+    assert [
+        t.kind for t in Touch.objects.for_user(student).filter(contact=contact)
+    ] == ["reply_received"]
+
+
+def test_a_bulk_blast_never_upgrades_an_outreach_proposal(student, firm):
+    consider(student, outreach_finding())
+    assert consider(student, finding(bulk=True, thread_id="t-out-1")) is None
+    (p,) = pending(student)
+    assert p.evidence_kind == "outreach"
+
+
+def test_a_reply_never_upgrades_a_dismissed_proposal(student, firm):
+    consider(student, outreach_finding())
+    (p,) = pending(student)
+    discovery.dismiss(p)
+    assert consider(student, finding(thread_id="t-out-1")) is None
+    p.refresh_from_db()
+    assert p.status == "dismissed"
+    assert p.evidence_kind == "outreach"
+
+
+# --------------------------------------------------------------------------- #
+# A threaded "reply" that never addressed the user.
+#
+# Live case (2026-08-25): a West Monroe coordinator's "RE:" follow-up to
+# their own mass invite carried In-Reply-To and named only the firm's own
+# people on To:/Cc:. A reply pointer proves someone hit Reply; only To:/Cc:
+# proves it was aimed at the user.
+# --------------------------------------------------------------------------- #
+
+def test_a_threaded_reply_not_addressed_to_the_user_never_proposes(
+    student, firm
+):
+    assert consider(student, finding(
+        email="coordinator@westmonroe.example",
+        addressed_to_user=False,
+    )) is None
+
+
+def test_findings_without_the_addressed_fact_keep_behaving_as_before(
+    student, firm
+):
+    """Every finding written before `addressed_to_user` existed carries no
+    such key — absence is unknown, not refusal."""
+    assert consider(student, finding(
+        email="alum@gmail.com", threaded_reply=True
+    )) == discovery.PROPOSED
+
+
+# --------------------------------------------------------------------------- #
+# The noise roster — every real sender from the founder's own 3-day window,
+# and the layer that stops each. None may ever become a networking proposal.
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize(
+    "email,extra",
+    [
+        # ATS / application mail: noreply localparts, whatever the domain.
+        ("no-reply@citadel.com", {}),
+        ("noreply@campuscareers.bofa.com", {}),
+        # ESP / job-board sending domains.
+        ("handshake@mail.joinhandshake.com", {}),
+        ("handshake@g.joinhandshake.com", {}),
+        ("tis.presidents@301933.mailchimpapp.com", {}),
+        # Role-account localparts.
+        ("hello@anythings.app", {}),
+        # No firm match, no reply pointer: campus mail, receipts, vendors,
+        # competitor marketing.
+        ("notifications-noreply@mail.brightspace.usc.edu", {}),
+        ("mobileorder@transactcampus.com", {}),
+        ("spamdigest@usc.edu", {}),
+        ("uscpublicsafety@msg.adm.usc.edu", {}),
+        ("ugcareers@marshall.usc.edu", {}),
+        ("VSPVisionCareVCM@e.vsp.com", {}),
+        ("streetsmart@streetsmartcareers.com", {}),
+        ("julia.hornstein@mail.recruitu.com", {}),
+        ("alerts@factset.com", {}),
+        # The ICC application blast: a genuine human sender, 16 students on
+        # To:, no reply pointer, gmail domain — no firm, no thread.
+        ("laicc.usc@gmail.com", {"threaded_reply": False}),
+    ],
+)
+def test_the_noise_roster_is_refused(student, firm, email, extra):
+    over = {"threaded_reply": False, **extra}
+    assert consider(student, finding(email=email, **over)) is None
+    assert pending(student) == []
+
+
+def test_bulk_flagged_mass_invites_are_refused_before_anything_else(
+    student, firm
+):
+    """The West Monroe "Sophomore Series" shape: whatever else is true of
+    the sender, `bulk` refuses first."""
+    assert consider(student, finding(
+        email="cbaenen@westmonroe.example", bulk=True
+    )) is None
