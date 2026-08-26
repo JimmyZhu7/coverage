@@ -182,6 +182,28 @@ class Contact(PrivateModel):
     #
     # Detection never writes this column. It is the user's word, and it stands.
     campaign_exempt = models.BooleanField(default=False)
+    # Is this person related to the user's RECRUITMENT at all? The founder's
+    # 2026-08-25 rule: "all contacts in coverage need to be related to
+    # recruitment, any unrelated should not show up." NULL means "the rule
+    # decides" (`crm.recruitment.contact_verdict` — a deterministic read of
+    # role / notes / the firm's own tracks / the tier list); True/False is
+    # the user's own word and wins permanently, in both directions — the
+    # rescue for a person the rule wrongly hides AND the hammer for one it
+    # wrongly keeps.
+    #
+    # THREE-STATE for the same reason `recruiting_contact` above is: the rule
+    # is the fallback, so "nobody has said" must stay distinguishable from
+    # "no". NOTE THE DELIBERATE REVERSAL this column's rule carries: the
+    # blanket school-tie exemption (`crm.relevance.REL_SCHOOL` keeping every
+    # alum in the queue) was an earlier founder decision, and judging his 24
+    # school-only rows it kept two professors, the campus advising office and
+    # tech/CPG alumni alongside the campus recruiters and finance-club peers
+    # who belong. The founder overrode it: the person's own occupation is the
+    # test now, and a school tie by itself decides nothing. See
+    # `crm/recruitment.py` for the whole doctrine.
+    #
+    # No automated path ever writes this column.
+    recruitment_related = models.BooleanField(null=True, blank=True, default=None)
 
     class Meta(PrivateModel.Meta):
         db_table = "contacts"
