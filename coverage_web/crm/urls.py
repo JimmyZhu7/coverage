@@ -54,6 +54,15 @@ urlpatterns = [
     # shadowed by the int converter (it can't be, but the ordering keeps the
     # relationship obvious).
     path("contacts/archived/", views.contact_archived, name="contact_archived"),
+    # The same trapdoor problem for the other way a contact leaves the board:
+    # answering "that bulk send was not my recruiting" in Settings now takes
+    # its originating contacts off the Network board, and this is where the
+    # board's caveat line points so the answer can be audited and undone one
+    # person at a time. Literal-before-converter, same as the line above.
+    path("contacts/not-recruiting/", views.contact_campaign_hidden,
+         name="contact_campaign_hidden"),
+    path("contacts/<int:pk>/keep/", views.contact_campaign_keep,
+         name="contact_campaign_keep"),
     # Multi-select bulk verbs from the Network board (snooze / park /
     # archive). Same literal-before-converter ordering as the line above.
     path("contacts/bulk/", views.contacts_bulk, name="contacts_bulk"),

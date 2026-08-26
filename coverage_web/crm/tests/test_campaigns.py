@@ -599,8 +599,8 @@ def test_classify_message_counts_only_this_campaign(client):
         {"campaign": small.id, "kind": Campaign.KIND_OTHER}, follow=True,
     )
     body = resp.content.decode()
-    assert "8 contacts affected" in body
-    assert "18 contacts affected" not in body
+    assert "8 contacts hidden" in body
+    assert "18 contacts hidden" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -716,3 +716,299 @@ def test_classify_rejects_an_unknown_kind_and_another_tenants_campaign():
     assert Campaign.objects.for_user(mine).get(
         id=campaign.id
     ).kind == Campaign.KIND_UNCLASSIFIED
+
+
+# ---------------------------------------------------------------------------
+# 7. The Network board.
+#
+# THE COMPLAINT, from the founder reading his own board after answering the
+# question in Settings: "why are there still icc people in my network?" The
+# rule stopped at the daily queue and left all twelve of them (nine
+# originating) in Firm Coverage, the warmth sections and the contact count.
+# "Not my recruiting" is an answer about the relationship, not about one
+# queue, so the board honours it too now — visibly, reversibly, and without
+# deleting anybody.
+# ---------------------------------------------------------------------------
+
+def _board(client):
+    from django.urls import reverse
+
+    return client.get(reverse("crm:contact_list"))
+
+
+def _classified(user, kind):
+    """One 10-person merge at a tier-1 target firm, answered `kind`."""
+    firm = _target_firm(user)
+    people = _merge(user, n=10, firm=firm, days_ago=20)
+    campaign = camp.detect(user)[0]
+    camp.classify(user, campaign.id, kind)
+    return firm, people, campaign
+
+
+def test_an_other_campaigns_contacts_come_off_the_network_board(client):
+    """The fix. Ten club alumni that Settings said were not his recruiting are
+    not on the board that exists to show his recruiting network."""
+    user = _user()
+    firm, people, _ = _classified(user, Campaign.KIND_OTHER)
+    mine = Contact.all_objects.create(user=user, name="Real Banker", firm=firm)
+    client.force_login(user)
+
+    resp = _board(client)
+    body = resp.content.decode()
+
+    assert "Real Banker" in body
+    for c in people:
+        assert c.name not in body
+    assert resp.context["contact_total"] == 1
+    assert resp.context["hidden_total"] == 10
+    # And nobody was deleted: the contact book still holds all eleven.
+    assert Contact.objects.for_user(user).count() == 11
+    assert mine.id not in camp.excluded_contact_ids(user)
+
+
+def test_the_board_says_what_it_is_hiding_and_links_to_it(client):
+    """A count that drops by ten with no explanation is its own bug. The board
+    states the number, the reason, and the way to look."""
+    from django.urls import reverse
+
+    user = _user()
+    _classified(user, Campaign.KIND_OTHER)
+    client.force_login(user)
+
+    body = _board(client).content.decode()
+
+    assert "10 hidden from this board" in body
+    assert "not your recruiting" in body
+    assert reverse("crm:contact_campaign_hidden") in body
+
+
+def test_an_unclassified_campaign_changes_nothing_on_the_board(client):
+    """A detected send nobody has answered behaves exactly as before this
+    module existed. Detection alone hides nobody."""
+    user = _user()
+    firm = _target_firm(user)
+    people = _merge(user, n=10, firm=firm, days_ago=20)
+    camp.detect(user)
+    client.force_login(user)
+
+    resp = _board(client)
+    body = resp.content.decode()
+
+    for c in people:
+        assert c.name in body
+    assert resp.context["contact_total"] == 10
+    assert resp.context["hidden_total"] == 0
+    assert resp.context["hidden_any"] is False
+
+
+def test_a_recruiting_campaign_changes_nothing_on_the_board(client):
+    """"That batch WAS my job search" is an answer too, and it is the answer
+    that must never remove anybody."""
+    user = _user()
+    _, people, _ = _classified(user, Campaign.KIND_RECRUITING)
+    client.force_login(user)
+
+    resp = _board(client)
+    body = resp.content.decode()
+
+    for c in people:
+        assert c.name in body
+    assert resp.context["contact_total"] == 10
+    assert resp.context["hidden_total"] == 0
+
+
+def test_a_contact_the_campaign_did_not_originate_stays_on_the_board():
+    """Somebody he was already recruiting before the blast reached them is not
+    club admin. `originates` decides, and this is the case that makes hiding
+    safe to do at all."""
+    user = _user()
+    firm = _target_firm(user)
+    people = _merge(user, n=10, firm=firm, days_ago=20)
+    prior = people[0]
+    Touch.all_objects.create(
+        user=user, contact=prior, kind="outreach", channel="email",
+        ts=timezone.now() - timedelta(days=90), subject="Coffee chat?",
+    )
+    campaign = camp.detect(user)[0]
+    camp.classify(user, campaign.id, Campaign.KIND_OTHER)
+
+    hidden = camp.excluded_contact_ids(user)
+
+    assert prior.id not in hidden
+    assert hidden == {c.id for c in people if c.id != prior.id}
+
+
+def test_a_hand_exempted_contact_stays_on_the_board(client):
+    """`Contact.campaign_exempt` is the user's word about one person inside a
+    two-hundred-person answer, and it wins on the board exactly as it wins in
+    the queue."""
+    user = _user()
+    _, people, _ = _classified(user, Campaign.KIND_OTHER)
+    rescued = people[0]
+    rescued.campaign_exempt = True
+    rescued.save(update_fields=["campaign_exempt"])
+    client.force_login(user)
+
+    resp = _board(client)
+    body = resp.content.decode()
+
+    assert rescued.name in body
+    assert resp.context["contact_total"] == 1
+    assert resp.context["hidden_total"] == 9
+
+
+def test_every_count_on_the_board_agrees_with_what_it_renders(client):
+    """The bulk-save count drift, one page over: a person hidden from the grid
+    but still counted in a header is the same class of bug. Every number this
+    page prints, checked against the cards it actually drew."""
+    user = _user()
+    firm, people, _ = _classified(user, Campaign.KIND_OTHER)
+    for i, warmth in enumerate(("advocate", "chatted", "replied")):
+        c = people[i]
+        c.warmth = warmth
+        c.save(update_fields=["warmth"])
+    Contact.all_objects.create(
+        user=user, name="Real Banker", firm=firm, warmth="advocate"
+    )
+    client.force_login(user)
+
+    resp = _board(client)
+    ctx = resp.context
+    body = resp.content.decode()
+
+    # The contact grid: header count == cards drawn == warmth sections summed.
+    assert ctx["contact_total"] == body.count('class="contact-card') == 1
+    assert sum(len(s["cards"]) for s in ctx["sections"]) == 1
+    assert "Real Banker" in body
+    # The action lanes: the header total == the items in the lanes, and no
+    # hidden contact is named in any of them.
+    assert ctx["action_total"] == sum(
+        len(g["items"]) for g in ctx["action_groups"]
+    )
+    hidden = camp.excluded_contact_ids(user)
+    for g in ctx["action_groups"]:
+        assert not {i["contact"]["id"] for i in g["items"]} & hidden
+    # The firm card: one contact, one advocate. Not eleven and four.
+    cards = [c for s in ctx["tier_sections"] for c in s["cards"]]
+    assert [c["contact_count"] for c in cards] == [1]
+    assert [c["advocates"] for c in cards] == [1]
+    # `firm_total` counts FIRMS, not contacts, and must not move.
+    assert ctx["firm_total"] == 1
+    # The Coverage Gaps strip reads the same warmths as the cards below it.
+    assert [g["advocates"] for g in ctx["gaps"]] == [1]
+
+
+def test_the_hidden_count_is_scoped_to_the_tab_it_sits_under(client):
+    """A US tab saying "10 hidden" while all ten are in Hong Kong is the same
+    class of lie as hiding them silently. The caveat goes through the same
+    filter as the board it is a caveat about; the TAB does not, because a way
+    back that disappears on one tab is a dead end."""
+    from django.urls import reverse
+
+    user = _user()
+    _, people, _ = _classified(user, Campaign.KIND_OTHER)
+    for c in people:
+        c.region = "hk"
+        c.save(update_fields=["region"])
+    client.force_login(user)
+
+    us = client.get(reverse("crm:contact_list") + "?scope=us")
+    body = us.content.decode()
+
+    assert us.context["hidden_total"] == 0
+    assert us.context["hidden_any"] is True
+    assert "hidden from this board" not in body
+    assert "Not recruiting" in body
+
+
+def test_the_hidden_list_names_the_send_that_hid_them(client):
+    """"These ten are hidden" is a fact about the software. "These ten arrived
+    on Fall 2026 ICC Alumni Digital Panel Outreach" is one he can check against
+    his own memory."""
+    from django.urls import reverse
+
+    user = _user()
+    _, people, _ = _classified(user, Campaign.KIND_OTHER)
+    client.force_login(user)
+
+    resp = client.get(reverse("crm:contact_campaign_hidden"))
+    body = resp.content.decode()
+
+    assert resp.context["contact_total"] == 10
+    for c in people:
+        assert c.name in body
+    assert ICC_SUBJECT[:44] in body
+
+
+def test_bringing_one_back_puts_them_on_the_board_and_leaves_the_rest(client):
+    """Reversible in practice, not only in principle — the same job Unarchive
+    does for the archived list. One person, not the whole send."""
+    from django.urls import reverse
+
+    user = _user()
+    _, people, _ = _classified(user, Campaign.KIND_OTHER)
+    rescued = people[0]
+    client.force_login(user)
+
+    resp = client.post(reverse("crm:contact_campaign_keep", args=[rescued.id]))
+
+    assert resp.status_code == 302
+    assert Contact.objects.for_user(user).get(
+        id=rescued.id
+    ).campaign_exempt is True
+    board = _board(client)
+    assert rescued.name in board.content.decode()
+    assert board.context["contact_total"] == 1
+    assert board.context["hidden_total"] == 9
+
+
+def test_another_tenant_cannot_unhide_your_contact(client):
+    from django.urls import reverse
+
+    mine = _user("owner3@example.com")
+    theirs = _user("intruder3@example.com")
+    _, people, _ = _classified(mine, Campaign.KIND_OTHER)
+    client.force_login(theirs)
+
+    resp = client.post(reverse("crm:contact_campaign_keep", args=[people[0].id]))
+
+    assert resp.status_code == 404
+    assert Contact.objects.for_user(mine).get(
+        id=people[0].id
+    ).campaign_exempt is False
+
+
+def test_a_hidden_contact_keeps_every_direct_surface(client):
+    """Hidden, not deleted. The detail page and every direct link still work —
+    the board is the only thing that stopped listing them."""
+    from django.urls import reverse
+
+    user = _user()
+    _, people, _ = _classified(user, Campaign.KIND_OTHER)
+    hidden = people[0]
+    client.force_login(user)
+
+    detail = client.get(reverse("crm:contact_detail", args=[hidden.id]))
+
+    assert detail.status_code == 200
+    assert hidden.name in detail.content.decode()
+    assert Contact.objects.for_user(user).filter(id=hidden.id).exists()
+
+
+def test_the_firm_page_and_its_rosters_hide_them_too(client):
+    """The board's bug relocated one click to the right. "Who do I know here"
+    is the same claim on /firms/<slug>/ as it is on the Network board."""
+    from django.urls import reverse
+
+    user = _user()
+    firm, people, _ = _classified(user, Campaign.KIND_OTHER)
+    Contact.all_objects.create(user=user, name="Real Banker", firm=firm)
+    client.force_login(user)
+
+    resp = client.get(reverse("directory:firm_detail", args=[firm.slug]))
+    body = resp.content.decode()
+
+    assert "Real Banker" in body
+    for c in people:
+        assert c.name not in body
+

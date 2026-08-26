@@ -434,11 +434,28 @@ def excluded_contact_ids(user) -> set[int]:
         was already recruiting before the blast reached them is not club admin.
       - the contact has not been exempted by hand (`Contact.campaign_exempt`).
 
-    Returns ids only. The caller decides what to do with them, and what it does
-    is narrow: these people keep the contact book, the Network board, search,
-    history and every export. The ONLY thing they lose is a daily action — and
-    even that has the inbound override on top of it (`crm.relevance`), so a
-    panelist who writes in with a real question still surfaces.
+    Returns ids only. The caller decides what to do with them, and two callers
+    now do different things:
+
+      - the daily queue drops their action (`crm.today`, `crm.relevance`),
+        with the inbound override on top of it, so a panelist who writes in
+        with a real question still surfaces.
+      - the Network board takes them off the board entirely
+        (`crm.views.contact_list`), and says so, and lists them at
+        `crm:contact_campaign_hidden` with a one-click way back.
+
+    WHY THE SECOND ONE EXISTS. This function shipped with a docstring
+    promising these people kept the Network board, and the founder read his
+    own board and asked why there were still ICC people in his network. Twelve
+    members on his live data, nine of them originating. "Not my recruiting" is
+    an answer about the relationship, not about one queue, and a board that
+    still counts nine club alumni into Firm Coverage and the contact total is
+    disagreeing out loud with the answer he just gave.
+
+    WHAT IS STILL TRUE, and it is the line this rule must not cross: nobody is
+    deleted, edited or unreachable. Every one of these contacts keeps their
+    detail page, their whole touch history, search, the contact book and every
+    export, and any direct link to them still works.
     """
     ids = set(
         CampaignContact.objects.for_user(user)

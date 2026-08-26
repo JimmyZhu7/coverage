@@ -35,8 +35,9 @@ THE THREE JOBS, and the founder dogfood that forced each:
    bulk send and asks him one question about it; contacts whose relationship
    with him STARTED in a send he says was not his recruiting arrive here with
    `campaign_excluded` set and get no daily action. They keep the contact book,
-   the Network board, search, history and every export, and the inbound
-   override above still applies to them unchanged — a panelist who writes in
+   search, history and every export (they come off the Network board too, but
+   that is `crm.views.contact_list`'s decision, not this module's), and the
+   inbound override above still applies to them unchanged — a panelist who writes in
    with a real question is still a person who wrote to him.
 
 2. THE ASK (`is_recruiting_role`). A campus recruiter and a banker are not the

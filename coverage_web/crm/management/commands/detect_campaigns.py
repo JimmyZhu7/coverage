@@ -17,8 +17,9 @@ the user has answered is locked by `classified_at` and no run touches it.
 WHAT IT DOES NOT DO. It never hides anybody by itself. A freshly detected
 campaign is `unclassified`, which behaves exactly as before it existed —
 everyone stays in the daily queue. Only the user's own answer in Settings
-removes anyone, and even then only from the daily queue, never from the contact
-book, the Network board, search, history or an export.
+removes anyone, and even then only from the daily queue and the Network board
+(which states the count and links to the list) — never from the contact book,
+search, history or an export.
 
 --dry-run prints what would be recorded and writes nothing, which is the right
 first call against a real account.

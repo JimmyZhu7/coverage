@@ -627,11 +627,51 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         )
     )
 
+    # OFF THE BOARD, not just off the daily queue. People whose relationship
+    # with the user began in a bulk send he answered "not my recruiting" — see
+    # `crm/campaigns.py` for the 201-thread ICC club merge that made the
+    # question exist. The rule used to stop at the queue and leave all of them
+    # sitting here, and the founder opened his own board and asked why there
+    # were still club people in his network. Twelve members, nine of them
+    # originating, on his live data. An answer that leaves them in Firm
+    # Coverage, the warmth sections and the contact count is not an answer to
+    # the question Settings asked him.
+    #
+    # Removed BEFORE the scope filter and before every count below, so the
+    # tier board, the Coverage Gaps strip, the action lanes, `contact_total`
+    # and the warmth sections all derive from this one list rather than each
+    # re-deciding. `hidden` is KEPT rather than dropped: a board that quietly
+    # shrinks by nine is the same bug wearing better manners, so it has to be
+    # able to say how many it is not showing and hand him a way to look.
+    #
+    # THE INBOUND OVERRIDE IS NOT REPRODUCED HERE, deliberately. A campaign
+    # contact who wrote in and is owed a reply still gets a card — on Today,
+    # which is the surface that exists to say "do this today"
+    # (`crm/relevance.py`). This page is the standing picture of who he knows
+    # for recruiting, and half-presence (an action lane card for somebody with
+    # no contact card below it) would answer neither question.
+    hidden_ids = campaigns.excluded_contact_ids(user)
+    hidden = [c for c in contacts if c.id in hidden_ids]
+    contacts = [c for c in contacts if c.id not in hidden_ids]
+
     scope = request.GET.get("scope", "").strip().lower()
-    if scope == "school":
-        contacts = [c for c in contacts if c.school or c.school_affiliation]
-    elif scope in NETWORK_SCOPE_REGIONS:
-        contacts = [c for c in contacts if _in_scope(c, scope)]
+
+    def _scoped(rows):
+        if scope == "school":
+            return [c for c in rows if c.school or c.school_affiliation]
+        if scope in NETWORK_SCOPE_REGIONS:
+            return [c for c in rows if _in_scope(c, scope)]
+        return rows
+
+    contacts = _scoped(contacts)
+    # The caveat's number goes through the SAME filter as the board it is a
+    # caveat about. A US tab reading "9 hidden" while eight of them are in
+    # Hong Kong is the same class of lie as hiding them silently.
+    hidden_total = len(_scoped(hidden))
+    # The tab, unlike the caveat, is NOT scoped: it is the way back to the
+    # list, and a way back that vanishes on the School tab because none of the
+    # hidden nine went to USC is a dead end rather than a filter.
+    hidden_any = bool(hidden)
     # How many of the shown contacts are here on a guess rather than a set
     # region. Rendered as a one-line caveat under the Contacts header so a
     # region tab never silently passes off "unknown" as "confirmed".
@@ -930,6 +970,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "sections": sections,
             "contact_total": len(contacts),
             "unconfirmed_total": unconfirmed_total,
+            "hidden_total": hidden_total,
+            "hidden_any": hidden_any,
         },
     )
 
@@ -1258,6 +1300,91 @@ def contact_archived(request: HttpRequest) -> HttpResponse:
         "crm/contact_archived.html",
         {"contacts": contacts, "contact_total": len(contacts)},
     )
+
+
+@login_required
+def contact_campaign_hidden(request: HttpRequest) -> HttpResponse:
+    """The people the Network board is hiding because the user said the send
+    they arrived on was not their recruiting.
+
+    The counterpart to `contact_archived`, and deliberately the same plain
+    ledger rather than a second Network board: somewhere to check the board's
+    arithmetic and put one person back. Nothing here is hidden anywhere else —
+    every one of them keeps their detail page, their whole touch history,
+    search, and every export. This list is what makes the board's caveat line
+    a claim he can audit instead of one he has to take on faith.
+
+    `archived=False` for the same reason the board filters it: somebody who is
+    both archived and campaign-hidden is already accounted for under Archived,
+    and listing them in both places would make the two counts disagree about
+    one person.
+    """
+    from .models import CampaignContact
+
+    hidden_ids = campaigns.excluded_contact_ids(request.user)
+    contacts = (
+        list(
+            Contact.objects.for_user(request.user)
+            .filter(id__in=hidden_ids, archived=False)
+            .select_related("firm")
+            .annotate(last_touch_ts=models_Max("touches__ts"))
+            .order_by("name")
+        )
+        if hidden_ids
+        else []
+    )
+    # WHICH send each person arrived on. One `.for_user`-scoped query, and the
+    # list is close to useless without it: "these nine are hidden" is a fact
+    # about the software, "these nine arrived on Fall 2026 ICC Alumni Digital
+    # Panel Outreach" is the fact he can check against his own memory.
+    sends: dict[int, str] = {}
+    if hidden_ids:
+        for cc in (
+            CampaignContact.objects.for_user(request.user)
+            .filter(
+                contact_id__in=hidden_ids,
+                originates=True,
+                campaign__kind=Campaign.KIND_OTHER,
+            )
+            .select_related("campaign")
+        ):
+            sends.setdefault(cc.contact_id, cc.campaign.label)
+    for c in contacts:
+        c.campaign_label = sends.get(c.id, "")
+    return render(
+        request,
+        "crm/contact_campaign_hidden.html",
+        {"contacts": contacts, "contact_total": len(contacts)},
+    )
+
+
+@login_required
+@require_POST
+def contact_campaign_keep(request: HttpRequest, pk: int) -> HttpResponse:
+    """Put one person from a "not my recruiting" send back on the board.
+
+    Writes the same `Contact.campaign_exempt` column the edit form's "Always
+    keep in my daily queue" tick writes — one column, one meaning, so the
+    hidden list and the form cannot drift into two rescue hatches that
+    disagree. Detection never writes it (`crm/campaigns.py`), so the answer
+    survives every re-run.
+
+    It is what makes hiding reversible in practice rather than only in
+    principle, the same job `contact_unarchive` does for Archived: the founder
+    mail-merged alumni across every industry and one of them is genuinely a
+    banker he wants to recruit through, and the alternative rescue is
+    reclassifying the whole send and letting the other two hundred back in.
+    """
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    if not contact.campaign_exempt:
+        contact.campaign_exempt = True
+        contact.save(update_fields=["campaign_exempt"])
+        record_event("campaign_contact_kept", user=request.user)
+    messages.success(
+        request,
+        f"{contact.name} is back on your board and in your daily queue.",
+    )
+    return redirect("crm:contact_campaign_hidden")
 
 
 @login_required
@@ -1739,9 +1866,9 @@ def classify_campaign(request: HttpRequest) -> HttpResponse:
         moved = len(members & campaigns.excluded_contact_ids(request.user))
         messages.success(
             request,
-            f"Got it. {name} is off your daily queue. {moved} "
-            f"contact{'' if moved == 1 else 's'} affected, all still in your "
-            "network.",
+            f"Got it. {name} is off your daily queue and your network board. "
+            f"{moved} contact{'' if moved == 1 else 's'} hidden, all still in "
+            "your contacts and your history.",
         )
     elif kind == Campaign.KIND_RECRUITING:
         messages.success(request, f"Kept. {name} stays in your daily queue.")

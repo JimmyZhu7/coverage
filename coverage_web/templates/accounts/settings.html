@@ -1017,9 +1017,10 @@
           <div class="set-row">
             <div class="set-row-main">
               <div class="set-row-desc">
-                A send you say was something else stays in your contacts, your
-                network board, your search and your history. It just stops
-                producing daily actions. Anyone who writes to you still
+                A send you say was something else comes off your daily queue
+                and off your network board. The people stay in your contacts,
+                your search and your history, and the board says how many it
+                is hiding and lets you look. Anyone who writes to you still
                 surfaces, whatever the send was.
               </div>
             </div>
@@ -1040,9 +1041,9 @@
                 {% endcomment %}
                 {{ c.originating_count }} of them first heard from you here.
                 {% if c.kind == campaign_kind_other %}
-                  <br><strong>Not your recruiting</strong> — off your daily queue.
+                  <br><strong>Not your recruiting</strong>. Off your daily queue and your network board.
                 {% elif c.kind == campaign_kind_recruiting %}
-                  <br><strong>Your recruiting</strong> — in your daily queue.
+                  <br><strong>Your recruiting</strong>. In your daily queue.
                 {% endif %}
               </div>
             </div>

@@ -1727,8 +1727,9 @@ def _cockpit_context(user) -> dict:
     # queue and left all 16 unanswered panelists sitting under "Waiting on
     # reply, nothing due yet" forever — on the founder's real account that is
     # 190-odd club recipients drowning every genuine recruiting wait. They
-    # keep the contact book, the Network board, search and every export, same
-    # as the queue rule (`crm/campaigns.py`).
+    # keep the contact book, search, history and every export, same as the
+    # queue rule (`crm/campaigns.py`). The Network board hides them and says
+    # so; nothing anywhere deletes them.
     busy_ids |= campaigns.excluded_contact_ids(user)
 
     return {

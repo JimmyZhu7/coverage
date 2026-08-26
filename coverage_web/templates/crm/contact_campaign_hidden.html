@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Not Your Recruiting · Coverage{% endblock %}
+
+{% block head %}{% include "crm/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page">
+  {% comment %}One link back to the board this list is a caveat about — same
+  single crumb Archived Contacts uses, for the same reason.{% endcomment %}
+  <nav class="subnav standalone">
+    <a href="{% url 'crm:contact_list' %}">← Network</a>
+  </nav>
+
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <p class="pagehead-eyebrow">Network</p>
+      <h1 class="pagehead-title">Not Your Recruiting</h1>
+      <p class="pagehead-sub">
+        You said the send these people arrived on was something else you do.
+        They are off your board and out of your queue. Nothing is deleted:
+        every touch stays on the record, and they still turn up in search.
+      </p>
+    </div>
+  </header>
+
+  {% if not contacts %}
+    <div class="empty">
+      <p>Nobody is hidden.</p>
+      <p><a href="{% url 'crm:contact_list' %}">Back to Network</a></p>
+    </div>
+  {% else %}
+    {% comment %}
+    The same ledger row Archived Contacts uses (`.arch-*`), because it answers
+    the same shape of question: who left the board, when you last spoke, and
+    the one button that brings them back. The middle column carries the SEND
+    rather than a date here — "these nine are hidden" is a fact about the
+    software, "these nine arrived on Fall 2026 ICC Alumni Digital Panel
+    Outreach" is one the user can check against his own memory.
+    {% endcomment %}
+    <div class="panel" id="hidden-contacts">
+      <p class="sec-label">{{ contact_total }} hidden</p>
+      {% include "crm/_contact_search.html" with target="hidden-contacts" %}
+      <div class="arch-list">
+        {% for c in contacts %}
+          <div class="arch-row" data-searchable data-order="{{ forloop.counter0 }}"
+               data-name="{{ c.name }}"
+               data-firm="{% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %}"
+               data-touch="{% if c.last_touch_ts %}{{ c.last_touch_ts|date:'U' }}{% endif %}"
+               data-search="{{ c.name }} {% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %} {{ c.role }} {{ c.email }} {{ c.campaign_label }}">
+            <div class="arch-id">
+              <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
+              <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}</span>
+            </div>
+            <span class="arch-when">
+              {% if c.campaign_label %}{{ c.campaign_label|truncatechars:44 }}{% else %}Bulk send{% endif %}
+            </span>
+            {% comment %}
+            Writes `Contact.campaign_exempt` — the user's word about one
+            person inside a two-hundred-person answer. It returns them to the
+            board AND to the daily queue, which is what the column has always
+            meant (crm/models.py), so the button says so rather than promising
+            the smaller half of it.
+            {% endcomment %}
+            <form method="post" action="{% url 'crm:contact_campaign_keep' c.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn"
+                      title="Put {{ c.name }} back on your board and in your daily queue. The rest of the send stays hidden.">Bring back</button>
+            </form>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

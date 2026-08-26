@@ -79,6 +79,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      before the list below is trusted, so it keeps the title's top margin. */
   .net-caveat { font-size: var(--fs-micro); color: var(--ink-3);
     margin: calc(-1 * var(--s2)) 0 var(--s3); }
+  /* Same quiet caveat one level up: this one is about the WHOLE board (the
+     tier cards and the Gaps strip drop too, not just the contact grid), so it
+     sits under the scope tabs and hugs nothing — the header-pull above would
+     tuck it into the nav's underline. */
+  /* No max-width, unlike a body paragraph: the sentence is 93 characters and
+     a readability cap only ever bought it a wrap that orphaned "Show them"
+     onto its own line. It runs one line on a desktop board and wraps by
+     itself on a phone. */
+  .net-caveat--board { margin: 0 0 var(--s4); }
+  .net-caveat a { color: var(--ink-2); text-decoration: underline; }
 
   /* ---- The Today cockpit: cadence queue + a sticky pace/activity rail ---- */
   .cockpit { display: grid; grid-template-columns: minmax(0, 1fr) 320px;
