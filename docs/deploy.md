@@ -55,7 +55,17 @@ On the web service's **Shell** tab:
 uv run --package coverage-web python coverage_web/manage.py createsuperuser
 uv run --package coverage-web python coverage_web/manage.py seed_directory   # 68 firms + firm dates
 uv run --package coverage-web python coverage_web/manage.py scrape            # first opportunities pull
+uv run --package coverage-web python coverage_web/manage.py seed_logo_domains  # firm front doors, for logos
+uv run --package coverage-web python coverage_web/manage.py seed_mail_domains  # the domains bankers email FROM
 ```
+
+`seed_mail_domains` runs **after** `scrape` on purpose: it appends to firms the
+catalog has already created, and it never invents a connector firm. It is also
+the one seed step that does not read `data/seeds/` — that directory is
+gitignored (private), so the mail domains live in the tracked
+`directory/_mail_domains.py` instead. Without this step `capture.discovery`
+matches almost nothing: the domains a board connector stores are career-site
+hosts (`careers.bcg.com`, `jobs.rbc.com`), and nobody sends mail from one.
 
 Now `/admin/` accepts your login and `/opportunities/` shows live openings. The
 cron service runs the full `refresh` pass every 6 hours (00/06/12/18 UTC;
