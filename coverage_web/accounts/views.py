@@ -92,6 +92,27 @@ def _next_step(step: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Onboarding wizard  (/welcome/)
+def _bound_profile_form(request) -> ProfileForm:
+    """`ProfileForm` bound to a POST — the one way it should ever be bound.
+
+    The `initial=` is not a rendering nicety. `ProfileForm.__init__` keeps a
+    no-longer-offered target cycle in the field's choices by reading
+    `self.initial`, and a bound form has no initial of its own, so without
+    this the stale value was absent from `choices` during validation and the
+    save failed with "Select a valid choice" on a checkbox the form itself
+    had rendered ticked and tickable — a profile that could not be saved at
+    all. Caught on the demo account (`sa2028_ib`), 2026-08-25.
+
+    Sourced from the STORED row, never from `request.POST`: reading the
+    submitted data would be the easy fix and the wrong one, because it would
+    let any POST invent its own cycle vocabulary and have it validate.
+    """
+    return ProfileForm(
+        request.POST, request.FILES,
+        initial={"target_cycles": list(request.user.target_cycles or [])},
+    )
+
+
 # ---------------------------------------------------------------------------
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -114,7 +135,7 @@ def onboarding(request):
     section_form = None
     if request.method == "POST":
         if step == "profile":
-            form = ProfileForm(request.POST, request.FILES)
+            form = _bound_profile_form(request)
             if form.is_valid():
                 form.apply_to(request.user)
                 return redirect(_step_url(_next_step(step)))
@@ -459,7 +480,7 @@ def settings_view(request):
         # `elif request.method == "POST":` branch just below for why. The
         # profile <form> in settings.html now carries
         # `<input type="hidden" name="section" value="profile">` to match.
-        form = ProfileForm(request.POST, request.FILES)
+        form = _bound_profile_form(request)
         if form.is_valid():
             form.apply_to(request.user)
             saved = True
@@ -473,6 +494,20 @@ def settings_view(request):
                 )
             messages.success(request, "Profile saved.")
             return redirect(reverse("accounts:settings"))
+        if request.headers.get("HX-Request"):
+            # An INVALID htmx save has to come back as the same partial the
+            # valid one does. Falling through here re-rendered the whole
+            # settings page and htmx swapped that entire document into
+            # `#profile-fields` — a second nav, a second Profile card, a
+            # second everything, nested inside the form the person was
+            # trying to fix. Latent until now (a ProfileForm with every field
+            # optional had almost no reachable failure), and reachable the
+            # moment `school_emails` gained a real refusal.
+            return render(
+                request,
+                "accounts/_profile_form.html",
+                {"form": form, "cycle_suggestions": CYCLE_SUGGESTIONS},
+            )
     elif request.method == "POST":
         # A POST that names neither a recognised `section` nor "profile" —
         # a stale form cached before a section was added/renamed, or a

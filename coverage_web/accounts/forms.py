@@ -16,6 +16,7 @@ firm-picker filters and the profile checkboxes never drift apart.
 from __future__ import annotations
 
 import io
+import re
 import uuid
 from datetime import date
 from functools import lru_cache
@@ -46,6 +47,10 @@ from crm.coverage import DEFAULT_ADVOCATE_TARGET
 from crm.views import TUNABLE_CADENCE_PARAMS
 
 from .models import WORK_AUTH
+
+# How many school addresses one student can state. Not a storage limit — a
+# sanity ceiling, so a pasted mailing list can't become an exclusion list.
+SCHOOL_EMAIL_LIMIT = 5
 
 # Human labels for the region tokens a student can state a preference for.
 # Sourced from `classify.TRACKED_REGIONS`/`REGION_LABELS` — the SAME six-market
@@ -209,6 +214,20 @@ class ProfileForm(forms.Form):
     # the widget to know about; this field does that job explicitly instead.
     remove_avatar = forms.BooleanField(required=False)
     school = forms.CharField(max_length=255, required=False, strip=True)
+    # The student's own school email address(es) — see
+    # `accounts.User.school_emails` for what they are, and
+    # `capture.discovery._own_institution_domains` for the one thing that
+    # reads them. One text box, comma- or space-separated, because the answer
+    # is usually one address and occasionally two; a formset for that would be
+    # ceremony around a field most students fill once.
+    school_emails = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={
+            "placeholder": "you@university.edu",
+            "autocomplete": "off",
+            "spellcheck": "false",
+        }),
+    )
     class_year = forms.TypedChoiceField(
         choices=CLASS_YEAR_CHOICES,
         coerce=int,
@@ -259,6 +278,19 @@ class ProfileForm(forms.Form):
         # recreate the exact silent-clear bug this exists to avoid. Enabled
         # also means the student can untick it on purpose if they're done
         # with that cycle, which a locked control couldn't offer anyway.
+        #
+        # `self.initial`, NEVER `self.data`. A BOUND form (the save) has no
+        # initial of its own, so the view hands the stored values in — see
+        # accounts/views.py's profile POST. Reading the submitted data here
+        # instead would be the easy fix and the wrong one: it would let any
+        # POST invent its own vocabulary and have it validate.
+        #
+        # PINS A FIXED BUG: without the view's `initial=`, this ran on an
+        # empty dict when bound, the stale cycle was absent from `choices`,
+        # and the very checkbox rendered as tickable failed validation with
+        # "Select a valid choice" — a profile that could not be saved at all
+        # until the student found and unticked it. Caught on the demo
+        # account (`sa2028_ib`), 2026-08-25.
         current = [v.strip() for v in (self.initial.get("target_cycles") or []) if v.strip()]
         known_values = {value for value, _ in choices}
         stale = [v for v in current if v not in known_values]
@@ -341,6 +373,7 @@ class ProfileForm(forms.Form):
             initial={
                 "name": user.name,
                 "school": user.school,
+                "school_emails": ", ".join(user.school_emails or []),
                 "class_year": user.class_year,
                 "target_cycles": list(user.target_cycles or []),
                 "regions": list(user.regions or []),
@@ -363,6 +396,54 @@ class ProfileForm(forms.Form):
             }
         )
 
+    def clean_school_emails(self) -> list[str]:
+        """Split, normalise, and refuse out loud the two answers that would
+        do harm. Returns a LIST — `apply_to` writes it to the ArrayField.
+
+        - FREEMAIL is refused. `capture.discovery._FREEMAIL_DOMAINS` drops it
+          at read time anyway (a gmail.com entry excluding all of Gmail is the
+          exact bug that guard exists for), so accepting one here would store
+          a value the engine ignores — the same defect that retired
+          `User.language`'s control (docs/specs/settings-page.md audit #3).
+          Better to say why than to save a no-op.
+        - A MALFORMED address is refused. What gets stored is matched on its
+          domain; a string with no usable domain is a typo, not a fact, and a
+          typo'd domain silently excludes nothing.
+        """
+        raw = (self.cleaned_data.get("school_emails") or "").strip()
+        if not raw:
+            return []
+        from django.core.validators import validate_email
+
+        from capture.discovery import _FREEMAIL_DOMAINS
+
+        addresses: list[str] = []
+        for piece in re.split(r"[,;\s]+", raw):
+            address = piece.strip().lower()
+            if not address:
+                continue
+            try:
+                validate_email(address)
+            except forms.ValidationError:
+                raise forms.ValidationError(
+                    f"“{address}” doesn't look like an email address. Use "
+                    "your full school address, e.g. you@university.edu."
+                ) from None
+            if address.rsplit("@", 1)[-1] in _FREEMAIL_DOMAINS:
+                raise forms.ValidationError(
+                    f"“{address}” is a personal email provider, not a school. "
+                    "Coverage can't treat it as your institution — that would "
+                    "hide every alum who writes from the same provider."
+                )
+            if address not in addresses:
+                addresses.append(address)
+        if len(addresses) > SCHOOL_EMAIL_LIMIT:
+            raise forms.ValidationError(
+                f"That's more than {SCHOOL_EMAIL_LIMIT} addresses. List the "
+                "school accounts you actually email from."
+            )
+        return addresses
+
     def clean_timezone(self) -> str:
         """AUTO and blank both pass through untouched; anything else must name
         a zone `zoneinfo` actually knows, so the middleware's read can never be
@@ -380,10 +461,12 @@ class ProfileForm(forms.Form):
         """Persist validated values back onto the user row. Call only after
         `is_valid()`."""
         cd = self.cleaned_data
-        update_fields = ["name", "school", "class_year", "target_cycles",
-                         "regions", "tracks", "timezone", "timezone_auto"]
+        update_fields = ["name", "school", "school_emails", "class_year",
+                         "target_cycles", "regions", "tracks", "timezone",
+                         "timezone_auto"]
         user.name = cd["name"]
         user.school = cd["school"]
+        user.school_emails = cd["school_emails"]
         user.class_year = cd["class_year"]
         user.target_cycles = cd["target_cycles"]
         user.regions = cd["regions"]

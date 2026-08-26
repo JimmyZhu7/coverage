@@ -71,6 +71,21 @@ replacement for one.
 </div>
 
 {% comment %}
+Sits under School because it is the same fact, spelled the way the product
+can actually use it. The only thing that reads it is the discovery gate
+(capture/discovery.py::_own_institution_domains) — and only to EXCLUDE, which
+is what the hint promises out loud, since a field whose effect is invisible
+is a field people fill in wrong.
+{% endcomment %}
+<label for="{{ form.school_emails.id_for_label }}">School Email</label>
+{{ form.school_emails }}
+<p class="field-hint">The address you email from at school, if it isn't the one you
+  sign in with. Coverage stops suggesting people who write from your own
+  university, so your housing desk never lands in your networking list. Two
+  addresses? Separate them with a comma.</p>
+{{ form.school_emails.errors }}
+
+{% comment %}
 These three stay bare <label>s with no `for`: CheckboxSelectMultiple renders
 its own <label> per checkbox, so there is no single control to point at, and
 the styling for a group heading lives on the element. Every SINGLE control on

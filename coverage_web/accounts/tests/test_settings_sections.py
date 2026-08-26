@@ -678,3 +678,69 @@ def test_onboarding_still_finishes_at_import(client, logged_in):
     assert resp["Location"] == "/app/"
     logged_in.refresh_from_db()
     assert logged_in.onboarded_at is not None
+
+
+# ---------------------------------------------------------------------------
+# School Email — the one setting `capture.discovery` reads to know which
+# domain is the student's OWN institution. Invisible state would be the wrong
+# answer here, so this pins that it is a real control on a real page.
+# ---------------------------------------------------------------------------
+
+def test_school_email_is_a_labelled_control_on_the_settings_page(client, logged_in):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert 'for="id_school_emails"' in body
+    assert 'name="school_emails"' in body
+
+
+def test_school_email_round_trips_through_the_settings_page(client, logged_in):
+    resp = _post(
+        client, section="profile", school="USC", school_emails="jimmyz@usc.edu",
+        class_year="", target_cycles=[], regions=[], tracks=[], timezone="",
+    )
+    assert resp.status_code == 302
+    logged_in.refresh_from_db()
+    assert logged_in.school_emails == ["jimmyz@usc.edu"]
+
+    # And it comes back in the box, so the student can see and change it.
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert 'value="jimmyz@usc.edu"' in body
+
+
+def test_a_rejected_school_email_leaves_the_stored_value_alone(client, logged_in):
+    """Freemail is refused by `ProfileForm.clean_school_emails`. The whole
+    profile save fails with it, which must mean UNCHANGED, not blanked."""
+    logged_in.school_emails = ["jimmyz@usc.edu"]
+    logged_in.school = "USC"
+    logged_in.save(update_fields=["school_emails", "school"])
+
+    resp = _post(
+        client, section="profile", school="Elsewhere U",
+        school_emails="jimmy@gmail.com", class_year="",
+        target_cycles=[], regions=[], tracks=[], timezone="",
+    )
+    assert resp.status_code == 200
+    assert "personal email provider" in resp.content.decode()
+    logged_in.refresh_from_db()
+    assert logged_in.school_emails == ["jimmyz@usc.edu"]
+    assert logged_in.school == "USC"
+
+
+def test_an_invalid_htmx_profile_save_returns_the_partial_not_the_page(
+    client, logged_in
+):
+    """PINS A FIXED BUG. The valid htmx save returns `_profile_form.html`;
+    the invalid one used to fall through to the full settings page, which
+    htmx then swapped into `#profile-fields` — a whole second page nested
+    inside the form the person was trying to fix."""
+    resp = client.post(
+        reverse(SETTINGS),
+        {"section": "profile", "school": "", "school_emails": "x@gmail.com",
+         "class_year": "", "target_cycles": [], "regions": [], "tracks": [],
+         "timezone": ""},
+        HTTP_HX_REQUEST="true",
+    )
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert "personal email provider" in body
+    assert 'id="profile-fields"' not in body
+    assert "<nav" not in body

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 
 from accounts.forms import REGION_CHOICES, TRACK_CHOICES, ProfileForm
 from directory.classify import (
@@ -140,3 +141,116 @@ def test_multiple_stored_cycles_all_round_trip_checked(user):
     form = ProfileForm.from_user(user)
     rendered = str(form["target_cycles"])
     assert rendered.count("checked") == 2
+
+
+def test_a_stale_cycle_can_still_be_saved_through_the_settings_page(client, user):
+    """PINS A FIXED BUG. The stale checkbox is rendered ticked and ENABLED so
+    the student can keep or drop it — but a BOUND ProfileForm has no
+    `initial`, so the stale value was missing from `choices` at validation
+    time and the whole profile save died on "Select a valid choice". Nothing
+    on the page said which control was at fault; the profile was simply
+    unsaveable. Caught on the demo account (`sa2028_ib`), 2026-08-25."""
+    user.target_cycles = ["sa2028_ib"]
+    user.school = "Before U"
+    user.save(update_fields=["target_cycles", "school"])
+    client.force_login(user)
+
+    resp = client.post(
+        reverse("accounts:settings"),
+        {"section": "profile", "school": "After U", "school_emails": "",
+         "class_year": "", "target_cycles": ["sa2028_ib"], "regions": [],
+         "tracks": [], "timezone": ""},
+    )
+    assert resp.status_code == 302, resp.content.decode()[:2000]
+    user.refresh_from_db()
+    assert user.school == "After U"
+    assert user.target_cycles == ["sa2028_ib"]
+
+
+def test_a_post_cannot_invent_a_cycle_for_itself(client, user):
+    """The fix reads the STORED row, not the POST. An unlisted value the user
+    does not already hold must still be refused."""
+    client.force_login(user)
+    resp = client.post(
+        reverse("accounts:settings"),
+        {"section": "profile", "school": "", "school_emails": "",
+         "class_year": "", "target_cycles": ["made_up_cycle"], "regions": [],
+         "tracks": [], "timezone": ""},
+    )
+    assert resp.status_code == 200
+    user.refresh_from_db()
+    assert user.target_cycles == []
+
+
+# ---------------------------------------------------------------------------
+# `school_emails` — the student's own institutional address(es).
+#
+# Read by exactly one thing (capture.discovery._own_institution_domains) and
+# only to EXCLUDE. What matters here is that it round-trips honestly and
+# refuses the two answers that would silently do nothing.
+# ---------------------------------------------------------------------------
+
+def _profile_post(**over):
+    data = {"name": "", "school": "", "school_emails": "", "class_year": "",
+            "target_cycles": [], "regions": [], "tracks": [], "timezone": ""}
+    data.update(over)
+    return data
+
+
+def test_school_emails_round_trip_through_the_form(user):
+    form = ProfileForm(_profile_post(school_emails="Jimmy@USC.edu"))
+    assert form.is_valid(), form.errors
+    form.apply_to(user)
+    user.save()
+    user.refresh_from_db()
+    # Lower-cased on the way in: the gate compares domains, and a stored
+    # "USC.edu" would match nothing.
+    assert user.school_emails == ["jimmy@usc.edu"]
+    assert ProfileForm.from_user(user)["school_emails"].value() == "jimmy@usc.edu"
+
+
+def test_school_emails_accepts_more_than_one(user):
+    """A student can carry an undergrad address and a graduate one; the
+    field must not assume exactly one."""
+    form = ProfileForm(_profile_post(
+        school_emails="a@usc.edu, b@marshall.usc.edu  c@lse.ac.uk"
+    ))
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["school_emails"] == [
+        "a@usc.edu", "b@marshall.usc.edu", "c@lse.ac.uk",
+    ]
+
+
+def test_school_emails_deduplicates(user):
+    form = ProfileForm(_profile_post(school_emails="a@usc.edu, A@usc.edu"))
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["school_emails"] == ["a@usc.edu"]
+
+
+def test_school_emails_refuses_freemail_out_loud(user):
+    """Storing gmail.com here would be a setting the engine ignores — the
+    freemail guard in `_own_institution_domains` drops it. Say why instead
+    of saving a no-op."""
+    form = ProfileForm(_profile_post(school_emails="jimmy@gmail.com"))
+    assert not form.is_valid()
+    assert "personal email provider" in str(form.errors["school_emails"])
+
+
+def test_school_emails_refuses_a_bare_domain(user):
+    """The stored value is an ADDRESS. A bare domain is a different answer to
+    a different question, and taking it silently would leave the student
+    unsure which one the box wanted."""
+    form = ProfileForm(_profile_post(school_emails="usc.edu"))
+    assert not form.is_valid()
+    assert "email address" in str(form.errors["school_emails"])
+
+
+def test_school_emails_blank_stays_blank(user):
+    user.school_emails = ["old@usc.edu"]
+    user.save(update_fields=["school_emails"])
+    form = ProfileForm(_profile_post(school_emails=""))
+    assert form.is_valid(), form.errors
+    form.apply_to(user)
+    user.save()
+    user.refresh_from_db()
+    assert user.school_emails == []
