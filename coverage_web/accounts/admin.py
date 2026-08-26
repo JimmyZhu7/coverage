@@ -43,6 +43,7 @@ class UserAdmin(DjangoUserAdmin):
                     "first_name",
                     "last_name",
                     "school",
+                    "school_emails",
                     "class_year",
                     "target_cycles",
                     "regions",

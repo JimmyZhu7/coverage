@@ -108,6 +108,33 @@ class User(AbstractUser):
     # the point this ships to real users.
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     school = models.CharField(max_length=255, blank=True, default="")
+    # The student's OWN institutional email address(es) — the address they
+    # email FROM at school, which is routinely NOT the address they signed up
+    # with. Read by `capture.discovery._own_institution_domains`, and ONLY as
+    # an exclusion: mail from the student's own institution is a campus
+    # relationship (an RA, an advisor, the housing desk), not a networking
+    # discovery. Verified on the founder's real mailbox (2026-08-22,
+    # read-only): the two junk proposals no other gate could stop were
+    # threaded personal replies from his own school's staff — and his account
+    # email is freemail, so nothing in the product knew his school's domain.
+    #
+    # Why a stated fact and not a derived one: it is the student's answer,
+    # visible and correctable in Settings, and it works with no mailbox
+    # connected and no mail sent. Inferring the domain from `school` (a
+    # display string) would need a name->domain table nobody maintains, and
+    # inferring it from sent mail cannot run before the first scan — which is
+    # exactly when the exclusion has to hold.
+    #
+    # PLURAL on purpose: a student can carry an undergrad address and a
+    # graduate-program one, or keep a transferred school's account alive. A
+    # single field would force a choice they are not making.
+    #
+    # Freemail is never excluded from here — a student who types their gmail
+    # address in gets nothing, by `_FREEMAIL_DOMAINS`, and the form says so
+    # rather than storing a value that would silently do nothing.
+    school_emails = ArrayField(
+        models.EmailField(max_length=254), default=list, blank=True
+    )
     class_year = models.PositiveSmallIntegerField(null=True, blank=True)
     # Which programme(s) the student is recruiting for RIGHT NOW — plural on
     # purpose: an underclassman routinely runs both a Spring Week/Insight

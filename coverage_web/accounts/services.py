@@ -634,7 +634,8 @@ PUSH_SUBSCRIPTION_EXPORT_COLUMNS = ["user_agent", "created"]
 CREDIT_LEDGER_EXPORT_COLUMNS = ["created", "kind", "delta", "period", "props"]
 PRO_WAITLIST_EXPORT_COLUMNS = ["email", "source", "created"]
 PROFILE_EXPORT_COLUMNS = [
-    "email", "name", "school", "class_year", "target_cycles", "regions",
+    "email", "name", "school", "school_emails", "class_year",
+    "target_cycles", "regions",
     "tracks", "work_authorization", "angles", "advocate_target",
     "cadence_params", "weekly_touch_goal", "timezone", "language",
     "joined", "onboarded_at",
@@ -1068,6 +1069,7 @@ def profile_csv(user) -> str:
             user.email,
             user.name,
             user.school,
+            _json_cell(list(user.school_emails or [])),
             user.class_year if user.class_year else "",
             _json_cell(list(user.target_cycles or [])),
             _json_cell(list(user.regions or [])),

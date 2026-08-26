@@ -144,6 +144,103 @@ def test_freemail_account_does_not_exclude_freemail_senders(firm):
     ) == discovery.PROPOSED
 
 
+# --------------------------------------------------------------------------- #
+# The stated school address (accounts.User.school_emails)
+#
+# THE GAP THIS CLOSES: the own-institution gate was built from the two
+# addresses the product happens to store — the account email and a connected
+# mailbox's — and on the founder, the person it was written for, it knew
+# neither. He signs in with freemail and has no Gmail connection; he emails
+# from a `usc.edu` alias. So his school's domain was in nobody's exclusion
+# set and a threaded reply from his school's staff would have proposed.
+# --------------------------------------------------------------------------- #
+
+def test_a_stated_school_address_excludes_its_domain(firm):
+    """The founder's exact shape: freemail account email, NO GmailConnection,
+    and the institution known only because he stated it in Settings."""
+    student = User.objects.create_user(email="founder@gmail.com", password="x")
+    reply = finding(email="housing.desk@school.example", threaded_reply=True)
+
+    # Before: nothing in the product knows the school's domain, and a
+    # threaded reply is exactly the case the "no firm match" rule lets past.
+    assert consider(student, reply) == discovery.PROPOSED
+    ContactProposal.all_objects.filter(user=student).delete()
+
+    student.school_emails = ["student@school.example"]
+    student.save(update_fields=["school_emails"])
+    assert consider(student, reply) is None
+
+
+def test_a_stated_school_address_excludes_its_subdomains(firm):
+    """`housing.school.example` is the same institution. The caller matches
+    exact-or-subdomain, so nothing has to be enumerated."""
+    student = User.objects.create_user(email="sub@gmail.com", password="x")
+    student.school_emails = ["student@school.example"]
+    student.save(update_fields=["school_emails"])
+    assert consider(
+        student,
+        finding(email="desk@housing.school.example", threaded_reply=True),
+    ) is None
+    # ...and not a domain that merely ENDS with the same letters.
+    assert consider(
+        student,
+        finding(email="someone@notschool.example", threaded_reply=True),
+    ) == discovery.PROPOSED
+
+
+def test_a_stated_school_address_does_not_exclude_a_firm_reply(firm):
+    """Exclusion only, and only of the institution: the same threaded reply
+    from a directory-firm domain still proposes."""
+    student = User.objects.create_user(email="firmcase@gmail.com", password="x")
+    student.school_emails = ["student@school.example"]
+    student.save(update_fields=["school_emails"])
+    assert consider(
+        student, finding(email="alex.banker@northbank.example")
+    ) == discovery.PROPOSED
+
+
+def test_a_stated_freemail_address_excludes_nothing(firm):
+    """The form refuses freemail up front; this is the backstop, and it is
+    load-bearing — a gmail.com value taken at face value here would hide
+    every alum who replies from Gmail."""
+    student = User.objects.create_user(email="jimmy.free@example.com", password="x")
+    # Written past the form on purpose (`update_fields`, no validation) —
+    # a row from any other path must still be safe.
+    student.school_emails = ["jimmy.personal@gmail.com"]
+    student.save(update_fields=["school_emails"])
+    assert "gmail.com" not in discovery._own_institution_domains(student)
+    assert consider(
+        student, finding(email="alum.reply@gmail.com", threaded_reply=True)
+    ) == discovery.PROPOSED
+
+
+def test_a_stated_school_address_is_never_promoted(firm):
+    """`school_emails` is an EXCLUSION and nothing else — it must not turn a
+    finding with no evidence at all into a candidate."""
+    student = User.objects.create_user(email="promote@gmail.com", password="x")
+    student.school_emails = ["student@school.example"]
+    student.save(update_fields=["school_emails"])
+    assert consider(
+        student,
+        finding(email="stranger@coldmail.example", threaded_reply=False),
+    ) is None
+
+
+def test_one_students_school_address_does_not_exclude_anothers_mail(firm):
+    """Tenant isolation: the exclusion is read off the user being scanned,
+    so one student's institution can never silence another's inbox."""
+    theirs = User.objects.create_user(email="theirs@gmail.com", password="x")
+    theirs.school_emails = ["them@school.example"]
+    theirs.save(update_fields=["school_emails"])
+    mine = User.objects.create_user(email="mine@gmail.com", password="x")
+
+    reply = finding(email="housing.desk@school.example", threaded_reply=True)
+    assert consider(theirs, reply) is None
+    assert consider(mine, reply) == discovery.PROPOSED
+    assert pending(theirs) == []
+    assert len(pending(mine)) == 1
+
+
 def test_stranger_with_no_signal_never_proposes(student, firm):
     """No firm-domain match AND no reply pointer: a stranger cold-emailing
     the student is not a networking contact."""

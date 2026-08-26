@@ -237,8 +237,9 @@ _FREEMAIL_DOMAINS = frozenset({
 
 
 def _own_institution_domains(user) -> set[str]:
-    """The user's OWN institutional email domains — their account email's and
-    any connected mailbox's, freemail excluded.
+    """The user's OWN institutional email domains — their account email's,
+    any connected mailbox's, and any school address they stated in Settings.
+    Freemail excluded from all three.
 
     WHY: verified on the founder's real mailbox (2026-08-22, read-only): the
     two would-be junk proposals the other gates could not stop were both
@@ -247,18 +248,49 @@ def _own_institution_domains(user) -> set[str]:
     writing from the student's own institution is a campus relationship (an
     RA, an advisor, an office), not a networking discovery; a professor worth
     tracking can always be added by hand. Deterministic, and only as an
-    EXCLUSION — no message is ever promoted by this."""
+    EXCLUSION — no message is ever promoted by this.
+
+    WHY THE THIRD SOURCE (2026-08-25). The two sources this started with are
+    the two the product happens to store, not the two that answer the
+    question, and on the person the gate was WRITTEN FOR it knew neither.
+    The founder signs in as `zhujimmy123@gmail.com` — freemail, correctly
+    dropped here — and has no `GmailConnection` at all, because Gmail Live is
+    not set up. Yet every one of the ~50 coffee-chat requests in his sent
+    mail goes out from his `usc.edu` alias. So `usc.edu` was in nobody's
+    exclusion set, and a threaded reply from USC staff was stopped only by
+    the incidental "no firm match and no reply pointer" rule — which a
+    threaded reply is exactly the exception to. The gate could not see the
+    domain it exists for.
+
+    `accounts.User.school_emails` closes that: a stated fact, visible and
+    correctable in Settings (Profile), needing no mail sent and no mailbox
+    connected. See that field for why it is stated rather than derived from
+    `school` or learned from sent mail.
+
+    SUBDOMAINS: this returns the base domains only; the caller matches
+    exact-or-subdomain, so `housing.usc.edu` is covered by `usc.edu` without
+    anything being enumerated here."""
     from capture.models import GmailConnection
 
     domains = set()
-    for address in [getattr(user, "email", "")] + list(
-        GmailConnection.all_objects.filter(user=user).values_list(
-            "gmail_address", flat=True
+    for address in (
+        [getattr(user, "email", "")]
+        + list(getattr(user, "school_emails", None) or [])
+        + list(
+            GmailConnection.all_objects.filter(user=user).values_list(
+                "gmail_address", flat=True
+            )
         )
     ):
         address = (address or "").strip().lower()
         if "@" in address:
             domain = address.rsplit("@", 1)[-1]
+            # THE FREEMAIL GUARD IS LOAD-BEARING FOR ALL THREE SOURCES. A
+            # student who types a personal address into the Settings field
+            # must not blank out every alum replying from that provider —
+            # the same reason a gmail.com account email excludes nothing.
+            # The form refuses freemail up front; this is the backstop for
+            # rows written before it, or by any other path.
             if domain and domain not in _FREEMAIL_DOMAINS:
                 domains.add(domain)
     return domains
