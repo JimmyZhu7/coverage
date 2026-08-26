@@ -61,6 +61,32 @@ MAIL_DOMAINS: dict[str, list[str]] = {
     "qatalyst": ["qatalyst.com"],
     "allen-company": ["allenco.com"],
     "liontree": ["liontree.com"],
+
+    # -- The wider sweep (2026-08-25). Firms already in the directory whose
+    #    stored domains were a career site or nothing at all, and whose own
+    #    primary domain admits no ambiguity. Firms whose mail domain needed a
+    #    guess (MUFG, Santander, Crédit Agricole CIB, GIC, Haitong, HPS,
+    #    Marshall Wace, Qube, Squarepoint, Tower Research, Verition, GSA
+    #    Capital, Belvedere) are deliberately absent.
+    "bcg": ["bcg.com"],                    # had only careers.bcg.com
+    "blackrock": ["blackrock.com"],        # had only careers.blackrock.com
+    "rbc": ["rbc.com"],                    # had only jobs.rbc.com
+    "accenture": ["accenture.com"],
+    "deloitte": ["deloitte.com"],
+    "ey": ["ey.com"],
+    "bmo": ["bmo.com"],
+    "cibc": ["cibc.com"],
+    "dbs": ["dbs.com"],
+    "stifel": ["stifel.com"],
+    "socgen": ["socgen.com", "societegenerale.com"],
+    "aqr": ["aqr.com"],
+    "bridgewater": ["bridgewater.com"],
+    "sig": ["sig.com"],
+    "xtx": ["xtxmarkets.com"],
+    "schonfeld": ["schonfeld.com"],
+    "permira": ["permira.com"],
+    "janushenderson": ["janushenderson.com"],
+    "exoduspoint": ["exoduspoint.com"],
 }
 
 # ---------------------------------------------------------------------------
