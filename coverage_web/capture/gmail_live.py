@@ -48,6 +48,18 @@ WHAT THIS MODULE DOES **NOT** DO, ON PURPOSE
    (`gmail_pubsub_listen` below), not a push endpoint — deliberately, so this
    whole feature works before Coverage has a public HTTPS deploy at all.
 
+   AND PUB/SUB IS OPTIONAL ENTIRELY (2026-08-27). `sync_connection` builds
+   its client from the stored OAuth refresh token and calls
+   `users().history().list(...)` — no Pub/Sub is on that path, and no Google
+   Cloud credential beyond the OAuth client in `.env`. Pulling FROM Pub/Sub
+   is the one step needing Application Default Credentials, which is exactly
+   what `gmail_pubsub_listen` cannot get on a network that blocks `gcloud`'s
+   loopback hand-back or a Workspace tenant that forbids service-account
+   keys. `gmail_poll` (capture/management/commands/gmail_poll.py) is the
+   same sync on a timer instead of a doorbell: same `sync_connection`, same
+   `apply_findings`, higher latency, zero Cloud credentials. See that
+   command's docstring for the trade in full.
+
 SETUP THIS MODULE ASSUMES ALREADY HAPPENED (docs/gmail-live-setup.md)
 -----------------------------------------------------------------------
 A second Google Cloud OAuth client (never the login one — see §3 and the
@@ -527,6 +539,48 @@ def sync_connection(connection: GmailConnection) -> None:
     connection.history_id = latest_history_id or connection.history_id
     connection.last_notification_at = timezone.now()
     connection.save(update_fields=["history_id", "last_notification_at"])
+
+
+def preview_sync(connection: GmailConnection) -> dict:
+    """Read-only twin of `sync_connection`'s FIRST step, for `gmail_poll
+    --dry-run`. Answers "what is waiting for this mailbox right now" without
+    writing a single row: no findings applied, no `history_id` advanced, no
+    `last_notification_at` stamped, no re-anchor on a 404.
+
+    Returns `{"reanchor": bool, "message_ids": [...], "latest_history_id":
+    str | None}`. `reanchor` True is the 404 case — Gmail's ~7-day history
+    retention passed the stored cursor, and a REAL run would re-anchor to
+    the mailbox's current `historyId` and accept the gap (see
+    `sync_connection`). Reporting it instead of silently returning "nothing
+    to sync" is the whole point: those two states look identical from the
+    outside and mean completely different things.
+
+    DELIBERATELY STOPS AFTER `history.list`. Classifying the messages would
+    mean a `messages.get` for every one of them — the expensive half of a
+    sync — to answer a question a poll's dry run isn't asking. "How much is
+    queued, and is this mailbox still reachable" is what a scheduler's dry
+    run needs; "what exactly would each message do to which contact" is
+    `gmail_backfill --dry-run`'s job, and it already answers it per-contact
+    on the shared `apply_findings(dry_run=True)` path.
+
+    "Writes nothing" means nothing in Coverage and nothing in the mailbox.
+    This DOES make live Gmail API calls — an OAuth token refresh plus one or
+    more `history.list` pages — because a dry run that skipped the network
+    could not tell a working connection from a revoked one, which is the
+    single most useful thing it reports.
+    """
+    gmail = _gmail_client(connection)
+    try:
+        message_ids, latest = _list_new_messages(gmail, connection.history_id or None)
+    except HttpError as exc:
+        if exc.resp.status == 404:
+            return {"reanchor": True, "message_ids": [], "latest_history_id": None}
+        raise
+    return {
+        "reanchor": False,
+        "message_ids": message_ids,
+        "latest_history_id": latest,
+    }
 
 
 def _list_new_messages(gmail, start_history_id) -> tuple[list[str], str | None]:
