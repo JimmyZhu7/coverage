@@ -524,6 +524,7 @@
       <a href="#pace">Weekly Pace</a>
       {% if campaigns %}<a href="#campaigns">Campaigns</a>{% endif %}
       {% if dismissed_proposals %}<a href="#dismissed-proposals">Dismissed</a>{% endif %}
+      {% if merge_suggestions or recent_merges %}<a href="#duplicates">Duplicates</a>{% endif %}
       <p class="settings-nav-group">Notifications</p>
       <a href="#notifications">Notifications</a>
       <p class="settings-nav-group">Plan &amp; Credits</p>
@@ -1141,6 +1142,93 @@
               <form method="post" action="{% url 'crm:proposal_restore' p.id %}">
                 {% csrf_token %}
                 <button type="submit" class="btn">Restore</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% comment %}
+      ---- Duplicate cards ----
+      Pairs of contacts the identity ladder's suggestive rung reads as one
+      person (capture.discovery.duplicate_evidence via crm.merge), and the
+      ledger of what the user answered. Two lists, one card: the open
+      questions, then the merges that can still be undone.
+
+      NOTHING HERE ACTS ON ITS OWN. A false merge fuses two people's
+      histories and there is no clean undo once later touches land on the
+      fused card, so suggestive evidence only ever becomes this card and a
+      tap. The evidence sentence is shown verbatim on both lists: the
+      surface where a decision is made, and the one where it gets reversed,
+      both show what the decision stood on.
+
+      SAME RENDER RULE AS CAMPAIGNS AND DISMISSED: nothing to show, no
+      card, no nav link.
+      {% endcomment %}
+      {% if merge_suggestions or recent_merges %}
+      <section class="set-card kin-reveal" id="duplicates" style="--i:6.8"
+               aria-labelledby="duplicates-h">
+        <div class="set-head">
+          <h2 id="duplicates-h">One Person, Two Cards?</h2>
+          <p>Pairs that look like the same person. Nothing merges without your tap.</p>
+        </div>
+        <div class="set-body">
+          {% if merge_suggestions %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <div class="set-row-desc">
+                Merging keeps the first card, moves the other card's history
+                onto it, and archives the spare. Every merge can be undone
+                below. If they are two people, say so once and Coverage
+                remembers.
+              </div>
+            </div>
+          </div>
+          {% endif %}
+          {% for s in merge_suggestions %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">
+                {{ s.primary.name|smart_title }} &middot; {{ s.duplicate.name|smart_title }}
+              </span>
+              <div class="set-row-desc">
+                Keep <strong>{{ s.primary.name|smart_title }}</strong>{% if s.primary.email %} ({{ s.primary.email }}){% endif %},
+                fold in {{ s.duplicate.name|smart_title }}{% if s.duplicate.email %} ({{ s.duplicate.email }}){% endif %}.
+                <br>{{ s.evidence }}
+              </div>
+            </div>
+            <div class="set-row-control">
+              <form method="post" action="{% url 'crm:contact_merge_act' 'merge' %}">
+                {% csrf_token %}
+                <input type="hidden" name="primary" value="{{ s.primary.id }}">
+                <input type="hidden" name="duplicate" value="{{ s.duplicate.id }}">
+                <button type="submit" class="btn btn-primary">Same person</button>
+              </form>
+              <form method="post" action="{% url 'crm:contact_merge_act' 'reject' %}">
+                {% csrf_token %}
+                <input type="hidden" name="primary" value="{{ s.primary.id }}">
+                <input type="hidden" name="duplicate" value="{{ s.duplicate.id }}">
+                <button type="submit" class="btn">Different people</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+          {% for m in recent_merges %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">{{ m.duplicate.name|smart_title }} &rarr; {{ m.primary.name|smart_title }}</span>
+              <div class="set-row-desc">
+                Merged{% if m.resolved_at %} {{ m.resolved_at|date:"j M Y" }}{% endif %}.
+                {{ m.moved_touch_ids|length }} touch{{ m.moved_touch_ids|length|pluralize:"es" }} moved.
+                {% if m.evidence %}<br>{{ m.evidence }}{% endif %}
+              </div>
+            </div>
+            <div class="set-row-control">
+              <form method="post" action="{% url 'crm:contact_merge_undo' m.id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn">Undo</button>
               </form>
             </div>
           </div>

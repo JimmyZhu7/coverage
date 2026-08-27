@@ -29,8 +29,8 @@ from billing import credits as billing_credits
 from billing import stripe_gateway as billing_stripe_gateway
 from capture import gmail_live
 from capture.models import ContactProposal, GmailConnection
-from crm import campaigns as crm_campaigns
-from crm.models import Campaign, Contact, UserFirm
+from crm import campaigns as crm_campaigns, merge as crm_merge
+from crm.models import Campaign, Contact, ContactMerge, UserFirm
 from directory.models import Firm
 
 from .models import PushSubscription
@@ -556,6 +556,22 @@ def settings_view(request):
                 .filter(status=ContactProposal.STATUS_DISMISSED)
                 .select_related("firm")
                 .order_by("-resolved_at", "-id")[:100]
+            ),
+            # Pairs of contact cards that read as one person (crm.merge —
+            # the identity ladder's suggestive rung, capture.discovery.
+            # duplicate_evidence). Computed live on render, never stored:
+            # a stored suggestion goes stale three ways and every staleness
+            # is a wrong card. Only the user's ANSWERS persist, as the
+            # ContactMerge rows two keys down. Nothing merges without the
+            # tap — a false merge fuses two histories with no clean undo.
+            "merge_suggestions": crm_merge.candidate_pairs(request.user),
+            # Merged pairs, newest first, each with its Undo — the same
+            # mis-tap-visible-within-minutes posture as the dismissed list.
+            "recent_merges": list(
+                ContactMerge.objects.for_user(request.user)
+                .filter(status=ContactMerge.STATUS_MERGED)
+                .select_related("primary", "duplicate")
+                .order_by("-resolved_at", "-id")[:50]
             ),
             "campaign_kind_other": Campaign.KIND_OTHER,
             "campaign_kind_recruiting": Campaign.KIND_RECRUITING,

@@ -53,8 +53,8 @@ from capture.models import (
     GmailConnection, MailFact,
 )
 from crm.models import (
-    CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact, Task,
-    Touch, UserFirm,
+    CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact,
+    ContactMerge, Task, Touch, UserFirm,
 )
 from directory.models import Firm
 
@@ -590,6 +590,15 @@ CAMPAIGN_EXPORT_COLUMNS = [
 CAMPAIGN_CONTACT_EXPORT_COLUMNS = [
     "campaign", "contact", "contact_email", "originates", "sent_at",
 ]
+CONTACT_MERGE_EXPORT_COLUMNS = [
+    # The full ledger of every duplicate-card answer: what was merged, on
+    # what evidence, what moved, and whether it was undone. `evidence` is
+    # the sentence the card showed when the user decided — exporting the
+    # decision without the reason would hand back half the record.
+    "primary", "primary_email", "duplicate", "duplicate_email", "status",
+    "evidence", "moved_touch_count", "field_changes", "note_line",
+    "duplicate_was_archived", "created", "resolved_at",
+]
 CONTACT_PROPOSAL_EXPORT_COLUMNS = [
     "name", "email", "firm", "role_hint", "recruiting_hint", "evidence",
     # What the person replied to, and whether it was a reply at all. Observed
@@ -849,6 +858,30 @@ def campaign_contacts_csv(user) -> str:
                 m.contact.name if m.contact_id else "",
                 m.contact.email if m.contact_id else "",
                 m.originates, _dt(m.sent_at),
+            ]
+            for m in rows
+        ),
+    )
+
+
+def contact_merges_csv(user) -> str:
+    """Every duplicate-card answer (merged, undone, or "different people").
+    Each row is a decision the user made about who is one person — the
+    identity of their own network, which is theirs to take along."""
+    rows = ContactMerge.objects.for_user(user).select_related("primary", "duplicate")
+    return _csv(
+        CONTACT_MERGE_EXPORT_COLUMNS,
+        (
+            [
+                m.primary.name if m.primary_id else "",
+                m.primary.email if m.primary_id else "",
+                m.duplicate.name if m.duplicate_id else "",
+                m.duplicate.email if m.duplicate_id else "",
+                m.status, m.evidence,
+                len(m.moved_touch_ids or []),
+                _json_cell(m.field_changes or {}),
+                m.note_line, m.duplicate_was_archived,
+                _dt(m.created), _dt(m.resolved_at),
             ]
             for m in rows
         ),
@@ -1196,6 +1229,8 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
      "Who was in each bulk send, and whose relationship started there."),
     ("contact_proposals.csv", contact_proposals_csv,
      "People your inbox scan suggested, and what you decided about each."),
+    ("contact_merges.csv", contact_merges_csv,
+     "Duplicate cards you merged, undid, or called different people."),
     ("application_events.csv", application_events_csv,
      "Application updates found in your mail, and what you decided about each."),
     ("mail_facts.csv", mail_facts_csv,
@@ -1301,6 +1336,10 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     # goes before both — same children-before-parents rule as everything here.
     ("campaign_contacts", CampaignContact),
     ("campaigns", Campaign),
+    # References `contact` twice (both CASCADE) — before `touches` only for
+    # readability (its `moved_touch_ids` is plain JSON, not an FK), and well
+    # before `contacts` for the children-before-parents rule.
+    ("contact_merges", ContactMerge),
     ("touches", Touch),
     ("fit_scores", FitScore),
     ("tasks", Task),

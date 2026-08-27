@@ -654,3 +654,78 @@ class CalendarEvent(PrivateModel):
 
     def __str__(self) -> str:
         return f"{self.title} @ {self.starts_at:%Y-%m-%d %H:%M}"
+
+
+class ContactMerge(PrivateModel):
+    """The ledger of one answer to "are these two cards one person?".
+
+    WHY THIS TABLE EXISTS. The founder's own board held the proof that the
+    identity matcher's two exact keys were not enough: "Ebba af Klercker"
+    at ebbakler@amazon.com (replied, 3 touches) and "Ebba Kler" at
+    ebbakler@amazon.es (cold, 1 touch) — one AWS account manager, tracked
+    as two people, history split, and the queue one step from asking him to
+    cold-email someone who had already replied. The evidence there is
+    strong but not conclusive (same mailbox name, related domains, a
+    truncated display name), and a FALSE merge is far worse than a missed
+    one: it fuses two people's histories and there is no clean undo once
+    later touches land on the fused card. So suggestive evidence only ever
+    becomes a card in Settings (`crm.merge.candidate_pairs`, computed live,
+    never stored), and this row records what the USER said about it.
+
+    THREE ANSWERS, ALL DURABLE:
+    - `merged`: the tap happened. `primary` kept the relationship,
+      `duplicate`'s touches moved over (their ids in `moved_touch_ids`, so
+      undo can move exactly those back and nothing else), blank fields
+      copied across are in `field_changes` with before AND after (so undo
+      restores a value only when it still holds what the merge wrote — a
+      hand-edit since is the user's word), the alternate-address note line
+      appended to `primary.notes` is in `note_line`, and the duplicate was
+      archived (its prior state in `duplicate_was_archived`).
+    - `undone`: the user reversed it. The pair is never re-suggested — the
+      undo IS their answer.
+    - `rejected`: the user said "different people". Never re-suggested;
+      this row is the memory, exactly the ContactProposal-dismissal
+      contract.
+
+    Both FKs CASCADE: the ledger is ABOUT the two rows, and a ledger entry
+    for a deleted contact audits nothing."""
+
+    STATUS_MERGED = "merged"
+    STATUS_UNDONE = "undone"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_MERGED, "Merged"),
+        (STATUS_UNDONE, "Undone"),
+        (STATUS_REJECTED, "Different people"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    primary = models.ForeignKey(
+        Contact, on_delete=models.CASCADE, related_name="merges_kept"
+    )
+    duplicate = models.ForeignKey(
+        Contact, on_delete=models.CASCADE, related_name="merges_folded"
+    )
+    # The sentence the card showed when the user answered — the same
+    # show-what-you-knew rule every capture surface holds.
+    evidence = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES)
+    # Touch ids moved from duplicate to primary, verbatim, for the undo.
+    moved_touch_ids = models.JSONField(default=list, blank=True)
+    # {field: {"before": ..., "after": ...}} for every primary field the
+    # merge filled from the duplicate.
+    field_changes = models.JSONField(default=dict, blank=True)
+    # The exact line appended to primary.notes (the alternate address), so
+    # undo can strip that line and no other.
+    note_line = models.CharField(max_length=500, blank=True, default="")
+    duplicate_was_archived = models.BooleanField(default=False)
+    created = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "contact_merges"
+        ordering = ["-created", "-id"]
+        indexes = [models.Index(fields=["user", "status"])]
+
+    def __str__(self) -> str:
+        return f"{self.duplicate_id} -> {self.primary_id} ({self.status})"

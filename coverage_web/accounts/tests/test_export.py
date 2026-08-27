@@ -37,7 +37,9 @@ from assistant.models import (
 )
 from billing.models import CreditLedger
 from capture.models import GmailConnection
-from crm.models import CalendarEvent, ChatDebrief, Contact, Task, Touch, UserFirm
+from crm.models import (
+    CalendarEvent, ChatDebrief, Contact, ContactMerge, Task, Touch, UserFirm,
+)
 from directory.models import Firm, Opportunity
 
 User = get_user_model()
@@ -78,9 +80,17 @@ def loaded(student, firm):
         school="Test University", school_affiliation=True, angle="Same crew team",
         notes="Responsive", archived=False,
     )
-    Contact.all_objects.create(
+    archived = Contact.all_objects.create(
         user=student, name="Archived Person", firm=firm,
         email="archived@test-bank.com", archived=True,
+    )
+    ContactMerge.all_objects.create(
+        user=student, primary=live, duplicate=archived,
+        status=ContactMerge.STATUS_MERGED,
+        evidence="Same mailbox name at related addresses.",
+        moved_touch_ids=[1, 2], field_changes={"role": {"before": "", "after": "Analyst"}},
+        note_line="Also reachable at archived@test-bank.com",
+        duplicate_was_archived=False, resolved_at=timezone.now(),
     )
     touch = Touch.all_objects.create(
         user=student, contact=live, ts=timezone.now(), channel="email",
@@ -175,6 +185,7 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
         "campaigns": "campaigns.csv",
         "campaign_contacts": "campaign_contacts.csv",
         "contact_proposals": "contact_proposals.csv",
+        "contact_merges": "contact_merges.csv",
         "application_events": "application_events.csv",
         "mail_facts": "mail_facts.csv",
         "autopilot_runs": "autopilot_runs.csv",

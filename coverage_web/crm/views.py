@@ -446,6 +446,78 @@ def proposal_restore(request: HttpRequest, pk: int) -> HttpResponse:
 
 @login_required
 @require_POST
+def contact_merge_act(request: HttpRequest, verb: str) -> HttpResponse:
+    """One tap on a duplicate-card suggestion in Settings: `merge` folds the
+    duplicate into the primary through `crm.merge` (touches moved, blanks
+    filled, alternate address noted, duplicate archived — all in the
+    ledger), `reject` records "different people" forever. The suggestion is
+    RE-DERIVED server-side (`crm.merge.suggestion_for`): a pair that no
+    longer clears the suggestive bar, or was answered on another tab,
+    refuses politely instead of merging on stale evidence."""
+    from crm import merge as merge_service
+
+    if verb not in ("merge", "reject"):
+        return HttpResponse(status=400)
+    try:
+        primary_id = int(request.POST.get("primary", ""))
+        duplicate_id = int(request.POST.get("duplicate", ""))
+    except (TypeError, ValueError):
+        return HttpResponse(status=400)
+    cand = merge_service.suggestion_for(request.user, primary_id, duplicate_id)
+    if cand is None:
+        messages.info(
+            request,
+            "That suggestion is no longer standing. Nothing was changed.",
+        )
+        return redirect(reverse("accounts:settings") + "#duplicates")
+    if verb == "merge":
+        merge_service.merge(
+            request.user, cand.primary, cand.duplicate, cand.evidence
+        )
+        record_event("contact_merge_merged", user=request.user, source="settings")
+        messages.success(
+            request,
+            f"{cand.duplicate.name} folded into {cand.primary.name}. "
+            "Their history is one card now. Undo below if this was wrong.",
+        )
+    else:
+        merge_service.reject(
+            request.user, cand.primary, cand.duplicate, cand.evidence
+        )
+        record_event("contact_merge_rejected", user=request.user, source="settings")
+        messages.success(
+            request,
+            f"Kept {cand.primary.name} and {cand.duplicate.name} as two "
+            "people. Coverage will not ask about this pair again.",
+        )
+    return redirect(reverse("accounts:settings") + "#duplicates")
+
+
+@login_required
+@require_POST
+def contact_merge_undo(request: HttpRequest, pk: int) -> HttpResponse:
+    """Reverse one merge from the Settings ledger: the recorded touches move
+    back, filled fields revert where the merge's value still stands, the
+    alternate-address note line comes off, and the duplicate returns to the
+    archived state it actually had (see `crm.merge.undo`)."""
+    from crm import merge as merge_service
+    from crm.models import ContactMerge
+
+    record = get_object_or_404(
+        ContactMerge.objects.for_user(request.user), pk=pk,
+        status=ContactMerge.STATUS_MERGED,
+    )
+    merge_service.undo(record)
+    record_event("contact_merge_undone", user=request.user, source="settings")
+    messages.success(
+        request,
+        f"{record.duplicate.name} is back as their own card, history restored.",
+    )
+    return redirect(reverse("accounts:settings") + "#duplicates")
+
+
+@login_required
+@require_POST
 def autopilot_apply(request: HttpRequest, pk: int) -> HttpResponse:
     """THE one tap — apply everything Autopilot decided in one reviewed run.
 

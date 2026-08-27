@@ -85,6 +85,12 @@ urlpatterns = [
          name="contact_unrelated_keep"),
     # Multi-select bulk verbs from the Network board (snooze / park /
     # archive). Same literal-before-converter ordering as the line above.
+    # Duplicate cards: merge / "different people" taps and the merge undo,
+    # all reached from Settings (see accounts settings.html #duplicates).
+    path("contacts/merge/undo/<int:pk>/", views.contact_merge_undo,
+         name="contact_merge_undo"),
+    path("contacts/merge/<str:verb>/", views.contact_merge_act,
+         name="contact_merge_act"),
     path("contacts/bulk/", views.contacts_bulk, name="contacts_bulk"),
     path("contacts/<int:pk>/archive/", views.contact_archive, name="contact_archive"),
     path("contacts/<int:pk>/unarchive/", views.contact_unarchive, name="contact_unarchive"),
