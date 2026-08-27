@@ -605,6 +605,33 @@ def _record_pattern_evidence(
     return True
 
 
+def _user_aware(user, value: str | None):
+    """`value` (an ISO string) as an aware datetime on the USER's clock, or
+    None if absent/unparseable.
+
+    A naive timestamp means "this clock time, on the user's own clock". It
+    must be anchored to the USER's zone, not the process default: this runs
+    inside a management command, which never passes through
+    TimezoneMiddleware, so get_current_timezone() here is the server's UTC —
+    and a "10am" chat stored as 10:00 UTC reads as 6pm the moment the user
+    sets Asia/Hong_Kong in Settings. Same fallback discipline as the
+    middleware: a blank or unloadable zone name falls back to the project
+    default rather than crashing the sync.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    parsed = parse_datetime(raw)
+    if parsed is None or timezone.is_aware(parsed):
+        return parsed
+    tzname = (getattr(user, "timezone", "") or "").strip()
+    try:
+        zone = ZoneInfo(tzname) if tzname else timezone.get_current_timezone()
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = timezone.get_current_timezone()
+    return timezone.make_aware(parsed, zone)
+
+
 def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     """Put a scheduled chat on the calendar when the finding carries a time.
 
@@ -614,46 +641,87 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     UP because "we do not store a chat datetime anywhere". This is that
     destination.
 
-    Keyed on (user, thread_id) so the twice-daily sync updates the one row
-    rather than stacking a duplicate every run, and so a rescheduled invite
-    on the same thread MOVES the event instead of leaving two. A finding
-    with no time is not an error — most are — it simply makes no event.
+    THE KEY IS THE INVITE, NOT THE THREAD. This was keyed on (user,
+    thread_id) alone, which holds for the twice-daily sync re-reading the
+    same thread but breaks on the case it was written for. A real one from
+    the founder's mailbox: Lily's "Accepted: Jimmy <> Lily Coffee Chat"
+    arrived on thread `1a0346eb...`, and her counter-proposal, "New Time
+    Proposed: Jimmy (USC) <> Lily Coffee Chat", arrived on a DIFFERENT
+    thread, `1a038f4c...` — Google starts a fresh one for it. Two threads
+    meant two rows, so the calendar showed the same chat twice and one of
+    them at the time she had just moved away from. The .ics UID is held
+    constant across REQUEST / REPLY / COUNTER / CANCEL for one event (RFC
+    5545), so it is looked up FIRST and the thread is only the fallback for
+    an invite whose UID could not be read.
+
+    Two consequences of a UID hit, both deliberate:
+
+    * Any OTHER captured chat sitting on the incoming thread is deleted.
+      That row is the duplicate this reconciliation exists to remove — the
+      second copy an earlier run already made — and leaving it would also
+      collide with the (user, thread_id) constraint the moment the surviving
+      row moves onto that thread. Only `source=capture` / `kind=chat` rows
+      qualify: a hand-added event carries a blank thread_id and can never
+      match.
+    * The time only moves FORWARD in invite order. Findings are not sorted
+      outside the backfill, so an older "Accepted:" applied after a newer
+      "New Time Proposed:" would otherwise drag the chat back to the stale
+      time — the same wrong answer as before, just with one row instead of
+      two. `invite_sent_at` records which invite is currently speaking.
+
+    A finding with no time is not an error — most are — it simply makes no
+    event.
     """
-    raw = (finding.get("chat_scheduled_at") or "").strip()
-    thread_id = (finding.get("thread_id") or "").strip()
-    if not raw or not thread_id:
+    when = _user_aware(user, finding.get("chat_scheduled_at"))
+    thread_id = (finding.get("thread_id") or "").strip()[:128]
+    uid = (finding.get("ics_uid") or "").strip()[:255]
+    if when is None or not (thread_id or uid):
         return False
-    when = parse_datetime(raw)
-    if when is None:
-        return False
-    if timezone.is_naive(when):
-        # A naive timestamp means "this clock time, on the user's own clock".
-        # It must be anchored to the USER's zone, not the process default:
-        # this runs inside a management command, which never passes through
-        # TimezoneMiddleware, so get_current_timezone() here is the server's
-        # UTC — and a "10am" chat stored as 10:00 UTC reads as 6pm the moment
-        # the user sets Asia/Hong_Kong in Settings. Same fallback discipline
-        # as the middleware: a blank or unloadable zone name falls back to
-        # the project default rather than crashing the sync.
-        tzname = (getattr(user, "timezone", "") or "").strip()
-        try:
-            zone = ZoneInfo(tzname) if tzname else timezone.get_current_timezone()
-        except (ZoneInfoNotFoundError, ValueError):
-            zone = timezone.get_current_timezone()
-        when = timezone.make_aware(when, zone)
+    sent_at = _user_aware(user, finding.get("occurred_at"))
+
+    event = None
+    if uid:
+        event = CalendarEvent.all_objects.filter(user=user, ics_uid=uid).first()
+    if event is None and thread_id:
+        event = CalendarEvent.all_objects.filter(user=user, thread_id=thread_id).first()
 
     label = contact.name or "Coffee chat"
-    CalendarEvent.all_objects.update_or_create(
-        user=user, thread_id=thread_id[:128],
-        defaults={
-            "title": f"Chat with {label}",
-            "starts_at": when,
-            "all_day": False,
-            "kind": CalendarEvent.KIND_CHAT,
-            "source": CalendarEvent.SOURCE_CAPTURE,
-            "contact": contact,
-        },
-    )
+    if event is None:
+        CalendarEvent.all_objects.create(
+            user=user, thread_id=thread_id, ics_uid=uid,
+            title=f"Chat with {label}", starts_at=when, invite_sent_at=sent_at,
+            all_day=False,
+            kind=CalendarEvent.KIND_CHAT, source=CalendarEvent.SOURCE_CAPTURE,
+            contact=contact,
+        )
+        return True
+
+    if thread_id and event.thread_id != thread_id:
+        CalendarEvent.all_objects.filter(
+            user=user, thread_id=thread_id,
+            source=CalendarEvent.SOURCE_CAPTURE, kind=CalendarEvent.KIND_CHAT,
+        ).exclude(pk=event.pk).delete()
+
+    event.title = f"Chat with {label}"
+    event.all_day = False
+    event.kind = CalendarEvent.KIND_CHAT
+    event.source = CalendarEvent.SOURCE_CAPTURE
+    event.contact = contact
+    # Adopt the UID even when the row was found by thread: that is how a chat
+    # first captured before any of this existed becomes reschedulable.
+    event.ics_uid = uid or event.ics_uid
+    if (
+        sent_at is None
+        or event.invite_sent_at is None
+        or sent_at >= event.invite_sent_at
+    ):
+        event.starts_at = when
+        event.thread_id = thread_id or event.thread_id
+        event.invite_sent_at = sent_at or event.invite_sent_at
+    event.save(update_fields=[
+        "title", "all_day", "kind", "source", "contact", "ics_uid",
+        "starts_at", "thread_id", "invite_sent_at",
+    ])
     return True
 
 

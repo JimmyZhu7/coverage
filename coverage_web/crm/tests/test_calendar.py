@@ -104,6 +104,108 @@ def test_an_unreadable_time_makes_no_event(user):
     assert CalendarEvent.objects.for_user(user).count() == 0
 
 
+# --- a reschedule that lands on a DIFFERENT thread ------------------------ #
+#
+# The shape below is a real one from the founder's mailbox (read-only,
+# 2026-08-25): lily.liu@barclays.com sent "Accepted: Jimmy <> Lily Coffee
+# Chat" on thread 1a0346eb227c8a0b, and then "New Time Proposed: Jimmy (USC)
+# <> Lily Coffee Chat" on a DIFFERENT thread, 1a038f4c6b1e59b3 — Google
+# starts a fresh thread for a counter-proposal. Keyed on the thread alone
+# that is two chats, one of them at a time Lily had just moved away from.
+# The .ics UID is the same on both, because RFC 5545 holds it constant
+# across REQUEST / REPLY / COUNTER for one event.
+
+LILY_UID = "0abc1def2ghi3jkl@google.com"
+
+
+def _lily(thread_id, when, *, sent_at=None, uid=LILY_UID, summary="Coffee Chat"):
+    return {
+        "name": "Lily Liu", "found": True, "email": "lily.liu@barclays.com",
+        "thread_id": thread_id, "chat_status": "scheduled",
+        "chat_scheduled_at": when.isoformat(), "ics_uid": uid,
+        "occurred_at": sent_at.isoformat() if sent_at else None,
+        "evidence": f"Calendar invite received: {summary}",
+    }
+
+
+def test_a_counter_proposal_on_a_new_thread_moves_the_chat(user):
+    Contact.all_objects.create(user=user, name="Lily Liu", email="lily.liu@barclays.com")
+    accepted, proposed = _at(days=3, hour=15), _at(days=4, hour=11)
+
+    apply_findings(user, [_lily("1a0346eb227c8a0b", accepted)])
+    apply_findings(user, [_lily("1a038f4c6b1e59b3", proposed)])
+
+    ev = CalendarEvent.objects.for_user(user).get()
+    assert timezone.localtime(ev.starts_at) == proposed, "moved, not duplicated"
+    assert ev.thread_id == "1a038f4c6b1e59b3", "the thread that spoke last"
+    assert ev.ics_uid == LILY_UID
+
+
+def test_the_older_invite_cannot_drag_the_chat_back(user):
+    """Findings are only sorted by time in the backfill. Applied out of
+    order, the stale "Accepted:" must not win: one row at the wrong time is
+    the same wrong answer as two rows, just quieter."""
+    Contact.all_objects.create(user=user, name="Lily Liu", email="lily.liu@barclays.com")
+    accepted, proposed = _at(days=3, hour=15), _at(days=4, hour=11)
+    monday = timezone.now() - timedelta(days=2)
+
+    apply_findings(user, [_lily("1a038f4c6b1e59b3", proposed, sent_at=monday)])
+    apply_findings(user, [
+        _lily("1a0346eb227c8a0b", accepted, sent_at=monday - timedelta(days=1))
+    ])
+
+    ev = CalendarEvent.objects.for_user(user).get()
+    assert timezone.localtime(ev.starts_at) == proposed
+    assert ev.thread_id == "1a038f4c6b1e59b3"
+
+
+def test_a_chat_already_duplicated_is_collapsed_on_the_next_sync(user):
+    """The rows this bug already wrote are on disk with no UID at all. The
+    next sync has to reconcile them, not just stop adding more."""
+    contact = Contact.all_objects.create(
+        user=user, name="Lily Liu", email="lily.liu@barclays.com")
+    accepted, proposed = _at(days=3, hour=15), _at(days=4, hour=11)
+    for thread, when in (("1a0346eb227c8a0b", accepted), ("1a038f4c6b1e59b3", proposed)):
+        CalendarEvent.all_objects.create(
+            user=user, contact=contact, thread_id=thread, title="Chat with Lily Liu",
+            starts_at=when, kind=CalendarEvent.KIND_CHAT,
+            source=CalendarEvent.SOURCE_CAPTURE,
+        )
+
+    apply_findings(user, [
+        _lily("1a0346eb227c8a0b", accepted),
+        _lily("1a038f4c6b1e59b3", proposed),
+    ])
+
+    ev = CalendarEvent.objects.for_user(user).get()
+    assert timezone.localtime(ev.starts_at) == proposed
+    assert ev.thread_id == "1a038f4c6b1e59b3"
+
+
+def test_two_genuinely_separate_invites_stay_two_events(user):
+    """The fix must not over-merge: two chats with the same person are two
+    rows, and it is their distinct UIDs that say so."""
+    Contact.all_objects.create(user=user, name="Lily Liu", email="lily.liu@barclays.com")
+    apply_findings(user, [
+        _lily("thread-a", _at(days=3), uid="first@google.com"),
+        _lily("thread-b", _at(days=10), uid="second@google.com"),
+    ])
+    assert CalendarEvent.objects.for_user(user).count() == 2
+
+
+def test_an_invite_with_no_uid_still_keys_on_its_thread(user):
+    """The UID is the better key, not a required one. A sender whose .ics
+    will not parse keeps exactly the behaviour they had before."""
+    Contact.all_objects.create(user=user, name="Lily Liu", email="lily.liu@barclays.com")
+    moved = _at(days=6)
+    apply_findings(user, [_lily("thread-a", _at(days=3), uid=None)])
+    apply_findings(user, [_lily("thread-a", moved, uid=None)])
+
+    ev = CalendarEvent.objects.for_user(user).get()
+    assert timezone.localtime(ev.starts_at) == moved
+    assert ev.ics_uid == ""
+
+
 def test_a_dry_run_puts_nothing_on_the_calendar(user):
     Contact.all_objects.create(user=user, name="Ada Lovelace", email="ada@gs.com")
     result = apply_findings(user, [{
@@ -586,6 +688,21 @@ def _tracked_role(user, *, day, title="Summer Analyst", status="", dismissed=Fal
     return opp
 
 
+def _grid(client, when):
+    """The month grid for the month `when` falls in.
+
+    A bare GET of the calendar renders THIS month, so a fixture written as
+    "five days out" silently falls off the grid for the last week of every
+    month — a presence assertion then fails, and an absence assertion passes
+    for the wrong reason, according to the date the suite happens to run.
+    (Six of the tests below did exactly that on 2026-08-27, with the product
+    working correctly.) `_firm_date` further down already sidesteps this by
+    pinning to the 15th; asking for the deadline's OWN month is the same
+    guard without changing what each fixture date means.
+    """
+    return client.get(reverse("crm:calendar"), {"y": when.year, "m": when.month})
+
+
 def test_a_tracked_roles_deadline_lands_on_the_calendar(logged_in, client):
     _tracked_role(logged_in, day=15, title="Summer Analyst")
     body = client.get("/app/calendar/").content.decode()
@@ -596,13 +713,13 @@ def test_an_untracked_roles_deadline_stays_off_the_calendar(logged_in, client):
     from directory.models import Opportunity
 
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
-    Opportunity.objects.create(
+    opp = Opportunity.objects.create(
         firm=firm, title="Nobody Tracks This", status="open",
         # In-month, per `_tracked_role`: a deadline that drifts off this
         # month's grid would pass this assertion for the wrong reason.
         deadline=timezone.localdate().replace(day=15),
         url="https://ms.com/untracked")
-    body = client.get("/app/calendar/").content.decode()
+    body = _grid(client, opp.deadline).content.decode()
     assert "Nobody Tracks This" not in body
 
 
@@ -620,9 +737,9 @@ def test_a_finished_application_stops_showing_its_deadline(logged_in, client):
 
 def test_one_users_tracked_deadline_is_not_anothers(client, user, django_user_model):
     other = django_user_model.objects.create_user(email="other-uo@x.com", password="x")
-    _tracked_role(other, day=15, title="Their Saved Role")
+    opp = _tracked_role(other, day=15, title="Their Saved Role")
     client.force_login(user)
-    body = client.get("/app/calendar/").content.decode()
+    body = _grid(client, opp.deadline).content.decode()
     assert "Their Saved Role" not in body
 
 
@@ -658,7 +775,7 @@ def test_a_prose_read_deadline_is_marked_on_the_calendar(logged_in, client):
     opp.confidence = 0.6
     opp.save(update_fields=["confidence"])
 
-    body = client.get("/app/calendar/").content.decode()
+    body = _grid(client, opp.deadline).content.decode()
     assert "Reported Analyst" in body
     assert "reported date" in body, "the caveat must be spoken, not only hovered"
 
@@ -790,15 +907,20 @@ def test_a_tracked_identity_duplicate_shows_once_on_the_grid(logged_in, client):
 def test_the_month_rail_count_does_not_double_count_the_duplicate(logged_in, client):
     """Layer 4's rail count used a raw .annotate()/Count("id") over
     _tracked_deadlines(), which has no idea two rows are one posting."""
-    _duplicate_pair(logged_in, day=15)
+    opp_a, _ = _duplicate_pair(logged_in, day=15)
     # A second, genuinely distinct tracked deadline in the same month, so a
     # fold that swallowed everything (the UserOpportunity trap) would also
     # be caught by this count, not just an unfolded duplicate.
     _tracked_role(logged_in, day=16, title="Distinct Analyst Role")
 
-    resp = client.get("/app/calendar/")
-    this_month = next(m for m in resp.context["rail"] if m["is_now"])
-    assert this_month["count"] == 2
+    deadline = opp_a.deadline
+    resp = _grid(client, deadline)
+    # By the deadline's own month rather than `is_now`: near a month end the
+    # two fixtures above land in NEXT month, and the count under test is the
+    # one on the month they are actually in. See `_grid`.
+    month = next(m for m in resp.context["rail"]
+                 if (m["y"], m["m"]) == (deadline.year, deadline.month))
+    assert month["count"] == 2
 
 
 def test_the_ics_feed_carries_the_duplicate_once(client, logged_in):

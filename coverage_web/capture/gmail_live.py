@@ -193,6 +193,17 @@ def _excluded_by_labels(label_ids) -> bool:
     return bool(_EXCLUDED_LABEL_IDS.intersection(label_ids or ()))
 _ICS_DTSTART_RE = re.compile(r"DTSTART(?:;TZID=([^:]+))?:(\d{8}T\d{6}Z?)")
 _ICS_SUMMARY_RE = re.compile(r"SUMMARY:(.+)")
+# Anchored to the start of a line, unlike the two above: `UID` is a substring
+# of plenty of other property names (`X-MS-OLK-...UID`, `RECURRENCE-ID` in
+# some exporters' custom fields), and picking one of those up would key the
+# calendar on a value that is NOT stable across a reschedule.
+_ICS_UID_RE = re.compile(r"^UID:(.+)$", re.MULTILINE)
+# RFC 5545 line folding: a long property is split across lines, each
+# continuation beginning with one space or tab. Google's UIDs routinely
+# exceed the 75-octet limit and arrive folded, so the text has to be
+# unfolded before any of the regexes above run — a half-read UID is worse
+# than none, because it still looks like a key.
+_ICS_FOLD_RE = re.compile(r"\r?\n[ \t]")
 
 
 class GmailLiveError(Exception):
@@ -795,16 +806,27 @@ def _decode_body(part: dict) -> str:
         return ""
 
 
-def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None]:
-    """(iso_datetime, summary) from the first `.ics`/`text/calendar` part
-    found, or (None, None). Deterministic per §5 ("scheduling via .ics ...
-    detection") — no language inference, just the invite's own DTSTART."""
+def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None, str | None]:
+    """(iso_datetime, summary, uid) from the first `.ics`/`text/calendar` part
+    found, or (None, None, None). Deterministic per §5 ("scheduling via .ics
+    ... detection") — no language inference, just the invite's own DTSTART.
+
+    THE UID IS THE STABLE IDENTITY. DTSTART answers "when", the UID answers
+    "which event", and only the second one survives a reschedule. A real
+    case from the founder's mailbox: an "Accepted: Jimmy <> Lily Coffee
+    Chat" reply arrived on one Gmail thread and the counter-proposal ("New
+    Time Proposed: ...") arrived on a DIFFERENT one, because Google starts a
+    fresh thread for it. Keyed on the thread, that is two chats — one of
+    them at a time nobody is turning up to. Keyed on the UID, which RFC 5545
+    holds constant across REQUEST / REPLY / COUNTER / CANCEL for the same
+    event, it is one chat that moved. See `capture.gmail._upsert_scheduled_chat`.
+    """
     for part in _walk_parts(message.get("payload", {})):
         mime = part.get("mimeType", "")
         filename = part.get("filename", "")
         if mime != "text/calendar" and not filename.endswith(".ics"):
             continue
-        text = _decode_body(part)
+        text = _ICS_FOLD_RE.sub("", _decode_body(part)).replace("\r\n", "\n")
         dt_match = _ICS_DTSTART_RE.search(text)
         if not dt_match:
             continue
@@ -824,8 +846,10 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None]:
             continue
         summary_match = _ICS_SUMMARY_RE.search(text)
         summary = summary_match.group(1).strip() if summary_match else ""
-        return dt.isoformat(), summary
-    return None, None
+        uid_match = _ICS_UID_RE.search(text)
+        uid = uid_match.group(1).strip() if uid_match else ""
+        return dt.isoformat(), summary, uid or None
+    return None, None, None
 
 
 def _looks_like_bounce(from_addr: str, subject: str) -> bool:
@@ -1027,7 +1051,7 @@ def classify_message_findings(own_email: str, message: dict) -> list[dict]:
 
 def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
     subject = _header(message, "Subject")
-    ics_dt, ics_summary = _extract_ics_schedule(message)
+    ics_dt, ics_summary, ics_uid = _extract_ics_schedule(message)
     return {
         "name": to_name or to_addr.split("@")[0],
         "email": to_addr.lower(),
@@ -1037,6 +1061,9 @@ def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
         "replied": False,
         "chat_status": "scheduled" if ics_dt else "none",
         "chat_scheduled_at": ics_dt,
+        # The invite's own identity, stable across a reschedule that lands
+        # on a different Gmail thread — see `_extract_ics_schedule`.
+        "ics_uid": ics_uid,
         "evidence": (
             f"Calendar invite sent: {ics_summary or subject}"
             if ics_dt
@@ -1066,7 +1093,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
     from_name, from_addr = parseaddr(_header(message, "From"))
     subject = _header(message, "Subject")
     thread_id = message.get("threadId", "")
-    ics_dt, ics_summary = _extract_ics_schedule(message)
+    ics_dt, ics_summary, ics_uid = _extract_ics_schedule(message)
     occurred_at = _message_occurred_at(message)
 
     is_outbound = from_addr.lower() == own_email.lower()
@@ -1192,6 +1219,10 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         "replied": True,
         "chat_status": "scheduled" if ics_dt else "none",
         "chat_scheduled_at": ics_dt,
+        # See the outbound branch above: this is what makes Lily's "New Time
+        # Proposed" on a brand-new thread move the existing chat instead of
+        # adding a second one at the old time.
+        "ics_uid": ics_uid,
         "bulk": False,
         # For the discovery hook (capture.discovery, via apply_findings'
         # unmatched branch): whether this message carries a real RFC reply

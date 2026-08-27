@@ -175,7 +175,52 @@ class TestIcsScheduling:
         assert finding["chat_scheduled_at"] is None
 
     def test_extract_ics_schedule_returns_none_when_absent(self):
-        assert gmail_live._extract_ics_schedule({"payload": {}}) == (None, None)
+        assert gmail_live._extract_ics_schedule({"payload": {}}) == (None, None, None)
+
+    def test_the_invite_uid_rides_along_with_the_time(self):
+        """DTSTART says when, UID says WHICH EVENT — and only the second one
+        survives a reschedule onto a different Gmail thread."""
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL, "Subject": "Invite"},
+            parts=[{"mimeType": "text/calendar", "body": {"data": _b64(
+                "BEGIN:VEVENT\n"
+                "UID:abc123@google.com\n"
+                "DTSTART:20260901T140000Z\n"
+                "SUMMARY:Coffee chat with Alice\n"
+                "END:VEVENT\n"
+            )}}],
+        )
+        assert gmail_live._classify_message(OWN_EMAIL, message)["ics_uid"] == (
+            "abc123@google.com"
+        )
+
+    def test_a_folded_uid_is_unfolded_not_truncated(self):
+        """RFC 5545 splits any property past 75 octets across lines with a
+        leading space. Google's UIDs are long enough to arrive folded, and
+        half a UID still LOOKS like a key — it would quietly key two
+        different events onto the same row."""
+        uid = "0" * 60 + "@google.com"
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL, "Subject": "Invite"},
+            parts=[{"mimeType": "text/calendar", "body": {"data": _b64(
+                "BEGIN:VEVENT\r\n"
+                f"UID:{uid[:50]}\r\n {uid[50:]}\r\n"
+                "DTSTART:20260901T140000Z\r\n"
+                "END:VEVENT\r\n"
+            )}}],
+        )
+        assert gmail_live._classify_message(OWN_EMAIL, message)["ics_uid"] == uid
+
+    def test_an_invite_with_no_uid_still_yields_its_time(self):
+        """Not every sender's .ics survives the parse. A missing UID costs
+        the reschedule key, not the event."""
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL, "Subject": "Invite"},
+            parts=[{"mimeType": "text/calendar", "body": {"data": _b64(self.ICS_TEXT)}}],
+        )
+        finding = gmail_live._classify_message(OWN_EMAIL, message)
+        assert finding["ics_uid"] is None
+        assert finding["chat_scheduled_at"] == "2026-09-01T14:00:00+00:00"
 
 
 class TestTokenEncryption:
