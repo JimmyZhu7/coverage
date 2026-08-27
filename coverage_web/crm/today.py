@@ -24,7 +24,9 @@ from django.views.decorators.http import require_POST
 from analytics.events import record_event
 from analytics.models import UserOpportunity
 from coverage_domain import cadence
-from coverage_domain.pipeline import CHANNELS, MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS
+from coverage_domain.pipeline import (
+    BULK_RECEIVED_KIND, CHANNELS, MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS,
+)
 from directory.classify import TARGET_BUCKETS
 from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
@@ -268,7 +270,17 @@ def _build_actions(user):
     kind_labels = dict(TOUCH_KIND_LABELS)
     last_real: dict[int, Touch] = {}
     for t in touches:
-        if t.kind == MANUAL_OVERRIDE_KIND:
+        # The SAME clock-silent set the engine's idle clocks use
+        # (`cadence._CLOCK_SILENT_KINDS`: `manual_override` AND
+        # `bulk_received`), not just the override kind. Skipping only
+        # `manual_override` here let a `bulk_received` touch — their own
+        # out-of-office auto-reply landing seconds after a genuine reply,
+        # or a newsletter — become the "last real touch": `owed_reply`
+        # went False and the person vanished from the queue with a reply
+        # still owed (live case: contact who replied Aug 21, masked by a
+        # same-day bulk touch). A blast is recorded and visible on the
+        # contact; it is simply not the touch this page reasons from.
+        if t.kind in cadence._CLOCK_SILENT_KINDS:
             continue
         prev = last_real.get(t.contact_id)
         if prev is None or t.ts > prev.ts:
@@ -620,7 +632,16 @@ _INBOUND_TOUCH_KINDS = frozenset({"reply_received", "chat_scheduled"})
 # different question — "what did you do this week?" — and a thank-you note or
 # a keep-warm update is unambiguously work you did. `chat` counts for the same
 # reason: showing up to a conversation is the most expensive thing on the list.
-PACE_TOUCH_KINDS = frozenset(TOUCH_TRANSITIONS) - _INBOUND_TOUCH_KINDS
+#
+# `BULK_RECEIVED_KIND` is the case the derive-by-default rule warned about:
+# it joined `TOUCH_TRANSITIONS` (2026-08-22) without being named inbound
+# here, so the ring counted a newsletter LANDING as work the user did —
+# live, the founder's ring read 6 done in a week where one of the six was
+# an inbound blast. It is somebody else's software's action, excluded by
+# name exactly as this comment block demands.
+PACE_TOUCH_KINDS = (
+    frozenset(TOUCH_TRANSITIONS) - _INBOUND_TOUCH_KINDS - {BULK_RECEIVED_KIND}
+)
 
 # Today's plan sizing. Both are reasoned, not measured — revisit against the
 # founder's actual clear-rate after a couple of weeks of dogfood.
@@ -969,7 +990,14 @@ def _schedule(user, today) -> list[dict]:
         # CalendarEvent branch above — see its comment.
         .select_related("firm")
         .annotate(
-            last_ts=models_Max("touches__ts", filter=~Q(touches__kind=MANUAL_OVERRIDE_KIND))
+            last_ts=models_Max(
+                "touches__ts",
+                # The engine's own clock-silent set (manual_override AND
+                # bulk_received) — a blast must not refresh this clock
+                # any more than it resets the cadence's. See the
+                # `last_real` loop in `_build_actions`.
+                filter=~Q(touches__kind__in=list(cadence._CLOCK_SILENT_KINDS)),
+            )
         )
     )
     for c in untimed:
@@ -1238,7 +1266,14 @@ def _waiting_on_reply(user, busy_ids: set[int], limit=12) -> dict:
         # firm SELECT — the single largest N+1 on the Today page.
         .select_related("firm")
         .annotate(
-            last_ts=models_Max("touches__ts", filter=~Q(touches__kind=MANUAL_OVERRIDE_KIND))
+            last_ts=models_Max(
+                "touches__ts",
+                # The engine's own clock-silent set (manual_override AND
+                # bulk_received) — a blast must not refresh this clock
+                # any more than it resets the cadence's. See the
+                # `last_real` loop in `_build_actions`.
+                filter=~Q(touches__kind__in=list(cadence._CLOCK_SILENT_KINDS)),
+            )
         )
         .filter(last_ts__isnull=False)
         .order_by("-last_ts")

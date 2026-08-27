@@ -2203,3 +2203,41 @@ def test_a_queue_of_only_stuck_prompts_is_not_a_silent_queue(client):
     body = client.get(reverse("crm:week")).content.decode()
     assert "Still open" in body
     assert "Leo Ziqiang Yuan" in body
+
+
+# ---------------------------------------------------------------------------
+# Clock-silent kinds on the VIEW layer (regressions found 2026-08-27)
+# ---------------------------------------------------------------------------
+def test_an_inbound_blast_never_fills_the_ring():
+    """`bulk_received` joined TOUCH_TRANSITIONS after PACE_TOUCH_KINDS'
+    derivation was written, so a newsletter LANDING counted as work the
+    user did (live: 1 of the ring's 6 "done" was an inbound blast)."""
+    assert "bulk_received" not in PACE_TOUCH_KINDS
+    user = _user(weekly_touch_goal=14)
+    c = _contact(user=user, name="Newsletter Victim")
+    _touch(user, c, "bulk_received")
+    assert _cockpit_context(user)["pace"]["done"] == 0
+
+
+def test_a_bulk_touch_after_a_reply_does_not_mask_the_owed_reply():
+    """The engine calls `bulk_received` clock-silent; the view's own
+    last-touch scan skipped only `manual_override`. Their OOO auto-reply
+    landing seconds after a genuine reply became the "last real touch",
+    `owed_reply` went False, and the person fell out of the queue with a
+    reply still owed (live: contact replied Aug 21, masked by a same-day
+    bulk touch). The last REAL touch must stay the reply."""
+    from crm.today import _build_actions
+
+    user = _user()
+    c = _contact(user=user, name="Ebba Reply", email="ebba@firm.example")
+    _touch(user, c, "reply_received", days_ago=1)
+    _touch(user, c, "bulk_received", days_ago=0)
+
+    actions, _ = _build_actions(user)
+    mine = [a for a in actions if a["contact"]["id"] == c.id]
+    assert mine, "the contact must still generate an action"
+    assert all(a["owed_reply"] for a in mine), (
+        "an inbound blast must not overwrite the fact that their reply is "
+        "still unanswered"
+    )
+    assert mine[0]["last_kind"] and "bulk" not in mine[0]["last_kind"].lower()
