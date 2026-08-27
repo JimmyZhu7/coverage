@@ -1833,7 +1833,15 @@ def _cockpit_context(user) -> dict:
             "run": ap_runs[-1],
             "accepts": ap_accepts,
             "escalations": sum(r.escalations for r in ap_runs),
+            "evidence_note": ap_runs[-1].evidence_note,
         }
+    # The OTHER four states — nothing to do, startable (with its price),
+    # deciding, stopped. Computed in `capture.autopilot.today_state` rather
+    # than here so the strip has one source of truth and this module keeps
+    # one line. See that function for what each phase means.
+    from capture import autopilot as autopilot_service
+
+    autopilot_state = autopilot_service.today_state(user)
     if proposals:
         ap_notes = {}
         for d in (
@@ -1998,6 +2006,7 @@ def _cockpit_context(user) -> dict:
         "app_events": app_events,
         "mail_facts": mail_facts,
         "autopilot_review": autopilot_review,
+        "autopilot_state": autopilot_state,
         "planned_total": len(planned),
         "held": held,
         "held_total": len(held),

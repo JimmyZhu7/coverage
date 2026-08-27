@@ -34,6 +34,12 @@ urlpatterns = [
     # the activity ledger with every decision's quote, and the per-decision
     # undo that doubles as the permanent override.
     path("autopilot/", views.autopilot_log, name="autopilot_log"),
+    # Starting a run (the button on Today) and the poll target that keeps
+    # the strip honest while one is queued or deciding. Both literal
+    # segments, ahead of the <int:pk> converter for the same reason
+    # "bulk" is above.
+    path("autopilot/start/", views.autopilot_start, name="autopilot_start"),
+    path("autopilot/state/", views.autopilot_state, name="autopilot_state"),
     path("autopilot/<int:pk>/apply/", views.autopilot_apply,
          name="autopilot_apply"),
     path("autopilot/decision/<int:pk>/undo/", views.autopilot_undo,

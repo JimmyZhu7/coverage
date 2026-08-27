@@ -42,13 +42,16 @@
           {% if run.source_label %} · from {{ run.source_label }}{% endif %}
         </p>
         {% comment %}
-        The sentence a run owes the reader beyond its counts: what it was
-        able to weigh its verdicts against, and what it was not. A run
+        The two sentences a run owes the reader beyond its counts: what it
+        was able to weigh its verdicts against (and what it was not — a run
         shown no counter-evidence once accepted a departed man and a full
-        mailbox, and the log said nothing about why. Written onto the run
-        row at decide time, so a copy change can never re-describe a run
-        after the fact.
+        mailbox, and the log said nothing about why), and, when it stopped,
+        that it stopped. Both live on the run row so a copy change can never
+        re-describe a run after the fact.
         {% endcomment %}
+        {% if run.failure_reason %}
+          <p class="arch-meta">{{ run.failure_reason }}</p>
+        {% endif %}
         {% if run.evidence_note %}
           <p class="arch-meta">{{ run.evidence_note }}</p>
         {% endif %}

@@ -593,6 +593,33 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
     transition: background var(--t-fast), border-color var(--t-fast); }
   .prop-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .prop-undo-btn[disabled] { opacity: .55; cursor: default; }
+  .prop-undo-btn[disabled]:hover { border-color: var(--accent-line); background: var(--surface); }
+
+  /* Autopilot's own strip, in the four states that are not "here is a
+     batch to tap". Same row shape as the undo strip above (it is the same
+     kind of object: one sentence about something that just happened, plus
+     the one control that answers it) with two quieter skins:
+       .ap-strip-quiet — a statement, no action. Nothing to spend, nothing
+         to undo, so it must not carry the accent that says "act on me".
+       .ap-strip-warn  — a run stopped. Warm border, and deliberately NOT
+         red: nothing was lost and nothing was charged, so alarm would be
+         a lie about the stakes. */
+  .ap-strip-quiet { background: var(--surface-2, var(--surface));
+    border-color: var(--line); border-left-color: var(--ink-4, var(--line));
+    color: var(--ink-3); }
+  .ap-strip-warn { background: var(--warn-soft, var(--accent-soft));
+    border-color: var(--warn-line, var(--accent-line));
+    border-left-color: var(--warn, var(--accent)); }
+  .ap-evidence { display: block; margin-top: 2px; font-size: var(--fs-xs); }
+  /* The one moving thing on the page while a run is out. Reduced-motion
+     users get a solid dot — the strip's words already carry the state, so
+     the animation is decoration and must be droppable. */
+  .ap-pulse { display: inline-block; width: 7px; height: 7px; margin-right: 6px;
+    border-radius: 50%; background: var(--accent); vertical-align: middle;
+    animation: ap-pulse 1.4s ease-in-out infinite; }
+  @keyframes ap-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .ap-pulse { animation: none; opacity: 1; } }
 
   /* Prep lane: a chat happening in a few hours. The only lane above Debrief,
      and the only one whose card leads with a clock — everything else on this

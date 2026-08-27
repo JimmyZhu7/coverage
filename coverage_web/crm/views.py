@@ -554,6 +554,67 @@ def autopilot_apply(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
+@require_POST
+def autopilot_start(request: HttpRequest) -> HttpResponse:
+    """Start a decide pass — the control that made this loop self-serve.
+
+    Until this existed the AI pass was a management command: a student
+    could APPLY a finished run and undo it, but could not start one. This
+    is the missing half, and everything it must not do is enforced in
+    `capture.autopilot.start_run` rather than here:
+
+      - it never blocks on the model — this writes a QUEUED row and
+        returns; the worker decides (see that module's "HOW A RUN STARTS");
+      - it never double-runs — `uniq_autopilot_active` refuses a second
+        active row at the database, so two taps land as one run plus one
+        "already running";
+      - it never spends what the ledger cannot cover — `preview` clamps and
+        refuses BEFORE the row is written, let alone a model call;
+      - it never applies anything. Deciding writes verdicts; the separate
+        "Add all N" tap is still the only thing that touches the CRM, which
+        is the Limited Use posture and not a UX preference.
+
+    Re-renders the cockpit like every other Today action, so the strip the
+    student sees next is the state they are actually in.
+    """
+    from capture import autopilot
+
+    outcome, run = autopilot.start_run(request.user, source_label="Today")
+    record_event(
+        "autopilot_started", user=request.user, outcome=outcome,
+        run_id=run.pk if run else None,
+    )
+    if outcome == autopilot.ALREADY_RUNNING:
+        messages.info(request, "Autopilot is already reading your cards.")
+    elif outcome == autopilot.INSUFFICIENT_CREDITS:
+        messages.error(
+            request,
+            "Not enough credits to read those cards. Nothing was started "
+            "and nothing was charged.",
+        )
+    elif outcome == autopilot.UNCONFIGURED:
+        messages.error(request, "Autopilot isn't switched on for this deploy.")
+    elif outcome == autopilot.NOTHING_TO_DECIDE:
+        messages.info(request, "Nothing for Autopilot to read right now.")
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+@login_required
+def autopilot_state(request: HttpRequest) -> HttpResponse:
+    """The poll target while a run is queued or deciding.
+
+    Returns the whole cockpit, not a fragment, because the cockpit is the
+    htmx swap target for every other Today action and re-rendering it is
+    how this page has always stayed in sync. The polling attribute lives
+    on the running strip itself, so the poll stops the moment the strip it
+    was attached to is replaced by a finished one — no timer to cancel, no
+    state to track, and a run that FAILED replaces the spinner with the
+    reason rather than spinning forever.
+    """
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+@login_required
 def autopilot_log(request: HttpRequest) -> HttpResponse:
     """The activity ledger: every run, every decision, and the quote each
     one stands on — the same check-the-rule's-work surface as Not Related
@@ -564,7 +625,11 @@ def autopilot_log(request: HttpRequest) -> HttpResponse:
 
     runs = list(
         AutopilotRun.objects.for_user(request.user)
-        .exclude(status=AutopilotRun.STATUS_RUNNING)
+        # A run still queued or deciding has nothing to show yet — its
+        # decisions are being written as the page renders. The Today strip
+        # is where an in-flight run is disclosed; this page is the record
+        # of finished ones.
+        .exclude(status__in=AutopilotRun.ACTIVE_STATUSES)
         .prefetch_related(
             "decisions__proposal", "decisions__app_event", "decisions__contact",
         )

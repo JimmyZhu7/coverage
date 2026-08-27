@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 from coverage_web.tenancy import PrivateModel
 
@@ -614,16 +615,30 @@ class AutopilotRun(PrivateModel):
     can touch nothing.
     """
 
+    # QUEUED is the state a user-started run is born in: the button writes
+    # the row and returns, and the worker (`capture_autopilot_worker`)
+    # claims it. It exists as a ROW rather than as an in-process job for
+    # the reason the rescan queue gives (capture.views.gmail_rescan): 52
+    # sequential model calls is minutes of work, and no POST may wait on
+    # it. It is also the re-entrancy guard — see `uniq_autopilot_active`
+    # below: a second tap cannot write a second active row, so "two taps,
+    # one run" is a database fact, not a race the view hopes to win.
+    STATUS_QUEUED = "queued"
     STATUS_RUNNING = "running"
     STATUS_REVIEWED = "reviewed"    # decided, waiting for the user's tap
     STATUS_APPLIED = "applied"
     STATUS_FAILED = "failed"
     STATUS_CHOICES = [
+        (STATUS_QUEUED, "Queued"),
         (STATUS_RUNNING, "Deciding"),
         (STATUS_REVIEWED, "Reviewed — waiting for your tap"),
         (STATUS_APPLIED, "Applied"),
         (STATUS_FAILED, "Failed"),
     ]
+    # The two states in which a run still owes the user an answer. One per
+    # user at a time (the constraint below), and the pair the stale reaper
+    # measures against.
+    ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_RUNNING)
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     status = models.CharField(
@@ -652,13 +667,35 @@ class AutopilotRun(PrivateModel):
     # produced a whole batch of wrong accepts and said nothing about it.
     # A run that reads less than the mailbox knows has to say so.
     evidence_note = models.CharField(max_length=300, blank=True, default="")
+    # Why a FAILED run failed, in the user's language. A failed run that
+    # renders identically to a running one is the "silently died" state
+    # this field exists to make impossible.
+    failure_reason = models.CharField(max_length=300, blank=True, default="")
     created = models.DateTimeField(auto_now_add=True)
+    # When a worker actually claimed the row (NOT when it was queued —
+    # `GmailConnection.rescan_started_at` carries the same distinction for
+    # the same reason: staleness measured from the request reclaims runs
+    # that were only slow to start, and charges twice for them).
+    started_at = models.DateTimeField(null=True, blank=True)
     decided_at = models.DateTimeField(null=True, blank=True)
     applied_at = models.DateTimeField(null=True, blank=True)
 
     class Meta(PrivateModel.Meta):
         db_table = "autopilot_runs"
         ordering = ["-created"]
+        constraints = [
+            # "Two taps, one run", enforced by the database rather than by
+            # the view's read-then-write. At most one queued-or-running run
+            # per user; a second concurrent POST loses the insert with an
+            # IntegrityError, which `queue_run` catches and reports as
+            # "already running" — the same answer the pre-check gives, now
+            # true even when both requests read an empty table.
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=Q(status__in=["queued", "running"]),
+                name="uniq_autopilot_active",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"AutopilotRun #{self.pk} ({self.status})"

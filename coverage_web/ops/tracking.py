@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 # truth silently drifting from a file this code doesn't parse.
 EXPECTED_INTERVALS: dict[str, timedelta] = {
     "gmail-backfill": timedelta(minutes=15),
+    # The Today button's worker (coverage-autopilot, */5). Five minutes,
+    # not fifteen, because a student is watching this one — a stalled tick
+    # here is a run that never starts, and the strip says "within a few
+    # minutes".
+    "autopilot": timedelta(minutes=5),
     "gmail-watch-renew": timedelta(days=1),
     "scrape": timedelta(hours=6),
     "push-alerts": timedelta(days=1),

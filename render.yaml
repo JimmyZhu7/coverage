@@ -378,3 +378,42 @@ services:
         sync: false
       - key: GMAIL_LIVE_TOKEN_KEY
         sync: false
+
+  # ---- Autopilot worker: decide the runs students queued ----------------
+  # `capture.autopilot.start_run` (the "Run Autopilot" button on Today)
+  # writes a QUEUED run and returns; 52 sequential model calls is minutes
+  # and no POST may wait on it. This tick claims those rows and decides
+  # them — the same queue-and-tick shape as coverage-gmail-backfill above,
+  # for the same reason, and it NEVER applies anything: the student's own
+  # tap on Today is still the only thing that writes to their network.
+  #
+  # Five minutes, not fifteen: a student is watching this one, and the
+  # strip they are looking at says "starts within a few minutes". Every
+  # tick that finds nothing queued is a single indexed SELECT.
+  #
+  # ANTHROPIC_API_KEY is the one value that matters here — blank and the
+  # worker fails every run it claims with "AI isn't switched on", which is
+  # also what the button says before it is ever tapped (the control is not
+  # offered on a dark deploy at all).
+  - type: cron
+    name: coverage-autopilot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "*/5 * * * *"
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py capture_autopilot_worker"
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: coverage_web.settings.production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coverage-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: coverage-web
+          envVarKey: DJANGO_SECRET_KEY
+      - key: DJANGO_ALLOWED_HOSTS
+        value: localhost
+      - key: ANTHROPIC_API_KEY
+        sync: false

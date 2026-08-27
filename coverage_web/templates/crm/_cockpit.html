@@ -211,11 +211,103 @@ on every quick action so all of it stays in sync.
     "hands-off" never means "unseen": what's ready, what was left for the
     user, and where every quoted reason lives.
     {% endcomment %}
+    {% comment %}
+    STARTING a run — the half of this loop that used to be a management
+    command. Five states, one strip, and the phase is decided in
+    `capture.autopilot.today_state` rather than by stacking `{% if %}`s
+    here, so "which state am I in" has one answer.
+
+    Read the states as promises:
+      * idle    — the price is on the button BEFORE the tap, because the
+                  student is spending their own credits. When a ceiling
+                  bites, the button says how many of how many it can read
+                  rather than quietly doing less than the number above it.
+      * active  — polls the cockpit (crm:autopilot_state) every few
+                  seconds. The poll attribute lives on THIS strip, so it
+                  stops by being replaced: the finished strip has no
+                  polling attribute, and there is no timer to leak.
+      * failed  — says so, and says nothing was added. A run that died
+                  must never wear the face of one still thinking.
+      * reviewed with nothing to add — the run still owes the student a
+                  sentence. Silence would read as "it never ran".
+      * nothing — no strip at all when there is nothing pending, and a
+                  quiet line (never a button) when everything on the page
+                  has already been read. Most days are this day, and this
+                  day must not read as an invitation to spend.
+    {% endcomment %}
+    {% if autopilot_state.phase == "idle" %}
+      <div class="prop-undo ap-strip" role="status">
+        <span class="prop-undo-said">
+          Autopilot can read {% if autopilot_state.preview.clamped %}{{ autopilot_state.preview.decidable }} of {{ autopilot_state.preview.candidates }}{% else %}{{ autopilot_state.preview.candidates }}{% endif %} card{{ autopilot_state.preview.candidates|pluralize }} for you{% if autopilot_state.preview.free_rows %}, plus {{ autopilot_state.preview.free_rows }} application update{{ autopilot_state.preview.free_rows|pluralize }}{% endif %}.
+          <span class="prop-undo-note">
+            About {{ autopilot_state.preview.credits }} credit{{ autopilot_state.preview.credits|pluralize }} of your {{ autopilot_state.preview.balance }}. It decides only — nothing is added to your network until you tap again.{% if autopilot_state.preview.clamped %} The rest stay as cards, untouched.{% endif %}
+          </span>
+        </span>
+        <button type="button" class="btn btn-primary prop-undo-btn"
+                title="Read every card and write up a verdict for each. Nothing is added until you tap Add all."
+                hx-post="{% url 'crm:autopilot_start' %}">Run Autopilot</button>
+      </div>
+    {% elif autopilot_state.phase == "active" %}
+      <div class="prop-undo ap-strip" role="status" aria-live="polite"
+           hx-get="{% url 'crm:autopilot_state' %}" hx-trigger="every 4s">
+        <span class="prop-undo-said">
+          <span class="ap-pulse" aria-hidden="true"></span>
+          {% if autopilot_state.run.status == "queued" %}Autopilot is queued — it starts within a few minutes.{% else %}Autopilot is reading your cards.{% endif %}
+          <span class="prop-undo-note">This can take a few minutes. Nothing is being added to your network — it's writing verdicts for you to tap.</span>
+        </span>
+        <button type="button" class="btn prop-undo-btn" disabled>Working…</button>
+      </div>
+    {% elif autopilot_state.phase == "failed" %}
+      <div class="prop-undo ap-strip ap-strip-warn" role="status">
+        <span class="prop-undo-said">
+          {{ autopilot_state.run.failure_reason|default:"Autopilot stopped before it finished. Nothing was added to your network." }}
+          <span class="prop-undo-note">Your cards below are exactly as they were. <a href="{% url 'crm:autopilot_log' %}">See the run</a>.</span>
+        </span>
+        {% if not autopilot_state.preview.blocked %}
+          <button type="button" class="btn prop-undo-btn"
+                  hx-post="{% url 'crm:autopilot_start' %}">Try again{% if autopilot_state.preview.credits %} · {{ autopilot_state.preview.credits }} credit{{ autopilot_state.preview.credits|pluralize }}{% endif %}</button>
+        {% endif %}
+      </div>
+    {% elif autopilot_state.phase == "reviewed_empty" %}
+      <div class="prop-undo ap-strip ap-strip-quiet" role="status">
+        <span class="prop-undo-said">
+          Autopilot read {{ autopilot_state.run.llm_calls }} card{{ autopilot_state.run.llm_calls|pluralize }} and left {% if autopilot_state.run.escalations > 1 %}them all{% else %}it{% endif %} for you — nothing was safe enough to add on its own.
+          <span class="prop-undo-note">Each one carries the line it read, below. <a href="{% url 'crm:autopilot_log' %}">Check its work</a>.</span>
+        </span>
+      </div>
+    {% elif autopilot_state.phase == "no_credits" %}
+      <div class="prop-undo ap-strip ap-strip-quiet" role="status">
+        <span class="prop-undo-said">
+          Autopilot could read {{ autopilot_state.preview.candidates }} card{{ autopilot_state.preview.candidates|pluralize }} for you, but your credits are used up.
+          <span class="prop-undo-note">Nothing was started and nothing was charged.{% if autopilot_state.preview.refill_on %} Credits refill {{ autopilot_state.preview.refill_on|date:"j M" }}.{% endif %} The cards below still work by hand.</span>
+        </span>
+      </div>
+    {% elif autopilot_state.phase == "nothing" and autopilot_state.run and proposals %}
+      <div class="prop-undo ap-strip ap-strip-quiet" role="status">
+        <span class="prop-undo-said">
+          Autopilot has already read every card here.
+          <span class="prop-undo-note">These are the ones it left for you. <a href="{% url 'crm:autopilot_log' %}">Check its work</a>.</span>
+        </span>
+      </div>
+    {% endif %}
+
     {% if autopilot_review %}
       <div class="prop-undo" role="status">
         <span class="prop-undo-said">
           Autopilot read this scan: {{ autopilot_review.accepts }} ready to add{% if autopilot_review.escalations %}, {{ autopilot_review.escalations }} left for you below{% endif %}.
           <span class="prop-undo-note">Every decision quotes the line it stands on — <a href="{% url 'crm:autopilot_log' %}">check its work</a>, or undo any of it later from the same page.</span>
+          {% comment %}
+          WHAT IT COULD AND COULD NOT READ. A run that judged 53 rows
+          having been told "OTHER MAIL … none found" accepted a man who
+          had left his firm and one whose mailbox was full — and said
+          nothing about the gap. The run now gathers its own
+          counter-evidence and states its limits on the row
+          (AutopilotRun.evidence_note); this is where the student sees it,
+          next to the tap it is about.
+          {% endcomment %}
+          {% if autopilot_review.evidence_note %}
+            <span class="prop-undo-note ap-evidence">{{ autopilot_review.evidence_note }}</span>
+          {% endif %}
         </span>
         <button type="button" class="btn btn-primary prop-undo-btn"
                 title="Apply every reviewed decision at once. Each one is undoable afterwards."

@@ -68,6 +68,19 @@ ladder already consumed at capture time and which persist nowhere — is
 NAMED on every run (`AutopilotRun.evidence_note`) and rendered wherever
 the run is. Partial evidence is allowed; silent partial evidence is not.
 
+HOW A RUN STARTS
+----------------
+`start_run` queues one (`STATUS_QUEUED`) and returns instantly; the
+`capture_autopilot_worker` cron tick claims it (`claim_run`, a
+compare-and-set so two workers cannot both win) and `execute_run` does
+the deciding. The queue-and-tick shape is the one `capture.views.
+gmail_rescan` already uses, for the same reason: 52 sequential model
+calls is minutes, and no POST may wait on it. `preview` prices the run
+before the button is drawn; `uniq_autopilot_active` makes a second
+concurrent run per user impossible at the database; `reap_stale_runs`
+turns a killed worker's row into a visible failure instead of a run that
+appears to be thinking forever.
+
 GROUNDED EVIDENCE OR NO ACTION
 ------------------------------
 `directory/ai_extract.py`'s rule, inherited whole (same as
@@ -121,7 +134,8 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from billing import credits as billing_credits
@@ -568,8 +582,9 @@ def latest_decisions(user, proposal_ids) -> dict[int, AutopilotDecision]:
     """The newest decision per proposal, in ONE query.
 
     `_skip_reason` used to walk `proposal.autopilot_decisions` per row,
-    which is a per-card query over a queue that has really been 52 rows
-    long. Ascending order, last write wins, so the map holds the newest.
+    which is a per-card query — fine in a background pass, not fine on
+    `preview`, which the Today page calls on every render to price the
+    button. Ascending order, last write wins, so the map holds the newest.
     """
     if not proposal_ids:
         return {}
@@ -625,6 +640,7 @@ def run_autopilot(
     dry_run: bool = False,
     model: str = DEFAULT_MODEL,
     source_label: str = "",
+    run: AutopilotRun | None = None,
     decide=_decide_with_model,
 ) -> AutopilotReport:
     """Decide every pending row once, unattended, without moving the CRM.
@@ -633,6 +649,11 @@ def run_autopilot(
     `AutopilotDecision`s) plus one credit debit — and under `dry_run`,
     none of those either: the report is the entire output, so a dry run
     against live data is a pure read plus model calls.
+
+    `run` is an ALREADY-CLAIMED `AutopilotRun` to decide into — the
+    worker's path (`execute_run`), where the row was written by the user's
+    tap and claimed by a worker before any of this started. Passing None
+    (the CLI's path) creates one here, as before.
 
     `decide` is injectable for tests; whatever it returns still passes
     through `_gate` — the floor and the grounding rule belong to this
@@ -698,13 +719,17 @@ def run_autopilot(
     evidence_note = _evidence_note(len(own_notes), caller_supplied)
     report.evidence_note = evidence_note
 
-    run: AutopilotRun | None = None
     if not dry_run:
-        run = AutopilotRun.all_objects.create(
-            user=user, model=model, source_label=source_label[:200],
-            evidence_note=evidence_note,
-        )
+        if run is None:
+            run = AutopilotRun.all_objects.create(
+                user=user, model=model, source_label=source_label[:200],
+                status=AutopilotRun.STATUS_RUNNING,
+            )
+        run.evidence_note = evidence_note
+        run.save(update_fields=["evidence_note"])
         report.run = run
+    else:
+        run = None
 
     # -- decide ------------------------------------------------------------- #
     # Any transport failure below marks the run FAILED and stops — decisions
@@ -765,14 +790,21 @@ def run_autopilot(
     except AutopilotError:
         if run is not None:
             run.status = AutopilotRun.STATUS_FAILED
+            # Said in the user's language, on the row, so the Today strip
+            # can render "stopped" instead of leaving a dead run wearing
+            # the face of a live one.
+            run.failure_reason = (
+                "The AI service stopped answering partway through. Nothing "
+                "was added to your network — start it again when you like."
+            )
             run.accepts = report.count(AutopilotDecision.DECIDE_ACCEPT)
             run.escalations = report.count(AutopilotDecision.DECIDE_ESCALATE)
             run.skips = report.count("skip")
             run.deferred = report.count("defer")
             run.llm_calls = report.llm_calls
             run.save(update_fields=[
-                "status", "accepts", "escalations", "skips", "deferred",
-                "llm_calls",
+                "status", "failure_reason", "accepts", "escalations",
+                "skips", "deferred", "llm_calls",
             ])
             # The fairness rule: model calls that DID run are real spend.
             billing_credits.spend_autopilot(user, report.llm_calls)
@@ -799,6 +831,309 @@ def run_autopilot(
             "llm_calls", "credits_spent", "decided_at",
         ])
     return report
+
+
+# --------------------------------------------------------------------------- #
+# Starting a run — the student's own button, and the states around it
+# --------------------------------------------------------------------------- #
+# WHY A QUEUE AND NOT A THREAD. 52 sequential model calls is minutes; no
+# POST may wait on that. The codebase already answered this question once,
+# for the same reason, in `capture.views.gmail_rescan`: the button writes a
+# QUEUED row and returns instantly, a cron-tick worker
+# (`capture_autopilot_worker`) claims it and does the work, and the page
+# reads the row to say where things stand. This is that pattern, in the
+# same shape, so there is one answer to "how does Coverage do slow work"
+# rather than two.
+#
+# WHY NOT `capture.locks`' ADVISORY LOCK. That lock is per-MAILBOX and
+# guards five writers that all mutate the same mailbox's contacts through
+# `apply_findings`. This pass writes no mailbox state at all — it writes
+# opinions about rows — and its contention is over a RUN, not a mailbox.
+# The run row is the better lock for it, in both directions:
+#
+#   - a partial unique index (`uniq_autopilot_active`) makes a second
+#     ACTIVE run per user impossible at the database, so "two taps, one
+#     run" holds even when two requests read an empty table at once —
+#     something a `pg_try_advisory_lock` taken inside a request could not
+#     do, since it is released the moment the request's connection returns
+#     to the pool;
+#   - a process killed mid-decide leaves a VISIBLE stale row that
+#     `reap_stale_runs` can reclaim and, more importantly, that the user
+#     can be TOLD about. A vanished advisory lock leaves nothing to render.
+#
+# The worker still needs an atomic claim against a second worker, and gets
+# one from the same row: a compare-and-set UPDATE on `status='queued'`
+# (see `claim_run`), which exactly one racer wins.
+
+STARTED = "started"
+ALREADY_RUNNING = "already_running"
+NOTHING_TO_DECIDE = "nothing_to_decide"
+INSUFFICIENT_CREDITS = "insufficient_credits"
+UNCONFIGURED = "unconfigured"
+
+# How long a `running` run is trusted to still be running before it is
+# treated as abandoned. `gmail_backfill.STALE_RUNNING_AFTER` uses two hours
+# for a job that walks a whole mailbox; this one is bounded by
+# `MAX_ROWS_PER_RUN` model calls, so thirty minutes is already several
+# times the worst realistic pass — and unlike a backfill, a person is
+# watching this one, so a dead run has to stop looking alive quickly.
+STALE_RUN_AFTER = 30 * 60  # seconds
+
+
+@dataclass
+class StartPreview:
+    """What starting a run right now would cost and do — computed BEFORE
+    the button is rendered, so the price is disclosed rather than
+    discovered. Every number here is a pure read."""
+
+    pending: int = 0          # pending cards in total
+    candidates: int = 0       # rows a model call would be spent on
+    free_rows: int = 0        # application events — decided deterministically
+    decidable: int = 0        # candidates after both ceilings
+    credits: int = 0          # what the decidable rows will cost
+    balance: int = 0
+    rows_per_credit: int = 10
+    refill_on: object = None  # date the monthly grant lands; for the refusal
+    blocked: str = ""         # "" | nothing_to_decide | insufficient_credits
+                              # | unconfigured
+    active_run: AutopilotRun | None = None
+
+    @property
+    def clamped(self) -> bool:
+        """True when a ceiling (credits or blast radius) means this run
+        would leave rows undecided — the strip says which."""
+        return self.decidable < self.candidates
+
+
+def preview(user) -> StartPreview:
+    """The pre-tap disclosure: how many cards, how many credits, and the
+    honest refusal when the balance cannot cover it."""
+    proposals = list(
+        ContactProposal.objects.for_user(user)
+        .filter(status=ContactProposal.STATUS_PENDING)
+        .only("id", "status")
+        .order_by("created")
+    )
+    free_rows = (
+        ApplicationEvent.objects.for_user(user)
+        .filter(status=ApplicationEvent.STATUS_PENDING)
+        .count()
+    )
+    seen = latest_decisions(user, [p.pk for p in proposals])
+    candidates = [p for p in proposals if _skip_reason(p, seen) is None]
+
+    out = StartPreview(
+        pending=len(proposals) + free_rows,
+        candidates=len(candidates),
+        free_rows=free_rows,
+        rows_per_credit=billing_credits.autopilot_rows_per_credit(),
+        active_run=(
+            AutopilotRun.objects.for_user(user)
+            .filter(status__in=AutopilotRun.ACTIVE_STATUSES)
+            .order_by("-created")
+            .first()
+        ),
+    )
+
+    if not out.candidates and not free_rows:
+        # The ordinary day. Deliberately short of the ledger entirely — the
+        # "nothing to do" state must not read as an invitation to spend, and
+        # it should not cost a grant reconciliation on every Today render
+        # either.
+        out.blocked = NOTHING_TO_DECIDE
+        return out
+
+    out.balance = billing_credits.balance(user)
+    budget = min(out.candidates, MAX_ROWS_PER_RUN)
+    if budget:
+        budget = min(budget, billing_credits.affordable_autopilot_rows(user, budget))
+    out.decidable = budget
+    out.credits = -(-budget // out.rows_per_credit) if budget else 0
+
+    if out.candidates and not is_configured():
+        # Nothing to sell the user on a feature that cannot run here.
+        out.blocked = UNCONFIGURED
+    elif out.candidates and not budget:
+        out.blocked = INSUFFICIENT_CREDITS
+        out.refill_on = billing_credits.next_refill_date(user)
+    return out
+
+
+@dataclass
+class TodayState:
+    """Which of Autopilot's five states this student is in right now — the
+    one thing the strip renders off, so "the user always knows where they
+    are" is decided in one place instead of in template `{% if %}`s.
+
+    NOTHING   nothing pending to decide. The ordinary day, and it must read
+              as "nothing to do", never as an error and never as a pitch.
+    IDLE      cards waiting, a run is startable, the price is known.
+    ACTIVE    queued or deciding. Polls; the tap is disabled.
+    REVIEWED_EMPTY  a run finished and handed everything back — the counts
+              are on the cards, but the RUN still owes the user a sentence
+              saying it ran. (The ordinary reviewed-with-accepts case is the
+              existing "Add all N" strip and is not this state.)
+    FAILED    a run stopped. Says so, offers another. Never mistakable for
+              one still thinking.
+    """
+
+    NOTHING = "nothing"
+    IDLE = "idle"
+    ACTIVE = "active"
+    REVIEWED_EMPTY = "reviewed_empty"
+    FAILED = "failed"
+    # Cards waiting, and the ledger cannot pay for them. Says so, with the
+    # refill date, and offers no button — a control that would refuse the
+    # tap is worse than no control.
+    NO_CREDITS = "no_credits"
+    # The AI is not switched on for this deploy. Renders nothing at all:
+    # this is a fact about the server, not about the student's day.
+    OFF = "off"
+
+    phase: str
+    preview: StartPreview
+    run: AutopilotRun | None = None
+
+
+def today_state(user) -> TodayState:
+    """The state the Today strip renders. One read per phase, no writes."""
+    look = preview(user)
+    if look.active_run is not None:
+        return TodayState(TodayState.ACTIVE, look, look.active_run)
+
+    newest = (
+        AutopilotRun.objects.for_user(user).order_by("-created", "-pk").first()
+    )
+    if newest is not None and look.pending:
+        # Both of these are statements about the LAST run, and both are
+        # worth making only while cards are still on the page — a failure
+        # notice over an empty lane is noise about work nobody is waiting
+        # for any more.
+        if newest.status == AutopilotRun.STATUS_FAILED:
+            return TodayState(TodayState.FAILED, look, newest)
+        if newest.status == AutopilotRun.STATUS_REVIEWED and not newest.accepts:
+            return TodayState(TodayState.REVIEWED_EMPTY, look, newest)
+    if look.blocked == UNCONFIGURED:
+        return TodayState(TodayState.OFF, look)
+    if look.blocked == INSUFFICIENT_CREDITS:
+        return TodayState(TodayState.NO_CREDITS, look)
+    if look.blocked == NOTHING_TO_DECIDE:
+        # `run` rides along so the strip can tell "Autopilot has already
+        # read these" (cards left, all of them judged) apart from a student
+        # who has simply never run it — the same words for both would be
+        # wrong for one of them.
+        return TodayState(TodayState.NOTHING, look, newest)
+    return TodayState(TodayState.IDLE, look)
+
+
+def start_run(user, *, source_label: str = "", model: str = DEFAULT_MODEL):
+    """Queue one decide pass for this user. Returns `(outcome, run|None)`.
+
+    Refuses — before anything is written and long before any model call —
+    when a run is already active, when there is nothing to decide, when the
+    ledger cannot pay for a single row, or when the AI is dark. Nothing
+    here is applied and nothing here is spent: this writes a QUEUED row and
+    returns. The spend happens in the worker, for the rows it actually
+    decided, exactly as the CLI path always has.
+    """
+    reap_stale_runs(user)
+    look = preview(user)
+    if look.active_run is not None:
+        return ALREADY_RUNNING, look.active_run
+    if look.blocked:
+        return look.blocked, None
+    try:
+        run = AutopilotRun.all_objects.create(
+            user=user, model=model, source_label=source_label[:200],
+            status=AutopilotRun.STATUS_QUEUED,
+        )
+    except IntegrityError:
+        # The other half of a double-tap got here first. `uniq_autopilot_active`
+        # turned the race into a refusal, which is the whole point of it.
+        return ALREADY_RUNNING, (
+            AutopilotRun.objects.for_user(user)
+            .filter(status__in=AutopilotRun.ACTIVE_STATUSES)
+            .order_by("-created")
+            .first()
+        )
+    return STARTED, run
+
+
+def claim_run(run: AutopilotRun) -> bool:
+    """Compare-and-set: flip exactly one `queued` row to `running`. Returns
+    whether THIS caller won it — two workers on the same tick cannot both
+    get True, because the UPDATE's WHERE clause is the arbitration."""
+    claimed = AutopilotRun.all_objects.filter(
+        pk=run.pk, status=AutopilotRun.STATUS_QUEUED
+    ).update(
+        status=AutopilotRun.STATUS_RUNNING, started_at=timezone.now()
+    )
+    if claimed:
+        run.refresh_from_db()
+    return bool(claimed)
+
+
+def execute_run(run: AutopilotRun, *, decide=None) -> AutopilotReport:
+    """Do the work of one claimed run, and leave it in a state the user can
+    read. Never leaves a row at `running`: every path out of here is
+    REVIEWED (there is an answer to look at) or FAILED (with the reason on
+    the row) — "still thinking" is a state only a live run may wear.
+
+    `decide` defaults to None, not to `_decide_with_model`, so the real
+    decider is looked up at CALL time — a default argument would bind the
+    function object at import and make the worker's decider unswappable
+    from a test."""
+    report = run_autopilot(
+        run.user, run=run, model=run.model or DEFAULT_MODEL,
+        source_label=run.source_label, decide=decide or _decide_with_model,
+    )
+    run.refresh_from_db()
+    if run.status == AutopilotRun.STATUS_RUNNING:
+        # An early return inside the decide pass never touched the row: it
+        # found nothing pending (the user worked the cards himself while
+        # this sat in the queue), or the AI is dark on this deploy.
+        if report.reason == "unconfigured":
+            run.status = AutopilotRun.STATUS_FAILED
+            run.failure_reason = (
+                "Autopilot's AI service isn't switched on for this deploy. "
+                "Nothing was decided and nothing was spent."
+            )
+        else:
+            run.status = AutopilotRun.STATUS_REVIEWED
+            run.decided_at = timezone.now()
+            run.evidence_note = report.evidence_note
+        run.save(update_fields=[
+            "status", "failure_reason", "decided_at", "evidence_note",
+        ])
+    return report
+
+
+def reap_stale_runs(user=None) -> int:
+    """Mark abandoned runs failed — a killed worker, an OOM, a redeploy
+    mid-pass. Without this a dead row sits at `running` forever, blocking
+    every future run behind `uniq_autopilot_active` AND rendering as a run
+    still thinking. Returns how many were reclaimed.
+
+    Only `running` rows go stale. A `queued` row is not abandoned, it is
+    waiting: the next worker tick is what it is waiting FOR, and reclaiming
+    it would fail runs on a deploy that simply hasn't ticked yet.
+    """
+    from datetime import timedelta
+
+    cutoff = timezone.now() - timedelta(seconds=STALE_RUN_AFTER)
+    rows = AutopilotRun.all_objects.filter(status=AutopilotRun.STATUS_RUNNING)
+    if user is not None:
+        rows = rows.filter(user=user)
+    rows = rows.filter(
+        Q(started_at__lt=cutoff) | Q(started_at__isnull=True, created__lt=cutoff)
+    )
+    return rows.update(
+        status=AutopilotRun.STATUS_FAILED,
+        failure_reason=(
+            "This run stopped before it finished — nothing was added to "
+            "your network. Start it again when you like."
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
