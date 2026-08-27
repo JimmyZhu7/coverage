@@ -53,7 +53,7 @@ logs/notes" applies to it the same as anywhere else.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.db import models
@@ -359,7 +359,13 @@ def _finding_occurred_at(finding: dict):
     if when is None:
         return None
     if timezone.is_naive(when):
-        when = timezone.make_aware(when, timezone.utc)
+        # `dt_timezone.utc`, not `timezone.utc`: Django 5 removed the
+        # `django.utils.timezone.utc` alias, so the old spelling raised
+        # AttributeError on the first naive timestamp — killing the whole
+        # apply pass (and, on the poll loop, re-processing the same
+        # messages every interval forever because the cursor never
+        # advanced past them).
+        when = timezone.make_aware(when, dt_timezone.utc)
     return min(when, timezone.now())
 
 

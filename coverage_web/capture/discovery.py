@@ -127,6 +127,7 @@ the meantime is never duplicated.
 from __future__ import annotations
 
 import re
+from datetime import timezone as dt_timezone
 
 from django.utils import timezone
 
@@ -504,7 +505,9 @@ def _parse_occurred_at(finding: dict):
 
     when = parse_datetime(raw)
     if when is not None and timezone.is_naive(when):
-        when = timezone.make_aware(when, timezone.utc)
+        # Django 5 removed `django.utils.timezone.utc` — see
+        # `capture.gmail._finding_occurred_at` for the failure this caused.
+        when = timezone.make_aware(when, dt_timezone.utc)
     return when
 
 
