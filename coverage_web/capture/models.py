@@ -606,9 +606,12 @@ class AutopilotRun(PrivateModel):
         experience is the difference between one tap and fifty.
 
     Status is the fail-closed mechanism: only a run that finished deciding
-    (REVIEWED) can ever be applied, and apply flips it to APPLIED inside
-    the same transaction as the writes it performs. A run that died
-    deciding stays RUNNING/FAILED forever and can touch nothing.
+    (REVIEWED) can ever be applied. Apply is deliberately NOT one wrapping
+    transaction — the warmth ratchet opens its own psycopg connection, so
+    the guarantee is per-decision completeness plus idempotent resume (see
+    `capture.autopilot.apply_run`); the run flips to APPLIED only after the
+    whole batch. A run that died deciding stays RUNNING/FAILED forever and
+    can touch nothing.
     """
 
     STATUS_RUNNING = "running"

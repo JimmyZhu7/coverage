@@ -452,10 +452,13 @@ def autopilot_apply(request: HttpRequest, pk: int) -> HttpResponse:
     This is the whole compliance design in a single view (see
     capture/autopilot.py's module docstring): the AI decided unattended and
     wrote nothing; this POST is the user's own act over the disclosed,
-    quoted batch, and `apply_run` executes it in one transaction through
-    the same doors a card tap uses. Re-renders the cockpit like every
-    other Today action — the accepted cards leave, the escalations stay,
-    and the strip is gone because the run is no longer `reviewed`."""
+    quoted batch, and `apply_run` executes it through the same doors a
+    card tap uses. NOT one database transaction, and it must not be — the
+    warmth ratchet opens its own psycopg connection (see `apply_run`'s
+    docstring for the per-decision completeness + resume contract that
+    stands in for one). Re-renders the cockpit like every other Today
+    action — the accepted cards leave, the escalations stay, and the
+    strip is gone because the run is no longer `reviewed`."""
     from capture import autopilot
     from capture.models import AutopilotRun
 
