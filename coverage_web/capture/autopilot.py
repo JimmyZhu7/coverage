@@ -53,6 +53,21 @@ functions with different callers). The one power it has is to sort the
 ladder's survivors into "add it" and "a human should look" — and even an
 "add it" only happens if the user taps the batch.
 
+THE RUN GATHERS ITS OWN COUNTER-EVIDENCE
+-----------------------------------------
+Counter-evidence used to be a caller's argument, and omitting it was
+silent: the same command over the same data accepted all 53 rows when run
+without `--findings` — including a man his firm's auto-reply says has
+left, and one whose mailbox was full — because the model was shown "OTHER
+MAIL ... none found" and believed it. Same code, same data, opposite
+answer, no warning. `run_autopilot` now reads `MailFact` rows itself, on
+every run, with no flag to forget (`mail_fact_notes`), and anything a
+caller passes is merged on top. What genuinely cannot be reconstructed at
+run time — hard bounces and mass-send flags, which the deterministic
+ladder already consumed at capture time and which persist nowhere — is
+NAMED on every run (`AutopilotRun.evidence_note`) and rendered wherever
+the run is. Partial evidence is allowed; silent partial evidence is not.
+
 GROUNDED EVIDENCE OR NO ACTION
 ------------------------------
 `directory/ai_extract.py`'s rule, inherited whole (same as
@@ -272,6 +287,131 @@ def _context_for(
 
 
 # --------------------------------------------------------------------------- #
+# Counter-evidence the run gathers ITSELF — the fix for the worst bug this
+# module has had.
+# --------------------------------------------------------------------------- #
+# WHAT WENT WRONG. `findings`/`context_notes` above are CALLER-supplied, and
+# omitting them was silent: the same command over the same data, run once
+# with `--findings` and once without, escalated two rows and then accepted
+# all 53 — including a man whose firm's auto-reply says he has left, and one
+# whose mailbox was full. The model was not wrong either time. It was shown
+# "OTHER MAIL ABOUT THIS ADDRESS OR THREAD: none found." and believed it.
+#
+# A run whose accuracy depends on a caller remembering a flag has no
+# accuracy. So the run now READS ITS OWN counter-evidence out of the
+# database, every time, with no argument and no way to turn it off; anything
+# a caller passes is merged on top as extra.
+#
+# THE SOURCE. `capture.mailfacts` already parses exactly this class of mail
+# into structured rows with the verbatim sentence attached — departures,
+# soft bounces ("the recipient's mailbox is full"), out-of-office with a
+# return date, referrals, address changes — one row per (user, person,
+# kind), remembered forever. That is the same evidence the findings file
+# carried, in a form that outlives the batch. It is also the SAME sentence:
+# `MailFact.quote` is verbatim mailbox text, so a verdict quoting it still
+# passes `_grounded` against the real message and not against our prose.
+#
+# WHAT STILL CANNOT BE RE-READ, stated rather than papered over (and said
+# out loud on every run — see `evidence_note`):
+#
+#   - HARD BOUNCES. A `bounced` finding writes no `MailFact` (mailfacts
+#     returns early on it) and touches only an existing Contact's address
+#     column. It is not a gap in practice for a row this pass can see: the
+#     deterministic ladder refuses the send a same-batch bounce killed
+#     (`discovery.BatchContext.bounced_emails`), so it never becomes a
+#     proposal. A bounce arriving in a LATER batch is a pre-existing,
+#     documented gap (`discovery.BatchContext`'s own docstring) and this
+#     module inherits it — it cannot see one, and says so.
+#   - MASS-SEND (`bulk`) FLAGS. Also not persisted anywhere; also already
+#     spent at capture time, where the ladder refused every bulk finding
+#     outright.
+#
+# Both are signals the deterministic layer CONSUMED before a card existed,
+# which is why the reconstructable half is the half that matters: the facts
+# that arrive about a person AFTER the card was made.
+_FACT_LEAD = {
+    "departed": "Their mailbox says they have left the firm",
+    "referral": "Their mailbox redirected you to someone else",
+    "out_of_office": "They are out of office",
+    "address_change": "They gave a new address",
+    "routing_address": "Mail to them was deferred, not delivered",
+    "review": "An automated reply came back from this address",
+}
+
+
+def mail_fact_notes(user) -> list[dict]:
+    """Every stored mail fact about this user's people, in `context_notes`
+    shape — the counter-evidence a run gathers for itself.
+
+    One note per fact: a short lead naming the KIND, then the verbatim
+    sentence from the message. The lead is Coverage's own words and the
+    quote is the mailbox's; the model may ground on either, and both are
+    checkable — the lead against this table, the quote against the message.
+
+    `review` facts (an auto-reply the readers could not type) carry no
+    quote by construction, so their note is the subject line and the plain
+    statement that the reply was automated. That IS the counter-evidence
+    for a row claiming a person acted, and dropping it because it has no
+    quote would repeat this module's original mistake in miniature.
+
+    Keyed on `about_email` — the person the fact is ABOUT — never on
+    `new_email`: a referral's quote is evidence against the person who
+    redirected you and evidence FOR the person named, and pinning it to the
+    latter would escalate the very card the referral created.
+    """
+    from .models import MailFact
+
+    notes: list[dict] = []
+    rows = (
+        MailFact.objects.for_user(user)
+        .exclude(status=MailFact.STATUS_DISMISSED)
+        .exclude(status=MailFact.STATUS_UNDONE)
+        .order_by("created")
+    )
+    for fact in rows:
+        lead = _FACT_LEAD.get(fact.kind, "Their mailbox stated something")
+        body = (fact.quote or "").strip()
+        if not body:
+            subject = (fact.subject or "").strip()
+            body = (
+                f"Automatic reply we could not read: {subject}" if subject
+                else "Automatic reply we could not read."
+            )
+        notes.append({
+            "email": fact.about_email,
+            "thread_id": "",
+            "text": f"{lead}: {body}",
+        })
+    return notes
+
+
+# An UNDONE or DISMISSED fact is the user's own word that the fact was
+# wrong, and this pass respects it the same way it respects an overridden
+# decision — see the `.exclude`s above. `applied` and `pending` facts both
+# count: a pending fact is one nobody has judged yet, which is precisely
+# when a second opinion should be cautious.
+
+
+def _evidence_note(fact_count: int, caller_supplied: bool) -> str:
+    """One sentence on the run saying what its verdicts were able to read —
+    and what they were not. Rendered on Today and in the ledger.
+
+    The rule this enforces: a run may proceed on partial counter-evidence,
+    but it may never proceed SILENTLY on partial counter-evidence."""
+    if fact_count:
+        read = f"Read {fact_count} stored mail fact(s) about these people"
+    else:
+        read = "No stored mail facts about these people — nothing to weigh against"
+    if caller_supplied:
+        read += ", plus the scan batch this run was handed"
+    return (
+        f"{read}. Not re-readable here: hard bounces and mass-send flags "
+        "leave no stored row — the scan's refusal ladder already spent "
+        "those when the cards were made."
+    )[:300]
+
+
+# --------------------------------------------------------------------------- #
 # The evidence text — everything the model may quote from, nothing it may not
 # --------------------------------------------------------------------------- #
 _KIND_SENTENCES = {
@@ -416,16 +556,46 @@ class AutopilotReport:
     lines: list[DecisionLine] = field(default_factory=list)
     llm_calls: int = 0
     credits_spent: int = 0
+    # What this pass could and could not read as counter-evidence — the
+    # same sentence stored on the run. See `_evidence_note`.
+    evidence_note: str = ""
 
     def count(self, decision: str) -> int:
         return sum(1 for line in self.lines if line.decision == decision)
 
 
-def _skip_reason(proposal: ContactProposal) -> str | None:
+def latest_decisions(user, proposal_ids) -> dict[int, AutopilotDecision]:
+    """The newest decision per proposal, in ONE query.
+
+    `_skip_reason` used to walk `proposal.autopilot_decisions` per row,
+    which is a per-card query over a queue that has really been 52 rows
+    long. Ascending order, last write wins, so the map holds the newest.
+    """
+    if not proposal_ids:
+        return {}
+    latest: dict[int, AutopilotDecision] = {}
+    for d in (
+        AutopilotDecision.objects.for_user(user)
+        .filter(proposal_id__in=list(proposal_ids))
+        .select_related("run")
+        .order_by("created", "pk")
+    ):
+        latest[d.proposal_id] = d
+    return latest
+
+
+def _skip_reason(
+    proposal: ContactProposal, latest: dict[int, AutopilotDecision] | None = None
+) -> str | None:
     """Deterministic pre-checks — the rows the model never sees, and why."""
     if proposal.status != ContactProposal.STATUS_PENDING:
         return "no longer pending — resolved by your own tap"
-    existing = proposal.autopilot_decisions.all().order_by("-created").first()
+    if latest is not None:
+        existing = latest.get(proposal.pk)
+    else:
+        existing = (
+            proposal.autopilot_decisions.all().order_by("-created", "-pk").first()
+        )
     if existing is not None:
         if existing.overridden:
             return "you overrode Autopilot on this person — it never re-decides"
@@ -486,9 +656,10 @@ def run_autopilot(
         return report
 
     # -- deterministic skips, before any budget math ------------------------ #
+    seen = latest_decisions(user, [p.pk for p in proposals])
     candidates: list[ContactProposal] = []
     for p in proposals:
-        skip = _skip_reason(p)
+        skip = _skip_reason(p, seen)
         if skip is not None:
             report.lines.append(DecisionLine(
                 kind="proposal", row_id=p.pk, who=f"{p.name} <{p.email}>",
@@ -517,12 +688,21 @@ def run_autopilot(
             detected_by="deterministic",
         ))
 
-    index = build_context_index(findings, context_notes)
+    # COUNTER-EVIDENCE, GATHERED HERE AND NOT ASKED FOR. Whatever the caller
+    # passed is merged ON TOP of what the run reads for itself — a caller may
+    # add evidence, never subtract it. See `mail_fact_notes` for the whole
+    # story of why this is not a parameter.
+    own_notes = mail_fact_notes(user)
+    caller_supplied = bool(findings or context_notes)
+    index = build_context_index(findings, own_notes + list(context_notes or []))
+    evidence_note = _evidence_note(len(own_notes), caller_supplied)
+    report.evidence_note = evidence_note
 
     run: AutopilotRun | None = None
     if not dry_run:
         run = AutopilotRun.all_objects.create(
             user=user, model=model, source_label=source_label[:200],
+            evidence_note=evidence_note,
         )
         report.run = run
 

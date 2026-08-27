@@ -14,9 +14,19 @@ Today for the user's single tap ("Add all N"), which is `apply_run` and the
 Limited Use posture in one gesture. See `capture/autopilot.py`'s module
 docstring for the compliance decision in full; this command never applies.
 
---findings is the SAME file `capture_gmail` just applied — passed again so
-counter-evidence in the batch (a bounce or bulk row about a proposed
-address or its thread) reaches the verdict that needs it.
+COUNTER-EVIDENCE IS NO LONGER YOURS TO REMEMBER. This command used to
+depend on `--findings` for it, and forgetting the flag was silent: the same
+data run without it accepted all 53 rows, including a man his firm's
+auto-reply says has left and one whose mailbox was full, because the model
+was shown "OTHER MAIL ... none found". `run_autopilot` now reads the stored
+`MailFact` rows itself on every run, and every run STATES what it could and
+could not weigh (`AutopilotRun.evidence_note`, printed below).
+
+--findings is still accepted, and is still the SAME file `capture_gmail`
+just applied: same-batch bounce and bulk rows persist nowhere, so this is
+the only way to put them in front of a verdict. It ADDS to what the run
+gathers for itself; it can no longer be the difference between a right
+answer and a wrong one.
 
 --context is the sidecar for counter-evidence the scan surfaced outside the
 findings shape — departure auto-replies, out-of-office referrals, alternate
@@ -49,7 +59,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--findings", default=None,
             help="The findings JSON the scan produced ('-' for stdin) — "
-            "optional, but without it batch counter-evidence can't be seen.",
+            "optional; adds same-batch bounce/bulk rows on top of the "
+            "mail facts every run reads for itself.",
         )
         parser.add_argument(
             "--context", default=None,
@@ -108,6 +119,11 @@ class Command(BaseCommand):
             else "reviewed — waiting for the one tap on Today"
         )
         self.stdout.write(f"Autopilot: {mode}")
+        if report.evidence_note:
+            # Printed before the table, not after it: the reader should
+            # know what these verdicts were weighed against BEFORE reading
+            # them, which is the whole lesson of the run that wasn't.
+            self.stdout.write(f"  evidence: {report.evidence_note}")
         for line in report.lines:
             label = {
                 "accept": "ACCEPT  ",

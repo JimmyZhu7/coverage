@@ -645,6 +645,13 @@ class AutopilotRun(PrivateModel):
     deferred = models.IntegerField(default=0)
     llm_calls = models.IntegerField(default=0)
     credits_spent = models.IntegerField(default=0)
+    # What the decide pass could and could NOT see when it judged this
+    # batch — written by `capture.autopilot.run_autopilot`, shown on the
+    # ledger and on Today. It exists because the opposite (a run that
+    # quietly judged 53 rows having been told "OTHER MAIL … none found")
+    # produced a whole batch of wrong accepts and said nothing about it.
+    # A run that reads less than the mailbox knows has to say so.
+    evidence_note = models.CharField(max_length=300, blank=True, default="")
     created = models.DateTimeField(auto_now_add=True)
     decided_at = models.DateTimeField(null=True, blank=True)
     applied_at = models.DateTimeField(null=True, blank=True)
