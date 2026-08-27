@@ -75,7 +75,7 @@ import base64
 import logging
 import re
 from datetime import datetime, timedelta, timezone as dt_timezone
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
@@ -558,9 +558,9 @@ def sync_connection(connection: GmailConnection):
         message = _fetch_message(gmail, message_id)
         if message is None:
             continue
-        finding = _classify_message(connection.gmail_address, message)
-        if finding is not None:
-            findings.append(finding)
+        findings.extend(
+            classify_message_findings(connection.gmail_address, message)
+        )
 
     result = None
     if findings:
@@ -755,41 +755,120 @@ def _looks_like_bounce(from_addr: str, subject: str) -> bool:
     return bool(_BOUNCE_FROM_RE.search(from_addr) or _BOUNCE_SUBJECT_RE.search(subject))
 
 
-def _bounce_recipient(message: dict, own_email: str) -> str | None:
-    """Best-effort: the failed address a bounce body names, by scanning its
-    text for the first address that isn't the account owner's or a mail-
-    system address. Bounces vary a lot in format; this is the same
-    reasonable heuristic the manual sync's agents already apply by reading
-    the body, just as a regex instead of judgment.
+# The DSN's own machine-readable recipient fields (RFC 3464). Both real DSN
+# shapes in the founder's mailbox (2026-08-27, read-only) carry these
+# verbatim in the text this module scans: the Proofpoint/sendmail "Returned
+# mail" transcript prints "Final-Recipient: RFC822; <addr>" inside its
+# text/plain body, and the Exchange "Undeliverable:" report carries the same
+# block in its message/delivery-status part (which `_bounce_text` now
+# includes). When one of these is present it IS the answer — everything else
+# in a DSN (quoted original headers, Received chains, signatures) is context
+# that can name the wrong person.
+_DSN_RECIPIENT_RE = re.compile(
+    r"(?:final|original|x-actual)-recipient:\s*(?:rfc822;?\s*)?<?"
+    r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?"
+    r"|x-failed-recipients:\s*<?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?",
+    re.IGNORECASE,
+)
 
-    The snippet is always included in the text scanned, not only when a
-    `text/*` part turns up — Gmail's own top-level payload frequently has no
-    `mimeType` of its own at all (it sits on a nested part, or is absent for
-    a message with no distinct body part), and a bounce with no text/* part
-    found would otherwise never fall back to the one text Gmail always
-    supplies.
+# Failure sentences that a human-readable bounce puts DIRECTLY in front of
+# the failed address. Both live shapes lead with one of these; so do Gmail's
+# own DSNs ("wasn't delivered to") and postfix's. An address found right
+# after one of these phrases is being named AS the failure, not quoted in
+# passing.
+_BOUNCE_PHRASE_RE = re.compile(
+    r"delivery has failed to these recipients or groups"
+    r"|following addresses? had permanent fatal errors"
+    r"|delivery to the following recipients? failed"
+    r"|(?:was|were)n'?t delivered to"
+    r"|could ?n[o']t be delivered to"
+    r"|address not found"
+    r"|your message to",
+    re.IGNORECASE,
+)
+# How far past a failure phrase the named address must appear. Generous
+# enough for a display name and a mailto: wrapper; short enough that the
+# quoted original message's headers (hundreds of chars further down) can
+# never be mistaken for the failure line.
+_BOUNCE_PHRASE_WINDOW = 300
+
+
+def _bounce_recipient(message: dict, own_email: str) -> str | None:
+    """The failed address a bounce names, or None when it cannot be
+    determined SAFELY. Downstream clears this address off a contact (the
+    hard-bounce block in `apply_findings`) — a destructive write — so this
+    refuses when the text is ambiguous rather than guessing.
+
+    Three passes, most reliable first:
+
+    1. RFC 3464 fields (`Final-Recipient:` / `Original-Recipient:` /
+       `X-Failed-Recipients:`). Both real DSN shapes on the founder's live
+       mailbox carry these; when present they are authoritative.
+    2. An address within `_BOUNCE_PHRASE_WINDOW` chars after a failure
+       phrase ("Delivery has failed to these recipients or groups", "The
+       following addresses had permanent fatal errors", ...). The phrase is
+       what makes the address the SUBJECT of the bounce.
+    3. The old first-address-anywhere heuristic — but only when the whole
+       text names exactly ONE candidate address. A DSN that quotes the
+       original message (a Cc, an address in a signature) before naming the
+       failed recipient used to hard-bounce-clear whichever address the
+       scan met first; with several candidates and no anchor, the only safe
+       answer is no answer. The daily agent-run sync remains the backstop
+       for a refused DSN, and refusing costs one uncleaned address — the
+       opposite mistake costs a working address on the wrong person.
+
+    An address is never a candidate if it is the account owner's own or a
+    mailer-daemon/postmaster address.
     """
     own = own_email.lower()
-    for candidate in _EMAIL_RE.findall(_bounce_text(message)):
+
+    def _ok(candidate: str) -> bool:
+        return candidate != own and not _BOUNCE_FROM_RE.search(candidate)
+
+    text = _bounce_text(message)
+
+    for match in _DSN_RECIPIENT_RE.finditer(text):
+        candidate = (match.group(1) or match.group(2) or "").lower()
+        if _ok(candidate):
+            return candidate
+
+    for phrase in _BOUNCE_PHRASE_RE.finditer(text):
+        window = text[phrase.end(): phrase.end() + _BOUNCE_PHRASE_WINDOW]
+        for candidate in _EMAIL_RE.findall(window):
+            low = candidate.lower()
+            if _ok(low):
+                return low
+
+    candidates = []
+    for candidate in _EMAIL_RE.findall(text):
         low = candidate.lower()
-        if low != own and not _BOUNCE_FROM_RE.search(low):
-            return low
+        if _ok(low) and low not in candidates:
+            candidates.append(low)
+    if len(candidates) == 1:
+        return candidates[0]
     return None
 
 
 def _bounce_text(message: dict) -> str:
     """The text a bounce actually says its news in: Gmail's snippet plus
-    every decoded `text/*` part. Shared by `_bounce_recipient` (finds the
-    failed address) and the soft-bounce test in `_classify_message` (finds
-    the "mailbox is full"/"delayed" vocabulary) so the two read the same
-    words. The DECODED body matters beyond reach: Gmail's snippet for the
-    founder's real Goldman DSN renders the routing address as
-    "Noah. Bauld@ ny. ibd. email. gs. com" — spaces after every dot — so an
-    address regex over the snippet alone misses what the body states
-    cleanly."""
+    every decoded `text/*` part, plus every `message/delivery-status` part.
+    Shared by `_bounce_recipient` (finds the failed address) and the
+    soft-bounce test in `_classify_message` (finds the "mailbox is full"/
+    "delayed" vocabulary) so the two read the same words. The DECODED body
+    matters beyond reach: Gmail's snippet for the founder's real Goldman
+    DSN renders the routing address as "Noah. Bauld@ ny. ibd. email. gs.
+    com" — spaces after every dot — so an address regex over the snippet
+    alone misses what the body states cleanly.
+
+    `message/delivery-status` is included because it is where an Exchange
+    DSN keeps its `Final-Recipient:`/`Status:` block — the authoritative
+    answer to "who failed" and the `4.x.x` transient class the soft-bounce
+    test reads — and its body is plain RFC 3464 text despite the mimeType
+    not starting with `text/`."""
     text_chunks = [message.get("snippet", "")]
     for part in _walk_parts(message.get("payload", {})):
-        if part.get("mimeType", "").startswith("text/"):
+        mime = part.get("mimeType", "")
+        if mime.startswith("text/") or mime == "message/delivery-status":
             decoded = _decode_body(part)
             if decoded:
                 text_chunks.append(decoded)
@@ -812,13 +891,91 @@ def _message_occurred_at(message: dict) -> str | None:
     return datetime.fromtimestamp(millis / 1000, tz=dt_timezone.utc).isoformat()
 
 
+def _outbound_recipients(own_email: str, message: dict) -> list[tuple[str, str]]:
+    """Every distinct (name, address) the To: header names, own address
+    excluded, order preserved. `getaddresses` rather than `parseaddr`:
+    `parseaddr` silently takes only the FIRST mailbox of a multi-recipient
+    header, which is how one email sent to three contacts logged outreach
+    for one and lost the other two sends entirely."""
+    seen: set[str] = set()
+    recipients: list[tuple[str, str]] = []
+    for to_name, to_addr in getaddresses([_header(message, "To")]):
+        low = (to_addr or "").strip().lower()
+        if not low or "@" not in low or low == own_email.lower() or low in seen:
+            continue
+        seen.add(low)
+        recipients.append((to_name, low))
+    return recipients
+
+
+def classify_message_findings(own_email: str, message: dict) -> list[dict]:
+    """Every finding one Gmail message honestly supports.
+
+    For inbound mail this is `_classify_message`'s single finding (or
+    none). For OUTBOUND mail it is one finding per distinct To: recipient:
+    a note sent to three contacts is three sends, and collapsing it to the
+    first recipient silently lost the other two (each un-logged send is a
+    missing outreach touch, a wrong follow-up clock, and a hole in
+    campaign detection's recipient count). Cc is deliberately excluded — a
+    Cc received the mail but was not the person being written to, and
+    "outreach" is a claim about who the note was FOR.
+
+    The merge guard is unaffected in the right direction: each recipient's
+    finding carries the same subject, so `discovery.BatchContext`'s
+    fan-out count now sees the true recipient count — a single blast To:
+    forty people counts as forty, which is exactly what the guard exists
+    to notice.
+    """
+    from_name, from_addr = parseaddr(_header(message, "From"))
+    if from_addr.lower() == own_email.lower():
+        recipients = _outbound_recipients(own_email, message)
+        return [
+            _outbound_finding(message, to_name, to_addr)
+            for to_name, to_addr in recipients
+        ]
+    finding = _classify_message(own_email, message)
+    return [finding] if finding is not None else []
+
+
+def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
+    subject = _header(message, "Subject")
+    ics_dt, ics_summary = _extract_ics_schedule(message)
+    return {
+        "name": to_name or to_addr.split("@")[0],
+        "email": to_addr.lower(),
+        "found": True,
+        "bounced": False,
+        "outreach_sent": True,
+        "replied": False,
+        "chat_status": "scheduled" if ics_dt else "none",
+        "chat_scheduled_at": ics_dt,
+        "evidence": (
+            f"Calendar invite sent: {ics_summary or subject}"
+            if ics_dt
+            else f"Sent: {subject}"
+        ),
+        "thread_id": message.get("threadId", ""),
+        # The Subject header, kept rather than only folded into the prose
+        # of `evidence` above. `capture.gmail._stamp_subject` writes it to
+        # `Touch.subject`, and `crm.campaigns` groups a mail merge on it —
+        # 201 threads sharing one subject is the whole signal, and it used
+        # to be read on the line above and discarded on the next.
+        "subject": subject,
+        "occurred_at": _message_occurred_at(message),
+    }
+
+
 def _classify_message(own_email: str, message: dict) -> dict | None:
     """One Gmail message -> one finding dict in `GmailFindingsProvider`'s
     shape, or None if there's nothing worth reporting (e.g. a message from
     the account owner to themselves, or an address this heuristic can't
-    resolve at all)."""
+    resolve at all).
+
+    For an outbound message this reports the FIRST To: recipient only —
+    callers that must not lose a multi-recipient send (the live sync, the
+    backfill) go through `classify_message_findings`, which returns one
+    finding per recipient."""
     from_name, from_addr = parseaddr(_header(message, "From"))
-    to_name, to_addr = parseaddr(_header(message, "To"))
     subject = _header(message, "Subject")
     thread_id = message.get("threadId", "")
     ics_dt, ics_summary = _extract_ics_schedule(message)
@@ -827,31 +984,10 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
     is_outbound = from_addr.lower() == own_email.lower()
 
     if is_outbound:
-        if not to_addr:
+        recipients = _outbound_recipients(own_email, message)
+        if not recipients:
             return None
-        return {
-            "name": to_name or to_addr.split("@")[0],
-            "email": to_addr.lower(),
-            "found": True,
-            "bounced": False,
-            "outreach_sent": True,
-            "replied": False,
-            "chat_status": "scheduled" if ics_dt else "none",
-            "chat_scheduled_at": ics_dt,
-            "evidence": (
-                f"Calendar invite sent: {ics_summary or subject}"
-                if ics_dt
-                else f"Sent: {subject}"
-            ),
-            "thread_id": thread_id,
-            # The Subject header, kept rather than only folded into the prose
-            # of `evidence` above. `capture.gmail._stamp_subject` writes it to
-            # `Touch.subject`, and `crm.campaigns` groups a mail merge on it —
-            # 201 threads sharing one subject is the whole signal, and it used
-            # to be read on the line above and discarded on the next.
-            "subject": subject,
-            "occurred_at": occurred_at,
-        }
+        return _outbound_finding(message, *recipients[0])
 
     if _looks_like_bounce(from_addr, subject):
         recipient = _bounce_recipient(message, own_email)
@@ -1146,9 +1282,9 @@ def backfill_connection(
         message = _fetch_message(gmail, message_id)
         if message is None:
             continue
-        finding = _classify_message(own_email, message)
-        if finding is not None:
-            findings.append(finding)
+        message_findings = classify_message_findings(own_email, message)
+        if message_findings:
+            findings.extend(message_findings)
         elif residue_sink is not None:
             residue_sink.append(
                 {"message": message, "thread_id": message.get("threadId", "")}
