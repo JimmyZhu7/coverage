@@ -176,6 +176,9 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
         "campaign_contacts": "campaign_contacts.csv",
         "contact_proposals": "contact_proposals.csv",
         "application_events": "application_events.csv",
+        "mail_facts": "mail_facts.csv",
+        "autopilot_runs": "autopilot_runs.csv",
+        "autopilot_decisions": "autopilot_decisions.csv",
         "fit_scores": "fit_scores.csv",
         "imports": "imports.csv",
         "product_events": "product_events.csv",
@@ -497,3 +500,62 @@ def test_the_normal_export_is_unchanged_by_the_guard(student, loaded):
         for row in _rows(zf, name):
             for value in row.values():
                 assert not (value or "").startswith("'")
+
+
+# ---------------------------------------------------------------------------
+# Deletion vs the PROTECT audit trail (capture.AutopilotDecision)
+# ---------------------------------------------------------------------------
+def test_deletion_survives_autopilot_and_mail_fact_rows(student, firm):
+    """Regression for the emergent break between two same-day merges:
+    `AutopilotDecision.proposal` / `.app_event` are `on_delete=PROTECT` (a
+    decision is the audit trail for the row it judged), and
+    `delete_user_and_data` deleted `contact_proposals` and
+    `application_events` without sweeping the decisions first — so the first
+    account deletion after a real Autopilot run raised ProtectedError and
+    500'd. The decisions (and their runs, and mail facts) must be swept
+    first, counted on the receipt, and reachable in the export."""
+    from capture.models import (
+        ApplicationEvent, AutopilotDecision, AutopilotRun, ContactProposal,
+        MailFact,
+    )
+    from directory.models import Opportunity as DirOpportunity
+
+    proposal = ContactProposal.all_objects.create(
+        user=student, name="Judged Person", email="judged@test-bank.com",
+        evidence="Replied to your email",
+    )
+    opp = DirOpportunity.objects.create(
+        firm=firm, title="2028 IB Summer Analyst", region="hk",
+        url="https://test-bank.com/apply/2",
+    )
+    event = ApplicationEvent.all_objects.create(
+        user=student, opportunity=opp, firm=firm, firm_text="Test Bank",
+        event_type=ApplicationEvent.APPLIED, target_status="submitted",
+        evidence="Thank you for applying",
+    )
+    run = AutopilotRun.all_objects.create(user=student, model="test-model")
+    AutopilotDecision.all_objects.create(
+        user=student, run=run, proposal=proposal,
+        decision=AutopilotDecision.DECIDE_ACCEPT, confidence=0.9,
+        quote="Replied to your email",
+    )
+    AutopilotDecision.all_objects.create(
+        user=student, run=run, app_event=event,
+        decision=AutopilotDecision.DECIDE_ACCEPT, confidence=1.0,
+        detected_by="deterministic",
+    )
+    MailFact.all_objects.create(
+        user=student, kind=MailFact.KIND_DEPARTED,
+        about_email="gone@test-bank.com", about_name="Gone Person",
+        quote="Gone Person is no longer with the firm",
+        status=MailFact.STATUS_APPLIED,
+    )
+
+    counts = services.delete_user_and_data(student)
+
+    assert not User.objects.filter(email="exporter@example.com").exists()
+    assert counts["autopilot_decisions"] == 2
+    assert counts["autopilot_runs"] == 1
+    assert counts["mail_facts"] == 1
+    assert counts["contact_proposals"] == 1
+    assert counts["application_events"] == 1

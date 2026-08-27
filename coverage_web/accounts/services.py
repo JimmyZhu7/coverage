@@ -48,7 +48,10 @@ from assistant.models import (
 )
 from billing.models import CreditLedger, ProWaitlist
 from capture import gmail_live
-from capture.models import ApplicationEvent, ContactProposal, GmailConnection
+from capture.models import (
+    ApplicationEvent, AutopilotDecision, AutopilotRun, ContactProposal,
+    GmailConnection, MailFact,
+)
 from crm.models import (
     CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact, Task,
     Touch, UserFirm,
@@ -601,6 +604,24 @@ APPLICATION_EVENT_EXPORT_COLUMNS = [
     "match_reason", "detected_by", "status", "occurred_at", "created",
     "resolved_at",
 ]
+MAIL_FACT_EXPORT_COLUMNS = [
+    # `quote` is the one sentence of body text the product deliberately
+    # keeps (see `MailFact`'s §10 note) — it is the justification the user
+    # audited the automated action against, so it is theirs to take with
+    # them like everything else here.
+    "kind", "about_name", "about_email", "new_name", "new_email",
+    "return_on", "quote", "subject", "detected_by", "status", "action_note",
+    "occurred_at", "created", "resolved_at",
+]
+AUTOPILOT_RUN_EXPORT_COLUMNS = [
+    "created", "status", "model", "source_label", "accepts", "escalations",
+    "skips", "deferred", "llm_calls", "credits_spent", "decided_at",
+    "applied_at",
+]
+AUTOPILOT_DECISION_EXPORT_COLUMNS = [
+    "run_created", "about", "decision", "confidence", "quote", "reason",
+    "detected_by", "status", "overridden", "created", "applied_at",
+]
 DEBRIEF_EXPORT_COLUMNS = [
     "created", "contact", "learned", "intro_name", "intro_email",
     "tracked_date", "date_note", "advocate_answer", "promoted", "dismissed",
@@ -881,6 +902,72 @@ def application_events_csv(user) -> str:
     )
 
 
+def mail_facts_csv(user) -> str:
+    """What the mail itself stated about people — departures, out-of-office
+    returns, routing addresses — with the verbatim sentence each action stood
+    on and what Coverage did about it (`capture.models.MailFact`). Dismissed
+    and undone rows are the do-not-re-ask memory, exported like every other
+    memory the user built one tap at a time."""
+    rows = MailFact.objects.for_user(user)
+    return _csv(
+        MAIL_FACT_EXPORT_COLUMNS,
+        (
+            [
+                f.get_kind_display(), f.about_name, f.about_email,
+                f.new_name, f.new_email,
+                f.return_on.isoformat() if f.return_on else "",
+                f.quote, f.subject, f.detected_by, f.status, f.action_note,
+                _dt(f.occurred_at), _dt(f.created), _dt(f.resolved_at),
+            ]
+            for f in rows
+        ),
+    )
+
+
+def autopilot_runs_csv(user) -> str:
+    """Every Autopilot decide pass: what it read, what it decided, what it
+    cost. The audit trail behind the one-tap batch (`capture.autopilot`)."""
+    rows = AutopilotRun.objects.for_user(user)
+    return _csv(
+        AUTOPILOT_RUN_EXPORT_COLUMNS,
+        (
+            [
+                _dt(r.created), r.status, r.model, r.source_label,
+                r.accepts, r.escalations, r.skips, r.deferred,
+                r.llm_calls, r.credits_spent,
+                _dt(r.decided_at), _dt(r.applied_at),
+            ]
+            for r in rows
+        ),
+    )
+
+
+def autopilot_decisions_csv(user) -> str:
+    """One row per Autopilot verdict, with the quote it stood on and whether
+    the user overrode it — the same check-its-work surface as the log page,
+    portable."""
+    rows = (
+        AutopilotDecision.objects.for_user(user)
+        .select_related("run", "proposal", "app_event")
+    )
+    return _csv(
+        AUTOPILOT_DECISION_EXPORT_COLUMNS,
+        (
+            [
+                _dt(d.run.created) if d.run_id else "",
+                (
+                    f"{d.proposal.name} <{d.proposal.email}>"
+                    if d.proposal_id else str(d.app_event or "")
+                ),
+                d.decision, d.confidence, d.quote, d.reason,
+                d.detected_by, d.status, d.overridden,
+                _dt(d.created), _dt(d.applied_at),
+            ]
+            for d in rows
+        ),
+    )
+
+
 def chat_debriefs_csv(user) -> str:
     """What each coffee chat actually taught the student. Free text they wrote
     once and would have no other way to get back."""
@@ -1111,6 +1198,14 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
      "People your inbox scan suggested, and what you decided about each."),
     ("application_events.csv", application_events_csv,
      "Application updates found in your mail, and what you decided about each."),
+    ("mail_facts.csv", mail_facts_csv,
+     "Facts your mail stated about people (departures, out-of-office, new "
+     "addresses), the quoted sentence behind each, and what was done."),
+    ("autopilot_runs.csv", autopilot_runs_csv,
+     "Every Autopilot decide pass, with its counts and cost."),
+    ("autopilot_decisions.csv", autopilot_decisions_csv,
+     "Every Autopilot verdict, the quote it stood on, and whether you "
+     "overrode it."),
     ("fit_scores.csv", fit_scores_csv,
      "Computed fit scores with the axes behind each one."),
     ("imports.csv", imports_csv, "Your CSV imports and what each one did."),
@@ -1212,6 +1307,17 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     # References `contact` (CASCADE) — deleted before `contacts` below for the
     # same "children before parents" reason as everything above it.
     ("calendar_events", CalendarEvent),
+    # References `contact` and `contact_proposal` (both SET_NULL) — kept
+    # child-before-parent like everything here, and its `quote` column is
+    # the one sentence of mail body the product deliberately stores.
+    ("mail_facts", MailFact),
+    # MUST precede `contact_proposals` and `application_events`: its FKs to
+    # both are on_delete=PROTECT (a decision is the audit trail for the row
+    # it judged), so deleting either parent first raises ProtectedError and
+    # 500s the whole account deletion. Also references `run` (CASCADE) and
+    # `contact` (SET_NULL).
+    ("autopilot_decisions", AutopilotDecision),
+    ("autopilot_runs", AutopilotRun),
     # References `contact` (SET_NULL, so the order doesn't move the counts —
     # kept child-before-parent anyway, like the trio below), and it holds the
     # "never propose this address again" memory, which is the user's data
