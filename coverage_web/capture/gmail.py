@@ -42,7 +42,12 @@ Two dedup layers, both from the original:
 
 `outreach` is dedup'd per contact rather than per thread ("have I ever sent a
 first note" is a per-contact fact), and is off the ladder entirely, so an
-outreach marker never blocks a later reply on the same thread.
+outreach marker never blocks a later reply on the same thread. A LATER
+outbound send to a contact whose first note is on record logs as
+`follow_up` — the kind branch 6 of the cadence engine counts toward
+`max_cold_touches`, which no capture path used to write at all (so a cold
+contact could never earn the park suggestion through capture). See
+`_follow_up_action` for exactly what qualifies and what never does.
 
 Every touch is written through `crm.services.log_touch`, so warmth advances via
 the same ported ratchet as every other front end. No email body is ever stored:
@@ -103,6 +108,15 @@ class SyncResult:
     # exactly how "backfill" quietly came to mean "overwrite".
     alternate_emails_noted: int = 0
     outreach_logged: int = 0
+    # A SECOND outbound send to a contact whose first note is already on
+    # record — logged as kind `follow_up`, the kind the cadence engine's
+    # branch 6 counts toward `max_cold_touches` and nothing anywhere used
+    # to log. Counted apart from `outreach_logged` because the two answer
+    # different questions ("how many first notes" vs "how many bumps"),
+    # and because this counter is the one that changes park behaviour:
+    # every follow-up here moves a cold contact one step toward the park
+    # threshold. See `_follow_up_action` for what qualifies.
+    follow_ups_logged: int = 0
     touches_logged: int = 0
     # Inbound messages recorded as `bulk_received` — a mass invitation, a
     # newsletter, an out-of-office. Counted SEPARATELY from
@@ -176,6 +190,7 @@ class SyncResult:
             "emails_backfilled": self.emails_backfilled,
             "alternate_emails_noted": self.alternate_emails_noted,
             "outreach_logged": self.outreach_logged,
+            "follow_ups_logged": self.follow_ups_logged,
             "touches_logged": self.touches_logged,
             "bulk_logged": self.bulk_logged,
             "bounced_cleared": self.bounced_cleared,
@@ -242,8 +257,9 @@ class GmailFindingsProvider(CaptureProvider):
             provider_ref=ref[:255],
             # A finding describes a thread, not a single message. Reply and
             # chat evidence is what the counterparty did, so it is recorded
-            # inbound; a never-answered sent note is outbound.
-            direction="inbound" if touch_kind != "outreach" else "outbound",
+            # inbound; a never-answered sent note — the first one or a
+            # follow-up — is outbound.
+            direction="outbound" if touch_kind in _OUTREACH_KINDS else "inbound",
             counterparty_email=email,
             counterparty_name=(finding.get("name") or "").strip(),
             # `occurred_at` is when the finding's underlying message actually
@@ -340,6 +356,143 @@ def _logged_recently(user, contact: Contact, kind: str, *, reference=None) -> bo
         .filter(contact=contact, kind=kind, ts__gte=ref - window, ts__lte=ref + window)
         .exists()
     )
+
+
+# What `_follow_up_action` decided about a second outbound send.
+FOLLOW_UP_LOG = "log"        # a real second note — log kind `follow_up`
+FOLLOW_UP_MERGE = "merge"    # a mail-merge wave — never a follow-up
+FOLLOW_UP_SKIP = "skip"      # this send is already on record
+
+
+def _outbound_on_thread(user, contact: Contact, thread_id: str) -> bool:
+    """Whether an outbound touch already carries this thread's marker —
+    i.e. this thread's send has been recorded once."""
+    marker = f"[gmail:{thread_id}]"
+    return (
+        Touch.objects.for_user(user)
+        .filter(contact=contact, kind__in=_OUTREACH_KINDS, note__contains=marker)
+        .exists()
+    )
+
+
+def _outbound_logged_near(user, contact: Contact, *, reference=None) -> bool:
+    """An outreach/follow_up touch within ±NO_THREAD_DEDUP_DAYS of the
+    finding's own time. The same symmetric window `_logged_recently` uses,
+    widened to both outbound kinds: a touch near this send's own instant is
+    overwhelmingly THIS send, recorded through another door (a hand-logged
+    entry, the daily agent sync, an earlier scan) — not evidence of a
+    second note."""
+    ref = reference or timezone.now()
+    window = timedelta(days=NO_THREAD_DEDUP_DAYS)
+    return (
+        Touch.objects.for_user(user)
+        .filter(
+            contact=contact, kind__in=_OUTREACH_KINDS,
+            ts__gte=ref - window, ts__lte=ref + window,
+        )
+        .exists()
+    )
+
+
+def _merge_shaped_send(user, finding: dict, batch) -> bool:
+    """Whether this outbound send is a mail-merge wave rather than a
+    personal note — the same two tests `capture.discovery` applies before
+    proposing from an outbound finding, mirrored here so a blast's second
+    wave cannot become N follow-ups (each of which would march a contact
+    toward the park threshold off a mass send):
+
+      - more than MERGE_RECIPIENT_LIMIT distinct recipients share this
+        normalized subject inside the batch in front of us;
+      - the subject's signature matches a DETECTED campaign the user has
+        not classified as their own recruiting. A campaign the user has
+        explicitly called their recruiting is their outreach by their own
+        word, so its second wave counts.
+    """
+    subject = (finding.get("subject") or "").strip()
+    if not subject:
+        return False
+    signature = crm_campaigns.normalize_subject(subject)
+    if not signature:
+        return False
+    if batch is not None and (
+        batch.outbound_subject_recipients.get(signature, 0)
+        > discovery.MERGE_RECIPIENT_LIMIT
+    ):
+        return True
+    from crm.models import Campaign
+
+    return (
+        Campaign.objects.for_user(user)
+        .filter(signature=signature)
+        .exclude(kind=Campaign.KIND_RECRUITING)
+        .exists()
+    )
+
+
+def _follow_up_action(
+    user, contact: Contact, finding: dict, *, thread_id: str,
+    finding_time, batch,
+) -> str:
+    """Decide what a SECOND outbound send to an already-contacted person is.
+
+    The judgement this encodes (2026-08-27, closing the audit's biggest
+    deferral): kind `follow_up` was never logged from any capture path, so
+    the cadence engine's branch 6 saw `outbound` stuck at 1 forever — the
+    "no reply after touch 1 — follow up" prompt re-rendered indefinitely,
+    `max_cold_touches` was unreachable, and a cold contact could never earn
+    the park suggestion through capture. The founder sends his follow-ups
+    from Gmail (measured on his live mailbox: they are same-thread "just
+    following up" replies), so capture is exactly where they must be
+    recognised.
+
+    What counts as what:
+
+      - FIRST NOTE: no outreach/follow_up touch exists for the contact.
+        Handled by the caller (logs `outreach`, unchanged).
+      - RE-SEEN SEND: the same message coming past again (a rescan, the
+        daily sync re-emitting a thread summary, a hand-logged duplicate).
+        Never logged twice. Recognised two ways: the thread already carries
+        an outbound marker and the finding has no message time of its own
+        (a thread-level summary says nothing new), or an outbound touch
+        already sits within ±NO_THREAD_DEDUP_DAYS of the finding's own
+        time (that touch IS this send).
+      - MERGE WAVE: `_merge_shaped_send` above — never a follow-up.
+      - FOLLOW-UP: everything else — a dated send at least the dedup
+        window after every recorded outbound touch (same thread or a new
+        one), or an undated new-thread send from the daily sync (which the
+        thread marker then guards from re-logging tomorrow).
+
+    Two accepted costs, stated rather than hidden: a genuine second note
+    sent within NO_THREAD_DEDUP_DAYS of the first is suppressed (the
+    cadence's own follow-up window is 6 business days, so a real follow-up
+    almost always clears it), and a threadless, undated finding never
+    logs a follow-up at all (nothing could stop it re-logging weekly).
+    """
+    if finding.get("replied") or finding.get("bulk"):
+        # A thread summary that says they replied has nothing to follow up;
+        # a bulk send is not a note to this person.
+        return FOLLOW_UP_SKIP
+    if _merge_shaped_send(user, finding, batch):
+        return FOLLOW_UP_MERGE
+    if thread_id and _outbound_on_thread(user, contact, thread_id):
+        # This thread's send is on record. Only a message carrying its own
+        # real time can prove it is a DIFFERENT, later send on the same
+        # thread (the founder's actual follow-up shape) — an undated
+        # thread summary cannot, and treating it as one would re-log
+        # weekly forever.
+        if finding_time is None:
+            return FOLLOW_UP_SKIP
+        if _outbound_logged_near(user, contact, reference=finding_time):
+            return FOLLOW_UP_SKIP
+        return FOLLOW_UP_LOG
+    if not thread_id and finding_time is None:
+        # Nothing to dedup a re-emission against — the one shape that must
+        # keep the old skip, or it logs a fresh follow-up every week the
+        # thread stays in the search window.
+        return FOLLOW_UP_SKIP
+    if _outbound_logged_near(user, contact, reference=finding_time):
+        return FOLLOW_UP_SKIP
+    return FOLLOW_UP_LOG
 
 
 def _finding_occurred_at(finding: dict):
@@ -789,7 +942,7 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         marker = f"[gmail:{thread_id}] " if thread_id else ""
         evidence = (finding.get("evidence") or "").strip()
 
-        # --- outreach: per-contact, off the ladder ------------------------ #
+        # --- outreach + follow-up: per-contact, off the ladder ------------ #
         if finding.get("outreach_sent"):
             already = (
                 Touch.objects.for_user(user)
@@ -797,7 +950,39 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                 .exists()
             )
             if already:
-                result.skipped_already_logged += 1
+                # A first note is on record, so this send is either the
+                # same event re-seen or the follow-up nothing used to log
+                # (`_follow_up_action` is the whole judgement, including
+                # why a merge wave and an undated re-emission never count).
+                action = _follow_up_action(
+                    user, contact, finding, thread_id=thread_id,
+                    finding_time=finding_time, batch=batch_context,
+                )
+                if action == FOLLOW_UP_LOG:
+                    if not dry_run:
+                        event = provider.build_event(
+                            finding, user, "follow_up", occurred_at=finding_time
+                        )
+                        logged = crm_services.log_touch(
+                            user.id, contact.id, "follow_up", TOUCH_CHANNEL,
+                            note=f"{marker}{evidence}".strip() or None,
+                            now=finding_time,
+                            source="capture",
+                        )
+                        _stamp_subject(user, logged, finding)
+                        _record(user, contact, event)
+                    result.follow_ups_logged += 1
+                    result.details.append(
+                        f"{name}: follow-up logged (second note, still no reply)"
+                    )
+                elif action == FOLLOW_UP_MERGE:
+                    result.skipped_already_logged += 1
+                    result.details.append(
+                        f"{name}: outbound is a mail-merge wave — not logged "
+                        "as a follow-up"
+                    )
+                else:
+                    result.skipped_already_logged += 1
             else:
                 if not dry_run:
                     event = provider.build_event(
