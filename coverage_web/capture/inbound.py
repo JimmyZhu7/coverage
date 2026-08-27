@@ -107,6 +107,22 @@ _CAMPAIGN_HEADERS = (
 # its own mail low-priority/automated.
 _BULK_PRECEDENCE = {"bulk", "list", "junk"}
 
+# Auto-reply subject prefixes, for the responders that carry no RFC 3834
+# header at all. Deliberately anchored to the START of the subject and kept
+# to the stock strings mail systems themselves prepend ("Automatic reply:"
+# is Exchange's, "Out of Office" is the older Outlook's) — a human writing
+# "following up on the auto reply I got" must never match. Verified against
+# the founder's live mailbox (2026-08-24, read-only): Exchange's
+# "Automatic reply: USC | Redwood | Allen & Company - ..." is exactly this
+# shape (that one ALSO carried `Auto-Submitted: auto-generated`; this regex
+# is for the systems that don't).
+_AUTOREPLY_SUBJECT_RE = re.compile(
+    r"^\s*(?:automatic reply|auto[- ]?reply|autoreply|auto response|"
+    r"out of (?:the )?office(?:\s+auto(?:-| )?reply)?|ooo)\b"
+    r"(?:\s*[:\-]|\s*$)",
+    re.IGNORECASE,
+)
+
 # How many people have to be on To:+Cc: before the message stops looking
 # like it was written to one person. Six, not two: a genuine intro email
 # ("Jimmy, meet Sarah; Sarah, meet Jimmy") legitimately carries three or
@@ -142,6 +158,17 @@ class InboundVerdict:
     # the same fact on its own so a stricter surface (contact discovery)
     # can make it decisive without re-parsing headers.
     addressed_to_user: bool = True
+    # True when the message declares ITSELF machine-answered: `Auto-Submitted:`
+    # anything but `no` (RFC 3834), an `X-Autoreply`/`X-Autorespond` header, or
+    # a stock auto-reply subject prefix ("Automatic reply:"). Strictly narrower
+    # than `is_bulk` — a newsletter is bulk and not this — and reported so the
+    # auto-reply reader (`capture.mailfacts`) can gate on "the counterparty's
+    # OWN mailbox answered by machine" without re-parsing headers. An
+    # auto-reply is the one bulk message whose BODY is worth reading: it is
+    # where "no longer with the firm", "please contact X at Y" and "back on
+    # September 2" live. Deliberately LAST in the field list: existing call
+    # sites construct this positionally.
+    auto_submitted: bool = False
 
     @property
     def reason_text(self) -> str:
@@ -221,8 +248,25 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
         always.append(f"sender is an unattended address ({from_addr})")
 
     auto_submitted = headers.get("auto-submitted", "").split(";")[0].strip().lower()
+    is_auto_reply = False
     if auto_submitted and auto_submitted != "no":
         always.append(f"Auto-Submitted: {auto_submitted}")
+        is_auto_reply = True
+
+    # The header-less responders. `X-Autoreply`/`X-Autorespond` are the
+    # de-facto headers some vacation responders stamp instead of RFC 3834's;
+    # the subject prefix covers the systems that stamp nothing at all. All
+    # tier 1 for the same reason `Auto-Submitted` is: a machine answered, in
+    # a thread, and it is not a person answering you — before this test an
+    # OOO with no RFC header fell straight through to `replied: True` and
+    # inflated warmth off a vacation responder.
+    if headers.get("x-autoreply") or headers.get("x-autorespond"):
+        always.append("X-Autoreply (vacation responder)")
+        is_auto_reply = True
+    subject = headers.get("subject", "")
+    if _AUTOREPLY_SUBJECT_RE.match(subject):
+        always.append("auto-reply subject prefix")
+        is_auto_reply = True
 
     precedence = headers.get("precedence", "").strip().lower()
     if precedence in _BULK_PRECEDENCE:
@@ -233,7 +277,9 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
         always.append("mailing-list headers (" + ", ".join(present_list) + ")")
 
     if always:
-        return InboundVerdict(True, tuple(always), threaded, addressed)
+        return InboundVerdict(
+            True, tuple(always), threaded, addressed, auto_submitted=is_auto_reply
+        )
 
     # --- tier 2: strong, overridden by a genuine reply pointer ------------- #
     strong: list[str] = []

@@ -105,6 +105,26 @@ _BOUNCE_SUBJECT_RE = re.compile(
     r"delivery status notification|undeliverable|delivery has failed",
     re.IGNORECASE,
 )
+
+# A bounce that does NOT mean "this address is wrong": the mailbox exists and
+# is full, or the receiving server asked for a retry. Treating these as hard
+# bounces is how a working address gets cleared off a contact over a full
+# mailbox — verified on the founder's live mailbox (2026-08-24, read-only):
+# Goldman's postmaster answered his note to a real banker with DSN status
+# 5.2.2, "The recipient's mailbox is full and can't accept messages now.
+# Please try resending your message later". The address works; the message
+# didn't land TODAY. Markers, deterministic only: the mailbox-full/quota
+# vocabulary (5.2.2 is nominally permanent but describes a full box, not a
+# wrong address), the DSN's own "delayed"/retry language, and any 4.x.x
+# status code (RFC 3464's transient class).
+_SOFT_BOUNCE_RE = re.compile(
+    r"mailbox (?:is )?full|over ?quota|quota ?exceeded"
+    r"|try (?:re)?sending (?:your message )?(?:again )?later"
+    r"|has been delayed|delivery will be (?:retried|attempted)"
+    r"|will (?:keep trying|retry)|action:\s*delayed"
+    r"|status:\s*4\.\d{1,3}\.\d{1,3}",
+    re.IGNORECASE,
+)
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _ICS_DTSTART_RE = re.compile(r"DTSTART(?:;TZID=([^:]+))?:(\d{8}T\d{6}Z?)")
 _ICS_SUMMARY_RE = re.compile(r"SUMMARY:(.+)")
@@ -623,17 +643,30 @@ def _bounce_recipient(message: dict, own_email: str) -> str | None:
     supplies.
     """
     own = own_email.lower()
+    for candidate in _EMAIL_RE.findall(_bounce_text(message)):
+        low = candidate.lower()
+        if low != own and not _BOUNCE_FROM_RE.search(low):
+            return low
+    return None
+
+
+def _bounce_text(message: dict) -> str:
+    """The text a bounce actually says its news in: Gmail's snippet plus
+    every decoded `text/*` part. Shared by `_bounce_recipient` (finds the
+    failed address) and the soft-bounce test in `_classify_message` (finds
+    the "mailbox is full"/"delayed" vocabulary) so the two read the same
+    words. The DECODED body matters beyond reach: Gmail's snippet for the
+    founder's real Goldman DSN renders the routing address as
+    "Noah. Bauld@ ny. ibd. email. gs. com" — spaces after every dot — so an
+    address regex over the snippet alone misses what the body states
+    cleanly."""
     text_chunks = [message.get("snippet", "")]
     for part in _walk_parts(message.get("payload", {})):
         if part.get("mimeType", "").startswith("text/"):
             decoded = _decode_body(part)
             if decoded:
                 text_chunks.append(decoded)
-    for candidate in _EMAIL_RE.findall("\n".join(text_chunks)):
-        low = candidate.lower()
-        if low != own and not _BOUNCE_FROM_RE.search(low):
-            return low
-    return None
+    return "\n".join(text_chunks)
 
 
 def _message_occurred_at(message: dict) -> str | None:
@@ -697,6 +730,39 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         recipient = _bounce_recipient(message, own_email)
         if not recipient:
             return None
+        # SOFT vs HARD, and the split is the whole point. A hard bounce means
+        # "this address is wrong" and downstream clears it off the contact
+        # (apply_findings' bounce block). A soft one — mailbox full, server
+        # asked for a retry — means the OPPOSITE: the address works and the
+        # message didn't land today. Filing it as `bounced: True` would clear
+        # a working address; filing it as nothing (the old behavior — it fell
+        # into the recipient's unmatched skip) discarded the one useful fact
+        # the DSN carries, the expanded routing address the receiving system
+        # names. So it becomes its own finding shape: never `bounced`, marked
+        # `bulk` so no matcher can mistake the postmaster for a person
+        # replying, and carrying the DSN's own text (from the decoded body,
+        # not Gmail's dot-mangled snippet — see `_bounce_text`) for
+        # `capture.mailfacts` to read and quote.
+        text = _bounce_text(message)
+        if _SOFT_BOUNCE_RE.search(f"{subject}\n{text}"):
+            return {
+                "name": recipient.split("@")[0],
+                "email": recipient,
+                "found": True,
+                "bounced": False,
+                "soft_bounce": True,
+                "outreach_sent": False,
+                "replied": False,
+                "chat_status": "none",
+                "chat_scheduled_at": None,
+                "bulk": True,
+                "bulk_reasons": "delivery deferred (soft bounce)",
+                "snippet": text[:600],
+                "evidence": f"Delivery deferred (not a bounce): {subject}",
+                "thread_id": thread_id,
+                "subject": subject,
+                "occurred_at": occurred_at,
+            }
         return {
             "name": recipient.split("@")[0],
             "email": recipient,
@@ -741,6 +807,14 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             "chat_scheduled_at": None,
             "bulk": True,
             "bulk_reasons": verdict.reason_text,
+            # The counterparty's own mailbox answered by machine — RFC 3834
+            # `Auto-Submitted`, an `X-Autoreply`, or the stock subject prefix
+            # (see `capture.inbound`). This is `capture.mailfacts`' gate: an
+            # auto-reply is the one bulk message whose body states facts
+            # about the PERSON ("no longer with", "please contact X at Y",
+            # "back on September 2"), so the flag rides along rather than
+            # being re-derived from the reasons prose.
+            "auto_reply": verdict.auto_submitted,
             # Gmail's own preview line, for `capture.appmail` only. Bulk
             # mail is where application-status mail lives, and a rejection's
             # subject is routinely the neutral "Your application to X" —
