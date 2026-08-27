@@ -161,3 +161,25 @@ def test_excluded_labels_on_the_fetched_message_are_skipped(label):
     assert applied.call_count == 0
     connection.refresh_from_db()
     assert connection.history_id == "2000"
+
+
+def test_sync_connection_returns_the_report_it_used_to_discard():
+    """The SyncResult is the only carrier of the pipeline's honesty valves
+    (unresolved application mail, ambiguous names, surfaced mail facts) —
+    `sync_connection` used to call `apply_findings` and throw it away, so
+    on the every-two-minutes path those lines went nowhere."""
+    connection = _connection()
+    real = _full_message(
+        "real", from_addr="Alice <alice@firm.example>", to_addr=OWN,
+        label_ids=["INBOX"],
+    )
+    client = _client([_added("real", ["INBOX"])], {"real": real})
+    sentinel = MagicMock()
+    with patch.object(gmail_live, "_gmail_client", return_value=client), \
+            patch.object(gmail_live, "apply_findings", return_value=sentinel):
+        assert gmail_live.sync_connection(connection) is sentinel
+
+    # And a pass with nothing new returns None rather than a fake report.
+    empty_client = _client([], {})
+    with patch.object(gmail_live, "_gmail_client", return_value=empty_client):
+        assert gmail_live.sync_connection(connection) is None

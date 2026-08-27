@@ -520,7 +520,20 @@ def process_notification(gmail_address: str, published_history_id: str) -> None:
     sync_connection(connection)
 
 
-def sync_connection(connection: GmailConnection) -> None:
+def sync_connection(connection: GmailConnection):
+    """Sync one mailbox from its stored cursor. Returns the
+    `capture.gmail.SyncResult` when findings were applied, else None.
+
+    THE RETURN IS THE OBSERVABILITY FIX, not a convenience: this used to
+    call `apply_findings(...)` and throw the report away, which meant every
+    honesty valve that module maintains — `app_events_unresolved` ("we saw
+    application mail and could not pin the role"), `skipped_ambiguous`,
+    the mail-facts surfaced lines — was invisible on the ONE path that runs
+    every two minutes. The next BofA-class deadline mail that gated in but
+    could not resolve would have produced no row, no card, and no line
+    anywhere. `gmail_poll` prints the non-zero counters and detail lines
+    per pass; the Pub/Sub path gets the same facts through the log line
+    below."""
     gmail = _gmail_client(connection)
     start_id = connection.history_id or None
 
@@ -537,7 +550,7 @@ def sync_connection(connection: GmailConnection) -> None:
             profile = gmail.users().getProfile(userId="me").execute()
             connection.history_id = str(profile["historyId"])
             connection.save(update_fields=["history_id"])
-            return
+            return None
         raise
 
     findings = []
@@ -549,12 +562,16 @@ def sync_connection(connection: GmailConnection) -> None:
         if finding is not None:
             findings.append(finding)
 
+    result = None
     if findings:
-        apply_findings(connection.user, findings)
+        result = apply_findings(connection.user, findings)
+        for line in result.details:
+            logger.info("Gmail Live %s: %s", connection.gmail_address, line)
 
     connection.history_id = latest_history_id or connection.history_id
     connection.last_notification_at = timezone.now()
     connection.save(update_fields=["history_id", "last_notification_at"])
+    return result
 
 
 def preview_sync(connection: GmailConnection) -> dict:

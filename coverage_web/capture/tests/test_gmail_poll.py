@@ -628,3 +628,31 @@ class TestSpacing:
     def test_negative_spacing_is_rejected(self):
         with pytest.raises(CommandError):
             _run("--spacing", "-1")
+
+
+class TestSyncReportSurfaces:
+    def test_the_reports_honesty_valves_reach_the_pass_output(self):
+        """`sync_connection` now returns the SyncResult, and the poll prints
+        its non-zero counters and detail lines — the only place the
+        every-two-minutes path can say "we saw application mail and could
+        not type it" out loud."""
+        from capture.gmail import SyncResult
+
+        _connection(_user("report@example.com"))
+        result = SyncResult(findings=2, touches_logged=1)
+        result.app_events_unresolved = 1
+        result.details.append(
+            "application mail we could not type: Your BofA next step"
+        )
+        with patch.object(gmail_live, "sync_connection", return_value=result):
+            out = _run()
+        assert "1 touches_logged" in out
+        assert "1 app_events_unresolved" in out
+        assert "application mail we could not type" in out
+
+    def test_a_quiet_pass_stays_quiet(self):
+        _connection(_user("quiet@example.com"))
+        with patch.object(gmail_live, "sync_connection", return_value=None):
+            out = _run()
+        assert "synced (history" in out
+        assert " — " not in out.split("pass:")[0]

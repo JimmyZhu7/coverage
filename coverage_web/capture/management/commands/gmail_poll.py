@@ -436,7 +436,7 @@ class Command(BaseCommand):
             return "skipped"
 
         try:
-            gmail_live.sync_connection(connection)
+            result = gmail_live.sync_connection(connection)
         except RefreshError as exc:
             return self._handle_refresh_error(connection, exc)
         except Exception as exc:  # noqa: BLE001
@@ -447,8 +447,37 @@ class Command(BaseCommand):
 
         # `sync_connection` writes the new cursor onto this same instance,
         # so there is nothing to re-read.
-        self.stdout.write(f"{address}: synced (history {connection.history_id})")
+        summary = self._sync_summary(result)
+        self.stdout.write(
+            f"{address}: synced (history {connection.history_id})"
+            + (f" — {summary}" if summary else "")
+        )
+        # The report's honesty valves, on the one path that runs every two
+        # minutes: "application mail we could not type", "2 contacts share
+        # this name", the mail-facts surfaced lines. These used to be
+        # discarded with the whole SyncResult, so a message the pipeline saw
+        # and could not resolve produced no row, no card, and no line.
+        for line in self._sync_details(result):
+            self.stdout.write(f"  {line}")
         return "synced"
+
+    @staticmethod
+    def _sync_summary(result) -> str:
+        """Non-zero counters as one short line, or "". Defensive against
+        anything that isn't a real SyncResult (tests patch the sync)."""
+        try:
+            stats = dict(result.as_stats())
+        except Exception:  # noqa: BLE001 — no result, or a test double
+            return ""
+        parts = [f"{v} {k}" for k, v in stats.items() if isinstance(v, int) and v]
+        return ", ".join(parts)
+
+    @staticmethod
+    def _sync_details(result) -> list[str]:
+        try:
+            return [str(line) for line in list(result.details)]
+        except Exception:  # noqa: BLE001 — no result, or a test double
+            return []
 
     # -- error policy ------------------------------------------------------
 
