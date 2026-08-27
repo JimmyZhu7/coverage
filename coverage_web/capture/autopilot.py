@@ -429,6 +429,13 @@ def _skip_reason(proposal: ContactProposal) -> str | None:
     if existing is not None:
         if existing.overridden:
             return "you overrode Autopilot on this person — it never re-decides"
+        # A SUPERSEDED decision blocks nothing: the row it judged was
+        # resolved by automation (a mail-fact withdrawal) before the tap,
+        # so the verdict was never offered and no human ever weighed in.
+        # This proposal being pending again means someone restored it —
+        # decide it afresh.
+        if existing.status == AutopilotDecision.STATUS_SUPERSEDED:
+            return None
         # Only a FINISHED run's decision blocks a re-decide. A run stuck at
         # `running` (a killed process) or marked `failed` must not lock its
         # rows out forever — its decisions were never offered for a tap, so
@@ -667,9 +674,34 @@ def apply_run(run: AutopilotRun) -> tuple[str, int]:
         if d.proposal is not None:
             p = d.proposal
             if p.status != ContactProposal.STATUS_PENDING:
-                d.overridden = True
-                d.reason = (d.reason + " · resolved by you before the tap")[:300]
-                d.save(update_fields=["overridden", "reason"])
+                # Resolved between decide and tap — but by WHOM decides the
+                # flag. `overridden` is the user's word and locks the row
+                # out of every future run; an automated withdrawal (a
+                # mail-fact dismissing a departed person's proposal,
+                # capture.mailfacts — the only automated path that resolves
+                # a pending proposal) is a machine action and gets
+                # `superseded` instead, which blocks nothing if the row is
+                # ever restored to pending. Conflating the two was marking
+                # "never re-decide, permanently" off a decision no person
+                # made.
+                from .models import MailFact
+
+                auto_withdrawn = (
+                    p.status == ContactProposal.STATUS_DISMISSED
+                    and MailFact.objects.for_user(d.user)
+                    .filter(proposal=p, status=MailFact.STATUS_APPLIED)
+                    .exists()
+                )
+                if auto_withdrawn:
+                    d.status = AutopilotDecision.STATUS_SUPERSEDED
+                    d.reason = (
+                        d.reason + " · withdrawn by a mail fact before the tap"
+                    )[:300]
+                    d.save(update_fields=["status", "reason"])
+                else:
+                    d.overridden = True
+                    d.reason = (d.reason + " · resolved by you before the tap")[:300]
+                    d.save(update_fields=["overridden", "reason"])
                 continue
             # `accept` may create or match — record which, so undo can
             # reverse exactly what happened and nothing more.

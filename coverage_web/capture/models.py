@@ -667,13 +667,23 @@ class AutopilotDecision(PrivateModel):
     stored as an escalation ("needs you"), never as an accept — an
     ungrounded answer takes no action, it asks for a human.
 
-    THE OVERRIDE IS PERMANENT. `overridden=True` is set the moment the
-    user undoes an applied decision (or the row it points at was resolved
-    by their own hand before apply reached it), and
-    `capture.autopilot.run_autopilot` refuses to ever re-decide a proposal
-    that carries an overridden decision. The user's word outranks every
-    future run, the same way a dismissed proposal outranks every future
-    scan.
+    THE OVERRIDE IS PERMANENT — AND IT IS ONLY EVER THE USER'S WORD.
+    `overridden=True` is set the moment the user undoes an applied decision
+    (or the row it points at was resolved by their own hand before apply
+    reached it), and `capture.autopilot.run_autopilot` refuses to ever
+    re-decide a proposal that carries an overridden decision. The user's
+    word outranks every future run, the same way a dismissed proposal
+    outranks every future scan.
+
+    A row resolved by AUTOMATION between decide and tap — a mail fact
+    withdrawing a departed person's pending proposal (capture.mailfacts) —
+    is NOT the user's word, so it must not wear the same flag: that
+    decision is marked `superseded` instead (see STATUS_SUPERSEDED below),
+    which blocks nothing. If the row ever comes back to pending (the user
+    restores the withdrawn card), a future run decides it afresh — no
+    human ever weighed in, so there is no override to honor. Before this
+    split, an auto-withdrawal was stamped `overridden` and the row was
+    locked out of every future run by a decision no person made.
 
     Exactly one of `proposal` / `app_event` is set — the two kinds of
     pending row a scan can leave behind. PROTECT, not CASCADE: a decision
@@ -691,10 +701,17 @@ class AutopilotDecision(PrivateModel):
     STATUS_PROPOSED = "proposed"    # decided, not yet applied
     STATUS_APPLIED = "applied"
     STATUS_UNDONE = "undone"
+    # The row this decision judged was resolved by AUTOMATION (a mail-fact
+    # withdrawal) between decide and tap, so the decision was never offered
+    # and never applied. Deliberately distinct from `overridden`: that flag
+    # is the user's word and permanent; this status is bookkeeping about a
+    # machine action and blocks no future run. See the class docstring.
+    STATUS_SUPERSEDED = "superseded"
     STATUS_CHOICES = [
         (STATUS_PROPOSED, "Proposed"),
         (STATUS_APPLIED, "Applied"),
         (STATUS_UNDONE, "Undone"),
+        (STATUS_SUPERSEDED, "Superseded"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
