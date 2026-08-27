@@ -110,6 +110,37 @@ BACKFILL_ZERO_TOUCH_DAYS = 365
 BACKFILL_TOUCHED_WINDOW_DAYS = 90
 BACKFILL_OVERLAP_DAYS = 7
 
+# The first-run SENT SWEEP (see `_sent_sweep_message_ids` and
+# `backfill_connection`'s `sweep_sent`). How far back the one-time pass over
+# the student's own sent mail reaches, and how many messages it will ever
+# fetch.
+#
+# 180 days is one recruiting cycle. Sent mail older than that describes a
+# relationship the cadence engine has nothing to do with any more, and every
+# extra month is more proposals to read for less reason to read them.
+#
+# 500 is a hard ceiling on `messages.get` calls, applied newest-first, so a
+# ten-year mailbox costs the same as a two-year one. It is a cost guard, not
+# a policy: a student who really did send more than 500 mails in six months
+# gets the most recent 500, and the live listener covers everything after
+# the connection. Both are deliberately NOT env-tunable — a knob here would
+# be a knob on how much of someone's mailbox Coverage reads.
+#
+# THE ONE PLACE THE CAP CAN COST SOMETHING, stated because it is not
+# obvious. `discovery.BatchContext`'s merge guard counts distinct recipients
+# per subject WITHIN the batch, so a blast the cap slices through is counted
+# short. A blast's messages are contiguous in time and the cap is
+# newest-first, so in practice a blast is either almost entirely in the
+# batch or almost entirely out of it — measured on the founder's mailbox
+# (2026-08-27, read-only) the cap dropped 308 of 808 matched messages and
+# both of his real 100+ blasts still scored far past `MERGE_RECIPIENT_LIMIT`
+# and proposed nobody. The residual case is a blast the cap boundary happens
+# to leave three or fewer recipients of, and its backstop is the OTHER merge
+# guard: a subject matching a DETECTED `Campaign` the user has not called
+# their own recruiting is refused whatever the batch says.
+SWEEP_SENT_DAYS = 180
+SWEEP_MAX_MESSAGES = 500
+
 logger = logging.getLogger(__name__)
 
 GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -1196,13 +1227,41 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
 # First-connect historical backfill
 # ---------------------------------------------------------------------------
 #
-# Deliberately mirrors capture_gmail (Step 1 of the daily sync) rather than
-# capture_discover (Step 2): this fills in history for contacts ALREADY in
-# Coverage and never creates new ones. Per-contact search is what makes that
-# the free choice, not just the cautious one — a search scoped to
-# `from:X OR to:X` can only ever return mail involving someone already
-# tracked, so there is no scan-the-whole-mailbox cost to weigh against
-# "could this discover someone new" (it can't, by construction).
+# TWO SEARCHES, TWO QUESTIONS, ONE BATCH.
+#
+# The per-contact search is the original and still the default: scoped to
+# `from:X OR to:X` for every contact already in Coverage, it can only ever
+# return mail involving someone already tracked. It fills in HISTORY and, by
+# construction, discovers nobody.
+#
+# That construction is exactly the cold start. A student who connects Gmail
+# before they own a spreadsheet has no contacts, so the per-contact loop
+# builds an empty query set, finds nothing, and the feature that makes
+# Coverage feel alive does nothing on the one day it matters most. The
+# onboarding copy papered over it by telling students to import first —
+# which asks them to produce a CSV before they have seen a single thing the
+# product does.
+#
+# So the first-connect pass now ALSO runs one SENT SWEEP
+# (`_sent_sweep_message_ids`, opted into by `backfill_connection`'s
+# `sweep_sent`): `in:sent` over the last `SWEEP_SENT_DAYS`, capped at
+# `SWEEP_MAX_MESSAGES`. It answers the other question — "who have I already
+# written to at a firm I care about" — and it is the only evidence a
+# brand-new account actually has. Nothing downstream changes: the swept ids
+# join the per-contact ids in ONE set, get the SAME `classify_message_findings`
+# treatment, and go through the SAME single `apply_findings` call, which is
+# what routes an unmatched recipient to `capture.discovery.consider_finding`
+# and its refusal ladder. One `apply_findings` call is load-bearing rather
+# than tidy: `discovery.BatchContext`'s mail-merge guard counts how many
+# distinct recipients share a subject ACROSS the batch, so splitting the
+# sweep into its own pass would blind the one guard that stops a 201-person
+# club blast becoming 201 proposals.
+#
+# What the sweep does NOT do: create a contact (only a tap does — see
+# capture/discovery.py), read inbound mail it was not already going to read
+# (the sweep is `in:sent`; the whole-mailbox inbound firehose is newsletters
+# and is not worth the read), or run more than once (`backfill_status` is
+# sticky at `done`, and a proposal row for an address refuses forever after).
 #
 # Runs as a scheduled command (gmail_backfill), never inline in the OAuth
 # callback — a year of history is a multi-minute job, and connect_gmail's
@@ -1237,6 +1296,56 @@ def _suppress_stale_bounces(findings: list[dict]) -> list[dict]:
     return kept
 
 
+def _sent_sweep_message_ids(gmail, *, now) -> list[str]:
+    """Message ids for the first-run sent sweep: the student's OWN sent mail
+    over the last `SWEEP_SENT_DAYS`, newest first, at most
+    `SWEEP_MAX_MESSAGES` of them.
+
+    `in:sent` plus mailer-daemon/postmaster, and nothing else. Not
+    `-in:sent` too, not `newer_than:` over the whole mailbox: the sweep's
+    entire claim is "the student chose to write to this person", which is
+    the one piece of evidence a brand-new account owns and the one Gmail can
+    hand over without reading anything that was written TO them. Every
+    judgment about whether a recipient is worth proposing happens later and
+    elsewhere (`capture.discovery.consider_finding` — firm domain required,
+    role accounts and ESPs and the user's own institution refused, merges
+    refused). This function only decides which messages get read.
+
+    THE BOUNCE CLAUSE IS NOT AN EXCEPTION TO THAT, IT IS WHAT KEEPS IT
+    HONEST. `discovery.consider_finding` refuses to propose a recipient
+    whose address bounced in the same batch ("the send provably did not
+    reach a person"), and it can only see a bounce that is IN the batch. A
+    bounce is inbound mail, so a strictly `in:sent` sweep would hand the
+    guard a batch it cannot fire on and quietly propose every dead address
+    in the student's outbox. Two `from:` terms restore it. They widen the
+    read by exactly the machine senders `_looks_like_bounce` already
+    recognises — no human's mail to the student is read by this function.
+
+    Paging stops at the cap rather than truncating afterward, so the ceiling
+    is on API calls, not just on the returned list. Gmail returns
+    `messages.list` newest-first, so the cap drops the OLDEST mail, which is
+    the right half to lose.
+    """
+    since = now - timedelta(days=SWEEP_SENT_DAYS)
+    query = (
+        f"(in:sent OR from:mailer-daemon OR from:postmaster) "
+        f"after:{since:%Y/%m/%d}"
+    )
+    ids: list[str] = []
+    page_token = None
+    while True:
+        response = gmail.users().messages().list(
+            userId="me", q=query, pageToken=page_token
+        ).execute()
+        for item in response.get("messages", []) or []:
+            ids.append(item["id"])
+            if len(ids) >= SWEEP_MAX_MESSAGES:
+                return ids
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            return ids
+
+
 def _backfill_window_start(last_touch, *, now) -> "datetime":
     if last_touch is None:
         return now - timedelta(days=BACKFILL_ZERO_TOUCH_DAYS)
@@ -1250,6 +1359,7 @@ def backfill_connection(
     contacts=None,
     dry_run: bool = False,
     update_backfill_status: bool = True,
+    sweep_sent: bool = False,
     residue_sink: list | None = None,
 ):
     """One historical pass over `contacts` (or, by default, every contact the
@@ -1281,6 +1391,17 @@ def backfill_connection(
     `done` regardless of how many other scans run afterward. Those callers
     are responsible for recording their own run's outcome wherever it
     belongs.
+
+    `sweep_sent`: also read the student's own recent sent mail, whoever it
+    went to (`_sent_sweep_message_ids`). False by default — the per-contact
+    scan above is the whole job for the import-triggered scoped pass and for
+    "Scan Now", both of which run against an account that already has
+    contacts. Only the FIRST-CONNECT pass (`gmail_backfill`'s pending sweep)
+    passes True, because that is the one moment where the answer to "who is
+    already in Coverage" may be nobody and the mailbox is the only thing
+    that knows anything. See the section header above for why the swept ids
+    join this function's existing set rather than getting a pass of their
+    own.
 
     `residue_sink`: when given a list, every message this pass could NOT
     confidently classify (`_classify_message` returned `None` — see
@@ -1328,6 +1449,13 @@ def backfill_connection(
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
+
+    if sweep_sent:
+        # Union, not a second pass: an id the per-contact loop already found
+        # is the same message, and the set is what keeps a note the student
+        # sent to three people — two tracked, one not — from being fetched
+        # twice and classified twice.
+        message_ids.update(_sent_sweep_message_ids(gmail, now=now))
 
     findings = []
     for message_id in message_ids:

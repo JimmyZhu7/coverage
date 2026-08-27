@@ -122,6 +122,7 @@ def test_backfill_releases_the_lock_when_done(settings):
         findings = 0
         touches_logged = 0
         outreach_logged = 0
+        proposals_created = 0
         bounced_cleared = 0
         details = []
 

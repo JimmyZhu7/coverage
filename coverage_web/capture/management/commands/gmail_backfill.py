@@ -7,7 +7,12 @@ mechanism rather than inventing a second one.
 `connect_gmail()` (capture/gmail_live.py) marks a fresh connection
 `backfill_status="pending"` right after the live watch is registered — so
 live coverage starts immediately, and this command is what fills in the
-past. `capture.views.gmail_rescan` marks a connection `rescan_status=
+past. The BACKFILL selection (and only it) runs with `sweep_sent=True`, so
+a student who connects Gmail with an empty Coverage gets their own recent
+sent mail read once and the people they already wrote to at directory firms
+PROPOSED for a tap — see `gmail_live`'s first-connect section header. That
+is the cold start fixed; a rescan is a different, repeatable job and keeps
+the per-contact scope. `capture.views.gmail_rescan` marks a connection `rescan_status=
 "pending"` when a user presses "Scan Now" in Settings. Run this command on
 a short tick (10-15 min is plenty; most runs find nothing pending in
 either queue). Never run either pass inline in a request: a year of
@@ -164,7 +169,17 @@ class Command(BaseCommand):
             connection.save(update_fields=["backfill_status", "backfill_started_at"])
 
         try:
-            result = gmail_live.backfill_connection(connection, dry_run=dry_run)
+            # `sweep_sent=True` HERE and nowhere else. This selection is the
+            # one-time first-connect pass, and it is the only pass that can
+            # be running against an account with no contacts at all — the
+            # cold start the sweep exists for. The rescan selection below
+            # and the import-triggered scan (`backfill_new_contacts`) both
+            # run against an account that already has people in it, so they
+            # keep the cheaper per-contact scope. See
+            # `gmail_live.backfill_connection`'s `sweep_sent`.
+            result = gmail_live.backfill_connection(
+                connection, dry_run=dry_run, sweep_sent=True
+            )
         except Exception as exc:  # noqa: BLE001
             if not dry_run:
                 connection.backfill_status = "failed"
@@ -183,9 +198,15 @@ class Command(BaseCommand):
                 row_stats=result.as_stats(),
             )
 
+        # `proposals` is named on this line and not on the rescan's because
+        # it is the whole point of the sent sweep above: on an empty
+        # account every other counter here is legitimately zero, and a
+        # first-connect run that reports "0 touches" while quietly having
+        # found 50 people to offer reads as a failure.
         self.stdout.write(
             f"{prefix}{connection.gmail_address}: {result.findings} findings, "
             f"{result.touches_logged} touches, {result.outreach_logged} outreach, "
+            f"{result.proposals_created} proposed, "
             f"{result.bounced_cleared} bounces cleared"
         )
         for line in result.details:
