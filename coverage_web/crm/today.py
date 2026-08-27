@@ -641,6 +641,15 @@ TODAY_PLAN_MAX = 5
 # Everything past the first is reachable under "Up next".
 QUIET_UPKEEP_PLAN_MAX = 1
 
+# How many pending contact proposals the cockpit renders as cards in one
+# view. A rendering guard, not a policy: the remainder stays pending and
+# surfaces on the next render as taps clear the lane. Shared with
+# `crm.views.proposals_bulk`, whose buttons promise "everyone listed here" —
+# the view acts on exactly this slice so the promise and the action can
+# never disagree (a first whole-mailbox scan left 52 pending while the lane
+# showed 24; "Dismiss all" then buried 28 people no card ever showed).
+PROPOSALS_RENDER_CAP = 24
+
 # Display class per cadence action, lower shown first. This is the Today
 # page's ordering, and it lives HERE rather than in the engine on purpose:
 # `cadence.due_actions`' `(priority, tier, firm_name)` sort is ported code
@@ -1656,15 +1665,22 @@ def _cockpit_context(user) -> dict:
 
     # People the mailbox scan judged worth tracking, waiting for a tap.
     # PROPOSALS, not contacts — nothing exists in the CRM until accept (see
-    # capture/discovery.py). Capped at 24 as a rendering guard only; the
-    # judgment chain keeps real volume far below that.
+    # capture/discovery.py). Capped as a rendering guard only; the judgment
+    # chain usually keeps real volume below it, but a first whole-mailbox
+    # scan does not (52 on the founder's own 2026-08-26 scan), so the lane
+    # count says "24 of 52" rather than a bare 24, and the bulk buttons act
+    # on exactly the rendered slice (see `crm.views.proposals_bulk` and
+    # `PROPOSALS_RENDER_CAP`).
     from capture.models import ContactProposal
 
-    proposals = list(
+    pending_proposals = (
         ContactProposal.objects.for_user(user)
         .filter(status=ContactProposal.STATUS_PENDING)
-        .select_related("firm")
-        .order_by("created")[:24]
+    )
+    proposals_total = pending_proposals.count()
+    proposals = list(
+        pending_proposals.select_related("firm")
+        .order_by("created")[:PROPOSALS_RENDER_CAP]
     )
 
     # Autopilot's reviewed batch, if one is waiting — the strip that turns
@@ -1858,6 +1874,7 @@ def _cockpit_context(user) -> dict:
     return {
         "lanes": lanes,
         "proposals": proposals,
+        "proposals_total": proposals_total,
         "app_events": app_events,
         "mail_facts": mail_facts,
         "autopilot_review": autopilot_review,

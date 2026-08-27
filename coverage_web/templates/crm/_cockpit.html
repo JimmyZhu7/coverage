@@ -227,7 +227,8 @@ on every quick action so all of it stays in sync.
       <section class="lane lane-proposals">
         <h2 class="lane-title">
           Found in your inbox
-          <span class="lane-count" aria-live="polite">{{ proposals|length }}</span>
+          {# E2's rule holds here too: a capped lane never renders a bare number. #}
+          <span class="lane-count" aria-live="polite">{{ proposals|length }}{% if proposals_total > proposals|length %} of {{ proposals_total }}{% endif %}</span>
           {% if proposals|length > 1 %}
             <span class="lane-bulk">
               <button type="button" class="btn act-ghost"

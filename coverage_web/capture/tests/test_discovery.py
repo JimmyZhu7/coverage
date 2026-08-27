@@ -1349,3 +1349,52 @@ def test_bulk_flagged_mass_invites_are_refused_before_anything_else(
     assert consider(student, finding(
         email="cbaenen@westmonroe.example", bulk=True
     )) is None
+
+
+def test_bulk_acts_only_on_the_rendered_slice(student, firm, client):
+    """Regression: the lane renders the first PROPOSALS_RENDER_CAP pending
+    cards and the bulk buttons promise "everyone listed here" — but the view
+    acted on the unbounded pending set, so one tap of "Dismiss all" on the
+    founder's 52-pending scan dismissed-forever 28 people no card had ever
+    shown. The bulk verbs must act on exactly the rendered slice, and the
+    lane count must say "24 of N" rather than a bare 24."""
+    from crm.today import PROPOSALS_RENDER_CAP
+
+    total = PROPOSALS_RENDER_CAP + 6
+    for i in range(total):
+        ContactProposal.all_objects.create(
+            user=student,
+            name=f"Person {i}",
+            email=f"person{i}@northbank.example",
+            firm=firm,
+            evidence="Replied to your email",
+            evidence_kind="reply_received",
+        )
+    client.force_login(student)
+    resp = client.post(reverse("crm:proposals_bulk", args=["dismiss"]))
+    assert resp.status_code == 200
+    assert ContactProposal.all_objects.filter(
+        user=student, status="dismissed"
+    ).count() == PROPOSALS_RENDER_CAP
+    assert len(pending(student)) == 6
+
+
+def test_capped_lane_count_names_the_real_total(student, firm, client):
+    from crm.today import PROPOSALS_RENDER_CAP, _cockpit_context
+
+    total = PROPOSALS_RENDER_CAP + 4
+    for i in range(total):
+        ContactProposal.all_objects.create(
+            user=student,
+            name=f"Person {i}",
+            email=f"person{i}@northbank.example",
+            firm=firm,
+            evidence="Replied to your email",
+            evidence_kind="reply_received",
+        )
+    context = _cockpit_context(student)
+    assert len(context["proposals"]) == PROPOSALS_RENDER_CAP
+    assert context["proposals_total"] == total
+    client.force_login(student)
+    resp = client.get(reverse("crm:week"))
+    assert f"{PROPOSALS_RENDER_CAP} of {total}" in resp.content.decode()

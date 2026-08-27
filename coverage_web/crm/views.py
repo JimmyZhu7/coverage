@@ -54,6 +54,7 @@ from .models import (
 # where code LIVES, not how it is reached.
 from .today import (  # noqa: F401
     PACE_TOUCH_KINDS,
+    PROPOSALS_RENDER_CAP,
     TODAY_PLAN_MAX,
     TODAY_PLAN_MIN,
     TUNABLE_CADENCE_PARAMS,
@@ -331,10 +332,17 @@ def proposals_bulk(request: HttpRequest, verb: str) -> HttpResponse:
 
     if verb not in ("accept", "dismiss"):
         return HttpResponse(status=400)
+    # Exactly the slice the cockpit rendered — same status filter, same
+    # ordering, same cap (`crm.today.PROPOSALS_RENDER_CAP`). The buttons
+    # promise "everyone listed here", and acting on the unbounded pending
+    # set instead once dismissed-forever 28 people the lane never showed
+    # (52 pending on the founder's first whole-mailbox scan, 24 rendered).
+    # Whatever remains past the cap stays pending and fills the lane on the
+    # re-render this view returns.
     pending = list(
-        ContactProposal.objects.for_user(request.user).filter(
-            status=ContactProposal.STATUS_PENDING
-        )
+        ContactProposal.objects.for_user(request.user)
+        .filter(status=ContactProposal.STATUS_PENDING)
+        .order_by("created")[:PROPOSALS_RENDER_CAP]
     )
     for proposal in pending:
         if verb == "accept":
