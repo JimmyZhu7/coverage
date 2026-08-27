@@ -15,7 +15,7 @@ on every quick action so all of it stays in sync.
     when the QUEUE is empty; saying it while 27 items are pacing out would be
     the page contradicting the line directly beneath it.
     {% endcomment %}
-    {% if not queue_total and not debriefs and not proposals and not app_events %}
+    {% if not queue_total and not debriefs and not proposals and not app_events and not mail_facts %}
       <div class="empty">
         {% if contact_count %}
           {% comment %}
@@ -48,7 +48,7 @@ on every quick action so all of it stays in sync.
         {% endcomment %}
         {% if not seeds %}<a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>{% endif %}
       </div>
-    {% elif not lanes and not debriefs and not proposals and not app_events %}
+    {% elif not lanes and not debriefs and not proposals and not app_events and not mail_facts %}
       {% comment %}
       The plan is clear but the queue is not. This is the product working, so
       it is styled as a win — and it names what's left rather than implying
@@ -232,6 +232,7 @@ on every quick action so all of it stays in sync.
               <div class="act-context">
                 <div class="act-badges">
                   <span class="prio prio-proposal">Not in your network</span>
+                  {% if p.evidence_kind == "referral" %}<span class="prio">Referral</span>{% endif %}
                   {% if p.recruiting_hint %}<span class="prio">Recruiting contact</span>{% endif %}
                 </div>
                 {% comment %}
@@ -265,6 +266,19 @@ on every quick action so all of it stays in sync.
                   {% else %}
                     <p class="act-reason act-replied">You wrote to them. <span class="act-replied-none">No subject line on it.</span></p>
                   {% endif %}
+                {% elif p.evidence_kind == "referral" %}
+                  {% comment %}
+                  A REFERRAL: this person neither wrote to the user nor was
+                  written to — an auto-reply named them (capture.mailfacts).
+                  The card must say so, and it must show the verbatim
+                  sentence that named them: the quote is the entire evidence
+                  for this person's existence on the page. Accepting logs no
+                  touch — they land cold, which is the true state.
+                  {% endcomment %}
+                  <p class="act-reason">{{ p.evidence }}</p>
+                  {% if p.referral_quote %}
+                    <p class="act-quote">&ldquo;{{ p.referral_quote }}&rdquo;</p>
+                  {% endif %}
                 {% elif p.thread_subject %}
                   <p class="act-reason act-replied">Replied to: <span class="act-replied-subj">{{ p.thread_subject }}</span></p>
                 {% elif p.threaded_reply %}
@@ -284,6 +298,65 @@ on every quick action so all of it stays in sync.
                           aria-label="Dismiss {{ p.name }}"
                           hx-post="{% url 'crm:proposal_act' p.id 'dismiss' %}"
                           title="No scan will propose this person again. Undo right after, or restore from Settings.">Dismiss</button>
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% comment %}
+    Your mail said — facts messages STATED about people (capture.mailfacts):
+    a departure, an out-of-office return date, a routing address. Two card
+    shapes: an APPLIED card announces an automatic, reversible action and
+    offers Undo; a PENDING card is the no-quote/nothing-to-change fallback,
+    surfaced instead of acted on. Every card shows the verbatim sentence the
+    message wrote — the quote IS the audit trail, and a card without one
+    would be an action the user cannot argue with.
+    {% endcomment %}
+    {% if mail_facts %}
+      <section class="lane lane-mailfacts">
+        <h2 class="lane-title">
+          Your mail said
+          <span class="lane-count" aria-live="polite">{{ mail_facts|length }}</span>
+        </h2>
+        <div class="act-grid">
+          {% for mf in mail_facts %}
+            <article class="act-card kin-reveal act-proposal" style="--i:{{ forloop.counter0 }}">
+              <div class="act-ident">
+                <div class="act-idtext">
+                  <span class="opp-firm">{{ mf.label }}</span>
+                  <h3 class="act-name">{{ mf.row.about_name|default:mf.row.about_email|smart_title }}</h3>
+                  <p class="act-role">{{ mf.row.about_email }}</p>
+                </div>
+                {% if mf.undoable %}<span class="chip warmth-cold">done</span>{% else %}<span class="chip warmth-cold">look</span>{% endif %}
+              </div>
+              <div class="act-context">
+                {% if mf.row.action_note %}<p class="act-reason">{{ mf.row.action_note }}</p>{% endif %}
+                {% if mf.row.return_on %}<p class="act-reason">Back {{ mf.row.return_on|date:"M j, Y" }}</p>{% endif %}
+                {% if mf.row.new_email and mf.row.kind != "referral" %}<p class="act-reason">{{ mf.row.new_email }}</p>{% endif %}
+                {% if mf.row.quote %}
+                  <p class="act-quote">&ldquo;{{ mf.row.quote }}&rdquo;</p>
+                {% else %}
+                  <p class="act-reason">{{ mf.row.subject|default:"An automated reply Coverage could not read." }}</p>
+                {% endif %}
+              </div>
+              <div class="act-quick">
+                <div class="act-ghosts">
+                  {% if mf.undoable %}
+                    <button type="button" class="btn act-ghost"
+                            aria-label="Undo this automatic change"
+                            hx-post="{% url 'crm:mail_fact_act' mf.row.id 'undo' %}"
+                            title="Puts back exactly what this change moved.">Undo</button>
+                    <button type="button" class="btn act-ghost"
+                            aria-label="Acknowledge"
+                            hx-post="{% url 'crm:mail_fact_act' mf.row.id 'dismiss' %}">Got it</button>
+                  {% else %}
+                    <button type="button" class="btn act-ghost"
+                            aria-label="Dismiss"
+                            hx-post="{% url 'crm:mail_fact_act' mf.row.id 'dismiss' %}">Dismiss</button>
+                  {% endif %}
                 </div>
               </div>
             </article>

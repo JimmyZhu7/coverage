@@ -35,6 +35,10 @@ urlpatterns = [
     # verb; each card is a different role at a different stage, and "accept
     # all" over a student's whole funnel is not a decision worth batching.
     path("applications/<int:pk>/<str:verb>/", views.app_event_act, name="app_event_act"),
+    # Mail facts (capture.mailfacts) — what a message stated about a person,
+    # acted on with a grounded quote. Undo reverses the automatic action;
+    # dismiss acknowledges the card.
+    path("mailfacts/<int:pk>/<str:verb>/", views.mail_fact_act, name="mail_fact_act"),
     path("debrief/<int:pk>/", views.debrief, name="debrief"),
     path("debrief/<int:pk>/dismiss/", views.debrief_dismiss, name="debrief_dismiss"),
     path("debrief/<int:pk>/promote/", views.debrief_promote, name="debrief_promote"),

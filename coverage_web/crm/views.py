@@ -294,6 +294,32 @@ def proposal_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 
 @login_required
 @require_POST
+def mail_fact_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
+    """One tap on a mail-fact card (capture.mailfacts): `undo` reverses an
+    automatic action exactly (address restored, snooze cleared, note line
+    removed, withdrawn proposal re-pended — see `mailfacts.undo` for the
+    only-if-unchanged guards), `dismiss` acknowledges the card. Re-renders
+    the cockpit like every other Today quick action."""
+    from capture import mailfacts
+    from capture.models import MailFact
+
+    if verb not in ("undo", "dismiss"):
+        return HttpResponse(status=400)
+    fact = get_object_or_404(
+        MailFact.objects.for_user(request.user), pk=pk,
+        status__in=[MailFact.STATUS_PENDING, MailFact.STATUS_APPLIED],
+    )
+    if verb == "undo":
+        mailfacts.undo(fact)
+        record_event("mail_fact_undone", user=request.user, source="today")
+    else:
+        mailfacts.dismiss(fact)
+        record_event("mail_fact_dismissed", user=request.user, source="today")
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+@login_required
+@require_POST
 def proposals_bulk(request: HttpRequest, verb: str) -> HttpResponse:
     """Accept or dismiss every pending proposal at once. Same per-row paths
     as the single-tap view — the bulk button is a loop, not a second

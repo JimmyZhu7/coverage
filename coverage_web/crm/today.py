@@ -1687,6 +1687,38 @@ def _cockpit_context(user) -> dict:
         )
         app_events.append({"row": row, "label": label, "action": action})
 
+    # What the mail itself STATED — departures, out-of-office returns,
+    # routing addresses (capture.mailfacts). Two card shapes in one lane:
+    # `applied` rows announce an automatic, reversible action and carry the
+    # verbatim quote that justified it plus an Undo; `pending` rows are the
+    # no-quote / nothing-to-change fallback, surfaced instead of acted on. A
+    # referral fact that spawned a proposal is NOT re-carded here — its
+    # quote renders on the proposal card itself (see below), one person, one
+    # card.
+    from capture.models import MailFact
+
+    mail_facts = [
+        {"row": f, "label": f.get_kind_display(), "undoable": f.status == MailFact.STATUS_APPLIED}
+        for f in (
+            MailFact.objects.for_user(user)
+            .filter(status__in=[MailFact.STATUS_PENDING, MailFact.STATUS_APPLIED])
+            .exclude(kind=MailFact.KIND_REFERRAL, proposal__isnull=False)
+            .select_related("contact", "proposal")
+            .order_by("created")[:24]
+        )
+    ]
+    # The referral quote, onto the proposal card it belongs to. One query,
+    # only when there are proposals to annotate.
+    if proposals:
+        quotes = {
+            f.proposal_id: f.quote
+            for f in MailFact.objects.for_user(user)
+            .filter(proposal__in=proposals)
+            .exclude(quote="")
+        }
+        for p in proposals:
+            p.referral_quote = quotes.get(p.id, "")
+
     # E10: when one contact holds both a debrief and a thank-you, the two
     # cards stop pretending not to know about each other.
     debriefs = debrief_svc.pending(user)
@@ -1780,6 +1812,7 @@ def _cockpit_context(user) -> dict:
         "lanes": lanes,
         "proposals": proposals,
         "app_events": app_events,
+        "mail_facts": mail_facts,
         "planned_total": len(planned),
         "held": held,
         "held_total": len(held),
