@@ -33,9 +33,16 @@ does not repeat a word the student has already read in their own inbox.
           <div class="act-context">
             <div class="act-badges">
               <span class="prio prio-proposal">Found in your inbox</span>
-              {# The dated requirement, when the mail stated one in words. It
-                 leads the badge row because it is the only thing on this card
-                 that expires — see capture.models.ApplicationEvent.due_on. #}
+              {% comment %}
+              The dated requirement, when the mail stated one in words. It
+              leads the badge row because it is the only thing on this card
+              that expires — see capture.models.ApplicationEvent.due_on.
+
+              `{% comment %}`, not `{# #}`: Django's brace-hash comment is
+              SINGLE-LINE only, so a three-line one closes nowhere and the
+              second and third lines render as literal text on the Today
+              page. Caught by accounts/tests/test_template_comments.py.
+              {% endcomment %}
               {% if e.row.due_on %}<span class="prio prio-due">Due {{ e.row.due_on|date:"M j" }}</span>{% endif %}
               {% if e.row.detected_by == "ai" %}<span class="prio">AI-read, check it</span>{% endif %}
             </div>
