@@ -61,7 +61,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
-from capture import appmail, discovery
+from capture import appmail, discovery, mailfacts
 from capture.providers import AmbiguousContactError, CaptureProvider, InteractionEvent
 from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import campaigns as crm_campaigns, services as crm_services
@@ -140,6 +140,17 @@ class SyncResult:
     # rather than guessed (directory.applications' rule).
     app_events_proposed: int = 0
     app_events_unresolved: int = 0
+    # Mail facts (capture.mailfacts): what an auto-reply or soft bounce
+    # STATED about a person, acted on with a grounded quote. `applied` are
+    # the safe-and-reversible automatic actions (address cleared for a
+    # departure, follow-up snoozed to an OOO return date, routing address
+    # noted); `surfaced` are the no-quote / nothing-to-change cards left for
+    # the user; `referral` are the pending ContactProposals a "please
+    # contact X at Y" wrote — counted apart from `proposals_created` because
+    # the person never wrote to the user and the card must say so.
+    mail_facts_applied: int = 0
+    mail_facts_surfaced: int = 0
+    referral_proposals: int = 0
     # Detected, matched, and already at or past the stage the mail claims —
     # the ATS's own reminder about something the board already knows.
     app_events_already: int = 0
@@ -176,6 +187,9 @@ class SyncResult:
             "proposals_upgraded": self.proposals_upgraded,
             "app_events_proposed": self.app_events_proposed,
             "app_events_unresolved": self.app_events_unresolved,
+            "mail_facts_applied": self.mail_facts_applied,
+            "mail_facts_surfaced": self.mail_facts_surfaced,
+            "referral_proposals": self.referral_proposals,
             "app_events_already": self.app_events_already,
             "skipped_ambiguous": self.skipped_ambiguous,
             "pattern_delivered": self.pattern_delivered,
@@ -590,6 +604,24 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         if outcome.detail:
             result.details.append(outcome.detail)
 
+        # THE MAIL-FACTS HOOK. Also before contact matching and for EVERY
+        # finding, for the same reason the application hook is: whether the
+        # sender is in the contact book has nothing to do with whether their
+        # mailbox stated a fact — the departed sender is usually NOT a
+        # contact (he wrote to them once, from outside Coverage), and the
+        # postmaster never is. Reads auto-replies ("no longer with", "please
+        # contact X at Y", "back on September 2") and soft bounces (the
+        # routing address), acts only with a verbatim quote, and proposes —
+        # never creates — people. See capture/mailfacts.py for the whole
+        # contract, including where "act" ends and "propose" begins.
+        facts = mailfacts.consider_finding(
+            user, finding, firm_domains=firm_domains, dry_run=dry_run
+        )
+        result.mail_facts_applied += facts.applied
+        result.mail_facts_surfaced += facts.surfaced
+        result.referral_proposals += facts.referrals
+        result.details.extend(facts.details)
+
         try:
             contact = _match_contact(user, finding)
         except AmbiguousContactError as exc:
@@ -687,10 +719,21 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         email = (finding.get("email") or "").strip()
         current = (contact.email or "").strip()
         if email and not current:
-            if not dry_run:
-                contact.email = email[:254]
-                contact.save(update_fields=["email"])
-            result.emails_backfilled += 1
+            # ...unless a departed-fact stands against this exact address
+            # (capture.mailfacts): the auto-reply that cleared it arrives in
+            # the same batch (and again on every re-scan), name-matches this
+            # contact, and would otherwise refill the address the firm's own
+            # mail system said is dead.
+            if mailfacts.address_is_departed(user, email):
+                result.details.append(
+                    f"{name}: not refilling {email} — their mailbox said "
+                    "they have left the firm"
+                )
+            else:
+                if not dry_run:
+                    contact.email = email[:254]
+                    contact.save(update_fields=["email"])
+                result.emails_backfilled += 1
         elif email and email.lower() != current.lower():
             # Guarded on the note text, not on a flag: this runs daily, and
             # the same finding will resurface every day the thread stays in

@@ -644,9 +644,16 @@ def consider_finding(
         # for the ladder to catch it later). Dismissed and accepted rows
         # are untouched — dismissal stays permanent, and nothing here
         # changes status, ever.
+        # "referral" joins "outreach" here (2026-08-27): a referral proposal
+        # (capture.mailfacts — "please contact Salima at salima@...") also
+        # describes someone who has not yet written, so a genuine reply from
+        # them is strictly stronger evidence and upgrades the same unique
+        # row in place. This is also the never-double-count guarantee: the
+        # reply can never mint a second card for a person a referral already
+        # proposed.
         if (
             existing.status == ContactProposal.STATUS_PENDING
-            and existing.evidence_kind == "outreach"
+            and existing.evidence_kind in ("outreach", "referral")
             and inbound_evidence
         ):
             if not dry_run:
@@ -792,7 +799,11 @@ def accept(proposal: ContactProposal) -> Contact | None:
             (
                 "Found in your sent mail"
                 if proposal.evidence_kind == "outreach"
-                else "Found in your inbox"
+                else (
+                    "Referred in an auto-reply"
+                    if proposal.evidence_kind == "referral"
+                    else "Found in your inbox"
+                )
             )
             + f" · {timezone.localdate():%b %d, %Y}"
             + (f"\n{proposal.evidence}" if proposal.evidence else "")
@@ -804,16 +815,25 @@ def accept(proposal: ContactProposal) -> Contact | None:
     # BECAUSE of a genuine inbound message, so the touch is that message's
     # own kind at that message's own time. The ratchet moves warmth exactly
     # as far as the evidence carries it and no further.
-    marker = f"[gmail:{proposal.thread_id}] " if proposal.thread_id else ""
-    now = proposal.occurred_at
-    if now is not None:
-        now = min(now, timezone.now())
-    crm_services.log_touch(
-        user.id, contact.id, proposal.evidence_kind, "email",
-        note=f"{marker}{proposal.evidence}".strip() or None,
-        now=now,
-        source="capture",
-    )
+    #
+    # EXCEPT A REFERRAL, which logs NOTHING — and that is the honesty, not a
+    # gap. The referred person (capture.mailfacts: "please contact Salima at
+    # salima@...") has neither written to the user nor been written to; any
+    # touch kind would state a fact that never happened. They land cold at
+    # no_reply with zero touches, so the cadence engine's own first branch
+    # says exactly the true thing: "added but never contacted — send the
+    # first note."
+    if proposal.evidence_kind != "referral":
+        marker = f"[gmail:{proposal.thread_id}] " if proposal.thread_id else ""
+        now = proposal.occurred_at
+        if now is not None:
+            now = min(now, timezone.now())
+        crm_services.log_touch(
+            user.id, contact.id, proposal.evidence_kind, "email",
+            note=f"{marker}{proposal.evidence}".strip() or None,
+            now=now,
+            source="capture",
+        )
 
     proposal.contact = contact
     _resolve(proposal, ContactProposal.STATUS_ACCEPTED, extra=["contact"])

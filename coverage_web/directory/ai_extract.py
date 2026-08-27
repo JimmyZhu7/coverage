@@ -427,6 +427,114 @@ def extract_application_event_ai(
     return ApplicationEventGuess(value=value, phrase=quote, confidence=0.5)
 
 
+# ---------------------------------------------------------------------------
+# AUTO-REPLY FACT CLASSIFICATION — the long tail of `capture.mailfacts`
+#
+# Same argument one more time: the deterministic layer in capture/mailfacts.py
+# types auto-replies from the stock phrasings mail systems actually send ("is
+# no longer with", "please contact X at Y", "out of the office ... returning
+# September 2"), and it will always have a tail — "Somil's coverage has been
+# assumed by Salima" states a departure and a referral in words no list had.
+#
+# SCOPE: reached ONLY for a message that already declared ITSELF machine-
+# answered (RFC 3834 Auto-Submitted / X-Autoreply / the stock subject prefix
+# — `capture.inbound`'s `auto_submitted`) AND that the phrase layer could not
+# type. Human mail never reaches this function, and neither does the great
+# majority of auto-replies, which the free layer types first.
+#
+# The classification is CLOSED — three fact kinds or null — and the grounding
+# rule is identical to every pass above: the quote must be a verbatim
+# substring of what the model was shown or the whole answer is discarded.
+# Uniquely here the quote is not thrown away after verification: it is the
+# justification `capture.models.MailFact` stores and shows, because an
+# automated action whose reason cannot be shown is an action the user cannot
+# argue with. Structured data (the referral's address, the return date) is
+# NEVER taken from the model — `capture.mailfacts` re-extracts it
+# deterministically from the grounded text, so the model can only ever point
+# at a sentence, not invent an email address.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class MailFactGuess:
+    value: str           # departed | out_of_office | address_change
+    phrase: str          # the exact sentence quoted, verified as a substring
+    confidence: float    # 0.5 — same second-pass tier as every guess above
+
+
+_MAIL_FACT_PROMPT = """You are reading one AUTOMATED reply (an auto-responder) a student received after emailing a professional. Answer ONLY from the text given -- never from general knowledge.
+
+QUESTION: Does this auto-reply state one of the following FACTS about the person the student wrote to?
+
+- "departed": the person is no longer at the firm / has left the company.
+- "out_of_office": the person is temporarily away (vacation, leave, travel) and will return.
+- "address_change": the person has a new email address to be reached at.
+
+Respond with EXACTLY this JSON shape and nothing else:
+{"fact": "<one of the three kinds above>", "quote": "<the exact sentence from the text that states this, copied verbatim, unmodified>"}
+
+If the text states none of these three facts clearly, respond with EXACTLY:
+{"fact": null, "quote": null}
+
+The "quote" field, when present, MUST be an exact, verbatim substring of the text below -- do not paraphrase, summarize, or fix typos in it. If you cannot quote it exactly, answer null instead of guessing.
+
+TEXT:
+\"\"\"
+{text}
+\"\"\"
+"""
+
+_MAIL_FACT_KINDS = frozenset({"departed", "out_of_office", "address_change"})
+
+
+def extract_mail_fact_ai(
+    subject: str | None,
+    snippet: str | None = "",
+    *,
+    model: str = DEFAULT_MODEL,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    retries: int = DEFAULT_RETRIES,
+) -> MailFactGuess | None:
+    """One gated auto-reply's subject + snippet in, a grounded fact kind out
+    (or `None`). Never raises: an API failure is swallowed, because this runs
+    inside a mailbox sync whose job is to keep going — an untyped auto-reply
+    is already a supported outcome (`capture.mailfacts` surfaces it as a
+    review card rather than acting)."""
+    if not is_configured():
+        return None
+    text = "\n".join(part for part in [(subject or "").strip(), (snippet or "").strip()] if part)
+    if not text:
+        return None
+    text = text[:MAX_INPUT_CHARS]
+
+    prompt = _MAIL_FACT_PROMPT.replace("{text}", text)
+    try:
+        response = _post_json(
+            {
+                "model": model,
+                "max_tokens": 200,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=timeout,
+            retries=retries,
+        )
+    except AIExtractError:
+        return None
+    raw = _extract_response_text(response).strip()
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+    value = parsed.get("fact")
+    quote = parsed.get("quote")
+    if value not in _MAIL_FACT_KINDS or not quote:
+        return None
+    if not _grounded(quote, text):
+        return None
+    return MailFactGuess(value=value, phrase=quote, confidence=0.5)
+
+
 DEFAULT_TEXT_MODEL = "claude-sonnet-5"
 
 

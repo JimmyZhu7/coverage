@@ -311,6 +311,156 @@ class ApplicationEvent(PrivateModel):
         return f"{self.firm_text or self.firm_id} {self.event_type} ({self.status})"
 
 
+class MailFact(PrivateModel):
+    """A fact one message STATED about a person, the verbatim sentence that
+    states it, and what Coverage did about it.
+
+    WHY THIS MODEL EXISTS. The pipeline used to understand four kinds of mail
+    — a reply, a bounce, a blast, and silence — and flattened everything else
+    to nothing. Two real costs on the founder's own mailbox (2026-08-24,
+    read-only): an auto-reply saying "Somil Agarwal is no longer with Allen &
+    Company. For matters with which Somil was involved, please contact Salima
+    Vahabzadeh at salima@allenco.com" was filed as bulk noise, so Coverage
+    kept proposing the departed Somil and never saw Salima; and Goldman's
+    postmaster saying a real banker's "mailbox is full ... try resending your
+    message later" had its routing address discarded. This row is where such
+    a fact lands: what was stated, about whom, the QUOTE that grounds it, and
+    the action taken — with the action's own undo bookkeeping.
+
+    THE GROUNDING CONTRACT, non-negotiable (`capture.mailfacts`): no row is
+    created, and no action is taken, without `quote` holding a verbatim
+    sentence from the message that states the fact — the same rule
+    `directory.ai_extract` holds for deadlines. A message that gates in but
+    yields no quotable fact becomes a `review` row: surfaced, never acted on.
+
+    ON §10 ("no email bodies in logs/notes"), read carefully rather than
+    waved at: `quote` IS one sentence of body text, stored deliberately, and
+    it is the ONLY place body text lands. It is the justification the user
+    audits an automated action against — an action whose reason cannot be
+    shown is an action that cannot be argued with — capped at one sentence,
+    shown on the card, and never copied into `Contact.notes` (the notes get
+    the FACT in Coverage's own words; the quote stays here).
+
+    THE ACT/PROPOSE LINE (`capture.mailfacts` draws it, this model records
+    it): actions that are safe and reversible run automatically and land
+    `applied` with a visible undo — clearing a departed person's dead
+    address (the bounce block's own precedent: address moved to notes, never
+    the person archived), withdrawing the departed person's not-yet-accepted
+    outreach proposal (restorable via the existing Settings restore path),
+    snoozing a follow-up past a stated out-of-office return date, noting an
+    alternate/routing address. Creating a PERSON stays propose-then-confirm:
+    a referral writes a pending `ContactProposal` (evidence_kind
+    "referral"), never a Contact.
+    """
+
+    KIND_DEPARTED = "departed"
+    KIND_REFERRAL = "referral"
+    KIND_OOO = "out_of_office"
+    KIND_ADDRESS_CHANGE = "address_change"
+    KIND_ROUTING = "routing_address"
+    # Gated as an auto-reply, but no deterministic pattern (and no grounded
+    # AI answer) could type it. Surfaced for the user, acted on never — the
+    # "no quote, no action" fallback made visible instead of silent.
+    KIND_REVIEW = "review"
+    KIND_CHOICES = [
+        (KIND_DEPARTED, "No longer at the firm"),
+        (KIND_REFERRAL, "Referred you to someone"),
+        (KIND_OOO, "Out of office"),
+        (KIND_ADDRESS_CHANGE, "New email address"),
+        (KIND_ROUTING, "Alternate routing address"),
+        (KIND_REVIEW, "Auto-reply to review"),
+    ]
+
+    STATUS_PENDING = "pending"      # surfaced, waiting for the user's look
+    STATUS_APPLIED = "applied"      # acted on automatically; undo offered
+    STATUS_UNDONE = "undone"        # the user reversed the automated action
+    STATUS_DISMISSED = "dismissed"  # the user waved the card away
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPLIED, "Applied"),
+        (STATUS_UNDONE, "Undone"),
+        (STATUS_DISMISSED, "Dismissed"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES)
+    # WHO the fact is about — the departed/OOO/moving person's address, or
+    # the address the DSN says it could not deliver to. Normalized lowercase;
+    # the dedup constraint below is keyed on it.
+    about_email = models.EmailField()
+    about_name = models.CharField(max_length=255, blank=True, default="")
+    # The address the message NAMES: the referral's (salima@...), the routing
+    # address a DSN expanded to, the "I've moved to" destination. Blank for
+    # kinds that name none.
+    new_email = models.EmailField(blank=True, default="")
+    new_name = models.CharField(max_length=255, blank=True, default="")
+    # The stated out-of-office return date. Only ever a DATE (same reasoning
+    # as ApplicationEvent.due_on): the day is what a follow-up waits for.
+    return_on = models.DateField(null=True, blank=True)
+    # THE GROUNDING. One verbatim sentence from the message. Required for
+    # every kind except `review`, whose whole meaning is "no quotable fact".
+    quote = models.CharField(max_length=500, blank=True, default="")
+    # The message's Subject — the same §10-safe evidence line every other
+    # capture surface shows.
+    subject = models.CharField(max_length=300, blank=True, default="")
+    # "rules" or "ai" — which layer read the fact. The deterministic layer is
+    # the product; the AI layer is the long tail, and an audit of a wrong
+    # card needs to know which one to fix.
+    detected_by = models.CharField(max_length=16, default="rules")
+    thread_id = models.CharField(max_length=128, blank=True, default="")
+    occurred_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+    # One plain sentence saying what the automated action actually did
+    # ("address cleared", "follow-up snoozed to Sep 2") — the card's second
+    # line, written at apply time so a later copy change can't re-describe
+    # history.
+    action_note = models.CharField(max_length=300, blank=True, default="")
+
+    # --- undo bookkeeping, per action --------------------------------- #
+    contact = models.ForeignKey(
+        "crm.Contact", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="mail_facts",
+    )
+    proposal = models.ForeignKey(
+        ContactProposal, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="mail_facts",
+    )
+    # The address a `departed` apply cleared off the contact — undo puts it
+    # back (only if the column is still blank, so a hand-typed correction is
+    # never overwritten).
+    prior_email = models.EmailField(blank=True, default="")
+    # The exact `snoozed_until` an `out_of_office` apply wrote — undo clears
+    # it only while it still holds this value, so a snooze the user set
+    # themselves afterwards stands.
+    snoozed_to = models.DateTimeField(null=True, blank=True)
+    # The exact dated line appended to `Contact.notes` — undo removes this
+    # line and nothing else.
+    note_line = models.CharField(max_length=500, blank=True, default="")
+
+    created = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "mail_facts"
+        ordering = ["created"]
+        constraints = [
+            # One row per (user, person, kind of fact) — the same
+            # remembered-forever dedup ContactProposal keys on its address.
+            # The same auto-responder firing on a re-scan (or on the user's
+            # own follow-up) resolves to the row that already exists, so
+            # nothing is re-applied and nothing re-asks.
+            models.UniqueConstraint(
+                fields=["user", "about_email", "kind"],
+                name="uniq_mail_fact_user_about_kind",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind}: {self.about_name or self.about_email} ({self.status})"
+
+
 class GmailConnection(PrivateModel):
     STATUS_CHOICES = [
         ("active", "Active"),
