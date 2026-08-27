@@ -602,16 +602,22 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      the one control that answers it) with two quieter skins:
        .ap-strip-quiet — a statement, no action. Nothing to spend, nothing
          to undo, so it must not carry the accent that says "act on me".
-       .ap-strip-warn  — a run stopped. Warm border, and deliberately NOT
-         red: nothing was lost and nothing was charged, so alarm would be
-         a lie about the stakes. */
+       .ap-strip-warn  — a run stopped. The same calm ground as the quiet
+         skin with the DANGER rule on the left edge, and deliberately not
+         a red panel: nothing was lost, nothing was charged, and nothing
+         needs undoing, so a full alarm would misstate the stakes. The
+         edge is enough to say "this one is different". */
   .ap-strip-quiet { background: var(--surface-2, var(--surface));
     border-color: var(--line); border-left-color: var(--ink-4, var(--line));
     color: var(--ink-3); }
-  .ap-strip-warn { background: var(--warn-soft, var(--accent-soft));
-    border-color: var(--warn-line, var(--accent-line));
-    border-left-color: var(--warn, var(--accent)); }
+  .ap-strip-warn { background: var(--danger-soft);
+    border-color: var(--danger-line); border-left-color: var(--danger);
+    color: var(--ink-2); }
   .ap-evidence { display: block; margin-top: 2px; font-size: var(--fs-xs); }
+  /* The start/retry control keeps the right edge even when the sentence
+     is long enough to wrap it onto its own line — otherwise the button
+     lands under the first word and reads as a link in the prose. */
+  .ap-strip .prop-undo-btn { margin-left: auto; }
   /* The one moving thing on the page while a run is out. Reduced-motion
      users get a solid dot — the strip's words already carry the state, so
      the animation is decoration and must be droppable. */

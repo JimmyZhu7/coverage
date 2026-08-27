@@ -282,7 +282,13 @@ on every quick action so all of it stays in sync.
           <span class="prop-undo-note">Nothing was started and nothing was charged.{% if autopilot_state.preview.refill_on %} Credits refill {{ autopilot_state.preview.refill_on|date:"j M" }}.{% endif %} The cards below still work by hand.</span>
         </span>
       </div>
-    {% elif autopilot_state.phase == "nothing" and autopilot_state.run and proposals %}
+    {% comment %}
+    "Already read" is only worth saying when nothing else is saying it.
+    A reviewed batch below already opens with "Autopilot read this scan",
+    so this line would be the second strip in a row narrating the same
+    run — hence `not autopilot_review`.
+    {% endcomment %}
+    {% elif autopilot_state.phase == "nothing" and autopilot_state.run and proposals and not autopilot_review %}
       <div class="prop-undo ap-strip ap-strip-quiet" role="status">
         <span class="prop-undo-said">
           Autopilot has already read every card here.
@@ -292,7 +298,12 @@ on every quick action so all of it stays in sync.
     {% endif %}
 
     {% if autopilot_review %}
-      <div class="prop-undo" role="status">
+      {% comment %}
+      `ap-strip` only pins the button to the right edge — this strip now
+      carries a second line (the evidence note) and wraps like the others,
+      so it should wrap like the others too.
+      {% endcomment %}
+      <div class="prop-undo ap-strip" role="status">
         <span class="prop-undo-said">
           Autopilot read this scan: {{ autopilot_review.accepts }} ready to add{% if autopilot_review.escalations %}, {{ autopilot_review.escalations }} left for you below{% endif %}.
           <span class="prop-undo-note">Every decision quotes the line it stands on — <a href="{% url 'crm:autopilot_log' %}">check its work</a>, or undo any of it later from the same page.</span>
