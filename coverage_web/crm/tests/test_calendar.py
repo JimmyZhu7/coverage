@@ -703,6 +703,29 @@ def _grid(client, when):
     return client.get(reverse("crm:calendar"), {"y": when.year, "m": when.month})
 
 
+def test_a_deadline_in_the_next_month_is_on_that_month_and_not_this_one(
+        logged_in, client):
+    """The month-boundary case, forced rather than waited for.
+
+    Every other tracked-deadline test here reads "N days out", which only
+    crosses a month for the last few days of each one — so the whole class of
+    bug hid until the suite happened to run on the 27th. This one dates the
+    role into next month unconditionally, so it holds the rule on every day of
+    the year: the grid renders ONE month, and a role closing in the next one
+    belongs on that month's grid, not on this one's.
+    """
+    today = timezone.localdate()
+    next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=10)
+    opp = _tracked_role(logged_in, days=(next_month - today).days,
+                        title="Next Month Analyst")
+    assert opp.deadline == next_month
+
+    assert "Next Month Analyst" in _grid(client, next_month).content.decode()
+    assert "Next Month Analyst" not in _grid(client, today).content.decode(), (
+        "a role closing next month is not this month's business"
+    )
+
+
 def test_a_tracked_roles_deadline_lands_on_the_calendar(logged_in, client):
     _tracked_role(logged_in, day=15, title="Summer Analyst")
     body = client.get("/app/calendar/").content.decode()
