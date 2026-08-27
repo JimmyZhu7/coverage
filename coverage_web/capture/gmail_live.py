@@ -138,6 +138,22 @@ _SOFT_BOUNCE_RE = re.compile(
     re.IGNORECASE,
 )
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+# Labels that mean a message is NOT real correspondence and must never be
+# classified. Measured on the founder's live mailbox (2026-08-27,
+# read-only): 14 of 20 sampled `messagesAdded` history records were DRAFT
+# autosaves — Gmail writes one per autosave while a mail is being composed.
+# A draft classified as outbound logs an `outreach` touch for an email
+# never sent (and the outbound discovery arm minting a "You wrote to them"
+# proposal off it); SPAM lets a spoofed firm-domain sender reach the
+# proposal ladder; TRASH is mail the user already threw away. Sending a
+# draft mints a NEW message id with SENT, which arrives as its own
+# `messagesAdded` record — skipping the DRAFT churn loses nothing.
+_EXCLUDED_LABEL_IDS = frozenset({"DRAFT", "SPAM", "TRASH"})
+
+
+def _excluded_by_labels(label_ids) -> bool:
+    return bool(_EXCLUDED_LABEL_IDS.intersection(label_ids or ()))
 _ICS_DTSTART_RE = re.compile(r"DTSTART(?:;TZID=([^:]+))?:(\d{8}T\d{6}Z?)")
 _ICS_SUMMARY_RE = re.compile(r"SUMMARY:(.+)")
 
@@ -526,9 +542,9 @@ def sync_connection(connection: GmailConnection) -> None:
 
     findings = []
     for message_id in message_ids:
-        message = gmail.users().messages().get(
-            userId="me", id=message_id, format="full"
-        ).execute()
+        message = _fetch_message(gmail, message_id)
+        if message is None:
+            continue
         finding = _classify_message(connection.gmail_address, message)
         if finding is not None:
             findings.append(finding)
@@ -583,9 +599,46 @@ def preview_sync(connection: GmailConnection) -> dict:
     }
 
 
+def _fetch_message(gmail, message_id: str) -> dict | None:
+    """One full message, or None when it must not be classified.
+
+    Two Nones, both load-bearing for the poll loop:
+
+    - A 404. `history.list` faithfully reports `messagesAdded` for
+      messages since PERMANENTLY DELETED — superseded draft autosaves are
+      the canonical case (each autosave deletes its predecessor), and 4 of
+      40 sampled ids on the founder's live stream were already gone. This
+      loop used to have no handler, so the first such id raised out of
+      `sync_connection` BEFORE the cursor advanced: every subsequent pass
+      re-listed the same window and died on the same id, silently wedging
+      the mailbox until Gmail's ~7-day retention re-anchored past the
+      whole gap. A message that no longer exists is a skip, never an
+      error.
+    - An excluded label (see `_EXCLUDED_LABEL_IDS`): drafts, spam, trash.
+    """
+    try:
+        message = gmail.users().messages().get(
+            userId="me", id=message_id, format="full"
+        ).execute()
+    except HttpError as exc:
+        if exc.resp.status == 404:
+            return None
+        raise
+    if _excluded_by_labels(message.get("labelIds")):
+        return None
+    return message
+
+
 def _list_new_messages(gmail, start_history_id) -> tuple[list[str], str | None]:
     """All `messagesAdded` ids since `start_history_id`, paging through
-    `history.list`, plus the newest `historyId` to resume from next time."""
+    `history.list`, plus the newest `historyId` to resume from next time.
+
+    Records whose message already carries an excluded label (DRAFT/SPAM/
+    TRASH — see `_EXCLUDED_LABEL_IDS`) are dropped here, before anyone
+    pays a `messages.get` for them: on the founder's real stream most
+    `messagesAdded` records are draft-autosave churn. `_fetch_message`
+    re-checks after the fetch, because the history record's labels are a
+    snapshot and the live message's labels are the truth."""
     if start_history_id is None:
         return [], None
 
@@ -601,7 +654,10 @@ def _list_new_messages(gmail, start_history_id) -> tuple[list[str], str | None]:
         ).execute()
         for record in response.get("history", []):
             for added in record.get("messagesAdded", []):
-                message_ids.append(added["message"]["id"])
+                message = added.get("message") or {}
+                if _excluded_by_labels(message.get("labelIds")):
+                    continue
+                message_ids.append(message["id"])
         latest = response.get("historyId", latest)
         page_token = response.get("nextPageToken")
         if not page_token:
@@ -1065,9 +1121,14 @@ def backfill_connection(
 
     findings = []
     for message_id in message_ids:
-        message = gmail.users().messages().get(
-            userId="me", id=message_id, format="full"
-        ).execute()
+        # Same guard as the live path (`_fetch_message`): a per-contact
+        # search matches the user's own DRAFTS to that contact, and a
+        # message can be deleted between the list and the get. Neither is
+        # correspondence, so neither reaches classification OR the residue
+        # sink — a draft is not "mail we could not read".
+        message = _fetch_message(gmail, message_id)
+        if message is None:
+            continue
         finding = _classify_message(own_email, message)
         if finding is not None:
             findings.append(finding)
