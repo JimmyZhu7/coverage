@@ -249,6 +249,33 @@ def test_blank_source_and_blank_region_are_the_same_state():
 
 
 @pytest.mark.django_db
+def test_overriding_a_declared_region_by_hand_makes_it_the_persons_own(client):
+    """The edit form's region dropdown. A row filed "us" by the student's own
+    declaration, changed by that student to Hong Kong, is no longer a
+    consequence of the declaration — it is an answer. If the provenance
+    stayed "declared", the next Settings change would unplace something a
+    person typed."""
+    user = _user(["us"])
+    c = _place(user, _firm(["hk", "us"]))
+    assert (c.region, c.region_source) == ("us", "declared")
+
+    fresh = Contact.all_objects.get(pk=c.pk)
+    fresh.region = "hk"
+    fresh.save()
+    fresh.refresh_from_db()
+    assert (fresh.region, fresh.region_source) == ("hk", "user")
+
+    # And it survives the reversal, which is the whole point of the change.
+    from crm import regions as crm_regions
+
+    user.regions = ["hk", "us"]
+    user.save(update_fields=["regions"])
+    crm_regions.unplace_declared_regions(user, previous_regions=["us"])
+    fresh.refresh_from_db()
+    assert (fresh.region, fresh.region_source) == ("hk", "user")
+
+
+@pytest.mark.django_db
 def test_a_region_set_by_hand_with_no_source_heals_to_user():
     """Every by-hand path — the edit form, the bulk verbs,
     `capture_discover --region` — writes a region and says nothing about

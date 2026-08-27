@@ -332,8 +332,31 @@ class Contact(PrivateModel):
             return next(iter(firm)), self.REGION_SOURCE_FIRM
         return "", ""
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        """Remember the region this row was loaded with.
+
+        The one thing `resolve_region` cannot see on its own: whether the
+        `region` it is being handed came off the row or was just typed into
+        it. A student who opens the edit form on a contact filed "us" by
+        their own declaration and changes it to Hong Kong has stated a fact,
+        and the row has to record that — otherwise it keeps `region_source`
+        "declared" and the next Settings change unplaces an answer a person
+        gave by hand. Compared in `save()` below.
+        """
+        obj = super().from_db(db, field_names, values)
+        if "region" in field_names:
+            obj._loaded_region = obj.region
+        return obj
+
     def save(self, *args, **kwargs):
         user_regions = kwargs.pop("user_regions", None)
+        loaded = getattr(self, "_loaded_region", None)
+        if self.region and loaded is not None and self.region != loaded:
+            # Changed by hand after loading — see `from_db`. The only
+            # application paths that move a region without a person saying so
+            # write it with `.update()`/`bulk_update()` and never reach here.
+            self.region_source = self.REGION_SOURCE_USER
         region, source = self.resolve_region(user_regions=user_regions)
         if (region, source) != (self.region, self.region_source):
             self.region, self.region_source = region, source
@@ -345,6 +368,11 @@ class Contact(PrivateModel):
                     *update_fields, "region", "region_source",
                 }
         super().save(*args, **kwargs)
+        # What is on the row now is what a later save() must compare against —
+        # without this, a second save() on the same instance would read the
+        # region it was loaded with hours ago and call an unchanged value a
+        # hand edit.
+        self._loaded_region = self.region
 
 
 class Touch(PrivateModel):
