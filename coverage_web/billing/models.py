@@ -45,6 +45,13 @@ class CreditLedger(PrivateModel):
     # than staying free. One row per successful generation, never on a
     # failed/unconfigured call — see `crm/views.py::contact_ai_brief`.
     KIND_SPEND_BRIEF = "spend_brief"
+    # The autopilot decide pass (`capture/autopilot.py`) — one grounded
+    # Haiku verdict per pending proposal, debited like `spend_rescan`:
+    # rows-per-credit, ceil-rounded, one row at the end of the pass for
+    # what ACTUALLY ran. Same meter, new surface — docs/credit-system-plan
+    # §1's "one ledger" rule is the reason this is a kind here rather than
+    # a second counter somewhere in capture.
+    KIND_SPEND_AUTOPILOT = "spend_autopilot"
     KIND_ADJUST = "adjust"
     # A pay-as-you-go top-up (billing/stripe_gateway.py), distinct from
     # KIND_GRANT: a grant is the free monthly allowance every plan carries,
@@ -80,6 +87,7 @@ class CreditLedger(PrivateModel):
         (KIND_SPEND_CHAT, "Chat message"),
         (KIND_SPEND_RESCAN, "Rescan residue classification"),
         (KIND_SPEND_BRIEF, "Coffee-chat brief"),
+        (KIND_SPEND_AUTOPILOT, "Autopilot review pass"),
         (KIND_ADJUST, "Admin adjustment"),
         (KIND_PURCHASE, "Credit top-up purchase"),
         (KIND_REFUND, "Refund of a failed turn"),

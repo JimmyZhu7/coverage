@@ -67,6 +67,11 @@ _DEFAULTS = {
     PRO: {"monthly_grant": 180, "message_cost": 3, "daily_burst": 45},
 }
 _DEFAULT_RESCAN_THREADS_PER_CREDIT = 10
+# One autopilot verdict costs about what one residue classification does
+# (same model, a similar few-hundred-token prompt — capture/autopilot.py),
+# so the same 10-rows-per-credit rate is the honest default, overridable
+# the same way.
+_DEFAULT_AUTOPILOT_ROWS_PER_CREDIT = 10
 
 
 def _plan_of(user) -> str:
@@ -179,6 +184,7 @@ _SPEND_KINDS = (
     CreditLedger.KIND_SPEND_CHAT,
     CreditLedger.KIND_SPEND_RESCAN,
     CreditLedger.KIND_SPEND_BRIEF,
+    CreditLedger.KIND_SPEND_AUTOPILOT,
 )
 
 #: `_SPEND_KINDS` plus `KIND_REFUND`, for the two usage counters below.
@@ -545,6 +551,44 @@ def grant_purchase(user, pack_key: str, stripe_event_id: str) -> None:
             "price_cents": pack["price_cents"],
         },
     )
+
+
+def autopilot_rows_per_credit() -> int:
+    value = getattr(settings, "CREDIT_AUTOPILOT_ROWS_PER_CREDIT", None)
+    return int(value) if value is not None else _DEFAULT_AUTOPILOT_ROWS_PER_CREDIT
+
+
+def affordable_autopilot_rows(user, candidate_rows: int) -> int:
+    """How many of `candidate_rows` pending rows this user's ledger can pay
+    an autopilot verdict for right now — the same pre-clamp
+    `affordable_residue_threads` performs for the rescan's residue stage,
+    computed BEFORE a single model call is made. A pure read;
+    `spend_autopilot` below records what actually ran. Callers still apply
+    `capture.autopilot.MAX_ROWS_PER_RUN` on top — a spend limit and a
+    per-run blast-radius ceiling are independent, and the smaller wins."""
+    if candidate_rows <= 0:
+        return 0
+    ensure_monthly_grant(user)
+    reconcile_plan_grant(user)
+    plan = plan_config(user)
+    available_balance = max(0, _raw_balance(user))
+    daily_left = max(0, plan["daily_burst"] - daily_spent(user))
+    affordable_credits = min(available_balance, daily_left)
+    per_credit = autopilot_rows_per_credit()
+    return max(0, min(candidate_rows, affordable_credits * per_credit))
+
+
+def spend_autopilot(user, rows_decided: int) -> None:
+    """Debit for one autopilot decide pass — one credit per
+    `CREDIT_AUTOPILOT_ROWS_PER_CREDIT` rows the model ACTUALLY decided,
+    ceil-rounded, `rows` in `props` for the audit trail. Zero rows (dry
+    run, nothing pending, AI unconfigured) writes nothing — the same
+    no-empty-debit rule `spend_rescan` holds."""
+    if rows_decided <= 0:
+        return
+    per_credit = autopilot_rows_per_credit()
+    cost = -(-rows_decided // per_credit)  # ceil division, no float math
+    spend(user, cost, CreditLedger.KIND_SPEND_AUTOPILOT, rows=rows_decided)
 
 
 def spend_rescan(user, threads_classified: int) -> None:

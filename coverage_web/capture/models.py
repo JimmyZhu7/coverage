@@ -572,3 +572,183 @@ class GmailConnection(PrivateModel):
 
     def __str__(self) -> str:
         return f"{self.gmail_address} ({self.status})"
+
+
+class AutopilotRun(PrivateModel):
+    """One reviewed batch of AI decisions over a scan's proposals — decided
+    unattended, applied on the user's own tap, never both in one step.
+
+    THE COMPLIANCE SHAPE, DECIDED FIRST. `ContactProposal` and
+    `ApplicationEvent` both exist to keep one sentence true: "mail read on a
+    student's behalf may PROPOSE, and only the student's own tap may change
+    their record" — the Limited Use posture the whole B2B plan rests on
+    (see ApplicationEvent's docstring, docs/gmail-live-setup.md §4). An
+    autonomous pass that silently wrote fifty contacts out of mailbox
+    content would void that posture in exactly the way it was designed to
+    prevent. So this model splits the work the way the posture splits it:
+
+      - DECIDE (unattended, cheap, grounded): the AI reads every pending
+        proposal, decides accept-or-needs-you for each, and stores the
+        verdicts here — with the verbatim quote each one stands on. No
+        Contact, no Touch, no pipeline move. A run that dies mid-decide
+        has written only opinions.
+      - APPLY (one tap): the user taps once over the whole reviewed batch
+        and `capture.autopilot.apply_run` executes every accept through
+        the same `discovery.accept` / `appmail.accept` doors a card tap
+        uses. One tap over a disclosed, quoted batch is the same
+        compliance object as fifty card taps — and the hands-off
+        experience is the difference between one tap and fifty.
+
+    Status is the fail-closed mechanism: only a run that finished deciding
+    (REVIEWED) can ever be applied, and apply flips it to APPLIED inside
+    the same transaction as the writes it performs. A run that died
+    deciding stays RUNNING/FAILED forever and can touch nothing.
+    """
+
+    STATUS_RUNNING = "running"
+    STATUS_REVIEWED = "reviewed"    # decided, waiting for the user's tap
+    STATUS_APPLIED = "applied"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_RUNNING, "Deciding"),
+        (STATUS_REVIEWED, "Reviewed — waiting for your tap"),
+        (STATUS_APPLIED, "Applied"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default=STATUS_RUNNING
+    )
+    # Where the batch came from, for the audit trail — the findings file's
+    # name or the sync's own label. Display only, never parsed.
+    source_label = models.CharField(max_length=200, blank=True, default="")
+    model = models.CharField(max_length=100, blank=True, default="")
+    # The split, denormalized so the log page and the Today strip never
+    # re-count: how many rows the AI said "add" to, how many it handed
+    # back, how many it skipped without spending a call (already decided,
+    # overridden, no longer pending), and how many it never reached
+    # because a ceiling bound first (the fail-closed remainder — those
+    # rows simply stay pending cards, exactly as if no run happened).
+    accepts = models.IntegerField(default=0)
+    escalations = models.IntegerField(default=0)
+    skips = models.IntegerField(default=0)
+    deferred = models.IntegerField(default=0)
+    llm_calls = models.IntegerField(default=0)
+    credits_spent = models.IntegerField(default=0)
+    created = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "autopilot_runs"
+        ordering = ["-created"]
+
+    def __str__(self) -> str:
+        return f"AutopilotRun #{self.pk} ({self.status})"
+
+
+class AutopilotDecision(PrivateModel):
+    """One AI verdict about one pending row, and the quote it stands on.
+
+    GROUNDED EVIDENCE OR NO ACTION — `directory/ai_extract.py`'s rule,
+    inherited whole: `quote` is the exact substring of the evidence text
+    the model was shown, verified by `capture.autopilot._grounded` before
+    the decision is stored. A verdict whose quote failed verification is
+    stored as an escalation ("needs you"), never as an accept — an
+    ungrounded answer takes no action, it asks for a human.
+
+    THE OVERRIDE IS PERMANENT. `overridden=True` is set the moment the
+    user undoes an applied decision (or the row it points at was resolved
+    by their own hand before apply reached it), and
+    `capture.autopilot.run_autopilot` refuses to ever re-decide a proposal
+    that carries an overridden decision. The user's word outranks every
+    future run, the same way a dismissed proposal outranks every future
+    scan.
+
+    Exactly one of `proposal` / `app_event` is set — the two kinds of
+    pending row a scan can leave behind. PROTECT, not CASCADE: a decision
+    is the audit trail for something the AI did or asked; deleting the row
+    it judged must not silently delete the record of the judgment.
+    """
+
+    DECIDE_ACCEPT = "accept"
+    DECIDE_ESCALATE = "escalate"
+    DECIDE_CHOICES = [
+        (DECIDE_ACCEPT, "Add it"),
+        (DECIDE_ESCALATE, "Needs you"),
+    ]
+
+    STATUS_PROPOSED = "proposed"    # decided, not yet applied
+    STATUS_APPLIED = "applied"
+    STATUS_UNDONE = "undone"
+    STATUS_CHOICES = [
+        (STATUS_PROPOSED, "Proposed"),
+        (STATUS_APPLIED, "Applied"),
+        (STATUS_UNDONE, "Undone"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    run = models.ForeignKey(
+        AutopilotRun, on_delete=models.CASCADE, related_name="decisions"
+    )
+    proposal = models.ForeignKey(
+        ContactProposal, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="autopilot_decisions",
+    )
+    app_event = models.ForeignKey(
+        ApplicationEvent, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="autopilot_decisions",
+    )
+    decision = models.CharField(max_length=16, choices=DECIDE_CHOICES)
+    # 0.0–1.0 as the model reported it; the floor that turned it into
+    # accept-or-escalate lives in capture.autopilot.ACCEPT_FLOOR, and a
+    # deterministic decision (an app event already typed at capture) is
+    # stored at 1.0 with detected_by="deterministic".
+    confidence = models.FloatField(default=0.0)
+    # The verbatim, verified substring of the evidence text this verdict
+    # stands on. §10's "no email bodies" rule applies: the evidence text is
+    # built from what the proposal/event rows already store (subjects,
+    # evidence lines) plus counter-evidence snippets the scan surfaced —
+    # never a full body.
+    quote = models.CharField(max_length=500, blank=True, default="")
+    reason = models.CharField(max_length=300, blank=True, default="")
+    detected_by = models.CharField(max_length=32, default="ai")
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default=STATUS_PROPOSED
+    )
+    # The user's word, permanent — see the class docstring.
+    overridden = models.BooleanField(default=False)
+    # What apply actually did, for undo: the contact the accept resolved to,
+    # and whether apply CREATED it (undo deletes it) or matched one that
+    # already existed (undo removes only the touch it logged).
+    contact = models.ForeignKey(
+        "crm.Contact", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="autopilot_decisions",
+    )
+    created_contact = models.BooleanField(default=False)
+    touch_id = models.IntegerField(null=True, blank=True)
+    # For an app-event accept: the `UserOpportunity` fields as they stood
+    # BEFORE apply ({"applied_status": ..., "applied_at": ..., "dismissed":
+    # ...}), so undo can put back exactly what was there rather than
+    # guessing at a rank ladder in reverse. Empty for proposal decisions.
+    undo_state = models.JSONField(default=dict, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "autopilot_decisions"
+        ordering = ["created"]
+        constraints = [
+            # A decision is about exactly one pending row.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(proposal__isnull=False, app_event__isnull=True)
+                    | models.Q(proposal__isnull=True, app_event__isnull=False)
+                ),
+                name="autopilot_decision_one_subject",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.decision} ({self.status})"
