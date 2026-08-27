@@ -684,12 +684,22 @@ def apply_run(run: AutopilotRun) -> tuple[str, int]:
                 continue
             d.contact = contact
             d.created_contact = match_before is None
-            touch = (
-                Touch.objects.for_user(p.user)
-                .filter(contact=contact, source="capture")
-                .order_by("-id")
-                .first()
-            )
+            # Attribute a touch to this decision ONLY when accept actually
+            # logged one: a brand-new contact with non-referral evidence.
+            # `accept`'s match path resolves the proposal WITHOUT logging
+            # anything, and a referral accept logs nothing by design — in
+            # both cases the newest capture touch on the contact is history
+            # some earlier sync wrote, and recording it here handed undo a
+            # touch to delete that apply never created (real data loss on
+            # the matched-contact path).
+            touch = None
+            if d.created_contact and p.evidence_kind != "referral":
+                touch = (
+                    Touch.objects.for_user(p.user)
+                    .filter(contact=contact, source="capture")
+                    .order_by("-id")
+                    .first()
+                )
             d.touch_id = touch.pk if touch else None
             d.status = AutopilotDecision.STATUS_APPLIED
             d.applied_at = timezone.now()

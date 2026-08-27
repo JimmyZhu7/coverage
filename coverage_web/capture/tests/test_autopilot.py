@@ -520,3 +520,40 @@ def test_tenancy_is_enforced(client, student, firm):
     ).status_code == 404
     run.refresh_from_db()
     assert run.status == AutopilotRun.STATUS_REVIEWED
+
+
+def test_undo_on_a_matched_contact_never_eats_prior_history(student, firm):
+    """Regression: `accept` on a proposal that MATCHES an existing live
+    contact resolves the proposal without logging any touch — but apply
+    used to record the contact's newest capture touch as if it were its
+    own, and undo then deleted a touch some earlier Gmail sync had
+    legitimately written. The matched contact and every one of their
+    touches must survive an apply-then-undo round trip untouched."""
+    from crm import services as crm_services
+
+    existing = Contact.all_objects.create(
+        user=student, name="Alex Banker0",
+        email="alex.banker0@northbank.example", firm=firm, source="capture",
+    )
+    prior = crm_services.log_touch(
+        student.id, existing.id, "reply_received", "email",
+        note="[gmail:t-old] they replied months ago", source="capture",
+    )
+    p = make_proposal(student, firm)  # same email — accept will match
+
+    autopilot.run_autopilot(student, decide=accepting)
+    run = AutopilotRun.all_objects.get(user=student)
+    autopilot.apply_run(run)
+    d = AutopilotDecision.all_objects.get(user=student)
+
+    assert d.contact_id == existing.id
+    assert d.created_contact is False
+    # Apply logged nothing on a matched contact, so it may claim nothing.
+    assert d.touch_id is None
+
+    assert autopilot.undo_decision(d) == autopilot.UNDONE
+    # The pre-existing history is intact; only the proposal came back.
+    assert Contact.all_objects.filter(pk=existing.pk).exists()
+    assert Touch.all_objects.filter(pk=prior.touch_id).exists()
+    p.refresh_from_db()
+    assert p.status == ContactProposal.STATUS_PENDING
