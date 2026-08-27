@@ -713,3 +713,215 @@ def test_a_role_title_is_never_case_folded():
         "opening": _role_opening("M&A Analyst, TMT"),
     })
     assert "The M&A Analyst, TMT role closes" in reason
+
+
+# ---------------------------------------------------------------------------
+# 6. The ordering ladder: what outranks a score, and what does not.
+#
+# The ladder narrowed from five rungs to four on 2026-08-27 (`_TODAY_CLASS`).
+# Two things have to hold at once and they pull in opposite directions, so
+# both are pinned here: a better-NAMED action must not beat a better-SCORING
+# one inside the engaged rung, and a stranger must never beat someone who
+# engaged, however high the stranger scores.
+# ---------------------------------------------------------------------------
+def test_the_best_card_in_the_queue_is_not_buried_under_a_weaker_better_named_one():
+    """THE INVERSION, measured on the founder's queue 2026-08-27.
+
+    Katy Chen — Nomura, tier 1, already chatted, a role at her firm closing
+    Sep 30 — scored 14.4, the highest expected value in his entire queue. Two
+    campus recruiters scoring 4.32 were shown ahead of her and she never
+    surfaced at all, because `advance` was class 1 and `keep_warm` was class 2
+    and the class outranked the score unconditionally.
+
+    Nothing about the scores is asserted here beyond their ORDER: the point is
+    that the higher-scoring card leads, whatever the two actions are called.
+    """
+    user = _user()
+    user.cadence_params = {"chatted_touch_min_weeks": 6}
+    user.save(update_fields=["cadence_params"])
+    firm = _target_firm(user)
+    FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="hk", event_kind="app_close",
+        date=timezone.localdate() + timedelta(days=34),
+        precision="day", confidence=1.0,
+    )
+    katy = Contact.all_objects.create(
+        user=user, name="Katy Chen", firm=firm, role="IB VP",
+        warmth="chatted", thread_state="chat_done",
+    )
+    _touch(user, katy, "chat", days_ago=27)
+
+    # Two people who wrote back, at no firm the student tiers — the shape the
+    # two recruiters had. `advance`, and worth less than Katy on every factor.
+    for name in ("Bridget Doyle", "Dan Frankel"):
+        c = Contact.all_objects.create(
+            user=user, name=name, school_affiliation=True,
+            warmth="replied", thread_state="replied",
+        )
+        _touch(user, c, "reply_received", days_ago=12)
+
+    by_name = _actions_by_name(user)
+    assert by_name["Katy Chen"]["action"] == "keep_warm"
+    assert by_name["Bridget Doyle"]["action"] == "advance"
+    assert by_name["Katy Chen"]["ev"] > by_name["Bridget Doyle"]["ev"], (
+        "precondition: the keep-warm must be the higher-scoring card"
+    )
+
+    ctx = _cockpit_context(user)
+    planned = [a["contact"]["name"] for lane in ctx["lanes"] for a in lane["items"]]
+    assert "Katy Chen" in planned, f"the best card must reach the plan, got {planned}"
+    assert planned[0] == "Katy Chen", (
+        f"the highest-scoring card must lead, got {planned}"
+    )
+
+
+def test_a_stranger_never_outranks_someone_who_engaged_however_high_they_score():
+    """THE OTHER HALF, and the reason `ev` did NOT simply replace the ladder.
+
+    A cold contact is not pinned to the cold-due weight: at a firm with a
+    confirmed close they take the deadline weight (3.0) and can score several
+    times a genuine warm contact at an unranked firm. Measured on the demo
+    account 2026-08-27, ordering purely by `ev` put five cold JPMorgan
+    strangers (5.28 each) above an advocate (1.08) and three people who had
+    written back — and at a cap of five they took the whole plan. That is the
+    29-cold flood returning through a different door.
+    """
+    user = _user()
+    firm = _target_firm(user, slug="citi", name="Citi", tier=1)
+    # Inside `pre_deadline_reping_days` (14), which is what attaches
+    # `closes_on` to their cards and lifts them onto the deadline weight.
+    FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="hk", event_kind="app_close",
+        date=timezone.localdate() + timedelta(days=10),
+        precision="day", confidence=1.0,
+    )
+    for i in range(8):
+        Contact.all_objects.create(user=user, name=f"Stranger {i:02d}", firm=firm)
+
+    warm = Contact.all_objects.create(
+        user=user, name="Wrote Back", school_affiliation=True,
+        warmth="replied", thread_state="replied",
+    )
+    _touch(user, warm, "reply_received", days_ago=12)
+
+    by_name = _actions_by_name(user)
+    strangers = [a for n, a in by_name.items() if n.startswith("Stranger")]
+    assert strangers, "precondition: the strangers must produce cards at all"
+    assert max(a["ev"] for a in strangers) > by_name["Wrote Back"]["ev"], (
+        "precondition: a stranger must OUTSCORE the warm contact, else this "
+        "test proves nothing about the fence"
+    )
+
+    ctx = _cockpit_context(user)
+    names = [a["contact"]["name"] for lane in ctx["lanes"] for a in lane["items"]]
+    assert names[0] == "Wrote Back", (
+        f"a higher-scoring stranger must still sit below someone who "
+        f"engaged, got {names}"
+    )
+
+
+def test_a_live_deadline_still_leads_a_higher_scoring_warm_card():
+    """The critical rung stays absolute. A re-ping guarding a confirmed close
+    leads even when a warm card outscores it — the clock belongs to the world,
+    not to the score."""
+    user = _user()
+    deadline_firm = _target_firm(user, slug="moelis", name="Moelis", tier=3)
+    FirmDate.objects.create(
+        firm=deadline_firm, cycle="sa2028", region="hk", event_kind="app_close",
+        date=timezone.localdate() + timedelta(days=5),
+        precision="day", confidence=1.0,
+    )
+    reping = Contact.all_objects.create(
+        user=user, name="Deadline Person", firm=deadline_firm,
+        warmth="replied", thread_state="replied",
+    )
+    _touch(user, reping, "outreach", days_ago=20)
+
+    rich_firm = _target_firm(user, slug="gs", name="Goldman Sachs", tier=1)
+    # Past the 14-day re-ping window but inside the 45-day opening horizon, so
+    # this is a live REASON on the advocate's card without being a deadline
+    # card of its own — which is exactly what makes him outscore the re-ping.
+    FirmDate.objects.create(
+        firm=rich_firm, cycle="sa2028", region="hk", event_kind="app_close",
+        date=timezone.localdate() + timedelta(days=30),
+        precision="day", confidence=1.0,
+    )
+    advocate = Contact.all_objects.create(
+        user=user, name="Rich Advocate", firm=rich_firm,
+        warmth="advocate", thread_state="advocate",
+    )
+    _touch(user, advocate, "maintain", days_ago=60)
+
+    by_name = _actions_by_name(user)
+    assert by_name["Deadline Person"]["action"] == "reping"
+    assert by_name["Rich Advocate"]["ev"] > by_name["Deadline Person"]["ev"], (
+        "precondition: the warm card must outscore the deadline card"
+    )
+
+    ctx = _cockpit_context(user)
+    planned = [a["contact"]["name"] for lane in ctx["lanes"] for a in lane["items"]]
+    assert planned[0] == "Deadline Person", (
+        f"a confirmed deadline outranks any score, got {planned}"
+    )
+
+
+def test_a_critical_with_no_deadline_behind_it_still_ages_out_of_the_lane():
+    """Staleness decay, unchanged by the narrowed ladder and previously
+    untested.
+
+    A `confirm_chat` asking "the chat was scheduled N business days ago, did
+    it happen?" is a question the PRODUCT chose to ask, not a clock the world
+    produced. Past `CRITICAL_STALE_BUSINESS_DAYS` it stops holding an uncapped
+    critical slot and moves to its own strip — measured, two of them held 2 of
+    3 slots permanently and rendered the same sentence every morning.
+
+    The card is not resolved, archived or snoozed: it keeps its controls and
+    stays findable, it just stops costing the day a slot.
+    """
+    user = _user()
+    firm = _target_firm(user)
+    stuck = Contact.all_objects.create(
+        user=user, name="Never Confirmed", firm=firm,
+        warmth="replied", thread_state="chat_scheduled",
+    )
+    # Well past 15 BUSINESS days of silence.
+    _touch(user, stuck, "chat_scheduled", days_ago=40)
+
+    assert _actions_by_name(user)["Never Confirmed"]["action"] == "confirm_chat"
+
+    ctx = _cockpit_context(user)
+    planned = [a["contact"]["name"] for lane in ctx["lanes"] for a in lane["items"]]
+    assert "Never Confirmed" not in planned, (
+        f"a three-week-old unanswered question must not hold a slot, got {planned}"
+    )
+    strip = [a["contact"]["name"] for a in ctx["still_open"]]
+    assert strip == ["Never Confirmed"], f"it must stay findable, got {strip}"
+    assert "Never Confirmed" not in [a["contact"]["name"] for a in ctx["held"]], (
+        "the strip is not the held list: held promises a morning it arrives"
+    )
+
+
+def test_a_fresh_confirm_chat_still_holds_its_uncapped_slot():
+    """The other side of the decay: only an UNANSWERED AGE retires a critical,
+    never the kind of card it is. A chat scheduled last week is still live.
+
+    10 calendar days, not 6: engine branch 2 fires above 4 BUSINESS days, and
+    6 calendar days is only 4 business days on most weekdays — the same
+    calendar-vs-business drift documented in `test_today.py`'s
+    longest-silent test. 10 clears the branch on every weekday and still sits
+    far below the 15-business-day decay.
+    """
+    user = _user()
+    firm = _target_firm(user)
+    fresh = Contact.all_objects.create(
+        user=user, name="Just Scheduled", firm=firm,
+        warmth="replied", thread_state="chat_scheduled",
+    )
+    _touch(user, fresh, "chat_scheduled", days_ago=10)
+
+    ctx = _cockpit_context(user)
+    critical = [lane for lane in ctx["lanes"] if lane["key"] == "critical"]
+    assert critical and [a["contact"]["name"] for a in critical[0]["items"]] == [
+        "Just Scheduled"
+    ]
+    assert ctx["still_open"] == []
