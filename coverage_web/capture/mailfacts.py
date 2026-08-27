@@ -818,12 +818,24 @@ def _apply_ooo(
                 existing.return_on = return_on
                 existing.quote = quote[:500]
                 existing.status = MailFact.STATUS_APPLIED if contact else MailFact.STATUS_PENDING
+                prior_snooze = contact.snoozed_until if contact else None
+                prior_was_ours = (
+                    prior_snooze is not None and prior_snooze == existing.snoozed_to
+                )
                 snoozed_to = _extend_snooze(user, contact, return_on) if contact else None
                 if snoozed_to is not None:
                     existing.snoozed_to = snoozed_to
+                    # Preserve what stood before OUR writes: if the value we
+                    # are overwriting was our own previous extension, the
+                    # original prior (possibly the user's own snooze) is
+                    # already recorded and must not be replaced by our own
+                    # intermediate value.
+                    if not prior_was_ours:
+                        existing.prior_snoozed_until = prior_snooze
                     existing.action_note = f"Follow-up snoozed to {return_on:%b %d, %Y}"[:300]
                 existing.save(update_fields=[
-                    "return_on", "quote", "status", "snoozed_to", "action_note",
+                    "return_on", "quote", "status", "snoozed_to",
+                    "prior_snoozed_until", "action_note",
                 ])
             out.applied += 1
             out.details.append(
@@ -851,6 +863,7 @@ def _apply_ooo(
         return
 
     if not dry_run:
+        prior_snooze = contact.snoozed_until
         snoozed_to = _extend_snooze(user, contact, return_on)
         note_line = _append_note(
             contact,
@@ -866,6 +879,10 @@ def _apply_ooo(
             action_note=f"Follow-up snoozed to {return_on:%b %d, %Y}"[:300],
             contact=contact,
             snoozed_to=snoozed_to,
+            # What stood before the extension — a snooze the USER set to an
+            # earlier date is overwritten by the forward-only move, and undo
+            # must put IT back rather than clearing to None.
+            prior_snoozed_until=prior_snooze if snoozed_to is not None else None,
             note_line=note_line[:500],
         )
     out.applied += 1
@@ -1021,7 +1038,11 @@ def undo(fact: MailFact) -> None:
             and fact.snoozed_to is not None
             and contact.snoozed_until == fact.snoozed_to
         ):
-            contact.snoozed_until = None
+            # Restore what the apply overwrote — which is the user's own
+            # earlier snooze when there was one, and None only when there
+            # was nothing before. Clearing to None unconditionally
+            # destroyed a snooze the user had set themselves.
+            contact.snoozed_until = fact.prior_snoozed_until
             contact.save(update_fields=["snoozed_until"])
         if contact is not None:
             _remove_note(contact, fact.note_line)

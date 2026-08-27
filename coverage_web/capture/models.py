@@ -435,6 +435,12 @@ class MailFact(PrivateModel):
     # it only while it still holds this value, so a snooze the user set
     # themselves afterwards stands.
     snoozed_to = models.DateTimeField(null=True, blank=True)
+    # The `snoozed_until` that stood BEFORE the apply moved it. `_extend_snooze`
+    # only ever moves the clock forward, which means it can move it forward
+    # OVER a snooze the user set themselves — and undo used to reset to None,
+    # destroying the user's own earlier value instead of restoring it. Null
+    # when there was nothing to preserve, in which case undo's None is exact.
+    prior_snoozed_until = models.DateTimeField(null=True, blank=True)
     # The exact dated line appended to `Contact.notes` — undo removes this
     # line and nothing else.
     note_line = models.CharField(max_length=500, blank=True, default="")

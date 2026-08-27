@@ -483,3 +483,40 @@ class TestNoQuoteNoAction:
         # ...while still reporting what WOULD happen.
         assert result.mail_facts_applied == 1
         assert result.referral_proposals == 1
+
+
+class TestOooUndoRestoresPriorSnooze:
+    def test_undo_puts_back_the_snooze_the_user_had_set(self, student, allen):
+        """Regression: `_extend_snooze` only moves forward, so it can move
+        the clock OVER a snooze the user set themselves — and undo cleared
+        `snoozed_until` to None instead of restoring the user's value."""
+        earlier = timezone.now() + timezone.timedelta(days=3)
+        contact = Contact.all_objects.create(
+            user=student, name="Peter Foggo", email="pfoggo@allenco.com",
+            firm=allen, snoozed_until=earlier,
+        )
+        finding = _classify_message(OWN, ooo_message())
+        apply_findings(student, [finding])
+
+        contact.refresh_from_db()
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_OOO)
+        assert timezone.localtime(contact.snoozed_until).date() == date(2026, 9, 7)
+        assert fact.prior_snoozed_until == earlier
+
+        mailfacts.undo(fact)
+        contact.refresh_from_db()
+        assert contact.snoozed_until == earlier, (
+            "undo must restore the user's own earlier snooze, not destroy it"
+        )
+
+    def test_undo_with_no_prior_snooze_still_clears(self, student, allen):
+        contact = Contact.all_objects.create(
+            user=student, name="Peter Foggo", email="pfoggo@allenco.com",
+            firm=allen,
+        )
+        finding = _classify_message(OWN, ooo_message())
+        apply_findings(student, [finding])
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_OOO)
+        mailfacts.undo(fact)
+        contact.refresh_from_db()
+        assert contact.snoozed_until is None
