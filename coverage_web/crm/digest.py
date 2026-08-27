@@ -132,16 +132,21 @@ def _who_to_ping(user) -> tuple[list[dict], int]:
     """The top of the cadence queue Today itself would show, minus the one
     action kind that is never a thing to DO ('park' — a bulk strip of
     contacts to stop chasing). Sorted by Today's own ordering
-    (`_today_sort_key`: class, then cadence priority, then tier, then
-    longest-silent-first) so a student who reads only the digest and only
-    ever opens Today would see the same names in the same order either way.
+    (`_today_sort_key`: class, then expected value, then cadence priority,
+    then tier, then longest-silent-first) so a student who reads only the
+    digest and only ever opens Today would see the same names in the same
+    order either way. Imported rather than re-derived for that reason — the
+    class ladder narrowed from five rungs to four on 2026-08-27 and this
+    function needed no edit, which is the property worth keeping.
 
     Returns (shown, overflow) — `overflow` is a count, never a silently
     truncated list, matching Today's own capped-lane convention."""
-    from crm.today import _build_actions, _today_class, _today_sort_key
+    from crm.today import (
+        CLASS_PARK, _build_actions, _today_class, _today_sort_key,
+    )
 
     raw_actions, _contacts = _build_actions(user)
-    pingable = [a for a in raw_actions if _today_class(a) != 4]
+    pingable = [a for a in raw_actions if _today_class(a) != CLASS_PARK]
     pingable.sort(key=_today_sort_key)
     shown = pingable[:MAX_ACTIONS]
     overflow = max(0, len(pingable) - len(shown))

@@ -175,9 +175,9 @@ def test_a_due_follow_up_shows_up_as_something_to_ping():
 
 def test_park_never_shows_up_as_something_to_ping():
     """'park' is a bulk strip of contacts to stop chasing, never a thing to
-    DO — crm/today.py's own `_today_class` puts it in its own class (4) for
-    exactly this reason, and the digest must honor that, not just Today's
-    lane rendering."""
+    DO — crm/today.py's own `_today_class` puts it in its own class
+    (`CLASS_PARK`) for exactly this reason, and the digest must honor that,
+    not just Today's lane rendering."""
     user = _user(weekly_touch_goal=14)
     stale = Contact.all_objects.create(user=user, name="Gone Quiet", school_affiliation=True)
     _touch(user, stale, "outreach", days_ago=200)

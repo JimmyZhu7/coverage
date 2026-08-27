@@ -684,19 +684,64 @@ PROPOSALS_RENDER_CAP = 24
 # occupied positions 1-29 and every warm contact sat below the fold, because
 # the warm ones happen to be at tier-3 and unranked firms. A person who
 # replied outranks a person who ignored you, whatever the letterhead.
+#
+# THE LADDER IS FOUR RUNGS, NOT FIVE, and the merge is the point. It used to
+# separate "momentum" (thank_you, advance) from "warm upkeep" (keep_warm,
+# maintain) and rank the first above the second unconditionally. That split
+# bought nothing and cost the queue its best card:
+#
+#   - The PAGE never made the distinction. Both classes render into the same
+#     "Move it forward" lane (`_TODAY_LANES` below has three entries, not
+#     five). The student was shown one lane whose internal order was decided
+#     by a boundary they could not see.
+#   - `ev` already makes the distinction, better. `_NOW_THANK_YOU` (2.6) and
+#     `_NOW_ADVANCE` (1.8) outrank `_NOW_NOTHING` (0.4) on the same contact,
+#     so a thank-you still leads a hollow keep-warm without a class saying so
+#     — and where the keep-warm has a real external clock behind it
+#     (`_OPENING_WEIGHT`, 1.6-2.4) it SHOULD lead, which the old ladder made
+#     impossible.
+#   - MEASURED, live demo account 2026-08-27: Chloe Park — tier 1, Goldman
+#     Sachs, already chatted, a confirmed firm date at her firm, ev 17.28, the
+#     highest score in the whole queue — sat in the held list behind four
+#     `advance` cards scoring 14.4, 14.4, 10.56 and 7.68, purely because
+#     `advance` was class 1 and `keep_warm` was class 2. The founder reported
+#     the identical shape on his own queue (Katy Chen, Nomura, ev 14.4, held
+#     behind two Bain recruiters at ev 4.32).
+#
+# WHY THE COLD BOUNDARY STAYS ABSOLUTE, and why the tempting next step — "let
+# `ev` outrank class between all the non-critical classes" — is wrong. The
+# claim that `ev` now floors cold contacts by itself does not survive
+# measurement. A cold-class item is not pinned to `_NOW_COLD_DUE` (1.0): a
+# stranger at a firm with a confirmed close gets `_NOW_DEADLINE` (3.0), so the
+# cold ceiling is 3.0 x 0.8 x 3.0 = 7.2 against an engaged floor of 0.16.
+# Measured on the same demo queue, pure-`ev` ordering put five cold JPMorgan
+# strangers (ev 5.28 each, riding their firm's deadline) above an ADVOCATE and
+# three contacts who had written back — and, at a daily cap of 5, they would
+# have taken the entire plan. That is the 29-cold flood returning through a
+# different door. `ev` narrows the gap; it does not close it. The rung that
+# has to be structural is the one between a stranger and someone who engaged.
+CLASS_CRITICAL = 0   # a real clock the world produced; uncapped, unsnoozed
+CLASS_ENGAGED = 1    # they gave you something; ordered among themselves by `ev`
+CLASS_COLD = 2       # strangers; never outrank the engaged, whatever they score
+CLASS_PARK = 3       # bulk strip, never a plan slot
+
 _TODAY_CLASS: dict[str, int] = {
-    "reping": 0, "confirm_chat": 0,        # time-critical: a real clock behind them
-    "thank_you": 1, "advance": 1,          # momentum: they gave you something
-    "keep_warm": 2, "maintain": 2,         # warm upkeep
-    "first_outreach": 3, "follow_up": 3,   # cold
-    "park": 4,                             # bulk strip, never a plan slot
+    "reping": CLASS_CRITICAL, "confirm_chat": CLASS_CRITICAL,
+    "thank_you": CLASS_ENGAGED, "advance": CLASS_ENGAGED,
+    "keep_warm": CLASS_ENGAGED, "maintain": CLASS_ENGAGED,
+    "first_outreach": CLASS_COLD, "follow_up": CLASS_COLD,
+    "park": CLASS_PARK,
 }
-_TODAY_CLASS_DEFAULT = 3
+_TODAY_CLASS_DEFAULT = CLASS_COLD
 
 # class -> the lane it renders in. Semantic (what KIND of work this is), not
 # an echo of the priority number: the old lanes mapped priority 0/1/2+ to
 # Overdue/Due Now/Keep Warm, and since six kinds share priority 1 the live
 # page showed one undifferentiated "Due Now" lane of 36 and nothing else.
+#
+# One rung per lane now, which is the shape this list always implied: the
+# ladder above has exactly as many plan-eligible classes as there are lanes
+# here, so no ordering decision is made on a boundary the page does not draw.
 _TODAY_LANES = [
     ("critical", "Don't lose these"),
     ("momentum", "Move it forward"),
@@ -806,17 +851,44 @@ def _today_sort_key(a: dict):
     """(class, expected value desc, cadence priority, tier, longest-silent
     first, firm name).
 
-    `ev` is the second term and the one that does the work now:
+    `ev` is the second term and the one that does most of the work:
     relevance x relationship strength x whether something real is happening
-    (`crm.relevance.expected_value`). Class stays first because it is a
-    different question — a confirmed deadline is time-critical whatever it
-    scores, and demoting one because the contact is merely warm rather than an
-    advocate would be the tier-over-momentum inversion this key already exists
-    to prevent, wearing a number.
+    (`crm.relevance.expected_value`).
+
+    CLASS IS STILL FIRST, BUT IT IS NARROW NOW — three plan-eligible rungs
+    (`CLASS_CRITICAL`, `CLASS_ENGAGED`, `CLASS_COLD`), and each survives on a
+    claim `ev` cannot make. Everything finer than that is `ev`'s to decide.
+
+      - CRITICAL over everything: a confirmed deadline or a dying chat thread
+        is time-critical whatever it scores, and it is exempt from the daily
+        cap and from Snooze besides (`_is_critical`, `_stale_critical`). That
+        exemption is a different kind of statement from a score, so it needs a
+        rung rather than a number. Unchanged.
+      - ENGAGED over COLD: a stranger does not outrank someone who engaged
+        with you, whatever the letterhead — the inversion this key was written
+        for. `ev` narrows that gap but does not close it (see `_TODAY_CLASS`
+        for the measurement: a cold contact riding their firm's deadline
+        scores 5.28 and buries an advocate at 1.08), so the rung stays.
+      - INSIDE `ENGAGED`, `ev` DECIDES. This is the change. A thank-you, a
+        reply to chase, a keep-warm on somebody whose firm has a role closing
+        in three weeks — these are all "this person gave you something, what
+        is worth doing about it today", and that is the exact question `ev`
+        answers, with the external clock already in it (`_OPENING_WEIGHT`).
+        The old ladder answered it with the action's NAME instead, which is
+        how the highest-scoring card in the queue ended up held behind cards
+        scoring a quarter as much: `advance` sorted above `keep_warm` before
+        either score was read. An action string is not evidence about today.
 
     Tier still breaks ties INSIDE a class — it just no longer outranks the
     relationship. Firm name is last and exists only to make the order stable
-    across renders."""
+    across renders.
+
+    WHAT STILL STOPS A WALL OF KEEP-WARMS, since they can now reach the top of
+    the engaged rung: nothing here — and deliberately, because it is not an
+    ordering question. `_cockpit_context`'s `QUIET_UPKEEP_PLAN_MAX` caps how
+    many keep-warms with NO live reason behind them take a plan slot, and it
+    keys on the reason (`opening`) rather than the rank, so a card that climbs
+    on a real opening is exactly the card it lets through."""
     return (
         _today_class(a),
         -a.get("ev", 0.0),
@@ -1628,23 +1700,26 @@ def _cockpit_context(user) -> dict:
         if a["stale_critical"]:
             a["reason"] = _stale_critical_reason(a)
 
-    park = [a for a in ordered if _today_class(a) == 4]
+    park = [a for a in ordered if _today_class(a) == CLASS_PARK]
     still_open = [
-        a for a in ordered if _today_class(a) != 4 and a["stale_critical"]
+        a for a in ordered if _today_class(a) != CLASS_PARK and a["stale_critical"]
     ]
     critical = [
         a for a in ordered
-        if _today_class(a) != 4 and _is_critical(a) and not a["stale_critical"]
+        if _today_class(a) != CLASS_PARK and _is_critical(a) and not a["stale_critical"]
     ]
     # Unchanged by the decay: `_stale_critical` can only ever be true for a
     # card `_is_critical` already covers, so nothing new falls in here.
-    rest = [a for a in ordered if _today_class(a) != 4 and not _is_critical(a)]
+    rest = [
+        a for a in ordered
+        if _today_class(a) != CLASS_PARK and not _is_critical(a)
+    ]
 
-    # Fill rule: class 0 is always shown in full, even past the cap — a
+    # Fill rule: CLASS_CRITICAL is always shown in full, even past the cap — a
     # confirmed deadline is never something the page decides you'll get to
-    # tomorrow. Whatever slots remain fill from class 1 -> 2 -> 3 in sort
-    # order, so the oldest-silent cold contacts drain FIFO across the week
-    # instead of a 31-card batch landing whole.
+    # tomorrow. Whatever slots remain fill from CLASS_ENGAGED then CLASS_COLD
+    # in sort order, so the oldest-silent cold contacts drain FIFO across the
+    # week instead of a 31-card batch landing whole.
     #
     # ONE EXCEPTION, and it is the "rare" half of the keep-warm decision (the
     # reason strings in `crm.relevance` are the "reason-seeking" half). A
@@ -1676,10 +1751,11 @@ def _cockpit_context(user) -> dict:
     planned_lanes = {key: [] for key, _ in _TODAY_LANES}
     for a in planned:
         planned_lanes["critical" if _is_critical(a) else
-                      ("cold" if _today_class(a) == 3 else "momentum")].append(a)
+                      ("cold" if _today_class(a) == CLASS_COLD
+                       else "momentum")].append(a)
     held_by_lane: dict[str, int] = {key: 0 for key, _ in _TODAY_LANES}
     for a in held:
-        held_by_lane["cold" if _today_class(a) == 3 else "momentum"] += 1
+        held_by_lane["cold" if _today_class(a) == CLASS_COLD else "momentum"] += 1
 
     lanes = []
     for key, label in _TODAY_LANES:
