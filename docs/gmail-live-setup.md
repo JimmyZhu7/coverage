@@ -50,9 +50,54 @@ APIs & Services → OAuth consent screen:
   is still marked DRAFT and still has unfilled placeholders, so it needs the
   lawyer pass and the entity details before it is submittable.
 
-## 5. Pub/Sub topic + subscription
+## 5. Pub/Sub topic + subscription — the topic is required, the rest is optional
+
+**Read this before doing the subscription half.** There are two ways to
+drive Gmail Live, and only one of them needs Pub/Sub at all:
+
+| | `gmail_pubsub_listen` (push) | `gmail_poll` (polling) |
+|---|---|---|
+| How it wakes up | Gmail notifies via Pub/Sub | a timer |
+| Latency | a second or two | up to one `--interval` (default 120s) |
+| Needs a Pub/Sub **topic** | yes | no (but `is_configured()` still wants the setting — see below) |
+| Needs a Pub/Sub **subscription** | yes | no |
+| Needs Google Cloud credentials (ADC) | **yes** | **no** |
+
+Both end in the identical call — `gmail_live.sync_connection()` — so
+classification, the history window, the 7-day re-anchor and
+`apply_findings` behave exactly the same either way. Latency is the only
+difference.
+
+**If `gcloud` works for you, do the whole section and use the listener.**
+It is genuinely better.
+
+**If it doesn't, skip the subscription and use `gmail_poll`.** Pulling from
+Pub/Sub is the one step that needs Application Default Credentials, and
+there are two common walls:
+
+- `gcloud auth application-default login` opens the browser, you consent,
+  and then it reports *"Could not reach the login server."* The token comes
+  back to a loopback listener on your own machine, and a captive or
+  filtered network (USC campus wifi, most guest networks, plenty of
+  corporate ones) blocks that hop. `--no-launch-browser` does not help —
+  the hand-back is what fails, not the browser.
+- The usual workaround, a service-account JSON key, is refused outright if
+  your Google Workspace tenant sets the org policy
+  `iam.disableServiceAccountKeyCreation`. University tenants generally do.
+  Only a domain admin can lift it.
+
+Neither is fixable from a terminal, and neither blocks polling, because
+polling never talks to Google Cloud — only to the Gmail API, with the same
+per-user OAuth refresh token the connect flow already stored.
+
+### The topic (still needed)
 
 Pub/Sub → Topics → Create Topic. Name it anything, e.g. `gmail-live`.
+
+Creating a topic needs no ADC and no key — it is a click in the Console.
+Do it even for the polling-only path: `gmail_live.is_configured()` is the
+whole feature's off-switch and checks `GMAIL_LIVE_PUBSUB_TOPIC` is set, and
+`users.watch()` needs a real topic if you ever get push working later.
 
 Grant Gmail's own push service publish rights on it — this is the one
 non-obvious step:
@@ -60,10 +105,19 @@ non-obvious step:
 - Principal: `gmail-api-push@system.gserviceaccount.com`
 - Role: **Pub/Sub Publisher**
 
+### The subscription (push only — skip it if you are polling)
+
 Then create a subscription on that topic:
 - Pub/Sub → Subscriptions → Create Subscription.
 - Delivery type: **Pull** (not push — see `gmail_live.py`'s docstring for
   why: pull means this works before Coverage is deployed anywhere public).
+
+And give the listener credentials to pull with:
+`gcloud auth application-default login`, or a service-account key with the
+`roles/pubsub.subscriber` role pointed at by
+`GOOGLE_APPLICATION_CREDENTIALS`. Without one of those,
+`gmail_pubsub_listen` exits immediately with
+`google.auth.exceptions.DefaultCredentialsError` — see the two walls above.
 
 Note the full resource names, e.g.:
 ```
@@ -89,22 +143,40 @@ GMAIL_LIVE_PUBSUB_SUBSCRIPTION=projects/your-project-id/subscriptions/gmail-live
 GMAIL_LIVE_TOKEN_KEY=<from step 6>
 ```
 
-`gmail_live.is_configured()` gates everything on all four being set — until
-then the Settings page shows nothing new and the two management commands
+`GMAIL_LIVE_PUBSUB_SUBSCRIPTION` is the only one of the five you can leave
+blank on the polling path — nothing but `gmail_pubsub_listen` reads it.
+
+`gmail_live.is_configured()` gates everything on the other four being set —
+until then the Settings page shows nothing new and the management commands
 below just no-op.
 
-## 8. Connect, then run the two processes
+## 8. Connect, then run the processes
 
 1. Log into Coverage, go to Settings, click **Connect Gmail** under the new
    "Gmail Live" section. Approve the Google consent screen.
-2. Keep two things running (launchd/tmux — whatever keeps a process alive
-   on your machine; neither is a cron job like the rest of this app's
-   commands):
-   - `python manage.py gmail_pubsub_listen` — the actual real-time listener.
-     Runs forever; syncs a mailbox the moment Gmail notifies of a change.
-   - `python manage.py gmail_watch_renew` — run this one daily (cron is
-     fine). Google's `watch()` registration expires every 7 days regardless
-     of activity; this keeps it alive.
+2. Keep the sync running. Pick ONE of these two (see §5 for which):
+   - `python manage.py gmail_poll --interval 120` — **the path that works
+     without any Google Cloud credentials.** Polls every connected mailbox
+     every two minutes, forever, until killed. Runs one pass and exits if
+     you drop `--interval`, which makes it a normal cron command instead.
+     Two minutes is the default because quota is not the constraint (an
+     empty poll is two quota units against a per-project allowance in the
+     hundreds of millions per day) — OAuth token-refresh churn is, and an
+     access token lasts an hour. Worst-case latency is one interval; for
+     "a recruiter replied" that is indistinguishable from push. Run
+     `--dry-run` first: it reports how many messages are waiting per
+     mailbox and writes nothing.
+   - `python manage.py gmail_pubsub_listen` — the real-time listener, if
+     you got ADC working. Runs forever; syncs the moment Gmail notifies.
+   Either way this is a long-running process, not a cron job like the rest
+   of this app's commands — launchd/tmux/systemd, whatever keeps a process
+   alive on your machine.
+3. Also run, on a cron:
+   - `python manage.py gmail_watch_renew` — daily. Google's `watch()`
+     registration expires every 7 days regardless of activity; this keeps
+     it alive. **Only matters on the push path** — a poller does not use
+     the watch at all, so on the polling path this command is harmless but
+     pointless, and you can leave it off.
    - `python manage.py gmail_backfill` — run this one every 10-15 minutes
      (cron). It's the one-time historical pass for each newly-connected
      mailbox: `connect_gmail()` marks a fresh connection

@@ -86,9 +86,11 @@ services:
       - key: VAPID_CLAIM_EMAIL
         sync: false
       # Gmail Live (docs/gmail-live-setup.md) — blank = the Settings page
-      # shows nothing new and gmail_watch_renew/gmail_pubsub_listen both
-      # no-op. A SEPARATE OAuth client from GOOGLE_OAUTH_CLIENT_ID above —
-      # see that key's comment; do not reuse the login client here.
+      # shows nothing new and gmail_watch_renew/gmail_poll/
+      # gmail_pubsub_listen all no-op. A SEPARATE OAuth client from
+      # GOOGLE_OAUTH_CLIENT_ID above — see that key's comment; do not reuse
+      # the login client here. GMAIL_LIVE_PUBSUB_SUBSCRIPTION is the one
+      # value only the (currently unused) push listener reads.
       - key: GMAIL_LIVE_CLIENT_ID
         sync: false
       - key: GMAIL_LIVE_CLIENT_SECRET
@@ -100,17 +102,46 @@ services:
       - key: GMAIL_LIVE_TOKEN_KEY
         sync: false
 
-  # ---- Gmail Live real-time listener (long-running, not a cron) ---------
-  # Pulls Pub/Sub notifications and syncs the mailbox the moment Gmail
-  # flags a change. A worker, not a cron job, because it has to stay
-  # attached to receive notifications as they happen — see
-  # capture/gmail_live.py's module docstring.
+  # ---- Gmail Live sync worker (long-running, not a cron) ----------------
+  # Syncs every connected mailbox on a timer. A worker, not a cron job,
+  # because a cron would pay a container cold start for a job that is
+  # usually one HTTP call, and could not tick faster than a minute anyway.
+  #
+  # POLLING, NOT PUSH — DELIBERATE, AND THE ONE THING THAT WORKS HERE.
+  # `gmail_pubsub_listen` is strictly better on latency (a second or two
+  # against up to one --interval) and was what this service ran. It cannot
+  # run here: pulling from Pub/Sub needs Application Default Credentials,
+  # and this service has no way to get them.
+  #
+  #   - Render is not GCP, so there is no metadata server to mint ADC from
+  #     and no workload-identity provider to federate with. Note this
+  #     service block never had a GOOGLE_APPLICATION_CREDENTIALS key or a
+  #     mounted key file — the listener would have exited on
+  #     DefaultCredentialsError on its first boot here, exactly as it does
+  #     locally.
+  #   - The only remaining option is a service-account JSON key, which the
+  #     Google Workspace tenant this project's OAuth client lives in refuses
+  #     to issue (org policy iam.disableServiceAccountKeyCreation).
+  #
+  # `gmail_poll` needs neither: it reads Gmail with the same per-user OAuth
+  # refresh token the connect flow already stored, and ends in the same
+  # `gmail_live.sync_connection()` the listener did. See that command's
+  # docstring and docs/gmail-live-setup.md §5.
+  #
+  # TO SWITCH BACK TO PUSH once ADC is available on this host, restore:
+  #   dockerCommand: "... manage.py gmail_pubsub_listen"
+  # and add a credential (GOOGLE_APPLICATION_CREDENTIALS pointing at a
+  # mounted key, or a workload-identity config). Nothing else changes —
+  # GMAIL_LIVE_PUBSUB_SUBSCRIPTION below is already set for it, and is
+  # simply unread while this runs the poller.
   - type: worker
     name: coverage-gmail-live
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: starter
-    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py gmail_pubsub_listen"
+    # --interval 120: see DEFAULT_INTERVAL in gmail_poll.py for why two
+    # minutes rather than as fast as the quota allows.
+    dockerCommand: "uv run --package coverage-web python coverage_web/manage.py gmail_poll --interval 120"
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: coverage_web.settings.production
