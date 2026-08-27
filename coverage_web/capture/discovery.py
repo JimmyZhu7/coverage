@@ -133,7 +133,7 @@ from django.utils import timezone
 
 from capture import inbound
 from capture.models import ContactProposal
-from capture.providers import normalize_email, normalize_name
+from capture.providers import normalize_email
 from crm import recruitment, services as crm_services
 from crm.models import Contact
 from crm.relevance import is_recruiting_role
@@ -442,17 +442,269 @@ def display_subject(raw: str | None) -> str:
     return " ".join(text.split())[:255]
 
 
+# --------------------------------------------------------------------------- #
+# Identity — the one opinion on "who is this already"
+#
+# `_match_existing` below is the SINGLE matcher every proposal-shaped door
+# uses (`consider_finding`, `accept`, `restore`, mailfacts' referral gate,
+# autopilot's created-or-matched bookkeeping, `capture_discover`). The
+# helpers here are its rungs plus one deliberately WEAKER rung
+# (`duplicate_evidence`) that never merges anything by itself: it only ever
+# words a suggestion for `crm.merge`'s tap-gated duplicate cards. Two rungs
+# of one ladder, in one module, so a third opinion about who is a duplicate
+# cannot grow — the same rule that pulled `restore` onto `_match_existing`
+# in the first place.
+# --------------------------------------------------------------------------- #
+
+# The label freemail providers put before the dot. An org-label match
+# (`amazon` == `amazon`) is meaningless for these: hotmail.com and hotmail.es
+# are separately registered mailboxes, so a shared localpart across them
+# proves nothing.
+_FREEMAIL_ORG_LABELS = frozenset(
+    domain.split(".", 1)[0] for domain in _FREEMAIL_DOMAINS
+)
+
+# Country-code registries commonly hang real domains under a generic second
+# level (cmbi.com.hk, blackstone.com.cn) — the organisation's own label sits
+# one step further left.
+_GENERIC_SECOND_LEVELS = frozenset({"com", "co", "org", "net", "ac", "edu", "gov"})
+
+
+def _name_tokens(name: str) -> tuple[str, ...]:
+    """A display name as canonical words: lowercased, diacritics folded,
+    periods dropped, and a single `Last, First` comma inverted back to
+    `First Last` — the form corporate address books emit ("Nunley, Vanessa
+    N", "af Klercker, Ebba"). Punctuation beyond that is left exactly as
+    typed: canonicalising is not guessing, and hyphenated or apostrophed
+    names stay themselves."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", name or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace(".", " ").strip().lower()
+    if text.count(",") == 1:
+        family, given = text.split(",", 1)
+        text = f"{given} {family}"
+    text = text.replace(",", " ")
+    return tuple(text.split())
+
+
+def names_equivalent(a: str, b: str) -> bool:
+    """Whether two display forms read as the SAME full name. True when the
+    canonical token sequences are equal, or equal once middle initials are
+    set aside — and only then for names still carrying at least a first and
+    a last name, so "Matt" can never claim "Matt R".
+
+    Initials must AGREE when both sides carry them: "Vanessa A Nunley" and
+    "Vanessa B Nunley" are two people until proven otherwise. And an
+    initial never expands into a word — "Jinghan L" does not equal
+    "Jinghan Liu", because which Liu/Lau/Lee the L was is exactly the guess
+    this function exists to refuse."""
+    ta, tb = _name_tokens(a), _name_tokens(b)
+    if not ta or not tb:
+        return False
+    if ta == tb:
+        return True
+    initials_a = sorted(t for t in ta if len(t) == 1)
+    initials_b = sorted(t for t in tb if len(t) == 1)
+    if initials_a and initials_b and initials_a != initials_b:
+        return False
+    words_a = tuple(t for t in ta if len(t) > 1)
+    words_b = tuple(t for t in tb if len(t) > 1)
+    return len(words_a) >= 2 and words_a == words_b
+
+
+def _name_shortening(a: str, b: str) -> bool:
+    """Whether one display name could be a truncation of the other: every
+    word of the shorter reads, in order, as the whole or the start (three
+    letters minimum) of a word in the longer. "Ebba Kler" fits "Ebba af
+    Klercker"; "Patina Chu" does not fit "Patina Zhu", and no edit-distance
+    guess ever gets a say. Suggestive only — never a match by itself."""
+    ta, tb = _name_tokens(a), _name_tokens(b)
+    if not ta or not tb:
+        return False
+    short, full = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    i = 0
+    for token in short:
+        matched = False
+        while i < len(full):
+            candidate = full[i]
+            i += 1
+            if candidate == token or (len(token) >= 3 and candidate.startswith(token)):
+                matched = True
+                break
+        if not matched:
+            return False
+    return True
+
+
+def _mailbox_parts(email: str) -> tuple[str, str]:
+    email = normalize_email(email)
+    if "@" not in email:
+        return "", ""
+    localpart, domain = email.rsplit("@", 1)
+    return localpart, domain
+
+
+def _org_label(domain: str) -> str:
+    """The label that names the organisation in a mail domain: `amazon` for
+    amazon.com AND amazon.es, `cmbi` for cmbi.com.hk, `gs` for
+    ny.ibd.email.gs.com. A heuristic, used only as ONE suggestive signal
+    alongside an identical mailbox name — never sufficient on its own, and
+    never consulted for freemail labels (see _FREEMAIL_ORG_LABELS)."""
+    parts = [p for p in (domain or "").lower().split(".") if p]
+    if len(parts) < 2:
+        return ""
+    if len(parts) >= 3 and parts[-2] in _GENERIC_SECOND_LEVELS and len(parts[-1]) <= 3:
+        return parts[-3]
+    return parts[-2]
+
+
+def _personal_localpart(email: str) -> bool:
+    """A localpart that plausibly names one human: four characters or more,
+    not a role account, not a no-reply. Two-letter initials ("jl@") are
+    refused — two people share initials far too easily to hang identity on
+    them."""
+    localpart, _ = _mailbox_parts(email)
+    if len(localpart) < 4:
+        return False
+    if _ROLE_ACCOUNT_LOCALPART_RE.match(localpart):
+        return False
+    return not inbound.looks_like_noreply(email)
+
+
+def _routing_variant(email_a: str, email_b: str) -> bool:
+    """The same mailbox seen through the firm's own mail routing: identical
+    localpart, one domain an internal extension of the other. Goldman's DSN
+    machinery reports `noah.bauld@ny.ibd.email.gs.com` for the person whose
+    address is `noah.bauld@gs.com` — one namespace, one mailbox, rewritten
+    in transit. Role and no-reply localparts are refused: a shared
+    `recruiting@` across subdomains is infrastructure, not a person."""
+    la, da = _mailbox_parts(email_a)
+    lb, db = _mailbox_parts(email_b)
+    if not la or la != lb or da == db:
+        return False
+    if _ROLE_ACCOUNT_LOCALPART_RE.match(la) or inbound.looks_like_noreply(email_a):
+        return False
+    return da.endswith("." + db) or db.endswith("." + da)
+
+
+def duplicate_evidence(a, b) -> str:
+    """One sentence of why two existing contact ROWS might be one person, or
+    "" when the evidence does not clear the bar. The suggestive rung of the
+    identity ladder: everything it returns is an OFFER for a tap
+    (`crm.merge`), never a merge — a false merge fuses two people's
+    histories with no clean undo, a false split costs one duplicate card.
+
+    `a` and `b` are Contact-shaped (`.name`, `.email`, `.firm_id`).
+
+    WHAT CLEARS THE BAR, and what never does:
+    - An identical personal mailbox name at two RELATED domains (one a
+      subdomain of the other, both registered to one directory firm, or one
+      org label across country TLDs: ebbakler@amazon.com next to
+      ebbakler@amazon.es) — provided the display names could be the same
+      person. Live proof: the founder's rows 707/706 are one AWS account
+      manager tracked as two people.
+    - The identical full name where the addresses do not contradict it:
+      same firm, related domains, or one row with no address at all.
+    - A shared employer alone NEVER suffices, with or without a shared
+      surname: two analysts at one bank routinely share both. Different
+      full names at unrelated domains never suffice either — a namesake at
+      another firm is two people until a human says otherwise."""
+    la, da = _mailbox_parts(getattr(a, "email", "") or "")
+    lb, db = _mailbox_parts(getattr(b, "email", "") or "")
+    same_firm = (
+        getattr(a, "firm_id", None) is not None
+        and getattr(a, "firm_id", None) == getattr(b, "firm_id", None)
+    )
+    subdomain_related = bool(
+        da and db and da != db and (da.endswith("." + db) or db.endswith("." + da))
+    )
+    label_a, label_b = _org_label(da), _org_label(db)
+    org_related = bool(
+        da
+        and db
+        and da != db
+        and (
+            subdomain_related
+            or same_firm
+            or (
+                label_a
+                and label_a == label_b
+                and label_a not in _FREEMAIL_ORG_LABELS
+            )
+        )
+    )
+
+    same_name = names_equivalent(getattr(a, "name", ""), getattr(b, "name", ""))
+    if same_name:
+        if la and lb:
+            if org_related:
+                return (
+                    f"Same name at related addresses, {la}@{da} and {lb}@{db}."
+                )
+            if same_firm:
+                return "Same name, and both cards sit at the same firm."
+            # Same full name at two unrelated employers: a namesake until a
+            # human says otherwise. Refused.
+            return ""
+        if not la and not lb:
+            return "Two cards with the same name and no email address on either."
+        with_addr = a if la else b
+        return (
+            f"Same name. One card has no email address; the other is "
+            f"{(with_addr.email or '').strip().lower()}."
+        )
+
+    # The mailbox rung: an identical personal localpart at related domains,
+    # for names that could be one person's long and short forms.
+    if (
+        la
+        and la == lb
+        and da != db
+        and _personal_localpart(a.email)
+        and org_related
+        and _name_shortening(a.name, b.name)
+    ):
+        detail = "both registered to the same firm" if same_firm else "one organisation"
+        return (
+            f"Same mailbox name, {la}, at {da} and {db} ({detail}), and the "
+            f"two display names read as one person."
+        )
+    return ""
+
+
 def _match_existing(user, email: str, name: str) -> Contact | None:
     """The contact this address-or-name already is, across EVERY row
-    including archived ones. Email first (the strong key), then normalized
-    name (the weak one) — the exact order and scope `capture_discover` uses,
-    lifted out of `consider_finding`/`accept` so `restore` reconciles by the
-    same rule instead of growing a third opinion about who is a duplicate."""
-    everyone = Contact.objects.for_user(user)
-    match = everyone.filter(email__iexact=email).first()
+    including archived ones — lifted out of `consider_finding`/`accept` so
+    `restore` (and every other door) reconciles by the same rule instead of
+    growing a third opinion about who is a duplicate.
+
+    Three rungs, strongest first, each conclusive on its own:
+    1. The exact address (the strong key).
+    2. The same address through the firm's own routing — identical
+       localpart, one domain an internal extension of the other (Goldman's
+       `ny.ibd.email.gs.com` for `gs.com`). See `_routing_variant`.
+    3. The same full name (`names_equivalent`): corporate `Last, First`
+       inversion and a dropped-or-added middle initial recognised, nothing
+       looser. A truncated name, a shared surname, or a shared employer is
+       NEVER a match here — that evidence is suggestive at best, and the
+       suggestive rung (`duplicate_evidence`) only ever proposes a merge
+       for a tap, never performs one."""
+    rows = list(Contact.objects.for_user(user))
+    email = normalize_email(email)
+    match = None
+    if email:
+        match = next(
+            (c for c in rows if normalize_email(c.email or "") == email), None
+        )
+        if match is None:
+            match = next(
+                (c for c in rows if c.email and _routing_variant(email, c.email)),
+                None,
+            )
     if match is None:
-        target = normalize_name(name)
-        match = next((c for c in everyone if normalize_name(c.name) == target), None)
+        match = next((c for c in rows if names_equivalent(c.name, name)), None)
     return match
 
 

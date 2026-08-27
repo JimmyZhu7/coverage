@@ -73,7 +73,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from capture.providers import normalize_email, normalize_name
+from capture.providers import normalize_email
 from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import services as crm_services
 from crm.models import Contact
@@ -138,16 +138,14 @@ class Command(BaseCommand):
             email = normalize_email(str(person.get("email", "")).strip())[:254]
 
             # Match against EVERY row including archived, so an archived
-            # person is recognised rather than duplicated.
-            everyone = Contact.objects.for_user(user)
-            match = None
-            if email:
-                match = everyone.filter(email__iexact=email).first()
-            if match is None:
-                target = normalize_name(name)
-                match = next(
-                    (c for c in everyone if normalize_name(c.name) == target), None
-                )
+            # person is recognised rather than duplicated. THE one matcher
+            # (`capture.discovery._match_existing`) — this command used to
+            # carry its own inline copy of the email-then-name rule, which
+            # was a second opinion about who is a duplicate waiting to
+            # drift; now every door asks the same question the same way.
+            from capture import discovery
+
+            match = discovery._match_existing(user, email, name)
 
             if match is not None:
                 if match.archived:
