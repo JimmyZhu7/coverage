@@ -656,7 +656,11 @@ def test_onboarding_rail_labels_every_step_readably(client, logged_in):
     """
     resp = client.get(_step("work_auth"))
     body = resp.content.decode()
-    for label in ("Profile", "Work", "Firms", "Import"):
+    # "Contacts", not "Import": the last step now leads with connecting
+    # Gmail (which reads the student's own sent mail once and offers the
+    # people they already wrote to) and keeps the CSV as the second door.
+    # The step KEY is still `import`; only what a student reads changed.
+    for label in ("Profile", "Work", "Firms", "Contacts"):
         assert f'<span class="ob-rail-lab">{label}' in body
 
 

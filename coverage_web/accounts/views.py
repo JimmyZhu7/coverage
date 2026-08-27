@@ -75,7 +75,13 @@ ONBOARDING_STEP_LABELS = {
     "profile": "Profile",
     "work_auth": "Work",
     "firms": "Firms",
-    "import": "Import",
+    # The step key stays `import` — it is an internal identifier baked into
+    # URLs and tests, and renaming it would buy nothing. The LABEL moved
+    # because the step did: it used to have one door (upload a CSV) and now
+    # leads with connecting Gmail, which reads the student's own sent mail
+    # once and OFFERS the people they have already written to. "Contacts" is
+    # what both doors are for.
+    "import": "Contacts",
 }
 
 
@@ -215,6 +221,13 @@ def onboarding(request):
     }
     if step == "firms":
         context.update(_firm_picker_context(request.user))
+    if step == "import":
+        # The last step now leads with Connect Gmail, so it needs the same
+        # availability fact the Settings page reads — an unconfigured deploy
+        # must not render a button whose view raises Http404. Same helper,
+        # so the two surfaces can never disagree about whether Gmail Live
+        # exists here.
+        context["gmail_live"] = _gmail_live_context(request.user)
     # The live panel's first paint, server-side. Rendering it here rather
     # than letting htmx fetch it on load is what keeps the wizard working
     # with JS off: the panel is correct before any script runs, and the

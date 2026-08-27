@@ -157,13 +157,24 @@ _welcome_head.html §2); nothing here hardcodes the step count.
     <header class="ob-head">
       <p class="ob-eyebrow">Step {{ step_number }} of {{ step_total }}</p>
       <h1>Bring Your Contacts In</h1>
-      {% comment %}The old lede ran four lines and buried its one real
-      argument — import before connecting Gmail, or the history has nothing to
-      attach to — at the end of a run-on sentence. That argument is a chain of
-      three events, so it is drawn as one below and the lede is back to a
-      single line.{% endcomment %}
-      <p class="ob-lede">Already emailing people? Import that list before you
-        connect Gmail.</p>
+      {% comment %}THE ARGUMENT THIS STEP MAKES CHANGED, BECAUSE THE FACT
+      UNDER IT DID. It used to say "import that list before you connect
+      Gmail", and it was right at the time: the historical Gmail pass
+      searched per-CONTACT, so it could only ever fill in history for people
+      already on the board. Connect first and it found nothing. The cost was
+      that Coverage asked a student to produce a spreadsheet before they had
+      watched it do a single thing.
+
+      The first-connect pass now also reads the student's own recent SENT
+      mail once (capture/gmail_live.py's sent sweep), so connecting is the
+      door that works on an empty account: everyone they have already
+      written to at a firm in the directory comes back as an offer. Gmail
+      leads; the CSV stays for a list that lives outside the mailbox.
+
+      The order of the WIZARD is unchanged — this is still the last step.
+      What changed is which door it opens first.{% endcomment %}
+      <p class="ob-lede">Already emailing people? Connect Gmail and we'll find
+        them.</p>
     </header>
     <div class="ob-step ob-step--import">
       {% comment %}Stacked, not three across: this column is now half the page
@@ -172,32 +183,48 @@ _welcome_head.html §2); nothing here hardcodes the step count.
       <ol class="ob-flow" aria-hidden="true">
         <li class="ob-flow-step">
           <span class="ob-flow-n">Now</span>
-          <span class="ob-flow-t">Import your CSV</span>
-          <span class="ob-flow-d">Names, emails, firms, roles, notes.</span>
+          <span class="ob-flow-t">Connect Gmail</span>
+          <span class="ob-flow-d">Read-only. Disconnect any time.</span>
         </li>
         <li class="ob-flow-step">
-          <span class="ob-flow-n">On upload</span>
-          <span class="ob-flow-t">Firms get matched</span>
-          <span class="ob-flow-d">To the directory where we can. Duplicates skipped.</span>
+          <span class="ob-flow-n">Once</span>
+          <span class="ob-flow-t">We read your sent mail</span>
+          <span class="ob-flow-d">Six months back. Only people at firms in the directory count.</span>
         </li>
         <li class="ob-flow-step">
-          <span class="ob-flow-n">Later</span>
-          <span class="ob-flow-t">Gmail fills the history</span>
-          <span class="ob-flow-d">Only for people already in your contacts. Import first and yours arrive with real history, not at zero.</span>
+          <span class="ob-flow-n">Then you decide</span>
+          <span class="ob-flow-t">Add them, or don't</span>
+          <span class="ob-flow-d">They wait on Today. Nothing joins your network until you tap.</span>
         </li>
       </ol>
       {% comment %}The diagram above is aria-hidden — three cards of stacked
       fragments read as noise out loud. This says the same chain as one
       sentence for anyone not looking at it.{% endcomment %}
-      <p class="ob-sr">Import your CSV of names, emails, firms, roles and notes.
-        Firms are matched to the directory where we can and duplicates are
-        skipped. Later, connecting Gmail fills in email history for people who
-        are already contacts, so anyone imported now starts with their real
-        history attached.</p>
+      <p class="ob-sr">Connect Gmail with read-only access and Coverage reads
+        the last six months of your own sent mail, once. Anyone you wrote to
+        at a firm in the directory turns up on Today as a suggestion. Nothing
+        is added to your network until you tap Add, and you can disconnect at
+        any time. If your contacts live in a spreadsheet instead, import the
+        CSV. Firms are matched to the directory where we can and duplicates
+        are skipped.</p>
       <div class="ob-import-cta">
-        <a class="btn" href="{% url 'accounts:import' %}?from=welcome">Import Contacts</a>
+        {% comment %}Gated on the same `available` fact the Settings page
+        reads (`accounts.views._gmail_live_context`): on a deploy with no
+        Gmail Live credentials `capture:gmail_connect` raises Http404, and a
+        primary button that 404s is worse than no button. The CSV door is
+        always there, which is what makes the gate safe to render nothing
+        into.{% endcomment %}
+        {% if gmail_live.available %}
+          <a class="btn btn-primary" href="{% url 'capture:gmail_connect' %}">Connect Gmail</a>
+        {% endif %}
+        <a class="btn" href="{% url 'accounts:import' %}?from=welcome">Import a CSV</a>
         <a class="btn" href="{% url 'accounts:import_template' %}">Download Template</a>
       </div>
+      {% comment %}Said in plain text rather than left to the flow diagram
+      above: this is the Limited Use posture, and it is also the only
+      question a student actually has at this button.{% endcomment %}
+      <p class="ob-note">Read-only, and nothing joins your network without
+        your tap.</p>
     </div>
     {% comment %}Finish is a POST — it stamps onboarded_at — so it is a form,
     not a link dressed as one. It keeps the footer's primary slot because on
