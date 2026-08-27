@@ -159,7 +159,14 @@ def test_there_is_no_bulk_delete_verb():
     from crm.views import _BULK_VERBS
 
     assert "delete" not in _BULK_VERBS
-    assert set(_BULK_VERBS) == {"snooze", "park", "archive"}
+    # The exact set is pinned so a new verb has to come and read the
+    # paragraph above. The three region verbs joined it with the Unplaced
+    # tab (crm/tests/test_region_resolution.py) — they write one column and
+    # are reversible by writing it again, which is the bar every verb here
+    # clears and a delete never could.
+    assert set(_BULK_VERBS) == {
+        "snooze", "park", "archive", "region_us", "region_hk", "region_other",
+    }
 
 
 def test_a_get_is_not_allowed(client):

@@ -414,3 +414,120 @@ def test_importing_two_hundred_contacts_reads_the_declaration_once():
             "region", "region_source"
         )
     ) == {("us", "declared")}
+
+
+# ---------------------------------------------------------------------------
+# The ask: an Unplaced tab, three verbs, and no interruption anywhere else.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_the_unplaced_tab_groups_by_firm_biggest_first(client):
+    """Three taps, not twelve. The grouping IS the feature — a flat list of
+    twelve names asks twelve questions, and a student answers for a desk."""
+    user = _user(["hk", "us"])
+    ms = _firm(["hk", "us"], slug="ms", name="Morgan Stanley")
+    citi = _firm(["hk", "us"], slug="citi", name="Citi")
+    for i in range(6):
+        Contact.all_objects.create(user=user, name=f"MS {i}", firm=ms)
+    for i in range(4):
+        Contact.all_objects.create(user=user, name=f"Citi {i}", firm=citi)
+    Contact.all_objects.create(user=user, name="Solo", firm_text="Some LLP")
+
+    client.force_login(user)
+    resp = client.get(reverse("crm:contact_list"), {"scope": "unplaced"})
+    groups = resp.context["unplaced_groups"]
+    assert [(g["label"], g["count"]) for g in groups] == [
+        ("Morgan Stanley", 6), ("Citi", 4), ("Some LLP", 1),
+    ]
+    assert resp.context["unplaced_total"] == 11
+
+
+@pytest.mark.django_db
+def test_the_tab_is_absent_when_nobody_is_unplaced(client):
+    """No badge, no card, and no permanent tab reading zero. An empty pool
+    asks nothing — which is the posture: unplaced is an allowed state."""
+    user = _user(["us"])
+    _place(user, _firm(["hk", "us"]))  # placed by the declaration
+    client.force_login(user)
+    resp = client.get(reverse("crm:contact_list"))
+    assert resp.context["unplaced_total"] == 0
+    assert "?scope=unplaced" not in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_the_guess_caveat_becomes_the_way_to_place_them(client):
+    """The caveat was already on screen saying the region was a guess. It
+    gains a link, and that link is the entire nag budget."""
+    user = _user(["hk", "us"])
+    _place(user, _firm(["hk", "us"]), warmth="replied")
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list"), {"scope": "us"}).content.decode()
+    assert "Shown on a guess." in body
+    assert "?scope=unplaced" in body
+
+
+@pytest.mark.django_db
+def test_the_three_region_verbs_file_a_hand_picked_set(client):
+    """Filed as "user": a person just said so, and that is the provenance
+    nothing else is ever allowed to overwrite."""
+    user = _user(["hk", "us"])
+    firm = _firm(["hk", "us"])
+    a = Contact.all_objects.create(user=user, name="A", firm=firm)
+    b = Contact.all_objects.create(user=user, name="B", firm=firm)
+    c = Contact.all_objects.create(user=user, name="C", firm=firm)
+
+    client.force_login(user)
+    for verb, picked in (("region_us", a), ("region_hk", b),
+                         ("region_other", c)):
+        resp = client.post(
+            reverse("crm:contacts_bulk"),
+            {"verb": verb, "ids": [picked.id], "scope": "unplaced"},
+        )
+        assert resp.status_code == 302
+        assert resp["Location"].endswith("?scope=unplaced")
+    for row, expected in ((a, "us"), (b, "hk"), (c, "other")):
+        row.refresh_from_db()
+        assert (row.region, row.region_source) == (expected, "user")
+
+
+@pytest.mark.django_db
+def test_other_is_reachable_only_through_the_ask(client):
+    """Nothing on the write path ever infers "other", by design — which is
+    what makes this verb load-bearing rather than decorative. It is the only
+    way a human says "London"."""
+    user = _user(["hk", "us"])
+    c = _place(user, _firm(["sg", "eu"]))
+    assert c.region == ""
+
+    client.force_login(user)
+    client.post(reverse("crm:contacts_bulk"),
+                {"verb": "region_other", "ids": [c.id], "scope": "unplaced"})
+    c.refresh_from_db()
+    assert (c.region, c.region_source) == ("other", "user")
+
+
+@pytest.mark.django_db
+def test_a_placed_contact_leaves_the_unplaced_pool(client):
+    """The pool empties as it is answered, and the tab leaves with it."""
+    user = _user(["hk", "us"])
+    c = _place(user, _firm(["hk", "us"]))
+    client.force_login(user)
+    assert client.get(reverse("crm:contact_list")).context["unplaced_total"] == 1
+    client.post(reverse("crm:contacts_bulk"),
+                {"verb": "region_hk", "ids": [c.id], "scope": "unplaced"})
+    assert client.get(reverse("crm:contact_list")).context["unplaced_total"] == 0
+
+
+@pytest.mark.django_db
+def test_a_region_verb_cannot_reach_another_tenants_rows(client):
+    """Same safety property as every other bulk verb: tenancy, not
+    derivation. A stray id from another account is simply absent from the
+    queryset rather than acted on."""
+    mine = _user(["hk", "us"])
+    theirs = _user(["hk", "us"], email="other@example.com")
+    victim = _place(theirs, _firm(["hk", "us"]))
+
+    client.force_login(mine)
+    client.post(reverse("crm:contacts_bulk"),
+                {"verb": "region_us", "ids": [victim.id], "scope": "unplaced"})
+    victim.refresh_from_db()
+    assert (victim.region, victim.region_source) == ("", "")

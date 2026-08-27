@@ -22,6 +22,19 @@
     {% for r in region_scopes %}
       <a href="?scope={{ r.code }}"{% if scope == r.code %} aria-current="page"{% endif %}>{{ r.label }}</a>
     {% endfor %}
+    {% comment %}
+    Everyone the write path declined to place. Coverage never infers a region
+    it cannot entail from something the student actually stated (see
+    crm/models.py `Contact.resolve_region` for the measurement that killed
+    every probabilistic signal), so some people stay unplaced — by design.
+    This tab is the only ask the product makes about it: no badge, no Today
+    card, no digest line. Rendered only when somebody is actually unplaced,
+    the same rule the two hidden-contact tabs follow — a permanent tab reading
+    "0" would be a standing reproach for a state that is allowed.
+    {% endcomment %}
+    {% if unplaced_total %}
+      <a href="?scope={{ unplaced_scope }}"{% if scope == unplaced_scope %} aria-current="page"{% endif %}>Unplaced</a>
+    {% endif %}
     <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School</a>
     {# Not a scope — a separate list. Archived contacts are excluded from every #}
     {# board query, so this is the only way back to them. #}
@@ -189,6 +202,77 @@
         </div>
       {% endfor %}
     </div>
+  </section>
+  {% endif %}
+
+  {% comment %}
+  THE ASK, in full. Not an interruption anywhere else in the product: it is a
+  tab you can choose to stand on, and standing on it you get the question in
+  the shape it is answerable — grouped by firm, select-all per group, so "12
+  unplaced: 6 Morgan Stanley, 4 Citi, 2 Jefferies" is three taps rather than
+  twelve. People at one firm's Hong Kong desk arrived on one thread; a student
+  remembers them as a group and can answer for the group.
+
+  "Other countries" is here even though nothing in the codebase ever infers it
+  and nothing ever will — which is exactly why: it is the only way a person
+  says "London".
+
+  Ignore it forever and nothing breaks. Blank contacts keep the cadence
+  engine's both-regions fallback and go on appearing in their firm's tabs
+  marked unconfirmed. That is the designed steady state, not a failure.
+  {% endcomment %}
+  {% if unplaced_groups %}
+  <section class="net-unplaced">
+    <h2 class="strip-title">Unplaced <span class="scrub-count">{{ contact_total }}</span></h2>
+    <p class="net-caveat">
+      Nobody has said where these people sit, and Coverage will not guess.
+      Until then they match deadlines in both markets, which is the
+      conservative answer rather than the right one.
+    </p>
+    <form id="place-form" method="post" action="{% url 'crm:contacts_bulk' %}">
+      {% csrf_token %}
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <div class="net-panel">
+        {% for group in unplaced_groups %}
+          <div class="net-group" data-place-group>
+            <div class="net-group-head">
+              <span>{{ group.label|smart_title }}</span>
+              {# Hidden in markup, revealed by the script — never a dead #}
+              {# control when JS is off. The checkboxes below are real form #}
+              {# controls and work without any of it. #}
+              <button type="button" class="lane-all" data-place-all hidden>Select all</button>
+              <span class="scrub-count">{{ group.count }}</span>
+            </div>
+            <div class="net-minis">
+              {% for c in group.contacts %}
+                <label class="net-mini">
+                  <input class="place-check" type="checkbox" name="ids" value="{{ c.id }}"
+                         aria-label="Select {{ c.name|smart_title }}">
+                  <span class="net-mini-text">
+                    <span class="net-mini-name">{{ c.name|smart_title }}</span>
+                    <span class="net-mini-firm">{{ c.role|default:"—" }}</span>
+                  </span>
+                  <a class="net-mini-open" href="{% url 'crm:contact_detail' c.id %}"
+                     aria-label="Open {{ c.name|smart_title }}'s profile"
+                     title="Open profile">›</a>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+        <div class="bulk-bar" data-place-bar hidden>
+          <span class="bulk-count"><b data-place-n>0</b> selected</span>
+          <span class="bulk-acts">
+            {% for verb, code in region_verbs.items %}
+              <button type="submit" name="verb" value="{{ verb }}" class="btn">
+                {% if code == 'us' %}United States{% elif code == 'hk' %}Hong Kong{% else %}Other countries{% endif %}
+              </button>
+            {% endfor %}
+            <button type="button" class="btn bulk-clear" data-place-clear>Clear</button>
+          </span>
+        </div>
+      </div>
+    </form>
   </section>
   {% endif %}
 
@@ -437,8 +521,11 @@
   <section class="net-contacts" id="net-contacts">
     <h2 class="strip-title">Contacts <span class="scrub-count">{{ contact_total }}</span></h2>
     {% if unconfirmed_total %}
-      {# Never let a region tab pass off a guess as a confirmed match. #}
-      <p class="net-caveat">{{ unconfirmed_total }} of these have no region set. Shown on a guess.</p>
+      {# Never let a region tab pass off a guess as a confirmed match. The #}
+      {# link is the ENTIRE nag budget for the unplaced pool — a sentence #}
+      {# that was already being shown, now with somewhere to go. #}
+      <p class="net-caveat">{{ unconfirmed_total }} of these have no region set. Shown on a guess.
+        <a href="?scope={{ unplaced_scope }}">Place them</a></p>
     {% endif %}
     {% include "crm/_contact_search.html" with target="net-contacts" %}
     {% for section in sections %}
@@ -603,6 +690,72 @@
                    "? They keep every touch and come back in one click.")) {
         e.preventDefault();
       }
+    });
+
+    sync();
+  })();
+
+  // The Unplaced tab's per-firm selection. Same progressive-enhancement
+  // contract as the bulk bar above and deliberately its own block: the two
+  // forms select different things (people to act on vs people to place) and
+  // sharing one script would mean one live count answering for both. The
+  // checkboxes and the three submit buttons are real controls either way.
+  (function () {
+    var form = document.getElementById("place-form");
+    if (!form) return;
+    var bar = form.querySelector("[data-place-bar]");
+    var count = form.querySelector("[data-place-n]");
+    var boxes = Array.prototype.slice.call(
+      form.querySelectorAll(".place-check"));
+    if (!boxes.length) return;
+    var lastIdx = null;
+
+    function sync() {
+      var n = boxes.filter(function (b) { return b.checked; }).length;
+      count.textContent = n;
+      bar.hidden = n === 0;
+      boxes.forEach(function (b) {
+        b.closest(".net-mini").classList.toggle("is-picked", b.checked);
+      });
+    }
+
+    form.querySelectorAll(".net-mini-open").forEach(function (open) {
+      open.addEventListener("click", function (e) { e.stopPropagation(); });
+    });
+
+    boxes.forEach(function (box, i) {
+      box.addEventListener("click", function (e) {
+        if (e.shiftKey && lastIdx !== null) {
+          var lo = Math.min(lastIdx, i), hi = Math.max(lastIdx, i);
+          for (var j = lo; j <= hi; j++) boxes[j].checked = box.checked;
+        }
+        lastIdx = i;
+        sync();
+      });
+    });
+
+    // Select-all per FIRM — the whole reason this tab groups at all. A
+    // second click clears the group it just filled.
+    form.querySelectorAll("[data-place-all]").forEach(function (btn) {
+      btn.hidden = false;
+      btn.addEventListener("click", function () {
+        var group = btn.closest("[data-place-group]");
+        var mine = Array.prototype.slice.call(
+          group.querySelectorAll(".place-check"));
+        var fill = mine.some(function (b) { return !b.checked; });
+        mine.forEach(function (b) { b.checked = fill; });
+        btn.textContent = fill ? "Clear firm" : "Select all";
+        sync();
+      });
+    });
+
+    form.querySelector("[data-place-clear]").addEventListener("click", function () {
+      boxes.forEach(function (b) { b.checked = false; });
+      form.querySelectorAll("[data-place-all]").forEach(function (b) {
+        b.textContent = "Select all";
+      });
+      lastIdx = null;
+      sync();
     });
 
     sync();

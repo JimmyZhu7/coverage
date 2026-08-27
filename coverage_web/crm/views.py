@@ -675,6 +675,14 @@ _WARMTH_SECTIONS = [
 # suggests).
 NETWORK_SCOPE_REGIONS = ("hk", "us", "sg", "eu", "other")
 
+# The one scope that is not a region: everyone the write path declined to
+# place. Kept OUT of NETWORK_SCOPE_REGIONS on purpose — every branch keyed on
+# that tuple ("is this a region tab?") would answer wrong for it: the firm
+# board would filter itself by a region code that isn't one, and the
+# "shown on a guess" caveat would fire on a tab where every row is a known
+# unknown and nothing is being guessed at.
+UNPLACED_SCOPE = "unplaced"
+
 # Firm-region codes that place a firm's footprint unambiguously OUTSIDE both
 # deadline markets — the only firm evidence the "other" tab's unknown-contact
 # fallback accepts. "apac" is deliberately absent: Jane Street carries
@@ -717,6 +725,29 @@ def contact_region(c) -> str | None:
     was written for a None that the old inference never returned.
     """
     return cadence.contact_region({"region": c.region, "source": c.source})
+
+
+def _group_unplaced(contacts) -> list[dict]:
+    """Unplaced contacts bundled by firm, biggest bundle first.
+
+    A contact with no directory firm still groups — by their typed
+    `firm_text`, and failing that under one "No firm" bundle. Dropping them
+    would be the quiet kind of wrong: they are exactly the people a student
+    added by hand, which is to say the ones most likely to be unplaced.
+    """
+    groups: dict[str, dict] = {}
+    for c in contacts:
+        label = (c.firm.name if c.firm_id and c.firm else c.firm_text) or "No firm"
+        group = groups.setdefault(
+            label, {"label": label, "key": f"g{len(groups)}", "contacts": []}
+        )
+        group["contacts"].append(c)
+    out = list(groups.values())
+    for g in out:
+        g["contacts"].sort(key=lambda c: (c.name or "").lower())
+        g["count"] = len(g["contacts"])
+    out.sort(key=lambda g: (-g["count"], g["label"].lower()))
+    return out
 
 
 def _in_scope(c, scope: str) -> bool:
@@ -925,10 +956,27 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     def _scoped(rows):
         if scope == "school":
             return [c for c in rows if c.school or c.school_affiliation]
+        if scope == UNPLACED_SCOPE:
+            return [c for c in rows if not c.region]
         if scope in NETWORK_SCOPE_REGIONS:
             return [c for c in rows if _in_scope(c, scope)]
         return rows
 
+    # THE ASK, and the whole of it. Nothing in this product ever infers a
+    # region it cannot entail (`Contact.resolve_region`), which means some
+    # contacts stay unplaced — by design, not by failure — and the only way a
+    # person says "London" is to say it. This is where they say it: a tab that
+    # exists, grouped so twelve contacts are three taps. Counted BEFORE the
+    # scope filter, because it is the size of the pool, not of the current
+    # view.
+    #
+    # It is never an interruption. No badge, no Today card, no digest line, no
+    # escalation — the caveat line under the Contacts header becoming a link
+    # to this tab is the entire nag budget. Ignored forever, nothing breaks:
+    # blank contacts keep the cadence engine's both-regions fallback and go on
+    # appearing in their firm's tabs marked unconfirmed. That is the designed
+    # steady state.
+    unplaced_total = sum(1 for c in contacts if not c.region)
     contacts = _scoped(contacts)
     # The caveat's number goes through the SAME filter as the board it is a
     # caveat about. A US tab reading "9 hidden" while eight of them are in
@@ -949,6 +997,14 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         sum(1 for c in contacts if not c.region)
         if scope in NETWORK_SCOPE_REGIONS
         else 0
+    )
+    # Grouped by firm, biggest group first, and only on the tab that asks.
+    # "12 unplaced: 6 Morgan Stanley, 4 Citi, 2 Jefferies" is three taps
+    # rather than twelve, and it is also the shape in which the question is
+    # answerable at all — people at one firm's Hong Kong desk came from one
+    # thread, and a student remembers them as a group.
+    unplaced_groups = (
+        _group_unplaced(contacts) if scope == UNPLACED_SCOPE else []
     )
     scoped_ids = {c.id for c in contacts}
 
@@ -1242,6 +1298,15 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         {
             "scope": scope,
             "region_scopes": region_scopes,
+            "unplaced_scope": UNPLACED_SCOPE,
+            # Unscoped, like `hidden_any`: the tab is the way TO the pool, and
+            # a way that vanishes depending on which tab you're standing on is
+            # a dead end rather than a filter. Rendered only when somebody is
+            # actually unplaced — a permanent tab reading "0" is a standing
+            # reproach for a state that is allowed.
+            "unplaced_total": unplaced_total,
+            "unplaced_groups": unplaced_groups,
+            "region_verbs": REGION_BULK_VERBS,
             "gaps": gaps,
             # Said once per panel, in the module that builds the links, so
             # the promise and the code can't drift apart.
@@ -1458,6 +1523,24 @@ _BULK_VERBS = {
     "snooze": "snoozed for 3 days",
     "park": "taken out of the follow-up queue",
     "archive": "archived",
+    # The ask. Three verbs, one per value `Contact.region` can hold, applied
+    # to a hand-picked set exactly like every verb above.
+    #
+    # `region_other` is in the list even though NOTHING infers "other" and
+    # nothing ever will — a firm's non-us/hk footprint describes the firm, and
+    # no stated fact entails that a person sits in London. Which is precisely
+    # why the verb has to exist: it is the only way a human says so.
+    "region_us": "filed as United States",
+    "region_hk": "filed as Hong Kong",
+    "region_other": "filed as Other countries",
+}
+
+# verb -> the `Contact.region` value it writes. Membership in this dict is
+# also what marks a verb as a region verb in `contacts_bulk` below.
+REGION_BULK_VERBS = {
+    "region_us": "us",
+    "region_hk": "hk",
+    "region_other": "other",
 }
 
 
@@ -1499,7 +1582,20 @@ def contacts_bulk(request: HttpRequest) -> HttpResponse:
         messages.info(request, "Nothing was selected.")
         return redirect(back)
 
-    if verb == "snooze":
+    if verb in REGION_BULK_VERBS:
+        # `region_source="user"` because a person just said so, and that is
+        # the one provenance nothing else is ever allowed to overwrite —
+        # not the firm rule, not the declaration rule, not a later Settings
+        # change. A plain `.update()` for the same reason it is safe here:
+        # tier 1 of `resolve_region` would return this value unchanged
+        # anyway, so there is nothing for `save()` to add.
+        Contact.objects.for_user(request.user).filter(
+            pk__in=[cid for cid, _ in rows]
+        ).update(
+            region=REGION_BULK_VERBS[verb],
+            region_source=Contact.REGION_SOURCE_USER,
+        )
+    elif verb == "snooze":
         Contact.objects.for_user(request.user).filter(
             pk__in=[cid for cid, _ in rows]
         ).update(snoozed_until=timezone.now() + timedelta(days=3))
@@ -1534,7 +1630,9 @@ def contacts_bulk(request: HttpRequest) -> HttpResponse:
     undo = ("They're in Archived Contacts if you want them back."
             if verb == "archive" else
             "Logging a touch puts anyone back in the queue."
-            if verb == "park" else "")
+            if verb == "park" else
+            "Change it on any contact if you picked wrong."
+            if verb in REGION_BULK_VERBS else "")
     messages.success(
         request,
         f"{len(rows)} contact{'' if len(rows) == 1 else 's'} "
