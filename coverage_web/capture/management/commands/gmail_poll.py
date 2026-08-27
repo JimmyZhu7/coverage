@@ -117,10 +117,10 @@ import threading
 import time
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db import close_old_connections, connection as db_connection
+from django.db import close_old_connections
 from google.auth.exceptions import RefreshError
 
-from capture import gmail_live
+from capture import gmail_live, locks
 from capture.models import GmailConnection
 from ops.tracking import track_job_run
 
@@ -147,10 +147,14 @@ DEFAULT_INTERVAL = 120
 # burst, not to stretch a pass out to fill the interval.
 MAX_SPACING = 5.0
 
-# `pg_try_advisory_lock(classid, objid)` namespace — an arbitrary but fixed
-# int4 so this command's locks can never collide with another feature's.
-# 0x676D6C70 is ASCII "gmlp".
-ADVISORY_LOCK_NAMESPACE = 0x676D6C70
+# The per-mailbox advisory lock now lives in `capture.locks` — shared by
+# every writer that can touch a mailbox (this poller, gmail_backfill's two
+# selections, the Pub/Sub listener, the import-triggered scan), because a
+# lock only one of them takes is a lock the others walk straight past. The
+# namespace constant is re-exported here because this command's tests (and
+# any operator hand-checking a stuck lock) have always addressed it by this
+# name.
+ADVISORY_LOCK_NAMESPACE = locks.ADVISORY_LOCK_NAMESPACE
 
 
 def auto_spacing(interval: float, mailboxes: int) -> float:
@@ -520,27 +524,9 @@ class Command(BaseCommand):
 
     def _try_lock(self, connection_id: int) -> bool:
         """Non-blocking. False means someone else holds it; see rule 3.
-
-        Session-scoped, so it is released by `_unlock` OR by the database
-        connection going away — including the process being killed
-        mid-sync, which is the case a lock table or a `locked_at` column
-        would leave stuck forever with no way to tell a live run from a
-        dead one.
-        """
-        if db_connection.vendor != "postgresql":
-            return True
-        with db_connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT pg_try_advisory_lock(%s, %s)",
-                [ADVISORY_LOCK_NAMESPACE, connection_id],
-            )
-            return bool(cursor.fetchone()[0])
+        Delegates to `capture.locks` — the shared per-mailbox lock every
+        mailbox writer now takes, not just this poller."""
+        return locks.try_mailbox_lock(connection_id)
 
     def _unlock(self, connection_id: int) -> None:
-        if db_connection.vendor != "postgresql":
-            return
-        with db_connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT pg_advisory_unlock(%s, %s)",
-                [ADVISORY_LOCK_NAMESPACE, connection_id],
-            )
+        locks.unlock_mailbox(connection_id)

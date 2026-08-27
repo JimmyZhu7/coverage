@@ -517,7 +517,19 @@ def process_notification(gmail_address: str, published_history_id: str) -> None:
     # itself finally expires.
     if connection.user.plan != "pro":
         return
-    sync_connection(connection)
+    # The shared per-mailbox lock (capture.locks) — the same one gmail_poll
+    # and gmail_backfill take, because a push notification landing while a
+    # poll pass or a backfill is mid-sync on the same mailbox is exactly
+    # the interleaving the lock exists to end. Skip rather than wait: a
+    # skipped notification costs nothing, since whoever holds the lock is
+    # reading the same history cursor forward and the next notification
+    # (or poll pass) picks up anything they missed.
+    from capture import locks
+
+    with locks.mailbox_lock(connection.pk) as acquired:
+        if not acquired:
+            return
+        sync_connection(connection)
 
 
 def sync_connection(connection: GmailConnection):
@@ -1339,9 +1351,19 @@ def backfill_new_contacts(user, contacts) -> "object | None":
         ).first()
         if connection is None:
             return None
-        return backfill_connection(
-            connection, contacts=contacts, update_backfill_status=False
-        )
+        # Shared per-mailbox lock, best-effort semantics: this scan runs
+        # inline in an import request and is documented as optional
+        # enrichment, so "another writer has the mailbox" means skip, not
+        # wait — the import succeeds either way, and the touches this
+        # would have found arrive through the poll loop or a later scan.
+        from capture import locks
+
+        with locks.mailbox_lock(connection.pk) as acquired:
+            if not acquired:
+                return None
+            return backfill_connection(
+                connection, contacts=contacts, update_backfill_status=False
+            )
     except Exception:  # noqa: BLE001 — an import must never fail because enrichment did
         return None
 

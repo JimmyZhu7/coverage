@@ -60,7 +60,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from analytics.models import Import
-from capture import gmail_live
+from capture import gmail_live, locks
 from capture.models import GmailConnection
 from ops.tracking import track_job_run
 
@@ -137,6 +137,27 @@ class Command(BaseCommand):
 
     def _run_backfill(self, connection, *, dry_run: bool) -> None:
         prefix = "[dry-run] " if dry_run else ""
+        # The shared per-mailbox lock (capture.locks): a backfill walks the
+        # same apply_findings machinery the 2-minute poll loop does, and
+        # used to be free to interleave with a live pass on the same
+        # mailbox. Taken BEFORE the status flips to "running", so a skipped
+        # run leaves the row `pending`/`failed` and the next cron tick
+        # simply tries again — by which time the seconds-long poll pass
+        # holding it is long gone. A dry run writes nothing and takes no
+        # lock, same as the poll command's rule 4.
+        if not dry_run and not locks.try_mailbox_lock(connection.pk):
+            self.stdout.write(
+                f"{connection.gmail_address}: mailbox is being synced by "
+                "another run — backfill deferred to the next tick"
+            )
+            return
+        try:
+            self._run_backfill_locked(connection, dry_run=dry_run, prefix=prefix)
+        finally:
+            if not dry_run:
+                locks.unlock_mailbox(connection.pk)
+
+    def _run_backfill_locked(self, connection, *, dry_run: bool, prefix: str) -> None:
         if not dry_run:
             connection.backfill_status = "running"
             connection.backfill_started_at = timezone.now()
@@ -172,6 +193,22 @@ class Command(BaseCommand):
 
     def _run_rescan(self, connection, *, dry_run: bool) -> None:
         prefix = "[dry-run] " if dry_run else ""
+        # Same shared lock, same reasoning and same skip semantics as
+        # `_run_backfill` above — the "Scan Now" rescan is the other
+        # long-running writer that could interleave with a live poll pass.
+        if not dry_run and not locks.try_mailbox_lock(connection.pk):
+            self.stdout.write(
+                f"{connection.gmail_address}: mailbox is being synced by "
+                "another run — rescan deferred to the next tick"
+            )
+            return
+        try:
+            self._run_rescan_locked(connection, dry_run=dry_run, prefix=prefix)
+        finally:
+            if not dry_run:
+                locks.unlock_mailbox(connection.pk)
+
+    def _run_rescan_locked(self, connection, *, dry_run: bool, prefix: str) -> None:
         if not dry_run:
             connection.rescan_status = "running"
             connection.rescan_started_at = timezone.now()
