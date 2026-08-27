@@ -1667,6 +1667,53 @@ def _cockpit_context(user) -> dict:
         .order_by("created")[:24]
     )
 
+    # Autopilot's reviewed batch, if one is waiting — the strip that turns
+    # this lane into one tap. Two reads, both display-only:
+    #
+    #   * the newest REVIEWED run with accepts: its counts and its id are
+    #     the strip ("N ready to add — one tap"), and the tap POSTs to
+    #     crm:autopilot_apply, which is capture.autopilot.apply_run behind
+    #     one button. Decide never wrote to the CRM; this tap is the only
+    #     thing that does. (See capture/autopilot.py's module docstring for
+    #     why the tap survives every hands-off ambition: it IS the Limited
+    #     Use posture.)
+    #   * every pending proposal that carries an ESCALATE decision gets the
+    #     AI's own quoted reason pinned to its card (`autopilot_quote`),
+    #     whatever run it came from — the card is the escalation path, and
+    #     a card that says only "Not in your network" would hide the one
+    #     line ("Somil Agarwal is no longer with Allen & Company…") that
+    #     makes the decision quick.
+    from capture.models import AutopilotDecision, AutopilotRun
+
+    autopilot_review = None
+    ap_run = (
+        AutopilotRun.objects.for_user(user)
+        .filter(status=AutopilotRun.STATUS_REVIEWED)
+        .order_by("-created")
+        .first()
+    )
+    if ap_run is not None and ap_run.accepts:
+        autopilot_review = {
+            "run": ap_run,
+            "accepts": ap_run.accepts,
+            "escalations": ap_run.escalations,
+        }
+    if proposals:
+        ap_notes = {}
+        for d in (
+            AutopilotDecision.objects.for_user(user)
+            .filter(
+                proposal_id__in=[p.pk for p in proposals],
+                decision=AutopilotDecision.DECIDE_ESCALATE,
+            )
+            .order_by("created")
+        ):
+            ap_notes[d.proposal_id] = d
+        for p in proposals:
+            note = ap_notes.get(p.pk)
+            p.autopilot_quote = note.quote if note else ""
+            p.autopilot_reason = note.reason if note else ""
+
     # The other half of "found in your inbox": an ATS saying one of the
     # student's applications moved. PROPOSALS again — nothing is written to
     # UserOpportunity until the tap (see capture/appmail.py). Same rendering
@@ -1813,6 +1860,7 @@ def _cockpit_context(user) -> dict:
         "proposals": proposals,
         "app_events": app_events,
         "mail_facts": mail_facts,
+        "autopilot_review": autopilot_review,
         "planned_total": len(planned),
         "held": held,
         "held_total": len(held),

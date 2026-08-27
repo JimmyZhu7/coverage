@@ -202,6 +202,27 @@ on every quick action so all of it stays in sync.
       </div>
     {% endif %}
 
+    {% comment %}
+    Autopilot's reviewed batch. The AI already read every card below and
+    wrote up a verdict for each (capture/autopilot.py) — but decided only,
+    never applied: this button is the single tap that commits the whole
+    batch, and it exists (rather than fifty silent writes) because the tap
+    IS the Limited Use posture. The strip names both halves of the split so
+    "hands-off" never means "unseen": what's ready, what was left for the
+    user, and where every quoted reason lives.
+    {% endcomment %}
+    {% if autopilot_review %}
+      <div class="prop-undo" role="status">
+        <span class="prop-undo-said">
+          Autopilot read this scan: {{ autopilot_review.accepts }} ready to add{% if autopilot_review.escalations %}, {{ autopilot_review.escalations }} left for you below{% endif %}.
+          <span class="prop-undo-note">Every decision quotes the line it stands on — <a href="{% url 'crm:autopilot_log' %}">check its work</a>, or undo any of it later from the same page.</span>
+        </span>
+        <button type="button" class="btn btn-primary prop-undo-btn"
+                title="Apply every reviewed decision at once. Each one is undoable afterwards."
+                hx-post="{% url 'crm:autopilot_apply' autopilot_review.run.pk %}">Add all {{ autopilot_review.accepts }}</button>
+      </div>
+    {% endif %}
+
     {% if proposals %}
       <section class="lane lane-proposals">
         <h2 class="lane-title">
@@ -285,6 +306,17 @@ on every quick action so all of it stays in sync.
                   <p class="act-reason act-replied">Replied to an email you sent. <span class="act-replied-none">No subject line on it.</span></p>
                 {% else %}
                   <p class="act-reason">{{ p.evidence }}</p>
+                {% endif %}
+                {% comment %}
+                Autopilot's escalation, when there is one — the AI looked at
+                this card and handed it back, and the card owes the user the
+                exact line it read. Always a verified verbatim quote of the
+                evidence (capture/autopilot.py's grounding rule), never the
+                model's own prose, so what renders here is checkable against
+                the mailbox, not an opinion to take on faith.
+                {% endcomment %}
+                {% if p.autopilot_quote %}
+                  <p class="act-reason act-replied">Autopilot left this one for you: <span class="act-replied-subj">&ldquo;{{ p.autopilot_quote }}&rdquo;</span></p>
                 {% endif %}
               </div>
               <div class="act-quick">

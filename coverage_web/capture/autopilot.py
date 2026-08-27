@@ -82,8 +82,10 @@ Same meter as everything else (`billing.credits`, docs/credit-system-plan
 `MAX_ROWS_PER_RUN` is the independent per-run ceiling on top. Rows past
 the clamp are DEFERRED — no decision, no spend; their cards simply stay
 pending, exactly as if no run happened. Failing closed is the same shape
-everywhere here: decide writes only decisions, apply is one transaction,
-and a run that isn't REVIEWED can never be applied.
+everywhere here: decide writes only decisions, a run that isn't REVIEWED
+can never be applied, and apply completes per-decision and resumes
+idempotently (see `apply_run` for why the ratchet's own connection design
+rules out one wrapping transaction).
 
 IDEMPOTENT, AND THE USER'S WORD IS PERMANENT
 --------------------------------------------
@@ -334,11 +336,11 @@ def _decide_with_model(
     text: str, *, model: str, timeout: float = DEFAULT_TIMEOUT_SECONDS,
     retries: int = DEFAULT_RETRIES,
 ) -> tuple[str, float, str, str]:
-    """One verdict. Returns (decision, confidence, quote, reason) with the
-    floor and the grounding rule ALREADY applied — the only decisions this
-    can return are `accept` (grounded, at/above floor) and `escalate`
-    (everything else, with the reason saying which guard fired). Raises
-    `AutopilotError` only on transport failure after retries."""
+    """One RAW claim from the model: (decision, confidence, quote, reason),
+    parsed but NOT gated — the floor and the grounding check live in
+    `_gate`, applied by the run loop itself, so no decider (this one, or a
+    test's injected one) can hand back an answer that skips the guards.
+    Raises `AutopilotError` only on transport failure after retries."""
     response = _post_json(
         {
             "model": model,
@@ -352,7 +354,7 @@ def _decide_with_model(
     try:
         answer = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
     except (ValueError, json.JSONDecodeError):
-        return AutopilotDecision.DECIDE_ESCALATE, 0.0, "", "model answer was malformed"
+        return "malformed", 0.0, "", "model answer was malformed"
 
     decision = str(answer.get("decision") or "").strip().lower()
     quote = str(answer.get("quote") or "")
@@ -361,7 +363,17 @@ def _decide_with_model(
         confidence = max(0.0, min(1.0, float(answer.get("confidence"))))
     except (TypeError, ValueError):
         confidence = 0.0
+    return decision, confidence, quote, reason
 
+
+def _gate(
+    decision: str, confidence: float, quote: str, reason: str, text: str
+) -> tuple[str, float, str, str]:
+    """The two guards, applied to every claim whatever produced it. Only two
+    decisions come out: `accept` (the model said accept, the quote grounds
+    in `text`, and confidence clears `ACCEPT_FLOOR`) and `escalate`
+    (everything else, with the reason naming which guard fired). Escalation
+    is never blocked; acceptance is never granted by default."""
     if not _grounded(quote, text):
         # An ungrounded answer takes no action, whatever it claimed.
         return (
@@ -417,9 +429,12 @@ def _skip_reason(proposal: ContactProposal) -> str | None:
     if existing is not None:
         if existing.overridden:
             return "you overrode Autopilot on this person — it never re-decides"
+        # Only a FINISHED run's decision blocks a re-decide. A run stuck at
+        # `running` (a killed process) or marked `failed` must not lock its
+        # rows out forever — its decisions were never offered for a tap, so
+        # deciding them again is the recovery path, not a double-decide.
         if existing.run.status in (
             AutopilotRun.STATUS_REVIEWED, AutopilotRun.STATUS_APPLIED,
-            AutopilotRun.STATUS_RUNNING,
         ):
             return "already decided by an earlier run"
     return None
@@ -442,8 +457,10 @@ def run_autopilot(
     none of those either: the report is the entire output, so a dry run
     against live data is a pure read plus model calls.
 
-    `decide` is injectable for tests; the default is the real model call
-    with the floor and grounding already enforced.
+    `decide` is injectable for tests; whatever it returns still passes
+    through `_gate` — the floor and the grounding rule belong to this
+    loop, not to any decider, so no injected (or future) decider can hand
+    back an answer that skips the guards.
     """
     report = AutopilotReport(dry_run=dry_run)
 
@@ -477,7 +494,7 @@ def run_autopilot(
     budget = min(len(candidates), MAX_ROWS_PER_RUN)
     if not dry_run:
         budget = min(budget, billing_credits.affordable_autopilot_rows(user, budget))
-    if candidates and not is_configured():
+    if candidates and decide is _decide_with_model and not is_configured():
         # AI dark: nothing is decided, nothing is spent, every card stays
         # exactly where it was. The report says so instead of guessing.
         report.ok = False
@@ -509,9 +526,9 @@ def run_autopilot(
     try:
         for p in to_decide:
             context = _context_for(index, p.email, p.thread_id)
-            decision, confidence, quote, reason = decide(
-                evidence_text(p, context), model=model
-            )
+            text = evidence_text(p, context)
+            raw = decide(text, model=model)
+            decision, confidence, quote, reason = _gate(*raw, text)
             report.llm_calls += 1
             report.lines.append(DecisionLine(
                 kind="proposal", row_id=p.pk, who=f"{p.name} <{p.email}>",
@@ -533,7 +550,9 @@ def run_autopilot(
             existing = e.autopilot_decisions.all().order_by("-created").first()
             if existing is not None and (
                 existing.overridden
-                or existing.run.status != AutopilotRun.STATUS_FAILED
+                or existing.run.status in (
+                    AutopilotRun.STATUS_REVIEWED, AutopilotRun.STATUS_APPLIED,
+                )
             ):
                 report.lines.append(DecisionLine(
                     kind="app_event", row_id=e.pk, who=str(e),
@@ -605,9 +624,24 @@ NOT_REVIEWED = "not_reviewed"
 def apply_run(run: AutopilotRun) -> tuple[str, int]:
     """Execute every accept in one reviewed batch — the user's single tap.
 
-    One transaction, deliberately: "a run that dies halfway must not leave
-    the CRM half-decided" is a property you get from atomicity or not at
-    all. Every accept goes through the exact door a card tap uses
+    WHY THIS IS NOT ONE DATABASE TRANSACTION. The warmth ratchet
+    (`crm.services.log_touch` -> `coverage_domain.pipeline`) opens its own
+    psycopg connection by design, so a contact created inside an uncommitted
+    Django transaction is invisible to it — the same reason every capture
+    test runs `transaction=True` and the shipped bulk-accept view loops
+    unwrapped. "A run that dies halfway must not leave the CRM
+    half-decided" is delivered at the only granularity the ratchet's
+    architecture allows, and it is the granularity that matters:
+
+      - each DECISION either completes (its writes done, its row marked
+        `applied`) or doesn't — a decision is never left half-recorded;
+      - the run flips to `applied` only after the whole batch; a failure
+        anywhere leaves it `reviewed`, the Today strip stays, and the next
+        tap RESUMES — already-applied decisions are filtered out by
+        status, and `discovery.accept`'s match-before-create contract
+        makes the one interrupted row reconcile instead of duplicate.
+
+    Every accept goes through the exact door a card tap uses
     (`discovery.accept` / `appmail.accept`), so the ratchet, the
     match-before-create rule and the never-resurrect rule all hold without
     this module restating them.
@@ -622,79 +656,78 @@ def apply_run(run: AutopilotRun) -> tuple[str, int]:
     from crm.models import Touch
 
     applied = 0
-    with transaction.atomic():
-        decisions = list(
-            run.decisions.select_related("proposal", "app_event")
-            .filter(
-                decision=AutopilotDecision.DECIDE_ACCEPT,
-                status=AutopilotDecision.STATUS_PROPOSED,
-            )
+    decisions = list(
+        run.decisions.select_related("proposal", "app_event")
+        .filter(
+            decision=AutopilotDecision.DECIDE_ACCEPT,
+            status=AutopilotDecision.STATUS_PROPOSED,
         )
-        for d in decisions:
-            if d.proposal is not None:
-                p = d.proposal
-                if p.status != ContactProposal.STATUS_PENDING:
-                    d.overridden = True
-                    d.reason = (d.reason + " · resolved by you before the tap")[:300]
-                    d.save(update_fields=["overridden", "reason"])
-                    continue
-                # `accept` may create or match — record which, so undo can
-                # reverse exactly what happened and nothing more.
-                match_before = discovery._match_existing(p.user, p.email, p.name)
-                contact = discovery.accept(p)
-                if contact is None:
-                    # Matched an archived contact: accept dismissed the
-                    # proposal and wrote nothing — the never-resurrect rule.
-                    d.overridden = True
-                    d.reason = (d.reason + " · matched an archived contact")[:300]
-                    d.save(update_fields=["overridden", "reason"])
-                    continue
-                d.contact = contact
-                d.created_contact = match_before is None
-                touch = (
-                    Touch.objects.for_user(p.user)
-                    .filter(contact=contact, source="capture")
-                    .order_by("-id")
-                    .first()
-                )
-                d.touch_id = touch.pk if touch else None
-                d.status = AutopilotDecision.STATUS_APPLIED
-                d.applied_at = timezone.now()
-                d.save(update_fields=[
-                    "contact", "created_contact", "touch_id", "status",
-                    "applied_at",
-                ])
-                applied += 1
-            elif d.app_event is not None:
-                e = d.app_event
-                if e.status != ApplicationEvent.STATUS_PENDING:
-                    d.overridden = True
-                    d.reason = (d.reason + " · resolved by you before the tap")[:300]
-                    d.save(update_fields=["overridden", "reason"])
-                    continue
-                from analytics.models import UserOpportunity
+    )
+    for d in decisions:
+        if d.proposal is not None:
+            p = d.proposal
+            if p.status != ContactProposal.STATUS_PENDING:
+                d.overridden = True
+                d.reason = (d.reason + " · resolved by you before the tap")[:300]
+                d.save(update_fields=["overridden", "reason"])
+                continue
+            # `accept` may create or match — record which, so undo can
+            # reverse exactly what happened and nothing more.
+            match_before = discovery._match_existing(p.user, p.email, p.name)
+            contact = discovery.accept(p)
+            if contact is None:
+                # Matched an archived contact: accept dismissed the
+                # proposal and wrote nothing — the never-resurrect rule.
+                d.overridden = True
+                d.reason = (d.reason + " · matched an archived contact")[:300]
+                d.save(update_fields=["overridden", "reason"])
+                continue
+            d.contact = contact
+            d.created_contact = match_before is None
+            touch = (
+                Touch.objects.for_user(p.user)
+                .filter(contact=contact, source="capture")
+                .order_by("-id")
+                .first()
+            )
+            d.touch_id = touch.pk if touch else None
+            d.status = AutopilotDecision.STATUS_APPLIED
+            d.applied_at = timezone.now()
+            d.save(update_fields=[
+                "contact", "created_contact", "touch_id", "status",
+                "applied_at",
+            ])
+            applied += 1
+        elif d.app_event is not None:
+            e = d.app_event
+            if e.status != ApplicationEvent.STATUS_PENDING:
+                d.overridden = True
+                d.reason = (d.reason + " · resolved by you before the tap")[:300]
+                d.save(update_fields=["overridden", "reason"])
+                continue
+            from analytics.models import UserOpportunity
 
-                prior = UserOpportunity.all_objects.filter(
-                    user=e.user, opportunity=e.opportunity
-                ).first()
-                d.undo_state = {
-                    "existed": prior is not None,
-                    "applied_status": prior.applied_status if prior else None,
-                    "applied_at": (
-                        prior.applied_at.isoformat()
-                        if prior and prior.applied_at else None
-                    ),
-                    "dismissed": prior.dismissed if prior else None,
-                }
-                appmail.accept(e)
-                d.status = AutopilotDecision.STATUS_APPLIED
-                d.applied_at = timezone.now()
-                d.save(update_fields=["undo_state", "status", "applied_at"])
-                applied += 1
+            prior = UserOpportunity.all_objects.filter(
+                user=e.user, opportunity=e.opportunity
+            ).first()
+            d.undo_state = {
+                "existed": prior is not None,
+                "applied_status": prior.applied_status if prior else None,
+                "applied_at": (
+                    prior.applied_at.isoformat()
+                    if prior and prior.applied_at else None
+                ),
+                "dismissed": prior.dismissed if prior else None,
+            }
+            appmail.accept(e)
+            d.status = AutopilotDecision.STATUS_APPLIED
+            d.applied_at = timezone.now()
+            d.save(update_fields=["undo_state", "status", "applied_at"])
+            applied += 1
 
-        run.status = AutopilotRun.STATUS_APPLIED
-        run.applied_at = timezone.now()
-        run.save(update_fields=["status", "applied_at"])
+    run.status = AutopilotRun.STATUS_APPLIED
+    run.applied_at = timezone.now()
+    run.save(update_fields=["status", "applied_at"])
     return APPLIED, applied
 
 

@@ -30,6 +30,14 @@ urlpatterns = [
     path("proposals/undo/", views.proposals_undo, name="proposals_undo"),
     path("proposals/<int:pk>/restore/", views.proposal_restore, name="proposal_restore"),
     path("proposals/<int:pk>/<str:verb>/", views.proposal_act, name="proposal_act"),
+    # Autopilot (capture.autopilot): the one-tap apply over a reviewed run,
+    # the activity ledger with every decision's quote, and the per-decision
+    # undo that doubles as the permanent override.
+    path("autopilot/", views.autopilot_log, name="autopilot_log"),
+    path("autopilot/<int:pk>/apply/", views.autopilot_apply,
+         name="autopilot_apply"),
+    path("autopilot/decision/<int:pk>/undo/", views.autopilot_undo,
+         name="autopilot_undo"),
     # Application-status mail (capture.appmail) — the other half of the same
     # door: a proposed pipeline move, committed only on the tap. No bulk
     # verb; each card is a different role at a different stage, and "accept

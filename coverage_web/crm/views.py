@@ -436,6 +436,85 @@ def proposal_restore(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect(reverse("accounts:settings") + "#dismissed-proposals")
 
 
+@login_required
+@require_POST
+def autopilot_apply(request: HttpRequest, pk: int) -> HttpResponse:
+    """THE one tap — apply everything Autopilot decided in one reviewed run.
+
+    This is the whole compliance design in a single view (see
+    capture/autopilot.py's module docstring): the AI decided unattended and
+    wrote nothing; this POST is the user's own act over the disclosed,
+    quoted batch, and `apply_run` executes it in one transaction through
+    the same doors a card tap uses. Re-renders the cockpit like every
+    other Today action — the accepted cards leave, the escalations stay,
+    and the strip is gone because the run is no longer `reviewed`."""
+    from capture import autopilot
+    from capture.models import AutopilotRun
+
+    run = get_object_or_404(
+        AutopilotRun.objects.for_user(request.user), pk=pk,
+        status=AutopilotRun.STATUS_REVIEWED,
+    )
+    outcome, applied = autopilot.apply_run(run)
+    record_event(
+        "autopilot_applied", user=request.user, run_id=run.pk,
+        count=applied, outcome=outcome,
+    )
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+@login_required
+def autopilot_log(request: HttpRequest) -> HttpResponse:
+    """The activity ledger: every run, every decision, and the quote each
+    one stands on — the same check-the-rule's-work surface as Not Related
+    to Recruitment and Not Your Recruiting, for the same reason. Hands-off
+    is only safe while "what did it do, and why" is one page, and the way
+    back (one Undo per applied decision) sits on the row it reverses."""
+    from capture.models import AutopilotRun
+
+    runs = list(
+        AutopilotRun.objects.for_user(request.user)
+        .exclude(status=AutopilotRun.STATUS_RUNNING)
+        .prefetch_related(
+            "decisions__proposal", "decisions__app_event", "decisions__contact",
+        )
+        .order_by("-created")[:20]
+    )
+    return render(request, "crm/autopilot_log.html", {"runs": runs})
+
+
+@login_required
+@require_POST
+def autopilot_undo(request: HttpRequest, pk: int) -> HttpResponse:
+    """One click back, and the user's word made permanent: the touch goes,
+    a contact Autopilot created goes with it, the card returns to Today —
+    and no future run ever re-decides this person (`overridden`)."""
+    from capture import autopilot
+    from capture.models import AutopilotDecision
+
+    decision = get_object_or_404(
+        AutopilotDecision.objects.for_user(request.user), pk=pk,
+    )
+    who = (
+        decision.proposal.name if decision.proposal
+        else str(decision.app_event or "")
+    )
+    outcome = autopilot.undo_decision(decision)
+    record_event(
+        "autopilot_undone", user=request.user, decision_id=decision.pk,
+        outcome=outcome,
+    )
+    if outcome == autopilot.UNDONE:
+        messages.success(
+            request,
+            f"Undone. {who} is back on Today as a card, and Autopilot will "
+            "never decide about them again.",
+        )
+    else:
+        messages.info(request, "Nothing to undo on that row.")
+    return redirect("crm:autopilot_log")
+
+
 def app_event_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     """One tap on an application-status card. Accept writes the pipeline
     move through `capture.appmail.accept` — the ONLY path from a detected

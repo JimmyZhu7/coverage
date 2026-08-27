@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% load textstyle %}
+
+{% block title %}Autopilot · Coverage{% endblock %}
+
+{% block head %}{% include "crm/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="page">
+  <nav class="subnav standalone">
+    <a href="{% url 'crm:week' %}">← Today</a>
+  </nav>
+
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <p class="pagehead-eyebrow">Today</p>
+      <h1 class="pagehead-title">Autopilot</h1>
+      <p class="pagehead-sub">
+        What the AI decided about your inbox, and the exact line each
+        decision stands on. It decides on its own; nothing touches your
+        network until your one tap on Today. Anything it applied, one click
+        below reverses — and once you override it on a person, it never
+        decides about them again.
+      </p>
+    </div>
+  </header>
+
+  {% if not runs %}
+    <div class="empty">
+      <p>No runs yet. After a mailbox scan, Autopilot reviews the new cards
+      and its work shows up here.</p>
+      <p><a href="{% url 'crm:week' %}">Back to Today</a></p>
+    </div>
+  {% else %}
+    {% for run in runs %}
+      <div class="panel">
+        <p class="sec-label">
+          {{ run.created|date:"M d, Y · H:i" }} —
+          {% if run.status == "reviewed" %}reviewed, waiting for your tap on Today{% elif run.status == "applied" %}applied on your tap{% else %}{{ run.get_status_display|lower }}{% endif %}
+          · {{ run.accepts }} to add, {{ run.escalations }} for you{% if run.skips %}, {{ run.skips }} skipped{% endif %}{% if run.deferred %}, {{ run.deferred }} deferred{% endif %}
+          {% if run.credits_spent %} · {{ run.credits_spent }} credit{{ run.credits_spent|pluralize }}{% endif %}
+          {% if run.source_label %} · from {{ run.source_label }}{% endif %}
+        </p>
+        <div class="arch-list">
+          {% for d in run.decisions.all %}
+            <div class="arch-row">
+              <div class="arch-id">
+                {% if d.proposal %}
+                  {% if d.contact %}<a href="{% url 'crm:contact_detail' d.contact.pk %}">{{ d.proposal.name|smart_title }}</a>{% else %}{{ d.proposal.name|smart_title }}{% endif %}
+                  <span class="arch-meta">{{ d.proposal.email }}</span>
+                {% elif d.app_event %}
+                  {{ d.app_event.firm_text|default:d.app_event.firm|smart_title }}
+                  <span class="arch-meta">{{ d.app_event.get_event_type_display }}</span>
+                {% endif %}
+                <span class="arch-meta">
+                  {% if d.decision == "accept" %}{% if d.status == "applied" %}Added{% elif d.status == "undone" %}Added, then undone by you{% else %}Would add{% endif %}{% else %}Left for you{% endif %}
+                  {% if d.detected_by == "ai" %} · confidence {{ d.confidence|floatformat:2 }}{% endif %}
+                  {% if d.overridden %} · your override — never re-decided{% endif %}
+                </span>
+              </div>
+              <span class="arch-when">
+                {% if d.quote %}&ldquo;{{ d.quote|truncatechars:140 }}&rdquo;{% endif %}
+                {% if d.reason %}<br>{{ d.reason|truncatechars:100 }}{% endif %}
+              </span>
+              {% if d.status == "applied" %}
+                <form method="post" action="{% url 'crm:autopilot_undo' d.pk %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn"
+                          title="Reverse exactly what this decision did and put the card back on Today. Autopilot never decides about this person again.">Undo</button>
+                </form>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}
