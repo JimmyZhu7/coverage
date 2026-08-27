@@ -466,7 +466,13 @@ def autopilot_apply(request: HttpRequest, pk: int) -> HttpResponse:
         AutopilotRun.objects.for_user(request.user), pk=pk,
         status=AutopilotRun.STATUS_REVIEWED,
     )
-    outcome, applied = autopilot.apply_run(run)
+    # Through, not just this run: the strip's count is the SUM across every
+    # reviewed run (crm.today), so the tap applies every reviewed run up to
+    # the one it named — an older reviewed batch left behind by a second
+    # decide pass used to stay invisible and unapplied forever. Runs newer
+    # than the tapped one are untouched; the tap never applies verdicts the
+    # strip didn't disclose.
+    outcome, applied = autopilot.apply_reviewed_through(run)
     record_event(
         "autopilot_applied", user=request.user, run_id=run.pk,
         count=applied, outcome=outcome,

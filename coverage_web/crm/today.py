@@ -1737,17 +1737,25 @@ def _cockpit_context(user) -> dict:
     from capture.models import AutopilotDecision, AutopilotRun
 
     autopilot_review = None
-    ap_run = (
+    # ALL reviewed runs, not just the newest: two can coexist (a second
+    # decide pass over rows the first never saw), and showing only the
+    # newest made the older one a decision disclosed to nobody — reviewed,
+    # waiting, and invisible until applied. The strip discloses the sum,
+    # and the tap (`autopilot.apply_reviewed_through`, behind
+    # crm:autopilot_apply on the NEWEST run's pk) applies every reviewed
+    # run up to the one it names, so the number shown is exactly the
+    # number applied.
+    ap_runs = list(
         AutopilotRun.objects.for_user(user)
         .filter(status=AutopilotRun.STATUS_REVIEWED)
-        .order_by("-created")
-        .first()
+        .order_by("created")
     )
-    if ap_run is not None and ap_run.accepts:
+    ap_accepts = sum(r.accepts for r in ap_runs)
+    if ap_runs and ap_accepts:
         autopilot_review = {
-            "run": ap_run,
-            "accepts": ap_run.accepts,
-            "escalations": ap_run.escalations,
+            "run": ap_runs[-1],
+            "accepts": ap_accepts,
+            "escalations": sum(r.escalations for r in ap_runs),
         }
     if proposals:
         ap_notes = {}

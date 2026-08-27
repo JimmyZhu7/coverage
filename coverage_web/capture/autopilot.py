@@ -773,6 +773,44 @@ def apply_run(run: AutopilotRun) -> tuple[str, int]:
     return APPLIED, applied
 
 
+def apply_reviewed_through(run: AutopilotRun) -> tuple[str, int]:
+    """Apply `run` AND every older reviewed run for the same user, oldest
+    first — the whole reviewed backlog behind one tap.
+
+    Two reviewed runs can legitimately coexist: a second decide pass over
+    rows the first run never saw (new proposals since) leaves the first
+    run's verdicts standing, and the Today strip only ever surfaced the
+    newest — so the older run was a decision made, disclosed to nobody,
+    and silently dropped unless the user happened onto the log page. The
+    strip now discloses the SUM across reviewed runs (see crm.today), and
+    this applies exactly what that number disclosed: everything reviewed
+    up to and including the tapped run. Runs newer than the tapped one are
+    deliberately left alone — they were decided after the strip the user
+    read was rendered, and a tap must never apply verdicts it never
+    disclosed.
+
+    Ordered by pk (serial, so creation order); each run goes through the
+    same `apply_run`, keeping its per-decision completeness and resume
+    contract. Returns `(outcome, total_applied)` — NOT_REVIEWED only when
+    the tapped run itself isn't reviewed, matching `apply_run`'s guard.
+    """
+    if run.status != AutopilotRun.STATUS_REVIEWED:
+        return NOT_REVIEWED, 0
+
+    total = 0
+    older = (
+        AutopilotRun.objects.for_user(run.user)
+        .filter(status=AutopilotRun.STATUS_REVIEWED, pk__lt=run.pk)
+        .order_by("pk")
+    )
+    for earlier in older:
+        _, applied = apply_run(earlier)
+        total += applied
+    _, applied = apply_run(run)
+    total += applied
+    return APPLIED, total
+
+
 UNDONE = "undone"
 UNDO_NOOP = "noop"
 
