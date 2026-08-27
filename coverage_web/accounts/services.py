@@ -362,6 +362,14 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
 
     firms = _firm_lookup()
 
+    # ONCE, above the loop — not once per row. Region resolution reads the
+    # student's declared markets for every contact it places (tiers 2 and 3
+    # of `Contact.resolve_region`), and a 200-row mailbox import is exactly
+    # the shape where "read it from `self.user`" becomes 200 identical
+    # queries. `User.regions` is guaranteed to be populated by the time this
+    # runs: "profile" precedes "import" in `accounts.views.ONBOARDING_STEPS`.
+    user_regions = list(getattr(user, "regions", None) or [])
+
     # Seed dedup sets from the user's existing contacts.
     existing_emails: set[str] = set()
     existing_name_firm: set[tuple[str, str]] = set()
@@ -432,11 +440,14 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
             angle=values.get("angle", ""),
             source="import",
         )
-        # bulk_create (below) never calls save(), so the firm-derived region
-        # default has to be applied by hand here or imported contacts would be
-        # the one path that silently keeps an unknown region. `matched_firm` is
-        # already loaded, so this costs no extra query.
-        contact.region = contact.default_region_from_firm()
+        # bulk_create (below) never calls save(), so the region resolution has
+        # to be applied by hand here or imported contacts would be the one
+        # path that silently keeps an unknown region. Same rule the save()
+        # path runs — `matched_firm` is already loaded and `user_regions` was
+        # read ONCE above the loop, so this costs no query per row.
+        contact.region, contact.region_source = contact.resolve_region(
+            user_regions=user_regions
+        )
         to_create.append(contact)
 
     if to_create:
@@ -518,12 +529,16 @@ def link_contacts_to_firm(user, contact_ids: list[int], firm_id) -> int:
     contacts = list(Contact.objects.for_user(user).filter(pk__in=contact_ids))
     if not contacts:
         return 0
+    user_regions = list(getattr(user, "regions", None) or [])
     for contact in contacts:
         contact.firm = firm
         contact.firm_text = ""
-        if not contact.region:
-            contact.region = contact.default_region_from_firm()
-    Contact.all_objects.bulk_update(contacts, ["firm", "firm_text", "region"])
+        contact.region, contact.region_source = contact.resolve_region(
+            user_regions=user_regions
+        )
+    Contact.all_objects.bulk_update(
+        contacts, ["firm", "firm_text", "region", "region_source"]
+    )
     record_event(
         "import_firm_linked", user=user, firm=firm.name, count=len(contacts)
     )

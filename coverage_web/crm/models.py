@@ -74,6 +74,21 @@ class Contact(PrivateModel):
     # the conservative match-either fallback.
     DEADLINE_MARKETS = frozenset({"us", "hk"})
 
+    # Provenance for `region` below. Ordered by how much the product trusts
+    # them: a person's own answer, then what their own declared markets
+    # entail, then what their firm's markets entail. There is deliberately no
+    # code for "we guessed from the mail" — see `region_source`'s comment and
+    # `resolve_region` for why no probabilistic signal is allowed on the
+    # write path at all.
+    REGION_SOURCE_USER = "user"
+    REGION_SOURCE_DECLARED = "declared"
+    REGION_SOURCE_FIRM = "firm"
+    REGION_SOURCE_CHOICES = [
+        ("user", "Set by you"),
+        ("declared", "From your target regions"),
+        ("firm", "From the firm's markets"),
+    ]
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
     # Nullable with a firm_text fallback (§2's "Deliberate calls"):
@@ -101,6 +116,24 @@ class Contact(PrivateModel):
     # DEADLINE_MARKETS above).
     region = models.CharField(
         max_length=8, blank=True, default="", choices=REGION_CHOICES
+    )
+    # WHERE the value in `region` above came from. Blank exactly when
+    # `region` is blank (the invariant `resolve_region` below keeps, and
+    # `crm/tests/test_region_resolution.py` asserts): a placed contact always
+    # knows who placed them.
+    #
+    # It earns its place three ways, and the first is load-bearing rather than
+    # informational: it is the only thing that makes the Settings reversal
+    # possible. A row filed "us" because the student's ONLY declared market
+    # was the US rests on a premise that stops holding the day they add Hong
+    # Kong — and without provenance there is no way to tell those rows apart
+    # from the ones a human placed by hand or a single-market firm answered.
+    # With it, the reversal blanks exactly the `declared` rows and leaves
+    # `user`/`firm` alone. Second, it is what lets the board say a region was
+    # a guess rather than an answer. Third, it keeps a future re-derivation
+    # from ever touching a value a person typed.
+    region_source = models.CharField(
+        max_length=16, blank=True, default="", choices=REGION_SOURCE_CHOICES
     )
     # Plain, unconstrained — see module docstring. Values are managed
     # entirely by coverage_domain.pipeline's ratchet, not Django.
@@ -212,39 +245,105 @@ class Contact(PrivateModel):
     def __str__(self) -> str:
         return self.name
 
+    def firm_markets(self) -> set[str]:
+        """The deadline markets (us/hk) this contact's firm recruits in.
+
+        Intersects DEADLINE_MARKETS, not REGION_VALUES: a firm's non-us/hk
+        footprint ("sg", "eu", Jane Street's "apac") describes where the FIRM
+        operates, never where this person sits, so it must not auto-pin
+        anyone to "other". "other" is only ever written by a human."""
+        if self.firm_id is None:
+            return set()
+        return {
+            (r or "").strip().lower()
+            for r in (self.firm.regions or [])
+        } & self.DEADLINE_MARKETS
+
     def default_region_from_firm(self) -> str:
         """The region this contact's firm implies, or "" when it implies
         nothing. Only an UNAMBIGUOUS firm answers: exactly one deadline market
         (us/hk) on the firm. A firm that recruits in both, in neither, or only
         in a region this product doesn't model yields "" — guessing there is
         exactly the bug this field exists to kill, and a blank keeps the
-        cadence engine's conservative both-regions fallback.
-
-        Intersects DEADLINE_MARKETS, not REGION_VALUES: a firm's non-us/hk
-        footprint ("sg", "eu", Jane Street's "apac") describes where the FIRM
-        operates, never where this person sits, so it must not auto-pin
-        anyone to "other"."""
-        if self.firm_id is None:
-            return ""
-        known = {
-            (r or "").strip().lower()
-            for r in (self.firm.regions or [])
-        } & self.DEADLINE_MARKETS
+        cadence engine's conservative both-regions fallback."""
+        known = self.firm_markets()
         return next(iter(known)) if len(known) == 1 else ""
 
+    def resolve_region(self, *, user_regions=None) -> tuple[str, str]:
+        """`(region, region_source)` for this row — the WHOLE write-path rule.
+
+        Precedence, first match wins:
+
+          1. A region already on the row. Never overwritten by anything below;
+             a blank `region_source` on a filled `region` heals to "user",
+             which is what every by-hand path (the edit form, the bulk verbs,
+             `capture_discover --region`) produces.
+          2. The student's own declared markets, when exactly ONE of them is a
+             deadline market -> that region, "declared". A US-only student's
+             contact at HSBC is a US contact: the firm's Hong Kong desk is
+             irrelevant to somebody not recruiting there. This is why tier 2
+             sits ABOVE the firm.
+          3. Firm markets ∩ declared markets, when that leaves exactly one.
+          4. Firm markets alone, when that is exactly one (the original
+             `default_region_from_firm` rule, unchanged).
+          5. Nothing -> ("", ""). Blank is a real answer and has to stay
+             reachable: the cadence engine's both-regions fallback and the
+             board's "shown on a guess" caveat are both built on it, and
+             retiring `cadence.infer_region` — which returned a confident
+             region 100% of the time — is what made it reachable at all.
+
+        `user_regions` is the six-value Settings vocabulary
+        (`directory.classify.TRACKED_REGIONS`), ALWAYS intersected with
+        DEADLINE_MARKETS before it decides anything: `Contact.region` has
+        three values and "sg" is not one of them. A student declaring ['sg']
+        alone therefore reaches tier 5 and stays blank rather than being
+        mapped to "other" — a firm's or a student's non-us/hk footprint
+        describes a market, never a desk.
+
+        Pass `user_regions` explicitly from any loop over many rows (see
+        `accounts.services.parse_contacts_csv`); left None it reads
+        `self.user.regions`, which is one query per row on a contact whose
+        user isn't already loaded.
+
+        NOTHING PROBABILISTIC IS CONSULTED HERE, deliberately. Measured on 174
+        real inbound messages across 54 contacts: the Date header's UTC offset
+        has 0% coverage on corporate senders (Exchange Online rewrites it —
+        all eleven Hong Kong bankers carried +0000), send-hour clustering
+        resolved 12% of contacts and only after a reply, and signature cities
+        and phone country codes are firm-wide templates naming an office
+        rather than a desk. A wrong region silently mis-scopes deadline
+        warnings and the student has no reason to doubt it. Write only what a
+        stated fact entails; ask for everything else.
+        """
+        if self.region:
+            return self.region, self.region_source or self.REGION_SOURCE_USER
+        if user_regions is None:
+            user_regions = getattr(self.user, "regions", None) or []
+        declared = {
+            (r or "").strip().lower() for r in user_regions
+        } & self.DEADLINE_MARKETS
+        if len(declared) == 1:
+            return next(iter(declared)), self.REGION_SOURCE_DECLARED
+        firm = self.firm_markets()
+        both = firm & declared
+        if len(both) == 1:
+            return next(iter(both)), self.REGION_SOURCE_FIRM
+        if len(firm) == 1:
+            return next(iter(firm)), self.REGION_SOURCE_FIRM
+        return "", ""
+
     def save(self, *args, **kwargs):
-        # Default region from the firm, but only when the user hasn't set one:
-        # an explicit region always wins, and a blank one stays blank unless
-        # the firm makes it unambiguous.
-        if not self.region:
-            inferred = self.default_region_from_firm()
-            if inferred:
-                self.region = inferred
-                # A partial save() must still persist the column we just
-                # filled in, or the value silently vanishes.
-                update_fields = kwargs.get("update_fields")
-                if update_fields is not None:
-                    kwargs["update_fields"] = {*update_fields, "region"}
+        user_regions = kwargs.pop("user_regions", None)
+        region, source = self.resolve_region(user_regions=user_regions)
+        if (region, source) != (self.region, self.region_source):
+            self.region, self.region_source = region, source
+            # A partial save() must still persist the columns we just filled
+            # in, or the value silently vanishes.
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = {
+                    *update_fields, "region", "region_source",
+                }
         super().save(*args, **kwargs)
 
 

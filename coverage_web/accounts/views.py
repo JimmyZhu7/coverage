@@ -113,6 +113,36 @@ def _bound_profile_form(request) -> ProfileForm:
     )
 
 
+def _apply_profile(request, form) -> None:
+    """Save a valid ProfileForm, and handle the one side effect saving it can
+    have on data the student did not touch.
+
+    `Contact.resolve_region`'s tier 2 files contacts by the student's own
+    declared markets, and it is allowed to only while exactly ONE of those
+    markets is a deadline market — "the US is where I recruit" entails "this
+    person is a US contact". Adding Hong Kong in Settings retires that
+    premise, and every row written under it becomes a claim nothing supports:
+    silently in a region tab, silently scoping the cadence engine's
+    pre-deadline re-ping. Those rows go back to unplaced, and the student is
+    told in the same breath as the change that caused it — see `crm.regions`.
+
+    Rows a person set by hand, and rows a single-market firm answered, are
+    untouched: neither premise moved.
+    """
+    from crm import regions as crm_regions
+
+    previous = list(request.user.regions or [])
+    form.apply_to(request.user)
+    if crm_regions.declared_market(previous) and not crm_regions.declared_market(
+        request.user.regions
+    ):
+        result = crm_regions.unplace_declared_regions(
+            request.user, previous_regions=previous
+        )
+        if result.message:
+            messages.info(request, result.message)
+
+
 # ---------------------------------------------------------------------------
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -137,7 +167,7 @@ def onboarding(request):
         if step == "profile":
             form = _bound_profile_form(request)
             if form.is_valid():
-                form.apply_to(request.user)
+                _apply_profile(request, form)
                 return redirect(_step_url(_next_step(step)))
             # invalid → fall through and re-render this step with errors
         elif step == "work_auth":
@@ -482,7 +512,7 @@ def settings_view(request):
         # `<input type="hidden" name="section" value="profile">` to match.
         form = _bound_profile_form(request)
         if form.is_valid():
-            form.apply_to(request.user)
+            _apply_profile(request, form)
             saved = True
             if request.headers.get("HX-Request"):
                 # htmx in-place save: swap back the form with a saved flag.
