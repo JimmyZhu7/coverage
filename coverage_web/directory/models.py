@@ -375,12 +375,31 @@ class OpportunityChange(models.Model):
         return cls.objects.filter(observed_at__lt=cutoff).delete()[0]
 
 
+# `FirmDate.precision`'s closed vocabulary. Module-level so both the field's
+# own `PRECISIONS` alias and the CheckConstraint inside `Meta` can name one
+# list — a nested `Meta` cannot see its outer class's attributes, and two
+# hand-kept copies of a vocabulary is how a vocabulary stops being closed.
+# "" means the row never stated a precision, which every renderer treats as
+# day-precise (the date is a real day, nobody qualified it).
+FIRM_DATE_PRECISIONS = ("", "day", "month", "estimated")
+
+
 class FirmDate(models.Model):
     firm = models.ForeignKey(Firm, on_delete=models.CASCADE, related_name="firm_dates")
     cycle = models.CharField(max_length=16)
     region = models.CharField(max_length=64, blank=True, default="")
     event_kind = models.CharField(max_length=64)
     date = models.DateField(null=True, blank=True)
+    # How exactly `date` locates the event, NOT how sure we are it happens —
+    # that is `confidence`. A CLOSED vocabulary, and the closure is what makes
+    # it safe to read: every renderer branches on the three known values and
+    # falls through to an exact "Sep 22, 2026" for anything else
+    # (`deadline_marker`, `_firm_date_row`, `crm.utils.CONFIRMED_PRECISIONS`).
+    # So an unrecognised string does not degrade to "unknown precision", it
+    # silently CLAIMS DAY PRECISION — a date whose own column says it is a
+    # guess, printed as a specific day. See `Meta.constraints`'s
+    # `firm_dates_precision_vocabulary`.
+    PRECISIONS = FIRM_DATE_PRECISIONS
     precision = models.CharField(max_length=32, blank=True, default="")
     # 0.0-1.0 — the three-band vocabulary `import_firm_dates.CONFIDENCE_BAND` /
     # `seed_directory._CONFIDENCE_BAND` map onto (rumor 0.3, reported 0.6,
@@ -429,6 +448,27 @@ class FirmDate(models.Model):
             models.CheckConstraint(
                 condition=models.Q(confidence__gte=0.0) & models.Q(confidence__lte=1.0),
                 name="firm_dates_confidence_in_range",
+            ),
+            # The precision vocabulary, on the column for the same reason
+            # `firm_dates_confidence_in_range` is: the writers that CAN put a
+            # bad value here are the ones a field validator never runs for.
+            # `import_firm_dates` passes `str(entry.get("precision", ""))`
+            # straight from a hand-written YAML/JSON findings file with no
+            # vocabulary check at all (the sibling `event_kind` IS checked
+            # against `EVENT_KINDS` two lines earlier, and `confidence` is
+            # looked up in `CONFIDENCE_BAND` — `precision` is the one field
+            # of the four that passes through raw), `FirmDateAdmin` places no
+            # bounds on it, and `full_clean()` runs on none of those paths.
+            #
+            # The failure is quiet and it is a lying date, which is worse
+            # than the loud one: a typo'd "aproximate" does not render as
+            # "unknown", it renders as an exact day (see the field comment).
+            # All 41 live rows and both seed files already use only these
+            # four values, so this constrains nothing that is actually in
+            # use — it stops the fifth from being writable.
+            models.CheckConstraint(
+                condition=models.Q(precision__in=FIRM_DATE_PRECISIONS),
+                name="firm_dates_precision_vocabulary",
             ),
         ]
         ordering = ["firm_id", "cycle", "event_kind"]

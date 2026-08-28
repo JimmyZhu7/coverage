@@ -223,6 +223,113 @@ class TestIcsScheduling:
         assert finding["chat_scheduled_at"] == "2026-09-01T14:00:00+00:00"
 
 
+class TestIcsTimezone:
+    """`DTSTART;TZID=` names the zone the wall-clock time is on. Reading the
+    clock and discarding the zone leaves a NAIVE time, which
+    `capture.gmail._user_aware` then anchors to the ACCOUNT OWNER's zone —
+    so a 9am New York chat became 9am Hong Kong for the founder, twelve
+    hours and one calendar day away from when it happens.
+    """
+
+    @staticmethod
+    def _invite(body: str) -> dict:
+        return _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL, "Subject": "Invite"},
+            parts=[{"mimeType": "text/calendar", "body": {"data": _b64(body)}}],
+        )
+
+    def test_a_tzid_qualified_time_is_resolved_to_that_zone(self):
+        when, _summary, _uid = gmail_live._extract_ics_schedule(self._invite(
+            "BEGIN:VEVENT\n"
+            "DTSTART;TZID=America/New_York:20260915T090000\n"
+            "SUMMARY:Coffee chat\n"
+            "END:VEVENT\n"
+        ))
+        # 9am Eastern on Sep 15 2026 is EDT (UTC-4), i.e. 13:00Z — and 9pm
+        # the same day in Hong Kong, not 9am the next morning.
+        assert datetime.fromisoformat(when).astimezone(dt_timezone.utc) == datetime(
+            2026, 9, 15, 13, 0, tzinfo=dt_timezone.utc
+        )
+
+    def test_a_utc_dtstart_is_unchanged(self):
+        when, _s, _u = gmail_live._extract_ics_schedule(self._invite(
+            "BEGIN:VEVENT\nDTSTART:20260901T140000Z\nEND:VEVENT\n"
+        ))
+        assert when == "2026-09-01T14:00:00+00:00"
+
+    def test_a_floating_time_stays_naive(self):
+        """No TZID at all: still "this clock time, on the user's own clock",
+        which is the documented downstream fallback."""
+        when, _s, _u = gmail_live._extract_ics_schedule(self._invite(
+            "BEGIN:VEVENT\nDTSTART:20260901T140000\nEND:VEVENT\n"
+        ))
+        assert when == "2026-09-01T14:00:00"
+
+    def test_a_windows_zone_name_stays_naive_rather_than_guessing(self):
+        """Exchange sends `TZID=Eastern Standard Time`, which is not an IANA
+        name. Unresolvable is not the same as wrong — it falls back to the
+        old naive behaviour instead of inventing an offset."""
+        when, _s, _u = gmail_live._extract_ics_schedule(self._invite(
+            "BEGIN:VEVENT\n"
+            'DTSTART;TZID="Eastern Standard Time":20260915T090000\n'
+            "END:VEVENT\n"
+        ))
+        assert when == "2026-09-15T09:00:00"
+
+
+class TestIcsCancellation:
+    """A cancellation carries the whole event — same UID, same SUMMARY, same
+    DTSTART — plus the statement that it is off. Read for DTSTART alone it was
+    indistinguishable from a fresh invite, so it re-asserted the chat at its
+    old time and logged another `chat_scheduled` touch."""
+
+    @staticmethod
+    def _cancel(extra: str) -> dict:
+        return _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL,
+             "Subject": "Cancelled: Coffee chat"},
+            parts=[{"mimeType": "text/calendar", "body": {"data": _b64(
+                "BEGIN:VCALENDAR\n"
+                f"{extra}\n"
+                "BEGIN:VEVENT\n"
+                "UID:abc123@google.com\n"
+                "DTSTART:20260901T140000Z\n"
+                "SUMMARY:Coffee chat with Alice\n"
+                "END:VEVENT\n"
+                "END:VCALENDAR\n"
+            )}}],
+        )
+
+    def test_method_cancel_reports_no_schedule(self):
+        assert gmail_live._extract_ics_schedule(
+            self._cancel("METHOD:CANCEL")) == (None, None, None)
+
+    def test_status_cancelled_reports_no_schedule(self):
+        assert gmail_live._extract_ics_schedule(
+            self._cancel("STATUS:CANCELLED")) == (None, None, None)
+
+    def test_a_cancelled_invite_does_not_claim_a_scheduled_chat(self):
+        finding = gmail_live._classify_message(OWN_EMAIL, self._cancel("METHOD:CANCEL"))
+        assert finding["chat_status"] == "none"
+        assert finding["chat_scheduled_at"] is None
+
+    def test_the_word_cancelled_in_a_summary_is_not_a_cancellation(self):
+        """The check is anchored to line starts and property names, so prose
+        that happens to contain the word cannot silently drop a real invite."""
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL, "Subject": "Invite"},
+            parts=[{"mimeType": "text/calendar", "body": {"data": _b64(
+                "BEGIN:VEVENT\n"
+                "DTSTART:20260901T140000Z\n"
+                "SUMMARY:Coffee chat (our cancelled one, rescheduled)\n"
+                "STATUS:CONFIRMED\n"
+                "END:VEVENT\n"
+            )}}],
+        )
+        when, _s, _u = gmail_live._extract_ics_schedule(message)
+        assert when == "2026-09-01T14:00:00+00:00"
+
+
 class TestTokenEncryption:
     def test_round_trips(self, settings):
         settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()

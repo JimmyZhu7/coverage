@@ -588,3 +588,53 @@ def test_coverage_cards_are_scoped_to_their_tenant():
     theirs = _user("theirs@example.com")
     _target(theirs, _firm("theirbank", "Their Bank"), tier=1)
     assert _cockpit_context(mine)["plays"] == []
+
+
+# ---------------------------------------------------------------------------
+# The second half of the confirmed bar: precision, not just confidence.
+# ---------------------------------------------------------------------------
+def test_an_estimated_date_is_not_a_play_however_confident():
+    """`_next_deadlines` spelled its bar as `confidence=1.0` alone, while
+    `directory.views._firm_date_row` — the page that renders these same rows
+    with their provenance attached — has always required BOTH halves:
+    `confidence >= 0.8 AND precision in ("day", "month", "")`.
+
+    The two halves say different things. `confidence` is how sure we are the
+    firm holds this date; `precision` is how exactly the stored day locates
+    it. `precision="estimated"` means a month-level guess, printed on the firm
+    timeline as "~ Nov 2026" — and printed by this lane as a hard "5d"
+    countdown next to a list of people to email today. `import_firm_dates`
+    reads the two from independent keys of one YAML entry, so a single seed
+    line saying `confidence: confirmed_official` / `precision: estimated`
+    produces exactly this row.
+    """
+    from crm.today import _next_deadlines
+
+    user = _user()
+    firm = _firm("gs", "Goldman Sachs")
+    _target(user, firm, tier=1)
+    _contact(user, firm, name="Ada", warmth="replied")
+    today = timezone.localdate()
+    guess = _confirmed(firm, today=today, days=5)
+    FirmDate.objects.filter(pk=guess.pk).update(precision="estimated")
+
+    assert _next_deadlines(user, today) == []
+    assert _plays(user, today) == []
+
+
+def test_a_month_precision_date_is_still_a_play():
+    """The over-reach guard. "month" is confirmed — the firm timeline calls it
+    confirmed too — and dropping it would silently delete a real date from the
+    board to fix a different one."""
+    from crm.today import _next_deadlines
+
+    user = _user()
+    firm = _firm("ms", "Morgan Stanley")
+    _target(user, firm, tier=1)
+    _contact(user, firm, name="Grace", warmth="replied")
+    today = timezone.localdate()
+    real = _confirmed(firm, today=today, days=5, event_kind="insight_deadline")
+    FirmDate.objects.filter(pk=real.pk).update(precision="month")
+
+    assert len(_next_deadlines(user, today)) == 1
+    assert len(_plays(user, today)) == 1

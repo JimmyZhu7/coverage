@@ -89,6 +89,8 @@ from .utils import (  # noqa: F401
     _mailto,
     _touch_dicts,
     _warmth_pct,
+    confirmed_firm_dates,
+    firm_date_confidence,
 )
 
 # ---------------------------------------------------------------------------
@@ -1139,12 +1141,16 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # below is no longer its only reader. Only CONFIRMED official close dates
     # count toward urgency, the same bar `cadence._closing_soon` holds:
     # anything rumored or merely reported must not raise an alarm.
+    # `confirmed_firm_dates()` holds BOTH halves of that bar — confidence AND
+    # a precision that locates a real day. The confidence half alone let a
+    # `precision="estimated"` row (a month-level guess the firm timeline
+    # prints as "~ Nov 2026") arrive here as an `app_close`, where it adds up
+    # to 3 exposure points via `coverage.deadline_bonus` and prints "5d to
+    # close" on the card. See `crm.utils.confirmed_firm_dates`.
     closes: dict[int, Any] = {}
-    for fd in FirmDate.objects.filter(
+    for fd in confirmed_firm_dates().filter(
         firm_id__in=firm_ids, event_kind="app_close", date__gte=today
     ):
-        if _confidence_label(fd.confidence) != cadence.CONFIRMED:
-            continue
         if fd.firm_id not in closes or fd.date < closes[fd.firm_id]:
             closes[fd.firm_id] = fd.date
     act_by_firm: dict[int, int] = {}
@@ -2405,7 +2411,10 @@ def _contact_live_context(
                 "event_kind": fd.event_kind,
                 "region": fd.region,
                 "date": fd.date,
-                "confidence": _confidence_label(fd.confidence),
+                # Both halves of "confirmed" — same reason as the cadence
+                # input in `crm.today._build_actions`. See
+                # `crm.utils.firm_date_confidence`.
+                "confidence": firm_date_confidence(fd),
             }
             for fd in FirmDate.objects.filter(firm=firm)
         ]

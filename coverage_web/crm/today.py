@@ -45,6 +45,8 @@ from .utils import (
     _mailto,
     _touch_dicts,
     _warmth_pct,
+    confirmed_firm_dates,
+    firm_date_confidence,
     WARMTH_ORDER,
 )
 
@@ -195,7 +197,12 @@ def _build_actions(user):
             "event_kind": fd.event_kind,
             "region": fd.region,
             "date": fd.date,
-            "confidence": _confidence_label(fd.confidence),
+            # Both halves of "confirmed", not just confidence — see
+            # `crm.utils.firm_date_confidence`. This label is what
+            # `cadence._closing_soon` and the re-ping branch act on, so a
+            # month-level estimate reaching it as "confirmed_official" would
+            # schedule a real outreach against a date nobody stated.
+            "confidence": firm_date_confidence(fd),
         }
         for fd in FirmDate.objects.filter(firm_id__in=firm_ids)
     ]
@@ -1553,11 +1560,16 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
     Stanley insight deadline, 2 days" is a thing you can do something about
     this morning.
 
-    `confidence=1.0` only, the same bar the cadence engine acts on. A calendar
-    countdown built on a rumour is worse than no countdown.
+    `confirmed_firm_dates()` only — `confidence=1.0` AND a precision that
+    locates a real day, the same two-part bar `directory.views._firm_date_row`
+    holds before it prints "confirmed" rather than "rumored". A calendar
+    countdown built on a rumour is worse than no countdown, and so is a "3d"
+    built on a date whose own `precision` says it is a month-level estimate.
+    See `crm.utils.confirmed_firm_dates` for why the second half of the bar
+    was missing here and what walks through the gap.
     """
-    rows = (FirmDate.objects
-            .filter(date__gte=today, confidence=1.0)
+    rows = (confirmed_firm_dates()
+            .filter(date__gte=today)
             .select_related("firm")
             .order_by("date")[:limit])
     out = []
@@ -1879,12 +1891,13 @@ def _coverage_cards(user, today, *, skip_firm_ids: set[int], limit: int) -> list
     # Confirmed close dates only — `rank_gaps`' `app_close` input does no
     # confidence filtering of its own by design (its docstring: "the caller
     # does the confidence filtering, exactly as the cadence engine's caller
-    # does"). Same 1.0 bar as `_next_deadlines`.
+    # does"). Same bar as `_next_deadlines`, through the same helper — this
+    # date drives `coverage.deadline_bonus`, which adds up to 3 exposure
+    # points and can reorder the whole strip, so it must not be a guess.
     closes: dict[int, date] = {}
     for fd in (
-        FirmDate.objects
-        .filter(firm_id__in=firm_ids, event_kind="app_close",
-                date__gte=today, confidence=1.0)
+        confirmed_firm_dates()
+        .filter(firm_id__in=firm_ids, event_kind="app_close", date__gte=today)
         .order_by("-date")
     ):
         closes[fd.firm_id] = fd.date
@@ -2051,8 +2064,8 @@ def _chat_prep(user, today, schedule) -> list[dict]:
     # reason, mirroring `.order_by("date").first()`.
     firm_date_by_firm: dict[int, FirmDate] = {}
     if firm_ids:
-        for fd in (FirmDate.objects
-                   .filter(firm_id__in=firm_ids, date__gte=today, confidence=1.0)
+        for fd in (confirmed_firm_dates()
+                   .filter(firm_id__in=firm_ids, date__gte=today)
                    .order_by("-date")):
             firm_date_by_firm[fd.firm_id] = fd
 

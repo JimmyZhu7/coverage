@@ -10,6 +10,7 @@ tenancy and honesty rules that matter once a page starts showing dates.
 
 from __future__ import annotations
 
+import base64
 import re
 from datetime import timedelta
 
@@ -18,7 +19,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from capture.gmail import apply_findings
-from crm.models import CalendarEvent, Contact
+from crm.models import CalendarEvent, Contact, Touch
 from directory.models import Firm, FirmDate
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -1184,3 +1185,183 @@ def test_a_posting_the_scraper_never_rechecked_still_alarms(client, user):
 
     assert "Unchecked Role closes" in body
     assert "TRIGGER;RELATED=START:-P7D" in body
+
+
+# ---------------------------------------------------------------------------
+# The two halves of "confirmed": confidence AND precision.
+# ---------------------------------------------------------------------------
+
+def test_an_estimated_date_stays_off_the_grid_even_at_full_confidence(
+        client, logged_in):
+    """`confidence` says how sure we are the firm holds this date;
+    `precision` says how exactly the stored day locates it. The calendar read
+    only the first half, so a row whose own column says the day is a
+    month-level guess got a specific square on the grid, a deadline colour,
+    and a place in the month tally — the same date the firm timeline prints
+    honestly as "~ Nov 2026".
+
+    `import_firm_dates` reads the two from independent keys of one YAML
+    entry, so this pairing is one seed line away, not hypothetical.
+    """
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    when = _pinned_day(15)
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="app_close", date=when,
+                            precision="estimated", confidence=1.0)
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+                            event_kind="insight_deadline", date=when,
+                            precision="month", confidence=1.0)
+
+    body = _grid(client, when).content.decode()
+    assert "Insight deadline" in body, (
+        "a month-precision date is confirmed — the firm timeline says so too"
+    )
+    assert "Applications close" not in body
+
+
+def test_an_estimated_date_raises_no_alarm_on_a_phone(client, user):
+    """The .ics feed is the copy that wakes someone up. A VALARM a week
+    before a date nobody stated is the worst version of this bug."""
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="app_close",
+                            date=timezone.localdate() + timedelta(days=9),
+                            precision="estimated", confidence=1.0)
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+    assert "Applications close" not in body
+    assert "BEGIN:VALARM" not in body
+
+
+def test_the_precision_vocabulary_is_closed_at_the_database(user):
+    """Every renderer branches on ""/day/month/estimated and falls through to
+    an exact "Nov 15, 2026" for anything else — so an unrecognised string
+    does not read as "unknown precision", it CLAIMS day precision. The guard
+    is on the column for the same reason `firm_dates_confidence_in_range` is:
+    `import_firm_dates` passes the value through raw from a hand-written
+    findings file, and `full_clean()` never runs on a bare `.save()`.
+    """
+    from django.db import IntegrityError
+
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    with pytest.raises(IntegrityError):
+        FirmDate.objects.create(
+            firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+            date=timezone.localdate(), precision="aproximate", confidence=0.6)
+
+
+# ---------------------------------------------------------------------------
+# The feed's own timezone. It is the one calendar surface with no session.
+# ---------------------------------------------------------------------------
+
+def test_the_feed_puts_an_all_day_event_on_the_users_own_day(client, user):
+    """`TimezoneMiddleware` reads `request.user`, and this request carries a
+    token instead of a session — so without the view activating the zone
+    itself, `localtime(...).date()` here resolves on the UTC day while the
+    grid resolves on the student's. A Hong Kong all-day event stored as
+    16:00Z the previous day then sat on two different dates on two surfaces
+    reading one row, and the feed is the copy that reaches a phone.
+    """
+    from datetime import datetime, timezone as dt_timezone
+
+    user.timezone = "Asia/Hong_Kong"
+    user.save(update_fields=["timezone"])
+    # 2026-09-01 00:00 Hong Kong == 2026-08-31 16:00 UTC.
+    CalendarEvent.all_objects.create(
+        user=user, title="Superday", all_day=True,
+        starts_at=datetime(2026, 8, 31, 16, 0, tzinfo=dt_timezone.utc))
+
+    body = client.get(f"/app/calendar/feed/{user.calendar_token}.ics").content.decode()
+    assert "DTSTART;VALUE=DATE:20260901" in body, body
+
+
+def test_the_feed_leaves_no_timezone_activated_behind(client, user):
+    """Threads are reused. A leaked activation would put this student's zone
+    on whatever request the worker serves next — including an anonymous one."""
+    user.timezone = "Asia/Hong_Kong"
+    user.save(update_fields=["timezone"])
+    client.get(f"/app/calendar/feed/{user.calendar_token}.ics")
+    assert timezone.get_current_timezone_name() == "UTC"
+
+
+def test_the_last_representable_month_is_not_a_500(client, logged_in):
+    """`date(9999, 12, 1)` is valid, so the existing guard passed it — and
+    then the grid's trailing week reached into January 10000 and raised from
+    inside the template context. A hand-edited querystring gets this month
+    back, not a server error."""
+    resp = client.get(reverse("crm:calendar"), {"y": "9999", "m": "12"})
+    assert resp.status_code == 200
+    assert timezone.localdate().strftime("%B %Y") in resp.content.decode()
+
+
+def test_a_second_reschedule_of_the_same_invite_still_moves_one_row(user):
+    """The original fix was demonstrated on ONE reschedule. Organisers move a
+    chat twice; the guard has to hold on the third invite as well as the
+    second, and it does because `invite_sent_at` records which invite is
+    currently speaking rather than counting how many have arrived."""
+    Contact.all_objects.create(user=user, name="Lily Liu", email="lily.liu@barclays.com")
+    first, second, third = _at(days=3, hour=15), _at(days=4, hour=11), _at(days=6, hour=9)
+    monday = timezone.now() - timedelta(days=3)
+
+    apply_findings(user, [_lily("thread-a", first, sent_at=monday)])
+    apply_findings(user, [_lily("thread-b", second, sent_at=monday + timedelta(days=1))])
+    apply_findings(user, [_lily("thread-c", third, sent_at=monday + timedelta(days=2))])
+
+    ev = CalendarEvent.objects.for_user(user).get()
+    assert timezone.localtime(ev.starts_at) == third
+    assert ev.thread_id == "thread-c"
+    assert ev.ics_uid == LILY_UID
+
+
+def test_a_cancelled_invite_adds_no_chat_and_logs_no_scheduled_touch(user):
+    """End to end for the cancellation gap. A cancellation carries the whole
+    event — same UID, same DTSTART — so read for its DTSTART it re-asserted
+    the meeting and climbed the ladder a second time.
+
+    KNOWN LIMIT, pinned deliberately rather than left to be discovered: the
+    row already on the calendar is NOT removed. `_extract_ics_schedule`
+    reports no time, which is the honest answer available to it; acting on
+    the cancellation (deleting or retitling the event, the way the .ics feed
+    retitles a pulled posting) is a `capture.gmail._upsert_scheduled_chat`
+    change and is not made here. What this pins is that a cancellation stops
+    ADDING to the lie.
+    """
+    from capture import gmail_live
+
+    contact = Contact.all_objects.create(
+        user=user, name="Lily Liu", email="lily.liu@barclays.com")
+    when = _at(days=3, hour=15)
+    apply_findings(user, [_lily("thread-a", when, sent_at=timezone.now() - timedelta(days=1))])
+    assert CalendarEvent.objects.for_user(user).count() == 1
+    before = Touch.objects.for_user(user).filter(
+        contact=contact, kind="chat_scheduled").count()
+
+    cancel = {
+        "threadId": "thread-z",
+        "payload": {
+            "headers": [
+                {"name": "From", "value": "Lily Liu <lily.liu@barclays.com>"},
+                {"name": "To", "value": user.email},
+                {"name": "Subject", "value": "Cancelled: Coffee Chat"},
+            ],
+            "parts": [{
+                "mimeType": "text/calendar",
+                "body": {"data": base64.urlsafe_b64encode(
+                    ("BEGIN:VCALENDAR\nMETHOD:CANCEL\nBEGIN:VEVENT\n"
+                     f"UID:{LILY_UID}\nDTSTART:20260901T140000Z\n"
+                     "SUMMARY:Coffee Chat\nEND:VEVENT\nEND:VCALENDAR\n"
+                     ).encode()).decode()},
+            }],
+        },
+    }
+    finding = gmail_live._classify_message(user.email, cancel)
+    assert finding["chat_status"] == "none"
+    assert finding["chat_scheduled_at"] is None
+
+    apply_findings(user, [finding])
+    assert CalendarEvent.objects.for_user(user).count() == 1, (
+        "no second chat minted from a cancellation"
+    )
+    assert Touch.objects.for_user(user).filter(
+        contact=contact, kind="chat_scheduled").count() == before, (
+        "a cancellation is not progress up the ladder"
+    )

@@ -46,11 +46,15 @@ from analytics.models import UserOpportunity
 from core.templatetags.textstyle import smart_title
 from directory.deadlines import is_posting_closed
 from directory.dupes import fold_duplicates
-from directory.models import FirmDate
 
 from .forms import CalendarEventForm
 from .models import CalendarEvent
-from .utils import FIRM_DATE_LABELS, _clock
+from .utils import (
+    CONFIRMED_CONFIDENCE,
+    FIRM_DATE_LABELS,
+    _clock,
+    confirmed_firm_dates as _confirmed_firm_dates,
+)
 
 # Monday-first weeks: every market this product covers starts its week on a
 # Monday, and the cadence engine's business-day maths already assumes it.
@@ -137,7 +141,7 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
     # it, and it is the day a thing becomes possible. `_firm_date_kind` reads
     # the event, so `insight_open` is covered by the same rule rather than
     # waiting to be found in a month where one falls.
-    for fd in (FirmDate.objects.filter(date__gte=first, date__lte=last, confidence=1.0)
+    for fd in (_confirmed_firm_dates().filter(date__gte=first, date__lte=last)
                .select_related("firm")):
         label = FIRM_DATE_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " "))
         buckets.setdefault(fd.date, []).append({
@@ -190,7 +194,7 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
 
 # See the module docstring: 1.0 means the board published the date as a field,
 # anything less means we read it out of the posting's own words.
-_CONFIRMED = 1.0
+_CONFIRMED = CONFIRMED_CONFIDENCE
 
 
 def _is_reported(opp) -> bool:
@@ -312,7 +316,7 @@ def _month_rail(user, year: int, month: int, today: date) -> list[dict]:
         key = (row["bucket"].year, row["bucket"].month)
         counts[key] = counts.get(key, 0) + row["n"]
 
-    for row in (FirmDate.objects.filter(date__gte=first, date__lte=last, confidence=1.0)
+    for row in (_confirmed_firm_dates().filter(date__gte=first, date__lte=last)
                 .annotate(bucket=TruncMonth("date"))
                 .values("bucket").annotate(n=Count("id"))):
         key = (row["bucket"].year, row["bucket"].month)
@@ -358,12 +362,23 @@ def _resolve_month(y, m, today: date) -> tuple[int, int]:
     same forgiveness. `date(y, m, 1)` is the validation: it rejects month 13
     and year 0 alike, where an int() check alone would let them through to
     `monthrange` and 500.
+
+    THE MONTH AFTER IT HAS TO BE REPRESENTABLE TOO, which the first check
+    alone does not give. `date(9999, 12, 1)` is a perfectly valid date, so
+    `?y=9999&m=12` passed — and then `monthdatescalendar(9999, 12)` builds the
+    grid's trailing week out of the first days of January 10000 and raises
+    "year 10000 is out of range" from inside the template context, i.e. a 500
+    on a hand-edited querystring. Checking the NEXT month is the same shape of
+    guard as the existing one and covers the grid's overhang at both ends
+    (`_shift` back from January lands on year 0, which the first check already
+    rejects on the follow-up request).
     """
     try:
         year, month = int(y), int(m)
         date(year, month, 1)
+        date(*_shift(year, month, 1), 1)
         return year, month
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return today.year, today.month
 
 
@@ -494,15 +509,46 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
     to remember to go and look at is one you can still miss. Dates that open
     something (applications open, insight programme opens) get no alarm —
     nothing is lost by reading those late.
+
+    THIS VIEW ACTIVATES THE USER'S TIMEZONE ITSELF, and has to. Every other
+    calendar surface gets it free from `accounts.middleware.TimezoneMiddleware`,
+    which reads `request.user` — but this request is authenticated by a token
+    in the URL, not a session, so `request.user` is anonymous and the
+    middleware deactivates back to `settings.TIME_ZONE` ("UTC"). Under UTC,
+    `timezone.localtime(ev.starts_at).date()` below resolves an all-day event
+    on the UTC day: a Hong Kong all-day event stored as 16:00Z the previous
+    day landed on the grid (middleware active, Asia/Hong_Kong) on one date
+    and in the subscribed feed on the date before it. Two surfaces reading
+    one row and disagreeing about which day it is on is exactly the class of
+    bug the module docstring's honesty rules exist to prevent, and the feed
+    is the copy that ends up on a phone. `window_start.date()` below has the
+    same dependency.
+
+    Deactivated in a `finally` for the same reason the middleware does it:
+    this runs on a reused worker thread, and a leaked activation would put
+    one student's zone on whatever request the thread serves next.
     """
     from django.contrib.auth import get_user_model
     from django.http import Http404
+
+    from accounts.middleware import activate_for_user
 
     user = get_user_model().objects.filter(
         calendar_token=token, deleted_at__isnull=True
     ).first()
     if user is None or not token:
         raise Http404
+    activate_for_user(user)
+    try:
+        return _ics_body(user)
+    finally:
+        timezone.deactivate()
+
+
+def _ics_body(user) -> HttpResponse:
+    """The feed itself. Split out of `calendar_ics` only so the timezone
+    activation there can wrap it in a `try/finally` without indenting a
+    hundred lines of iCalendar assembly."""
 
     def esc(text: str) -> str:
         return (text or "").replace("\\", "\\\\").replace(";", r"\;").replace(
@@ -511,6 +557,13 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
     now = timezone.now()
     window_start = now - timedelta(days=30)
     window_end = now + timedelta(days=400)
+    # The two DATE-typed layers below (firm dates, tracked closes) are
+    # filtered on calendar dates, so the window's edges are read on the
+    # user's own calendar — `.date()` on these UTC instants would move both
+    # edges by a day for every user east of Greenwich, silently dropping the
+    # deadline that falls exactly on the far edge.
+    first_day = timezone.localdate(window_start)
+    last_day = timezone.localdate(window_end)
 
     lines = [
         "BEGIN:VCALENDAR",
@@ -558,10 +611,9 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
                     "END:VALARM"]
         return out
 
-    for fd in (FirmDate.objects.filter(
-            confidence=1.0, date__isnull=False,
-            date__gte=window_start.date(), date__lte=window_end.date())
-            .select_related("firm")):
+    for fd in (_confirmed_firm_dates()
+               .filter(date__gte=first_day, date__lte=last_day)
+               .select_related("firm")):
         label = FIRM_DATE_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " "))
         summary = f"{fd.firm.name} · {label}"
         lines += ["BEGIN:VEVENT",
@@ -594,9 +646,7 @@ def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:
     # So the event stays on its day, says "Closed:" first, and raises no
     # alarm. The alarm is the only part that was actively harmful: a VALARM is
     # a phone waking someone up to act, and there is nothing left to do.
-    for uo in _fold_tracked(
-        list(_tracked_deadlines(user, window_start.date(), window_end.date()))
-    ):
+    for uo in _fold_tracked(list(_tracked_deadlines(user, first_day, last_day))):
         opp = uo.opportunity
         # The marker rides in the SUMMARY, not the description: a phone
         # notification shows the summary and nothing else, and that

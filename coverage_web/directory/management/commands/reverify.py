@@ -49,6 +49,23 @@ happened this pass either way, and both fields exist to mean exactly that.
 The honesty contract: `last_verified` moves ONLY on a positive liveness
 signal. The card's "Verified N Days Ago" pill therefore never lies.
 
+AND THE SAME CONTRACT FROM THE OTHER SIDE, for a row that is already
+`status="closed"`. The routine candidate query never selects one, but `--ids`
+is unfiltered by design, so both verdicts have to have an answer:
+
+- "verified-open" on a closed row -> stamp the check fields and say so,
+  nothing more. `last_verified` does not move (it would put "verified today"
+  on a card the board shows as closed) and `deadline` is not refreshed (it
+  would put a live countdown there). Reopening on that evidence is
+  `reopen_confirmed_live_rows`' job — it exists for exactly this, and records
+  what it did. Two commands reading one provider answer and writing two
+  different stories about the same row is how a posting ends up both closed
+  and freshly verified.
+- "closed" on a closed row -> a re-check, not a move. No `OpportunityChange`
+  is written and `closed_at` is left where it is, so re-running the command
+  is idempotent instead of logging a `closed -> closed` "change" into the
+  tracked-role timeline and walking the actual close date forward every run.
+
 Every move this pass makes — a `deadline` corrected from the provider's own
 answer, a posting flipped closed — is also recorded row-by-row in
 `directory.models.OpportunityChange`. The deadline overwrite above was
@@ -174,7 +191,25 @@ class Command(BaseCommand):
             # next run's candidates too, instead of being retried forever.
             opp.deadline_checked_at = now
             update_fields = ["last_checked", "deadline_checked_at"]
-            if verdict == "verified-open":
+            if verdict == "verified-open" and opp.status == "closed":
+                # A CLOSED ROW THIS COMMAND MUST NOT SPEAK FOR. The routine
+                # candidate query is `status="open"`, so this is only
+                # reachable through `--ids`, which is unfiltered by design.
+                # Stamping `last_verified` here would break the module
+                # docstring's own honesty contract from the other side: the
+                # card's "Verified N days ago" pill would read "today" on a
+                # posting the board still shows as closed, and refreshing
+                # `deadline` would put a live-looking countdown on it too.
+                # Reopening is the right correction, but it is
+                # `reopen_confirmed_live_rows`' decision to make (it exists
+                # for exactly this evidence, and records it), not a side
+                # effect of a staleness sweep. So: record that we looked,
+                # say so loudly, change nothing else.
+                self.stdout.write(self.style.WARNING(
+                    f"  #{opp.pk} — verified OPEN but stored status='closed'. "
+                    f"Left alone; run: reopen_confirmed_live_rows --ids {opp.pk}"))
+                opp.save(update_fields=update_fields)
+            elif verdict == "verified-open":
                 opp.last_verified = now
                 update_fields.append("last_verified")
                 fresh = _fresh_deadline(result.deadline_dates) if result is not None else None
@@ -187,6 +222,16 @@ class Command(BaseCommand):
                     opp.deadline = fresh
                     opp.deadline_precision = "day"
                     update_fields += ["deadline", "deadline_precision"]
+                opp.save(update_fields=update_fields)
+            elif verdict == "closed" and opp.status == "closed":
+                # ALREADY CLOSED — a re-check, not a move. Again only
+                # reachable via `--ids`. Writing the transition anyway logged
+                # a `status: closed -> closed` row in the tracked-role
+                # timeline and reset `closed_at` to now, so a student
+                # watching that role saw a fresh "closed" event every time an
+                # audit re-ran the command, and the date it actually closed
+                # walked forward one run at a time. Re-running is now a
+                # no-op beyond the check stamps.
                 opp.save(update_fields=update_fields)
             elif verdict == "closed":
                 changes.append(OpportunityChange.entry(

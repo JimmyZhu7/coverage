@@ -82,6 +82,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 from email.utils import getaddresses, parseaddr
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
@@ -204,6 +205,48 @@ _ICS_UID_RE = re.compile(r"^UID:(.+)$", re.MULTILINE)
 # unfolded before any of the regexes above run — a half-read UID is worse
 # than none, because it still looks like a key.
 _ICS_FOLD_RE = re.compile(r"\r?\n[ \t]")
+# A CANCELLED invite states a time it is simultaneously withdrawing. Both
+# spellings are checked because they are two different statements and either
+# one alone is enough: `METHOD:CANCEL` is the iTIP verb on the message
+# (RFC 5546 §3.2.5, what Google and Exchange send when an organiser deletes
+# an event), `STATUS:CANCELLED` is the event object's own state (RFC 5545
+# §3.8.1.11, which some exporters set without changing METHOD). Anchored to
+# line starts so neither can be matched inside a SUMMARY or DESCRIPTION —
+# "Cancelled: Coffee chat" in a subject line is prose, not a property.
+_ICS_CANCELLED_RE = re.compile(
+    r"^(?:METHOD:CANCEL|STATUS:CANCELLED)\s*$", re.MULTILINE | re.IGNORECASE
+)
+
+
+def _ics_zone(tzid: str | None):
+    """The `zoneinfo` zone a `DTSTART;TZID=` names, or None when the name is
+    not one this host's tz database carries.
+
+    WHY THIS EXISTS. The TZID was read and then thrown away, on the reasoning
+    that resolving it needed "a full tz database lookup by name" — but that
+    lookup is `zoneinfo`, in the standard library, and it is already how
+    `accounts.middleware.activate_for_user` resolves `User.timezone`. Without
+    it a `DTSTART;TZID=America/New_York:20260915T090000` parsed to a NAIVE
+    09:00, and `capture.gmail._user_aware` then anchored that naive time to
+    the ACCOUNT OWNER's zone. For a Hong Kong student taking a New York
+    chat that is a 12-hour error that also lands on the wrong calendar day —
+    the exact "consistent days-until from the user's own perspective" the
+    product's US+HK audience makes routine, not exotic.
+
+    Returns None (leaving the time naive, i.e. the previous behaviour) for
+    the two cases that genuinely cannot be resolved: a floating time with no
+    TZID at all, and Windows/Exchange's non-IANA zone names ("Eastern
+    Standard Time"), which `ZoneInfo` does not carry. Falling back rather
+    than guessing is the same posture the middleware takes for a stored zone
+    the host's tzdata no longer has.
+    """
+    name = (tzid or "").strip().strip('"')
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, KeyError):
+        return None
 
 
 class GmailLiveError(Exception):
@@ -847,6 +890,17 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None, str | 
     them at a time nobody is turning up to. Keyed on the UID, which RFC 5545
     holds constant across REQUEST / REPLY / COUNTER / CANCEL for the same
     event, it is one chat that moved. See `capture.gmail._upsert_scheduled_chat`.
+
+    A CANCELLED INVITE REPORTS NO TIME. An organiser deleting the event sends
+    a `.ics` that still carries the UID, the SUMMARY and the DTSTART — the
+    whole event, plus the statement that it is off. Read for its DTSTART
+    alone, that cancellation was indistinguishable from a fresh invite: it
+    re-asserted the chat at its old time (`chat_status: "scheduled"`,
+    `chat_scheduled_at` set), so `_upsert_scheduled_chat` kept the calendar
+    row alive and `_touch_kind_for` logged another `chat_scheduled` touch for
+    a meeting nobody is attending. There is no honest time to report from a
+    cancellation, so none is reported and the message falls through to the
+    ordinary reply/no-finding paths.
     """
     for part in _walk_parts(message.get("payload", {})):
         mime = part.get("mimeType", "")
@@ -854,6 +908,8 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None, str | 
         if mime != "text/calendar" and not filename.endswith(".ics"):
             continue
         text = _ICS_FOLD_RE.sub("", _decode_body(part)).replace("\r\n", "\n")
+        if _ICS_CANCELLED_RE.search(text):
+            return None, None, None
         dt_match = _ICS_DTSTART_RE.search(text)
         if not dt_match:
             continue
@@ -864,11 +920,15 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None, str | 
                     tzinfo=dt_timezone.utc
                 )
             else:
-                # A floating or TZID-qualified time with no offset info we
-                # can resolve without a full tz database lookup by name —
-                # stored naive, same as the manual sync's own documented
-                # fallback (anchors to the account owner's User.timezone).
                 dt = datetime.strptime(raw, "%Y%m%dT%H%M%S")
+                # A TZID this host's tz database knows makes the time an
+                # absolute instant; anything else (a floating time, a
+                # Windows zone name) stays naive and is anchored downstream
+                # to the account owner's `User.timezone`, the documented
+                # fallback. See `_ics_zone`.
+                zone = _ics_zone(tzid)
+                if zone is not None:
+                    dt = dt.replace(tzinfo=zone)
         except ValueError:
             continue
         summary_match = _ICS_SUMMARY_RE.search(text)

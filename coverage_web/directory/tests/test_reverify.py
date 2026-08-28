@@ -288,3 +288,95 @@ def test_refresh_can_skip_the_network_stage_but_still_extracts(monkeypatch):
     call_command("refresh", no_enrich=True)
     assert "enrich_postings" not in calls
     assert "extract_facts" in calls
+
+
+# ---------------------------------------------------------------------------
+# `--ids` is unfiltered by design, so both verdicts need an answer for a row
+# that is ALREADY closed. The routine query never selects one; --ids can.
+# ---------------------------------------------------------------------------
+
+def _closed_opp(firm, url, *, closed_days_ago=5):
+    o = Opportunity.objects.create(
+        firm=firm, url=url, title="Summer Analyst", bucket="internship",
+        status="closed",
+    )
+    when = timezone.now() - timedelta(days=closed_days_ago)
+    Opportunity.objects.filter(pk=o.pk).update(
+        status="closed", closed_at=when, last_checked=when, last_verified=when,
+    )
+    o.refresh_from_db()
+    return o
+
+
+@pytest.mark.django_db
+def test_reverify_ids_on_an_already_closed_row_is_idempotent(monkeypatch):
+    """A "closed" verdict on a row that is already closed is a RE-CHECK, not
+    a move. It used to be written as one anyway: an `OpportunityChange` of
+    `status: closed -> closed` landed in the tracked-role timeline and
+    `closed_at` was reset to now — so a student watching that role saw a
+    fresh "closed" event every time an audit re-ran the command, and the date
+    it actually closed walked forward one run at a time."""
+    from directory.models import OpportunityChange
+
+    firm = Firm.objects.create(slug="acme", name="Acme")
+    dead = _closed_opp(firm, "https://x/already-dead")
+    original_close = dead.closed_at
+    monkeypatch.setattr(reverify_mod, "verify", lambda url: _result(url, "closed"))
+
+    call_command("reverify", ids=str(dead.id))
+    call_command("reverify", ids=str(dead.id))
+
+    dead.refresh_from_db()
+    assert dead.status == "closed"
+    assert dead.closed_at == original_close, "the real close date must not drift"
+    assert not OpportunityChange.objects.filter(opportunity=dead).exists()
+    # The check itself is still recorded — that is what these two fields are.
+    assert dead.deadline_checked_at is not None
+
+
+@pytest.mark.django_db
+def test_reverify_never_marks_a_closed_row_freshly_verified(monkeypatch, capsys):
+    """The honesty contract from the other side. `reopen_confirmed_live_rows`
+    exists for exactly this evidence and records what it does; a staleness
+    sweep stamping `last_verified` on a closed row instead would put
+    "verified today" on a card the board still shows as closed, and refresh
+    its deadline into a live-looking countdown. Two commands reading one
+    provider answer must not write two different stories about one row."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    row = _closed_opp(firm, "https://bmo.wd3.myworkdayjobs.com/live-really")
+    was_verified = row.last_verified
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-09-04"]),
+    )
+
+    call_command("reverify", ids=str(row.id))
+
+    row.refresh_from_db()
+    assert row.status == "closed", "reopening is not this command's call"
+    assert row.closed_at is not None
+    assert row.last_verified == was_verified
+    assert row.deadline is None, "no live countdown on a closed row"
+    assert "reopen_confirmed_live_rows" in capsys.readouterr().out
+
+
+@pytest.mark.django_db
+def test_reverify_still_closes_an_open_row_exactly_once(monkeypatch):
+    """The over-reach guard: the new same-status short-circuits must not stop
+    a genuine open -> closed transition from being written and recorded."""
+    from directory.models import OpportunityChange
+
+    firm = Firm.objects.create(slug="acme", name="Acme")
+    live = _opp(firm, "https://x/going-dark")
+    monkeypatch.setattr(reverify_mod, "verify", lambda url: _result(url, "closed"))
+
+    call_command("reverify", ids=str(live.id))
+    live.refresh_from_db()
+    first_close = live.closed_at
+    assert live.status == "closed"
+    assert OpportunityChange.objects.filter(opportunity=live, field="status").count() == 1
+
+    call_command("reverify", ids=str(live.id))
+    live.refresh_from_db()
+    assert live.closed_at == first_close
+    assert OpportunityChange.objects.filter(opportunity=live, field="status").count() == 1

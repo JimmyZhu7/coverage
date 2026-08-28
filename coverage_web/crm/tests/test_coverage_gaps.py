@@ -449,3 +449,95 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
 #    longest-silent-first ordering claim itself is still exercised where the
 #    queue actually lives now: see crm/tests/test_today.py.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# `deadline_bonus` over its whole domain, not three examples.
+# ---------------------------------------------------------------------------
+def test_deadline_bonus_is_defined_and_bounded_across_the_domain():
+    """Generated inputs rather than another example. Three invariants:
+
+    1. Every answer is one of the declared bonuses. A band table read in the
+       wrong order, or a missing final `return 0`, breaks this before it
+       breaks any single hand-picked case.
+    2. Urgency never RISES as a deadline moves further away. This is the
+       property the bands exist to express; `DEADLINE_BONUS` being a
+       first-match-wins tuple means a re-ordered or overlapping entry would
+       violate it silently while every existing example still passed.
+    3. The far edges are finite answers, not exceptions — the closes this
+       reads come from `FirmDate.date`, an unbounded DateField, so a row
+       dated in 2099 or in 2015 reaches here as a five-figure day count.
+    """
+    allowed = {b for _limit, b in coverage.DEADLINE_BONUS} | {0}
+    domain = list(range(-400, 400)) + [-100000, -1, 100000, 10**9]
+    for days in domain:
+        assert coverage.deadline_bonus(days) in allowed, days
+
+    ordered = sorted(domain)
+    scores = [coverage.deadline_bonus(d) for d in ordered]
+    assert scores == sorted(scores, reverse=True), (
+        "a deadline further out must never score MORE urgent"
+    )
+
+
+def test_a_deadline_already_passed_scores_the_maximum():
+    """The docstring's own claim, held at the boundary rather than at -4: a
+    deadline you missed at a firm you have no coverage at is the most exposed
+    a firm can be, not the least."""
+    top = max(b for _limit, b in coverage.DEADLINE_BONUS)
+    assert coverage.deadline_bonus(-1) == top
+    assert coverage.deadline_bonus(0) == top
+
+
+@pytest.mark.django_db
+def test_an_estimated_close_never_reaches_the_exposure_formula(client):
+    """`rank_gaps` does no confidence filtering of its own by design — its
+    caller does, and the caller's bar is now both halves of "confirmed". An
+    estimated month-level guess adds up to 3 exposure points and can reorder
+    the whole strip, so it must not arrive as an `app_close` at all."""
+    user = User.objects.create_user(email="est@example.com", password="pw12345!")
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=3)
+    today = date.today()
+    fd = FirmDate.objects.create(
+        firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+        date=today + timedelta(days=5), confidence=1.0,
+    )
+    FirmDate.objects.filter(pk=fd.pk).update(precision="estimated")
+
+    client.force_login(user)
+    body = _gap_strip(client.get(reverse("crm:contact_list")).content.decode())
+    assert "Goldman Sachs" in body, "the firm is still a gap — it has nobody"
+    assert "5d to close" not in body, (
+        "a month-level guess must not print a day countdown on the strip"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The persistence -> domain adapter, at its one dangerous boundary.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "stored,label",
+    [
+        (1.0, "confirmed_official"),
+        (0.6, "reported"),
+        (0.3, "rumor"),
+        (0.0, "reported"),
+        # The band boundary. `round(0.99, 1)` is 1.0, so everything from 0.96
+        # up used to come back "confirmed_official" — the label
+        # `cadence._closing_soon` and the re-ping branch act on. The column's
+        # CheckConstraint bounds the RANGE, not the band, so 0.99 is a legal
+        # stored value; nothing else stopped an unconfirmed date from firing
+        # a pre-deadline re-ping and printing a countdown.
+        (0.99, "reported"),
+        (0.96, "reported"),
+        (0.95, "reported"),
+        (0.8, "reported"),
+        (None, "reported"),
+        ("confirmed_official", "confirmed_official"),
+    ],
+)
+def test_a_confidence_below_the_band_is_never_laundered_into_confirmed(stored, label):
+    from crm.utils import _confidence_label
+
+    assert _confidence_label(stored) == label
