@@ -32,7 +32,7 @@ for _ in $(seq 1 30); do pg_isready -h localhost -p 5432 -q 2>/dev/null && break
 # The demo-student seed used to run here on every launch. It was right when
 # nobody had signed up yet and an empty app looked broken; it is just noise
 # now that the real account has 139 contacts of its own. The demo user still
-# exists and is tenant-isolated — run `scripts/demo_seed.py` by hand if you
+# exists and is tenant-isolated — run `manage.py seed_demo` by hand if you
 # ever need a populated account to show someone.
 echo "• Preparing your data…"
 uv run --package coverage-web python coverage_web/manage.py migrate --noinput >/dev/null 2>&1

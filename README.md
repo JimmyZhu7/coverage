@@ -79,6 +79,35 @@ cd ..
 uv run pytest
 ```
 
+## Verifying a change by hand — use the demo account, not the shared tables
+
+The `coverage` database above is a **shared, standing dev database** — every
+worktree on a given machine points at the same one by default (only the
+pytest database name is per-worktree, see `settings/base.py`'s Database
+section), and it is also where the founder's own account lives. `uv run
+pytest` / `pytest coverage_web/<app> -q` never touch it — they run against a
+throwaway `test_coverage_*` database instead. Anything driven through a
+running `manage.py runserver` or typed into `manage.py shell`, though, lands
+in the real one.
+
+That distinction has produced real leakage more than once: a `Firm` row with
+a blank slug from a stray `manage.py shell` insert (see `Firm.slug`'s
+docstring), four "ZZZ Smoke Test..." contacts left in the founder's own CRM
+by smoke runs (`crm/management/commands/purge_test_contacts.py`), and a fake
+"Verify J.P. Morgan" firm that rendered as a real card on the founder's own
+Today page.
+
+So: to click through a CRM feature by hand, sign in as
+**`demo@coverage.local`** (password `demo1234`) — run **`manage.py
+seed_demo`** first if it doesn't exist yet (idempotent, safe to run
+anytime). It is tenant-isolated like every other account, so nothing you do
+to its contacts/touches/firms can affect anyone else's data. Only reach for
+`directory.Firm`/`FirmDate` directly when the thing under test IS the shared
+directory itself, and prefer doing that against pytest's database over the
+live one. Either way, run **`manage.py audit_fixtures`** before you finish —
+it reports (never deletes) anything that still looks synthetic, so a session
+ends with a check rather than a guess.
+
 Google sign-in (`/accounts/google/login/`) is wired up via django-allauth but
 needs a real OAuth client from Google Cloud Console
 (`GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` in `.env`) to
