@@ -111,6 +111,10 @@
     font-family: var(--font-mono); }
   /* Every tappable control on this page clears 44px. */
   .set-row-control .btn, .set-save .btn { min-height: 44px; }
+  /* The Save button of a row that saves on change, once a script exists to do
+     the saving. `!important` because `.btn`'s own display would otherwise win
+     — see the script's note on why the `hidden` attribute cannot do this. */
+  .set-row-control .btn.is-autosaved { display: none !important; }
 
   .set-hint { color: var(--ink-3); font-size: var(--fs-s); margin: var(--s2) 0 0;
     max-width: 60ch; }
@@ -137,9 +141,69 @@
      Accent-colored and tabular, like the other live numbers on this page
      (.set-row-value): it is a value, not more prose, and grey-on-grey let
      it disappear into the sentence above it. */
+  /* A <button>, not a <span>, since 2026-08-28 — see the markup note. It is
+     the SAME chip visually in its idle state (the type treatment below is
+     unchanged), so a page where every number sits on its default looks exactly
+     as it did; the difference appears only once you have something to undo.
+     `disabled` is the server-rendered idle state and the JS drops it. */
   .set-default { display: block; margin-top: 4px; color: var(--accent-ink);
     font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-weight: var(--w-med); font-size: var(--fs-xs); white-space: nowrap; }
+    font-weight: var(--w-med); font-size: var(--fs-xs); white-space: nowrap;
+    padding: 0; border: 0; background: none; text-align: left;
+    transition: color var(--t-fast); }
+  /* Idle: not a button in any way the eye or the pointer can tell. It states
+     the default, which is all the old span did. */
+  .set-default[disabled] { cursor: default; opacity: 1; }
+  /* Armed: there IS an override to drop, so the chip becomes the way back. */
+  .set-default:not([disabled]) { cursor: pointer;
+    text-decoration: underline; text-decoration-style: dotted;
+    text-underline-offset: 3px; text-decoration-color: var(--accent-line); }
+  .set-default:not([disabled]):hover { color: var(--accent);
+    text-decoration-color: var(--accent); }
+  .set-default:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; border-radius: var(--r-ctl); }
+
+  /* ---- A two-option segment, for a knob with only two legal values --------
+     Same idea as .theme-pick above (pick one of a few, the chosen one filled),
+     stacked rather than inline because it lives in .set-field's fixed 12rem
+     control track — see that rule's note on why the track is fixed. Two
+     horizontal pills reading "Note only" and "Note + follow-up" do not fit in
+     12rem; two stacked ones do, and they left-align with every number input
+     down the same column.
+
+     The radio itself is the control and stays a real focusable radio (arrow
+     keys, screen reader, the POST); only its default rendering is replaced,
+     which is why this is not a checkbox restyle. */
+  .seg-pick { display: flex; flex-direction: column; width: 100%;
+    border: 1px solid var(--line); border-radius: var(--r-ctl);
+    overflow: hidden; background: var(--surface); }
+  .seg-opt { display: block; cursor: pointer; }
+  .seg-opt + .seg-opt .seg-face { border-top: 1px solid var(--line); }
+  /* The radio is present and focusable, drawn by the face beside it. */
+  .seg-opt input[type="radio"] { position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0);
+    white-space: nowrap; border: 0; appearance: none; }
+  .seg-face { display: flex; align-items: baseline; gap: var(--s2);
+    padding: 8px 12px; min-height: 40px;
+    font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink-2);
+    transition: background-color var(--t-fast), color var(--t-fast); }
+  .seg-face > span { flex: 1 1 auto; }
+  /* "default", marked on the option that is the default — the number the old
+     "Default: 2" line printed, moved onto the thing it describes. */
+  .seg-face u { flex: none; text-decoration: none; font-family: var(--font-mono);
+    font-size: var(--fs-nano); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-3); }
+  .seg-opt:hover .seg-face { background: var(--accent-soft); color: var(--accent-ink); }
+  .seg-opt input:checked + .seg-face { background: var(--accent); color: var(--on-accent); }
+  .seg-opt input:checked + .seg-face u { color: var(--on-accent); opacity: 0.75; }
+  .seg-opt input:focus-visible + .seg-face { outline: 2px solid var(--accent);
+    outline-offset: -2px; }
+  /* A segment is two rows tall where a number input is one, so the field's
+     two text rows would stretch to match it and float apart. A third,
+     text-free row takes the slack instead and the label keeps its description
+     directly under it, exactly like every spinner row beside it. */
+  .set-field.is-seg { grid-template-areas: "label control" "desc control"
+    "fill control" "err err"; grid-template-rows: auto auto 1fr auto; }
   /* Two knobs to a row (Cadence only, so far). Seven full-width .set-rows
      put seven near-identical spinners in a 700px column, each one label and
      one number marooned at opposite edges of the card with a rule between —
@@ -247,9 +311,14 @@
        leaves a phone about 130px of label, and "Pre-Deadline Re-Ping" does
        not fit in 130px. Label, then input, then the prose — the desktop
        areas collapse to one column in that same order. */
-    .set-field { grid-template-columns: minmax(0, 1fr);
-      grid-template-areas: "label" "control" "desc" "err"; }
+    .set-field, .set-field.is-seg { grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "label" "control" "desc" "err";
+      /* One column means nothing is spanning two rows, so the slack row the
+         segmented field reserves on desktop has no job here. */
+      grid-template-rows: none; }
     .set-field > .set-row-control { justify-self: start; }
+    /* Stacked, the segment gets the full width like every other control. */
+    .set-field.is-seg > .set-row-control { justify-self: stretch; }
     /* A phone gives the track about 200px, and three labels reading name AND
        number do not fit in 200px — they overlapped each other outright. The
        number is the part to drop: the live sentence directly under the rail
@@ -713,7 +782,21 @@
             </div>
           </div>
           {% endif %}
-          <form method="post" action="{% url 'accounts:settings' %}" class="set-row">
+          {% comment %}
+          ONE control for one boolean. This row used to be a checkbox AND a
+          Save button — two controls for a single yes/no, in a card whose other
+          two rows (Theme above, Deadline Alerts) both apply the instant you
+          touch them. So a reader learned two save models inside one frame, and
+          the only row that needed a second click was the one with the least to
+          decide.
+
+          The button is still in the markup and still works: the script below
+          hides it and submits on change only where there is a script to do so,
+          so a no-JS render keeps exactly the row it always had. The tick is
+          the save either way, which is why the row needs no line saying so.
+          {% endcomment %}
+          <form method="post" action="{% url 'accounts:settings' %}" class="set-row"
+                data-autosave>
             {% csrf_token %}
             <input type="hidden" name="section" value="notifications">
             <div class="set-row-main">
@@ -722,7 +805,7 @@
             </div>
             <div class="set-row-control">
               {{ notifications_form.weekly_digest_enabled }}
-              <button type="submit" class="btn">Save</button>
+              <button type="submit" class="btn" data-autosave-btn>Save</button>
             </div>
           </form>
         </div>
@@ -1004,8 +1087,11 @@
               </div>
               <div class="pace-main">
                 <label class="set-row-label" for="{{ pace_form.weekly_touch_goal.id_for_label }}">Weekly Touch Goal</label>
+                {# Same default chip as the cadence rows below — one behaviour for every number on this card. #}
                 <div class="set-row-desc" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">What the pace ring on Today measures you against.
-                  <span class="set-default">Default: {{ default_weekly_goal }}.</span></div>
+                  <button type="button" class="set-default" disabled
+                          data-default-for="{{ pace_form.weekly_touch_goal.id_for_label }}"
+                          data-default="{{ default_weekly_goal }}">Default {{ default_weekly_goal }}</button></div>
                 {% if pace_form.weekly_touch_goal.errors %}
                   <div class="set-row-err" id="{{ pace_form.weekly_touch_goal.auto_id }}-err">{{ pace_form.weekly_touch_goal.errors }}</div>
                 {% endif %}
@@ -1093,13 +1179,75 @@
             {% endcomment %}
             <div class="set-grid-2">
               {% for row in cadence_form.rows %}
-                <div class="set-field">
-                  <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
-                  <div class="set-row-control set-num">
-                    {{ row.field }}<span class="set-unit">{{ row.unit|title }}</span>
-                  </div>
-                  <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
-                    <span class="set-default">Default: {{ row.default }}</span></div>
+                <div class="set-field{% if row.segmented %} is-seg{% endif %}">
+                  {% comment %}
+                  A SEGMENTED row (row.segmented) has no unit and no default
+                  chip. Its options are the unit — "Note only" and "Note +
+                  follow-up" are the two values, not a count you type — and the
+                  default is marked ON the option that is the default, which is
+                  where a reader looking at the control will find it. See
+                  accounts.forms.CADENCE_SEGMENTS.
+
+                  A radiogroup, not a <label for>: the row's label names a set
+                  of radios, and pointing `for` at one of them would make the
+                  heading click-select that single option.
+                  {% endcomment %}
+                  {% if row.segmented %}
+                    <span class="set-row-label" id="{{ row.field.auto_id }}-lab">{{ row.field.label }}</span>
+                    <div class="set-row-control">
+                      <div class="seg-pick" role="radiogroup"
+                           aria-labelledby="{{ row.field.auto_id }}-lab"
+                           aria-describedby="{{ row.field.auto_id }}-desc">
+                        {% comment %}
+                        The radio comes FIRST and its face is its next
+                        sibling, so `input:checked + .seg-face` can fill the
+                        chosen segment with a plain sibling selector. Wrapping
+                        the text in the <label> and reaching for :has() would
+                        read better and would make the selected state
+                        invisible on any engine without :has() — a control
+                        whose whole job is to show which of two values is set.
+                        {% endcomment %}
+                        {% for choice in row.field %}
+                          <label class="seg-opt">
+                            {{ choice.tag }}
+                            <span class="seg-face">
+                              <span>{{ choice.choice_label }}</span>
+                              {% comment %}
+                              Real text in the DOM, not a CSS ::after — the
+                              default is data (hold #3), so it has to survive a
+                              screen reader and a stylesheet that failed to load.
+                              {% endcomment %}
+                              {% if not choice.data.value %}<u>default</u>{% endif %}
+                            </span>
+                          </label>
+                        {% endfor %}
+                      </div>
+                    </div>
+                    <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}</div>
+                  {% else %}
+                    <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                    <div class="set-row-control set-num">
+                      {{ row.field }}<span class="set-unit">{{ row.unit|title }}</span>
+                    </div>
+                    {% comment %}
+                    The default was a static "Default: N" line. It is now the
+                    control that RESTORES it, and it still states the number in
+                    both states, so nothing was traded away: "Default 6" while
+                    the box is empty (you are on it), "Reset to 6" the moment
+                    you override it (one tap back).
+
+                    That way back already existed and was invisible — clearing
+                    the box is what `CadenceForm.apply_to` reads as "drop the
+                    override" — so this is the rare case where adding a control
+                    removes the sentence that would otherwise have to explain
+                    it. Server-rendered in the idle state, so with no JS it is
+                    an inert chip printing exactly what the old line printed.
+                    {% endcomment %}
+                    <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
+                      <button type="button" class="set-default" disabled
+                              data-default-for="{{ row.field.id_for_label }}"
+                              data-default="{{ row.default }}">Default {{ row.default }}</button></div>
+                  {% endif %}
                   {% if row.field.errors %}
                     <div class="set-row-err" id="{{ row.field.auto_id }}-err">{{ row.field.errors }}</div>
                   {% endif %}
@@ -1822,11 +1970,23 @@
     // below. Reading the placeholder is what makes drift impossible rather
     // than merely fixed once; it is also what the pace ring already does with
     // its own goal input.
+    //
+    // Two control shapes reach this now, and both answer the same way. A
+    // number input carries its override in `.value` and its default in
+    // `.placeholder`. A segment (accounts.forms.CADENCE_SEGMENTS) carries the
+    // override on the checked radio's value and its default on that radio's
+    // `data-default-value` — because the DEFAULT segment posts blank, which is
+    // what `apply_to` reads as "no override". Reading `:checked` first is what
+    // makes the diagram track a segment at all: an unqualified
+    // `[name="max_cold_touches"]` returns the FIRST radio whatever is selected,
+    // so the rail would have drawn "note only" forever.
     function num(name) {
-      var el = document.querySelector('[name="' + name + '"]');
+      var el = document.querySelector('[name="' + name + '"]:checked')
+            || document.querySelector('[name="' + name + '"]');
       if (!el) return NaN;
       var v = parseInt(el.value, 10);
-      return isNaN(v) ? parseInt(el.placeholder, 10) : v;
+      if (!isNaN(v)) return v;
+      return parseInt(el.dataset.defaultValue || el.placeholder, 10);
     }
     function setMark(sel, pct, label) {
       var m = viz.querySelector(sel);
@@ -1965,12 +2125,20 @@
       // number that briefly shows the wrong day count is worse than a
       // widget that skips its own entrance animation.
       drawCadence();
+      // querySelectorAll + change, not querySelector + input: a segmented knob
+      // is SEVERAL elements sharing one name, so binding the first one alone
+      // would leave the rail frozen whenever the other segment was the one
+      // clicked. `change` covers radios in every browser; `input` is what a
+      // number input fires per keystroke, and both are wanted here.
       ["followup_after_business_days", "park_after_business_days",
        "max_cold_touches", "chatted_touch_min_weeks",
        "advocate_touch_min_weeks", "pre_deadline_reping_days"
       ].forEach(function (name) {
-        var el = document.querySelector('[name="' + name + '"]');
-        if (el) el.addEventListener("input", function () { drawCadence(); bump(); });
+        document.querySelectorAll('[name="' + name + '"]').forEach(function (el) {
+          ["input", "change"].forEach(function (evt) {
+            el.addEventListener(evt, function () { drawCadence(); bump(); });
+          });
+        });
       });
       // Label boxes are measured, so anything that changes their size or the
       // rail's has to re-run the packing: the webfont landing after first
@@ -1990,6 +2158,57 @@
         });
       });
     }
+
+    // ---- Rows that save on change, so the tick IS the save. --------------
+    // Progressive enhancement, deliberately in this order: the Save button is
+    // only hidden once we know a script is running to replace it. Hiding it in
+    // CSS and revealing it without JS is not possible, so the button ships
+    // visible and this removes it.
+    //
+    // A CLASS, not the `hidden` attribute. `.btn` sets its own display, an
+    // author rule that beats the user-agent's `[hidden] { display: none }`
+    // regardless of specificity — the same trap the Target Firms search
+    // filter above documents against `.tf-result`. `hidden` here left the
+    // button on screen and saving looked like it needed a click it no longer
+    // needed.
+    document.querySelectorAll("form[data-autosave]").forEach(function (form) {
+      var btn = form.querySelector("[data-autosave-btn]");
+      if (btn) btn.classList.add("is-autosaved");
+      form.addEventListener("change", function () { form.submit(); });
+    });
+
+    // ---- The default chip: states the default, and restores it. ----------
+    // Every number on this card used to carry a static "Default: N" line. The
+    // number is data (it is the value you get back if you clear the box), so
+    // it still prints in both states — but the chip is now the control that
+    // does the clearing, which is a thing the page could previously only have
+    // told you in a sentence.
+    //
+    // ARMED = the input holds ANY value, not "a value different from the
+    // default". That is exactly the underlying contract: `CadenceForm.apply_to`
+    // stores whatever it is handed and pops the key on a blank, so a typed 6 in
+    // a field defaulting to 6 IS a stored override, and the chip must still
+    // offer to remove it.
+    document.querySelectorAll("[data-default-for]").forEach(function (chip) {
+      var input = document.getElementById(chip.dataset.defaultFor);
+      if (!input) return;
+      var def = chip.dataset.default;
+      function paint() {
+        var armed = input.value !== "";
+        chip.disabled = !armed;
+        chip.textContent = armed ? "Reset to " + def : "Default " + def;
+      }
+      chip.addEventListener("click", function () {
+        input.value = "";
+        // A real input event, so the cadence rails and the pace ring redraw
+        // through the same path a keystroke uses rather than a second one.
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        paint();
+        input.focus();
+      });
+      input.addEventListener("input", paint);
+      paint();
+    });
 
     // ---- The pace ring: two-way bound to the weekly-goal input. ----------
     var ring = document.getElementById("pace-ring");

@@ -575,8 +575,13 @@ def settings_view(request):
             bound.apply_to(request.user)
             messages.success(request, bound.success_message)
             # PRG, same as the profile save: a refresh after saving must
-            # not re-POST.
-            return redirect(reverse("accounts:settings"))
+            # not re-POST. `success_fragment` is empty for every section whose
+            # save is a button press; a section that saves on change sets it so
+            # the reader comes back to the card they were on.
+            target = reverse("accounts:settings")
+            if bound.success_fragment:
+                target = f"{target}#{bound.success_fragment}"
+            return redirect(target)
         # Invalid → fall through and re-render, this section showing errors.
         section_forms[section] = bound
     elif request.method == "POST" and section == "profile":

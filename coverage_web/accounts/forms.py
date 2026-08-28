@@ -520,6 +520,12 @@ class SectionForm(forms.Form):
     # Value of the hidden `section` input, and the key in views.SECTION_FORMS.
     section = ""
     success_message = "Saved."
+    # Fragment appended to the post-save redirect, so a section that saves
+    # WITHOUT a deliberate button press lands the reader back where they were
+    # rather than at the top of a twelve-card page. Empty for every section
+    # whose save is an explicit click — those already redirect to the top and
+    # a reader who pressed Save is expecting the page to answer.
+    success_fragment = ""
 
     @classmethod
     def from_user(cls, user) -> "SectionForm":
@@ -621,11 +627,16 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
         "business days",
         "Silence after your last touch before Coverage parks the contact.",
     ),
+    # Rendered as a two-option segment, not a spinner (see CADENCE_SEGMENTS),
+    # so the description no longer has to say "Capped at 2: one note, one
+    # follow-up" — the two options ARE that sentence, and they are the only
+    # two things the control can be set to. The unit stays "touches" because
+    # the error messages built below still name it, on the one path that can
+    # still produce one: a hand-crafted POST.
     "max_cold_touches": (
-        "Max Cold Touches",
+        "Cold Outreach",
         "touches",
-        "How many times you'll reach out to someone who never replies. "
-        "Capped at 2: one note, one follow-up.",
+        "How far Coverage chases someone who never replies.",
     ),
     "advocate_touch_min_weeks": (
         "Advocate Check-In",
@@ -645,6 +656,64 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
         "days",
         "How far ahead of a confirmed deadline warm contacts get re-pinged.",
     ),
+}
+
+
+class DefaultingRadioSelect(forms.RadioSelect):
+    """Radios for a knob with only a couple of legal values, where the option
+    that IS the product default posts blank.
+
+    Blank is what `CadenceForm.apply_to` already reads as "remove the
+    override" — the same contract clearing a number input has always had. A
+    segment posting the literal default number instead would look identical
+    and quietly store a value that merely happens to equal the default, which
+    is the thing `apply_to`'s advocate-target branch goes out of its way to
+    avoid. So the default segment posts "" and the override segment posts its
+    number.
+
+    `format_value` is the whole reason this is a widget rather than plain
+    `choices`: a row that already holds the default as a stored integer (ported
+    at cutover, set by a fixture, or written by a shell) has an initial of e.g.
+    2, which matches NEITHER "" nor "1" — stock RadioSelect would then render a
+    segmented control with nothing selected at all, on an account whose setting
+    is perfectly valid.
+    """
+
+    def __init__(self, *, default: int, **kwargs):
+        self._default = default
+        super().__init__(**kwargs)
+
+    def format_value(self, value):
+        if value in (None, "", self._default, str(self._default)):
+            return [""]
+        return super().format_value(value)
+
+    def create_option(self, name, value, *args, **kwargs):
+        """Hang the default's NUMBER on the default option.
+
+        The option posts blank on purpose, so its `value` cannot carry the
+        number — and the cadence diagram needs it, since that rail draws
+        "one note, then a follow-up" from the integer, not from the fact that a
+        blank was submitted. Same single-source rule the number inputs follow
+        with their placeholder: the value comes from CADENCE_DEFAULTS, never
+        restated in the template or the script.
+        """
+        option = super().create_option(name, value, *args, **kwargs)
+        if value in (None, ""):
+            option["attrs"]["data-default-value"] = self._default
+        return option
+
+
+# Cadence knobs whose legal values are few enough to show as segments rather
+# than type into a spinner. Escalation order, left/top first; the entry whose
+# value is "" is the default (see DefaultingRadioSelect).
+#
+# `max_cold_touches` is the only one so far, and it is the clearest case on the
+# page: crm.today.TUNABLE_CADENCE_PARAMS caps it at (1, 2), so a number input
+# with a spinner offered exactly two reachable values while looking like a free
+# number, and the description had to spend a sentence saying so.
+CADENCE_SEGMENTS: dict[str, list[tuple[str, str]]] = {
+    "max_cold_touches": [("1", "Note only"), ("", "Note + follow-up")],
 }
 
 
@@ -696,6 +765,23 @@ class CadenceForm(SectionForm):
         )
         for key, (low, high) in TUNABLE_CADENCE_PARAMS.items():
             label, unit, _desc = CADENCE_LABELS[key]
+            described_by = f"id_{key}-desc id_{key}-err"
+            if key in CADENCE_SEGMENTS:
+                # A segment posts "" or its number; the field itself is
+                # unchanged (IntegerField, required=False, same range), so a
+                # hand-crafted POST of 3 is still the form error it always was
+                # and `apply_to` still pops the key on a blank.
+                widget = DefaultingRadioSelect(
+                    default=CADENCE_DEFAULTS[key],
+                    choices=CADENCE_SEGMENTS[key],
+                    attrs={"aria-describedby": described_by},
+                )
+            else:
+                widget = forms.NumberInput(
+                    attrs={"min": low, "max": high, "step": 1,
+                           "placeholder": CADENCE_DEFAULTS[key],
+                           "aria-describedby": described_by}
+                )
             # min_value/max_value mirror the server-side whitelist exactly, so
             # an out-of-range value is a form error the user sees, never a
             # saved-then-ignored number.
@@ -704,11 +790,7 @@ class CadenceForm(SectionForm):
                 required=False,
                 min_value=low,
                 max_value=high,
-                widget=forms.NumberInput(
-                    attrs={"min": low, "max": high, "step": 1,
-                           "placeholder": CADENCE_DEFAULTS[key],
-                           "aria-describedby": f"id_{key}-desc id_{key}-err"}
-                ),
+                widget=widget,
                 error_messages={
                     "min_value": f"{label} must be between {low} and {high} {unit}.",
                     "max_value": f"{label} must be between {low} and {high} {unit}.",
@@ -760,6 +842,10 @@ class CadenceForm(SectionForm):
                 "unit": unit,
                 "description": desc,
                 "default": CADENCE_DEFAULTS[key],
+                # A segmented row draws no unit and no "Default N" chip: its
+                # options carry both, so printing them again beside it would
+                # be the same fact twice in one row.
+                "segmented": key in CADENCE_SEGMENTS,
             })
         # Sits with the other engine knobs rather than in a card of its own —
         # it is the same class of thing (a number that changes what Coverage
@@ -772,6 +858,7 @@ class CadenceForm(SectionForm):
                 "Feeds your firm fit score."
             ),
             "default": DEFAULT_ADVOCATE_TARGET,
+            "segmented": False,
         })
         return rows
 
@@ -864,6 +951,9 @@ class NotificationsForm(SectionForm):
 
     section = "notifications"
     success_message = "Notification preferences saved."
+    # This checkbox saves itself the moment it is ticked (settings.html), so
+    # the redirect has to come back to the card it was ticked on.
+    success_fragment = "preferences"
 
     # required=False, initial=True: an unchecked BooleanField posts nothing
     # at all, so a first-time GET render must supply the default explicitly
