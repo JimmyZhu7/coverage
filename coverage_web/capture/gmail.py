@@ -696,6 +696,26 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
         )
         return True
 
+    # A RETIRED CHAT IS INERT TO ANY INVITE THAT CANNOT OUTDATE ITS
+    # CANCELLATION, and this is what stops the retirement being undone by
+    # accident. The sync re-reads a ROLLING WINDOW, so the original REQUEST
+    # is still in the mailbox after the CANCEL lands; without this guard the
+    # very next run would walk over it, rewrite the title back to "Chat with
+    # Lily" and hand the student a cancelled meeting again — the resurrection
+    # loop `_retire_cancelled_chat` rejected outright deletion to avoid,
+    # arriving instead through the update path.
+    #
+    # Same rule as the recency guard below, applied to a different statement:
+    # a cancellation is DATED, so only an invite that can prove it was sent
+    # at or after it may speak over it. The re-read original never can — its
+    # own send time predates the cancellation by definition — while a genuine
+    # re-invite does, and revives the chat by clearing `cancelled_at` and
+    # dropping the marker off the title.
+    if event.cancelled_at is not None:
+        if sent_at is None or sent_at < event.cancelled_at:
+            return False
+        event.cancelled_at = None
+
     if thread_id and event.thread_id != thread_id:
         CalendarEvent.all_objects.filter(
             user=user, thread_id=thread_id,
@@ -710,18 +730,150 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     # Adopt the UID even when the row was found by thread: that is how a chat
     # first captured before any of this existed becomes reschedulable.
     event.ics_uid = uid or event.ics_uid
-    if (
-        sent_at is None
-        or event.invite_sent_at is None
-        or sent_at >= event.invite_sent_at
+    # AN INVITE WE CANNOT DATE MAY NOT OVERWRITE A TIME A DATED INVITE SET.
+    # `_message_occurred_at` returns None for an absent or garbled
+    # `internalDate`, and the guard used to spell that case `sent_at is None ->
+    # take the branch` — i.e. "if we can't date it, trust it most", which is
+    # the exact reverse of what no timestamp means. An undateable invite
+    # carries no evidence of being the NEWER one, so it walked straight in
+    # through the guard's own null branch and dragged the chat back to its
+    # DTSTART: the failure `test_the_older_invite_cannot_drag_the_chat_back`
+    # exists to prevent, arriving by the one door that test left open.
+    #
+    # The rule, stated positively: the incoming invite speaks unless a DATED
+    # invite already established this row's time and this one cannot say it is
+    # newer. So all three of the other cases still move the row —
+    #
+    #   * dated over dated, newer wins (unchanged);
+    #   * dated over a row with no recorded provenance — which is EVERY row
+    #     written before `invite_sent_at` existed, so this is the branch that
+    #     carries the live table, not a corner;
+    #   * undateable over undateable, because neither side has evidence and
+    #     refusing would freeze those same rows at whatever an old sync wrote.
+    #
+    # Only "undateable over dated" is refused. The CREATE path above is
+    # deliberately not gated on this: a row that does not exist yet has no
+    # time to protect, and some evidence beats none.
+    if event.invite_sent_at is None or (
+        sent_at is not None and sent_at >= event.invite_sent_at
     ):
         event.starts_at = when
         event.thread_id = thread_id or event.thread_id
         event.invite_sent_at = sent_at or event.invite_sent_at
     event.save(update_fields=[
         "title", "all_day", "kind", "source", "contact", "ics_uid",
-        "starts_at", "thread_id", "invite_sent_at",
+        "starts_at", "thread_id", "invite_sent_at", "cancelled_at",
     ])
+    return True
+
+
+# The marker a retired chat wears on every surface that keeps it. A prefix,
+# not a tense change: "Cancelled: Chat with Lily" against "Chat with Lily" is
+# unmissable on a lock screen in a way that editing a verb is not.
+_CANCELLED_PREFIX = "Cancelled: "
+
+
+def _retire_cancelled_chat(user, finding: dict) -> bool:
+    """Mark the chat a `METHOD:CANCEL` invite calls off, so it stops reading
+    as scheduled. True when a row was actually retired.
+
+    No `contact` argument, unlike its sibling above: the invite UID is the
+    event's identity and the row is found by it alone. Narrowing to the
+    contact the finding matched would only add a way to MISS — the original
+    invite may well have been matched to a different card, and a cancellation
+    that silently declines to act is the failure this function exists to end.
+
+    THE HALF THAT WAS MISSING. `_extract_ics_schedule` learned to report no
+    time from a cancellation, which stopped one arriving and re-asserting the
+    meeting at its old DTSTART. It could not do anything about the row the
+    ORIGINAL invite had already written: that row sat on the month grid, rode
+    out to the subscribed .ics feed and onto a phone, and produced a prep card
+    on Today telling a student to get ready for a chat nobody was attending.
+    A cancellation that stops adding to a lie while leaving the lie standing
+    is half a fix.
+
+    RETIRED, NOT DELETED, and the third option is worse than both:
+
+    * DELETE. It destroys the record of a chat that genuinely was on the
+      books — but the disqualifying problem is mechanical, not sentimental.
+      The sync re-reads a ROLLING WINDOW of the mailbox, so the original
+      invite is still sitting in it; delete the row and the very next run
+      walks over that invite and mints it again. The chat would resurrect
+      itself twice a day, forever, and each resurrection looks exactly like a
+      fresh booking. A delete here is not a fix, it is a loop.
+    * RETITLE ONLY, the way the .ics feed retitles a posting the firm pulled
+      (`crm.calendar_views._ics_body`). Right for that layer and not enough
+      for this one: the loudest surface a cancelled chat reaches is Today's
+      "Chats today" lane, and that card renders the CONTACT and the CLOCK —
+      it never prints the event title at all (see `_cockpit.html`). A prefix
+      nobody's most urgent surface displays is a fix you cannot see.
+
+    So both, split by what the surface is FOR. `crm.today._schedule` drops
+    cancelled rows outright, which empties them out of the prep lane and the
+    day track: those answer "what is happening", and this is not happening.
+    The month grid and the .ics feed keep the row, struck and retitled: those
+    are a RECORD, and the feed especially — an entry that silently disappears
+    off someone's phone is the failure mode the pulled-posting comment one
+    layer down already argued through at length.
+
+    ON PROPOSE-THEN-CONFIRM. Mail read on a student's behalf may propose, and
+    only their own tap changes their record — so writing this without a tap
+    needs an argument, and the argument is symmetry. Coverage created this row
+    with no tap either: `_upsert_scheduled_chat` writes on the REQUEST because
+    an .ics is a machine-readable statement from the organiser rather than
+    something inferred out of prose. The CANCEL is the same statement from the
+    same organiser in the same standard, retracting what it asserted. If the
+    assertion needed no tap, the retraction of that same assertion cannot need
+    one; requiring a tap to un-say something we said unasked is not caution,
+    it is an asymmetry that can only ever leave the student holding the FALSE
+    state. The posture guards against Coverage INFERRING things into someone's
+    record, and nothing here is inferred.
+
+    Two limits keep that argument honest. Only `source=capture` rows are
+    touched — a hand-typed event is the student's own record and an inbound
+    .ics has no standing over it, whatever UID it carries. And nothing is
+    destroyed: the time, the contact and the identity all survive, so a
+    re-invite on the same UID lands back in `_upsert_scheduled_chat` and
+    revives it.
+
+    IDEMPOTENT BY STRUCTURE. An already-cancelled row is left exactly alone
+    rather than re-stamped, so the same cancellation on the second, tenth and
+    hundredth sync is indistinguishable from the first — including the
+    timestamp, which a `now()` re-stamp would walk forward on every run.
+    """
+    uid = (finding.get("ics_uid") or "").strip()[:255]
+    thread_id = (finding.get("thread_id") or "").strip()[:128]
+    if not (uid or thread_id):
+        return False
+
+    # Same lookup order as `_upsert_scheduled_chat`: the UID is the identity
+    # that survives a reschedule, the thread is the fallback for an invite
+    # whose UID would not parse. A cancellation typically arrives on a NEW
+    # Gmail thread, so in practice the UID is the only key that finds
+    # anything — which is exactly why the extractor now keeps it.
+    rows = CalendarEvent.all_objects.filter(
+        user=user,
+        source=CalendarEvent.SOURCE_CAPTURE,
+        kind=CalendarEvent.KIND_CHAT,
+        cancelled_at__isnull=True,
+    )
+    event = rows.filter(ics_uid=uid).first() if uid else None
+    if event is None and thread_id:
+        event = rows.filter(thread_id=thread_id).first()
+    if event is None:
+        return False
+
+    # The cancelling invite's own send time when it has one. Falling back to
+    # "now" only when the message could not be dated keeps the column honest
+    # about WHEN this was called off without ever leaving it null, which is
+    # the value that means "not cancelled".
+    event.cancelled_at = _user_aware(user, finding.get("occurred_at")) or timezone.now()
+    if not event.title.startswith(_CANCELLED_PREFIX):
+        # At the FRONT, and in the title rather than the description: the
+        # .ics SUMMARY is the whole of what a phone notification shows. Same
+        # argument, same wording shape, as "Closed:" on a pulled posting.
+        event.title = f"{_CANCELLED_PREFIX}{event.title}"
+    event.save(update_fields=["cancelled_at", "title"])
     return True
 
 
@@ -1025,6 +1177,16 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                     result.chats_scheduled += 1
             elif (finding.get("chat_scheduled_at") or "").strip():
                 result.chats_scheduled += 1
+
+        # A cancellation is the only finding that reaches the calendar while
+        # carrying no time — the extractor refuses to report one from a
+        # cancellation, so it can never come through the branch above. Kept
+        # off the `chats_scheduled` counter deliberately: retiring a chat is
+        # not scheduling one, and folding it in would make the sync's own
+        # summary line say the opposite of what happened. Same `is_bulk`
+        # guard, for the same reason as above.
+        if not is_bulk and finding.get("chat_cancelled") and not dry_run:
+            _retire_cancelled_chat(user, finding)
 
         thread_id = (finding.get("thread_id") or "").strip()
         marker = f"[gmail:{thread_id}] " if thread_id else ""

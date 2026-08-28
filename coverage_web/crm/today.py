@@ -1323,6 +1323,24 @@ def _schedule(user, today) -> list[dict]:
                # at `contact` left one firm SELECT per scheduled chat.
                .select_related("contact", "contact__firm")
                .order_by("starts_at")):
+        # A CANCELLED CHAT IS NOT COMING. This list is the page's answer to
+        # "what is happening", and everything built on it inherits the
+        # exclusion: `_chat_prep` stops pulling a prep card for a meeting
+        # nobody is attending, and `_daybar` stops holding a slot on the day
+        # track for it. The row itself survives, marked, on the surfaces that
+        # are a RECORD rather than a plan — the month grid and the .ics feed.
+        # See `crm.models.CalendarEvent.cancelled_at`.
+        #
+        # Its contact still counts as SEEN, and that is the whole reason this
+        # is skipped here rather than filtered in the query. `thread_state`
+        # stays "chat_scheduled" after a cancellation, so dropping the row
+        # without claiming the contact would hand them straight to the untimed
+        # branch below and print "Lily Liu · chat set up — no time yet" about
+        # the chat that was just called off. Silence is the honest answer.
+        if ev.cancelled_at is not None:
+            if ev.contact_id:
+                seen_contacts.add(ev.contact_id)
+            continue
         at = timezone.localtime(ev.starts_at)
         day = at.date()
         offset = (day - today).days

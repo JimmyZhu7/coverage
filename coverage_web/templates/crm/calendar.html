@@ -314,6 +314,15 @@
      — the red rail is what makes a deadline row read as something to act on,
      and there is nothing to act on here. */
   .cal-ev-tracked.is-shut { border-left-color: var(--line-strong); color: var(--ink-2); }
+  /* A chat the organiser called off. Same visual argument as .is-shut above,
+     one step stronger: the row keeps its place on the day so the record is
+     intact, drops the chat colour off its rail so it stops reading as
+     something on your afternoon, and strikes the title so it is legible as
+     retired at a glance rather than only to whoever reads the "Cancelled: "
+     prefix. */
+  .cal-ev.is-cancelled { border-left-color: var(--line-strong); color: var(--ink-3); }
+  .cal-ev.is-cancelled .cal-ev-title { text-decoration: line-through;
+    font-weight: var(--w-reg); }
   .cal-ev-time { font-family: var(--font-mono); font-size: var(--fs-nano); color: var(--ink-3);
     flex: none; letter-spacing: -0.02em; }
   .cal-ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;

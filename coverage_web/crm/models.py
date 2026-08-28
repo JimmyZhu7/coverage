@@ -777,6 +777,33 @@ class CalendarEvent(PrivateModel):
     # chat back to the stale time. Null on rows written before this existed
     # and on hand-added events, where it simply means "nothing to compare".
     invite_sent_at = models.DateTimeField(null=True, blank=True)
+    # When a `METHOD:CANCEL` / `STATUS:CANCELLED` invite retired this chat.
+    # Null means "not cancelled" and is the case for every hand-added event.
+    #
+    # WHY THE ROW SURVIVES AT ALL. A cancellation carries the same UID as the
+    # original (RFC 5545), so the row is findable — and the obvious move,
+    # deleting it, is the wrong one twice over. It destroys the record of a
+    # chat that really was on the books; and the sync re-reads a rolling
+    # window of the mailbox, so the ORIGINAL invite is still in there and the
+    # next run would simply mint the row again. A delete is not a fix, it is a
+    # ghost on a twice-daily loop.
+    #
+    # WHY IT IS A TIMESTAMP AND NOT A BOOLEAN. It stores the cancelling
+    # invite's own send time when it has one, so the column answers "when was
+    # this called off" rather than only "was it" — the same reason
+    # `invite_sent_at` above is not a flag either.
+    #
+    # WHAT READS IT. Two different jobs, deliberately split. Surfaces that
+    # say what is HAPPENING drop it entirely (`crm.today._schedule`, and so
+    # `_chat_prep` and `_daybar` below it) — a cancelled chat is not on your
+    # afternoon and no prep card should be pulled for it. Surfaces that are a
+    # RECORD keep it and mark it: the month grid strikes it through, and the
+    # .ics feed retitles it "Cancelled: ..." rather than dropping the VEVENT,
+    # which is the settled treatment for a pulled posting one layer down
+    # (`crm.calendar_views._ics_body`) and for the same reason — this feed is
+    # SUBSCRIBED, and an entry that silently vanishes from someone's phone
+    # teaches them to distrust the whole calendar.
+    cancelled_at = models.DateTimeField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta(PrivateModel.Meta):

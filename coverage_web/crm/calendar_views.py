@@ -127,6 +127,15 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             "at": None if ev.all_day else local,
             "contact": ev.contact,
             "editable": True,
+            # Kept on the grid rather than dropped, on exactly the reasoning
+            # layer 4 uses for a posting the firm has pulled: this is a
+            # RECORD of the student's month, and a row that silently vanishes
+            # teaches them to distrust the page. Today's queue is where a
+            # cancelled chat stops appearing, because that page answers a
+            # different question. The title already carries "Cancelled: " —
+            # this flag is what lets the grid strike it through as well, so
+            # it reads as retired at a glance and not just on close reading.
+            "cancelled": ev.cancelled_at is not None,
         })
 
     # Layer 3 — confirmed firm dates, read-only. Deadlines AND openings: this

@@ -175,7 +175,7 @@ class TestIcsScheduling:
         assert finding["chat_scheduled_at"] is None
 
     def test_extract_ics_schedule_returns_none_when_absent(self):
-        assert gmail_live._extract_ics_schedule({"payload": {}}) == (None, None, None)
+        assert gmail_live._extract_ics_schedule({"payload": {}}) == (None, None, None, False)
 
     def test_the_invite_uid_rides_along_with_the_time(self):
         """DTSTART says when, UID says WHICH EVENT — and only the second one
@@ -239,7 +239,7 @@ class TestIcsTimezone:
         )
 
     def test_a_tzid_qualified_time_is_resolved_to_that_zone(self):
-        when, _summary, _uid = gmail_live._extract_ics_schedule(self._invite(
+        when, _summary, _uid, _cancelled = gmail_live._extract_ics_schedule(self._invite(
             "BEGIN:VEVENT\n"
             "DTSTART;TZID=America/New_York:20260915T090000\n"
             "SUMMARY:Coffee chat\n"
@@ -252,7 +252,7 @@ class TestIcsTimezone:
         )
 
     def test_a_utc_dtstart_is_unchanged(self):
-        when, _s, _u = gmail_live._extract_ics_schedule(self._invite(
+        when, _s, _u, _c = gmail_live._extract_ics_schedule(self._invite(
             "BEGIN:VEVENT\nDTSTART:20260901T140000Z\nEND:VEVENT\n"
         ))
         assert when == "2026-09-01T14:00:00+00:00"
@@ -260,7 +260,7 @@ class TestIcsTimezone:
     def test_a_floating_time_stays_naive(self):
         """No TZID at all: still "this clock time, on the user's own clock",
         which is the documented downstream fallback."""
-        when, _s, _u = gmail_live._extract_ics_schedule(self._invite(
+        when, _s, _u, _c = gmail_live._extract_ics_schedule(self._invite(
             "BEGIN:VEVENT\nDTSTART:20260901T140000\nEND:VEVENT\n"
         ))
         assert when == "2026-09-01T14:00:00"
@@ -269,7 +269,7 @@ class TestIcsTimezone:
         """Exchange sends `TZID=Eastern Standard Time`, which is not an IANA
         name. Unresolvable is not the same as wrong — it falls back to the
         old naive behaviour instead of inventing an offset."""
-        when, _s, _u = gmail_live._extract_ics_schedule(self._invite(
+        when, _s, _u, _c = gmail_live._extract_ics_schedule(self._invite(
             "BEGIN:VEVENT\n"
             'DTSTART;TZID="Eastern Standard Time":20260915T090000\n'
             "END:VEVENT\n"
@@ -302,11 +302,44 @@ class TestIcsCancellation:
 
     def test_method_cancel_reports_no_schedule(self):
         assert gmail_live._extract_ics_schedule(
-            self._cancel("METHOD:CANCEL")) == (None, None, None)
+            self._cancel("METHOD:CANCEL")) == (
+                None, None, "abc123@google.com", True)
 
     def test_status_cancelled_reports_no_schedule(self):
         assert gmail_live._extract_ics_schedule(
-            self._cancel("STATUS:CANCELLED")) == (None, None, None)
+            self._cancel("STATUS:CANCELLED")) == (
+                None, None, "abc123@google.com", True)
+
+    def test_a_cancellation_keeps_the_uid_that_finds_the_row(self):
+        """Reporting no TIME stopped the cancellation re-asserting the chat.
+        It did nothing about the row already on the calendar, because a bare
+        (None, None, None) threw away the one field that can FIND that row —
+        and a cancellation typically arrives on a brand-new Gmail thread, so
+        the UID is the only key that reaches it. Same UID as the original
+        REQUEST, per RFC 5545."""
+        _dt, _summary, uid, cancelled = gmail_live._extract_ics_schedule(
+            self._cancel("METHOD:CANCEL"))
+        assert uid == "abc123@google.com"
+        assert cancelled is True
+
+    def test_a_cancellation_still_reports_no_time_at_all(self):
+        """The UID riding along must not smuggle the DTSTART back with it: a
+        cancellation carries the whole event, and its time is the one thing
+        nothing downstream may read."""
+        finding = gmail_live._classify_message(OWN_EMAIL, self._cancel("METHOD:CANCEL"))
+        assert finding["chat_scheduled_at"] is None
+        assert finding["chat_status"] == "none"
+        assert finding["chat_cancelled"] is True
+
+    def test_an_ordinary_invite_is_not_flagged_cancelled(self):
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL, "Subject": "Invite"},
+            parts=[{"mimeType": "text/calendar", "body": {"data": _b64(
+                "BEGIN:VEVENT\nUID:abc123@google.com\n"
+                "DTSTART:20260901T140000Z\nEND:VEVENT\n"
+            )}}],
+        )
+        assert gmail_live._classify_message(OWN_EMAIL, message)["chat_cancelled"] is False
 
     def test_a_cancelled_invite_does_not_claim_a_scheduled_chat(self):
         finding = gmail_live._classify_message(OWN_EMAIL, self._cancel("METHOD:CANCEL"))
@@ -326,7 +359,7 @@ class TestIcsCancellation:
                 "END:VEVENT\n"
             )}}],
         )
-        when, _s, _u = gmail_live._extract_ics_schedule(message)
+        when, _s, _u, _c = gmail_live._extract_ics_schedule(message)
         assert when == "2026-09-01T14:00:00+00:00"
 
 

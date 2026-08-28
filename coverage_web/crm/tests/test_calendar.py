@@ -1317,13 +1317,16 @@ def test_a_cancelled_invite_adds_no_chat_and_logs_no_scheduled_touch(user):
     event — same UID, same DTSTART — so read for its DTSTART it re-asserted
     the meeting and climbed the ladder a second time.
 
-    KNOWN LIMIT, pinned deliberately rather than left to be discovered: the
-    row already on the calendar is NOT removed. `_extract_ics_schedule`
-    reports no time, which is the honest answer available to it; acting on
-    the cancellation (deleting or retitling the event, the way the .ics feed
-    retitles a pulled posting) is a `capture.gmail._upsert_scheduled_chat`
-    change and is not made here. What this pins is that a cancellation stops
-    ADDING to the lie.
+    What this pins is that a cancellation stops ADDING to the lie: no second
+    row is minted, and no second `chat_scheduled` touch is logged.
+
+    The KNOWN LIMIT this used to record — that the row already on the
+    calendar was left standing — is now closed, in
+    `capture.gmail._retire_cancelled_chat`. It is asserted here rather than
+    only in `capture/tests/test_gmail_invite_honesty.py` because the two
+    halves have to hold together: reporting no time and retiring the row are
+    one behaviour seen from two ends, and a regression in either one alone
+    would leave a cancelled chat reading as scheduled again.
     """
     from capture import gmail_live
 
@@ -1358,10 +1361,17 @@ def test_a_cancelled_invite_adds_no_chat_and_logs_no_scheduled_touch(user):
     assert finding["chat_scheduled_at"] is None
 
     apply_findings(user, [finding])
-    assert CalendarEvent.objects.for_user(user).count() == 1, (
+    assert CalendarEvent.all_objects.filter(user=user).count() == 1, (
         "no second chat minted from a cancellation"
     )
     assert Touch.objects.for_user(user).filter(
         contact=contact, kind="chat_scheduled").count() == before, (
         "a cancellation is not progress up the ladder"
+    )
+
+    ev = CalendarEvent.all_objects.get(user=user)
+    assert ev.cancelled_at is not None, "and the one that exists is retired"
+    assert ev.title == "Cancelled: Chat with Lily Liu"
+    assert timezone.localtime(ev.starts_at) == when, (
+        "retired, not erased — the date it was booked for is a real fact"
     )

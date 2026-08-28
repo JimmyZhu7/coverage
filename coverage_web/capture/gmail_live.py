@@ -876,10 +876,13 @@ def _decode_body(part: dict) -> str:
         return ""
 
 
-def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None, str | None]:
-    """(iso_datetime, summary, uid) from the first `.ics`/`text/calendar` part
-    found, or (None, None, None). Deterministic per §5 ("scheduling via .ics
-    ... detection") — no language inference, just the invite's own DTSTART.
+def _extract_ics_schedule(
+    message: dict,
+) -> tuple[str | None, str | None, str | None, bool]:
+    """(iso_datetime, summary, uid, cancelled) from the first
+    `.ics`/`text/calendar` part found, or (None, None, None, False).
+    Deterministic per §5 ("scheduling via .ics ... detection") — no language
+    inference, just the invite's own DTSTART.
 
     THE UID IS THE STABLE IDENTITY. DTSTART answers "when", the UID answers
     "which event", and only the second one survives a reschedule. A real
@@ -901,6 +904,16 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None, str | 
     a meeting nobody is attending. There is no honest time to report from a
     cancellation, so none is reported and the message falls through to the
     ordinary reply/no-finding paths.
+
+    BUT ITS UID IS STILL REPORTED, and that is what the fourth element is
+    for. Reporting no time stopped the cancellation ADDING to the lie; it did
+    nothing about the row already on the calendar, because returning a bare
+    (None, None, None) threw away the one field that can FIND that row. The
+    UID is the same one the original REQUEST carried (RFC 5545 holds it
+    constant across REQUEST / REPLY / COUNTER / CANCEL), so it is returned
+    alongside the cancellation flag and `capture.gmail._retire_cancelled_chat`
+    keys on it. `dt` stays None regardless: there is still no honest time to
+    report from a cancellation, and nothing downstream may read one.
     """
     for part in _walk_parts(message.get("payload", {})):
         mime = part.get("mimeType", "")
@@ -909,7 +922,9 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None, str | 
             continue
         text = _ICS_FOLD_RE.sub("", _decode_body(part)).replace("\r\n", "\n")
         if _ICS_CANCELLED_RE.search(text):
-            return None, None, None
+            uid_match = _ICS_UID_RE.search(text)
+            uid = uid_match.group(1).strip() if uid_match else ""
+            return None, None, uid or None, True
         dt_match = _ICS_DTSTART_RE.search(text)
         if not dt_match:
             continue
@@ -935,8 +950,8 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None, str | 
         summary = summary_match.group(1).strip() if summary_match else ""
         uid_match = _ICS_UID_RE.search(text)
         uid = uid_match.group(1).strip() if uid_match else ""
-        return dt.isoformat(), summary, uid or None
-    return None, None, None
+        return dt.isoformat(), summary, uid or None, False
+    return None, None, None, False
 
 
 def _looks_like_bounce(from_addr: str, subject: str) -> bool:
@@ -1138,7 +1153,7 @@ def classify_message_findings(own_email: str, message: dict) -> list[dict]:
 
 def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
     subject = _header(message, "Subject")
-    ics_dt, ics_summary, ics_uid = _extract_ics_schedule(message)
+    ics_dt, ics_summary, ics_uid, ics_cancelled = _extract_ics_schedule(message)
     return {
         "name": to_name or to_addr.split("@")[0],
         "email": to_addr.lower(),
@@ -1151,9 +1166,15 @@ def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
         # The invite's own identity, stable across a reschedule that lands
         # on a different Gmail thread — see `_extract_ics_schedule`.
         "ics_uid": ics_uid,
+        # The invite says this event is OFF. Never paired with a time (the
+        # extractor refuses to report one from a cancellation), so it can
+        # only ever retire a row, never place one.
+        "chat_cancelled": ics_cancelled,
         "evidence": (
             f"Calendar invite sent: {ics_summary or subject}"
             if ics_dt
+            else f"Calendar invite cancelled: {subject}"
+            if ics_cancelled
             else f"Sent: {subject}"
         ),
         "thread_id": message.get("threadId", ""),
@@ -1180,7 +1201,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
     from_name, from_addr = parseaddr(_header(message, "From"))
     subject = _header(message, "Subject")
     thread_id = message.get("threadId", "")
-    ics_dt, ics_summary, ics_uid = _extract_ics_schedule(message)
+    ics_dt, ics_summary, ics_uid, ics_cancelled = _extract_ics_schedule(message)
     occurred_at = _message_occurred_at(message)
 
     is_outbound = from_addr.lower() == own_email.lower()
@@ -1270,6 +1291,11 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             # thrown away — it is just not claimed as a relationship.
             "chat_status": "none",
             "chat_scheduled_at": None,
+            # False for the same reason `chat_status` is "none" above: a
+            # blast never PLACED a chat, so there is none of ours for it to
+            # retire, and letting a list cancellation reach into the calendar
+            # would give mass mail a write it is denied in every direction.
+            "chat_cancelled": False,
             "bulk": True,
             "bulk_reasons": verdict.reason_text,
             # The counterparty's own mailbox answered by machine — RFC 3834
@@ -1310,6 +1336,10 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         # Proposed" on a brand-new thread move the existing chat instead of
         # adding a second one at the old time.
         "ics_uid": ics_uid,
+        # The organiser has called it off. Paired with the UID above, this is
+        # what lets `capture.gmail._retire_cancelled_chat` find the row the
+        # original invite created and stop it reading as scheduled.
+        "chat_cancelled": ics_cancelled,
         "bulk": False,
         # For the discovery hook (capture.discovery, via apply_findings'
         # unmatched branch): whether this message carries a real RFC reply
@@ -1333,6 +1363,8 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         "evidence": (
             f"Calendar invite received: {ics_summary or subject}"
             if ics_dt
+            else f"Calendar invite cancelled: {subject}"
+            if ics_cancelled
             else message.get("snippet", "")[:300]
         ),
         "thread_id": thread_id,
