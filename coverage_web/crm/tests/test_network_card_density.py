@@ -108,43 +108,6 @@ def test_the_firm_line_is_one_line_and_may_ellipsise():
     )
 
 
-def test_the_firm_name_stays_readable_when_the_line_truncates(client):
-    """A one-line firm may ellipsise, which is only honest if the whole
-    string is still recoverable. The CARD's own title= carries the action
-    reason, not the firm, so the firm line needs a title of its own."""
-    from datetime import timedelta
-
-    from django.utils import timezone
-
-    from crm.models import Contact, Touch, UserFirm
-    from directory.models import Firm
-
-    user = get_user_model().objects.create_user(
-        email="net-firmtitle@example.com", password="x" * 14
-    )
-    firm = Firm.objects.create(slug="sixth-street", name="Sixth Street Partners")
-    contact = Contact.all_objects.create(
-        user=user, name="Mia Garcia", firm=firm, warmth="cold"
-    )
-    # The relevance gate won't queue a contact at a firm the student isn't
-    # chasing, and the cadence engine needs a reason to call her overdue.
-    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
-    Touch.all_objects.create(
-        user=user, contact=contact, kind="outreach", channel="email",
-        ts=timezone.now() - timedelta(days=30),
-    )
-
-    client.force_login(user)
-    body = client.get(NETWORK).content.decode()
-
-    assert re.search(
-        r'class="net-mini-firm[^"]*"\s+title="Sixth Street Partners"', body
-    ), (
-        "the firm line on a contact mini-card no longer carries its own "
-        "title=, so an ellipsised firm name has nowhere left to be read."
-    )
-
-
 def test_the_open_profile_link_keeps_a_24px_touch_target():
     """The one part of the card that OPENS rather than SELECTS. The glyph is
     small on purpose; the TARGET must not be. It used to be a 16px link grown
@@ -176,41 +139,16 @@ def test_the_open_profile_link_keeps_a_24px_touch_target():
     )
 
 
-def test_a_phone_gets_one_card_per_row():
-    """The three-across basis is a desktop measurement. Left unconditional it
-    gave a 375px phone 67px-wide cards 245-536px tall — a letter-stack per
-    contact. One per row instead: name and firm get a whole line each and the
-    card lands flat at 43px."""
-    css = _network_styles()
-    narrow = re.search(
-        r"@media \(max-width: 560px\) \{\s*\.net-actions \.net-mini \{([^}]*)\}", css
-    )
-    assert narrow, (
-        "the phone breakpoint for the contact mini-card is gone. Without it "
-        "the three-across basis applies at 375px too, where a third of the "
-        "lane is under 100px and the name breaks across three and four lines."
-    )
-    assert "flex: 0 0 100%" in narrow.group(1), (
-        f"the phone card is no longer full width: {narrow.group(1).strip()}"
-    )
-
-
-def test_a_phone_actually_shows_the_contacts_in_a_lane():
-    """Stacked, the panel and the page swap roles: the PAGE scrolls, so
-    pinning the panel to a fixed height and splitting it four ways left each
-    populated lane 32px. Measured at 375px: panel 266px, the two EMPTY lanes
-    taking 99px each, the two real ones 32px — a header and not one contact
-    visible, on every phone."""
+def test_a_phone_gets_the_stacked_panel_its_own_natural_height():
+    """The action lane's phone breakpoints (a three-across `.net-mini` basis
+    forced to one-per-row, and a fixed-height panel split into quarters) went
+    with the panel that owned them — see crm/views.py::contact_list. What's
+    left is the one rule every stacked board panel still needs: below the
+    900px breakpoint the PAGE scrolls, so a panel pinned to a desktop-only
+    fixed height would just nest another scrollbar inside it."""
     css = _network_styles()
     stacked = re.search(r"@media \(max-width: 900px\) \{(.*?)\n  \}", css, re.S)
     assert stacked, "the Network board's stack breakpoint is gone"
-    body = stacked.group(1)
-
-    assert ".net-panel { height: auto; }" in body, (
-        "the stacked panel is back on a fixed height, which it then divides "
-        "between four lanes that no longer have a scroll of their own."
-    )
-    assert ".net-actions .net-group { flex: 0 0 auto; }" in body, (
-        "the stacked lanes are back to splitting the panel into equal "
-        "quarters, so an empty lane takes as much room as a full one."
+    assert ".net-panel { height: auto; }" in stacked.group(1), (
+        "the stacked panel is back on a fixed height."
     )

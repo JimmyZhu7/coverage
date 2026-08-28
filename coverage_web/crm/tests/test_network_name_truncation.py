@@ -80,54 +80,12 @@ def test_a_contact_name_may_wrap_rather_than_being_cut_mid_word():
     )
 
 
-def test_the_action_lane_lets_a_card_grow_to_fit_its_name():
-    """A grid pinned every card to the 58px min-height floor and clipped the
-    wrapped line, turning the truncation vertical instead of fixing it."""
-    block = _rule(_network_styles(), ".net-actions .net-minis")
-
-    assert "display: flex" in block, (
-        "the action lane is laid out with something other than flex. As a "
-        "grid it measured the card's height contribution at 23px, sized its "
-        "rows to the 58px min-height floor, and the card's overflow:hidden "
-        "cut off the wrapped second line of the name — the same truncation, "
-        "rotated 90 degrees. A flex line sizes its cross axis after the "
-        "card's width is known, which is what makes the wrap safe."
-    )
-    assert "flex-wrap: wrap" in block, (
-        "the action lane no longer wraps, so its cards run off in one row "
-        "instead of forming the four-across grid the lane is sized for."
-    )
-
-
-def test_the_lane_lays_three_cards_across_and_the_basis_counts_its_gaps():
-    """The column count is a density decision, and it moved five → four →
-    three. Four was chosen to stop names ELLIPSISING; once the name was
-    allowed to wrap instead, four became the thing that made wrapping
-    expensive — 131px of card, 64px of name, and the ordinary names on this
-    board measure 65-71px, so nearly every card wrapped and many came down in
-    three pieces. Every card in a flex line stretches to the tallest, so one
-    three-line name set the height of its whole row: 80/99/120/141px, 111.6px
-    a contact on average. Reported directly: "these are too big."
-
-    Three gives 177px of card and ~118px of name — one line is the normal
-    case, two the exception — and the lane measures 43-59px a card. Density
-    is height per contact, not cards per row.
-    """
-    block = _rule(_network_styles(), ".net-actions .net-mini")
-
-    basis = re.search(r"flex:\s*0 0 calc\(\(100% - (\d+) \* var\(--s2\)\) / (\d+)\)", block)
-    assert basis, (
-        "the card's flex basis is no longer the explicit three-across "
-        f"third: {block.strip()}"
-    )
-    gaps, columns = int(basis.group(1)), int(basis.group(2))
-    assert columns == 3, (
-        f"the lane now lays out {columns} across, not three. At four the card "
-        "is 131px and the name gets 64px, which is less than the names on "
-        "this board measure — every card wraps, some to three lines, and the "
-        "row stretches to the tallest."
-    )
-    assert gaps == columns - 1, (
-        f"{columns} cards have {columns - 1} gaps between them, but the basis "
-        f"subtracts {gaps}; the last card in each row will not fit."
-    )
+    # The four-across action lane this test's siblings once guarded
+    # (`.net-actions .net-minis` laid out with flex so a wrapped name's
+    # second line was never clipped; `.net-actions .net-mini` fixed at a
+    # three-across basis) is gone along with the panel it belonged to — its
+    # queue moved to Today, see crm/views.py::contact_list. The one claim
+    # that survives it, and that this file still guards, is the more
+    # general one above: a name wraps rather than losing characters to an
+    # ellipsis, wherever `.net-mini-name` is used (today, the Unplaced
+    # panel's per-firm cards).

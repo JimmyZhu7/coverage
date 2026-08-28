@@ -21,6 +21,7 @@ paths reach `crm.services`, which opens its own connection.
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 import pytest
@@ -1020,14 +1021,14 @@ def test_every_count_on_the_board_agrees_with_what_it_renders(client):
     assert ctx["contact_total"] == body.count('class="contact-card') == 1
     assert sum(len(s["cards"]) for s in ctx["sections"]) == 1
     assert "Real Banker" in body
-    # The action lanes: the header total == the items in the lanes, and no
-    # hidden contact is named in any of them.
-    assert ctx["action_total"] == sum(
-        len(g["items"]) for g in ctx["action_groups"]
-    )
+    # Bulk selection lives on this same grid now (the "Contacts Needing
+    # Action" panel this test used to check is gone — see
+    # crm/views.py::contact_list) — so a hidden contact must not get a
+    # checkbox here either. `.cc-check` values are exactly the ids the grid
+    # is willing to act on; none of the excluded ten may appear among them.
     hidden = camp.excluded_contact_ids(user)
-    for g in ctx["action_groups"]:
-        assert not {i["contact"]["id"] for i in g["items"]} & hidden
+    checkbox_ids = {int(v) for v in re.findall(r'class="cc-check"[^>]*value="(\d+)"', body)}
+    assert not checkbox_ids & hidden
     # The firm card: one contact, one advocate. Not eleven and four.
     cards = [c for s in ctx["tier_sections"] for c in s["cards"]]
     assert [c["contact_count"] for c in cards] == [1]

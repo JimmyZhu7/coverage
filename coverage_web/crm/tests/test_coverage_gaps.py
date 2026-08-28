@@ -36,9 +36,13 @@ def _gap_strip(body: str) -> str:
     bare `body.index("Coverage Gaps")` anchored there instead, which cost
     every membership check (`"x" in gap_strip`) nothing — the CSS block was
     just extra haystack — but silently broke the first assertion to COUNT
-    occurrences, since CSS text landed inside the slice too."""
+    occurrences, since CSS text landed inside the slice too.
+
+    Sliced up to "Firm Coverage" — the next `<h2>` on the board — rather
+    than the "Contacts Needing Action" panel this used to end at: that panel
+    duplicated Today's own queue and is gone (crm/views.py::contact_list)."""
     start = body.index('<h2 class="strip-title" title="Ranked by exposure')
-    return body[start : body.index("Contacts Needing Action", start)]
+    return body[start : body.index("Firm Coverage", start)]
 
 
 def _firm(name, tier, warmths, app_close=None, firm_id=None):
@@ -404,57 +408,10 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
 
 
 # ---------------------------------------------------------------------------
-# 5. "Contacts Needing Action" sorts each lane longest-silent-first.
-#    Before this, `cadence.due_actions` only ever sorted by
-#    (priority, tier, firm name) — real for choosing which LANE an action
-#    lands in, meaningless for ordering 80+ people inside the SAME lane, all
-#    the same priority. The lane fell back to alphabetical-by-firm, which is
-#    what this test proves is no longer true.
+# 5. (removed) "Contacts Needing Action" sorted each lane longest-silent-
+#    first. The panel — and the per-lane sort that only ever served its
+#    rendering — is gone along with it: it duplicated Today's own queue
+#    under different lane labels (crm/views.py::contact_list). The
+#    longest-silent-first ordering claim itself is still exercised where the
+#    queue actually lives now: see crm/tests/test_today.py.
 # ---------------------------------------------------------------------------
-@pytest.mark.django_db(transaction=True)
-def test_follow_up_lane_sorts_longest_silent_first(client):
-    from django.utils import timezone as tz
-
-    user = User.objects.create_user(email="stale@example.com", password="x")
-    # Named so alphabetical order would put Aardvark BEFORE Zebra — the
-    # opposite of the order this test expects once idle time decides it.
-    aardvark = Firm.objects.create(slug="aardvark-co", name="Aardvark Co")
-    zebra = Firm.objects.create(slug="zebra-co", name="Zebra Co")
-    UserFirm.all_objects.create(user=user, firm=aardvark, tier=2)
-    UserFirm.all_objects.create(user=user, firm=zebra, tier=2)
-
-    barely = Contact.all_objects.create(
-        user=user, name="Barely Overdue", firm=aardvark, warmth="cold",
-        thread_state="no_reply",
-    )
-    long_overdue = Contact.all_objects.create(
-        user=user, name="Long Overdue", firm=zebra, warmth="cold",
-        thread_state="no_reply",
-    )
-    from crm.models import Touch
-    # Both offsets are CALENDAR days; the follow-up threshold
-    # (`followup_after_business_days`, 6) is in BUSINESS days, and the two
-    # diverge by weekday. 8 calendar days is 6 business days Mon-Fri but only
-    # 5 on Sat/Sun — below the window — so an 8 here made this test pass five
-    # days a week and fail on the weekend (seen on Sat 2026-08-15, with the
-    # whole Follow Up lane empty rather than merely misordered). 10 is the
-    # smallest offset that clears 6 business days on EVERY weekday, and still
-    # sits under the 10-business-day park window, so this test measures the
-    # ordering it is named for rather than the day it runs on. Same fix, same
-    # reason as test_today.test_within_a_class_the_longest_silent_goes_first;
-    # the arithmetic itself is pinned by
-    # test_cadence.test_ten_calendar_days_is_the_weekday_proof_followup_offset.
-    Touch.all_objects.create(user=user, contact=barely, kind="outreach",
-                             channel="email", ts=tz.now() - timedelta(days=10))
-    Touch.all_objects.create(user=user, contact=long_overdue, kind="outreach",
-                             channel="email", ts=tz.now() - timedelta(days=40))
-
-    client.force_login(user)
-    body = client.get(reverse("crm:contact_list")).content.decode()
-    follow_up_start = body.index("Follow Up")
-    lane = body[follow_up_start:follow_up_start + 3000]
-    assert "Long Overdue" in lane and "Barely Overdue" in lane
-    # Longest-silent (Zebra Co's contact) renders FIRST despite sorting
-    # alphabetically last — proof the idle clock, not the firm name, now
-    # decides the order.
-    assert lane.index("Long Overdue") < lane.index("Barely Overdue")

@@ -216,15 +216,14 @@ def test_the_region_tab_survives_a_bulk_action(client):
 # 5. The board renders the controls.
 # ---------------------------------------------------------------------------
 def test_the_board_renders_checkboxes_and_the_bulk_bar(client):
+    """The checkbox used to render on the "Contacts Needing Action" panel,
+    a queue this board duplicated from Today and has since dropped (see
+    crm/views.py::contact_list). Bulk selection lives on the real contact
+    grid now — Ada's card, in whichever warmth section she lands in."""
     user = _user()
     firm = Firm.objects.create(slug="acme", name="Acme")
     c = _contact(user, "Ada", firm=firm)
-    # On the student's list, because the queue's relevance gate (crm.relevance)
-    # will not speak about a contact at a firm they are not chasing — and this
-    # board's "Contacts Needing Action" column is where Ada's checkbox renders.
     UserFirm.all_objects.create(user=user, firm=firm, tier=1)
-    # Give the cadence engine a reason to queue her: contacted, no reply,
-    # well past the follow-up window.
     Touch.all_objects.create(user=user, contact=c, kind="outreach",
                              channel="email",
                              ts=timezone.now() - timedelta(days=30))
@@ -233,10 +232,9 @@ def test_the_board_renders_checkboxes_and_the_bulk_bar(client):
     body = client.get(reverse("crm:contact_list")).content.decode()
 
     assert 'name="ids"' in body
-    assert 'class="net-mini-check"' in body
-    assert '<label class="net-mini kin-reveal"' in body  # the whole card toggles the box
-    assert 'net-mini-open' in body            # and a real link still opens it
-    assert 'data-bulk-bar' in body
+    assert 'class="cc-check"' in body
+    assert 'id="cc-bulk-form"' in body
+    assert 'data-cc-bulk-bar' in body
     # Every offered verb, and no delete button anywhere on the page.
     assert 'value="snooze"' in body
     assert 'value="park"' in body
