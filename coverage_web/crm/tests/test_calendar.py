@@ -657,9 +657,23 @@ def test_the_feed_needs_no_session(client, user):
 # two surfaces that exist to warn you.
 # ---------------------------------------------------------------------------
 
+def _pinned_day(day, months_ahead=0):
+    """Day `day` of the month `months_ahead` months from now."""
+    first = timezone.localdate().replace(day=1)
+    for _ in range(months_ahead):
+        first = (first + timedelta(days=32)).replace(day=1)
+    return first.replace(day=day)
+
+
 def _tracked_role(user, *, day, title="Summer Analyst", status="", dismissed=False,
-                  firm=None, url=None, posting_status="open"):
+                  firm=None, url=None, posting_status="open", months_ahead=0):
     """`day` is a day of THIS month, the same anchoring `_firm_date` uses.
+
+    `months_ahead` moves that same pinned day into a LATER month, for the one
+    test that has to straddle a month boundary on purpose rather than wait for
+    the calendar to hand it one. It is not an offset from today either — the
+    day stays pinned, only the month moves — so it inherits the same
+    every-day-of-the-year stability as the default.
 
     It used to be `days`, an offset from today, which reads better and is
     wrong: the grid and the month rail are both bounded by `_month_bounds`,
@@ -681,8 +695,9 @@ def _tracked_role(user, *, day, title="Summer Analyst", status="", dismissed=Fal
         slug="gs", name="Goldman Sachs")
     opp = Opportunity.objects.create(
         firm=firm, title=title, status=posting_status,
-        deadline=timezone.localdate().replace(day=day),
-        url=url or f"https://gs.com/{title.lower().replace(' ', '-')}-{day}")
+        deadline=_pinned_day(day, months_ahead),
+        url=url or f"https://gs.com/{title.lower().replace(' ', '-')}-{day}"
+            + (f"-m{months_ahead}" if months_ahead else ""))
     UserOpportunity.all_objects.create(
         user=user, opportunity=opp, applied_status=status, dismissed=dismissed)
     return opp
@@ -715,8 +730,8 @@ def test_a_deadline_in_the_next_month_is_on_that_month_and_not_this_one(
     belongs on that month's grid, not on this one's.
     """
     today = timezone.localdate()
-    next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=10)
-    opp = _tracked_role(logged_in, days=(next_month - today).days,
+    next_month = _pinned_day(10, months_ahead=1)
+    opp = _tracked_role(logged_in, day=10, months_ahead=1,
                         title="Next Month Analyst")
     assert opp.deadline == next_month
 
