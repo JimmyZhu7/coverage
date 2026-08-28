@@ -115,11 +115,19 @@ def loud(client):
     _touch(user, _contact(user, "Chatted Person", firm=firm, warmth="chatted"),
            "chat", days_ago=3)
 
-    # A chat on the calendar today.
+    # A chat on the calendar today. Anchored to local NOON today rather than
+    # "now + 3h": `_schedule`'s window starts at local midnight, so any time
+    # today satisfies it, but `now + 3h` crosses into tomorrow (in whatever
+    # zone is active for this timezone-less test user, i.e. UTC) for roughly
+    # the last three hours of every UTC day — which turned "is_today" false
+    # and silently dropped the whole prep lane, exactly the kind of
+    # local-date bug this suite exists to catch elsewhere.
     CalendarEvent.all_objects.create(
         user=user, contact=_contact(user, "Prep Person", firm=firm, warmth="chatted"),
         title="Chat with Prep Person", kind="chat", thread_id="t-order",
-        starts_at=timezone.now() + timedelta(hours=3),
+        starts_at=timezone.localtime(timezone.now()).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        ),
     )
 
     # An inbox match waiting on a yes or no.
