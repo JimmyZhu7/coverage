@@ -858,6 +858,29 @@ def _in_scope(c, scope: str) -> bool:
     return bool(c.firm and scope in (c.firm.regions or []))
 
 
+# The `Q` filter every "real touch" annotation below applies, reusing
+# `coverage_domain.cadence`'s own `_CLOCK_SILENT_KINDS` — same private-name
+# import `crm.today`'s `_coming_up_scheduled_chats` already uses for its
+# `last_ts` annotation, so there is exactly one definition of "not a real
+# touch" for this whole app to drift out of sync with. Its C2 DIVERGENCE note
+# is the full argument: a `manual_override` row is the system correcting its
+# own bookkeeping, not evidence a relationship was maintained, and
+# `bulk_received` is an inbound blast `capture.inbound` already judged wasn't
+# one either. That fix landed in the cadence engine's due-actions math and in
+# Today's own scheduled-chat clock; THIS module's `last_touch_ts` /
+# `touch_count` annotations read the exact same `touches` table but were
+# never updated to match, so a contact whose ONLY row on file is a bulk
+# programme invite, or whose last row is a correction/park/promotion made
+# weeks after their real last touch, rendered as freshly touched here while
+# the engine correctly still called them idle. Confirmed on the founder's
+# live data (2026-08-28): a contact with two `bulk_received` rows and zero
+# real outreach showed under "Emailed, No Reply" (`touch_count` counted the
+# blasts), and 5 actively-worked contacts plus 118 parked ones showed a
+# staleness ring dozens of days fresher than their real last touch
+# (`last_touch_ts` counted a `manual_override`).
+_REAL_TOUCH_Q = ~Q(touches__kind__in=list(cadence._CLOCK_SILENT_KINDS))
+
+
 # The keep-warm clock each warmth class runs on, in days — the same windows
 # the cadence engine acts on (weeks * 7 for the two check-in clocks; cold
 # contacts run on the follow-up window). The staleness ring divides elapsed
@@ -947,8 +970,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         .filter(archived=False)
         .select_related("firm")
         .annotate(
-            last_touch_ts=models_Max("touches__ts"),
-            touch_count=models_Count("touches"),
+            last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q),
+            touch_count=models_Count("touches", filter=_REAL_TOUCH_Q),
         )
     )
 
@@ -1806,7 +1829,7 @@ def contact_archived(request: HttpRequest) -> HttpResponse:
         Contact.objects.for_user(request.user)
         .filter(archived=True)
         .select_related("firm")
-        .annotate(last_touch_ts=models_Max("touches__ts"))
+        .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
         .order_by("name")
     )
     if firm_id.isdigit():
@@ -1845,7 +1868,7 @@ def contact_campaign_hidden(request: HttpRequest) -> HttpResponse:
             Contact.objects.for_user(request.user)
             .filter(id__in=hidden_ids, archived=False)
             .select_related("firm")
-            .annotate(last_touch_ts=models_Max("touches__ts"))
+            .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
             .order_by("name")
         )
         if hidden_ids
@@ -1934,7 +1957,7 @@ def contact_unrelated(request: HttpRequest) -> HttpResponse:
         for c in Contact.objects.for_user(request.user)
         .filter(archived=False)
         .select_related("firm")
-        .annotate(last_touch_ts=models_Max("touches__ts"))
+        .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
         .order_by("name")
         if c.id not in campaign_ids
     ]
@@ -2005,7 +2028,7 @@ def _parked_cohorts(user) -> list[dict]:
         Contact.objects.for_user(user)
         .filter(archived=False, thread_state="parked")
         .select_related("firm")
-        .annotate(last_touch_ts=models_Max("touches__ts"))
+        .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
         .order_by("name")
     )
     if not parked:
