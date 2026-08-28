@@ -705,14 +705,6 @@ def app_event_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 # ---------------------------------------------------------------------------
 # 2. Contact list + detail.
 # ---------------------------------------------------------------------------
-# Needing-action buckets, in display order (radar layout).
-_ACTION_GROUPS = [
-    ("first_note", "Send the First Note", {"first_outreach"}),
-    ("follow_up", "Follow Up", {"follow_up", "reping"}),
-    ("thank_you", "Send the Thank-You Note", {"thank_you"}),
-    ("others", "Others", set()),  # catch-all: confirm_chat, advance, maintain, park
-]
-
 # Contact-card sections below the coverage board, in display order.
 _WARMTH_SECTIONS = [
     ("replied", "Replied"),
@@ -930,10 +922,11 @@ def _contact_card(c, *, tier, today, cadence=None, as_of=None):
 @login_required
 def contact_list(request: HttpRequest) -> HttpResponse:
     """The Network board (radar layout): scope tabs (US / Hong Kong /
-    School), Contacts Needing Action grouped by the cadence verb, Firm
-    Coverage grouped by the user's own tiers (draggable — tier drives the
-    cadence engine's priorities), then full contact cards sectioned by
-    warmth."""
+    School), Firm Coverage grouped by the user's own tiers (draggable —
+    tier drives the cadence engine's priorities), then full contact cards
+    sectioned by warmth. Bulk selection lives on those contact cards
+    (`contacts_bulk`, below) — the cadence-verb queue this board used to
+    duplicate now renders only on Today (`crm/today.py`)."""
     from .today import _cadence_params
 
     # One read of the user's cadence overrides for every card's staleness
@@ -1094,39 +1087,23 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         or not interested_regions or code in interested_regions
     ]
 
-    # --- Contacts Needing Action (left column) -------------------------
+    # The "Contacts Needing Action" panel that used to render here (verb
+    # lanes: first note / follow up / thank-you / others) is gone — it and
+    # Today's own cockpit rendered the SAME `_build_actions` output under
+    # different labels, one queue on two pages. The queue lives on Today
+    # now; this board's job is who-do-I-know-and-where-are-the-gaps, not
+    # what-do-I-do-now. See crm/today.py::_cockpit_context for the surface
+    # that still owns it.
+    #
+    # `_build_actions` itself is STILL called above (`actions, _ =
+    # _build_actions(user)`) — this scope filter is the one thing that
+    # survives from the removed panel. `act_by_firm` below still needs a
+    # per-firm count of open actions to break ties in the tier sort
+    # (`cards.sort(key=lambda fc: (-fc["act_now"], ...))`); it does not
+    # render, so it never has to agree with a lane that no longer exists.
     actions = [a for a in actions if a["contact"]["id"] in scoped_ids]
-    grouped = {key: [] for key, _, _ in _ACTION_GROUPS}
-    for a in actions:
-        for key, _, kinds in _ACTION_GROUPS:
-            if a["action"] in kinds:
-                grouped[key].append(a)
-                break
-        else:
-            grouped["others"].append(a)
-    # `cadence.due_actions` sorts its OWN output by (priority, tier, firm
-    # name) — never by how long the contact has gone quiet, because it has
-    # no opinion on lane order. Once split into these verb-lanes, "Follow
-    # Up" alone can hold 80+ people, all the same action, all the same
-    # priority, differing only in how overdue they are — and that was the
-    # one thing the list wasn't sorted by. Longest-silent-first inside each
-    # lane, priority still breaking ties first (a re-ping guarding a real
-    # deadline outranks an ordinary follow-up regardless of either one's
-    # idle time). Not `_today_sort_key`: that key's leading term is
-    # `_today_class`, the Today page's OWN critical/momentum/cold split,
-    # which doesn't exist here — the lane a card is in already answers the
-    # question that term is for.
-    for items in grouped.values():
-        items.sort(key=lambda a: (
-            a["priority"], -a.get("idle_business_days", 0),
-            a["tier"], str(a["firm_name"]),
-        ))
-    action_groups = [
-        {"key": key, "label": label, "items": grouped[key]}
-        for key, label, _ in _ACTION_GROUPS
-    ]
 
-    # --- Firm Coverage (right column), grouped by the user's tiers -----
+    # --- Firm Coverage, grouped by the user's tiers ---------------------
     user_firms = list(
         UserFirm.objects.for_user(user).select_related("firm")
     )
@@ -1378,8 +1355,6 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             # the promise and the code can't drift apart.
             "sourcing_note": sourcing.DISCLOSURE,
             "adv_target": adv_target,
-            "action_groups": action_groups,
-            "action_total": len(actions),
             "tier_sections": tier_sections,
             "firm_total": len(user_firms),
             "sections": sections,

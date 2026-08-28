@@ -867,11 +867,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   /* ---- Network board (radar layout, Coverage light theme) ---- */
   .scope-tabs { margin-top: var(--s3); }
-  /* Both columns stretch to the same height; each is a title over a panel
-     that fills the remaining space. */
-  .net-board { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5);
-    align-items: stretch; margin-bottom: var(--s6); }
-  .net-actions, .net-coverage { display: flex; flex-direction: column; min-height: 0; }
+  /* This section used to share its row with a bulk-selection panel this
+     board no longer has (`.net-board`'s two-column grid, removed along with
+     it — see crm/views.py::contact_list). One column now: a title over a
+     panel that fills the width. */
+  .net-coverage { display: flex; flex-direction: column; min-height: 0;
+    margin-bottom: var(--s6); }
   .net-group { border-top: 1px solid var(--line); padding: var(--s3) 0; }
   .net-group:first-of-type { border-top: 0; padding-top: 0; }
   .net-group-head { display: flex; justify-content: space-between; align-items: baseline;
@@ -883,10 +884,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      because the name came down in three pieces at 131px wide and a flex
      line stretches every card to its tallest member.
 
-     The whole `repeat(auto-fill, minmax(190px, 1fr))` grid this rule used
-     to declare was dead: `.net-actions .net-minis` below overrides display,
-     template AND gap, and the action lane is the only place `.net-minis`
-     appears in any template. Stated once, in the terms that actually run. */
+     The action lane that produced this measurement is gone (its queue
+     moved to Today — see crm/views.py::contact_list), but the fix outlives
+     it: `.net-minis` now belongs to the Unplaced panel's per-firm groups,
+     which wrap the same way for the same reason — a pick-list, not a
+     gallery, however many cards land in it. */
   .net-minis { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
   .net-mini { background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--r-ctl); padding: 6px var(--s2); min-height: 44px;
@@ -920,11 +922,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      a 13px tick is not enough of a signal to count a selection from. */
   .net-mini.is-picked { border-color: var(--accent-line);
     background: var(--accent-soft); }
-  /* The name WRAPS. It used to be one nowrap line with an ellipsis, and in
-     the four-across action lane that lane is 554px, so a card is 131px and
-     the name gets whatever the fixed chrome leaves: 24px of padding, 2px of
-     border, a 13px checkbox, two 8px gaps and the 12px open-profile glyph —
-     67px of the 131px, leaving 64px for the text.
+  /* The name WRAPS, never truncates. The measurements below are from the
+     four-across action lane this rule was written for — that lane is gone
+     (its queue moved to Today, crm/views.py::contact_list), and the only
+     live user of `.net-mini-name` today is the Unplaced panel's per-firm
+     cards, which don't share the old lane's fixed width or column count.
+     The doctrine still holds there — a long name should grow its card
+     rather than lose characters to an ellipsis — so the rule (and the
+     history of why it exists) stays.
+
+     It used to be one nowrap line with an ellipsis, and in the four-across
+     action lane that lane is 554px, so a card is 131px and the name gets
+     whatever the fixed chrome leaves: 24px of padding, 2px of border, a
+     13px checkbox, two 8px gaps and the 12px open-profile glyph — 67px of
+     the 131px, leaving 64px for the text.
 
      Measured on the live board, every visible card was cut, and cut by
      almost nothing: "Mia Garcia" wanted 65px, "Mason Lee" 66px, "Lucas
@@ -932,15 +943,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      the board read "Lucas Si…", "Sofia Re…", "Ethan P…", which is the
      "unfinished" tell a reader clocks before they read a single word of it.
 
-     Widening the box is not available: the four-across count is itself a
-     considered fix (see the comment on .net-actions .net-minis below, which
-     went from five to four to bring ellipsised names down from 86 of 106 to
-     23), and a fifth pass of the same trade just moves the loss around.
-     So the card gives way instead — "Lucas" over "Silva", both words whole.
-     That is this board's own stated doctrine, written on .firm-card-name:
-     the box gives way, not the text. min-height is a FLOOR, the lane's rows
-     are auto, and the lane scrolls, so a two-line name simply makes its row
-     taller.
+     Widening the box was not available there: the four-across count was
+     itself a considered fix (went from five to four to bring ellipsised
+     names down from 86 of 106 to 23), and a fifth pass of the same trade
+     would only have moved the loss around. So the card gave way instead —
+     "Lucas" over "Silva", both words whole. That is this board's own
+     stated doctrine, written on .firm-card-name: the box gives way, not
+     the text. min-height is a FLOOR, never a fixed row height, so a
+     two-line name simply makes its row taller.
 
      STILL TRUE, and the wrap stays. What changed is how OFTEN it fires: the
      card is 179px now, not 131px, so the name gets ~118px against the 65-71px
@@ -1052,7 +1062,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .is-csearch-hidden { display: none; }
   @media (max-width: 560px) { .csearch-bar { flex-direction: column; } }
 
-  /* Both board columns share one pattern: the strip-title sits ABOVE a
+  /* Every board panel shares one pattern: the strip-title sits ABOVE a
      single surface panel. The panels have the SAME fixed height and always
      show the scrollbar lane at their right edge — the scrollbar is a
      permanent element of the widget, not an occasional apparition. */
@@ -1069,75 +1079,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     min-height: 40px; }
   .net-panel::-webkit-scrollbar-thumb:hover { background: var(--accent);
     border: 3px solid var(--paper); background-clip: padding-box; }
-
-  /* Left panel only: the four action sections split the panel into equal
-     quarters, and each quarter scrolls its own overflow. The panel itself
-     does not scroll — the sections do. */
-  /* The bulk form wraps the panel, so it is now the flex child of
-     `.net-actions` and has to carry the stretch the panel used to. Not
-     `display: contents` — that would drop the form's own box and, in some
-     engines, its semantics with it, for a layout a two-line rule fixes. */
-  .net-actions > form { display: flex; flex-direction: column; flex: 1;
-    min-height: 0; }
-  .net-actions .net-panel { display: flex; flex-direction: column; overflow: hidden;
-    padding: 0; }
-  .net-actions .net-group { flex: 1 1 0; min-height: 0;
-    display: flex; flex-direction: column; padding: var(--s4) var(--s5); }
-  .net-actions .net-group + .net-group { border-top: 1px solid var(--line); }
-  .net-actions .net-group-head { flex: none; }
-  /* THREE per row now, not four. The count went five → four to stop names
-     ellipsising, then the name was allowed to WRAP instead — and four-across
-     is what made the wrap expensive. At 131px a card gave the name 64px
-     against the 65-71px ordinary names measure, so it wrapped nearly always,
-     often into three pieces, and every card in that row stretched to match:
-     80/99/120/141px, avg 111.6px a contact.
-
-     Density is height per contact, not cards per row. Three flat one-line
-     cards cost a fraction of what four wrapped ones did (111.6px avg), and
-     the row that used to be the tallest is now the one that fits on one
-     line. The lost column is paid back several times over by the rows that
-     no longer exist. Padding and the height floor got a small bump back up
-     from the tightest fit — asked for directly, after the first pass read
-     as cramped rather than compact. */
-  /* FLEX, not grid, and the swap is load-bearing — it is what lets the name
-     above wrap at all.
-
-     As a grid this lane sized its rows to 58px and pinned every card there,
-     so a card whose name had wrapped to two lines had its second line cut
-     off by the card's own `overflow: hidden`: the horizontal truncation came
-     back as a vertical one. The row track was not measuring the wrapped
-     height. Asked directly, the card reported a 23px content contribution
-     against the 67-76px it actually occupies at 131px wide, so the track
-     resolved to the `min-height` floor and stopped there; `grid-auto-rows:
-     minmax(58px, auto)`, `align-self`, and dropping `overflow` were each
-     tried against the live board and none of them moved it.
-
-     A flex line's cross size is measured AFTER the item's main size is
-     resolved, which is exactly the order this needs: the card is sized to
-     131px first, the text wraps into that, and the line takes the height
-     that results. Same four columns, same 131px card, same gap — the basis
-     below just states in flex terms what the grid template stated.
-
-     min-height stays a FLOOR so a one-line card keeps a flat, uniform row;
-     taller is still allowed, which is what keeps the wrap safe. */
-  .net-actions .net-minis { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2);
-    flex: 1 1 0; min-height: 0; overflow-y: auto; align-content: flex-start;
-    padding-right: var(--s2);
-    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-  /* Two gaps between three cards; `0 0` so a lane holding one contact draws
-     a third-width card rather than one stretched across the whole lane.
-     `min-width: 0` lets a long single word shrink rather than force the lane
-     wider than its column. */
-  .net-actions .net-mini { flex: 0 0 calc((100% - 2 * var(--s2)) / 3); min-width: 0; }
-  .net-actions .net-minis::-webkit-scrollbar { width: 8px; }
-  .net-actions .net-minis::-webkit-scrollbar-thumb { background: var(--line-strong);
-    border-radius: 999px; }
-  .net-actions .net-none { flex: 1 1 0; display: flex; align-items: center;
-    justify-content: center; margin: 0; }
-  /* An empty lane gives up its quarter: header plus one quiet line, and the
-     populated lanes share the released height. */
-  .net-actions .net-group.is-empty { flex: 0 0 auto; }
-  .net-actions .net-group.is-empty .net-none { flex: none; padding: var(--s2) 0; }
 
   .net-legend { display: flex; gap: var(--s4); flex-wrap: wrap; align-items: center;
     font-size: var(--fs-s); color: var(--ink-2); margin-bottom: var(--s3); }
@@ -1341,7 +1282,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        cards materialise. */
     content-visibility: auto; contain-intrinsic-size: auto 212px; }
   .contact-card:hover { border-color: var(--accent-line); box-shadow: var(--shadow-1); }
+  /* Selected, for bulk actions (`crm:contacts_bulk` — see `#cc-bulk-form`
+     in the template). Same tint `.net-mini.is-picked` uses on the Unplaced
+     panel's cards: a 15px box is not enough of a signal on its own once a
+     dozen cards are picked across a scrolling grid. */
+  .contact-card.is-picked { border-color: var(--accent-line);
+    background: var(--accent-soft); }
   .cc-head { display: flex; gap: var(--s3); align-items: flex-start; }
+  /* The explicit selection control. NOT a wrapping <label> like
+     `.net-mini` — this card already has its own click targets (the mailto
+     link, Log Touch, Edit), so the box has to be its own deliberate target
+     rather than fighting those for the click. Sized like `.net-mini-check`
+     and aligned to the avatar's cap-height, not stretched to the card. */
+  .cc-check { flex: none; margin-top: 3px; accent-color: var(--accent);
+    width: 15px; height: 15px; cursor: pointer; }
   .cc-avatar { width: 40px; height: 40px; border-radius: 50%; flex: none;
     background: var(--accent-soft); color: var(--accent-ink);
     display: inline-flex; align-items: center; justify-content: center;
@@ -1368,31 +1322,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cc-btns { display: flex; gap: var(--s2); }
   .cc-btns .btn { padding: 6px 14px; font-size: var(--fs-xs); }
 
-  /* Below this breakpoint the two panels stack full-width and the PAGE is
-     what scrolls, so the desktop trick of pinning the panel to a fixed
-     height and splitting it four ways stops working: measured at 375px, the
-     panel resolved to 266px, the two EMPTY lanes took 99px each, and the two
-     lanes that actually held people got 32px — a header, and not one contact
-     visible, on every phone. Let the panel and its lanes size to what they
-     hold; a long lane still caps and scrolls itself rather than running away
-     with the page. */
+  /* Below this breakpoint the PAGE is what scrolls, so a panel pinned to a
+     fixed desktop height would just add a second, nested scrollbar inside
+     the one the phone already gives you. Let the panel size to what it
+     holds; a long list still caps and scrolls itself (`.contact-grid`,
+     `.net-minis`) rather than running away with the page. */
   @media (max-width: 900px) {
-    .net-board { grid-template-columns: 1fr; }
     .net-panel { height: auto; }
-    .net-actions .net-group { flex: 0 0 auto; }
-    .net-actions .net-minis { flex: 0 0 auto; max-height: 46vh; }
-  }
-  /* On a phone the lane is ~293px wide, and a third of that is under 100px —
-     less than the name needs, so the card would go back to breaking names
-     across three and four lines. Measured at 375px before this rule existed
-     (the four-across basis applied unconditionally, phone included): cards
-     67px wide and 245-536px TALL, one letter-stack per contact. One per row
-     instead. A full-width card gives the name and the firm a whole line
-     each and lands flat, at the same small height the desktop board reads
-     at — `.net-mini`'s own min-height and padding, not a phone-specific
-     value. */
-  @media (max-width: 560px) {
-    .net-actions .net-mini { flex: 0 0 100%; }
   }
 
   /* The Compose draft editor on the contact page. */

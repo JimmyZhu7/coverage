@@ -276,121 +276,25 @@
   </section>
   {% endif %}
 
-  <div class="net-board">
-    {# ---- Left: Contacts Needing Action ---- #}
-    <section class="net-actions">
-      <h2 class="strip-title">Contacts Needing Action <span class="scrub-count">{{ action_total }}</span></h2>
-      {% comment %}
-      The whole panel is one form so a selection can span lanes — you can
-      park four people from Follow Up and one from Others in a single
-      submit. Plain checkboxes and submit buttons: the bar below works with
-      no JavaScript at all, and the script that follows only adds the
-      niceties (live count, shift-click ranges, per-lane select-all).
-      {% endcomment %}
-      <form id="bulk-form" method="post" action="{% url 'crm:contacts_bulk' %}">
-        {% csrf_token %}
-        {# Round-trips the region tab so a bulk action returns you to the #}
-        {# board you were looking at, not to "All". #}
-        <input type="hidden" name="scope" value="{{ scope }}">
-      <div class="net-panel">
-      {% for group in action_groups %}
-        {% comment %}`is-empty` releases the lane's flex share. The panel used
-        to split into equal quarters regardless, so a lane holding nothing
-        reserved ~200px of italic silence while "Follow up" squeezed 83
-        people into the same slice — dead space presented as symmetry.
-        Empty lanes collapse to their header + one line; the full lanes
-        divide what's left.{% endcomment %}
-        <div class="net-group{% if not group.items %} is-empty{% endif %}">
-          <div class="net-group-head">
-            <span>{{ group.label }}</span>
-            {% if group.items %}
-              {# Selects this lane and nothing else — "a whole block" in one #}
-              {# click, which is the case the multi-select exists for. JS #}
-              {# only; with no JS the per-card checkboxes still work. #}
-              <button type="button" class="lane-all" data-lane-all hidden>Select all</button>
-            {% endif %}
-            <span class="scrub-count">{{ group.items|length }}</span>
-          </div>
-          {% if group.items %}
-            {% comment %}
-            Sorted longest-silent-first within the lane (see contact_list()
-            in views.py) — a re-ping guarding a real deadline still floats
-            above an ordinary follow-up regardless of either one's idle
-            time, but two follow-ups no longer tie on nothing and fall back
-            to alphabetical-by-firm. The `title` is the only place that
-            ordering becomes legible: without it, a re-sorted wall of 83
-            names reads identically to an unsorted one.
-            {% endcomment %}
-            <div class="net-minis">
-              {% for a in group.items %}
-                {% comment %}
-                A <label> for the checkbox, not a div — clicking a label
-                toggles its control natively, so the whole card becomes a
-                selection target for free, no JS required for that part
-                (shift-range and the live count still need the script
-                below). Reported directly: most of the card used to be dead
-                space, responsive only over the 13px box itself.
+  {% comment %}
+  THE PANEL THAT USED TO BE HERE is gone. "Contacts Needing Action" and
+  Today's cockpit rendered the exact same `_build_actions` queue under
+  different lane labels — one queue, two pages — and it filled this whole
+  left column with four lanes that mostly read "Nothing right now" while
+  the contacts this board exists for sat to the right of it. The queue's
+  one home now is Today (crm/today.py::_cockpit_context); this board's job
+  is who-do-I-know-and-where-are-the-gaps, not what-do-I-do-now.
 
-                The small arrow is the one part of the card that still
-                OPENS the contact instead of selecting it, and it has to
-                stay real: a contact with zero touches (the "Send the First
-                Note" lane) appears on THIS card and nowhere else on the
-                page — the warmth sections below only ever hold contacts
-                who have been touched at least once. `stopPropagation`
-                keeps its click from also toggling the checkbox underneath.
-                {% endcomment %}
-                <label class="net-mini kin-reveal" style="--i:{{ forloop.counter0 }}" title="{{ a.reason|capfirst }}">
-                  <input class="net-mini-check" type="checkbox" name="ids"
-                         value="{{ a.contact.id }}"
-                         aria-label="Select {{ a.contact.name|smart_title }}">
-                  <span class="net-mini-text">
-                    <span class="net-mini-name">{{ a.contact.name|smart_title }}</span>
-                    {% comment %}
-                    The firm line is one line and may ellipsise (see
-                    .net-mini-firm). Its own `title` is what makes that
-                    honest — the card's title carries the action reason,
-                    not the firm, so without this the cut-off half of
-                    "Sixth Street Partners" had nowhere to be read.
-                    {% endcomment %}
-                    <span class="net-mini-firm{% if not a.firm_known %} is-missing{% endif %}"
-                          title="{{ a.firm_name|smart_title }}">{{ a.firm_name|smart_title }}</span>
-                  </span>
-                  <a class="net-mini-open" href="{% url 'crm:contact_detail' a.contact.id %}"
-                     aria-label="Open {{ a.contact.name|smart_title }}'s profile"
-                     title="Open profile">›</a>
-                </label>
-              {% endfor %}
-            </div>
-          {% else %}
-            <p class="net-none">Nothing right now.</p>
-          {% endif %}
-        </div>
-      {% endfor %}
-      {% comment %}
-      The bulk bar. Sticky to the bottom of the panel and `hidden` until
-      something is ticked, so it costs nothing on a board with no selection.
-      Every verb here is reversible, and each button says what it does in
-      the user's words rather than the model's — "Stop following up" is
-      `thread_state="parked"`, which is a term only this codebase uses.
-      Deliberately NO delete: see `_BULK_VERBS` in crm/views.py for why the
-      product has no hard-delete path for a contact at all.
-      {% endcomment %}
-      <div class="bulk-bar" data-bulk-bar hidden>
-        <span class="bulk-count"><b data-bulk-n>0</b> selected</span>
-        <span class="bulk-acts">
-          <button type="submit" name="verb" value="snooze" class="btn">Snooze 3d</button>
-          <button type="submit" name="verb" value="park" class="btn">Stop following up</button>
-          <button type="submit" name="verb" value="archive" class="btn">Archive</button>
-          <button type="button" class="btn bulk-clear" data-bulk-clear>Clear</button>
-        </span>
-      </div>
-      </div>
-      </form>
-    </section>
+  Its bulk-select form moved too, but not as a lane-spanning pick-list —
+  onto the real contact grid below (`.net-contacts`), where selecting from
+  a map of people you already see is the natural gesture, rather than a
+  queue with checkboxes rendered somewhere else on the page. Same verbs,
+  same endpoint (`crm:contacts_bulk`), same reversibility.
+  {% endcomment %}
 
-    {# ---- Right: Firm Coverage by tier (draggable) ---- #}
-    <section class="net-coverage">
-      <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a card between lanes to change a firm's tier.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
+  {# ---- Firm Coverage by tier (draggable) ---- #}
+  <section class="net-coverage">
+    <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a card between lanes to change a firm's tier.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
       <div class="net-panel">
       <div class="net-legend">
         <span><i class="dot dot-cold"></i> Emailed, No Reply</span>
@@ -514,8 +418,7 @@
         </div>
       {% endfor %}
       </div>
-    </section>
-  </div>
+  </section>
 
   {# ---- Full contact cards, by warmth ---- #}
   <section class="net-contacts" id="net-contacts">
@@ -528,6 +431,19 @@
         <a href="?scope={{ unplaced_scope }}">Place them</a></p>
     {% endif %}
     {% include "crm/_contact_search.html" with target="net-contacts" %}
+    {% comment %}
+    Bulk selection, moved off the removed "Contacts Needing Action" panel
+    and onto the grid itself — the whole grid is one form, exactly like
+    that panel's was, so a selection can span sections (a few from Replied,
+    a few from Emailed-No-Reply, one submit). Same three verbs, same
+    endpoint (`crm:contacts_bulk`), same reversibility; only where the
+    checkbox lives has changed.
+    {% endcomment %}
+    <form id="cc-bulk-form" method="post" action="{% url 'crm:contacts_bulk' %}">
+      {% csrf_token %}
+      {# Round-trips the region tab so a bulk action returns you to the #}
+      {# board you were looking at, not to "All". #}
+      <input type="hidden" name="scope" value="{{ scope }}">
     {% for section in sections %}
       {% comment %}
       Replied/Chatted/Advocates are small and worth seeing at a glance, so
@@ -557,6 +473,17 @@
                    data-touch="{% if card.c.last_touch_ts %}{{ card.c.last_touch_ts|date:'U' }}{% endif %}"
                    data-search="{{ card.c.name }} {% if card.c.firm %}{{ card.c.firm.name }}{% else %}{{ card.c.firm_text }}{% endif %} {{ card.c.role }} {{ card.school }}">
                 <div class="cc-head">
+                  {% comment %}
+                  The card's own checkbox, not a wrapping <label>: unlike
+                  `.net-mini`, this card is already full of its own click
+                  targets (the mailto link, Log Touch, Edit) — turning the
+                  whole card into a label would fight every one of them for
+                  the click. So the box is the explicit, deliberate target,
+                  same as ticking a row in a mail client.
+                  {% endcomment %}
+                  <input class="cc-check" type="checkbox" name="ids"
+                         value="{{ card.c.id }}"
+                         aria-label="Select {{ card.c.name|smart_title }}">
                   {% comment %}The staleness ring: silence made visible. The
                   ring drains as the cadence clock this contact runs on is
                   consumed — full ring means the engine is about to nag. The
@@ -601,52 +528,61 @@
         {% endif %}
       </details>
     {% endfor %}
+      {% comment %}
+      The bulk bar. Sticky to the bottom of the viewport and `hidden` until
+      something is ticked, so it costs nothing on a board with no selection.
+      Every verb here is reversible, and each button says what it does in
+      the user's words rather than the model's — "Stop following up" is
+      `thread_state="parked"`, which is a term only this codebase uses.
+      Deliberately NO delete: see `_BULK_VERBS` in crm/views.py for why the
+      product has no hard-delete path for a contact at all.
+      {% endcomment %}
+      <div class="bulk-bar" data-cc-bulk-bar hidden>
+        <span class="bulk-count"><b data-cc-bulk-n>0</b> selected</span>
+        <span class="bulk-acts">
+          <button type="submit" name="verb" value="snooze" class="btn">Snooze 3d</button>
+          <button type="submit" name="verb" value="park" class="btn">Stop following up</button>
+          <button type="submit" name="verb" value="archive" class="btn">Archive</button>
+          <button type="button" class="btn bulk-clear" data-cc-bulk-clear>Clear</button>
+        </span>
+      </div>
+    </form>
   </section>
 </div>
 
 {% script %}
-  // Bulk selection on the actions panel. Progressive enhancement only: the
-  // checkboxes and the submit buttons are real form controls that work
-  // without any of this — the script adds the live count, shift-click
-  // ranges, and the per-lane "Select all" (which is hidden in markup and
-  // revealed here, so it never appears as a dead control when JS is off).
+  // Bulk selection on the contact grid (moved off the removed "Contacts
+  // Needing Action" panel — see the comment above `#cc-bulk-form` in the
+  // template). Progressive enhancement only: the checkboxes and the submit
+  // buttons are real form controls that work without any of this — the
+  // script adds the live count and shift-click ranges.
   (function () {
-    var form = document.getElementById("bulk-form");
+    var form = document.getElementById("cc-bulk-form");
     if (!form) return;
-    var bar = form.querySelector("[data-bulk-bar]");
-    var count = form.querySelector("[data-bulk-n]");
+    var bar = form.querySelector("[data-cc-bulk-bar]");
+    var count = form.querySelector("[data-cc-bulk-n]");
     var boxes = Array.prototype.slice.call(
-      form.querySelectorAll(".net-mini-check"));
+      form.querySelectorAll(".cc-check"));
     if (!boxes.length) return;
     var lastIdx = null;
 
     function sync() {
+      // Exactly the checkboxes on the page, exactly as ticked — the same
+      // count that gets posted, so the bar and the confirm dialog below
+      // can never name a number bigger than what is actually selected.
       var n = boxes.filter(function (b) { return b.checked; }).length;
       count.textContent = n;
       bar.hidden = n === 0;
-      // The tint lives on the CARD, which has no :checked of its own —
-      // `:has()` would do it in CSS but is worth not depending on for a
-      // state this load-bearing.
       boxes.forEach(function (b) {
-        b.closest(".net-mini").classList.toggle("is-picked", b.checked);
+        b.closest(".contact-card").classList.toggle("is-picked", b.checked);
       });
     }
-
-    // The card is a <label>, so clicking it forwards to the checkbox —
-    // EXCEPT most browsers already skip that forwarding when the actual
-    // click landed on another interactive descendant, like this anchor.
-    // That skip is real but not something to depend on sight-unseen for a
-    // control this load-bearing: stopping propagation here makes the
-    // outcome certain instead of implementation-defined, at zero cost.
-    form.querySelectorAll(".net-mini-open").forEach(function (open) {
-      open.addEventListener("click", function (e) { e.stopPropagation(); });
-    });
 
     boxes.forEach(function (box, i) {
       box.addEventListener("click", function (e) {
         // Shift-click extends from the last box touched — the gesture
         // every mail client uses, and the one that makes "a whole block"
-        // one action instead of eighty-three.
+        // one action instead of one at a time.
         if (e.shiftKey && lastIdx !== null) {
           var lo = Math.min(lastIdx, i), hi = Math.max(lastIdx, i);
           for (var j = lo; j <= hi; j++) boxes[j].checked = box.checked;
@@ -656,32 +592,18 @@
       });
     });
 
-    form.querySelectorAll("[data-lane-all]").forEach(function (btn) {
-      btn.hidden = false;
-      btn.addEventListener("click", function () {
-        var lane = btn.closest(".net-group");
-        var mine = Array.prototype.slice.call(
-          lane.querySelectorAll(".net-mini-check"));
-        // Toggle: a second click clears the lane it just filled.
-        var fill = mine.some(function (b) { return !b.checked; });
-        mine.forEach(function (b) { b.checked = fill; });
-        btn.textContent = fill ? "Clear lane" : "Select all";
-        sync();
-      });
-    });
-
-    form.querySelector("[data-bulk-clear]").addEventListener("click", function () {
+    form.querySelector("[data-cc-bulk-clear]").addEventListener("click", function () {
       boxes.forEach(function (b) { b.checked = false; });
-      form.querySelectorAll("[data-lane-all]").forEach(function (b) {
-        b.textContent = "Select all";
-      });
       lastIdx = null;
       sync();
     });
 
     // Archive is the one verb that takes people OFF the board, so it is the
     // one that asks. Snooze and park both leave everyone visible and
-    // reverse themselves; a confirm on those would be noise.
+    // reverse themselves; a confirm on those would be noise. `n` is read
+    // fresh from the checked boxes at submit time, same as `sync()` above —
+    // the number named in the dialog is the number that gets posted, never
+    // a separately-derived count.
     form.addEventListener("submit", function (e) {
       var verb = e.submitter && e.submitter.value;
       var n = boxes.filter(function (b) { return b.checked; }).length;
