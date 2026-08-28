@@ -37,9 +37,33 @@ walks the same URL as a plain page load.
             stays on the anchor so the visual design is untouched.{% endcomment %}
             <h2 class="firmcol-h"><a class="firmcol-name" href="{% url 'directory:firm_detail' cl.firm_slug %}">{{ cl.firm_name|smart_title }}</a></h2>
             <span class="firmcol-meta">{% if cl.category %}{{ cl.category }} · {% endif %}{{ cl.open_count }} open</span>
+            {% comment %}
+            THIRD LINE — cut to what a target firm's tier actually is, dropped
+            entirely everywhere else.
+
+            "Untiered" used to render on every firm you have NOT targeted —
+            which, on a default board, is most of them — stating the obvious
+            (this isn't one of your firms) as if it were a fact about the
+            firm. `cl.is_mine` already carries that distinction, honestly, via
+            the column's own accent ring; a tier only means something once a
+            firm IS on your list, so the pill now renders only then.
+
+            "N closing" (the old `cl.closing_count`) is cut outright, not
+            folded: it counted every dated-and-not-passed role at the firm,
+            which is not "closing soon" (the fuse/countdown on every card
+            below already own that, per role) — an aggregate next to the
+            specific date it competes with, without changing what to open
+            next. See `_columns.html`'s own history for the count; nothing
+            downstream reads `cl.closing_count` any more.
+            {% endcomment %}
+            {% comment %}The div itself always renders, even holding nothing —
+            see `test_firmcol_head.py`: a header that sometimes carries this
+            box and sometimes omits it is the exact alignment bug that test
+            guards (an id stack's height depends on what's inside it, and
+            `align-items: flex-start` only holds every name to the same top
+            edge if every column's box is there to be measured).{% endcomment %}
             <div class="firmcol-stats">
-              <span class="firmcol-tier{% if cl.is_mine %} is-mine{% endif %}">{% if cl.tier %}Tier {{ cl.tier }}{% else %}Untiered{% endif %}</span>
-              {% if cl.closing_count %}<span class="fc-stat fc-closing">{{ cl.closing_count }} closing</span>{% endif %}
+              {% if cl.is_mine %}<span class="firmcol-tier is-mine">{% if cl.tier %}Tier {{ cl.tier }}{% else %}Untiered{% endif %}</span>{% endif %}
             </div>
           </div>
         </header>

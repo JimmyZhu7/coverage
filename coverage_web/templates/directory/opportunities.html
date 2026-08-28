@@ -101,9 +101,15 @@
     The <legend> is visible, styled like the uppercase micro-captions on row 2.
     It replaces the old "Role Type" caption rather than hiding beside it.
 
-    `other` and `all` are NOT drawn here. They are opt-in modes, reachable via
-    the subset sentence's link or a ?role= deep link — see the conditional
-    fifth segment below.
+    `other` is NOT drawn here — it stays an opt-in mode, reachable only by a
+    ?role= deep link, see the conditional fifth segment below. `all`
+    ("Everything") IS drawn here, as a real fifth pill with its own live
+    count: it used to be the same kind of deep-link-only opt-in, reachable
+    through the header's subset sentence, but that sentence was removed
+    (2026-08-27) and its escape hatch had to stay one action away — so it is
+    now a normal, always-checkable segment like the four campus buckets
+    beside it (`.seg-all`, muted rather than accent-tinted, because choosing
+    it is not a recommendation).
     {% endcomment %}
     <fieldset class="seg">
       <legend>Role type</legend>
@@ -118,14 +124,16 @@
         {% endfor %}
         {% if role_optin_segment %}
           {% comment %}
-          The conditional fifth segment. It exists for deep-link honesty — with
-          ?role=all the bar must not draw four campus pills over a feed showing
-          everything — but its structural job matters more: A RADIO GROUP WITH
-          NO CHECKED MEMBER SERIALIZES NOTHING. Without a checked radio here,
-          the next htmx GET (the moment the student touches Region or Search)
-          would carry no `role` at all, silently resetting the mode to campus
-          and dropping the roles the user explicitly asked to see. Muted grey,
-          full width, and never a sibling of the four campus options.
+          The conditional fifth segment, for `other` alone now (`all` graduated
+          to a normal segment in the loop above). It exists for deep-link
+          honesty — with ?role=other the bar must not draw five pills, none
+          checked, over a feed of experienced rows — but its structural job
+          matters more: A RADIO GROUP WITH NO CHECKED MEMBER SERIALIZES
+          NOTHING. Without a checked radio here, the next htmx GET (the moment
+          the student touches Region or Search) would carry no `role` at all,
+          silently resetting the mode to campus and dropping the roles the
+          user explicitly asked to see. Muted grey, full width, and never a
+          sibling of the campus options.
           {% endcomment %}
           <input class="seg-input" type="radio" name="role" id="{{ role_optin_segment.input_id }}" value="{{ role_optin_segment.value }}" checked>
           <label class="seg-pill seg-optin" for="{{ role_optin_segment.input_id }}">{{ role_optin_segment.label }} (<span id="{{ role_optin_segment.count_id }}">{{ role_optin_segment.count }}</span>)</label>
@@ -228,11 +236,35 @@
       need to score year + region + track + eligibility together, which is
       what `directory.recommend.recommend()` already does for Picked for
       You; that's a second control, not a rename of this one.
+
+      Unchecking IS the "board says what it's not showing" guarantee here:
+      the control that hides these rows is the control that brings them
+      back, with the same click, so nothing states the count anywhere else.
       {% endcomment %}
       {% if fit_available %}
         <label class="fit-toggle" title="Hide roles whose own text states a requirement you don't meet. Roles that state nothing always show.">
           <input type="checkbox" name="fit" value="1"{% if fit %} checked{% endif %}>
           <span>Eligible only</span>
+        </label>
+      {% endif %}
+
+      {% comment %}
+      Repeat listings, folded by default (see directory.dupes.fold_duplicates)
+      — some firms genuinely file one job as several requisitions, and this is
+      the one hide on the page with no other control that causes it. It used
+      to be reachable only through a link in the header's subset sentence
+      ("146 repeat listings"); that sentence is gone (2026-08-27) so this
+      checkbox is its replacement, in the same plain shape `.fit-toggle`
+      already uses and deliberately uncounted for the same reason: a number
+      here would need the same OOB-refresh machinery the segmented counts get,
+      and the control's own reachability is the guarantee, not the figure.
+      Hidden at zero, same rule the toggle above follows — a student with
+      nothing folded is not shown a route to an empty reveal.
+      {% endcomment %}
+      {% if hidden_dupes or dupes_shown %}
+        <label class="fit-toggle" title="Some firms file one posting as several requisitions, folded together by default.">
+          <input type="checkbox" name="dupes" value="1"{% if dupes_shown %} checked{% endif %}>
+          <span>Show repeat listings</span>
         </label>
       {% endif %}
 

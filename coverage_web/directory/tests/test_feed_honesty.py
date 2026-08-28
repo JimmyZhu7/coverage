@@ -149,19 +149,27 @@ def test_feed_and_firm_page_agree_a_passed_deadline_has_passed(client):
 
 
 # ---------------------------------------------------------------------------
-# A3 — the "Show everything" escape hatch must actually reveal the hidden
+# A3 — the "Everything" escape hatch must actually reveal the hidden
 # non-campus roles, preserving the student's other active filters.
+#
+# This used to be a link built from `show_all_qs` (role forced to "all",
+# every other querystring param copied across) surfaced in the header's
+# subset sentence. That sentence — and `show_all_qs` with it — is gone
+# (2026-08-27, "take this thing away"): "Everything" is a normal segment in
+# the Role Type control now, a real form field the browser's own
+# serialization carries alongside every other filter, so there is nothing
+# left to build. The guarantee is asked the same way regardless.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-def test_show_all_qs_actually_shows_the_hidden_roles(client):
+def test_the_everything_segment_actually_shows_the_hidden_roles(client):
     firm = _firm()
     _opp(firm, "https://x/1", bucket="other", region="hk")  # hidden by the default view
     resp = client.get(reverse("opportunities"), {"region": "hk"})
-    show_all_qs = resp.context["show_all_qs"]
-    assert show_all_qs, "show_all_qs must not be empty"
+    everything = next(s for s in resp.context["role_segments"] if s["value"] == "all")
+    assert everything["count"] == 1, "the Everything segment names the hidden role itself"
 
-    follow = client.get(f"{reverse('opportunities')}?{show_all_qs}")
+    follow = client.get(reverse("opportunities"), {"region": "hk", "role": "all"})
     assert follow.context["total"] == 1                # the hidden role is now shown
     assert follow.context["selected"]["role"] == "all"
     assert follow.context["selected"]["region"] == "hk"  # other filters preserved
@@ -484,11 +492,15 @@ def test_the_fit_filter_hides_only_blocking_verdicts_and_says_so(client, student
     assert "Keep Me Intern" in body
     assert "Silent Keeps Intern" in body, "silence never hides"
     assert "Hide Me Intern" not in body
-    # The wording moved into the merged hidden-counts line (four stacked
-    # paragraphs became one sentence with a link per reason); the guarantee
-    # is unchanged — the count is stated and its undo is reachable.
-    assert "1 you don't qualify for" in body, "the scope line owns honesty"
-    assert "show_unfit" in body or "fit=0" in body or "Also hidden" in body or "Hidden:" in body
+    # The wording used to live in the header's merged hidden-counts sentence
+    # ("1 you don't qualify for ... Also hidden: ..."). That sentence is gone
+    # (2026-08-27, "take this thing away") and the guarantee moved to the
+    # control that causes the hide: the Eligible-only checkbox renders
+    # checked, and unchecking it (the follow-up request below) is the
+    # one-click reversal — no count needed anywhere else.
+    assert 'name="fit" value="1" checked' in body
+    restored = client.get("/opportunities/").content.decode()
+    assert "Hide Me Intern" in restored, "unchecking the toggle is the escape hatch"
 
 
 @pytest.mark.django_db

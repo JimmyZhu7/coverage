@@ -72,15 +72,24 @@ without cutting text off.
   </div>
 
   {% comment %}
-  One meta row, always present: status then provenance. "First seen"
-  used to ALSO ride as a badge in the top row, so 857 cards stated
+  One meta row, always present: status, then provenance, trailing. "First
+  seen" used to ALSO ride as a badge in the top row, so 857 cards stated
   the same fact twice — once as "First seen 3d ago" and again as
-  "· seen 3d ago". Said once, here, next to the status it
-  qualifies.
+  "· seen 3d ago". Said once, here.
 
   It is deliberately "first seen", not "posted": first_seen is when
   the row entered OUR database. A bulk import once wore "New" on
   794 of 805 roles at once, which is the bug this wording closes.
+
+  It sits at the FAR end of the row now, not beside the deadline it used to
+  lean on: one names provenance, the other names the decision, and a founder
+  review flagged the two competing for the same glance. `margin-left: auto`
+  on `.meta-seen` (see _styles.html) pushes it — and the Read button after
+  it — away from the status, so the row reads as "what to do" (left) then
+  "where this came from, and how to act on it" (right), instead of three
+  equally-weighted facts in a line. The words are unchanged: still visible
+  text a screen reader reads plainly, no title-only caveat needed for a fact
+  this quiet.
   {% endcomment %}
   {% comment %}
   FACT CHIPS — what the posting itself says about applying: sponsorship, pay,
@@ -128,7 +137,7 @@ without cutting text off.
       <span class="meta-status meta-undated">No date posted</span>
     {% endif %}
     {% if r.seen_days is not None %}
-      <span class="meta-seen">· first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>
+      <span class="meta-seen">first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>
     {% endif %}
     {% comment %}
     Read, only where there is something to read. The description was fetched

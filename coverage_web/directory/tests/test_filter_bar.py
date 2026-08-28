@@ -85,17 +85,24 @@ def _checked_roles(html):
 def test_the_four_campus_segments_render_with_live_counts(client, bar):
     resp = _get(client)
     values = [s["value"] for s in resp.context["role_segments"]]
-    assert values == ["", "insight", "internship", "entry_level"]
+    # "all" ("Everything") is a fifth, always-drawn segment now (2026-08-27):
+    # it used to be a deep-link-only opt-in, reachable only through the
+    # header's subset sentence; that sentence is gone and its escape hatch
+    # had to stay one click away, so it graduated to a normal segment here.
+    assert values == ["", "insight", "internship", "entry_level", "all"]
     counts = {s["value"]: s["count"] for s in resp.context["role_segments"]}
-    assert counts == {"": 4, "insight": 1, "internship": 3, "entry_level": 0}
+    assert counts == {"": 4, "insight": 1, "internship": 3, "entry_level": 0, "all": 5}
     html = resp.content.decode()
     assert "All Campus (<span id=\"cnt-role-campus\">4</span>)" in html
+    assert "Everything (<span id=\"cnt-role-all\">5</span>)" in html
 
 
-def test_other_and_all_are_not_drawn_as_sibling_options(client, bar):
-    """Scope is not a filter. The two opt-in modes must not sit in the control
-    as if they were a fifth and sixth campus bucket — they are reachable by
-    deep link and by the subset sentence's link, and nowhere else."""
+def test_other_is_not_drawn_as_a_sibling_option(client, bar):
+    """Scope is not a filter. `other` (experienced rows outside the four
+    campus buckets) must not sit in the control as if it were a fifth bucket
+    — it is reachable only by deep link. `all` ("Everything") is the one
+    exception: it is a real, always-checkable mode now (see the test above),
+    not a filter over campus roles, so it belongs beside them."""
     resp = _get(client)
     assert resp.context["role_optin_segment"] is None
     assert [s["value"] for s in resp.context["role_segments"]].count("other") == 0
@@ -110,28 +117,60 @@ def test_exactly_one_segment_is_always_checked(client, bar):
         assert len(_checked_roles(html)) == 1, f"role={role!r}"
 
 
-@pytest.mark.parametrize("role,label,count", [
-    ("all", "Everything", 5),
-    ("other", "Other / Experienced", 1),
-])
-def test_optin_deep_link_renders_the_conditional_fifth_segment(client, bar, role, label, count):
-    resp = _get(client, role=role)
+def test_everything_is_a_normal_checkable_segment_not_a_deep_link_echo(client, bar):
+    """`all` used to only ever render CHECKED, as the conditional fifth
+    segment acknowledging a deep link — never a sibling a student could
+    simply click. It is a normal segment now: unchecked by default, and
+    checked like any of the other four once selected."""
+    default = _get(client)
+    everything = next(s for s in default.context["role_segments"] if s["value"] == "all")
+    assert everything["checked"] is False
+    assert 'id="seg-role-all" value="all"' in default.content.decode()
+    assert 'id="seg-role-all" value="all" checked' not in default.content.decode()
+    assert default.context["role_optin_segment"] is None
+
+    picked = _get(client, role="all")
+    everything = next(s for s in picked.context["role_segments"] if s["value"] == "all")
+    assert everything["checked"] is True
+    assert _checked_roles(picked.content.decode()) == ("all",)
+    # No conditional fifth segment fires for "all" any more — the normal
+    # segment above is the whole story, and firing both would check two
+    # radios sharing one value.
+    assert picked.context["role_optin_segment"] is None
+
+
+def test_optin_deep_link_renders_the_conditional_fifth_segment(client, bar):
+    """`other` alone still uses this mechanism — `all` graduated to a normal
+    segment (see the tests above)."""
+    resp = _get(client, role="other")
     seg = resp.context["role_optin_segment"]
-    assert seg is not None and seg["value"] == role and seg["count"] == count
+    assert seg is not None and seg["value"] == "other" and seg["count"] == 1
     html = resp.content.decode()
-    assert f"{label} (<span id=\"cnt-role-{role}\">{count}</span>)" in html
+    assert 'Other / Experienced (<span id="cnt-role-other">1</span>)' in html
     # And it is the checked one, so the bar states its own mode.
-    assert _checked_roles(html) == (role,)
+    assert _checked_roles(html) == ("other",)
 
 
 @pytest.mark.parametrize("role", ["all", "other"])
 def test_optin_mode_survives_the_next_filter_change(client, bar, role):
     """THE MODE-RESET REGRESSION. Load an opt-in mode, then change Region the
-    way the htmx form does — carrying whatever the form serializes. Without the
-    fifth segment the group has no checked member, `role` is absent from that
-    request, and the view silently re-scopes to campus."""
+    way the htmx form does — carrying whatever the form serializes. Without a
+    checked member the group has no checked member, `role` is absent from
+    that request, and the view silently re-scopes to campus.
+
+    `all` and `other` now keep that checked member two different ways —
+    `all` as a normal segment, `other` as the conditional fifth — so both are
+    asked here, reading the checked state from wherever each one actually
+    lives."""
+    def _is_checked(ctx, role):
+        if role == "other":
+            seg = ctx["role_optin_segment"]
+            return seg is not None and seg["value"] == role
+        return any(s["value"] == role and s["checked"] for s in ctx["role_segments"])
+
     first = _get(client, role=role)
     assert _checked_roles(first.content.decode()) == (role,)
+    assert _is_checked(first.context, role)
 
     # The browser would submit the checked radio's value alongside the new
     # region. Assert it is still there after the round trip, in the context AND
@@ -140,7 +179,7 @@ def test_optin_mode_survives_the_next_filter_change(client, bar, role):
     assert second.context["selected"]["role"] == role
     assert _checked_roles(second.content.decode()) == (role,)
     # …and the mode genuinely still applies, rather than merely being echoed.
-    assert second.context["role_optin_segment"]["value"] == role
+    assert _is_checked(second.context, role)
 
 
 def test_an_unrecognised_role_checks_all_campus(client, bar):
@@ -183,10 +222,16 @@ def test_region_counts_match_what_the_filter_returns(client, bar):
 
 
 def test_a_concrete_region_says_what_it_is_hiding(client, bar):
+    """The header used to state this in its own sentence ("N with no tracked
+    region"). That sentence is gone (2026-08-27, "take this thing away") and
+    needed no relocation: the Region select's own "Unstated (N)" option
+    already carries the same live count, one click away, regardless of which
+    concrete region is currently picked."""
     resp = _get(client, region="hk")
     assert resp.context["hidden_region"] == 1
-    body = resp.content.decode()
-    assert "with no tracked region" in body
+    unstated = next(o for o in resp.context["facets"]["regions"] if o["value"] == REGION_NONE)
+    assert unstated["count"] == 1
+    assert 'value="none">Unstated (1)</option>' in resp.content.decode()
     # The escape hatch is built from the LIVE querystring, not a bare "?" —
     # it must preserve the other filters while flipping region to `none`.
     qs = resp.context["show_unregioned_qs"]
@@ -195,10 +240,9 @@ def test_a_concrete_region_says_what_it_is_hiding(client, bar):
     assert follow.context["total"] == 1
 
 
-def test_any_region_hides_nothing_and_says_nothing(client, bar):
+def test_any_region_hides_nothing(client, bar):
     resp = _get(client)
     assert resp.context["hidden_region"] == 0
-    assert "with no tracked region" not in resp.content.decode()
 
 
 def test_an_unrecognised_region_is_a_no_op_not_an_empty_page(client, bar):
@@ -277,36 +321,39 @@ def test_the_oob_fragment_never_swaps_the_form_or_an_input(client, bar):
 # The subset sentence, and where it is read.
 # ---------------------------------------------------------------------------
 
-def test_the_subset_sentence_renders_above_the_stat_strip(client, bar):
-    """It used to render at the BOTTOM of the results, below every firm card —
-    stating the single most important fact about the default view only to
-    readers who had already finished."""
+def test_the_subset_sentence_is_gone_from_the_header(client, bar):
+    """It used to render at the TOP of the results, above the stat strip and
+    every firm card — one line naming the campus-only scope, its hidden
+    count, and a "Show everything" link. Removed outright (2026-08-27,
+    "take this thing away"): the guarantee it made moved to the Role Type
+    control's own "Everything" segment (see the tests above), which states
+    its own live count and is a real, always-checkable mode rather than a
+    sentence with a link buried in it."""
     body = _get(client).content.decode()
-    line = body.index("experienced role")
+    assert "Showing campus roles only" not in body
+    assert "experienced role" not in body
+    assert ">Show everything</a>" not in body
+    # The escape hatch is one click away regardless — it just lives in the
+    # segmented control now, above the stat strip like the sentence used to.
     strip = body.index('class="stat-strip"')
+    everything = body.index('id="seg-role-all"')
     cards = body.index('class="firmcols"')
-    assert line < strip < cards
-    assert body.count("experienced role") == 1   # said once, never duplicated
+    assert everything < strip < cards
 
 
-def test_the_subset_sentence_states_the_hidden_count_and_links_out(client, bar):
+def test_the_everything_segment_states_its_own_count_honestly(client, bar):
+    """The wording moved, the honesty did not: the total behind "Everything"
+    genuinely includes the row the campus scope hides, with no paywall
+    theatre around a free, one-click mode. Checked against the segmented
+    control's own markup, not the whole document — whose stylesheet comments
+    legitimately discuss the no-paywall rule in prose."""
     resp = _get(client)
-    assert resp.context["hidden_other"] == 1
-    body = resp.content.decode()
-    assert "Showing campus roles only" in body
-    assert "1 experienced role hidden" in body
-    # Plain words, and a plain link: no paywall theatre around a free,
-    # one-click escape hatch. Asserted on the sentence itself rather than the
-    # whole document, whose stylesheet comments legitimately discuss the rule.
-    sentence = body[body.index("Showing campus roles only"):]
-    sentence = sentence[:sentence.index("</p>")]
-    assert ">Show everything</a>" in sentence
+    everything = next(s for s in resp.context["role_segments"] if s["value"] == "all")
+    assert everything["count"] == 5   # 4 campus rows + the 1 experienced row
+    html = resp.content.decode()
+    seg_list = html[html.index('class="seg-list"'):html.index("</fieldset>")]
     for word in ("premium", "Premium", "unlock", "Unlock", "Upgrade"):
-        assert word not in sentence
-
-
-def test_an_optin_mode_hides_nothing_so_says_nothing(client, bar):
-    assert "experienced role" not in _get(client, role="all").content.decode()
+        assert word not in seg_list
 
 
 # ---------------------------------------------------------------------------

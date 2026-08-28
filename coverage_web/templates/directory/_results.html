@@ -11,18 +11,18 @@ float to the top.
 {% include "directory/_scope.html" %}
 
 {% comment %}
-THE BOARD STATE — the totals and the shape of the cycle, bound into one unit.
+THE BOARD STATE — the running totals, on the boundary between what you ASKED
+for (the controls above) and what the board ANSWERS (the roles below). A
+hairline marks that boundary — the same rule the section labels wear.
 
-They answer one question between them ("what does the board look like right
-now": how many, and when they close), and they are the only two rows here
-that are always present.
-
-The hairline that used to mark the boundary above THIS div now sits above
-`#cov-scope` instead (see `_styles.html`'s `#cov-scope` rule) — it fences the
-whole status group (what's hidden, the save prompt, and this) as one bounded
-section, not just the bottom half of it. Grouped in this file rather than
-inside _cycle_band.html because that partial is shared with Settings'
-target-cycle picker, where there is no stat strip to bind to.
+The month-by-month cycle shape used to render here too, first as an always-on
+band, then folded behind a "See it by month" disclosure. Removed outright
+(2026-08-27, "take this thing away as well"): it was `role="img"`, drawn bars
+with no link or filter inside them, never something needed to reach the first
+role card, and the founder didn't want the disclosure either. `_cycle_band.html`
+itself is untouched — it is still Settings' target-cycle picker's own partial,
+just no longer called from here. The view stopped passing `cycle_months` for
+the same reason.
 {% endcomment %}
 <div class="board-state">
 <div class="stat-strip">
@@ -45,26 +45,6 @@ target-cycle picker, where there is no stat strip to bind to.
   {% if dash.fresh_count %}<span class="ss-item"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh ({{ dash.fresh_days }}d)</span>{% endif %}
   {% if checked_ago %}<span class="ss-item ss-checked">checked {{ checked_ago }} ago</span>{% endif %}
 </div>
-
-{% comment %}
-THE MONTH RAIL, FOLDED. Real navigation on this page is a link or a form
-control; this is neither — `_cycle_band.html` renders `role="img"`, drawn
-bars with a tooltip, nothing inside it is clickable, and it does not filter
-or scroll anything. That makes it the one row in the old six-band stack that
-was purely supplementary ("when does this cycle actually close", a fact nice
-to have, never needed to read the totals above it or to reach the first role
-card), so it is the one that moves behind a click rather than staying
-permanently paid for in height. `cycle_months` is checked here too (not just
-inside the include) so a call with nothing to draw never renders a toggle
-that opens onto emptiness — the same "never disclose to nothing" rule the
-filter bar's own <details> follows.
-{% endcomment %}
-{% if cycle_months %}
-<details class="cyc-fold">
-  <summary>See it by month</summary>
-  {% include "directory/_cycle_band.html" %}
-</details>
-{% endif %}
 </div>
 
 {% comment %}
@@ -113,7 +93,7 @@ exactly the moment it had something to say.
             <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% else %}None match this filter{% endif %}</span>
             {% comment %}
             The shared "why", as ONE text line in the firm columns' own third-
-            line voice ("TIER 1 · 56 CLOSING"), not a row of pills. Pills wrapped
+            line voice ("Tier 1"), not a row of pills. Pills wrapped
             the moment two reasons showed ("2027 INTAKE" + "2027 SUMMER
             INTERNSHIP" is 266px against a 236px row), and a wrapped stats row
             made this header 122px against its neighbours' 92px, pushing every

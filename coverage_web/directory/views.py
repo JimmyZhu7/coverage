@@ -1803,10 +1803,19 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # gave all six values equal billing while hiding the page's single most
     # important scoping decision behind a closed control.
     #
-    # `other` and `all` are deliberately absent from the four drawn segments —
-    # they are opt-ins, reachable by deep link or by the subset sentence's
-    # "Show everything" link, never a sibling option.
+    # `other` stays deliberately absent from the drawn segments — it is an
+    # opt-in, reachable only by deep link, never a sibling option. `all` used
+    # to be the same kind of opt-in, reachable only through the subset
+    # sentence's "Show everything" link; that sentence was removed from the
+    # header (2026-08-27, "take this thing away") and its escape hatch had to
+    # stay one action away, so `all` is now drawn here too — a real, always
+    # visible fifth segment ("Everything") with its own live count, not a
+    # deep-link-only acknowledgment. `ROLE_OPTIN` (still `(OTHER, "all")`) is
+    # left alone: `firm_detail`'s own simpler `?role=` toggle still reads it
+    # and still treats "all" as an opt-in there, where there is no segmented
+    # control to hold it.
     effective_role = _effective_role(role)
+    FEED_SEGMENT_VALUES = (*SEGMENT_VALUES, "all")
     role_segments = [
         {
             "value": v,
@@ -1819,22 +1828,27 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             "count_id": f"cnt-role-{v or 'campus'}",
             "css": f"seg-{v or 'campus'}",
         }
-        for v in SEGMENT_VALUES
+        for v in FEED_SEGMENT_VALUES
     ]
 
-    # THE CONDITIONAL FIFTH SEGMENT — deep-link honesty, and a real bug guard.
+    # THE CONDITIONAL FIFTH SEGMENT — deep-link honesty, and a real bug guard,
+    # now for `other` alone. `all` graduated to a normal segment above, so
+    # gating this on the full `ROLE_OPTIN` tuple would draw it twice — once as
+    # the always-visible pill, once again here — and check two radios sharing
+    # one value.
     #
-    # Two jobs. (1) With `?role=all` active the bar must say so rather than
-    # drawing four campus pills, none checked, over a feed showing 4,342 rows.
-    # (2) Far less obvious and far more damaging: a radio GROUP WITH NO CHECKED
-    # MEMBER SERIALIZES NOTHING. Without this segment, `?role=all` renders four
-    # unchecked radios, and the moment the student touches Region or Search the
-    # htmx GET goes out with no `role` key at all — the mode silently resets to
-    # campus and 3,456 roles vanish mid-interaction. A checked fifth radio
-    # keeps `role` in the serialization, which is why it is an input and not a
+    # Two jobs remain for `other`. (1) With `?role=other` active the bar must
+    # say so rather than drawing five pills, none checked, over a feed showing
+    # thousands of experienced rows. (2) Far less obvious and far more
+    # damaging: a radio GROUP WITH NO CHECKED MEMBER SERIALIZES NOTHING.
+    # Without this segment, `?role=other` renders five unchecked radios, and
+    # the moment the student touches Region or Search the htmx GET goes out
+    # with no `role` key at all — the mode silently resets to campus and every
+    # experienced row vanishes mid-interaction. A checked fifth radio keeps
+    # `role` in the serialization, which is why it is an input and not a
     # decorative chip.
     role_optin_segment = None
-    if role in ROLE_OPTIN:
+    if role == OTHER:
         role_optin_segment = {
             "value": role,
             "label": SEGMENT_LABELS[role],
@@ -1843,26 +1857,12 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             "count_id": f"cnt-role-{role}",
         }
 
-    # `effective_role`, not `role`: an unrecognised `?role=` renders the campus
-    # scope, so it is hiding the experienced rows too and must say so.
-    hidden_other = bucket_counts.get(OTHER, 0) if effective_role == "" else 0
-
-    # The "Show everything" escape hatch for `hidden_other`: role forced to
-    # "all", every other active filter preserved. Built from the live
-    # querystring, not hardcoded — the bug this replaced rendered a bare `?`
-    # (no `show_all_qs` in context at all), which is `/opportunities/?`: the
-    # default view, i.e. the exact page that hides the roles it promised to
-    # reveal.
-    show_all_params = request.GET.copy()
-    show_all_params["role"] = "all"
-    show_all_qs = show_all_params.urlencode()
-
     # ---- The region honesty line. Picking a concrete market excludes every
     # row whose location resolved to nothing (297 of 886 on the live set), and
     # before this the page said nothing about it. The number is read straight
     # off the Region facet's own "Other / Unstated" option — already crossed
     # against every other active filter — so the sentence and the option can
-    # never disagree. Same live-querystring construction as `show_all_qs`.
+    # never disagree.
     hidden_region = 0
     if region.lower() in REGION_ORDER:
         hidden_region = next(
@@ -1911,9 +1911,14 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # apprentice intakes as parallel reqs — and those reqs close on their own
     # schedules, so the rows must all stay in the database and stay
     # close-tracked. Only the render is collapsed. See directory.dupes.
-    rows, hidden_dupes = ([r for r in rows], 0) if request.GET.get(
-        "dupes", ""
-    ).strip() == "1" else fold_duplicates(rows, sticky_ids=sticky_ids)
+    # `dupes_shown` names the toggle's own state: the "Show repeat listings"
+    # checkbox in the filter bar (opportunities.html) is this control now,
+    # not a lone escape-hatch link — the count that used to live in the
+    # header's subset sentence rides that checkbox's label instead.
+    dupes_shown = request.GET.get("dupes", "").strip() == "1"
+    rows, hidden_dupes = ([r for r in rows], 0) if dupes_shown else fold_duplicates(
+        rows, sticky_ids=sticky_ids
+    )
 
     # The undo, built from the LIVE querystring like every other one on this
     # page — a hardcoded `?dupes=1` would silently drop the student's filters.
@@ -2314,15 +2319,17 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # count and the offer, and neither is anywhere near the card. See
     # `_scope.html` and the `scope_only` return below.
     scope_context = {
-        "hidden_count": len(hidden_ids),
-        "hidden_other": hidden_other,
-        "show_all_qs": show_all_qs,
         "hidden_region": hidden_region,
         "show_unregioned_qs": show_unregioned_qs,
         "hidden_fit": hidden_fit,
         "show_unfit_qs": _qs_without(request, "fit"),
         "hidden_dupes": hidden_dupes,
         "show_dupes_qs": show_dupes_qs,
+        # The "Show repeat listings" checkbox's own checked state
+        # (opportunities.html) — the control that replaced the header
+        # sentence's lone `show_dupes_qs` link, so it needs to render
+        # checked/unchecked like every other filter-bar toggle.
+        "dupes_shown": dupes_shown,
         # The lens→pipeline bridge's trigger: open roles whose text names the
         # user's year and which they have never touched (tracked or
         # dismissed both count as touched — "not for me" outranks "your
@@ -2372,7 +2379,6 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # while the data is radar-cadence; naming the age is what makes the
         # pulse honest.
         "checked_ago": _last_checked(),
-        "cycle_months": cycle_months(),
         "total": total,
         # Recommendation bar. `picks` empty + `has_profile` true is the honest
         # "nothing clears the bar" state; `has_profile` false is the

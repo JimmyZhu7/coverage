@@ -121,12 +121,22 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     color: var(--accent-ink); border-color: var(--accent-line); }
   .seg-input:checked + .seg-entry_level { background: var(--surface);
     color: var(--accent-ink); border-color: var(--accent); }
-  /* The conditional fifth segment (?role=all / ?role=other). Muted on purpose
-     — it states an opt-in mode honestly without dressing it up as a fifth
-     equal option. Grey, never an accent tint: this mode is not a
-     recommendation. It is only ever rendered CHECKED (it exists only while its
-     mode is active), so it has no unchecked state to contrast against; the
-     four unchecked campus pills beside it are what make it read as selected.
+  /* "Everything" — a real fifth segment now (2026-08-27), not the
+     deep-link-only opt-in it used to be: the header's subset sentence, whose
+     "Show everything" link was its only door, is gone, so this pill is the
+     one-click escape hatch in its place. Muted grey rather than an accent
+     tint on purpose, matching `.seg-optin` below — choosing it is not a
+     recommendation, it is a wider net, and it sits beside the four campus
+     pills as an equal, always-clickable fifth rather than a banner. */
+  .seg-input:checked + .seg-all { background: var(--surface);
+    color: var(--ink-3); border-color: var(--line-strong);
+    box-shadow: inset 0 0 0 1px var(--line-strong); }
+  /* The conditional fifth segment, for `?role=other` alone now. Muted on
+     purpose — it states an opt-in mode honestly without dressing it up as a
+     normal option. Grey, never an accent tint: this mode is not a
+     recommendation. It is only ever rendered CHECKED (it exists only while
+     its mode is active), so it has no unchecked state to contrast against;
+     the campus pills beside it are what make it read as selected.
 
      It sizes to its content here and only spans the full row at <=640px, where
      the 2x2 grid gives it a row of its own. Stretched across 1392px of desktop
@@ -857,10 +867,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .firmcol-tier.is-mine { color: var(--accent-ink); }
   .fc-stat { display: inline-flex; align-items: center; gap: var(--s2); }
   .fc-stat::before { content: "·"; color: var(--ink-3); }
-  .fc-closing { color: var(--stale-t); font-weight: var(--w-med); }
+  /* `.fc-closing` removed (2026-08-27): it styled the per-firm "N closing"
+     aggregate cut from `_columns.html` — every dated-and-not-passed role at
+     the firm, which is not the same claim as "closing soon" and duplicated
+     the specific countdown already on each role card below it without
+     changing what to open next. The rule is gone rather than left orphaned
+     so nobody reintroduces the count by reaching for a class that still
+     styles. `.fc-stat` itself stays: `.firmcol-why`'s shared-reasons line
+     still uses it. */
   /* Picked-for-you's third line: the reasons every pick shares, in the same
-     voice and on the same single line as a firm's "TIER 1 · 56 CLOSING". It
-     must never wrap — a second line here is what put this header 30px taller
+     voice and on the same single line as a firm's own tier pill. It must
+     never wrap — a second line here is what put this header 30px taller
      than its neighbours — so it shrinks and ellipsises instead, and the
      `title` carries every full sentence for anyone who wants the rest. */
   .firmcol-why { display: block; min-width: 0; flex: 1 1 auto; overflow: hidden;
@@ -1076,11 +1093,33 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .meta-soon { color: var(--stale-t); }
   .meta-upcoming { color: var(--accent-ink); }
   .meta-passed { color: var(--ink-3); }
-  /* Truncates before the status does — a clipped "Closes in 6 d" would be
+  /* Provenance, trailing. It used to sit directly beside the deadline status
+     with the same visual weight, so the row read as two competing facts
+     ("Closes today" · "first seen 35d ago") rather than one decision and
+     one footnote. `margin-left: auto` claims the row's slack space ahead of
+     it — pushing `.meta-seen` (and `.meta-read` after it, which already
+     carries its own `margin-left: auto`) to the row's trailing end, so the
+     status alone owns the leading position.
+     Font size is UNCHANGED on purpose — still `--fs-xs`, the same size the
+     row already used — rather than a size down: a smaller size here would
+     have been a new, thirteenth type treatment on this card family for a
+     single element, working against "fewer distinct type treatments"
+     rather than for it. Position and colour (`--ink-3`, already the
+     quietest ink token in the row) do the de-emphasis instead.
+     Truncates before the status does — a clipped "Closes in 6 d" would be
      worse than a clipped "first seen 3d…", because one is the reason to act
      today and the other is provenance. */
   .meta-seen { color: var(--ink-3); white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: auto; }
+  /* `.meta-read` (coverage.css) carries its OWN `margin-left: auto`, for the
+     card that has no `.meta-seen` to push it — a dated-but-unfetched role,
+     say. Stack that with `.meta-seen`'s auto margin just above and a flex
+     row with TWO auto margins splits the free space between them, opening a
+     second gap between "first seen…" and Read that nothing asked for. This
+     collapses that second gap on the one card shape where both render: Read
+     rides flush after the provenance text, and `.meta-seen`'s single auto
+     margin does all the pushing away from the deadline status. */
+  .rolecard-meta .meta-seen + .meta-read { margin-left: 0; }
 
   /* The fuse, as a hairline on the card's bottom edge. It used to be an inline
      track competing with the countdown for the meta row's width; on the edge it
@@ -1149,8 +1188,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        Vertical growth is free here; a hidden option is not. */
     .seg-list { display: grid; grid-template-columns: 1fr 1fr; }
     .filters .seg-pill { width: 100%; padding: 8px 10px; }
-    /* The fifth segment spans both columns: it is a mode, not a fourth-and-a-
-       half option, and its label is the longest text in the control. */
+    /* "Everything" is the fifth, real segment: it spans both columns on its
+       own row rather than sitting alone beside an empty cell. */
+    .filters .seg-all { grid-column: 1 / -1; width: 100%; }
+    /* The conditional sixth segment (`other`) spans both columns too: it is
+       a mode, not a fourth-and-a-half option, and its label is the longest
+       text in the control. */
     .filters .seg-optin { grid-column: 1 / -1; width: 100%; }
 
     /* Stacked, full width at narrow widths. */
