@@ -1061,3 +1061,112 @@ def test_the_drawer_stays_silent_for_a_freshly_confirmed_role(client):
 
     body = client.get(reverse("role_description", args=[o.id])).content.decode()
     assert "drawer-caution" not in body
+
+
+# ---------------------------------------------------------------------------
+# AN INEXACT DATE MAY NOT CARRY AN EXACT COUNTDOWN.
+#
+# `deadline_marker` renders "~ Sep 2026" for `precision="estimated"` and
+# "Sep 2026" for `precision="month"` — a deliberate refusal to name a day —
+# and then returned `countdown="closes in 4 days"` in the same dict. One row,
+# two claims about the same date, and the reader believes the specific one.
+#
+# REACHABILITY, since it decides whether this is a renderer fix or a
+# constraint: `Opportunity.deadline_precision` is a bare `CharField` with no
+# vocabulary CHECK, and `directory.admin.OpportunityAdmin` declares no
+# `fields`, `exclude` or `readonly_fields` — so every column on the model is
+# editable in its admin change form, this one included. That is the same
+# unbounded-ModelAdmin path `opportunities_confidence_in_range` was added for
+# after the `confidence=95.0` write. The value is one admin save (or one
+# `manage.py shell` line) away, and `FirmDate` — same vocabulary, same
+# meaning, closed to it by `firm_dates_precision_vocabulary` — already holds
+# 25 `estimated` rows live. So: fix the rendering. A constraint here could
+# only ban a garbage string, and "estimated" is not garbage; it is a
+# legitimate value the renderer was mishandling.
+# ---------------------------------------------------------------------------
+
+from datetime import date as _date  # noqa: E402
+
+from directory.views import deadline_marker  # noqa: E402
+
+
+def test_an_estimated_deadline_gets_no_day_count():
+    m = deadline_marker(_date(2026, 9, 20), "estimated", today=_date(2026, 9, 16))
+    assert m["label"] == "~ Sep 2026"
+    assert "4 days" not in m["countdown"], (
+        "a day count on a date the label just refused to print as a day")
+    assert m["countdown"] == "estimated this month"
+
+
+def test_a_month_precision_deadline_gets_no_day_count():
+    m = deadline_marker(_date(2026, 9, 20), "month", today=_date(2026, 9, 16))
+    assert m["label"] == "Sep 2026"
+    assert "days" not in m["countdown"]
+    assert m["countdown"] == "closes this month"
+
+
+def test_an_inexact_deadline_counts_in_its_own_unit():
+    assert deadline_marker(_date(2026, 11, 3), "month",
+                           today=_date(2026, 9, 28))["countdown"] == "closes in 2 months"
+    assert deadline_marker(_date(2026, 10, 3), "month",
+                           today=_date(2026, 9, 28))["countdown"] == "closes next month"
+    assert deadline_marker(_date(2027, 3, 1), "estimated",
+                           today=_date(2026, 9, 28))["countdown"] == "estimated in 6 months"
+
+
+def test_an_inexact_deadline_is_not_past_until_its_whole_unit_is():
+    """The lie has a second direction. A "Sep 2026" date is not overdue on
+    Sep 30 — nothing ever said which September day it was — so the
+    danger-red `past` styling would be asserting a day too."""
+    m = deadline_marker(_date(2026, 9, 1), "month", today=_date(2026, 9, 30))
+    assert m["past"] is False
+    assert m["countdown"] == "closes this month"
+
+    gone = deadline_marker(_date(2026, 9, 1), "month", today=_date(2026, 10, 1))
+    assert gone["past"] is True
+    assert gone["countdown"] == "deadline passed"
+
+    est = deadline_marker(_date(2026, 9, 1), "estimated", today=_date(2026, 10, 1))
+    assert est["past"] is True
+    assert est["countdown"] == "estimated date passed"
+
+
+def test_a_day_precise_deadline_still_counts_days():
+    """The fix must not coarsen the 633 live rows that DO name a day."""
+    for prec in ("day", "", None):
+        m = deadline_marker(_date(2026, 9, 20), prec, today=_date(2026, 9, 16))
+        assert m["label"] == "Sep 20, 2026"
+        assert m["countdown"] == "closes in 4 days"
+        assert m["past"] is False
+    assert deadline_marker(_date(2026, 9, 16), "day",
+                           today=_date(2026, 9, 16))["countdown"] == "closes today"
+    assert deadline_marker(_date(2026, 9, 17), "day",
+                           today=_date(2026, 9, 16))["countdown"] == "closes tomorrow"
+    past = deadline_marker(_date(2026, 9, 10), "day", today=_date(2026, 9, 16))
+    assert past["countdown"] == "deadline passed" and past["past"] is True
+
+
+@pytest.mark.django_db
+def test_an_estimated_deadline_never_reaches_the_firm_page_as_a_day_count(client):
+    """End to end, through `_card` — the reader that actually calls
+    `deadline_marker` and prints `countdown|capfirst` on the firm page.
+
+    The Opportunities FEED is deliberately not asserted here: `_urgency_item`
+    builds its own countdown and does NOT go through `deadline_marker`, so it
+    still prints "Closes in 4 days" for this row. That is a real second
+    instance of the same bug, left alone on purpose — see the comment on
+    `_urgency_item`'s inexact-precision branch for why it is not a local
+    edit."""
+    firm = Firm.objects.create(slug="ubs", name="UBS")
+    Opportunity.objects.create(
+        firm=firm, title="Guessed Analyst", bucket="internship", status="open",
+        deadline=TODAY + timedelta(days=4), deadline_precision="estimated",
+        confidence=0.6, url="https://ubs.com/estimated")
+
+    body = re.sub(r"<style.*?</style>", "",
+                  client.get("/firms/ubs/").content.decode(), flags=re.S)
+    assert "Guessed Analyst" in body
+    assert "in 4 days" not in body.lower()
+    # "this month" or "next month" depending on where +4 days lands; the
+    # assertion that matters is the word, not which of the two.
+    assert "Estimated" in body

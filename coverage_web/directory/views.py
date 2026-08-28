@@ -189,9 +189,34 @@ def deadline_provenance(opp) -> dict | None:
             "why": "Read from the posting's own text, not a field the board published"}
 
 
+# Precisions whose LABEL refuses to name a day. The rule the two halves of
+# this function keep between them: a countdown may not count days on a date
+# the label just declined to print as a day. "~ Sep 2026" beside "closes in 4
+# days" is one row stating a month-level guess and an exact day count about
+# the same date, and the reader believes the specific one — which is how a
+# `~`-prefixed estimate reaches a student as a deadline to plan around.
+#
+# `Opportunity.deadline_precision` is a bare `CharField` with no vocabulary
+# constraint and a fully editable `OpportunityAdmin` over it, so this is one
+# admin save away, exactly like the `confidence=95.0` write that
+# `opportunities_confidence_in_range` exists for. `FirmDate` already carries
+# 25 `estimated` rows; the two columns mean the same thing.
+_INEXACT_PRECISIONS = ("month", "estimated")
+
+
+def _month_distance(deadline, today) -> int:
+    """Whole calendar months from `today`'s month to `deadline`'s. 0 = this
+    month. Deliberately month arithmetic and not `days // 30`: the unit has
+    to be the one the label prints, or the countdown is a day count wearing
+    a coarser word."""
+    return (deadline.year - today.year) * 12 + (deadline.month - today.month)
+
+
 def deadline_marker(deadline, precision, *, today=None):
     """Format a deadline honestly, respecting its stated precision, and
-    never fabricating one. A null deadline says so out loud.
+    never fabricating one. A null deadline says so out loud, and an inexact
+    one gets a countdown in its own unit rather than a day count it cannot
+    support — see `_INEXACT_PRECISIONS`.
     """
     if deadline is None:
         return {"posted": False, "label": "No deadline posted", "countdown": "", "past": False}
@@ -204,6 +229,27 @@ def deadline_marker(deadline, precision, *, today=None):
         label = f"{deadline:%b} {deadline.day}, {deadline.year}"
 
     today = today or timezone.localdate()
+    if prec in _INEXACT_PRECISIONS:
+        # `past` moves to the same coarser unit as the countdown. A "Sep 2026"
+        # deadline is not passed on Sep 15 — nothing ever said which September
+        # day it was, so the danger-red "past" styling would be asserting a
+        # day the row does not hold, in the other direction.
+        months = _month_distance(deadline, today)
+        if prec == "estimated":
+            # No "closes": the date is our estimate, not the firm's statement,
+            # and the verb is what makes it read as one.
+            countdown = ("estimated date passed" if months < 0 else
+                         "estimated this month" if months == 0 else
+                         "estimated next month" if months == 1 else
+                         f"estimated in {months} months")
+        else:
+            countdown = ("deadline passed" if months < 0 else
+                         "closes this month" if months == 0 else
+                         "closes next month" if months == 1 else
+                         f"closes in {months} months")
+        return {"posted": True, "label": label, "countdown": countdown,
+                "past": months < 0, "precision": prec}
+
     days = (deadline - today).days
     if days < 0:
         countdown = "deadline passed"
@@ -1868,6 +1914,18 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
                      "rolling_stated": stated,
                      "rolling_why": (((o.raw or {}).get("facts") or {})
                                      .get("rolling", {}).get("phrase", ""))})
+    # NOT FIXED HERE, and deliberately: this branch builds its own countdown
+    # rather than calling `deadline_marker`, so it does not carry that
+    # function's rule that a date whose precision refuses to name a day gets
+    # no day count (see `_INEXACT_PRECISIONS`). A `deadline_precision` of
+    # "month"/"estimated" therefore still reaches the feed as "Closes in 4
+    # days", with a day-level urgency band and a fuse bar burning down to a
+    # specific afternoon. Correcting it is not a local edit: `days_left` set
+    # here is an ORDERING and AGGREGATION key for `_urgency_feed`'s sort, the
+    # firm cluster's `next_days` (which must never go negative — see its
+    # comment below), the cluster role sort, and the closing-this-week count,
+    # and a coarser value breaks each differently. Zero live rows carry an
+    # inexact precision today, so this is latent, not shipped.
     elif o.deadline >= today:
         days = (o.deadline - today).days
         item.update({
