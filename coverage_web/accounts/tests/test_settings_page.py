@@ -335,3 +335,92 @@ def test_rows_use_min_height_never_a_fixed_height(body):
     assert any("min-height" in rule for rule in row_rules)
     for rule in row_rules:
         assert re.search(r"(^|[^-])height:\s*\d", rule) is None, rule
+
+
+# ---------------------------------------------------------------------------
+# Target Firms: re-tiering must not require a pointer
+# ---------------------------------------------------------------------------
+# The board shipped drag-and-drop only. Chips were `draggable="true"` and the
+# columns listened for `dragstart`/`dragover`/`drop`; HTML5 drag-and-drop does
+# not fire on a touchscreen and has no keyboard equivalent. So on a phone a
+# student could START tracking a firm (the search rows carry Tier 1/2/3
+# buttons) and STOP tracking one (the chip's ×) and could never MOVE one
+# between tiers — while the hint above the board read "Drag a firm to change
+# its tier", an instruction the device could not carry out.
+#
+# The Network board's tier lanes had the identical gap and got the identical
+# fix, deliberately: see `crm/tests/test_firm_tier_controls.py`. Both boards
+# write through `crm:set_firm_tier`.
+def _chips(body: str) -> list[str]:
+    return re.split(r'(?=<div class="tf-chip" )', body)[1:]
+
+
+@pytest.fixture
+def tracked_firms(logged_in):
+    from crm.models import UserFirm
+    from directory.models import Firm
+
+    firms = []
+    for tier in (1, 2, 3):
+        firm = Firm.objects.create(
+            slug=f"tier-{tier}-co", name=f"Tier {tier} Co", regions=["us"]
+        )
+        UserFirm.all_objects.create(user=logged_in, firm=firm, tier=tier)
+        firms.append(firm)
+    return firms
+
+
+def test_every_tracked_firm_chip_carries_a_tier_picker(client, tracked_firms):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    chips = _chips(body)
+    assert len(chips) == 3
+    for chip in chips:
+        assert 'class="tf-tier"' in chip, chip
+
+
+def test_the_picker_offers_every_tier_the_board_renders(client, tracked_firms):
+    """`accounts.views.TARGET_FIRM_TIERS` decides which columns exist; the
+    picker reads that same list rather than hard-coding 1/2/3, so a fourth
+    tier would appear in both places or neither."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    board = body[body.index('class="tf-board"') : body.index('for="tf-search"')]
+    columns = set(re.findall(r'<div class="tf-col" data-tier="(\d+)"', board))
+    for chip in _chips(board):
+        picker = chip[chip.index('class="tf-tier"') : chip.index("</select>")]
+        assert set(re.findall(r'<option value="(\d+)"', picker)) == columns
+
+
+def test_the_picker_shows_the_tier_the_chip_is_actually_on(client, tracked_firms):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    for tier, chip in enumerate(_chips(body), start=1):
+        assert f'<option value="{tier}" selected>Tier {tier}</option>' in chip
+
+
+def test_the_picker_names_its_firm_and_spells_the_tier_out(client, tracked_firms):
+    """The `aria-label` says which firm, the option text says which tier. A
+    screen reader reads the chosen OPTION back on change, not the box's
+    label, so an abbreviated "T2" would drop half of what a blind student
+    needs to hear."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    chip = _chips(body)[1]
+    assert 'aria-label="Tier for Tier 2 Co"' in chip
+    assert ">Tier 2</option>" in chip
+
+
+def test_the_drag_survives_as_the_pointer_shortcut(client, tracked_firms):
+    """The picker is the route that always works. It does not cost anyone
+    with a mouse the faster gesture."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert '<div class="tf-chip" draggable="true"' in body
+    for handler in ("dragstart", "dragover", "drop"):
+        assert f'"{handler}"' in body
+
+
+def test_the_board_no_longer_prescribes_a_gesture_touch_cannot_send(
+    client, tracked_firms
+):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert "Drag a firm to change its tier" not in body
+    assert "Drop a firm here" not in body
+    # Whatever it says instead still has to say what tier is FOR.
+    assert "Higher tiers get more attention from Coverage." in body

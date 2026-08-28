@@ -1316,15 +1316,54 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      chrome: 55-odd of 69 cards show this, and the strip's tall button would
      have pushed the grid rows well past what a status board should cost. A
      quiet 10px link adds one short line — the grid's `minmax(44px, auto)`
-     rows absorb it, and a row mixing covered firms (no line) with uncovered
-     ones (a line) is simply as tall as its tallest card. Now that the badges
-     are gone this line is the card's ONLY verb, which is the point: the ask
-     was to leave the progress bar and the suggestion. */
-  .firm-card-act { flex: none; margin-top: -2px; }
-  .fc-act-link { display: block; font-size: 10px; font-weight: var(--w-med);
+     rows absorb it. Now that the badges are gone this line is the card's
+     ONLY verb, which is the point: the ask was to leave the progress bar
+     and the suggestion.
+
+     The row it sits on renders on EVERY card now, covered or not, because
+     it also carries the tier picker below — the link is still hidden once a
+     firm is covered, so on those cards the row holds the picker alone. That
+     is one 10px line a covered card did not used to have, and it is what
+     buys a way to re-tier a firm without a mouse. */
+  .firm-card-act { flex: none; margin-top: -2px; display: flex;
+    align-items: center; gap: var(--s2); min-width: 0; }
+  .fc-act-link { flex: 1 1 auto; min-width: 0;
+    font-size: 10px; font-weight: var(--w-med);
     color: var(--accent-ink); text-decoration: none; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
   .fc-act-link:hover { text-decoration: underline; }
+  /* The tier picker shares the verb row, pushed to its right edge — the
+     link is the thing allowed to ellipsise, the control is not. Nearly
+     invisible at rest for the same reason the badges came off these cards:
+     it renders on all 69 of them, and bordered chrome repeated 69 times is
+     decoration. At rest it reads as the card's own tier caption in the same
+     10px mono as `.fc-adv` beside it; the control chrome arrives on hover
+     and focus, which is when someone is aiming at it. */
+  .fc-tier { flex: none; width: auto; margin-left: auto; appearance: none; -webkit-appearance: none;
+    border: 1px solid transparent; border-radius: 999px; background: transparent;
+    padding: 1px 13px 1px 5px;
+    font-family: var(--font-mono); font-size: 10px; font-weight: var(--w-med);
+    line-height: 1.6; color: var(--ink-3); cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: right 6px top 51%, right 3px top 51%;
+    background-size: 3px 3px, 3px 3px; background-repeat: no-repeat;
+    transition: border-color var(--t-fast), background-color var(--t-fast),
+      color var(--t-fast); }
+  .firm-card:hover .fc-tier, .fc-tier:hover { border-color: var(--line);
+    background-color: var(--surface); color: var(--ink-2); }
+  .fc-tier:focus-visible { outline: 2px solid var(--accent); outline-offset: 0;
+    border-color: var(--accent); background-color: var(--accent-soft);
+    color: var(--accent-ink); }
+  /* On a device that cannot hover, the resting state IS the only state, so
+     the control wears its chrome all the time. This is the case the whole
+     change exists for — a phone had no way to re-tier a firm at all — and a
+     control that only announces itself on hover would have replaced one
+     invisible affordance with another. */
+  @media (hover: none) {
+    .fc-tier { border-color: var(--line); background-color: var(--surface);
+      color: var(--ink-2); }
+  }
 
   /* ---- Contacts: one warmth ledger, not five separate cards ------------
      Reported directly against the founder's live board: five collapsed

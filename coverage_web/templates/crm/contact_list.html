@@ -307,9 +307,9 @@
   same endpoint (`crm:contacts_bulk`), same reversibility.
   {% endcomment %}
 
-  {# ---- Firm Coverage by tier (draggable) ---- #}
+  {# ---- Firm Coverage by tier (pick or drag) ---- #}
   <section class="net-coverage">
-    <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a card between lanes to change a firm's tier.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
+    <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Pick a tier on a card, or drag it between lanes.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
       <div class="net-panel">
       {% comment %}
       THE LEGEND that used to open this panel is gone. Four warmth dots and
@@ -330,12 +330,15 @@
       {% for section in tier_sections %}
         <div class="tier-section" data-tier="{{ section.tier|default:'' }}">
           {% comment %}
-          Same explainer a card already carries on hover ("Drag to another
-          tier. Tier drives your action priorities.") — repeated on the
+          Same explainer a card already carries on hover — repeated on the
           lane's own heading so it reaches an EMPTY lane too. A "TIER 1"
-          header over a bare "Drop a firm here" placeholder had nothing on
-          it to hover; the lane label is the one element in that state
-          that's always there.
+          header over a bare placeholder had nothing on it to hover; the
+          lane label is the one element in that state that's always there.
+          Neither sentence names dragging as THE method any more: HTML5
+          drag-and-drop never fires on a touchscreen, so on a phone a hint
+          reading "drag a card here" described a gesture the page could not
+          receive. Every card carries a tier picker now (`.fc-tier`); the
+          drag stayed as the pointer shortcut.
           {% endcomment %}
           {% comment %}
           The firm count next to the label is the one affordance that costs
@@ -352,7 +355,7 @@
           — that was a computed stat nobody asked for; this is the same
           single number `scrub-count` already shows everywhere else.
           {% endcomment %}
-          <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a firm card here to set its tier.">
+          <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Pick this tier on a card, or drag the card here.">
             <span>{{ section.label }}</span>
             <span class="scrub-count">{{ section.cards|length }}</span>
           </div>
@@ -360,7 +363,7 @@
             {% for fc in section.cards %}
               <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
                    style="--i:{{ forloop.counter0 }}"
-                   title="Drag to another tier. Tier drives your action priorities.">
+                   title="Tier drives your action priorities. Pick a tier below, or drag this card to another lane.">
                 {% comment %}
                 The COUNT badges are gone. Asked for directly: take the
                 counts off these cards and leave the progress bar and the
@@ -455,11 +458,28 @@
                 nowhere else. `draggable="false"` so starting a drag on the
                 link hands off to the card's own drag-to-retier handler
                 instead of the browser's native "drag this link" gesture.
-                Hidden once `adv_met` — a covered firm is a status, not a
-                task, same as the gap strip never nagging about one.
+                The LINK is hidden once `adv_met` — a covered firm is a
+                status, not a task, same as the gap strip never nagging
+                about one. Its row is not: see the note below on why the
+                row itself now always renders.
                 {% endcomment %}
-                {% if fc.gap_label %}
-                  <div class="firm-card-act">
+                {% comment %}
+                The row is unconditional now, because the tier picker beside
+                the verb is: a card whose firm is already covered still has
+                to be re-tierable, and until this control existed the only
+                way to move one was a drag, which a touchscreen cannot
+                send. A covered firm therefore gains one 10px line it did
+                not carry before, and that is the whole cost.
+
+                Options are rendered from `tier_sections` rather than a
+                hard-coded 1/2/3 so the picker can only ever offer a lane
+                that exists in the DOM to move the card into. "Unranked" is
+                built by the view only when something is already sitting
+                there (see `if cards or tier in (1, 2, 3)` in views.py), and
+                that is exactly when the option should appear.
+                {% endcomment %}
+                <div class="firm-card-act">
+                  {% if fc.gap_label %}
                     {% if fc.lever %}
                       <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
                          href="{% url 'crm:contact_detail' fc.lever.id %}">Work {{ fc.lever.name|smart_title }}</a>
@@ -467,13 +487,28 @@
                       <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
                          href="{% url 'crm:contact_new' %}?firm={{ fc.firm.slug }}">＋ Add a contact</a>
                     {% endif %}
-                  </div>
-                {% endif %}
+                  {% endif %}
+                  {% comment %}
+                  A native <select> and not a hand-rolled menu: `.tier-grid`
+                  becomes `overflow-y: auto` once capped, which would clip
+                  any popup drawn inside a card. The browser floats a native
+                  list above that, and hands us touch, keyboard and screen
+                  reader support at the same time. `draggable="false"` for
+                  the same reason `.fc-act-link` carries it: the gesture
+                  belongs to the control, not the card behind it.
+                  {% endcomment %}
+                  <select class="fc-tier" draggable="false" data-no-csel data-fc-tier
+                          aria-label="Tier for {{ fc.firm.name|smart_title }}">
+                    {% for opt in tier_sections %}
+                      <option value="{{ opt.tier|default_if_none:'' }}"{% if opt.tier == section.tier %} selected{% endif %}>{{ opt.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
               </div>
             {% endfor %}
           </div>
           {# Placeholder sits OUTSIDE the grid — a dropped card never shares a row with it; JS toggles it. #}
-          <p class="net-none tier-empty"{% if section.cards %} hidden{% endif %}>Drop a firm here.</p>
+          <p class="net-none tier-empty"{% if section.cards %} hidden{% endif %}>No firms on this tier.</p>
         </div>
       {% endfor %}
       </div>
@@ -903,10 +938,82 @@
       if (!document.hidden) capAllGrids();
     });
 
+    // ---- Re-tier a firm. Two gestures, one write.
+    //
+    // The drag came first and was for a long time the only route, which
+    // made the whole board read-only on a phone: HTML5 drag-and-drop does
+    // not fire on touch, and it has no keyboard equivalent either. The
+    // per-card <select> is the route that always works; the drag stays as
+    // the pointer shortcut. Both call `setTier` so the two can never learn
+    // to disagree about what a tier change means, the same contract this
+    // board already keeps with Settings' board through the shared endpoint.
+    function setTier(card, tier, section) {
+      if (!section) return Promise.resolve(false);
+      var body = new URLSearchParams({ firm: card.dataset.firm, tier: tier });
+      return fetch("{% url 'crm:set_firm_tier' %}", {
+        method: "POST",
+        headers: { "X-CSRFToken": "{{ csrf_token }}",
+                   "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      }).then(function (resp) {
+        if (!resp.ok) return false;
+        section.querySelector(".tier-grid").appendChild(card);
+        syncTierSelect(card);
+        // Re-sync every tier's empty-state placeholder AND its count. The
+        // count was left behind by the original drop handler, so a board
+        // that had just been rearranged read "TIER 1 14" over thirteen
+        // cards until the next page load — the one number on the lane label
+        // whose whole job is to say how much is in there. Settings' board
+        // has always done both together (`syncEmpty`); this is that same
+        // pair.
+        document.querySelectorAll(".tier-section").forEach(function (s) {
+          var cards = s.querySelector(".tier-grid").children.length;
+          var empty = s.querySelector(".tier-empty");
+          if (empty) empty.hidden = cards > 0;
+          var count = s.querySelector(".tier-label .scrub-count");
+          if (count) count.textContent = cards;
+        });
+        // The card just moved tiers, so both the old and new grid's row
+        // count changed — recompute every cap rather than track which
+        // two moved.
+        capAllGrids();
+        return true;
+      }, function () { return false; });
+    }
+    // A refused or failed write leaves the card in its old lane, so the
+    // picker has to be walked back to match — otherwise it goes on showing
+    // a tier the server never accepted.
+    function syncTierSelect(card) {
+      var sel = card.querySelector("[data-fc-tier]");
+      if (sel) sel.value = card.closest(".tier-section").dataset.tier;
+    }
+
     var dragged = null;
     document.querySelectorAll(".firm-card").forEach(function (card) {
       card.addEventListener("dragstart", function () { dragged = card; card.classList.add("dragging"); });
       card.addEventListener("dragend", function () { card.classList.remove("dragging"); });
+      var sel = card.querySelector("[data-fc-tier]");
+      if (!sel) return;
+      sel.addEventListener("change", function () {
+        var target = null;
+        document.querySelectorAll(".tier-section").forEach(function (s) {
+          if (s.dataset.tier === sel.value) target = s;
+        });
+        // No lane for that value should be impossible — the options are
+        // rendered from the lanes themselves — but a picker left showing a
+        // tier the card is not on is the one outcome worth ruling out.
+        if (!target) { syncTierSelect(card); return; }
+        if (target === card.closest(".tier-section")) return;
+        setTier(card, sel.value, target).then(function (ok) {
+          if (!ok) syncTierSelect(card);
+        });
+      });
+      // A `draggable` ancestor swallows the press that should open a native
+      // select, so the card stands down for as long as the picker has the
+      // pointer or the focus, then takes the gesture back. `focusout`
+      // covers both dismissing the list and choosing from it.
+      sel.addEventListener("pointerdown", function () { card.draggable = false; });
+      sel.addEventListener("focusout", function () { card.draggable = true; });
     });
     document.querySelectorAll(".tier-section").forEach(function (section) {
       section.addEventListener("dragover", function (e) { e.preventDefault(); section.classList.add("drop-hot"); });
@@ -915,27 +1022,8 @@
         e.preventDefault();
         section.classList.remove("drop-hot");
         if (!dragged) return;
-        var firm = dragged.dataset.firm;
-        var tier = section.dataset.tier;
-        var body = new URLSearchParams({ firm: firm, tier: tier });
-        fetch("{% url 'crm:set_firm_tier' %}", {
-          method: "POST",
-          headers: { "X-CSRFToken": "{{ csrf_token }}",
-                     "Content-Type": "application/x-www-form-urlencoded" },
-          body: body.toString(),
-        }).then(function (resp) {
-          if (!resp.ok) return;
-          section.querySelector(".tier-grid").appendChild(dragged);
-          // Re-sync every tier's empty-state placeholder.
-          document.querySelectorAll(".tier-section").forEach(function (s) {
-            var empty = s.querySelector(".tier-empty");
-            if (empty) empty.hidden = s.querySelector(".tier-grid").children.length > 0;
-          });
-          // The card just moved tiers, so both the old and new grid's row
-          // count changed — recompute every cap rather than track which
-          // two moved.
-          capAllGrids();
-        });
+        if (dragged.closest(".tier-section") === section) return;
+        setTier(dragged, section.dataset.tier, section);
       });
     });
   })();

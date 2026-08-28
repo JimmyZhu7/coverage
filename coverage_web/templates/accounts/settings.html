@@ -550,7 +550,7 @@
   .tf-chips::-webkit-scrollbar { width: 8px; }
   .tf-chips::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
   .tf-chip { flex: none; display: flex; align-items: center;
-    gap: 6px; max-width: 220px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
+    gap: 6px; max-width: 250px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
     border-radius: 999px; background: var(--paper); cursor: grab;
     font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink);
     box-shadow: var(--shadow-1); animation: chip-check 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -559,6 +559,43 @@
   .tf-chip:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
   .tf-chip.dragging { opacity: 0.5; cursor: grabbing; }
   .tf-chip.is-leaving { opacity: 0; transform: scale(0.85); }
+  /* The tier picker, and the reason it is nearly invisible at rest: it sits
+     on every chip on the board, and a bordered control repeated 60-odd
+     times is the "identical decoration on nearly every card" this app has
+     already pruned once off the Network board. At rest it reads as the
+     chip's own tier caption in the same 10px mono the rest of the app uses
+     for micro-data; the control chrome arrives on hover and focus, which is
+     when someone is actually aiming at it. `appearance: none` for the
+     chevron. The options spell the tier out ("Tier 2") rather than
+     abbreviating it, because a screen reader reads the chosen OPTION and
+     not the box's `aria-label` — the label names the firm, the option
+     names the tier, and neither can be dropped. The pill grew to 250px to
+     pay for it; the name was already the part that ellipsises. */
+  .tf-tier { flex: none; width: auto; appearance: none; -webkit-appearance: none;
+    border: 1px solid transparent; border-radius: 999px; background: transparent;
+    padding: 1px 13px 1px 5px; margin: 0;
+    font-family: var(--font-mono); font-size: 10px; font-weight: var(--w-med);
+    line-height: 1.6; color: var(--ink-3); cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: right 6px top 51%, right 3px top 51%;
+    background-size: 3px 3px, 3px 3px; background-repeat: no-repeat;
+    transition: border-color var(--t-fast), background-color var(--t-fast),
+      color var(--t-fast); }
+  .tf-chip:hover .tf-tier, .tf-tier:hover { border-color: var(--line);
+    background-color: var(--surface); color: var(--ink-2); }
+  .tf-tier:focus-visible { outline: 2px solid var(--accent); outline-offset: 0;
+    border-color: var(--accent); background-color: var(--accent-soft);
+    color: var(--accent-ink); }
+  /* On a device that cannot hover, the resting state IS the only state, so
+     the control wears its chrome all the time. This is the case the whole
+     change exists for — a phone had no way to re-tier a firm at all — and a
+     control that only announces itself on hover would have replaced one
+     invisible affordance with another. */
+  @media (hover: none) {
+    .tf-tier { border-color: var(--line); background-color: var(--surface);
+      color: var(--ink-2); }
+  }
   .tf-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center;
     width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
     color: var(--ink-3); font-size: 14px; line-height: 1; cursor: pointer;
@@ -836,7 +873,16 @@
           docstring), so a drag here and a drag on Network can never
           disagree about what a firm's tier means.
           {% endcomment %}
-          <p class="field-hint">Drag a firm to change its tier. Higher tiers get more attention from Coverage.</p>
+          {% comment %}
+          The hint no longer names dragging as THE method. HTML5
+          drag-and-drop fires on pointers only: on a phone the chips are
+          inert, so a hint reading "Drag a firm to change its tier" was an
+          instruction half this app's readers cannot follow. Every chip now
+          carries its own tier picker (`.tf-tier`), which is the route the
+          hint describes; the drag is still bound underneath as the pointer
+          shortcut for people who have a pointer.
+          {% endcomment %}
+          <p class="field-hint">Pick a tier on any firm, or drag it. Higher tiers get more attention from Coverage.</p>
           <div class="tf-board" id="tf-board" data-tf-board>
             {% for col in firm_tiers %}
               <div class="tf-col" data-tier="{{ col.tier }}">
@@ -846,12 +892,28 @@
                   {% for f in col.firms %}
                     <div class="tf-chip" draggable="true" data-firm="{{ f.id }}" data-firm-name="{{ f.name|lower }}">
                       <span>{{ f.name|smart_title }}</span>
+                      {% comment %}
+                      A native <select>, not a custom popup: it is reachable
+                      by touch, by keyboard and by screen reader for free,
+                      and the browser floats its list ABOVE `.tf-chips`'s
+                      own `overflow-y: auto` — a hand-rolled menu inside a
+                      scrolling column would be clipped by it. `draggable
+                      ="false"` for the same reason `.fc-act-link` carries
+                      it on the Network board: the gesture belongs to the
+                      control, not to the chip around it.
+                      {% endcomment %}
+                      <select class="tf-tier" draggable="false" data-no-csel data-tf-tier-sel
+                              aria-label="Tier for {{ f.name|smart_title }}">
+                        {% for t in firm_tiers %}
+                          <option value="{{ t.tier }}"{% if t.tier == col.tier %} selected{% endif %}>Tier {{ t.tier }}</option>
+                        {% endfor %}
+                      </select>
                       <button type="button" class="tf-chip-x" data-tf-remove="{{ f.id }}"
                               aria-label="Stop tracking {{ f.name|smart_title }}">×</button>
                     </div>
                   {% endfor %}
                 </div>
-                <p class="tf-empty"{% if col.firms %} hidden{% endif %}>Drop a firm here.</p>
+                <p class="tf-empty"{% if col.firms %} hidden{% endif %}>Nothing on this tier yet.</p>
               </div>
             {% endfor %}
           </div>
@@ -971,17 +1033,36 @@
         // than reloading — a full-page reload here would also reset the
         // scroll position away from the section the student is mid-edit
         // on, on a page with a dozen other sections above this one. ----
-        function buildChip(firmId, name) {
+        function buildChip(firmId, name, tier) {
           var chip = document.createElement("div");
           chip.className = "tf-chip";
           chip.draggable = true;
           chip.dataset.firm = firmId;
           chip.dataset.firmName = name.toLowerCase();
-          chip.innerHTML = '<span></span><button type="button" class="tf-chip-x" ' +
+          // Same three parts the server renders, in the same order: name,
+          // tier picker, stop-tracking. A chip added here and a chip that
+          // arrived with the page must be the same chip, or the board grows
+          // two classes of firm with different controls on them.
+          chip.innerHTML = '<span></span>' + tierSelectHtml(tier, name) +
+            '<button type="button" class="tf-chip-x" ' +
             'data-tf-remove="' + firmId + '" aria-label="Stop tracking ' + name.replace(/"/g, "&quot;") + '">×</button>';
           chip.querySelector("span").textContent = name;
           bindDrag(chip);
+          bindTierSelect(chip);
           return chip;
+        }
+        // The tiers the board actually renders, read off the board itself
+        // rather than hard-coded 1/2/3 — `accounts.views.TARGET_FIRM_TIERS`
+        // is the one place that decides, and this reads its output.
+        var tiers = Array.prototype.map.call(
+          board.querySelectorAll(".tf-col"), function (c) { return c.dataset.tier; });
+        function tierSelectHtml(tier, name) {
+          var opts = tiers.map(function (t) {
+            return '<option value="' + t + '"' + (t === String(tier) ? " selected" : "") +
+              ">Tier " + t + "</option>";
+          }).join("");
+          return '<select class="tf-tier" draggable="false" data-no-csel data-tf-tier-sel aria-label="Tier for ' +
+            name.replace(/"/g, "&quot;") + '">' + opts + "</select>";
         }
         function bindAdd(row) {
           row.querySelectorAll("[data-tf-add]").forEach(function (btn) {
@@ -991,7 +1072,7 @@
               post(tierUrl, { firm: firmId, tier: tier }).then(function (resp) {
                 if (!resp.ok) return;
                 var col = colFor(tier);
-                col.querySelector("[data-tf-chips]").appendChild(buildChip(firmId, name));
+                col.querySelector("[data-tf-chips]").appendChild(buildChip(firmId, name, tier));
                 syncEmpty(col);
                 row.remove();
               });
@@ -1017,6 +1098,43 @@
         }
         if (search) search.addEventListener("input", filterResults);
 
+        // ---- Re-tier without a pointer. HTML5 drag-and-drop never fires
+        // on a touchscreen and has no keyboard equivalent, so the drag
+        // below cannot be the only route to a tier change: on a phone the
+        // board could add a firm and remove one but never move one. The
+        // per-chip <select> is the route that always works; the drag is the
+        // shortcut for people holding a mouse.
+        function moveChip(chip, tier) {
+          var fromCol = chip.closest(".tf-col");
+          var col = colFor(tier);
+          if (!col || fromCol === col) return;
+          post(tierUrl, { firm: chip.dataset.firm, tier: tier }).then(function (resp) {
+            if (!resp.ok) { syncTierSelect(chip); return; }
+            col.querySelector("[data-tf-chips]").appendChild(chip);
+            syncEmpty(fromCol);
+            syncEmpty(col);
+          }, function () { syncTierSelect(chip); });
+        }
+        // A failed POST leaves the chip where it was, so the picker has to
+        // be walked back too — otherwise it keeps showing a tier the server
+        // never accepted.
+        function syncTierSelect(chip) {
+          var sel = chip.querySelector("[data-tf-tier-sel]");
+          if (sel) sel.value = chip.closest(".tf-col").dataset.tier;
+        }
+        function bindTierSelect(chip) {
+          var sel = chip.querySelector("[data-tf-tier-sel]");
+          if (!sel) return;
+          sel.addEventListener("change", function () { moveChip(chip, sel.value); });
+          // A `draggable` ancestor swallows the press that should open a
+          // native select, so the chip stands down for as long as the
+          // picker has the pointer or the focus, then takes the gesture
+          // back. `focusout` covers both dismissing the list and choosing
+          // from it.
+          sel.addEventListener("pointerdown", function () { chip.draggable = false; });
+          sel.addEventListener("focusout", function () { chip.draggable = true; });
+        }
+
         // ---- Drag-and-drop between tiers: identical mechanism to the
         // Network board's (same endpoint, same event shape) so the two
         // never learn to disagree about what a drag means. ----
@@ -1025,7 +1143,10 @@
           chip.addEventListener("dragend", function () { chip.classList.remove("dragging"); });
         }
         var dragged = null;
-        board.querySelectorAll(".tf-chip").forEach(bindDrag);
+        board.querySelectorAll(".tf-chip").forEach(function (chip) {
+          bindDrag(chip);
+          bindTierSelect(chip);
+        });
         board.querySelectorAll(".tf-col").forEach(function (col) {
           col.addEventListener("dragover", function (e) { e.preventDefault(); col.classList.add("drop-hot"); });
           col.addEventListener("dragleave", function () { col.classList.remove("drop-hot"); });
@@ -1038,6 +1159,7 @@
             post(tierUrl, { firm: dragged.dataset.firm, tier: col.dataset.tier }).then(function (resp) {
               if (!resp.ok) return;
               col.querySelector("[data-tf-chips]").appendChild(dragged);
+              syncTierSelect(dragged);
               syncEmpty(fromCol);
               syncEmpty(col);
             });
