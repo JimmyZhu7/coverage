@@ -1145,15 +1145,45 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      long firm name onto its own line; a row is as tall as its tallest card,
      and that is the truthful shape of holding more. Same doctrine as the
      feed's role card: the box gives way, not the text. */
-  /* Each tier is bounded (~2 rows) and scrolls its own firms, so a tier with
-     many firms doesn't stretch the whole coverage panel. */
+  /* Each tier is bounded to two rows and scrolls its own firms, so a tier
+     with many firms doesn't stretch the whole coverage panel. The old
+     `max-height: 200px` was a pixel guess against a card height that has
+     already drifted twice (82px -> 67px empty cards, 64px -> 44px row
+     floor) and will again. A row's REAL height isn't reliably
+     back-computable from the declared tokens either — a bare card renders
+     taller in practice than the padding-plus-line-height arithmetic
+     suggests, and a row mixes bare/bar/bar+sockets cards that each hold a
+     different amount, so the tallest card in a row (not the 44px floor)
+     is what actually sets that row's height. So the cap isn't a formula:
+     `capAllGrids()` (bottom of contact_list.html) measures the real
+     top of each grid's third card after layout and writes the midpoint of
+     the gap above it back here as `--tier-cap`, which lands the cut
+     between rows two and three exactly in the gap, never through a card,
+     no matter how tall any given row turns out to be. `none` is the
+     fallback for a tier that fits in two rows already (nothing to cap —
+     see `.is-capped` below) and for a no-JS load: showing every card
+     unclipped is the one failure mode here that can never slice one. */
   .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    grid-auto-rows: minmax(44px, auto); gap: var(--s3); max-height: 200px; overflow-y: auto;
+    grid-auto-rows: minmax(44px, auto); gap: var(--s3);
+    max-height: var(--tier-cap, none); overflow-y: auto;
     padding-right: 4px; scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent; }
-  .tier-grid::-webkit-scrollbar { width: 8px; }
-  .tier-grid::-webkit-scrollbar-thumb { background: var(--line-strong);
-    border-radius: 999px; }
+  /* Only a grid `capAllGrids()` actually capped gets the loud, always-on
+     scrollbar `.net-panel` already draws above (track + thumb + hover) —
+     a plain `::-webkit-scrollbar` declaration is exactly what this grid
+     had before and the founder's screenshot is the proof it isn't enough:
+     macOS hides an overlay scrollbar, styled or not, until the user
+     scrolls, which is the specific silence being fixed here. A tier that
+     fits in two rows has nothing to scroll to, so it stays plain — the
+     same track drawn around two rows of cards for no reason would be its
+     own rendering-bug read. */
+  .tier-grid.is-capped { scrollbar-color: var(--line-strong) var(--paper); }
+  .tier-grid.is-capped::-webkit-scrollbar { width: 8px; }
+  .tier-grid.is-capped::-webkit-scrollbar-track { background: var(--paper);
+    border-radius: 999px; margin: var(--s2) 0; }
+  .tier-grid.is-capped::-webkit-scrollbar-thumb { background: var(--line-strong);
+    border-radius: 999px; border: 2px solid var(--paper); background-clip: padding-box; }
+  .tier-grid.is-capped::-webkit-scrollbar-thumb:hover { background: var(--accent); }
   .firm-card { background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s3) var(--s4); cursor: grab;
     height: 100%; overflow: hidden;

@@ -417,8 +417,24 @@
           it to hover; the lane label is the one element in that state
           that's always there.
           {% endcomment %}
+          {% comment %}
+          The firm count next to the label is the one affordance that costs
+          nothing to render and can't be hidden by a browser's own
+          scrollbar behaviour (macOS hides overlay scrollbars, styled or
+          not, until the user actually scrolls — see `.tier-grid.is-capped`
+          in _styles.html for the other half of the fix). "Tier 1  14" says
+          plainly that there is more than a glance's worth here, the same
+          job `scrub-count` already does for every other section on this
+          page ("Firm Coverage 54", "Contacts 80"). This is a plain count,
+          not the tier-cost sentence ("2 firms x 2 = 4 advocates...") that
+          was pulled from under every tier label as clutter (see
+          crm/tests/test_coverage_gaps.py::test_network_page_shows_gaps_and_advocate_fractions)
+          — that was a computed stat nobody asked for; this is the same
+          single number `scrub-count` already shows everywhere else.
+          {% endcomment %}
           <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a firm card here to set its tier.">
             <span>{{ section.label }}</span>
+            <span class="scrub-count">{{ section.cards|length }}</span>
           </div>
           <div class="tier-grid">
             {% for fc in section.cards %}
@@ -827,6 +843,90 @@
   })();
 
   (function () {
+    // Two rows of whatever the real card height turns out to be — see the
+    // long comment on `.tier-grid` in crm/_styles.html for why this is
+    // measured live instead of computed from the declared tokens: cards in
+    // the same tier can differ in real height (a bare firm vs. one with a
+    // warmth bar and advocate sockets), and even a bare card's rendered
+    // height doesn't reliably match the padding-plus-line-height
+    // arithmetic. This reads the actual gap between the second and third
+    // row off the layout and writes it back as `--tier-cap`, so the cut
+    // always lands in the gap and never through a card. A tier that fits
+    // in two rows already is left uncapped — nothing to find, nothing to
+    // scroll to.
+    function debounce(fn, ms) {
+      var t;
+      return function () {
+        clearTimeout(t);
+        t = setTimeout(fn, ms);
+      };
+    }
+
+    function capOneGrid(grid) {
+      grid.style.removeProperty("--tier-cap");
+      grid.classList.remove("is-capped");
+      grid.removeAttribute("tabindex");
+      grid.removeAttribute("role");
+      grid.removeAttribute("aria-label");
+
+      var cards = Array.prototype.slice.call(grid.children).filter(function (el) {
+        return el.classList.contains("firm-card");
+      });
+      if (!cards.length) return;
+
+      // Group into rows by rendered top, not by counting children per row —
+      // `auto-fill` puts a different number of cards in a row depending on
+      // viewport width, so the row boundaries have to come off the layout.
+      var gridTop = grid.getBoundingClientRect().top;
+      var rows = [];
+      cards.forEach(function (card) {
+        var rect = card.getBoundingClientRect();
+        var top = Math.round(rect.top - gridTop);
+        var bottom = Math.round(rect.bottom - gridTop);
+        var row = rows.length && Math.abs(rows[rows.length - 1].top - top) < 2
+          ? rows[rows.length - 1] : null;
+        if (!row) { row = { top: top, bottom: bottom }; rows.push(row); }
+        row.bottom = Math.max(row.bottom, bottom);
+      });
+      if (rows.length <= 2) return; // Fits already — no cap, no scrollbar.
+
+      var gapPx = parseFloat(getComputedStyle(grid).rowGap) || 0;
+      // Midpoint of the gap after row two — flush with row two's own
+      // bottom edge reads as a hairline sitting on the last visible card.
+      var cap = rows[1].bottom + gapPx / 2;
+
+      grid.style.setProperty("--tier-cap", cap + "px");
+      grid.classList.add("is-capped");
+      grid.setAttribute("tabindex", "0");
+      grid.setAttribute("role", "region");
+      var label = grid.parentElement.querySelector(".tier-label");
+      var labelText = label ? label.textContent.trim().replace(/\s+/g, " ") : "Tier";
+      grid.setAttribute("aria-label", labelText + " firms, scroll for more");
+    }
+
+    function capAllGrids() {
+      document.querySelectorAll(".tier-grid").forEach(capOneGrid);
+    }
+
+    // Measured once immediately (covers reduced-motion, where the cards
+    // never move) and again once the `.kin-reveal` entrance animation
+    // settles (covers everyone else — mid-animation cards briefly report a
+    // translated position, which would misplace the cap). `animationend`
+    // bubbles from every card, so this fires often right after load;
+    // debounced so the burst collapses into one recompute.
+    capAllGrids();
+    var recomputeAfterReveal = debounce(capAllGrids, 60);
+    document.querySelectorAll(".tier-grid").forEach(function (grid) {
+      grid.addEventListener("animationend", recomputeAfterReveal);
+    });
+    window.addEventListener("resize", debounce(capAllGrids, 150));
+    // A tab opened in the background never plays `.kin-reveal` (browsers
+    // pause it while hidden), so its `animationend` recompute never fires
+    // either — recheck once the tab is actually looked at.
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) capAllGrids();
+    });
+
     var dragged = null;
     document.querySelectorAll(".firm-card").forEach(function (card) {
       card.addEventListener("dragstart", function () { dragged = card; card.classList.add("dragging"); });
@@ -855,6 +955,10 @@
             var empty = s.querySelector(".tier-empty");
             if (empty) empty.hidden = s.querySelector(".tier-grid").children.length > 0;
           });
+          // The card just moved tiers, so both the old and new grid's row
+          // count changed — recompute every cap rather than track which
+          // two moved.
+          capAllGrids();
         });
       });
     });
