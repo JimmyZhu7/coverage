@@ -1013,10 +1013,10 @@ def test_the_rail_still_names_a_date_the_board_folded_away(client):
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="gs2", name="Goldman Sachs")
     today = timezone.localdate()
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="insight_open",
                             date=today + timedelta(days=2), confidence=1.0)
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=today + timedelta(days=25), confidence=1.0)
 

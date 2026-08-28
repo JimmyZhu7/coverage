@@ -112,7 +112,7 @@ def test_a_deadline_that_passed_last_night_is_not_a_critical_card(client):
     firm = Firm.objects.create(name="Closed Bank", slug="closed-bank")
     UserFirm.all_objects.create(user=user, firm=firm, tier=1)
     FirmDate.objects.create(
-        firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
         date=UTC_DAY, confidence=1.0,
     )
     contact = Contact.all_objects.create(
@@ -147,7 +147,7 @@ def test_a_deadline_still_open_today_keeps_its_critical_card(client):
     firm = Firm.objects.create(name="Open Bank", slug="open-bank")
     UserFirm.all_objects.create(user=user, firm=firm, tier=1)
     FirmDate.objects.create(
-        firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
         date=HK_DAY, confidence=1.0,
     )
     contact = Contact.all_objects.create(

@@ -1205,10 +1205,10 @@ def test_an_estimated_date_stays_off_the_grid_even_at_full_confidence(
     """
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
     when = _pinned_day(15)
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close", date=when,
                             precision="estimated", confidence=1.0)
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="hk",
                             event_kind="insight_deadline", date=when,
                             precision="month", confidence=1.0)
 
@@ -1223,7 +1223,7 @@ def test_an_estimated_date_raises_no_alarm_on_a_phone(client, user):
     """The .ics feed is the copy that wakes someone up. A VALARM a week
     before a date nobody stated is the worst version of this bug."""
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=timezone.localdate() + timedelta(days=9),
                             precision="estimated", confidence=1.0)
@@ -1245,7 +1245,7 @@ def test_the_precision_vocabulary_is_closed_at_the_database(user):
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
     with pytest.raises(IntegrityError):
         FirmDate.objects.create(
-            firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+            firm=firm, cycle="sa2028", region="us", event_kind="app_close",
             date=timezone.localdate(), precision="aproximate", confidence=0.6)
 
 

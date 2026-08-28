@@ -91,7 +91,7 @@ def loud(client):
     firm = Firm.objects.create(name="Order Capital", slug="order-capital")
     UserFirm.all_objects.create(user=user, firm=firm, tier=1)
     FirmDate.objects.create(
-        firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
         date=today + timedelta(days=3), confidence=1.0,
     )
     # A second tiered firm with nobody at it, so the board also carries a

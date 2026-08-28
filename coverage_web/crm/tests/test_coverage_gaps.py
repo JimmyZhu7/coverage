@@ -500,7 +500,7 @@ def test_an_estimated_close_never_reaches_the_exposure_formula(client):
     UserFirm.all_objects.create(user=user, firm=firm, tier=3)
     today = date.today()
     fd = FirmDate.objects.create(
-        firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
         date=today + timedelta(days=5), confidence=1.0,
     )
     FirmDate.objects.filter(pk=fd.pk).update(precision="estimated")
