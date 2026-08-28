@@ -98,10 +98,13 @@
   {% comment %}
   Coverage Gaps: the worst-exposed tiered firms, worst first. The formula is
   documented in crm/coverage.py — tier weight × gap points + a deadline
-  bonus for a CONFIRMED close — and each card SHOWS its own arithmetic
-  in `.gap-math` (not just a hover tooltip: the title= attribute below is
-  unreachable on any touch device, which is most of this app's own screen
-  sizes, so the rank used to be arguable only if you owned a mouse).
+  bonus for a CONFIRMED close. Each card shows the one number that formula
+  resolves to (`.gap-exp`), not just a hover tooltip: the title= attribute
+  below is unreachable on any touch device, which is most of this app's own
+  screen sizes, so the rank would be arguable only if you owned a mouse.
+  See `test_the_gap_strip_shows_its_score_without_a_hover` — that test is
+  the reason a later simplification pass (below) still shows `.gap-exp`
+  in plain text rather than folding it into this same hover-only title=.
   {% endcomment %}
   {% if gaps %}
   <section class="gap-strip">
@@ -139,16 +142,27 @@
           times on one card. `title=` above still carries the full
           breakdown for anyone hovering — this is the one number from it
           worth always showing without a hover, not the whole formula.
+          `test_the_gap_strip_shows_its_score_without_a_hover` pins this:
+          `.gap-exp` stays plain text specifically because title= cannot
+          be reached on a touch screen, so it is not a candidate for the
+          next round of trimming even though it looks like one.
 
-          "{{ g.target }}" is the user's own advocate-per-firm target
-          (Settings > Cadence, `crm.coverage.advocate_target`, default 2),
-          not a fixed rule — the title= says so since the card itself has
-          no room to. "exp" spelled out as "exposure" in place: matches the
-          card's own title= breakdown ("... = exposure N"), so a reader who
-          hovers sees the same word the card already shows without hovering.
+          The advocate fraction that used to sit between them is gone.
+          Asked for directly: cut what repeats without distinguishing.
+          `g.label` already implies "0 advocates" for every state except
+          "Short of target" ("No contacts", "No replies yet" and "No
+          advocate" are all, by construction in `gap_state()`, states
+          where `advocates == 0` — see crm/coverage.py) — so printing
+          "0/{{ g.target }}" beside "No advocate" was one fact twice, and
+          six identical fractions in a row read as filler, not signal.
+          The one state where the fraction WAS new information — "Short
+          of target", where advocates can be 1 of 2 — keeps that count,
+          just off the face: it is in this line's title= now, worded with
+          the actual numbers rather than the fixed rule the old copy
+          implied ("{{ g.target }}" is the user's own Settings > Cadence
+          target, `crm.coverage.advocate_target`, not a constant).
           {% endcomment %}
-          <div class="gap-state">{{ g.label }} ·
-            <span title="Your advocate target for this firm ({{ g.target }} per firm) — set in Settings &gt; Cadence.">{{ g.advocates }}/{{ g.target }} advocates</span>
+          <div class="gap-state" title="{{ g.advocates }} of {{ g.target }} advocates toward your target for this firm. Set in Settings &gt; Cadence.">{{ g.label }}
             <span class="gap-exp">· exposure {{ g.exposure }}</span></div>
           {% comment %}
           "Who to find": the other half of the card. Everything above it

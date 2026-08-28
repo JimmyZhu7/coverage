@@ -785,7 +785,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      colour (see .gap-t1/2/3 below), so a filled T1 badge restated the
      same fact in a second shape. Text carries it for anyone the colour
      doesn't reach; the mono face keeps it feeling like a tag without the
-     chrome. */
+     chrome.
+
+     A "simplify this strip" pass looked at cutting this tag too, on the
+     same "the border already says it" logic used to cut the fraction and
+     the pill above. It stayed: border-left colour is the ONLY other place
+     tier appears on this card, and colour-only is exactly the failure mode
+     this comment was written to avoid. Cutting the badge without giving
+     colour-blind or low-vision readers a second channel would be redoing
+     the mistake this rule already fixed once, not simplifying past it. */
   .gap-head { display: flex; gap: var(--s2); align-items: baseline; }
   .gap-tier-tag { font-size: 10px; font-family: var(--font-mono);
     color: var(--ink-3); font-weight: var(--w-med); }
@@ -800,12 +808,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      `rank_gaps`'s sort instead of on the card's face. The tied cards read
      the same and sit in the right order, which is the answer the count was
      standing in for. `.pill.fc-open` went with the pill. */
+  /* No advocate fraction here any more either — "0/2 advocates" beside
+     "No advocate" was one fact stated twice, and the fraction read
+     identically across all six cards regardless of firm (see
+     contact_list.html for the full argument and the one state where the
+     count still mattered). `title=` on this element carries it now. */
   .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
   /* The one number worth showing without a hover: not the whole formula
      (tier weight × gap points + bonus — that still lives in the card's
      `title=` for anyone hovering), just the score it resolves to, so a
      touch-only screen can still see WHY this card outranks its neighbour.
-     Mono so it reads as a number, not more state-line prose. */
+     Mono so it reads as a number, not more state-line prose. Protected by
+     `test_the_gap_strip_shows_its_score_without_a_hover`: title= is
+     unreachable on touch, so this cannot fold into it no matter how
+     redundant with sort order it looks on a desktop screen. */
   .gap-exp { font-family: var(--font-mono); color: var(--ink-2); }
   .gap-act { margin-top: auto; padding: 5px var(--s2); font-size: var(--fs-xs);
     text-align: center; white-space: nowrap; overflow: hidden;
