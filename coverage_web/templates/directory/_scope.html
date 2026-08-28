@@ -71,11 +71,15 @@ answerable, never restated a second time above the first result.
   - "N you marked 'not for me'" (`hidden_count`) already has a durable home:
     My Applications' own "Not for me" section states the count and the way
     back (`#hidden`), one click from this page's own header nav.
-  - "N repeat listings" (`hidden_dupes`) now has a real control instead of a
-    lone escape-hatch link: "Show repeat listings" beside Eligible only in
-    the filter bar's Filters disclosure — no count on its label, the same
-    plain shape "Eligible only" already uses, so nothing here risks going
-    stale between the OOB refreshes that keep the segmented counts honest.
+  - "N repeat listings" (`hidden_dupes`) is the one exception to "every
+    guarantee survives, relocated": it briefly had a real control ("Show
+    repeat listings" beside Eligible only), then that control was cut
+    outright (2026-08-28) when the bar wrapped onto a second row for it
+    alone. Unlike the other three, a folded duplicate is never a role a
+    student was trying to reach — it is the same posting filed twice by the
+    firm — so this is a genuine narrowing, not a relocation. `?dupes=1`
+    still works as a quiet URL fallback; see `opportunities.html` for the
+    fuller argument.
 
 Nothing here silently narrows what the board admits to hiding — each hide
 still states its own count, at the control that causes it, and still offers

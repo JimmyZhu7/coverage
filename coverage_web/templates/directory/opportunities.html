@@ -249,24 +249,23 @@
       {% endif %}
 
       {% comment %}
-      Repeat listings, folded by default (see directory.dupes.fold_duplicates)
-      — some firms genuinely file one job as several requisitions, and this is
-      the one hide on the page with no other control that causes it. It used
-      to be reachable only through a link in the header's subset sentence
-      ("146 repeat listings"); that sentence is gone (2026-08-27) so this
-      checkbox is its replacement, in the same plain shape `.fit-toggle`
-      already uses and deliberately uncounted for the same reason: a number
-      here would need the same OOB-refresh machinery the segmented counts get,
-      and the control's own reachability is the guarantee, not the figure.
-      Hidden at zero, same rule the toggle above follows — a student with
-      nothing folded is not shown a route to an empty reveal.
+      Repeat listings fold silently now (see directory.dupes.fold_duplicates)
+      — no toggle, no count, no route back. Cut on request, pointing at the
+      filter bar wrapping onto a second row for one lone "All Companies":
+      "this needs to be reduced to one bar... can we take away the show
+      repeated listing button?" (2026-08-28).
+
+      This is a genuine narrowing, not a relocation like its three siblings
+      in `_scope.html`'s header-strip note — there is nowhere left for a
+      folded-duplicate student to see the fold or reverse it. That is a
+      deliberate call, not an oversight: a firm re-filing one job as several
+      requisitions is noise on every reading of this page, never a role a
+      student was trying to reach, unlike the other three hides (fit,
+      region, campaign) which can each hide a role someone actually wants.
+      `?dupes=1` still works as a URL fallback (`directory/views.py`'s
+      `dupes_shown`) — nothing downstream broke — it is simply no longer
+      advertised.
       {% endcomment %}
-      {% if hidden_dupes or dupes_shown %}
-        <label class="fit-toggle" title="Some firms file one posting as several requisitions, folded together by default.">
-          <input type="checkbox" name="dupes" value="1"{% if dupes_shown %} checked{% endif %}>
-          <span>Show repeat listings</span>
-        </label>
-      {% endif %}
 
       {% comment %}
       Companies shows an ACTIVE-SELECTION count ("3 selected"), not a result

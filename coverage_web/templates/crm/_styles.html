@@ -1474,9 +1474,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* The explicit selection control. NOT a wrapping <label> like
      `.net-mini` — this card already has its own click targets (Log Touch,
      Edit), so the box has to be its own deliberate target rather than
-     fighting those for the click. Sized like `.net-mini-check` and aligned
-     to the avatar's cap-height, not stretched to the card. */
-  .cc-check { flex: none; margin-top: 3px; accent-color: var(--accent);
+     fighting those for the click. Sized like `.net-mini-check`.
+
+     Centred on the AVATAR, not on the cap-height of the name: the avatar
+     is the fixed, always-40px anchor of this row, while the name/pill line
+     it used to align to varies card to card (one pill vs. three, a
+     two-line wrap on a long name) — a 3px top margin read as "cap-height
+     aligned" only on the shortest cards and as floating high above center
+     on every other one, reported directly against the live board. Centred
+     math: (40px avatar − 15px box) / 2. */
+  .cc-check { flex: none; margin-top: 13px; accent-color: var(--accent);
     width: 15px; height: 15px; cursor: pointer; }
   .cc-avatar { width: 40px; height: 40px; border-radius: 50%; flex: none;
     background: var(--accent-soft); color: var(--accent-ink);
