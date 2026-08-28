@@ -1361,21 +1361,6 @@ _FRESH_DAYS = 10
 _ROLLING_FEED_CAP = 30
 
 
-def _fresh_label(seen_days: int | None) -> str:
-    """What the "New" badge actually measures, spelled out: `first_seen` is
-    when the row entered OUR db, not when the firm posted it — so the badge
-    must say "first seen", never bare "New". (Bug: after a bulk import, 794
-    of 805 open roles wore "New" because every backfilled row's `first_seen`
-    was the import timestamp, days after the firm actually listed it.)"""
-    if seen_days is None:
-        return ""
-    if seen_days == 0:
-        return "First seen today"
-    if seen_days == 1:
-        return "First seen 1d ago"
-    return f"First seen {seen_days}d ago"
-
-
 def _unconfirmed_note(o) -> dict:
     """Whether Coverage's own most recent check of this posting actually
     reconfirmed it is live, as something a template can render honestly. {}
@@ -1436,6 +1421,57 @@ _FACT_CHIP_ORDER = ("sponsorship", "study", "language", "pay", "grad", "gpa",
                     "duration", "cover_letter", "transcript", "assessment")
 _FACT_CHIPS_MAX = 2
 
+# A class-standing fact ("Penultimate year", "Final year", "First year" — see
+# facts.py's `_STUDY_STAGE`) and a grad-year fact, BOTH stated by the same
+# posting, are two spellings of one requirement often enough to merge — but
+# only when they cannot disagree. `_STUDY_STAGE`'s own comment is why the
+# module never converts a stage into a year: "penultimate" means something
+# different on a three-year UK degree and a four-year US one. What CAN be
+# checked without inventing that translation is breadth — "final year" and
+# "first year" name ONE imminent year; "penultimate year" straddles two (this
+# year's or next year's intake). A grad-year fact wider than that is a
+# DIFFERENT, more specific claim than the stage phrase, not a repeat of it, so
+# it must stay two chips — merging would hide a real mismatch instead of a
+# duplicate. Measured live: 55 open TARGET_BUCKETS rows carry both, and every
+# one agrees (Penultimate year + Grad 2028; Penultimate year + Grad
+# 2027-2028; Final year + Grad 2027; ...) — none contradict.
+_CLASS_STANDING_SPAN = {"First year": 1, "Final year": 1, "Penultimate year": 2}
+
+
+def _standing_matches_grad(study_value, grad_fact):
+    """Whether a class-standing fact and a grad-year fact, stated by the SAME
+    posting, describe one requirement rather than two — see
+    `_CLASS_STANDING_SPAN` above for why "matches" means "not wider than"
+    rather than an exact translation."""
+    span = _CLASS_STANDING_SPAN.get(study_value)
+    if span is None:
+        return False
+    years = (grad_fact or {}).get("years") or []
+    return 1 <= len(years) <= span
+
+
+# "Current student" / "Current student or recent graduate" is not a class
+# standing — facts.py's own comment on `_STUDY_STAGE` calls it out as a
+# distinct stage, not a stand-in for one. On THIS product it is also close to
+# uninformative: `extract_facts` (the management command that populates
+# `raw["facts"]`) only ever runs over `TARGET_BUCKETS` — insight, internship,
+# entry_level, the three buckets `classify.py` defines as campus recruiting —
+# so every row that can carry this fact at all is already, by the
+# classifier's own criterion, a current-student-or-recent-grad row. Measured
+# live: 26 "Current student" + 2 "Current student or recent graduate" rows,
+# 100% of them insight/internship/entry_level, and 0 of the 13,962 open
+# `other` (experienced-hire) rows carry ANY `facts` at all, this one
+# included. Suppressed HERE, at render time, gated on the OPPORTUNITY'S OWN
+# bucket rather than deleted from facts.py's extraction: the day extraction
+# widens to the `other` bucket, or a firm-page surface starts showing facts
+# for experienced roles, this same phrase on that row would be exactly the
+# signal a reader needs (an experienced-hire posting that also welcomes
+# current students is worth flagging), so the extractor keeps finding it —
+# only this campus-scoped chip stops repeating it.
+_NON_DISCRIMINATING_STUDY_ON_CAMPUS = {
+    "Current student", "Current student or recent graduate",
+}
+
 
 def _fact_chips(o, *, verdict=None) -> list[dict]:
     """What this posting states about applying, as at most three chips.
@@ -1469,6 +1505,20 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     repeats the window, so the fact chip is the only place a student can read
     what the posting actually stated, and it stays. Anonymous visitors get no
     verdict at all and are untouched.
+
+    Two more duplications, both FACT-vs-FACT rather than verdict-vs-fact, and
+    the correct de-dup for each turned out to be value-dependent rather than
+    kind-dependent — see `_standing_matches_grad` and
+    `_NON_DISCRIMINATING_STUDY_ON_CAMPUS` for the evidence behind each:
+
+    - A class-standing fact ("Penultimate year") and a grad-year fact ("Grad
+      2028") that AGREE merge into the one grad chip, quoting both sentences.
+      A class-standing fact that does not agree with the grad fact beside it
+      (or has no grad fact at all) is never touched — an apparent mismatch is
+      surfaced, not papered over.
+    - "Current student"/"Current student or recent graduate" is suppressed
+      outright, but only where the posting's own bucket is already one of the
+      three campus buckets this fact is redundant with.
     """
     facts = (o.raw or {}).get("facts") or {}
     made = {}
@@ -1527,14 +1577,37 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     # Walls are the facts that can END the decision: a visa answer, a language
     # you do not speak, a year of study you are not in.
     css = {"language": "fact-wall", "study": "fact-wall", "pay": "fact-pay"}
+    study_fact, grad_fact = facts.get("study"), facts.get("grad")
+    standing_merge = bool(study_fact) and _standing_matches_grad(
+        study_fact.get("value"), grad_fact)
     for fact_kind, label in labels.items():
         if fact_kind == "grad" and kind == "year_out":
             continue           # the verdict beside it already says this
+        if fact_kind == "study" and standing_merge:
+            continue           # merges into the grad chip below instead
         fact = facts.get(fact_kind)
-        if fact:
-            made[fact_kind] = {"label": label(fact),
-                               "css": css.get(fact_kind, "fact-plain"),
-                               "why": fact.get("phrase", "")}
+        if not fact:
+            continue
+        if (fact_kind == "study"
+                and fact.get("value") in _NON_DISCRIMINATING_STUDY_ON_CAMPUS
+                and o.bucket in TARGET_BUCKETS):
+            continue           # true of ~every row this feed can show at all
+        entry = {"label": label(fact), "css": css.get(fact_kind, "fact-plain"),
+                 "why": fact.get("phrase", "")}
+        if fact_kind == "grad" and standing_merge:
+            # One chip, both sentences: the label carries the stage AND the
+            # year, and the tooltip keeps the stage phrase's own evidence
+            # trail alive rather than letting it vanish with the chip it came
+            # from — see the docstring's "quoting both sentences". The `css`
+            # stays `fact-wall` — the standing chip's own styling, not plain
+            # grad's — because a stage-plus-year requirement is still a wall
+            # ("a year of study you are not in"), not a neutral detail.
+            entry["label"] = f"{study_fact['value']} · {entry['label']}"
+            entry["css"] = css["study"]
+            stage_phrase = study_fact.get("phrase", "")
+            if stage_phrase and stage_phrase != entry["why"]:
+                entry["why"] = f"{stage_phrase} {entry['why']}".strip()
+        made[fact_kind] = entry
 
     return [made[k] for k in _FACT_CHIP_ORDER if k in made][:_FACT_CHIPS_MAX]
 
@@ -1677,7 +1750,6 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
         "is_mine": o.firm_id in my_firm_ids,
         "seen_days": seen_days,
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
-        "fresh_label": _fresh_label(seen_days),
         "facts": _fact_chips(o, verdict=_eligibility(o, profile)),
         "reported": deadline_provenance(o),
         "verdict": _eligibility(o, profile),

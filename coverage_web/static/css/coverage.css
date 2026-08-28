@@ -1639,10 +1639,19 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 /* ---- The posting drawer + its Read affordance ------------------------------
    Shared by every page that lists a role (feed, firm page, My Applications).
    Moved here from the feed's inline styles for the same reason as the fact
-   chips: one component, one definition. */
+   chips: one component, one definition.
+   `letter-spacing: -0.01em` matches `.fact-chip` right above — the two are
+   NOT one style split by an accident, though: `.fact-chip`'s padding is
+   pinned to 6px on purpose (raising it to `.meta-read`'s 8px measurably
+   grew truncated chips on the default feed, see its own comment) and its
+   `ink-2` is a deliberately more legible tier than this button's fainter
+   `ink-3` — a data chip and a click target earn different weight. Tracking
+   was the one property with no such reason on either side, so this alone
+   was the accidental gap. */
 .meta-read { flex: none; margin-left: auto; border: 1px solid var(--line);
   border-radius: 999px; background: var(--surface); color: var(--ink-3);
   padding: 1px 8px; font-size: var(--fs-nano); font-family: var(--font-mono);
+  letter-spacing: -0.01em;
   cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
 .meta-read:hover { border-color: var(--accent-line); color: var(--accent-ink); }
 /* 42x16 is a cursor target. On a finger it is a quarter of the 44px floor the

@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from directory.models import Firm, Opportunity
 from directory.views import (
-    _FRESH_DAYS, REGION_NONE, _fact_chips, _fresh_label, _unconfirmed_note,
+    _FRESH_DAYS, REGION_NONE, _fact_chips, _unconfirmed_note,
     _urgency_feed, _urgency_item,
 )
 
@@ -51,16 +51,6 @@ def _seen(o, days_ago):
 # ---------------------------------------------------------------------------
 # A1(a) — the "New" badge must say what it measures (first_seen), not "New".
 # ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("seen_days,expected", [
-    (None, ""),
-    (0, "First seen today"),
-    (1, "First seen 1d ago"),
-    (5, "First seen 5d ago"),
-])
-def test_fresh_label_says_what_it_measures(seen_days, expected):
-    assert _fresh_label(seen_days) == expected
-
 
 @pytest.mark.django_db
 def test_feed_badge_reads_first_seen_not_new(client):
@@ -825,6 +815,102 @@ def test_an_anonymous_visitor_still_sees_the_stated_window(client):
     body = client.get("/opportunities/").content.decode()
     assert "Grad 2027–2028" in body
     assert "grads" not in body.replace("Grad 2027–2028", "")
+
+
+# ---------------------------------------------------------------------------
+# FACT-vs-FACT DEDUPLICATION. `_fact_chips`'s docstring already documents the
+# verdict-vs-fact case (year_out suppressing "Grad ..."); these are the two
+# duplications where BOTH sides are facts, and the de-dup turned out to be
+# value-dependent rather than kind-dependent — see `_standing_matches_grad`
+# and `_NON_DISCRIMINATING_STUDY_ON_CAMPUS` in views.py.
+# ---------------------------------------------------------------------------
+
+def _facted(firm, facts, *, bucket="internship", **extra):
+    return Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket=bucket, status="open",
+        url=f"https://x.com/{firm.slug}-{bucket}-facted", raw={"facts": facts},
+        **extra)
+
+
+@pytest.mark.django_db
+def test_an_agreeing_class_standing_and_grad_year_merge_into_one_chip():
+    """"Penultimate year" + "Grad 2028" is one requirement stated twice — 55
+    open rows carry both, none of them disagreeing. The merge must not drop
+    either sentence: the standing's own phrase has to survive in the tooltip
+    of the chip that's left, same as the year_out verdict keeps `grad`'s
+    phrase alive in its own `why`."""
+    firm = Firm.objects.create(slug="gs2", name="Goldman Sachs 2")
+    o = _facted(firm, {
+        "study": {"value": "Penultimate year", "phrase": "In your penultimate year of study"},
+        "grad": {"value": "2028", "years": ["2028"], "phrase": "graduating in 2028"},
+    })
+    chips = _fact_chips(o)
+    labels = [c["label"] for c in chips]
+    assert len(chips) == 1
+    assert labels == ["Penultimate year · Grad 2028"]
+    assert "penultimate" in chips[0]["why"].lower()
+    assert "graduating in 2028" in chips[0]["why"]
+
+
+@pytest.mark.django_db
+def test_a_class_standing_wider_than_its_grad_year_fact_does_not_merge():
+    """"Final year" names ONE imminent year. A grad fact spanning three of
+    them beside it is a different, wider claim — not the same requirement
+    restated — so this must stay two chips rather than quietly picking one."""
+    firm = Firm.objects.create(slug="ms3", name="Morgan Stanley 3")
+    o = _facted(firm, {
+        "study": {"value": "Final year", "phrase": "You are a final year student"},
+        "grad": {"value": "2027-2029", "years": ["2027", "2028", "2029"],
+                 "phrase": "graduating between 2027 and 2029"},
+    })
+    chips = _fact_chips(o)
+    labels = {c["label"] for c in chips}
+    assert labels == {"Final year", "Grad 2027-2029"}, labels
+
+
+@pytest.mark.django_db
+def test_current_student_is_suppressed_on_a_campus_bucket():
+    """"Current student" states nothing a campus bucket (insight/internship/
+    entry_level) doesn't already establish by being on this feed at all — see
+    `_NON_DISCRIMINATING_STUDY_ON_CAMPUS`. A real second fact (GPA) must take
+    the freed slot rather than the row rendering only one chip."""
+    firm = Firm.objects.create(slug="p72", name="Point72")
+    o = _facted(firm, {
+        "study": {"value": "Current student", "phrase": "You are a current student"},
+        "gpa": {"value": "3.5", "phrase": "minimum GPA of 3.5"},
+    }, bucket="entry_level")
+    chips = _fact_chips(o)
+    labels = [c["label"] for c in chips]
+    assert "Current student" not in labels
+    assert "GPA 3.5" in labels
+
+
+@pytest.mark.django_db
+def test_current_student_would_still_show_off_the_campus_buckets():
+    """The suppression is scoped to the bucket, not a blanket rule on the
+    VALUE — `extract_facts` never actually populates `other`-bucket rows
+    today (confirmed live: 0 of 13,962), but `_fact_chips` itself must not
+    be the thing making that true. Constructed directly, bypassing the
+    pipeline, so the render-time gate is what's under test."""
+    firm = Firm.objects.create(slug="exp1", name="Experienced Co")
+    o = _facted(firm, {
+        "study": {"value": "Current student", "phrase": "We also welcome current students"},
+    }, bucket="other")
+    chips = _fact_chips(o)
+    assert [c["label"] for c in chips] == ["Current student"]
+
+
+@pytest.mark.django_db
+def test_recent_graduate_alone_is_not_suppressed_on_a_campus_bucket():
+    """Only the two exact non-discriminating values are gated — "Recent
+    graduate" alone (34 open rows) is real information on an internship
+    bucket, where the default assumption is a still-enrolled student."""
+    firm = Firm.objects.create(slug="pwc2", name="PwC 2")
+    o = _facted(firm, {
+        "study": {"value": "Recent graduate", "phrase": "recent graduates are welcome"},
+    }, bucket="internship")
+    chips = _fact_chips(o)
+    assert [c["label"] for c in chips] == ["Recent graduate"]
 
 
 def test_no_verdict_is_rendered_as_struck_through_text():
