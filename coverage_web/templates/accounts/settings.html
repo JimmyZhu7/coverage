@@ -1667,10 +1667,21 @@
               has to state its population (rule D3), so the archived split is
               broken out and links to the list it refers to.
               {% endcomment %}
+              {% comment %}
+              The four ways a contact is off the Network board, stated once
+              with its count and its route. This used to be a strip above the
+              board itself, in three separate vocabularies; it was removed on
+              2026-08-28 and landed here, which is the page that already
+              exists to say what Coverage holds and how much of it.
+
+              Each clause hides at zero, for the reason the strip's own
+              comments gave: a permanent link to a list that is always empty
+              is a standing reproach for a state that is allowed.
+              {% endcomment %}
               <div class="set-row-desc">People in your private CRM.
-                {% if archived_count %}
-                  Includes <a href="{% url 'crm:contact_archived' %}">{{ archived_count }} archived</a>,
-                  which the Network board doesn't show.
+                {% if archived_count or parked_count or campaign_hidden_count or unrelated_count %}
+                  Off the Network board:
+                  {% if archived_count %}<a href="{% url 'crm:contact_archived' %}">{{ archived_count }} archived</a>{% endif %}{% if archived_count and parked_count %}, {% endif %}{% if parked_count %}<a href="{% url 'crm:contact_parked' %}">{{ parked_count }} parked</a>{% endif %}{% if campaign_hidden_count and archived_count or campaign_hidden_count and parked_count %}, {% endif %}{% if campaign_hidden_count %}<a href="{% url 'crm:contact_campaign_hidden' %}">{{ campaign_hidden_count }} not recruiting</a>{% endif %}{% if unrelated_count and archived_count or unrelated_count and parked_count or unrelated_count and campaign_hidden_count %}, {% endif %}{% if unrelated_count %}<a href="{% url 'crm:contact_unrelated' %}">{{ unrelated_count }} not recruitment</a>{% endif %}.
                 {% endif %}
               </div>
             </div>

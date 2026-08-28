@@ -194,17 +194,27 @@ def _board_fixture(user):
     return banker, prof
 
 
-def test_board_hides_unrelated_and_says_so(client):
+def test_board_hides_unrelated_and_the_product_says_so(client):
+    """The board hides the professor; SETTINGS is where it says so.
+
+    The board used to carry that sentence itself, in a meta strip above the
+    first contact card. The strip was removed on 2026-08-28 and the count and
+    route landed in Settings > Your Data — the guarantee was never the
+    strip's to keep, only to state."""
+    from django.urls import reverse
+
     user = _user("board@example.com")
     banker, prof = _board_fixture(user)
     client.force_login(user)
     resp = client.get("/app/contacts/")
     assert resp.status_code == 200
     # Every count derives from the one filtered list: the professor is out of
-    # the total, and the board says it is hiding one, with the way to look.
+    # the board's total, and the product still says where he went.
     assert resp.context["contact_total"] == 1
-    assert resp.context["unrelated_total"] == 1
-    assert resp.context["unrelated_any"] is True
+    assert "hidden from this board" not in resp.content.decode()
+    settings_body = client.get(reverse("accounts:settings")).content.decode()
+    assert "1 not recruitment" in settings_body
+    assert reverse("crm:contact_unrelated") in settings_body
     # The card sections never contain the professor.
     section_names = [
         card["c"].name
@@ -231,7 +241,6 @@ def test_ledger_lists_reason_and_bring_back_restores(client):
     assert prof.recruitment_related is True
     resp = client.get("/app/contacts/")
     assert resp.context["contact_total"] == 2
-    assert resp.context["unrelated_total"] == 0
     resp = client.get("/app/contacts/unrelated/")
     assert resp.context["contacts"] == []
 

@@ -50,112 +50,32 @@
   </nav>
 
   {% comment %}
-  Everyone the write path declined to place. Coverage never infers a region
-  it cannot entail from something the student actually stated (see
-  crm/models.py `Contact.resolve_region` for the measurement that killed
-  every probabilistic signal), so some people stay unplaced — by design.
-  This link is the only ask the product makes about it: no badge, no Today
-  card, no digest line. Rendered only when somebody is actually unplaced —
-  a permanent line reading "0 unplaced" would be a standing reproach for a
-  state that is allowed.
+  THE BOARD'S META STRIP IS GONE (2026-08-28). Pointed at twice in a row,
+  the second time as "take all of this away, hide": three stacked bands
+  above the board — an unplaced ask, a row of four off-board links, and two
+  "N hidden from this board" caveats — none of which was a contact.
 
-  Moved out of the segmented pill above (2026-08-27): it was never a lens on
-  the board like "Hong Kong" or "School" — it's the region-ask surface, a
-  chore the product owes the student an answer for, so it now sits with the
-  board's other honesty lines below rather than among the filters. Nothing
-  about the ask changed: same unscoped count, same link, same `?scope=` this
-  page has always understood.
-  {% endcomment %}
-  {% if unplaced_total %}
-    <p class="net-caveat net-caveat--board">
-      {{ unplaced_total }} unplaced. <a href="?scope={{ unplaced_scope }}">Say where they are.</a>
-    </p>
-  {% endif %}
+  Every guarantee they made survives, relocated rather than dropped:
 
-  {% comment %}
-  The three ways off this board, collapsed (2026-08-27) from three segmented
-  tabs sitting among the filters into one quiet line beneath them. None of
-  the routes changed — same three URLs, same hide-when-empty rule the
-  campaign and recruitment gates below already used. Archived now follows
-  that same rule too, on purpose: it used to render unconditionally, but
-  most students have archived nobody, and a permanent link to a list that's
-  always empty is the same standing reproach as a permanently-zero tab.
+  - The unplaced ask is still made TWICE lower on this same page: the
+    `net-unplaced` section (the full grouped-by-firm answer, which is where
+    the question is actually answerable) and the one-line "N of these have
+    no region set. Shown on a guess. Place them" above the contact grid.
+    The band removed here was the third statement of it, and the only one
+    with nowhere useful to go.
+  - The four off-board lists (archived, parked, campaign-hidden,
+    not-recruitment) now hang off Settings > Your Data, beside the archived
+    link that already lived there. They are account-level ledgers, not
+    lenses on this board, and that is the page that already exists to say
+    what Coverage holds and how many.
+  - "The board says what it is not showing" is still honoured, just not
+    three times in three vocabularies at the top of the board. Settings
+    carries the counts and the routes together.
 
-  All three stay UNSCOPED, exactly like the tabs they replace: a way back
-  that disappears depending which filter you're standing on is a dead end,
-  not a filter.
+  What is NOT allowed back: a permanently-rendered line for a state that is
+  allowed (see the old "0 unplaced" argument), or a hidden-count sentence
+  that appears above the first contact card.
   {% endcomment %}
-  {% if archived_any or parked_any or hidden_any or unrelated_any %}
-    <nav class="subnav standalone net-offboard">
-      {% comment %}
-      Not a scope — a separate list. Archived contacts are excluded from
-      every board query, so this is the only way back to them.
-      {% endcomment %}
-      {% if archived_any %}
-        <a href="{% url 'crm:contact_archived' %}">Archived</a>
-      {% endif %}
-      {% comment %}
-      Parked contacts stay ON this board — they still sit in their warmth
-      section below — so this is the bulk way back, not a hidden-contacts
-      ledger. It joins this line rather than the filter pill for the same
-      reason the other three did: it is a route off the board, not a lens
-      on it. Gated like its neighbours; a student who has parked nobody
-      does not need the link.
-      {% endcomment %}
-      {% if parked_any %}
-        <a href="{% url 'crm:contact_parked' %}">Parked</a>
-      {% endif %}
-      {% comment %}
-      The other way a contact leaves this board: you answered "that bulk
-      send was not my recruiting" in Settings. Rendered only when somebody
-      is actually hidden — most students never mail-merge anything and a
-      permanent link explaining a feature that will never fire for them
-      makes the board harder to read.
-      {% endcomment %}
-      {% if hidden_any %}
-        <a href="{% url 'crm:contact_campaign_hidden' %}">Not recruiting</a>
-      {% endif %}
-      {% comment %}
-      The third way off the board: the person themselves is not related to
-      the user's recruiting (crm/recruitment.py). Same render-only-when-
-      somebody-is-hidden rule as the campaign link above, for the same
-      reason.
-      {% endcomment %}
-      {% if unrelated_any %}
-        <a href="{% url 'crm:contact_unrelated' %}">Not recruitment</a>
-      {% endif %}
-    </nav>
-  {% endif %}
-
-  {% comment %}
-  THE BOARD SAYS WHAT IT IS NOT SHOWING. Classifying a send "not my
-  recruiting" used to take those people out of the daily queue only, and the
-  founder opened his own board and asked why there were still club people in
-  his network (crm/campaigns.py). They come off the board now — which makes
-  the contact count, the tier board and the Coverage Gaps strip all drop at
-  once, and a page that shrinks by nine without saying so is the same bug with
-  better manners. Count, reason, and a link to look. Scoped, so the number
-  agrees with the tab it is under.
-  {% endcomment %}
-  {% if hidden_total %}
-    <p class="net-caveat net-caveat--board">
-      {{ hidden_total }} hidden from this board. They came in on a send you
-      said was not your recruiting.
-      <a href="{% url 'crm:contact_campaign_hidden' %}">Show them</a>
-    </p>
-  {% endif %}
-  {% comment %}
-  Same count-reason-link discipline for the recruitment-relevance gate
-  (crm/recruitment.py): the board must say what it is hiding and why, and
-  the number goes through the same scope filter as the board it caveats.
-  {% endcomment %}
-  {% if unrelated_total %}
-    <p class="net-caveat net-caveat--board">
-      {{ unrelated_total }} hidden from this board. Nothing on their row
-      relates them to your recruiting.
-      <a href="{% url 'crm:contact_unrelated' %}">Show them</a>
-    </p>
-  {% endif %}
 
   {% comment %}
   Coverage Gaps: the worst-exposed tiered firms, worst first. The formula is

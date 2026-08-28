@@ -29,7 +29,7 @@ from billing import credits as billing_credits
 from billing import stripe_gateway as billing_stripe_gateway
 from capture import gmail_live
 from capture.models import ContactProposal, GmailConnection
-from crm import campaigns as crm_campaigns, merge as crm_merge
+from crm import campaigns as crm_campaigns, merge as crm_merge, recruitment as crm_recruitment
 from crm.models import Campaign, Contact, ContactMerge, UserFirm
 from directory.models import Firm
 
@@ -689,6 +689,19 @@ def settings_view(request):
             # disagreed about the same number. Stating the population is rule
             # D3 — a count must mean what it says.
             "archived_count": contacts.filter(archived=True).count(),
+            # The other three ways a contact is off the Network board. These
+            # used to be counted and linked from a meta strip above the board
+            # itself; that strip was removed on 2026-08-28 ("take all of this
+            # away, hide") and the guarantee it made — the board says what it
+            # is not showing — landed here, on the page whose whole job is
+            # stating what Coverage holds. Same hide-when-zero rule the strip
+            # used: a student who has parked nobody is not shown a route to an
+            # empty list.
+            "parked_count": contacts.filter(
+                archived=False, thread_state="parked"
+            ).count(),
+            "campaign_hidden_count": len(crm_campaigns.excluded_contact_ids(request.user)),
+            "unrelated_count": len(crm_recruitment.hidden_contact_ids(request.user)),
             "work_auth_form": section_forms["work_auth"],
             "cadence_form": section_forms["cadence"],
             "pace_form": section_forms["pace"],

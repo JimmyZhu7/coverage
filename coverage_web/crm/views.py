@@ -1053,35 +1053,21 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         for code in NETWORK_SCOPE_REGIONS
     }
     contacts = _scoped(contacts)
-    # The caveat's number goes through the SAME filter as the board it is a
-    # caveat about. A US tab reading "9 hidden" while eight of them are in
-    # Hong Kong is the same class of lie as hiding them silently.
-    hidden_total = len(_scoped(hidden))
-    # The tab, unlike the caveat, is NOT scoped: it is the way back to the
-    # list, and a way back that vanishes on the School tab because none of the
-    # hidden nine went to USC is a dead end rather than a filter.
-    hidden_any = bool(hidden)
-    # Same pair for the recruitment-relevance gate: a scoped count for the
-    # caveat, an unscoped bool for the way back.
-    unrelated_total = len(_scoped(unrelated))
-    unrelated_any = bool(unrelated)
-    # A fourth way off this board, alongside the two gates above: the student
-    # archived them by hand (`contact_archive`). Unlike them, this one used to
-    # render unconditionally — the 2026-08-27 tab-bar simplification pass
-    # applied the same hide-when-empty rule here too, on purpose: most
-    # students have archived nobody yet, and a permanent link to a list that
-    # is always empty is the exact "standing reproach" the founder flagged on
-    # a permanently-zero "Other countries" tab.
-    archived_any = Contact.objects.for_user(user).filter(archived=True).exists()
-    # Parked is a route OFF this board, not a lens on it, so it sits on the
-    # off-board line with Archived rather than in the filter pill. Gated the
-    # same way: a student who has parked nobody is not shown the way back to
-    # an empty list. Django reads a missing context key as falsy, so without
-    # this the link would simply never render — silently, which is worse than
-    # loudly.
-    parked_any = Contact.objects.for_user(user).filter(
-        archived=False, thread_state="parked"
-    ).exists()
+    # The counts and routes for the four ways OFF this board — archived,
+    # parked, campaign-hidden, not-recruitment — used to be computed here and
+    # rendered as a meta strip above the first contact card. The strip is
+    # gone (2026-08-28, asked for twice, the second time as "take all of this
+    # away, hide"), and so is the arithmetic that only existed to feed it.
+    #
+    # The guarantee it carried — the board says what it is not showing — now
+    # lives in Settings > Your Data, next to the archived count that was
+    # already there. That is the page whose whole job is stating what
+    # Coverage holds, and it can say it once with all four numbers instead of
+    # three times in three vocabularies at the top of the board.
+    #
+    # `hidden` and `unrelated` themselves are NOT dead: they are still what
+    # takes those people off the board a few lines above. Only their display
+    # counts went.
     # How many of the shown contacts are here on a guess rather than a set
     # region. Rendered as a one-line caveat under the Contacts header so a
     # region tab never silently passes off "unknown" as "confirmed".
@@ -1423,11 +1409,14 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "all_total": all_total,
             "school_total": school_total,
             "unplaced_scope": UNPLACED_SCOPE,
-            # Unscoped, like `hidden_any`: the tab is the way TO the pool, and
-            # a way that vanishes depending on which tab you're standing on is
-            # a dead end rather than a filter. Rendered only when somebody is
-            # actually unplaced — a permanent tab reading "0" is a standing
-            # reproach for a state that is allowed.
+            # Nothing renders this any more — `unplaced_groups` below is the
+            # surface, and the one-line caveat above the contact grid uses
+            # `unconfirmed_total`. It stays because it is the assertion
+            # surface for region resolution (crm/tests/test_region_resolution.py):
+            # four tests read "how many contacts still have no region" off
+            # this key rather than re-deriving it, and a count computed the
+            # same way the page computes it is a better witness than one a
+            # test writes itself.
             "unplaced_total": unplaced_total,
             "unplaced_groups": unplaced_groups,
             "region_verbs": REGION_BULK_VERBS,
@@ -1441,12 +1430,6 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "sections": sections,
             "contact_total": len(contacts),
             "unconfirmed_total": unconfirmed_total,
-            "hidden_total": hidden_total,
-            "hidden_any": hidden_any,
-            "unrelated_total": unrelated_total,
-            "unrelated_any": unrelated_any,
-            "archived_any": archived_any,
-            "parked_any": parked_any,
         },
     )
 
