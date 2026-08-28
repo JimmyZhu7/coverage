@@ -160,13 +160,26 @@
   {% comment %}
   Coverage Gaps: the worst-exposed tiered firms, worst first. The formula is
   documented in crm/coverage.py — tier weight × gap points + a deadline
-  bonus for a CONFIRMED close. Each card shows the one number that formula
-  resolves to (`.gap-exp`), not just a hover tooltip: the title= attribute
-  below is unreachable on any touch device, which is most of this app's own
-  screen sizes, so the rank would be arguable only if you owned a mouse.
-  See `test_the_gap_strip_shows_its_score_without_a_hover` — that test is
-  the reason a later simplification pass (below) still shows `.gap-exp`
-  in plain text rather than folding it into this same hover-only title=.
+  bonus for a CONFIRMED close. The founder asked what "exposure" meant on
+  this card and, on hearing the answer, said drop the number: the word
+  already means something else in finance (position size, counterparty
+  risk), and the raw integer is only meaningful next to its neighbours,
+  which the sort order already carries.
+
+  `.gap-exp` still renders in plain text rather than folding into the
+  hover-only title= below — the title= attribute is unreachable on any
+  touch device, which is most of this app's own screen sizes, so touch
+  readers still need something on the card's face to trust the order isn't
+  arbitrary. What changed is WHAT it says: instead of the bare score, it
+  spells out this card's position among the worst shown ("ranked 1 of 6"),
+  which needs no formula literacy and still tells tied cards apart — two
+  firms can share a score (see `rank_gaps`'s tie-break in crm/coverage.py)
+  and still land at different, ordered positions instead of printing the
+  same number twice. See
+  `test_the_gap_strip_shows_its_rank_without_a_hover` (renamed from
+  `..._shows_its_score_without_a_hover`); the full arithmetic, "exposure"
+  included, still rides along in the card's own title= for anyone on a
+  pointer device.
   {% endcomment %}
   {% if gaps %}
   <section class="gap-strip">
@@ -198,16 +211,28 @@
           rest of the arithmetic it already shows there.
           {% endcomment %}
           {% comment %}
-          The state and the score share one line rather than two: the tier
+          The state and the rank share one line rather than two: the tier
           is already the border colour, so restating "T1 ×3" in a second
           sentence under the state line was the same fact printed three
           times on one card. `title=` above still carries the full
-          breakdown for anyone hovering — this is the one number from it
-          worth always showing without a hover, not the whole formula.
-          `test_the_gap_strip_shows_its_score_without_a_hover` pins this:
-          `.gap-exp` stays plain text specifically because title= cannot
-          be reached on a touch screen, so it is not a candidate for the
-          next round of trimming even though it looks like one.
+          breakdown, "exposure" included, for anyone hovering.
+
+          `.gap-exp` used to print that breakdown's raw output —
+          "exposure 12" — until the founder asked what it meant and, on
+          hearing the answer, said drop the number: "exposure" already
+          means something else in finance, and the integer is only
+          meaningful next to its neighbours, which the sort order already
+          says. It still can't fold into the hover-only title= above —
+          unreachable on any touch device, which is most of this app's own
+          screen sizes — so it still has to say something plain-text worth
+          reading without a hover. It now says this card's position among
+          the worst {{ gaps|length }} instead of its score: no formula
+          literacy required to read it, and it still tells tied cards
+          apart, since two firms can share a score (`rank_gaps`'s
+          tie-break in crm/coverage.py) and still land at different
+          positions rather than printing the same number twice.
+          `test_the_gap_strip_shows_its_rank_without_a_hover` (renamed
+          from `..._shows_its_score_without_a_hover`) pins this.
 
           The advocate fraction that used to sit between them is gone.
           Asked for directly: cut what repeats without distinguishing.
@@ -225,7 +250,7 @@
           target, `crm.coverage.advocate_target`, not a constant).
           {% endcomment %}
           <div class="gap-state" title="{{ g.advocates }} of {{ g.target }} advocates toward your target for this firm. Set in Settings &gt; Cadence.">{{ g.label }}
-            <span class="gap-exp">· exposure {{ g.exposure }}</span></div>
+            <span class="gap-exp">· ranked {{ forloop.counter }} of {{ gaps|length }}</span></div>
           {% comment %}
           "Who to find": the other half of the card. Everything above it
           says how exposed this firm is; the button below it says "Add",

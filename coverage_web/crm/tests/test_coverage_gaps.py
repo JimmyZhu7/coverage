@@ -339,12 +339,21 @@ def test_a_covered_firm_shows_no_action_at_all(client):
 
 
 @pytest.mark.django_db
-def test_the_gap_strip_shows_its_score_without_a_hover(client):
-    """The full formula lives in a `title=` tooltip, unreachable on any
-    touch device — but the SCORE it resolves to, the thing a card is
-    actually ranked by, must be plain text, not hover-only. Spelled out as
-    "exposure", not the "exp" abbreviation nobody could read without the
-    tooltip (which touch devices can never reach in the first place)."""
+def test_the_gap_strip_shows_its_rank_without_a_hover(client):
+    """The full formula, "exposure" included, lives in a `title=` tooltip,
+    unreachable on any touch device. That used to mean the card's face
+    printed the raw score ("exposure 12") so a touch reader had SOMETHING
+    plain-text to trust the order by. The founder asked what "exposure"
+    meant and, on hearing the answer, said drop the number: it collides
+    with what "exposure" means elsewhere in finance, and the raw integer
+    is only meaningful next to its neighbours, which the sort order
+    already carries.
+
+    What replaced it must still work without a hover: not the score, but
+    this card's plain-language RANK among the worst shown ("ranked 1 of
+    1" here, the only tiered firm on the account) — legible with no
+    formula literacy, and still distinct card-to-card even when the
+    underlying score ties (see the tied-cards test below)."""
     user = User.objects.create_user(email="math@example.com", password="x")
     firm = Firm.objects.create(slug="exposed-co", name="Exposed Co")
     UserFirm.all_objects.create(user=user, firm=firm, tier=1)
@@ -352,13 +361,15 @@ def test_the_gap_strip_shows_its_score_without_a_hover(client):
     client.force_login(user)
     body = client.get(reverse("crm:contact_list")).content.decode()
     gap_block = _gap_strip(body)
-    # Tier 1, no contacts: 3 × 4 = exposure 12. "· exposure 12" (not the bare
-    # substring) is the plain-text reading specifically — the hover tooltip
-    # below also contains "exposure 12" via its own "= exposure 12", and the
-    # two must not be conflated.
+    # The only tiered firm on the account, so it is the sole (and first)
+    # card in the strip.
     assert 'class="gap-exp"' in gap_block
-    assert "· exposure 12" in gap_block
-    # The full breakdown still rides along in the hover tooltip.
+    assert "· ranked 1 of 1" in gap_block
+    # The raw score no longer reaches the card's plain-text face...
+    assert "· exposure" not in gap_block
+    # ...but the full breakdown, "exposure" included, still rides along in
+    # the hover tooltip for anyone on a pointer device. Tier 1, no
+    # contacts: 3 × 4 = exposure 12.
     assert "= exposure 12" in gap_block
 
 
@@ -374,6 +385,15 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
     does the same job by ORDERING the tied cards instead: the firm with seats
     open right now is the one worth a contact today, in a way the exposure
     formula has no term for.
+
+    The card's face no longer prints the shared "exposure" score at all
+    (dropped per the founder's ask — see
+    test_the_gap_strip_shows_its_rank_without_a_hover), which makes this
+    tie-break more visible on the page than before, not less: two cards
+    that used to read as identical text ("exposure 12" twice) now print
+    their own distinct, ordered rank ("ranked 1 of 2" / "ranked 2 of 2"),
+    so the reordering is legible on the card face, not just inferred from
+    hovering both and comparing.
 
     Named so that the OLD tie-break would get this wrong: alphabetically
     "Zeta" comes last, and it is the one that has to come first.
@@ -395,8 +415,14 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
     body = client.get(reverse("crm:contact_list")).content.decode()
     gap_block = _gap_strip(body)
 
-    # Both tied at exposure 12 (Tier 1 × no_contacts = 3 × 4)...
-    assert gap_block.count("· exposure 12") == 2
+    # Both tied at exposure 12 (Tier 1 × no_contacts = 3 × 4) in the hover
+    # tooltip's arithmetic...
+    assert gap_block.count("= exposure 12") == 2
+    # ...but the card face never prints that shared score (dropped per the
+    # founder's ask) — it prints each card's own ordered RANK instead, so
+    # the tie reads as two DIFFERENT lines, not "exposure 12" twice.
+    assert "· ranked 1 of 2" in gap_block
+    assert "· ranked 2 of 2" in gap_block
     # ...and the tie is broken by who is hiring, not by the alphabet.
     assert gap_block.index("Zeta Co") < gap_block.index("Alpha Co"), (
         "the firm with three seats open sorts below a firm with none, on the "

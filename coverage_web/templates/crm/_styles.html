@@ -814,14 +814,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      contact_list.html for the full argument and the one state where the
      count still mattered). `title=` on this element carries it now. */
   .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
-  /* The one number worth showing without a hover: not the whole formula
-     (tier weight × gap points + bonus — that still lives in the card's
-     `title=` for anyone hovering), just the score it resolves to, so a
-     touch-only screen can still see WHY this card outranks its neighbour.
-     Mono so it reads as a number, not more state-line prose. Protected by
-     `test_the_gap_strip_shows_its_score_without_a_hover`: title= is
-     unreachable on touch, so this cannot fold into it no matter how
-     redundant with sort order it looks on a desktop screen. */
+  /* Not the raw "exposure" score any more — the founder asked what the
+     word meant and, on hearing the answer, said drop the number: it
+     collides with what "exposure" means elsewhere in finance, and the
+     integer is only meaningful next to its neighbours, which the sort
+     order already carries. What's shown instead is this card's
+     plain-language RANK ("ranked 1 of 6"): self-explanatory with no
+     formula literacy needed, and it still separates tied cards, since two
+     firms can share a score (crm/coverage.py's tie-break) and still land
+     at different, ordered positions. Mono kept so it still reads as a
+     number, not more state-line prose. Protected by
+     `test_the_gap_strip_shows_its_rank_without_a_hover`: title= is
+     unreachable on touch, so this line still can't fold into the hover
+     tooltip no matter how redundant with grid position it looks on a
+     desktop screen. */
   .gap-exp { font-family: var(--font-mono); color: var(--ink-2); }
   .gap-act { margin-top: auto; padding: 5px var(--s2); font-size: var(--fs-xs);
     text-align: center; white-space: nowrap; overflow: hidden;
