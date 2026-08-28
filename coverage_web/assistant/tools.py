@@ -930,6 +930,15 @@ def _get_firm(user, args) -> dict:
             "region": fd.region or "unstated",
             "date": _iso(fd.date),
             "confidence": round(fd.confidence or 0.0, 2),
+            # `confidence` alone is not the whole claim: a `precision` of
+            # "estimated" means this date is a month-level GUESS (extrapolated
+            # from past cycles), not a day the firm stated, however high
+            # `confidence` reads — see `crm.utils.firm_date_confidence`'s
+            # identical two-part bar. Without this the advisor could read a
+            # high confidence number alone and tell a student a specific day
+            # is coming, on a row the firm page itself only ever prints as
+            # "~ Sep 2027".
+            "precision": fd.precision or "day",
         }
         for fd in FirmDate.objects.filter(firm_id=firm.id, date__gte=today).order_by("date")[:MAX_ROWS]
     ]
