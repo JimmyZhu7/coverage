@@ -38,7 +38,16 @@ happened this pass either way, and both fields exist to mean exactly that.
                            `scrape`'s list-endpoint fetch for a provider
                            whose list API carries no deadline field, e.g.
                            Workday) gets to be corrected once the firm bakes
-                           an updated one into the posting.
+                           an updated one into the posting. `confidence`
+                           moves WITH it, to the tier the answering
+                           connector actually earns (`_verify_confidence`) --
+                           greenhouse/oracle read a structured field and get
+                           1.0, everyone else (tal.net, Workday) is reading
+                           the posting's own text by regex and gets 0.6, the
+                           same split `ingest._apply_opportunity` draws at
+                           first ingest. A date that did not move keeps the
+                           BETTER of its old confidence and this tier, never
+                           the worse.
 - "closed"              -> status="closed"
 - "unreachable"         -> nothing else — an error is never evidence of
                            life OR death (same rule as ingest's failed-board
@@ -115,6 +124,47 @@ def _fresh_deadline(deadline_dates: list[str]) -> date | None:
         except (ValueError, TypeError):
             continue
     return None
+
+
+# Providers whose `verify()` reads `deadline_dates` off a genuinely
+# structured field: `greenhouse.py` reads `application_deadline` straight out
+# of the board's own JSON API, `oracle.py` reads `PostingEndDate` the same
+# way. Every other connector that ever populates `deadline_dates` gets there
+# by regex over the posting's own rendered text -- `talnet.py` matches
+# "Event Date"/"Registration Deadline" out of an HTML meta description,
+# `workday.py`'s `_deadline_from_description` matches a stated "Application
+# Deadline" out of the job description HTML. That is the SAME tier
+# `directory.ingest._apply_opportunity` calls 0.6 ("Deadline-from-prose"),
+# not the 1.0 tier a structured API field earns -- the fact that the regex
+# is reading a clearly-labelled field on the page does not make it any less
+# a regex reading OUR code performed, the same distinction the walkthrough
+# already drew for HSBC's own "Closing Date:" label at ingest time.
+#
+# `verified-open` used to leave `confidence` untouched entirely, so a date
+# `reverify` corrected inherited whatever confidence the row already held --
+# usually 1.0, from an original structured-field ingest, now standing next
+# to a value verify()'s own regex just supplied. Confirmed live: of the 31
+# open rows whose most recent deadline write came from this command, 29 sat
+# at confidence 1.0 while their date came from tal.net's or Workday's own
+# text read. This is `ingest._apply_opportunity`'s "a prose reading
+# inherited a board-published confidence" bug, on this command's write path
+# instead of that one.
+_STRUCTURED_VERIFY_PROVIDERS = frozenset({"greenhouse", "oracle"})
+#: The tier every other connector's `deadline_dates` earns -- matches
+#: `directory.ingest`'s own prose tier so a date means the same thing
+#: wherever it was last written.
+_TEXT_VERIFY_CONFIDENCE = 0.6
+
+
+def _verify_confidence(provider: str) -> float:
+    """What confidence a date drawn from this provider's `verify()` deserves,
+    on the same two-tier scale `ingest._apply_opportunity` uses: 1.0 for a
+    genuine structured field, 0.6 for a regex reading of the posting's own
+    text. An unrecognised provider defaults to the text tier -- the
+    conservative side of the line, and the side every connector that has
+    ever shipped `deadline_dates` other than greenhouse/oracle actually
+    belongs on."""
+    return 1.0 if provider in _STRUCTURED_VERIFY_PROVIDERS else _TEXT_VERIFY_CONFIDENCE
 
 
 class Command(BaseCommand):
@@ -213,15 +263,32 @@ class Command(BaseCommand):
                 opp.last_verified = now
                 update_fields.append("last_verified")
                 fresh = _fresh_deadline(result.deadline_dates) if result is not None else None
-                if fresh is not None and fresh != opp.deadline:
-                    changes.append(OpportunityChange.entry(
-                        opp.pk, "deadline", opp.deadline, fresh,
-                        stage=OpportunityChange.STAGE_REVERIFY, at=now,
-                        note="provider's verify endpoint states a different date",
-                    ))
-                    opp.deadline = fresh
-                    opp.deadline_precision = "day"
-                    update_fields += ["deadline", "deadline_precision"]
+                if fresh is not None:
+                    tier = _verify_confidence(result.provider)
+                    if fresh != opp.deadline:
+                        # REPLACED: the claim is replaced with it, same rule
+                        # `ingest._apply_opportunity` draws -- this provider's
+                        # OWN tier, not whatever confidence the row happened
+                        # to be carrying before this pass (see
+                        # `_verify_confidence`'s docstring for why that used
+                        # to be wrong).
+                        changes.append(OpportunityChange.entry(
+                            opp.pk, "deadline", opp.deadline, fresh,
+                            stage=OpportunityChange.STAGE_REVERIFY, at=now,
+                            note="provider's verify endpoint states a different date",
+                        ))
+                        opp.deadline = fresh
+                        opp.deadline_precision = "day"
+                        opp.confidence = tier
+                    else:
+                        # UNCHANGED: this pass merely corroborated the date
+                        # already on file. `max()`, not an overwrite -- the
+                        # no-downgrade rule `ingest._apply_opportunity` keeps
+                        # for the identical case: a 1.0 board-published date
+                        # reconfirmed only by a 0.6-tier text read has not
+                        # become less certain.
+                        opp.confidence = max(opp.confidence or 0.0, tier)
+                    update_fields += ["deadline", "deadline_precision", "confidence"]
                 opp.save(update_fields=update_fields)
             elif verdict == "closed" and opp.status == "closed":
                 # ALREADY CLOSED — a re-check, not a move. Again only

@@ -21,6 +21,7 @@ import pytest
 
 from django.db import transaction
 from django.db.utils import IntegrityError
+from django.utils import timezone
 
 from directory.models import Firm, FirmDate
 
@@ -308,3 +309,60 @@ def test_two_identical_close_dates_are_not_a_conflict():
          "cycle": "SA 2028", "region": "hk", "state": "confirmed"},
     ]
     assert all(r["state"] == "confirmed" for r in _flag_conflicting_closes(rows))
+
+
+# ---------------------------------------------------------------------------
+# 6. `cycle_months` (the onboarding/Settings deadline band) must use the SAME
+#    confirmed bar the timeline right above it does, not a `confidence`-only
+#    check that ignores `precision`.
+# ---------------------------------------------------------------------------
+
+def _months_at(out, year, month):
+    # `cycle_months` labels each slot with "%b" only (no year), which is not
+    # enough to address a slot directly — walk the same year/month sequence
+    # the function itself builds instead.
+    today = timezone.localdate()
+    y, m = today.year, today.month
+    for r in out:
+        if (y, m) == (year, month):
+            return r["count"]
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    raise AssertionError(f"{year}-{month} is outside the {len(out)}-month window")
+
+
+def test_cycle_months_excludes_an_estimated_date_even_at_full_confidence():
+    """PINS A FIXED BUG: `cycle_months` filtered `FirmDate` on
+    `confidence=1.0` alone, the exact bar `_firm_date_row` (the timeline
+    right below this band on the same firm page) was written to replace,
+    because `precision="estimated"` is a month-level GUESS that can sit at
+    any confidence — nothing in `import_firm_dates` ties the two together
+    (see `_CONFIRMED_FIRM_DATE_PRECISIONS`'s comment). No live row pairs
+    1.0 with "estimated" today, but a band that would count one if it
+    existed is not actually reading the same "confirmed" this page claims
+    to show everywhere else."""
+    from directory.views import cycle_months
+
+    firm = _firm()
+    today = timezone.localdate()
+    target = today.replace(day=1) + dt.timedelta(days=40)
+    target = target.replace(day=1)  # a later month, comfortably inside the window
+    _date(firm, event_kind="app_close", date=target,
+          precision="estimated", confidence=1.0)
+
+    out = cycle_months(months=12)
+    assert _months_at(out, target.year, target.month) == 0
+
+
+def test_cycle_months_counts_a_genuinely_confirmed_close():
+    """The positive case: a day-precision, full-confidence close still
+    lands in its month — the fix narrows the filter, it does not silence it."""
+    from directory.views import cycle_months
+
+    firm = _firm()
+    today = timezone.localdate()
+    target = (today.replace(day=1) + dt.timedelta(days=40)).replace(day=1)
+    _date(firm, event_kind="app_close", date=target,
+          precision="", confidence=1.0)
+
+    out = cycle_months(months=12)
+    assert _months_at(out, target.year, target.month) == 1

@@ -882,6 +882,19 @@ def _source_marker(raw: str) -> dict:
     return {"label": label, "why": why}
 
 
+# A `FirmDate` counts as CONFIRMED only when both halves agree: a high
+# enough `confidence` (the firm holds this date) AND a `precision` that
+# names a real day or a real month (the row locates it — "estimated" is a
+# month-level GUESS about a date nobody stated, and stays out no matter how
+# high `confidence` reads; see `crm.utils`'s identical split, which exists
+# because six CRM readers once re-spelled this bar as `confidence == 1.0`
+# alone and put a countdown on an estimate). One pair of constants, every
+# reader in this module included, so a third copy of the bar never drifts
+# from this one.
+_CONFIRMED_FIRM_DATE_CONFIDENCE = 0.8
+_CONFIRMED_FIRM_DATE_PRECISIONS = ("day", "month", "")
+
+
 def _firm_date_row(fd, *, today):
     """One firm_dates row as a timeline entry. confirmed vs rumored is read
     off confidence + precision: a high-confidence, non-estimated date is
@@ -898,7 +911,8 @@ def _firm_date_row(fd, *, today):
     else:
         date_text = f"{d:%b} {d.day}, {d.year}"
 
-    confirmed = (fd.confidence or 0.0) >= 0.8 and prec in ("day", "month", "")
+    confirmed = ((fd.confidence or 0.0) >= _CONFIRMED_FIRM_DATE_CONFIDENCE
+                 and prec in _CONFIRMED_FIRM_DATE_PRECISIONS)
     return {
         "cycle": cycle_label(fd.cycle, fd.track),
         # The stored slug rides along beside its label so `_timeline` can match
@@ -2049,8 +2063,18 @@ def cycle_months(months: int = 12) -> list[dict]:
             status="open", bucket__in=TARGET_BUCKETS,
             deadline__gte=today).values_list("deadline", flat=True):
         counts[(d.year, d.month)] += 1
+    # `confidence=1.0` alone, with no `precision` check, is exactly the bar
+    # `_firm_date_row` was written to replace — a `precision="estimated"`
+    # row (a month-level GUESS, rendered "~ Sep 2027" everywhere else) could
+    # sit at confidence 1.0 and bump this band as if the firm had stated the
+    # day. No live row pairs the two today, but nothing stops one (see
+    # `_CONFIRMED_FIRM_DATE_PRECISIONS`'s comment) — this reads the SAME
+    # confirmed bar `_firm_date_row` uses for the timeline right below it on
+    # the same firm page, so the two can't drift apart.
     for d in FirmDate.objects.filter(
-            confidence=1.0, date__gte=today,
+            confidence__gte=_CONFIRMED_FIRM_DATE_CONFIDENCE,
+            precision__in=_CONFIRMED_FIRM_DATE_PRECISIONS,
+            date__gte=today,
             event_kind__in=("app_close", "insight_deadline")).values_list("date", flat=True):
         counts[(d.year, d.month)] += 1
 
