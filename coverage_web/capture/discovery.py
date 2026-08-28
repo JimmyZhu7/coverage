@@ -454,6 +454,14 @@ def display_subject(raw: str | None) -> str:
 # of one ladder, in one module, so a third opinion about who is a duplicate
 # cannot grow — the same rule that pulled `restore` onto `_match_existing`
 # in the first place.
+#
+# `capture.gmail._match_contact` is the one exception, and deliberately so:
+# it has a genuinely different contract (active-only, raises on ambiguity
+# instead of picking) that `_match_existing` cannot express. Rather than
+# grow a third opinion about WHO COUNTS AS A MATCH, it imports the same two
+# conclusive rungs — `routing_variant` and `names_equivalent` — and applies
+# its own scoping/ambiguity rules on top. The identity rules live here;
+# only the "what do I do with an ambiguous or archived hit" policy differs.
 # --------------------------------------------------------------------------- #
 
 # The label freemail providers put before the dot. An org-label match
@@ -573,13 +581,16 @@ def _personal_localpart(email: str) -> bool:
     return not inbound.looks_like_noreply(email)
 
 
-def _routing_variant(email_a: str, email_b: str) -> bool:
+def routing_variant(email_a: str, email_b: str) -> bool:
     """The same mailbox seen through the firm's own mail routing: identical
     localpart, one domain an internal extension of the other. Goldman's DSN
     machinery reports `noah.bauld@ny.ibd.email.gs.com` for the person whose
     address is `noah.bauld@gs.com` — one namespace, one mailbox, rewritten
     in transit. Role and no-reply localparts are refused: a shared
-    `recruiting@` across subdomains is infrastructure, not a person."""
+    `recruiting@` across subdomains is infrastructure, not a person.
+
+    Public (no leading underscore) because `capture.gmail._match_contact`
+    shares this rung too — see that function's docstring."""
     la, da = _mailbox_parts(email_a)
     lb, db = _mailbox_parts(email_b)
     if not la or la != lb or da == db:
@@ -684,7 +695,7 @@ def _match_existing(user, email: str, name: str) -> Contact | None:
     1. The exact address (the strong key).
     2. The same address through the firm's own routing — identical
        localpart, one domain an internal extension of the other (Goldman's
-       `ny.ibd.email.gs.com` for `gs.com`). See `_routing_variant`.
+       `ny.ibd.email.gs.com` for `gs.com`). See `routing_variant`.
     3. The same full name (`names_equivalent`): corporate `Last, First`
        inversion and a dropped-or-added middle initial recognised, nothing
        looser. A truncated name, a shared surname, or a shared employer is
@@ -700,7 +711,7 @@ def _match_existing(user, email: str, name: str) -> Contact | None:
         )
         if match is None:
             match = next(
-                (c for c in rows if c.email and _routing_variant(email, c.email)),
+                (c for c in rows if c.email and routing_variant(email, c.email)),
                 None,
             )
     if match is None:

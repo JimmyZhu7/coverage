@@ -152,6 +152,50 @@ def test_ambiguous_name_is_skipped_not_guessed(student, contact):
     assert other_jane.warmth == "cold"
 
 
+def test_matches_inverted_last_first_display_name(student):
+    """A corporate address book emits "Last, First[ Middle]" — the exact form
+    the founder's real mailbox shows for contacts like "Nunley, Vanessa N".
+    `_match_contact` used to name-match with plain `normalize_name` (lowercase
+    + whitespace collapse only), which cannot see this inversion, so a
+    finding for a known contact drifted straight into `skipped_unmatched`.
+    Now it shares `discovery.names_equivalent` with `_match_existing`, which
+    already handles the inversion (and a dropped middle initial) for the
+    discovery pipeline."""
+    contact = Contact.all_objects.create(
+        user=student, name="Vanessa Nunley", email="", source="manual",
+    )
+    result = apply_findings(
+        student,
+        [finding(name="Nunley, Vanessa N", email="vanessa.n@buyside.example", replied=True)],
+    )
+    assert result.skipped_unmatched == 0
+    assert kinds(student, contact) == ["reply_received"]
+
+
+def test_matches_a_routing_variant_address(student):
+    """Goldman's DSN machinery rewrites `noah.bauld@gs.com` as
+    `noah.bauld@ny.ibd.email.gs.com` in transit — same mailbox, same person.
+    `_match_contact` used to only try an exact (case-insensitive) address
+    match before falling through to name matching; a finding whose sender
+    the firm's own routing rewrote, for a contact whose stored address and
+    display name are different (so the name rung can't rescue it either),
+    used to be reported as unmatched. It now shares
+    `discovery.routing_variant` with `_match_existing`."""
+    contact = Contact.all_objects.create(
+        user=student, name="Noah Bauld", email="noah.bauld@gs.com", source="manual",
+    )
+    result = apply_findings(
+        student,
+        [finding(
+            name="Someone Else Entirely",
+            email="noah.bauld@ny.ibd.email.gs.com",
+            replied=True,
+        )],
+    )
+    assert result.skipped_unmatched == 0
+    assert kinds(student, contact) == ["reply_received"]
+
+
 def test_not_found_is_left_completely_alone(student, contact):
     result = apply_findings(student, [finding(found=False, replied=True)])
     assert result.skipped_not_found == 1

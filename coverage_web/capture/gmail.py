@@ -290,8 +290,25 @@ def _match_contact(user, finding: dict) -> Contact | None:
     already being tracked, so an unmatched one means the two systems have
     drifted — worth reporting, not worth inventing a contact for.
 
+    Shares its two conclusive identity rungs with
+    ``capture.discovery._match_existing`` — ``discovery.routing_variant``
+    (same localpart, one domain a routing extension of the other, e.g.
+    Goldman's ``noah.bauld@ny.ibd.email.gs.com`` for ``noah.bauld@gs.com``)
+    and ``discovery.names_equivalent`` (``Last, First`` inversion, diacritics,
+    middle initials) — rather than the plain lowercase-and-strip
+    ``normalize_name`` this used to name-match with, which could not see a
+    corporate address book's inverted display form ("Nunley, Vanessa N").
+    It stays a SEPARATE function rather than a call into
+    ``_match_existing``, because the two have different contracts:
+    ``_match_existing`` matches across every row including archived ones and
+    never raises; this one is scoped to ACTIVE contacts only (a finding
+    should not silently resurrect an archived row) and RAISES when a name
+    resolves to more than one active contact rather than guessing. See
+    ``discovery.py``'s module comment on the identity ladder for why the
+    rungs live there and not here.
+
     Raises:
-        AmbiguousContactError: more than one contact shares the normalized
+        AmbiguousContactError: more than one contact shares the equivalent
             name (e.g. two "Michael Chen"s at different firms) and there's
             no email on the finding to disambiguate with. Silently picking
             the first one found (the previous behavior) would land the
@@ -303,14 +320,17 @@ def _match_contact(user, finding: dict) -> Contact | None:
         match = scoped.filter(email__iexact=email).first()
         if match:
             return match
+        match = next(
+            (c for c in scoped if c.email and discovery.routing_variant(email, c.email)),
+            None,
+        )
+        if match:
+            return match
     name = (finding.get("name") or "").strip()
     if name:
-        from capture.providers import normalize_name
-
-        norm = normalize_name(name)
         matches = [
             contact for contact in scoped
-            if contact.name and normalize_name(contact.name) == norm
+            if contact.name and discovery.names_equivalent(contact.name, name)
         ]
         if len(matches) > 1:
             raise AmbiguousContactError(name, len(matches))
