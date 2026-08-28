@@ -35,8 +35,15 @@ class Command(BaseCommand):
         # as `failed`, which is exactly the "worth surfacing" posture this
         # command's own docstring already wanted.
         with track_job_run("gmail-watch-renew"):
-            if not gmail_live.is_configured():
-                self.stdout.write("Gmail Live is not configured — nothing to renew.")
+            # `is_push_configured()`, not the base `is_configured()`: a
+            # deployment can be fully connected and syncing (gmail_poll) with
+            # no Pub/Sub topic at all — there is simply no push to renew in
+            # that state, which is distinct from "Gmail Live is unconfigured".
+            if not gmail_live.is_push_configured():
+                self.stdout.write(
+                    "Gmail Live push is not configured (no "
+                    "GMAIL_LIVE_PUBSUB_TOPIC) — nothing to renew."
+                )
                 return
 
             renewed, revoked = gmail_live.renew_watches()

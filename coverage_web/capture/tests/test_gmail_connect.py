@@ -165,6 +165,13 @@ class TestConnectGmailConfigFailures:
         `watch_expiration`, daily. Losing it must not lose the connect.
         """
         settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()
+        # `register_watch` holds `is_push_configured()` — CLIENT_ID/SECRET/
+        # TOPIC all set — before it ever reaches Google, so this scenario (a
+        # topic that exists but 400s) needs a topic actually set, distinct
+        # from "no topic configured at all".
+        settings.GMAIL_LIVE_CLIENT_ID = "cid"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "csecret"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
         fake_gmail = _fake_gmail_client()
         fake_gmail.users.return_value.watch.return_value.execute.side_effect = (
             _http_error(400, "Error sending test message to Cloud PubSub")
@@ -191,6 +198,9 @@ class TestConnectGmailConfigFailures:
         from google.auth.exceptions import RefreshError
 
         settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()
+        settings.GMAIL_LIVE_CLIENT_ID = "cid"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "csecret"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
         fake_gmail = _fake_gmail_client()
         with patch.object(gmail_live, "_flow", return_value=_fake_flow()), \
              patch.object(gmail_live, "build", return_value=fake_gmail), \

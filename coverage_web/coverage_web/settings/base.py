@@ -615,16 +615,23 @@ ENABLED_SOCIAL_PROVIDERS = [
 # break the ability to log in. Create a second OAuth client in the Google
 # Cloud Console for this — do not point it at the login client's credentials.
 #
-# All four values are blank by default, which is the feature's actual
-# off-switch: `gmail_live.is_configured()` gates every entry point on all four
-# being set, so an unconfigured deploy exposes no connect button and runs no
-# watch/poll commands, rather than 500ing on a missing credential.
+# All five values are blank by default. `CLIENT_ID`/`CLIENT_SECRET`/
+# `TOKEN_KEY` are the feature's actual off-switch for connecting and syncing:
+# `gmail_live.is_configured()` gates the connect button and the poll/backfill
+# commands on those three, so an unconfigured deploy exposes no connect
+# button and runs no sync commands rather than 500ing on a missing
+# credential. `PUBSUB_TOPIC`/`PUBSUB_SUBSCRIPTION` are a SEPARATE, stricter
+# gate (`gmail_live.is_push_configured()`) held only by real-time push
+# (`register_watch`, `renew_watches`, `gmail_pubsub_listen`) — a deployment
+# can connect and sync mail with none of Pub/Sub set up at all.
 # ---------------------------------------------------------------------------
 GMAIL_LIVE_CLIENT_ID = env("GMAIL_LIVE_CLIENT_ID", default="")
 GMAIL_LIVE_CLIENT_SECRET = env("GMAIL_LIVE_CLIENT_SECRET", default="")
 # The Pub/Sub topic `users.watch()` publishes change notifications to, as
 # "projects/<project>/topics/<topic>" — created once by hand in Cloud Console
-# (see docs/gmail-live-setup.md), not managed by this app.
+# (see docs/gmail-live-setup.md), not managed by this app. Optional: only
+# real-time push needs it (`gmail_live.is_push_configured()`) — connecting
+# and syncing mail (`gmail_live.is_configured()`) does not.
 GMAIL_LIVE_PUBSUB_TOPIC = env("GMAIL_LIVE_PUBSUB_TOPIC", default="")
 # A PULL subscription on that topic, "projects/<project>/subscriptions/<sub>".
 # Pull, not push: a push subscription needs a public HTTPS endpoint, which

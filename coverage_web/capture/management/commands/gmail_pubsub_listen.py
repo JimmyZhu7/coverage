@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import json
 
-from django.core.management.base import BaseCommand
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections
 
 from capture import gmail_live
@@ -45,9 +46,26 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
-        if not gmail_live.is_configured():
-            self.stdout.write("Gmail Live is not configured — nothing to listen for.")
+        # `is_push_configured()`, not the base `is_configured()`: this
+        # command IS the push half of Gmail Live, so it holds itself to the
+        # stricter gate (GMAIL_LIVE_PUBSUB_TOPIC) that `gmail_poll` and the
+        # connect flow don't need.
+        if not gmail_live.is_push_configured():
+            self.stdout.write(
+                "Gmail Live push is not configured (no GMAIL_LIVE_PUBSUB_TOPIC) "
+                "— nothing to listen for."
+            )
             return
+        # A topic is enough to REGISTER a watch, but this command PULLS off a
+        # subscription on that topic, which is a separate, hand-created
+        # setting (docs/gmail-live-setup.md §5). Refuse clearly here rather
+        # than let `SubscriberClient` fail obscurely on an empty path.
+        if not settings.GMAIL_LIVE_PUBSUB_SUBSCRIPTION:
+            raise CommandError(
+                "GMAIL_LIVE_PUBSUB_SUBSCRIPTION is not set — a pull "
+                "subscription on GMAIL_LIVE_PUBSUB_TOPIC is required to "
+                "listen; see docs/gmail-live-setup.md §5."
+            )
 
         # Imported here, not at module level: this command is the only
         # thing in the app that needs the Pub/Sub *subscriber* client (the
@@ -56,10 +74,9 @@ class Command(BaseCommand):
         # keeping the import local matches how cairosvg is deferred in
         # fetch_firm_logos for an equally optional runtime dependency.
         from google.cloud import pubsub_v1
-        from django.conf import settings as django_settings
 
         subscriber = pubsub_v1.SubscriberClient()
-        subscription_path = django_settings.GMAIL_LIVE_PUBSUB_SUBSCRIPTION
+        subscription_path = settings.GMAIL_LIVE_PUBSUB_SUBSCRIPTION
 
         def _process(data: bytes) -> None:
             """Raises on failure — callers decide what that means for

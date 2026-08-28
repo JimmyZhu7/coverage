@@ -93,6 +93,14 @@ class TestConnectGmailPlanGate:
 
     def test_pro_user_connects_and_a_watch_is_registered(self, pro_student, settings):
         settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()
+        # A real (unmocked) `register_watch` now holds `is_push_configured()`
+        # — a Pub/Sub topic — so a watch that's actually meant to succeed
+        # needs one set, same as production (the connect flow's own
+        # `is_configured()` gate already guarantees CLIENT_ID/SECRET by the
+        # time register_watch runs; only TOPIC is unique to push).
+        settings.GMAIL_LIVE_CLIENT_ID = "cid"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "csecret"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
         fake_gmail = _fake_gmail_client("pro-student@example.com")
         with patch.object(gmail_live, "_flow", return_value=_fake_flow()), \
              patch.object(gmail_live, "build", return_value=fake_gmail), \
@@ -112,6 +120,9 @@ class TestConnectGmailPlanGate:
         the gate must not regress an existing Pro connection's real-time
         sync on a routine reconnect."""
         settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()
+        settings.GMAIL_LIVE_CLIENT_ID = "cid"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "csecret"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
         GmailConnection.all_objects.create(
             user=pro_student,
             gmail_address="old@example.com",
@@ -142,6 +153,9 @@ class TestConnectGmailStartsAProTrial:
         self, free_student, settings
     ):
         settings.GMAIL_LIVE_TOKEN_KEY = gmail_live.Fernet.generate_key().decode()
+        settings.GMAIL_LIVE_CLIENT_ID = "cid"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "csecret"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
         fake_gmail = _fake_gmail_client("free-student@example.com")
         with patch.object(gmail_live, "_flow", return_value=_fake_flow()), \
              patch.object(gmail_live, "build", return_value=fake_gmail), \

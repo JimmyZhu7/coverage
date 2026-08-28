@@ -194,19 +194,59 @@ class TestTokenEncryption:
 
 
 class TestIsConfigured:
-    def test_false_when_any_setting_missing(self, settings):
+    def test_false_when_any_of_the_three_is_missing(self, settings):
         settings.GMAIL_LIVE_CLIENT_ID = ""
         settings.GMAIL_LIVE_CLIENT_SECRET = "x"
-        settings.GMAIL_LIVE_PUBSUB_TOPIC = "x"
         settings.GMAIL_LIVE_TOKEN_KEY = "x"
         assert gmail_live.is_configured() is False
 
-    def test_true_when_all_four_set(self, settings):
+    def test_true_when_client_id_secret_and_token_key_are_set(self, settings):
         settings.GMAIL_LIVE_CLIENT_ID = "id"
         settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
-        settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
         settings.GMAIL_LIVE_TOKEN_KEY = "key"
         assert gmail_live.is_configured() is True
+
+    def test_true_with_no_pubsub_topic_at_all(self, settings):
+        """The fix this pins (2026-08-27): connecting a mailbox and syncing
+        mail never needed Pub/Sub — `connect_gmail` and `sync_connection`
+        build their Gmail client straight from the stored OAuth refresh
+        token. `is_configured()` used to demand `GMAIL_LIVE_PUBSUB_TOPIC`
+        anyway, so a topicless deployment (real-time push never set up)
+        could not even show a connect button or run `gmail_poll`, though
+        neither touches Pub/Sub. See `TestIsPushConfigured` for the gate
+        that DOES need the topic."""
+        settings.GMAIL_LIVE_CLIENT_ID = "id"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
+        settings.GMAIL_LIVE_TOKEN_KEY = "key"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = ""
+        assert gmail_live.is_configured() is True
+
+
+class TestIsPushConfigured:
+    """Real-time push's own, stricter gate — `register_watch`,
+    `renew_watches`, and `gmail_pubsub_listen` hold themselves to this
+    instead of the base `is_configured()`."""
+
+    def test_false_without_a_topic(self, settings):
+        settings.GMAIL_LIVE_CLIENT_ID = "id"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
+        settings.GMAIL_LIVE_TOKEN_KEY = "key"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = ""
+        assert gmail_live.is_push_configured() is False
+
+    def test_false_when_the_base_config_is_missing_even_with_a_topic(self, settings):
+        settings.GMAIL_LIVE_CLIENT_ID = ""
+        settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
+        settings.GMAIL_LIVE_TOKEN_KEY = "key"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
+        assert gmail_live.is_push_configured() is False
+
+    def test_true_when_all_four_are_set(self, settings):
+        settings.GMAIL_LIVE_CLIENT_ID = "id"
+        settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
+        settings.GMAIL_LIVE_TOKEN_KEY = "key"
+        settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
+        assert gmail_live.is_push_configured() is True
 
 
 class TestFlowHasPkceDisabled:

@@ -38,13 +38,14 @@ project, which is why this command was written):
      do on a university tenant.
 
 So for a single-user or small deployment, this command removes the Pub/Sub
-half of setup entirely: no pull subscription, no ADC, no service-account
-key, no `gcloud` at all. What it does NOT remove today is
-`GMAIL_LIVE_PUBSUB_TOPIC` — that setting is still part of
-`gmail_live.is_configured()`, the feature's whole-feature off-switch, and
-`users.watch()` still needs a topic if you ever want push back. A topic is
-free and creatable in the Cloud Console in about a minute; the subscription
-and the credentials are the parts you can now skip. See
+half of setup entirely: no topic, no pull subscription, no ADC, no
+service-account key, no `gcloud` at all. `gmail_live.is_configured()` — the
+gate this command holds itself to — does NOT require
+`GMAIL_LIVE_PUBSUB_TOPIC`; only real-time push
+(`gmail_live.is_push_configured()`, held by `register_watch`,
+`renew_watches`, and `gmail_pubsub_listen`) does. A topic is free and
+creatable in the Cloud Console in about a minute whenever you do want push
+back; until then this command is the entire feature. See
 docs/gmail-live-setup.md §5.
 
 RUN IT EITHER WAY

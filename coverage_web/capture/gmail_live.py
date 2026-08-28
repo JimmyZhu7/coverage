@@ -63,10 +63,16 @@ WHAT THIS MODULE DOES **NOT** DO, ON PURPOSE
 SETUP THIS MODULE ASSUMES ALREADY HAPPENED (docs/gmail-live-setup.md)
 -----------------------------------------------------------------------
 A second Google Cloud OAuth client (never the login one — see §3 and the
-settings module), the Gmail + Pub/Sub APIs enabled, one Pub/Sub topic granting
-publish rights to `gmail-api-push@system.gserviceaccount.com`, and a pull
-subscription on that topic. `is_configured()` is the runtime gate: every
-entry point below no-ops (rather than 500s) until all four settings are set.
+settings module) plus a Fernet token key. `is_configured()` is the runtime
+gate for exactly that: every CONNECT-and-SYNC entry point below (the connect
+button, `gmail_poll`, `gmail_backfill`) no-ops (rather than 500s) until those
+three settings are set. A Pub/Sub topic (and, for `gmail_pubsub_listen`, a
+pull subscription on it) is a SEPARATE, stricter gate — `is_push_configured()`
+— held only by the pieces that genuinely need real-time push: `register_watch`,
+`renew_watches`, and `gmail_pubsub_listen`. See "AND PUB/SUB IS OPTIONAL
+ENTIRELY" above for why the split exists: a mailbox can connect and sync mail
+with zero Google Cloud credentials beyond the OAuth client, and only turning
+on real-time push needs the rest.
 """
 
 from __future__ import annotations
@@ -164,14 +170,31 @@ class GmailLiveError(Exception):
 
 
 def is_configured() -> bool:
-    """The feature's actual off-switch — see the settings module's comment
-    on why this gates rather than each entry point checking settings itself."""
+    """Whether this deployment can connect a mailbox and sync mail at all —
+    the connect button, `gmail_poll`, `gmail_backfill`'s backfill/rescan, all
+    of it. Deliberately does NOT require `GMAIL_LIVE_PUBSUB_TOPIC`: none of
+    those paths touch Pub/Sub — `connect_gmail` and `sync_connection` build
+    their Gmail client straight from the stored OAuth refresh token and call
+    `users().history().list(...)` directly (see the module docstring's "AND
+    PUB/SUB IS OPTIONAL ENTIRELY"). See `is_push_configured()` for the
+    stricter gate real-time push holds itself to instead."""
     return bool(
         settings.GMAIL_LIVE_CLIENT_ID
         and settings.GMAIL_LIVE_CLIENT_SECRET
-        and settings.GMAIL_LIVE_PUBSUB_TOPIC
         and settings.GMAIL_LIVE_TOKEN_KEY
     )
+
+
+def is_push_configured() -> bool:
+    """Whether this deployment can additionally register REAL-TIME push
+    (`users.watch()`) on top of an already-working connection. Real-time push
+    is the one piece of Gmail Live that needs a Google Cloud Pub/Sub topic —
+    `register_watch`, `renew_watches`, and `gmail_pubsub_listen` hold
+    themselves to this gate (never the base `is_configured()`), so a
+    topicless deployment still connects and polls cleanly, and a genuine
+    attempt at push refuses with a clear `GmailLiveError` instead of Google's
+    own 400/404 for an empty or nonexistent topic name."""
+    return is_configured() and bool(settings.GMAIL_LIVE_PUBSUB_TOPIC)
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +436,22 @@ def register_watch(connection: GmailConnection) -> None:
     """(Re-)register the 7-day `users.watch()` notification. Marks the
     connection `revoked` (rather than raising) when Google reports the grant
     itself is gone — the one failure mode that needs the USER to act, as
-    opposed to a transient error `gmail_watch_renew` should just retry."""
+    opposed to a transient error `gmail_watch_renew` should just retry.
+
+    Raises `GmailLiveError` immediately, before any Google API call, when
+    `GMAIL_LIVE_PUBSUB_TOPIC` is unset — otherwise this would reach Google
+    with an empty `topicName` and come back as an opaque 400, which is
+    exactly the "failing obscurely" this check exists to avoid. The one
+    caller that treats this as non-fatal (`connect_gmail`, for a Pro user
+    whose deployment has no topic yet) already catches broad `Exception`
+    around this call, so the message just needs to be clear when it lands in
+    that log line."""
+    if not is_push_configured():
+        raise GmailLiveError(
+            "GMAIL_LIVE_PUBSUB_TOPIC is not set — real-time push needs a "
+            "Pub/Sub topic. Connecting, Scan Now, and gmail_poll all work "
+            "without one; see docs/gmail-live-setup.md §5 to add push."
+        )
     try:
         gmail = _gmail_client(connection)
         response = gmail.users().watch(
@@ -446,6 +484,13 @@ def renew_watches() -> tuple[int, int]:
     downgraded (or trial-expired) Pro connection loses real-time honestly —
     nothing deletes or disconnects it, this query just stops renewing its
     watch, and Google's own 7-day expiry does the rest.
+
+    Does not check `is_push_configured()` itself — the caller
+    (`gmail_watch_renew`) already holds that gate before calling this at
+    all, and this loop's own `register_watch` call raises the same clear
+    `GmailLiveError` the moment any due connection is actually reached, so
+    the refusal is never silent or obscure even for a caller that skips the
+    gate.
     """
     soon = timezone.now() + timedelta(days=1)
     due = GmailConnection.all_objects.filter(status="active", user__plan="pro").filter(
