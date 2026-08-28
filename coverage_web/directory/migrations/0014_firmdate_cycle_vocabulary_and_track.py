@@ -150,7 +150,13 @@ def recompose(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('directory', '0012_firmdate_firm_dates_confidence_in_range_and_more'),
+        # Re-parented onto 0013 at merge time. This was authored against 0012
+        # in a worktree that predated the precision-vocabulary constraint;
+        # both landing on 0012 would leave the graph with two leaf nodes and
+        # every test erroring on `makemigrations --merge`. The two constraints
+        # are independent (precision vs cycle/track), so ordering them is
+        # purely a graph question, not a data one.
+        ('directory', '0013_firmdate_precision_vocabulary'),
     ]
 
     operations = [
