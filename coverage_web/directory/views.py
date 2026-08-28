@@ -2227,7 +2227,20 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
                 _pick_card(r)
                 for r in recommend(
                     profile,
-                    [
+                    # The page's own clock, not the ranker's default. `recommend`
+                    # keeps itself free of Django and so falls back to
+                    # `date.today()` — the SERVER's local date — while every
+                    # date-sensitive surface in this view (`today` above, the
+                    # urgency feed, `deadlines.closing_soon_window`) reads
+                    # `timezone.localdate()`, i.e. the date in `settings.
+                    # TIME_ZONE` (UTC). On any host whose OS clock is not UTC
+                    # the two are a different day for part of every day — eight
+                    # hours of it on the founder's own machine — and in that
+                    # window the picks dropped a role as expired that the feed
+                    # beside them still rendered as closing today. One clock
+                    # per request, passed in.
+                    today=today,
+                    candidates=[
                         Candidate.from_opportunity(o)
                         # Folded first, and scored second. Two copies of one
                         # posting score identically by construction, so an

@@ -930,28 +930,53 @@ def test_warmth_never_outruns_the_class_axis():
     assert ranked[0].candidate.id == 2
 
 
-def test_stacked_signals_can_outrun_the_class_penalty_alone():
-    """`W_CLASS_STATED_MISMATCH` (-25) is a subtraction, not a veto — pinning
-    that here so nobody mistakes it for the hard-exclusion guarantee, which
-    is `Candidate.blocked`'s job (see `recommend`'s 'Never rank what the
-    student cannot have' comment). Enough OTHER signals stacked on top of a
-    title-stated wrong-class role clear MIN_SCORE despite the -25, unless the
-    caller correctly set `blocked=True` — see
-    test_a_title_stated_class_mismatch_is_blocked_end_to_end for the case
-    that actually shipped this way in production, via `directory.views.
-    _eligibility` never reading `Opportunity.class_year`."""
+def test_stacked_signals_outrun_the_class_penalty_but_not_the_class_veto():
+    """The arithmetic this test was written to pin is still true and still
+    worth pinning: `W_CLASS_STATED_MISMATCH` (-25) is a SUBTRACTION, and it is
+    not big enough to stop a wrong-class role clearing MIN_SCORE once tier,
+    track, region and warmth stack on top of it. The weight's own comment
+    claims it is "large negative so it cannot be outrun by a tier-1 firm the
+    student happens to like"; the number says otherwise, and that gap is what
+    the first assertion below records.
+
+    WHAT CHANGED, AND WHAT THE OLD ASSERTION PROTECTED. This test used to end
+    `assert [r.candidate.id for r in ranked] == [1]` — i.e. `recommend()`
+    RETURNS the wrong-class role, and only `Candidate.blocked` stops it. That
+    was a true description of the code and a deliberate one: it existed so
+    nobody would mistake the -25 for the hard-exclusion guarantee and rip out
+    the `blocked` plumbing in `directory.views`, which is what actually shipped
+    the fix for the production bug (`_eligibility` never reading
+    `Opportunity.class_year`).
+
+    It is no longer true, because `recommend()` now vetoes a STATED class
+    mismatch itself (`stated_class_mismatch`) rather than trusting every caller
+    to have filtered first — a guarantee this module makes in prose about
+    itself should not live only in its callers. The old assertion's real job
+    survives below, made stronger rather than weaker: `blocked` is still
+    separately exercised, and still on a role the class veto does NOT cover, so
+    the plumbing it protected cannot be deleted on the grounds that the veto
+    has made it redundant. It has not — `blocked` also carries the VISA
+    verdict, which nothing in this module can see."""
     prof = replace(JIMMY, warm_firms={1: "warm"})  # firm_id=1 is Jimmy's tier 1
     wrong_class = _cand(
         1, firm_id=1, class_year="2026",  # stated, not Jimmy's 2029
         title="Investment Banking Summer Analyst", region="us",
     )
-    # blocked=False (the default): the scoring axes alone don't stop it.
-    ranked = recommend(prof, [wrong_class])
-    assert [r.candidate.id for r in ranked] == [1]
+    # The subtraction alone does not sink it — the arithmetic is unchanged.
+    assert score_candidate(prof, wrong_class)[0] >= MIN_SCORE
 
-    # The caller correctly flagging it, as `_eligibility` now does, is what
-    # actually enforces the hard exclusion.
-    assert recommend(prof, [replace(wrong_class, blocked=True)]) == []
+    # ...and `recommend()` refuses it anyway, on the posting's own words, with
+    # the caller having flagged nothing (blocked=False, the default).
+    assert recommend(prof, [wrong_class]) == []
+
+    # `blocked` is NOT made redundant by that veto. A role whose text says
+    # nothing about a class year but which refuses this student's visa carries
+    # no stated mismatch for `recommend` to see, and is excluded only because
+    # the caller said so.
+    visa_wall = _cand(2, firm_id=1, title="Investment Banking Summer Analyst",
+                      region="us")
+    assert score_candidate(prof, visa_wall)[0] >= MIN_SCORE
+    assert recommend(prof, [replace(visa_wall, blocked=True)]) == []
 
 
 @pytest.mark.django_db
