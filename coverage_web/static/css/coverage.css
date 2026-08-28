@@ -114,6 +114,15 @@
      the token audit measured without it, so the quiet variant is its own
      token and gets measured too. 5.24:1 here, 5.29:1 in dark. */
   --on-accent-2:  #bccbdb;
+  /* The tick. Every drawn "on" state in the app stamps this same glyph — the
+     shared checkbox, the chipset chips, the onboarding firm tiles — so it is
+     a token rather than three copies of the same data URI. It cannot read
+     `--on-accent` (an SVG data URI has no access to the cascade), so the
+     stroke is that token's value written out, and the token is redefined in
+     both dark blocks for the same reason `--on-accent` is: dark mode's
+     accent is a LIGHT blue, where a white tick measures 2.48:1 — under
+     WCAG 1.4.11's 3:1 floor for a graphical object. */
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --accent:       #1f4e79;
   --accent-ink:   #163a5b;   /* hover/active */
   --accent-soft:  #e9eef4;   /* tinted surfaces (honesty banner) */
@@ -255,6 +264,7 @@
   
     --on-accent:    #10161d;
     --on-accent-2:  #26303c;
+    --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%2310161d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --accent:       #7aa7d4;
     --accent-ink:   #a9c7e6;
     --accent-soft:  #232a35;
@@ -312,6 +322,7 @@
 
   --on-accent:    #10161d;
   --on-accent-2:  #26303c;
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%2310161d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --accent:       #7aa7d4;
   --accent-ink:   #a9c7e6;
   --accent-soft:  #232a35;
@@ -764,8 +775,10 @@ main { flex: 1 0 auto; }
   }
   .chipset > div > div > label:has(:checked)::before {
     background-color: var(--accent); border-color: var(--accent);
-    /* Inline tick, so there is no request and it stays crisp at any zoom. */
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    /* The shared tick token (§2) — an inline data URI, so there is no request
+       and it stays crisp at any zoom, and one definition so the chip, the
+       firm tile and the plain checkbox can never drift apart. */
+    background-image: var(--tick);
     animation: chip-check 260ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   @keyframes chip-check {
@@ -1172,7 +1185,52 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 0;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
-input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--accent); }
+input[type="radio"] { width: auto; accent-color: var(--accent); }
+
+/* ---- The checkbox ---------------------------------------------------------
+   ONE drawn control, for every checkbox in the app. This used to be
+   `accent-color: var(--accent)` and nothing else, which recolours the
+   browser's own widget but leaves its SHAPE, SIZE and TICK to the platform,
+   so the box differed per OS and per browser while every hand-drawn control
+   around it agreed with itself everywhere. Six components then each said
+   their own size on top of that — 13px here, 15px there, 16px on the one
+   fully-drawn box in Settings — which is the drift this rule ends.
+
+   The style is the one Settings > Profile's "Remove" already had. It is a
+   BASE rule (`input[type="checkbox"]`, 0,1,1) rather than a class, so a
+   checkbox added tomorrow inherits it without anyone remembering to opt in;
+   anything that needs to differ — the destructive checked colour on
+   `.avatar-remove`, the drawn-elsewhere controls on `.chipset`/`.ob-firm` —
+   out-specifies it with a class and says so out loud.
+
+   Only the CHECKED colour is context-dependent. `--accent` is "selected", the
+   app's normal selection colour, and is right for every bulk-select, filter
+   and preference box. `--danger` is reserved for a box whose ticking DESTROYS
+   something; `.avatar-remove` is the only one, and it overrides below.
+
+   No `box-shadow` here on hover or focus: the generic `input:hover` and
+   `input:focus-visible` rules above already supply the app's shadow and focus
+   glow, and this control is deliberately drawn to sit inside that same
+   language rather than opting out of it. */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 16px; height: 16px; margin: 0; flex: none;
+  border: 1.5px solid var(--line-strong); border-radius: 4px;
+  background: var(--surface); cursor: pointer;
+  transition: background-color var(--t-fast), border-color var(--t-fast);
+}
+input[type="checkbox"]:hover { border-color: var(--accent); }
+input[type="checkbox"]:checked {
+  background-color: var(--accent); border-color: var(--accent);
+  background-image: var(--tick);
+  background-repeat: no-repeat; background-position: center; background-size: 11px 11px;
+}
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+/* Matches `.btn:disabled` — opacity only, no second colour change, so the
+   contrast the palette was measured at is dimmed once and not twice. */
+input[type="checkbox"]:disabled { opacity: 0.5; cursor: default; }
 
 /* Number inputs — hide the native spinner (OS-drawn, square-cornered, the
    one raw browser widget left on a page where every other control is
@@ -1245,29 +1303,15 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
 .avatar-remove { display: inline-flex; align-items: center; gap: var(--s2);
   font-weight: var(--w-reg); margin: 0; width: auto; color: var(--ink-2);
   font-size: var(--fs-s); cursor: pointer; }
-/* Every other checkbox in the app gets a drawn control (the chipset ring,
-   the work-auth dots, the filter bar's fit toggle) — this one relied on
-   nothing but the browser default, which on most platforms is a plain
-   square with no relationship to the app's palette. `appearance: none`
-   plus the same tick glyph the chipset chips use keeps the checkmark
-   consistent everywhere it appears; `--danger` on the checked state
-   (not `--accent`) is deliberate — checking this box deletes the photo,
-   and that is a different kind of "on" than selecting a filter chip. */
-.avatar-remove input[type="checkbox"] {
-  appearance: none; -webkit-appearance: none;
-  width: 16px; height: 16px; margin: 0; flex: none;
-  border: 1.5px solid var(--line-strong); border-radius: 4px;
-  background: var(--surface); cursor: pointer;
-  transition: background-color var(--t-fast), border-color var(--t-fast);
-}
+/* This is the checkbox the shared `input[type="checkbox"]` rule above was
+   drawn from, so the shape, size, tick and focus ring all come from there
+   now and are stated once. The ONLY thing left here is the colour of the
+   "on" state: `--danger`, not `--accent`, because ticking this box deletes
+   the photo — a different kind of "on" than selecting a filter or a
+   contact, and the one place in the app where that distinction is real. */
 .avatar-remove input[type="checkbox"]:hover { border-color: var(--danger); }
 .avatar-remove input[type="checkbox"]:checked {
   background-color: var(--danger); border-color: var(--danger);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: center; background-size: 11px 11px;
-}
-.avatar-remove input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
 }
 .avatar-remove:has(input:checked) { color: var(--danger); font-weight: var(--w-med); }
 form p label { margin-top: var(--s3); }
@@ -2140,7 +2184,10 @@ select:focus-visible, input:focus-visible {
   font-weight: var(--w-reg); text-transform: none; letter-spacing: normal;
   min-width: 0; }
 .cmulti-menu .cmulti-opt:hover { background: var(--accent-soft); color: var(--accent-ink); }
-.cmulti-menu .cmulti-opt input { width: auto; margin: 0; flex: none; accent-color: var(--accent); }
+/* The box itself is the shared `input[type="checkbox"]` control (§11) — this
+   rule used to restate `width`/`margin`/`flex`/`accent-color` and its
+   `width: auto` would now beat the shared 16px. Nothing component-specific
+   is left, so nothing is stated. */
 .cmulti-menu .cmulti-opt span { min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 

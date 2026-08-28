@@ -974,8 +974,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        grid itself was asked for. The grid's own `gap` is the one thing
        that should be setting the space between these cards. */
     margin: 0; }
-  .net-mini-check { flex: none; margin: 0; accent-color: var(--accent);
-    width: 13px; height: 13px; cursor: pointer; }
+  /* `.net-mini-check` used to be styled here — a 13px `accent-color` box.
+     The markup has said `class="place-check"` for a while, so the rule was
+     styling nothing: the Unplaced panel's boxes were raw browser widgets,
+     the one place in the app with no treatment at all. Both names are gone
+     now; the box is the shared `input[type="checkbox"]` control
+     (coverage.css §11), which already gives it size, margin, flex and the
+     drawn tick, and gives the next one for free too. */
   .net-mini-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
   /* Selected. Tint the whole card, not just the box — at four cards a row
      a 13px tick is not enough of a signal to count a selection from. */
@@ -1512,7 +1517,9 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* The explicit selection control. NOT a wrapping <label> like
      `.net-mini` — this card already has its own click targets (Log Touch,
      Edit), so the box has to be its own deliberate target rather than
-     fighting those for the click. Sized like `.net-mini-check`.
+     fighting those for the click. Drawn by the shared
+     `input[type="checkbox"]` rule (coverage.css §11); the only thing left
+     here is the vertical nudge.
 
      Centred on the AVATAR, not on the cap-height of the name: the avatar
      is the fixed, always-40px anchor of this row, while the name/pill line
@@ -1520,9 +1527,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      two-line wrap on a long name) — a 3px top margin read as "cap-height
      aligned" only on the shortest cards and as floating high above center
      on every other one, reported directly against the live board. Centred
-     math: (40px avatar − 15px box) / 2. */
-  .cc-check { flex: none; margin-top: 13px; accent-color: var(--accent);
-    width: 15px; height: 15px; cursor: pointer; }
+     math: (40px avatar − 16px box) / 2 = 12px. The box is 16px now, not
+     the 15px this was first computed against, because the shared rule
+     sizes every checkbox in the app alike.
+
+     Written as `input.cc-check` and not `.cc-check`: the shared rule sets
+     `margin: 0` at (0,1,1), which a bare class at (0,1,0) loses to no
+     matter where it sits in the cascade. */
+  input.cc-check { margin-top: 12px; }
   .cc-avatar { width: 40px; height: 40px; border-radius: 50%; flex: none;
     background: var(--accent-soft); color: var(--accent-ink);
     display: inline-flex; align-items: center; justify-content: center;

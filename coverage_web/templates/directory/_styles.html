@@ -268,8 +268,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     white-space: nowrap; transition: border-color var(--t-fast),
       background var(--t-fast), color var(--t-fast); }
   .filters .fit-toggle:hover { border-color: var(--accent-line); }
-  .filters .fit-toggle input { accent-color: var(--accent); margin: 0;
-    width: 15px; height: 15px; flex: none; cursor: pointer; }
+  /* The WRAPPER above is untouched: it is a filter control drawn to match
+     its row-mates in this bar, and standardising the app's checkboxes is
+     not a reason to restyle the pill it happens to sit in. The BOX inside
+     it is now the app's one shared checkbox (coverage.css §11) rather than
+     a 15px native widget recoloured with `accent-color`, so its tick agrees
+     with every other tick in the product while the pill goes on reading as
+     a button. Everything this rule used to say — margin, flex, cursor,
+     colour — the shared rule says, and its 15px would now fight it. */
   .filters .fit-toggle:has(input:checked) { background: var(--accent-soft);
     color: var(--accent-ink); border-color: var(--accent); }
   .filters .fit-toggle:focus-within { outline: 2px solid var(--accent);

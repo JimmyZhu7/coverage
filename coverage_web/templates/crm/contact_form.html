@@ -11,7 +11,11 @@
   .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4); }
   .cf-full { grid-column: 1 / -1; }
   .cf-card label { font-size: var(--fs-s); }
-  .cf-card input, .cf-card select, .cf-card textarea { width: 100%; }
+  /* `:not([type="checkbox"])` because this card holds one — "Always keep in
+     my daily queue". A bare `.cf-card input` ties on specificity with the
+     shared `input[type="checkbox"]` rule (coverage.css §11) and, sitting
+     later in the cascade, was stretching a 16px box across the column. */
+  .cf-card input:not([type="checkbox"]), .cf-card select, .cf-card textarea { width: 100%; }
   .cf-actions { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s4); }
   .cf-cancel { font-size: var(--fs-s); }
   .cf-err { color: var(--danger); font-size: var(--fs-xs); margin: 2px 0 var(--s2); }
