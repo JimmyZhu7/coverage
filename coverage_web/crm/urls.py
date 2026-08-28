@@ -98,6 +98,12 @@ urlpatterns = [
          name="contact_unrelated"),
     path("contacts/<int:pk>/recruitment-keep/", views.contact_unrelated_keep,
          name="contact_unrelated_keep"),
+    # The parked cohort view — the bulk way back (Phase 1 bench design,
+    # 2026-08-27): grouped by the audit note that parked them, with an
+    # audited bulk `unpark` verb. Literal-before-converter, same reason.
+    path("contacts/parked/", views.contact_parked, name="contact_parked"),
+    path("contacts/parked/unpark/", views.contact_parked_unpark,
+         name="contact_parked_unpark"),
     # Multi-select bulk verbs from the Network board (snooze / park /
     # archive). Same literal-before-converter ordering as the line above.
     # Duplicate cards: merge / "different people" taps and the merge undo,

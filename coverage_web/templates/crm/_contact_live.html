@@ -100,6 +100,13 @@ values.
         folds warmth in and dedupes pairs like replied/replied. Prepending
         warmth here is how "Replied · They replied" shipped.{% endcomment %}
         <span class="cd-state-line">{{ state_line }}</span>
+        {% comment %}
+        What "parked" means for THIS contact, by warmth (crm.views._park_note)
+        — park was doing two jobs (stop the clock / invisible everywhere),
+        and this is the one place that says which regime applies without
+        changing what any of them actually do.
+        {% endcomment %}
+        {% if park_note %}<p class="cd-park-note">{{ park_note }}</p>{% endif %}
       </div>
       <div class="meter">
         <div class="meter-track">

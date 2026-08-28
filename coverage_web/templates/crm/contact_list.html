@@ -39,6 +39,10 @@
     {# Not a scope — a separate list. Archived contacts are excluded from every #}
     {# board query, so this is the only way back to them. #}
     <a href="{% url 'crm:contact_archived' %}">Archived</a>
+    {# Parked contacts stay ON this board (they still sit in their warmth #}
+    {# section below) — this is the bulk way back, not a hidden-contacts #}
+    {# ledger, so it renders unconditionally like Archived does. #}
+    <a href="{% url 'crm:contact_parked' %}">Parked</a>
     {% comment %}
     The other way a contact leaves this board: you answered "that bulk send
     was not my recruiting" in Settings. Rendered only when somebody is

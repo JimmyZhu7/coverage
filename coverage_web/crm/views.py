@@ -13,7 +13,7 @@ adapter) only — never a hand-rolled UPDATE.
 from __future__ import annotations
 
 import re
-from datetime import timedelta
+from datetime import datetime as _datetime, timedelta, timezone as dt_timezone
 from math import ceil
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -53,6 +53,7 @@ from .models import (
 # URLconf and a few hundred test assertions already use — the split changes
 # where code LIVES, not how it is reached.
 from .today import (  # noqa: F401
+    BENCH_RESTORE_STATE,
     PACE_TOUCH_KINDS,
     PROPOSALS_RENDER_CAP,
     TODAY_PLAN_MAX,
@@ -1904,6 +1905,172 @@ def contact_unrelated_keep(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("crm:contact_unrelated")
 
 
+# ---------------------------------------------------------------------------
+# The bulk way back (Phase 1 bench design, 2026-08-27). 113 of the founder's
+# 182 live contacts are parked, 102 of those written in a single minute on
+# Aug 10, 15 more in one minute on Aug 25 — cadence branch 6 proposed them,
+# the page offered a bulk button, he clicked it. He was clearing a screen,
+# not pruning a network, and the audit trail says so: every one of those
+# parks is a `manual_override` touch this view reads back, grouped by
+# exactly the note and minute that put them there, so "102 people, one
+# click, Aug 10" is legible instead of 102 individual rows with no story
+# connecting them.
+# ---------------------------------------------------------------------------
+def _parked_cohorts(user) -> list[dict]:
+    """Currently-parked, non-archived contacts grouped by the audit note
+    that parked them (see the module comment above). Newest cohort first —
+    the one a student most likely just landed here to check.
+
+    Reads the SAME `manual_override` audit trail `_override_label` and
+    `_display_note` already parse for one contact's own History tab; this is
+    that trail read in bulk, across contacts, instead of one page at a time.
+    """
+    parked = list(
+        Contact.objects.for_user(user)
+        .filter(archived=False, thread_state="parked")
+        .select_related("firm")
+        .order_by("name")
+    )
+    if not parked:
+        return []
+
+    park_touch: dict[int, Touch] = {}
+    for t in (
+        Touch.objects.for_user(user)
+        .filter(
+            contact_id__in=[c.id for c in parked],
+            kind=MANUAL_OVERRIDE_KIND,
+            note__icontains="thread_state=parked",
+        )
+        .order_by("contact_id", "-ts")
+    ):
+        # Latest matching override per contact — the one that put them in
+        # the CURRENT park state (an earlier park-then-unpark-then-reply
+        # cycle would otherwise misfile them under a stale cohort).
+        park_touch.setdefault(t.contact_id, t)
+
+    groups: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for c in parked:
+        t = park_touch.get(c.id)
+        if t is not None:
+            m = _MANUAL_OVERRIDE_PARSE.match(t.note or "")
+            human = ((m.group("human") if m else "") or "").lstrip()
+            who = "Your advisor" if _ASSISTANT_NOTE.match(human) else "You"
+            label = human or "Parked"
+            minute = timezone.localtime(t.ts).replace(second=0, microsecond=0)
+            key = (minute, label)
+            sort_ts = t.ts
+        else:
+            # No audit row on file — a row imported already parked, or one
+            # older than this feature's own audit trail. Its own honest
+            # cohort rather than silently folded into "Parked".
+            who, label, minute, sort_ts = "", "No park record on file", None, None
+            key = (None, label)
+        group = groups.get(key)
+        if group is None:
+            group = {"label": label, "who": who, "when": minute, "contacts": []}
+            groups[key] = group
+            order.append((sort_ts, key))
+        group["contacts"].append(c)
+
+    order.sort(
+        key=lambda pair: pair[0] or _datetime.min.replace(tzinfo=dt_timezone.utc),
+        reverse=True,
+    )
+    out = []
+    for _, key in order:
+        g = groups[key]
+        g["count"] = len(g["contacts"])
+        # The warmth split the whole bench doctrine runs on — cold stays
+        # dark, replied keeps its branch-3 re-ping, chatted/advocate are
+        # bench-eligible (`crm.today._opening_bench`). Shown per cohort so a
+        # student can see at a glance which ones are safe to bulk-restore
+        # without a second look and which hold an advocate worth reading
+        # first.
+        g["warmth_counts"] = [
+            {"key": w, "n": sum(1 for c in g["contacts"] if c.warmth == w)}
+            for w in WARMTH_ORDER
+        ]
+        g["cold_count"] = sum(1 for c in g["contacts"] if c.warmth == "cold")
+        out.append(g)
+    return out
+
+
+@login_required
+def contact_parked(request: HttpRequest) -> HttpResponse:
+    """The Network board's parked view: every currently-parked contact,
+    grouped by the bulk (or single) action that parked them, each cohort
+    carrying an audited `unpark` verb that restores `thread_state` from
+    `warmth` — never a guess, never the terminal `advocate` state stripped
+    by accident, and always through the same manual-override audit path
+    every other thread_state change in this product goes through.
+    """
+    cohorts = _parked_cohorts(request.user)
+    return render(
+        request,
+        "crm/contact_parked.html",
+        {
+            "cohorts": cohorts,
+            "parked_total": sum(c["count"] for c in cohorts),
+        },
+    )
+
+
+@login_required
+@require_POST
+def contact_parked_unpark(request: HttpRequest) -> HttpResponse:
+    """The audited bulk `unpark` verb: restore `thread_state` for a
+    hand-picked set of currently-parked contacts, reading the target state
+    off each one's OWN `warmth` (`crm.today.BENCH_RESTORE_STATE` — the same
+    warmth -> resting-thread_state pairing the bench's "restore" tap uses),
+    never a single value applied to everyone regardless of how warm they
+    are.
+
+    A LOOP over the audited override, matching `today_park_all` and
+    `contacts_bulk`'s own `park` verb: `thread_state` only ever moves
+    through `services.set_contact_state`, one `manual_override` touch per
+    contact, so the log has no gap about who came back or when. Trusts the
+    posted ids (like `contacts_bulk`) rather than re-deriving them — the
+    whole feature is the student choosing a cohort — but every id still
+    resolves through `.for_user`, so tenancy holds regardless.
+    """
+    ids = []
+    for raw in request.POST.getlist("ids"):
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+
+    rows = list(
+        Contact.objects.for_user(request.user)
+        .filter(pk__in=ids, archived=False, thread_state="parked")
+    )
+    if not rows:
+        messages.info(request, "Nothing was selected.")
+        return redirect("crm:contact_parked")
+
+    for c in rows:
+        services.set_contact_state(
+            request.user.id, c.id,
+            thread_state=BENCH_RESTORE_STATE.get(c.warmth, "no_reply"),
+            note="Unparked from the Network board (bulk)",
+        )
+    record_event(
+        "contacts_unparked_bulk", user=request.user,
+        source="network", count=len(rows),
+    )
+    who = (", ".join(c.name for c in rows[:3])
+           + (f" and {len(rows) - 3} more" if len(rows) > 3 else ""))
+    messages.success(
+        request,
+        f"{len(rows)} contact{'' if len(rows) == 1 else 's'} back in the "
+        f"queue: {who}. Cold ones with nothing new will be proposed for "
+        "park again in about two weeks unless something changes.",
+    )
+    return redirect("crm:contact_parked")
+
+
 @login_required
 def contact_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # for_user() 404s cleanly for another tenant's id (indistinguishable from
@@ -2072,6 +2239,39 @@ def _status_line(contact: Contact) -> str:
     return f"{contact.warmth.capitalize()} · {state}"
 
 
+# What "parked" ACTUALLY means for this contact, by warmth (Phase 1 bench
+# design, 2026-08-27). Park was doing two jobs at once — "stop the clock" and
+# "invisible to every surface" — and those are different claims for
+# different people. Stated here so the state on the contact's OWN file is
+# legible, without changing what any of the three regimes actually do:
+#   - cold: stays dark. `reply_received` already un-parks through the
+#     pipeline ratchet (ANY inbound reply moves thread_state, whatever it
+#     was) — nothing on this page does that job, it only says so.
+#   - replied: the engine's own branch 3 still fires a confirmed-close
+#     re-ping for a warm contact AHEAD of the parked skip — see
+#     `coverage_domain.cadence`'s branch order. Unaffected by this feature.
+#   - chatted/advocate: bench-eligible (`crm.today._opening_bench`) — a live
+#     opening at their firm may put them on today's bench for one tap back.
+_PARK_NOTES = {
+    "cold": "Parked and cold. A reply from them un-parks this automatically "
+            "— nothing else does, and nothing here is on a timer.",
+    "replied": "Parked, but a confirmed deadline at their firm still triggers "
+               "a re-ping before it closes — that has not changed.",
+    "chatted": "Parked. A live opening at their firm may put this contact on "
+               "today's bench — one tap brings them back, nothing does it "
+               "automatically.",
+    "advocate": "Parked. A live opening at their firm may put this contact on "
+                "today's bench — one tap brings them back, nothing does it "
+                "automatically.",
+}
+
+
+def _park_note(contact: Contact) -> str:
+    if contact.thread_state != "parked":
+        return ""
+    return _PARK_NOTES.get(contact.warmth, "")
+
+
 def _contact_live_context(
     request: HttpRequest, contact: Contact, *, moved: dict | None = None
 ) -> dict[str, Any]:
@@ -2219,6 +2419,7 @@ def _contact_live_context(
         "touches": touches,
         "touch_rows": touch_rows,
         "state_line": _status_line(contact),
+        "park_note": _park_note(contact),
         "contact_score": contact_score,
         "firm_score": firm_score,
         "firm": firm,

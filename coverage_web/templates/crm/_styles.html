@@ -45,6 +45,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     gap: var(--s3); flex-wrap: wrap; }
   .cd-state .cd-h { margin-bottom: 0; }
   .cd-state-line { font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink); }
+  {% comment %}Full-width so it wraps onto its own line under the h2/state-line
+  pair rather than fighting them for the flex row's space-between.{% endcomment %}
+  .cd-park-note { flex-basis: 100%; margin: var(--s1) 0 0; font-size: var(--fs-xs);
+    color: var(--ink-3); }
   .cd-firmname { margin: 0 0 var(--s1); font-size: var(--fs-s); font-weight: var(--w-med); }
   .cd-none { margin: 0; color: var(--ink-3); font-size: var(--fs-s); }
 
@@ -1243,6 +1247,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     .arch-row { grid-template-columns: minmax(0, 1fr) auto; }
     .arch-when { grid-column: 1 / -1; }
   }
+
+  /* ---- Parked cohorts (crm/contact_parked.html): one bulk verb per group,
+     the audit note it read the label off is the one caption. ---- */
+  .cohort-head { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s4); flex-wrap: wrap; margin-bottom: var(--s3); }
+  .cohort-label { font-weight: var(--w-med); color: var(--ink); margin: 0; }
+  .cohort-warmth { font-size: var(--fs-s); color: var(--ink-3); margin: 2px 0 0; }
 
   /* Capped to two rows (roughly 8 cards at this page's usual desktop
      width) and internally scrollable, matching .net-panel's own pattern
