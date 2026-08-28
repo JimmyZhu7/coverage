@@ -90,7 +90,14 @@ materials.
      idiom sitting in the sidebar header. Both stay exactly one click away;
      "New chat", the one thing actually pressed every session, keeps its own
      full-width button. */
-  .as-sidebar-more { position: relative; flex: none; }
+  /* `display: flex` here, not just on the row above: `.as-sidebar-new-row`'s
+     `align-items: stretch` reaches its direct children (this div and the
+     New-chat form) but stops there — a plain block div doesn't pass stretch
+     down to ITS OWN child. Without this the kebab button kept its own
+     intrinsic height (~19px, just the icon) against New chat's ~36px, so
+     two controls sharing one border, background and radius still read as
+     two different shapes — reported directly against the rendered page. */
+  .as-sidebar-more { position: relative; flex: none; display: flex; }
   .as-history-menu.as-sidebar-more-menu { top: calc(100% + 4px); right: 0; width: 220px; }
   .as-folder-create[hidden] { display: none; }
   .as-folder-create-input { width: 100%; box-sizing: border-box; border: 1px solid var(--accent-line);
