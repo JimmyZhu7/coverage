@@ -1180,8 +1180,25 @@ def _today_sort_key(a: dict):
         either score was read. An action string is not evidence about today.
 
     Tier still breaks ties INSIDE a class — it just no longer outranks the
-    relationship. Firm name is last and exists only to make the order stable
-    across renders.
+    relationship. Firm name comes next and exists only to make the order
+    stable across renders — or it would, except two contacts can share a
+    class, an `ev`, a priority, a tier, an idle bucket AND a firm label: two
+    never-contacted strangers with no firm on file tie on all five (same
+    trigger, same unranked weight, the same `10**6` "no dateable touch"
+    idle sentinel, and the same "No firm listed" placeholder). `sorted()` is
+    stable, so a tie like that used to fall through to whatever order the
+    caller's `actions` list happened to arrive in — and for the actions
+    `_opening_keep_warms` appends, that traces back to an UNORDERED
+    `Contact` queryset in `_build_actions` (no `.order_by()`), which is
+    exactly the "free to change after any UPDATE, and does" case
+    `coverage_domain.cadence.due_actions`' own sort was given a contact-id
+    tiebreak for (that module's "C5" divergence note). This page's own
+    re-sort had reopened the identical bug one layer up: which of two tied
+    contacts sat in today's capped plan and which one was bumped to "held"
+    could flip between two renders with no data change behind it. Contact id
+    is the final key for the same reason C5 gives — it never reorders
+    anything the keys above it already separated, it only replaces
+    "whatever order the database felt like" with a stable one.
 
     WHAT STILL STOPS A WALL OF KEEP-WARMS, since they can now reach the top of
     the engaged rung: nothing here — and deliberately, because it is not an
@@ -1196,6 +1213,7 @@ def _today_sort_key(a: dict):
         a["tier"],
         -a.get("idle_business_days", 0),
         str(a["firm_name"]),
+        str(a["contact"].get("id")),
     )
 
 

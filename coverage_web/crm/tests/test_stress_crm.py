@@ -675,3 +675,71 @@ def test_two_date_only_sends_on_consecutive_days_are_two_bursts():
     day1 = datetime(2026, 7, 6, tzinfo=timezone.utc)
     rows = [type("T", (), {"ts": day1})(), type("T", (), {"ts": day1 + timedelta(days=1)})()]
     assert len(campaigns._burst_groups(rows)) == 2
+
+
+# ===========================================================================
+# INVARIANT — `crm.today._today_sort_key` is a TOTAL order, the same
+# guarantee `coverage_domain.cadence.due_actions`' own sort was given a
+# fourth tiebreak key for (contact id, the "C5" divergence in that module's
+# docstring): "the returned order is a TOTAL order rather than three keys
+# plus list.sort's stability over whatever sequence the caller iterated."
+#
+# `crm.today._cockpit_context` re-sorts the engine's already-totally-ordered
+# output in ITS OWN key (`_today_sort_key`, `class, -ev, priority, tier,
+# -idle_business_days, firm_name`) for the view's own reasons (momentum over
+# tier), and that key stops at `firm_name` — no contact-id tiebreak. Two
+# actions tie on every one of those terms whenever they share class, ev,
+# priority, tier, idle bucket and firm label, which is the ordinary case for
+# two never-contacted strangers with no firm on file: same trigger (cold,
+# due), same relevance weight (unranked), same idle bucket (`10**6`, "no
+# dateable touch"), same firm_name ("No firm listed"). `sorted()` is stable,
+# so a tie is resolved by whatever order the caller's `actions` list happened
+# to arrive in — and for the actions `_opening_keep_warms` appends, that
+# order traces back to `Contact.objects.for_user(user).filter(archived=False)`
+# in `_build_actions`, which carries no `.order_by()`. That is exactly the
+# "free to change after any UPDATE, and does" case cadence's C5 note
+# measured for an unordered Postgres scan — reintroduced one layer up, in
+# the view's own re-sort, by the same class of bug the engine was already
+# fixed for. Concretely: which of two tied cold contacts sits inside today's
+# capped plan and which one is bumped to "held" can flip between two renders
+# of the same page with no data change in between.
+# ===========================================================================
+def _tied_today_action(cid, **overrides):
+    base = {
+        "action": "first_outreach", "ev": 0.96, "priority": 1, "tier": 3,
+        "idle_business_days": 10 ** 6, "firm_name": "No firm listed",
+        "contact": {"id": cid},
+    }
+    base.update(overrides)
+    return base
+
+
+def test_today_sort_key_breaks_every_tie_on_contact_id():
+    from crm.today import _today_sort_key
+
+    a, b = _tied_today_action(101), _tied_today_action(202)
+    assert _today_sort_key(a) != _today_sort_key(b), (
+        "two actions tied on class/ev/priority/tier/idle/firm_name must "
+        "still resolve to a total order — the same guarantee cadence."
+        "due_actions' own sort carries via its contact-id tiebreak (C5)"
+    )
+
+
+def test_today_sort_key_is_invariant_under_input_order_for_tied_actions():
+    from crm.today import _today_sort_key
+
+    rng = random.Random(SEED)
+    actions = [_tied_today_action(cid) for cid in (301, 302, 303, 304, 305, 306)]
+    expected = [a["contact"]["id"] for a in sorted(actions, key=_today_sort_key)]
+    seen = set()
+    for _ in range(60):
+        shuffled = actions[:]
+        rng.shuffle(shuffled)
+        got = [a["contact"]["id"] for a in sorted(shuffled, key=_today_sort_key)]
+        seen.add(tuple(got))
+    assert seen == {tuple(expected)}, (
+        f"{len(seen)} distinct orders produced for the same tied set across "
+        "60 shuffles — the Today page's plan/held split (and the rendered "
+        "card order within a lane) can flip between two renders with no "
+        "data change behind it"
+    )
