@@ -54,7 +54,7 @@ from capture.models import (
 )
 from crm.models import (
     CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact,
-    ContactMerge, Task, Touch, UserFirm,
+    ContactMerge, PlayDismissal, Task, Touch, UserFirm,
 )
 from directory.models import Firm
 
@@ -599,6 +599,7 @@ APPLICATION_EXPORT_COLUMNS = [
     "applied_status", "applied_at", "interview_dates", "dismissed",
 ]
 TASK_EXPORT_COLUMNS = ["title", "why", "due", "kind", "firm", "status", "created"]
+PLAY_DISMISSAL_EXPORT_COLUMNS = ["firm", "event_kind", "date", "dismissed_at"]
 CAMPAIGN_EXPORT_COLUMNS = [
     "label", "kind", "recipients", "first_sent", "last_sent", "classified_at",
 ]
@@ -835,6 +836,24 @@ def tasks_csv(user) -> str:
                 t.firm.name if t.firm_id else "", t.status, _dt(t.created),
             ]
             for t in rows
+        ),
+    )
+
+
+def play_dismissals_csv(user) -> str:
+    """Every Today "play" the student has dismissed — the fact (firm, event
+    kind, date) they said "not now" to, and when. See `crm.models.
+    PlayDismissal` and `crm.today._plays`: this is the anti-nag memory, and a
+    student asking for their data back gets it like everything else here."""
+    rows = PlayDismissal.objects.for_user(user).select_related("firm")
+    return _csv(
+        PLAY_DISMISSAL_EXPORT_COLUMNS,
+        (
+            [
+                d.firm.name if d.firm_id else "", d.event_kind,
+                d.date.isoformat() if d.date else "", _dt(d.dismissed_at),
+            ]
+            for d in rows
         ),
     )
 
@@ -1236,6 +1255,9 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("applications.csv", applications_csv,
      "Roles you're tracking, their status, and any interview dates you added."),
     ("tasks.csv", tasks_csv, "Your tasks, open and done."),
+    ("play_dismissals.csv", play_dismissals_csv,
+     "Today \"plays\" you dismissed — which firm, which dated fact, and "
+     "when."),
     ("chat_debriefs.csv", chat_debriefs_csv,
      "What each coffee chat taught you, in your own words."),
     ("campaigns.csv", campaigns_csv,
@@ -1358,6 +1380,11 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     ("touches", Touch),
     ("fit_scores", FitScore),
     ("tasks", Task),
+    # No other private-zone row references it (CASCADEs only from `user` and
+    # from the shared, unowned `firm`), so its position here is not load-
+    # bearing the way the PROTECT-guarded rows below are — kept alongside
+    # `tasks` for readability, as another small standalone Today-page table.
+    ("play_dismissals", PlayDismissal),
     # References `contact` (CASCADE) — deleted before `contacts` below for the
     # same "children before parents" reason as everything above it.
     ("calendar_events", CalendarEvent),
