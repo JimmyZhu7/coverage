@@ -1780,6 +1780,98 @@ def _starter_seeds(user, today) -> list[dict]:
     return seeds[:SEED_MAX]
 
 
+# ---------------------------------------------------------------------------
+# The quiet-day forecast — Phase 1 of the "quiet day is a statement, not an
+# absence" work. A page with nothing due says what is coming and when,
+# instead of rendering a bare "you're all caught up" or, worse, an
+# achievement banner it has no evidence for (see `_cockpit_context`'s
+# `quiet` gate below).
+# ---------------------------------------------------------------------------
+def _next_wave(user, today) -> dict | None:
+    """The next date a batch of cold, no-reply follow-ups comes due, and how
+    many. The forecast half of the quiet-day line.
+
+    Mirrors `cadence.due_actions`' branch 6 (cold / no_reply cadence)
+    exactly, using its own `business_days_since` and the user's own
+    `followup_after_business_days` — never a parallel calendar guess, so
+    this can never name a date the engine itself would disagree with once
+    that date arrives. Two contacts branch 6 would route elsewhere are
+    excluded up front for the same reason: a contact already at
+    `max_cold_touches` outbound touches gets `park`, not another
+    `follow_up`, and a contact with no dateable touch on record reads as
+    already due (branch 6 treats a missing date as "definitely stale
+    enough"), so it belongs in TODAY's queue, not a future wave.
+
+    Also excludes campaign-excluded and recruitment-hidden contacts —
+    `crm.relevance.contact_relevance` drops a not-yet-replied contact in
+    either set entirely (`REL_NONE`) once their follow-up comes due, so
+    counting them here would forecast a wave bigger than the one that
+    actually renders on the day it lands ("counts equal what renders").
+
+    Returns `{"date": date, "count": int}` for the earliest such date, or
+    `None` when there is nothing pending to forecast (no cold/no_reply
+    contact with an outbound touch under the park threshold)."""
+    params = _cadence_params(user)
+    merged = {**cadence.CADENCE_DEFAULTS, **params}
+    followup_bd = int(merged["followup_after_business_days"])
+    max_cold = int(merged["max_cold_touches"])
+
+    contacts = list(
+        Contact.objects.for_user(user)
+        .filter(archived=False, warmth="cold", thread_state="no_reply")
+    )
+    if not contacts:
+        return None
+    excluded_ids = campaigns.excluded_contact_ids(user) | recruitment.hidden_contact_ids(user)
+    contacts = [c for c in contacts if c.id not in excluded_ids]
+    if not contacts:
+        return None
+
+    touches = Touch.objects.for_user(user).filter(
+        contact_id__in=[c.id for c in contacts]
+    )
+    by_contact: dict[int, list[Touch]] = {}
+    for t in touches:
+        by_contact.setdefault(t.contact_id, []).append(t)
+
+    forecast: dict = {}
+    for c in contacts:
+        ctouches = sorted(by_contact.get(c.id, ()), key=lambda t: t.ts)
+        real = [t for t in ctouches if t.kind not in cadence._CLOCK_SILENT_KINDS]
+        if not real:
+            continue
+        outbound = sum(1 for t in ctouches if t.kind in cadence._OUTBOUND_KINDS)
+        if outbound == 0 or outbound >= max_cold:
+            continue
+        lt_date = real[-1].ts.date()
+        if cadence.business_days_since(lt_date, today) >= followup_bd:
+            continue  # already due today's queue would have surfaced it
+
+        d = lt_date
+        while cadence.business_days_since(lt_date, d) < followup_bd:
+            d += timedelta(days=1)
+        forecast[d] = forecast.get(d, 0) + 1
+
+    if not forecast:
+        return None
+    earliest = min(forecast)
+    return {"date": earliest, "count": forecast[earliest]}
+
+
+def _quiet_line(wave: dict | None) -> str:
+    """The one sentence a genuinely quiet Today page shows — never a nag,
+    never an empty grid. `wave` is `_next_wave`'s result. No LLM and no
+    prose variants beyond this one: a date computation rendered as a
+    sentence, in the product's own copy voice (sentence case, no em dash)."""
+    if not wave:
+        return "Quiet on the cadence. Nothing on deck right now."
+    n = wave["count"]
+    when = f"{wave['date'].strftime('%a %b')} {wave['date'].day}"
+    verb = "lands" if n == 1 else "land"
+    plural = "" if n == 1 else "s"
+    return f"Quiet on the cadence. Next wave: {n} follow-up{plural} {verb} {when}."
+
+
 def _cockpit_context(user) -> dict:
     """The Today cockpit: a capped, momentum-ordered daily plan in three
     semantic lanes, an honest held-back remainder, a weekly pace figure, the
@@ -2110,6 +2202,54 @@ def _cockpit_context(user) -> dict:
         else []
     )
 
+    # Whether this Today page has genuinely nothing on it. Two distinct
+    # empty stories already exist and both must keep their earned copy
+    # unchanged (see test_today.py / test_today_seeds.py):
+    #
+    #   - "You're all caught up": every due contact was handled or snoozed
+    #     by hand. Deliberate, earned, and true — must not be overwritten
+    #     just because there is no CONCRETE forecast to name.
+    #   - "Done for today ... N contacts have gone quiet; park them below":
+    #     a real park backlog is a decision waiting on the student, not
+    #     nothing. `park` therefore gates this exactly like `lanes`/`held`/
+    #     `still_open` — the fix here is narrower than "a park-only queue is
+    #     silent" (that's the SEED gate's own, different question above).
+    #
+    # This header exists to say ONE new thing neither of those says: a
+    # concrete date and count for what's coming. So it only takes over when
+    # there both (a) is nothing else on the page and (b) `_next_wave` found
+    # an actual future wave to name — a queue with no forecast at all keeps
+    # falling through to whichever of the two existing lines already fits
+    # it, which is the more honest sentence when there is truly nothing to
+    # predict.
+    #
+    # `plays` and `bench` are two sibling sections landing on this same page
+    # from separate work — this function has no way to name variables that
+    # may not exist yet, so it doesn't try. `_cockpit.html`'s own `{% if %}`
+    # ANDs this flag with `not plays and not bench`, which Django evaluates
+    # as true whenever those keys are absent; add `and not <your_section>`
+    # there when your section lands so the header keeps composing correctly.
+    would_be_quiet = (
+        len(contacts) > 0
+        and not seeds
+        and not lanes
+        and not held
+        and not still_open
+        and not park
+        and not debriefs
+        and not chat_prep
+        and not proposals
+        and not app_events
+        and not mail_facts
+        and not autopilot_review
+    )
+    # The one query this feature costs is gated behind everything above,
+    # same cost discipline as `_starter_seeds`: a working queue, a park
+    # backlog, or a handled/snoozed queue all skip it entirely.
+    wave = _next_wave(user, today) if would_be_quiet else None
+    quiet = would_be_quiet and wave is not None
+    quiet_line = _quiet_line(wave) if quiet else ""
+
     # Every contact the queue is already speaking about. "Waiting on reply" is
     # the page's silent bucket, so it must not re-list somebody who has a card
     # six inches above it.
@@ -2181,6 +2321,12 @@ def _cockpit_context(user) -> dict:
         # PLAYS_MAX and independent of the queue/cap machinery above: a play
         # can render on a day the cadence queue is completely empty.
         "plays": _plays(user, today),
+        # The quiet-day header (see the `quiet` computation above): `line`
+        # is only meaningful when `quiet` is true, but it's cheap enough
+        # (empty string otherwise) to hand over unconditionally rather than
+        # make the template guard two keys instead of one.
+        "quiet": quiet,
+        "quiet_line": quiet_line,
         "deadlines": _next_deadlines(user, today),
         "new_at_firms": _new_at_your_firms(user),
         "waiting": _waiting_on_reply(user, busy_ids),

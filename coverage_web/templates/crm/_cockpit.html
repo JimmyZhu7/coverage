@@ -66,7 +66,28 @@ on every quick action so all of it stays in sync.
     when the QUEUE is empty; saying it while 27 items are pacing out would be
     the page contradicting the line directly beneath it.
     {% endcomment %}
-    {% if not queue_total and not debriefs and not proposals and not app_events and not mail_facts %}
+    {% comment %}
+    The quiet-day header. `quiet` (crm/today.py's `_cockpit_context`) is
+    true only when there is nothing else on the page — no plan, no chat
+    prep, no debrief, nothing pacing out, no stuck prompt, no park backlog,
+    no batch waiting for a tap, and (thin network) no starter seeds — AND
+    `_next_wave` found a concrete future date to name. A queue that is
+    empty for some OTHER reason (everything handled/snoozed, or a real
+    park backlog waiting on a decision) keeps its own earned line below
+    instead: this header adds one new fact, it doesn't replace every
+    empty state. `not plays and not bench` composes in the two sibling
+    sections landing on this same page: Django reads an absent context key
+    as falsy, so this line is correct today (neither key exists yet) and
+    stays correct once they do. One sentence, nothing else — never the
+    achievement-toned "Done for today" banner, which is exactly the copy
+    that read as a saturated pace ring's punchline on a day there was
+    nothing to do.
+    {% endcomment %}
+    {% if quiet and not plays and not bench %}
+      <div class="empty empty--quiet">
+        <p class="quiet-line">{{ quiet_line }}</p>
+      </div>
+    {% elif not queue_total and not debriefs and not proposals and not app_events and not mail_facts %}
       <div class="empty">
         {% if contact_count %}
           {% comment %}
