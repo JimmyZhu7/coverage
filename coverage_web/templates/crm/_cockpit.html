@@ -11,6 +11,57 @@ on every quick action so all of it stays in sync.
 <div class="cockpit">
   <div class="cockpit-main">
     {% comment %}
+    Plays: a dated world fact (a confirmed firm date) joined to the
+    student's own people there — see crm.today._plays. Deliberately OUTSIDE
+    the zero-state gate just below: the gap this closes is a week the
+    cadence queue had nothing due while a bank closed in three days and six
+    of his own contacts sat there unmentioned, so a play has to render on a
+    day the queue is empty, not just on a day it's full.
+
+    At most 3, ever. A firm with a live date and no contacts still plays —
+    it reads as a sourcing prompt rather than a roster. Dismissal is
+    per-FACT (firm + event kind + date, crm.models.PlayDismissal) rather
+    than per-card: dismissing this exact close date never suppresses a
+    later, different date at the same firm.
+    {% endcomment %}
+    {% if plays %}
+      <section class="lane lane-plays" aria-labelledby="plays-lane-h">
+        <h2 class="lane-title" id="plays-lane-h">Plays</h2>
+        <ul class="play-list">
+          {% for p in plays %}
+            <li class="play-card{% if p.urgent %} is-urgent{% endif %}">
+              <div class="play-head">
+                <a class="play-firm" href="{% url 'directory:firm_detail' p.firm.slug %}">{{ p.firm.name|smart_title }}</a>
+                <span class="play-when{% if p.urgent %} is-urgent{% endif %}">{{ p.when }}</span>
+              </div>
+              <p class="play-fact">{{ p.label }} · {{ p.date|date:"M j" }}</p>
+              {% if p.sourcing %}
+                <p class="play-people">You have nobody here yet.</p>
+              {% else %}
+                <p class="play-people">
+                  {{ p.total }} contact{{ p.total|pluralize }} here —
+                  {% for row in p.breakdown %}{{ row.count }} {{ row.label }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                </p>
+              {% endif %}
+              <div class="play-foot">
+                {% if p.sourcing %}
+                  <a class="btn play-cta" href="{% url 'crm:contact_new' %}?firm={{ p.firm.slug }}">Source contacts</a>
+                {% else %}
+                  <a class="btn play-cta" href="{% url 'directory:firm_detail' p.firm.slug %}">View contacts</a>
+                {% endif %}
+                <button type="button" class="btn play-dismiss"
+                        aria-label="Dismiss {{ p.firm.name }} {{ p.label }}"
+                        hx-post="{% url 'crm:play_dismiss' %}"
+                        hx-vals='{"firm": "{{ p.firm.id }}", "event_kind": "{{ p.event_kind }}", "date": "{{ p.date|date:"Y-m-d" }}"}'
+                        title="Never show this exact date again">Dismiss</button>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
+    {% comment %}
     Three distinct zero states, not two. "You're all caught up" is only true
     when the QUEUE is empty; saying it while 27 items are pacing out would be
     the page contradicting the line directly beneath it.

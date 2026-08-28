@@ -207,6 +207,40 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     .seed-btn { grid-column: 1 / -1; width: 100%; min-height: 44px; }
   }
 
+  /* Plays (crm/_cockpit.html, crm.today._plays): a dated world fact joined
+     to the student's own people at that firm. Its own shape, distinct from
+     both act-card and the seed lane above — a play is not a due action with
+     write buttons behind it (there is nothing to attest to), and unlike a
+     seed it is anchored to a REAL confirmed date rather than a first-move
+     suggestion, so it gets a SOLID left edge rather than the seed lane's
+     dashed one. Danger tint only when the date itself is urgent — the same
+     bar the deadlines rail and the cadence engine hold, so a colour here
+     never disagrees with the same firm's colour there. */
+  .lane-plays { margin-bottom: var(--s6); }
+  .play-list { list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: var(--s2); }
+  .play-card { background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent-line);
+    border-radius: var(--r-panel); padding: var(--s3) var(--s4); }
+  .play-card.is-urgent { border-left-color: var(--danger); }
+  .play-head { display: flex; align-items: baseline; justify-content: space-between;
+    gap: var(--s3); }
+  .play-firm { font-weight: var(--w-med); color: var(--ink); }
+  .play-when { font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--ink-3); white-space: nowrap; }
+  .play-when.is-urgent { color: var(--danger); font-weight: var(--w-med); }
+  .play-fact { margin: 2px 0 0; font-size: var(--fs-s); color: var(--ink-2); }
+  .play-people { margin: var(--s2) 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+  .play-foot { display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s3); margin-top: var(--s3); }
+  .play-cta { padding: 6px 12px; font-size: var(--fs-xs); white-space: nowrap; }
+  .play-dismiss { background: transparent; border-color: transparent;
+    color: var(--ink-3); padding: 3px 8px; font-size: var(--fs-xs); }
+  .play-dismiss:hover { background: var(--paper); border-color: var(--line); color: var(--ink-2); }
+  @media (max-width: 560px) {
+    .play-foot { flex-wrap: wrap; }
+  }
+
   /* Up next: the held-back remainder. Collapsed by default, exact count in
      the summary, complete list inside — the cap paces, it never filters. */
   .upnext { margin-bottom: var(--s6); background: var(--surface);
