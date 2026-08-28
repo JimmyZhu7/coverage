@@ -1097,6 +1097,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     border: 1px solid var(--line); border-radius: var(--r-panel);
     padding: var(--s2) var(--s3); background: var(--surface); }
   .tl-row.rumored { border-style: dashed; }
+  /* Two closes for one cycle (see views.py `_flag_conflicting_closes`) — the
+     row is a genuine data conflict, not a soft estimate, so it gets its own
+     treatment rather than borrowing "rumored"'s dashed border. */
+  .tl-row.conflicting { border-color: var(--conf-low-l); }
   .tl-date { font-weight: var(--w-med); min-width: 8.5rem;
     font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--fs-s); }
   .tl-event { flex: 1; font-size: var(--fs-m); }

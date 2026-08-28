@@ -702,9 +702,56 @@ def _drop_contradicted_openings(rows: list[dict]) -> list[dict]:
     return keep
 
 
+# Two `app_close` rows can both survive to here for the same printed scope —
+# the DB's uniqueness constraint is on (firm, cycle, region, event_kind), and
+# the JPM shape above is exactly a case where two different `cycle` spellings
+# ("SA 2028" and "sa2028_hk") name the same scope once `_cycle_scope` renders
+# them. The founder's own jpm page showed an Aug 30 close and a Sep 3 close,
+# both badged "confirmed", with nothing telling a student which to believe.
+#
+# Three ways out were considered and rejected:
+#   - Newer date wins: a re-scrape can be a bad read of the firm's page: an
+#     older row is not automatically stale, it may be the one that is right.
+#   - Higher-confidence row wins: the two rows can tie (same band, same
+#     precision), which this repo's confidence vocabulary is coarse enough to
+#     make common — and a tie has no honest winner.
+#   - Keep both silently confirmed: this is the live bug. A student reads
+#     "confirmed" on the wrong one and misses the real deadline.
+#
+# So neither row gets to keep `state == "confirmed"` alone. Both stay on the
+# page — dropping one is how a real deadline goes missing — but each is
+# re-labelled "conflicting" with the reason attached, the same honest-
+# ambiguity move as `_unconfirmed_note`: say what we don't know rather than
+# assert a guess.
+def _flag_conflicting_closes(rows: list[dict]) -> list[dict]:
+    """Mark every `app_close` row whose printed scope carries more than one
+    distinct close date, so the timeline can't badge either one "confirmed"
+    alone."""
+    dates_by_scope: dict[tuple[str, str], set] = {}
+    for row in rows:
+        if row["event_kind"] == "app_close" and row["date"] is not None:
+            dates_by_scope.setdefault(_cycle_scope(row), set()).add(row["date"])
+
+    conflicted = {scope for scope, dates in dates_by_scope.items() if len(dates) > 1}
+    if not conflicted:
+        return rows
+
+    for row in rows:
+        if row["event_kind"] == "app_close" and _cycle_scope(row) in conflicted:
+            row["state"] = "conflicting"
+            row["conflict"] = {
+                "label": "conflicting dates on file",
+                "why": ("Coverage has more than one closing date on file for "
+                        "this cycle and cannot tell which is current. Check "
+                        "the firm's own posting before relying on either."),
+            }
+    return rows
+
+
 def _timeline(firm, *, today):
     rows = firm.firm_dates.all().order_by(F("date").asc(nulls_last=True), "cycle", "event_kind")
-    return _drop_contradicted_openings([_firm_date_row(fd, today=today) for fd in rows])
+    rows = _drop_contradicted_openings([_firm_date_row(fd, today=today) for fd in rows])
+    return _flag_conflicting_closes(rows)
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,9 @@
 {% comment %}
 A firm's cycle dates from firm_dates, rendered as a timeline. `timeline` is a
 list of dicts from directory/views.py `_firm_date_row`. Confirmed dates are
-solid; rumored ones are dashed and wear their confidence openly.
+solid; rumored ones are dashed and wear their confidence openly; a row whose
+scope has two conflicting close dates on file (`_flag_conflicting_closes`)
+is neither — it says so instead of picking a winner.
 {% endcomment %}
 {% if timeline %}
   <ul class="tl">
@@ -15,6 +17,8 @@ solid; rumored ones are dashed and wear their confidence openly.
         <span class="markers">
           {% if row.state == "confirmed" %}
             <span class="pill conf-high" title="High-confidence, dated.">confirmed</span>
+          {% elif row.state == "conflicting" %}
+            <span class="pill conf-low" title="{{ row.conflict.why }}">{{ row.conflict.label }}</span>
           {% else %}
             <span class="pill conf-{{ row.confidence.level }}" title="Not yet confirmed; shown with its confidence.">rumored · confidence {{ row.confidence.label }}{% if row.confidence.value %} ({{ row.confidence.value }}){% endif %}</span>
           {% endif %}

@@ -216,3 +216,55 @@ def test_a_confirmed_opening_after_a_close_is_left_visible(client):
           date=dt.date(2027, 9, 1), precision="", confidence=1.0)
     body = _page(client, firm)
     assert "Sep 1, 2027" in body
+
+
+# ---------------------------------------------------------------------------
+# 4. Two contradicted closes must not render side by side
+#
+# The live shape: jpm carried an Aug 30 close and a Sep 3 close for the same
+# printed cycle, both badged "confirmed", nothing on the page telling a
+# student which to believe. `firm_dates`'s uniqueness constraint is keyed on
+# the STORED `cycle` column, so two different spellings of the same scope
+# ("SA 2028" and "sa2028_ib" printing identically once region-suffixed) sail
+# straight past it — the same collision `cycle_label` already causes for
+# app_open/app_close pairs above, just between two closes instead of an open
+# and a close. The fixtures behind the original report were deleted, so this
+# reproduces the shape rather than the literal rows.
+# ---------------------------------------------------------------------------
+def test_two_closes_for_one_cycle_are_flagged_conflicting_not_both_confirmed(client):
+    firm = _firm("jpm", "J.P. Morgan")
+    _date(firm, cycle="SA 2028", region="hk", event_kind="app_close",
+          date=dt.date(2026, 8, 30), precision="", confidence=1.0)
+    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_close",
+          date=dt.date(2026, 9, 3), precision="", confidence=1.0)
+    body = _page(client, firm)
+    # Neither date goes missing — hiding one is how a student misses the
+    # real deadline.
+    assert "Aug 30, 2026" in body
+    assert "Sep 3, 2026" in body
+    # ...but neither gets to claim the unqualified "confirmed" badge alone.
+    assert ">confirmed<" not in body
+    assert "conflicting dates on file" in body
+
+
+def test_a_lone_close_is_still_confirmed(client):
+    """The ordinary, non-conflicting shape must be untouched by the new
+    check — one dated close still earns the plain "confirmed" badge."""
+    firm = _firm()
+    _date(firm, cycle="SA 2028", region="us", event_kind="app_close",
+          date=dt.date(2026, 10, 30), precision="", confidence=1.0)
+    body = _page(client, firm)
+    assert ">confirmed<" in body
+    assert "conflicting dates on file" not in body
+
+
+def test_two_identical_close_dates_are_not_a_conflict(client):
+    """Two rows that happen to agree on the date are redundant data, not a
+    disagreement — nothing here for a student to be warned about."""
+    firm = _firm()
+    _date(firm, cycle="SA 2028", region="hk", event_kind="app_close",
+          date=dt.date(2026, 10, 30), precision="", confidence=1.0)
+    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_close",
+          date=dt.date(2026, 10, 30), precision="", confidence=1.0)
+    body = _page(client, firm)
+    assert "conflicting dates on file" not in body
