@@ -814,21 +814,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      contact_list.html for the full argument and the one state where the
      count still mattered). `title=` on this element carries it now. */
   .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
-  /* Not the raw "exposure" score any more — the founder asked what the
-     word meant and, on hearing the answer, said drop the number: it
-     collides with what "exposure" means elsewhere in finance, and the
-     integer is only meaningful next to its neighbours, which the sort
-     order already carries. What's shown instead is this card's
-     plain-language RANK ("ranked 1 of 6"): self-explanatory with no
-     formula literacy needed, and it still separates tied cards, since two
-     firms can share a score (crm/coverage.py's tie-break) and still land
-     at different, ordered positions. Mono kept so it still reads as a
-     number, not more state-line prose. Protected by
-     `test_the_gap_strip_shows_its_rank_without_a_hover`: title= is
-     unreachable on touch, so this line still can't fold into the hover
-     tooltip no matter how redundant with grid position it looks on a
-     desktop screen. */
-  .gap-exp { font-family: var(--font-mono); color: var(--ink-2); }
+  /* `.gap-exp` is gone, and with it every number on this card's face. It
+     held the raw "exposure" score, then the card's rank once that score
+     was cut; both were cut on the founder's ask, the second within
+     minutes of the first. The rank failed for its own reason rather than
+     inheriting the score's: it printed a position the reader could
+     already see, and its denominator moved with the strip's length. The
+     arithmetic is not lost — it is in each card's title= and the strip
+     heading's, spelled out with the word "exposure" — it just no longer
+     competes with `g.label` for the one line a reader actually scans.
+     `test_the_gap_strip_shows_no_number_on_its_face` keeps it out. */
   .gap-act { margin-top: auto; padding: 5px var(--s2); font-size: var(--fs-xs);
     text-align: center; white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; display: block; }

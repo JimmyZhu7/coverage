@@ -339,21 +339,27 @@ def test_a_covered_firm_shows_no_action_at_all(client):
 
 
 @pytest.mark.django_db
-def test_the_gap_strip_shows_its_rank_without_a_hover(client):
-    """The full formula, "exposure" included, lives in a `title=` tooltip,
-    unreachable on any touch device. That used to mean the card's face
-    printed the raw score ("exposure 12") so a touch reader had SOMETHING
-    plain-text to trust the order by. The founder asked what "exposure"
-    meant and, on hearing the answer, said drop the number: it collides
-    with what "exposure" means elsewhere in finance, and the raw integer
-    is only meaningful next to its neighbours, which the sort order
-    already carries.
+def test_the_gap_strip_shows_no_number_on_its_face(client):
+    """No measurement on the card at all — not the score, not the rank.
 
-    What replaced it must still work without a hover: not the score, but
-    this card's plain-language RANK among the worst shown ("ranked 1 of
-    1" here, the only tiered firm on the account) — legible with no
-    formula literacy, and still distinct card-to-card even when the
-    underlying score ties (see the tied-cards test below)."""
+    The founder asked what "exposure" meant, heard the answer, and said
+    drop the number. A first pass read that as "drop the SCORE" and put
+    the card's rank there instead ("ranked 1 of 6"); shown that, he said
+    it was not what he meant either. The second reading is the one this
+    test pins.
+
+    The earlier guard here defended a real constraint — `title=` is
+    unreachable on touch, so the order must be justifiable without a
+    hover — but it defended it with the wrong thing. Rank does not
+    justify an order; it restates it, to a reader already looking down
+    the list it describes. What justifies the order is WHY each firm is
+    on the strip, and the tier tag, the gap label and the deadline tag
+    all carry that in plain text on the face, with no number to compare
+    across cards.
+
+    So: no `.gap-exp` element, no "exposure" and no "ranked" in the
+    strip's plain text — while the full arithmetic stays in the hover
+    tooltip for anyone who wants it."""
     user = User.objects.create_user(email="math@example.com", password="x")
     firm = Firm.objects.create(slug="exposed-co", name="Exposed Co")
     UserFirm.all_objects.create(user=user, firm=firm, tier=1)
@@ -363,10 +369,12 @@ def test_the_gap_strip_shows_its_rank_without_a_hover(client):
     gap_block = _gap_strip(body)
     # The only tiered firm on the account, so it is the sole (and first)
     # card in the strip.
-    assert 'class="gap-exp"' in gap_block
-    assert "· ranked 1 of 1" in gap_block
-    # The raw score no longer reaches the card's plain-text face...
+    assert 'class="gap-exp"' not in gap_block, (
+        "the gap card grew a number back on its face"
+    )
+    # Neither number reaches the card's plain-text face...
     assert "· exposure" not in gap_block
+    assert "ranked 1 of" not in gap_block
     # ...but the full breakdown, "exposure" included, still rides along in
     # the hover tooltip for anyone on a pointer device. Tier 1, no
     # contacts: 3 × 4 = exposure 12.
@@ -386,14 +394,11 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
     open right now is the one worth a contact today, in a way the exposure
     formula has no term for.
 
-    The card's face no longer prints the shared "exposure" score at all
-    (dropped per the founder's ask — see
-    test_the_gap_strip_shows_its_rank_without_a_hover), which makes this
-    tie-break more visible on the page than before, not less: two cards
-    that used to read as identical text ("exposure 12" twice) now print
-    their own distinct, ordered rank ("ranked 1 of 2" / "ranked 2 of 2"),
-    so the reordering is legible on the card face, not just inferred from
-    hovering both and comparing.
+    The card's face prints no number at all now (see
+    test_the_gap_strip_shows_no_number_on_its_face), so two tied cards do
+    read as identical text again — and that is the point of this test.
+    ORDER is what separates them, and order is what has to be right,
+    because it is now the only thing carrying the distinction.
 
     Named so that the OLD tie-break would get this wrong: alphabetically
     "Zeta" comes last, and it is the one that has to come first.
@@ -418,11 +423,9 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
     # Both tied at exposure 12 (Tier 1 × no_contacts = 3 × 4) in the hover
     # tooltip's arithmetic...
     assert gap_block.count("= exposure 12") == 2
-    # ...but the card face never prints that shared score (dropped per the
-    # founder's ask) — it prints each card's own ordered RANK instead, so
-    # the tie reads as two DIFFERENT lines, not "exposure 12" twice.
-    assert "· ranked 1 of 2" in gap_block
-    assert "· ranked 2 of 2" in gap_block
+    # ...and nothing on either card's face repeats it, or ranks them.
+    assert "· exposure" not in gap_block
+    assert "ranked" not in gap_block
     # ...and the tie is broken by who is hiring, not by the alphabet.
     assert gap_block.index("Zeta Co") < gap_block.index("Alpha Co"), (
         "the firm with three seats open sorts below a firm with none, on the "
