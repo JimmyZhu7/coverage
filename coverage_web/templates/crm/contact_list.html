@@ -899,9 +899,16 @@
       grid.classList.add("is-capped");
       grid.setAttribute("tabindex", "0");
       grid.setAttribute("role", "region");
+      // Read the two spans separately rather than flattening the label's
+      // textContent: run together it announces as "Tier 1 20 firms", which
+      // is two numbers with nothing between them and no way to hear which
+      // is the tier. Sighted readers get the separation from layout.
       var label = grid.parentElement.querySelector(".tier-label");
-      var labelText = label ? label.textContent.trim().replace(/\s+/g, " ") : "Tier";
-      grid.setAttribute("aria-label", labelText + " firms, scroll for more");
+      var tierName = label && label.firstElementChild
+        ? label.firstElementChild.textContent.trim() : "Tier";
+      grid.setAttribute(
+        "aria-label", tierName + ", " + grid.children.length + " firms. Scroll for more."
+      );
     }
 
     function capAllGrids() {
