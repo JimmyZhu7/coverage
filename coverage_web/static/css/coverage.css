@@ -109,6 +109,11 @@
      light theme's deep navy; dark mode's accent is a LIGHT blue, where
      white measures 2.53:1 — so the pairing flips with the palette. */
   --on-accent:    #ffffff;
+  /* De-emphasised text on that same fill — a count beside a label, not the
+     label. Dimming is a COLOUR decision: `opacity` on text multiplies a ratio
+     the token audit measured without it, so the quiet variant is its own
+     token and gets measured too. 5.24:1 here, 5.29:1 in dark. */
+  --on-accent-2:  #bccbdb;
   --accent:       #1f4e79;
   --accent-ink:   #163a5b;   /* hover/active */
   --accent-soft:  #e9eef4;   /* tinted surfaces (honesty banner) */
@@ -249,6 +254,7 @@
     --line-strong:  #42473c;
   
     --on-accent:    #10161d;
+    --on-accent-2:  #26303c;
   --accent:       #7aa7d4;
     --accent-ink:   #a9c7e6;
     --accent-soft:  #232a35;
@@ -305,6 +311,7 @@
   --line-strong:  #42473c;
 
   --on-accent:    #10161d;
+  --on-accent-2:  #26303c;
   --accent:       #7aa7d4;
   --accent-ink:   #a9c7e6;
   --accent-soft:  #232a35;
@@ -956,14 +963,19 @@ main { flex: 1 0 auto; }
 }
 .subnav.scope-tabs a:hover { background: var(--accent-soft); color: var(--ink); }
 .subnav.scope-tabs a[aria-current="page"] { background: var(--accent); color: var(--on-accent); }
-/* 2026-08-27: a tab's own size, so it's judgeable before you click it. No
-   explicit color — it inherits the segment's current color (muted ink-2,
-   or on-accent when selected) at reduced opacity, so it never needs its own
-   rule for hover/current. */
+/* 2026-08-27: a tab's own size, so it's judgeable before you click it. The
+   count is quieter than its label, and it says so in COLOUR rather than
+   `opacity`: a faded text element multiplies whatever ratio the token audit
+   measured for the pair, invisibly (.mrail-yr turned a 5:1 --ink-3 into
+   2.18:1 exactly that way). So each background the pill can wear names the
+   dimmed ink it takes — ink-3 on the capsule surface and on the hover tint,
+   on-accent-2 on the selected navy — and every one of those pairs is a
+   measured token pair. */
 .scope-count {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 0.85em; opacity: 0.65; margin-left: 2px;
+  font-size: 0.85em; color: var(--ink-3); margin-left: 2px;
 }
+.subnav.scope-tabs a[aria-current="page"] .scope-count { color: var(--on-accent-2); }
 /* The three off-board escape hatches (Archived / Not recruiting / Not
    recruitment), demoted from the segmented pill above into one quiet line —
    plain breadcrumb links, not a second capsule, so the row reads as a
