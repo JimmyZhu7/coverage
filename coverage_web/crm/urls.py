@@ -17,6 +17,10 @@ urlpatterns = [
     # spend money — same rule as the contact AI endpoints below.
     path("today/brief/", views.daily_brief, name="daily_brief"),
     path("today/<int:pk>/<str:verb>/", views.today_act, name="today_act"),
+    # A Today "play" dismissal — keyed on the fact (firm + event kind + date)
+    # posted in the body, not on a path segment, since the fact isn't a row
+    # id. See crm.models.PlayDismissal.
+    path("plays/dismiss/", views.play_dismiss, name="play_dismiss"),
     # Post-chat debrief, keyed by the `chat` touch it belongs to (one
     # debrief per chat — see crm.models.ChatDebrief).
     # Contact proposals found in the mailbox (capture.discovery) — one-tap

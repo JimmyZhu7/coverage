@@ -70,6 +70,7 @@ from .today import (  # noqa: F401
     _today_class,
     _today_sort_key,
     _workdays_left,
+    play_dismiss,
     today_act,
     today_park_all,
     week,

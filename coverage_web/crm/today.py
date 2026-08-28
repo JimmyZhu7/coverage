@@ -9,7 +9,7 @@ working unchanged.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from math import ceil
 
 from django.contrib.auth.decorators import login_required
@@ -32,7 +32,7 @@ from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
 
 from . import campaigns, debrief as debrief_svc, recruitment, relevance as rel, services
-from .models import CalendarEvent, ChatDebrief, Contact, Touch, UserFirm
+from .models import CalendarEvent, ChatDebrief, Contact, PlayDismissal, Touch, UserFirm
 from .utils import (
     ACTION_LABELS,
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
@@ -1305,6 +1305,11 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
             "firm": fd.firm,
             "label": _FIRM_DATE_LABELS.get(
                 fd.event_kind, fd.event_kind.replace("_", " ")),
+            # The raw kind, alongside the human `label` above. `_plays` keys
+            # its dismissal tuple on this (plus firm + date) rather than on
+            # the label, so a copy-editing pass on `_FIRM_DATE_LABELS` can
+            # never resurrect or re-dismiss a fact it didn't touch.
+            "event_kind": fd.event_kind,
             "date": fd.date,
             "days": days,
             "when": "today" if days == 0 else ("1d" if days == 1 else f"{days}d"),
@@ -1314,6 +1319,135 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
         })
     return out
 
+
+# ---------------------------------------------------------------------------
+# Plays: a dated world fact joined to the student's own people at that firm.
+# ---------------------------------------------------------------------------
+# THE GAP THIS CLOSES. The founder's Today page rendered zero cards the week
+# he sent ~50 personalised coffee-chat requests: nothing was DUE, and the
+# cadence queue is the page's only content source. Meanwhile the page already
+# knew J.P. Morgan closes in 3 days and he has 6 people there, and Goldman's
+# insight programme opens Sep 1 with 5 of his new batch at Goldman. The
+# ingredients existed on two different rails — `_next_deadlines`'s dated
+# facts, and the student's own contacts — and never met. This is the join,
+# and only the join: no prose, no model call, nothing rendered that isn't
+# read off a row.
+#
+# Confirmed dates only, unchanged from `_next_deadlines`'s own bar — a
+# rumoured date is not a play, it is the countdown bug this codebase already
+# refused to ship once.
+PLAYS_MAX = 3
+# How many of the soonest confirmed dates to pull before dismissal/one-per-
+# firm narrowing. Wider than PLAYS_MAX so a dismissed fact or two still
+# leaves a full three to show; `_next_deadlines` is one indexed query so the
+# extra rows cost nothing extra to fetch.
+_PLAYS_CANDIDATE_POOL = 20
+
+# The contact-state groups a play's breakdown may name, warm-to-cold. Read
+# off `Contact.warmth` for NON-archived contacts only — `parked` (below) is
+# the archived count and is reported separately so a person's warmth at the
+# moment they were parked never gets counted twice.
+_PLAY_WARMTH_GROUPS = ("replied", "chatted", "advocate", "cold")
+_PLAY_WARMTH_LABELS = {
+    "replied": "replied", "chatted": "chatted", "advocate": "advocate",
+    "cold": "cold",
+}
+
+
+def _plays(user, today) -> list[dict]:
+    """At most `PLAYS_MAX` cards: a confirmed, dated fact about a firm, joined
+    to a plain count of this student's own contacts there.
+
+    JOIN, NOT RE-DERIVE. The fact side is exactly `_next_deadlines`'s own
+    output — this function adds no opinion about what counts as confirmed or
+    upcoming. The people side is a straight `Contact` count by firm and
+    warmth/archived state. Nothing here computes relevance, ranks a
+    relationship, or writes a sentence a human didn't already establish by
+    filling in a row.
+    """
+    candidates = _next_deadlines(user, today, limit=_PLAYS_CANDIDATE_POOL)
+    if not candidates:
+        return []
+
+    dismissed = set(
+        PlayDismissal.objects.for_user(user)
+        .values_list("firm_id", "event_kind", "date")
+    )
+
+    # One play per firm. `_next_deadlines` is already sorted soonest-date
+    # first, so the first row seen per firm is that firm's nearest confirmed
+    # date — the same "earliest wins" rule the deadlines rail itself applies.
+    seen_firms: set[int] = set()
+    facts = []
+    for d in candidates:
+        firm_id = d["firm"].id
+        if firm_id in seen_firms:
+            continue
+        seen_firms.add(firm_id)
+        # THE ANTI-NAG GATE. Filtered out here, before the cap, so a
+        # dismissed fact never occupies one of the at-most-3 slots and never
+        # blocks a real one behind it.
+        if (firm_id, d["event_kind"], d["date"]) in dismissed:
+            continue
+        facts.append(d)
+        if len(facts) >= PLAYS_MAX:
+            break
+    if not facts:
+        return []
+
+    firm_ids = [d["firm"].id for d in facts]
+    by_firm: dict[int, list] = {fid: [] for fid in firm_ids}
+    for c in (
+        Contact.objects.for_user(user)
+        .filter(firm_id__in=firm_ids)
+        .only("id", "firm_id", "warmth", "archived")
+    ):
+        by_firm[c.firm_id].append(c)
+
+    plays = []
+    for d in facts:
+        firm = d["firm"]
+        cs = by_firm.get(firm.id, [])
+        live = [c for c in cs if not c.archived]
+        parked = [c for c in cs if c.archived]
+
+        breakdown = []
+        accounted = 0
+        for w in _PLAY_WARMTH_GROUPS:
+            n = sum(1 for c in live if c.warmth == w)
+            if n:
+                breakdown.append(
+                    {"key": w, "label": _PLAY_WARMTH_LABELS[w], "count": n}
+                )
+                accounted += n
+        # `warmth` is a plain, unconstrained column (see Contact.warmth) — a
+        # value outside the known ladder still has to be counted somewhere,
+        # or the card's own arithmetic would drift from the roster behind
+        # it, which is rule 4: counts must equal what renders.
+        other = len(live) - accounted
+        if other:
+            breakdown.append({"key": "other", "label": "other", "count": other})
+        if parked:
+            breakdown.append(
+                {"key": "parked", "label": "parked", "count": len(parked)}
+            )
+
+        plays.append({
+            "firm": firm,
+            "label": d["label"],
+            "event_kind": d["event_kind"],
+            "date": d["date"],
+            "when": d["when"],
+            "urgent": d["urgent"],
+            "breakdown": breakdown,
+            # The single source both the card and this function's own tests
+            # read — never resummed from `breakdown` a second time.
+            "total": len(cs),
+            # A firm with a live date and nobody there is still a play: the
+            # card reads as a sourcing prompt rather than a roster.
+            "sourcing": not cs,
+        })
+    return plays
 
 
 def _waiting_on_reply(user, busy_ids: set[int], limit=12) -> dict:
@@ -2042,6 +2176,11 @@ def _cockpit_context(user) -> dict:
         # render, never stored. Empty for any account whose queue has work
         # in it. See `_starter_seeds`.
         "seeds": seeds,
+        # Dated world facts joined to the student's own people at that firm —
+        # see `_plays`'s own module note for the gap this closes. Capped at
+        # PLAYS_MAX and independent of the queue/cap machinery above: a play
+        # can render on a day the cadence queue is completely empty.
+        "plays": _plays(user, today),
         "deadlines": _next_deadlines(user, today),
         "new_at_firms": _new_at_your_firms(user),
         "waiting": _waiting_on_reply(user, busy_ids),
@@ -2186,6 +2325,37 @@ def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
         return HttpResponse(status=400)
     return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
 
+
+@login_required
+@require_POST
+def play_dismiss(request: HttpRequest) -> HttpResponse:
+    """Dismiss one Today play, keyed on the FACT — `(firm, event_kind, date)`
+    — never on the card's rendered position or a row id.
+
+    THE WHOLE POINT. `PlayDismissal` writes the values, not a foreign key to
+    the `FirmDate` row: a firm's board gets re-scraped and that row is edited
+    IN PLACE, so keying on its id would keep suppressing a fact whose date has
+    since moved. Storing the date as a value means a later, DIFFERENT date is
+    a different tuple and the play returns on its own — no undo needed,
+    nothing to expire. See `crm.models.PlayDismissal` and `_plays`.
+    """
+    try:
+        firm_id = int(request.POST.get("firm", ""))
+        fact_date = date.fromisoformat(request.POST.get("date", ""))
+    except (TypeError, ValueError):
+        return HttpResponse(status=400)
+    event_kind = (request.POST.get("event_kind") or "").strip()
+    if not event_kind:
+        return HttpResponse(status=400)
+    get_object_or_404(Firm, pk=firm_id)
+    PlayDismissal.all_objects.get_or_create(
+        user=request.user, firm_id=firm_id, event_kind=event_kind, date=fact_date,
+    )
+    record_event(
+        "play_dismissed", user=request.user, firm_id=firm_id,
+        event_kind=event_kind, date=fact_date.isoformat(),
+    )
+    return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
 
 
 _PAREN = _re.compile(r"\s*\([^)]*\)")
