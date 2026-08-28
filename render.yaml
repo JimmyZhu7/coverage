@@ -338,20 +338,33 @@ services:
         value: localhost
 
   # ---- Gmail Live first-connect backfill + "Scan Now" rescans, every ----
-  # ---- 15 minutes ---------------------------------------------------------
+  # ---- 5 minutes ----------------------------------------------------------
   # A tight tick because a newly-connected user (or someone who just hit
   # "Scan Now" in Settings) should not sit at "queued" for hours, but each
   # run costs almost nothing when idle — the very first things it does are
   # `SELECT ... WHERE backfill_status IN (pending, failed)` and the same
-  # for `rescan_status`, and at this app's scale (a handful of users) both
-  # are empty on nearly every one of the 96 runs/day. See capture/
-  # management/commands/gmail_backfill.py for what actually happens on the
-  # rare run that finds something in either queue.
+  # for `rescan_status`, and at this app's scale both are empty on nearly
+  # every run. See capture/management/commands/gmail_backfill.py for what
+  # actually happens on the rare run that finds something in either queue.
+  #
+  # FIVE MINUTES, NOT FIFTEEN, and for the reason coverage-autopilot below
+  # already gives for its own tick: a student is WATCHING this one. They
+  # pressed a button, the row says "Queued — starts shortly", and fifteen
+  # minutes is not shortly. The two jobs are the same shape (a POST that
+  # queues, a tick that claims) and had no business being on different
+  # clocks — the fifteen was chosen when this queue only ever held one
+  # person, who was the developer.
+  #
+  # Safe to shorten because the command bounds its own work: TICK_BUDGET
+  # (300s) stops it starting new connections past the interval, so ticks
+  # cannot pile up on each other no matter how many users are queued, and
+  # the per-mailbox advisory lock means an overlap would be declined rather
+  # than duplicated anyway.
   - type: cron
     name: coverage-gmail-backfill
     runtime: docker
     dockerfilePath: ./Dockerfile
-    schedule: "*/15 * * * *"
+    schedule: "*/5 * * * *"
     dockerCommand: "uv run --package coverage-web python coverage_web/manage.py gmail_backfill"
     envVars:
       - key: DJANGO_SETTINGS_MODULE

@@ -61,7 +61,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 from analytics.models import Import
@@ -78,6 +78,27 @@ from ops.tracking import track_job_run
 # means a row is checked many times before it's ever reclaimed, not
 # reclaimed on the very next tick after it dies.
 STALE_RUNNING_AFTER = timedelta(hours=2)
+
+# How long one tick will keep starting new connections before it stops and
+# leaves the rest queued for the next one.
+#
+# THE FAILURE THIS PREVENTS. Connections run serially, and a full rescan is
+# ~65s on a real mailbox (measured: 182 contacts against 10,761 messages).
+# With no budget, a tick that finds 30 queued users runs for ~32 minutes —
+# straight through the next scheduled tick, and the one after it. Ticks then
+# overlap, each holding mailbox locks the others want, and the queue's
+# latency degrades without any single run ever failing. The symptom would be
+# "Scan Now got slower as we onboarded", which is the hardest kind of
+# slowness to diagnose because nothing is broken.
+#
+# Set under the tick interval, not equal to it: a connection already started
+# when the budget runs out still finishes, so the real ceiling is the budget
+# plus one run. At 300s budget on a 300s tick that means a worst case just
+# over one interval, which is the intended overlap-free behaviour.
+#
+# This is a THROUGHPUT limit, not a fairness one — the ordering below is what
+# guarantees the users who don't get in this tick go first in the next.
+TICK_BUDGET = timedelta(seconds=300)
 
 
 class Command(BaseCommand):
@@ -109,6 +130,14 @@ class Command(BaseCommand):
                 base = base.filter(user__email=opts["email"])
 
             stale_cutoff = timezone.now() - STALE_RUNNING_AFTER
+            # OLDEST REQUEST FIRST, both queues. Without an explicit order
+            # Postgres is free to return these rows however it likes, which is
+            # fine at one user and a starvation bug at fifty: whoever the
+            # planner happens to put last can be pushed past the tick budget
+            # below on every single tick and wait indefinitely while newer
+            # requests are served ahead of them. `nulls_first` because a row
+            # with no timestamp is either a pre-field row or a crashed run —
+            # it has been waiting longest by definition, so it goes first.
             backfill_connections = list(
                 base.filter(
                     Q(backfill_status="pending")
@@ -119,7 +148,7 @@ class Command(BaseCommand):
                     # as stale rather than leaving it stuck for a different
                     # reason.
                     | Q(backfill_status="running", backfill_started_at__isnull=True)
-                )
+                ).order_by(F("backfill_started_at").asc(nulls_first=True), "pk")
             )
             rescan_connections = list(
                 base.filter(
@@ -127,18 +156,39 @@ class Command(BaseCommand):
                     | Q(rescan_status="failed")
                     | Q(rescan_status="running", rescan_started_at__lt=stale_cutoff)
                     | Q(rescan_status="running", rescan_started_at__isnull=True)
-                )
+                ).order_by(F("rescan_requested_at").asc(nulls_first=True), "pk")
             )
 
             if not backfill_connections and not rescan_connections:
                 self.stdout.write("Nothing pending.")
                 return
 
+            # First-connect backfills lead. A student who just connected is
+            # staring at an empty product; a rescan is a refresh of one that
+            # already works.
+            deadline = timezone.now() + TICK_BUDGET
+            deferred = 0
             for connection in backfill_connections:
+                if timezone.now() >= deadline:
+                    deferred += 1
+                    continue
                 self._run_backfill(connection, dry_run=opts["dry_run"])
 
             for connection in rescan_connections:
+                if timezone.now() >= deadline:
+                    deferred += 1
+                    continue
                 self._run_rescan(connection, dry_run=opts["dry_run"])
+
+            if deferred:
+                # Said out loud, because a silent deferral looks exactly like
+                # a queue that is keeping up. These rows keep their pending
+                # status and their place at the front of the next tick's
+                # ordering — nothing is dropped.
+                self.stdout.write(
+                    f"Tick budget reached — {deferred} connection"
+                    f"{'' if deferred == 1 else 's'} deferred to the next run."
+                )
 
     def _run_backfill(self, connection, *, dry_run: bool) -> None:
         prefix = "[dry-run] " if dry_run else ""
