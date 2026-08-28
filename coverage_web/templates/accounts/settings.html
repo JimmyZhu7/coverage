@@ -1133,7 +1133,6 @@
                aria-labelledby="decisions-h">
         <div class="set-head">
           <h2 id="decisions-h">Decisions</h2>
-          <p>Questions you answered once. Change any of them.</p>
         </div>
         <div class="set-body">
 
@@ -1341,7 +1340,6 @@
                aria-labelledby="credits-h">
         <div class="set-head">
           <h2 id="credits-h">Credits</h2>
-          <p>What powers the advisor chat and Gmail rescans.</p>
         </div>
         <div class="set-body">
           <div class="set-row">
@@ -1360,6 +1358,7 @@
                 {% if credits.trial_days_left %}&middot; Pro trial &middot; {{ credits.trial_days_left }} day{{ credits.trial_days_left|pluralize }} left{% endif %}
               </span>
               <div class="set-row-desc">
+                Powers the advisor chat and Gmail rescans.
                 {{ credits.monthly_grant }} credits refill {{ credits.refill_date|date:"j F" }}.
                 Used {{ credits.month_usage }} so far this month.
               </div>
@@ -1421,26 +1420,26 @@
                aria-labelledby="gmail-live-h">
         <div class="set-head">
           <h2 id="gmail-live-h">Gmail Live</h2>
-          <p>Real-time reply and bounce detection from your inbox.
-            {% if gmail_live.trial_days_left %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro trial &middot; {{ gmail_live.trial_days_left }} day{{ gmail_live.trial_days_left|pluralize }} left</span>
-            {% elif not gmail_live.is_pro %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro</span>{% endif %}</p>
         </div>
         <div class="set-body">
           {% comment %}
-          Real-time sync is Pro-only (docs/pricing-rebalance-plan.md §7). That
-          gate used to be stated THREE times on one card: the "Pro" badge in
-          the subtitle, a whole row of its own saying so, and then the Status
-          row saying it again ("Real-time sync is off on the Free plan"). The
-          standalone row is the one that went — it carried no status and no
-          control, only a repeat. The badge says WHICH tier, the Status row
-          says what that means for this account right now, and Connect Gmail
-          and Scan Now stay open to every plan exactly as before.
+          Real-time sync is Pro-only (docs/pricing-rebalance-plan.md §7). The
+          card's subtitle used to carry a "Pro"/"Pro trial" badge naming the
+          gate; the subtitle is gone (settings-subtitle sweep, 2026-08-28) and
+          the badge went with it rather than surviving as a floating fragment
+          — the plan/trial fact it carried is not lost, it is what the plan
+          pill and trial countdown on the Credits card above already say for
+          this same account. What's left here is Gmail Live's own status:
+          what the feature does, and what it's doing for THIS account right
+          now. Connect Gmail and Scan Now stay open to every plan exactly as
+          before.
           {% endcomment %}
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Status</span>
               <div class="set-row-desc">
                 {% if gmail_live.connected %}
+                  Real-time reply and bounce detection from your inbox.
                   {% if gmail_live.status == "revoked" %}
                     <strong>Access was revoked</strong> — reconnect below.
                   {% else %}
@@ -1460,6 +1459,9 @@
                 {% else %}
                   Not connected. Coverage only reads mail for bounces,
                   replies, and calendar invites — never stores message bodies.
+                  {% if not gmail_live.trial_days_left and not gmail_live.is_pro %}
+                    Real-time sync needs Pro.
+                  {% endif %}
                 {% endif %}
               </div>
             </div>
