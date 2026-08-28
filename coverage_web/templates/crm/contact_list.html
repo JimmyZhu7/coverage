@@ -557,7 +557,13 @@
                       {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
                       {% if card.region %}<span class="pill cc-pill">{{ card.region }}</span>{% endif %}
                     </span>
-                    <span class="cc-firm">
+                    {% comment %}
+                    `title=` carries the whole string for the ellipsis case
+                    below — same "one hover away" doctrine `.net-mini-firm`
+                    states for its own truncation.
+                    {% endcomment %}
+                    <span class="cc-firm"
+                          title="{% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}">
                       {% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}
                     </span>
                     {% if card.school %}<span class="pill cc-school">{{ card.school }}</span>{% endif %}
@@ -593,8 +599,17 @@
                   <span class="cc-since">
                     {% if card.days_since is not None %}{{ card.days_since }}d since last touch{% else %}Never contacted{% endif %}
                   </span>
+                  {% comment %}
+                  Log Touch and Edit are not equals: Log Touch is the verb
+                  this whole board exists to prompt, Edit is the escape
+                  hatch for when a fact on the card is wrong. `btn-primary`
+                  is the same treatment `_contact_live.html` gives its own
+                  Log Touch button — one accent-filled control, one plain
+                  outline, instead of two identically-weighted boxes that
+                  only differed by how long their labels happened to be.
+                  {% endcomment %}
                   <span class="cc-btns">
-                    <a class="btn" href="{% url 'crm:contact_detail' card.c.id %}">Log Touch</a>
+                    <a class="btn btn-primary" href="{% url 'crm:contact_detail' card.c.id %}">Log Touch</a>
                     <a class="btn" href="{% url 'crm:contact_edit' card.c.id %}">Edit</a>
                   </span>
                 </div>

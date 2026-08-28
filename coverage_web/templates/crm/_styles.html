@@ -1316,7 +1316,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      tight-value move `.net-mini`'s own floor already took). Was two rows at
      a 212px floor, back when the card still carried a description and an
      email line — same visual footprint, one more row of cards in it. */
+  /* align-items: start, not the grid default of stretch. A CSS grid row
+     sizes itself to its tallest member and then STRETCHES every item in
+     that row to match — the exact "one tall card inflates its siblings"
+     bug the density pass fixed for `.net-mini`'s flex lane, reappearing
+     here on a grid instead of a flex line. Measured on the demo board
+     before this rule existed: a lone one-line card sharing a row with a
+     two-pill card whose name wrapped rendered at the wrapped card's full
+     height, 199px against its own natural 156px — 43px of dead air below
+     its foot row, on every short card unlucky enough to share a row with
+     a tall one. `start` makes each card size to its own content only. */
   .contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    align-items: start;
     gap: var(--s4); max-height: 416px; overflow-y: scroll; }
   .contact-grid { scrollbar-width: thin; scrollbar-color: var(--line-strong) var(--paper); }
   .contact-grid::-webkit-scrollbar { width: 12px; }
@@ -1374,13 +1385,39 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cc-name { font-weight: var(--w-bold); display: flex; gap: var(--s2);
     align-items: center; flex-wrap: wrap; }
   .cc-pill { font-size: 10px; padding: 1px 7px; }
-  .cc-firm { font-size: var(--fs-s); color: var(--ink-2); }
+  /* ONE line, may honestly ellipsise — same doctrine as `.net-mini-firm`
+     two panels up, and for the same reason: the firm is context for the
+     name, not a second thing to read, and real firm · role strings on the
+     founder's own board run to 124 characters. Before this rule the line
+     had no white-space control at all, so a long one wrapped to two or
+     three lines — which, combined with the grid defaulting every card in
+     that row to stretch-match it (see `.contact-grid`'s `align-items`
+     comment above), turned one long title into a tall row across the
+     whole board. The full string is one hover away in the `title=` the
+     template carries alongside it. */
+  .cc-firm { font-size: var(--fs-s); color: var(--ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cc-school { align-self: flex-start; background: var(--stale-s); color: var(--stale-t);
     border-color: var(--stale-l); }
+  /* No `margin-top: auto`. That rule was the other half of the empty-band
+     bug reported on the live board: pinning the foot to the BOTTOM of
+     whatever height the card ended up at (its own min-height floor, or a
+     taller row-mate's height before the fix above) left a blank gap
+     between the firm line and "Nd since last touch" on every card that
+     didn't need the full floor. The foot now just follows the head after
+     the flex column's own `gap` — a card's height is the sum of what it
+     actually holds. */
   .cc-foot { display: flex; justify-content: space-between; align-items: center;
-    gap: var(--s3); margin-top: auto; padding-top: var(--s2); flex-wrap: wrap; }
-  .cc-since { font-size: var(--fs-xs); color: var(--ink-3);
-    font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    gap: var(--s3); padding-top: var(--s2); flex-wrap: wrap; }
+  /* Plain body face, not `--font-mono`. The rest of the app reaches for
+     mono+tabular-nums on a date/count that sits in a column of OTHER
+     numbers it needs to line up against (`.arch-when`, `.play-when`,
+     `.lane-count`) — this fact stands alone on the card, nothing beside it
+     to align with, so the mono face bought nothing but a fourth typeface
+     on a four-fact card, competing with the name for a reader's first
+     glance at something that is meant to read third. Same size and color
+     as before; only the face changes. */
+  .cc-since { font-size: var(--fs-xs); color: var(--ink-3); }
   .cc-btns { display: flex; gap: var(--s2); }
   .cc-btns .btn { padding: 6px 14px; font-size: var(--fs-xs); }
 
