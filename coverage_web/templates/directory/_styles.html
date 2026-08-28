@@ -725,6 +725,18 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      role-level facts only — the page header owns the firm-level ones. ---- */
   .frow-group { margin-top: var(--s5); }
   .frows { display: flex; flex-direction: column; gap: var(--s2); }
+  /* Which markets the in-scope rows sit in — one line, only on a firm big
+     enough that its groups were capped. Deliberately quieter than the scope
+     sentence above it: that line is a disclosure the reader must not miss,
+     this one is an index they glance at. Wraps, never scrolls sideways. */
+  .fd-markets { margin: 0 0 var(--s3); font-size: var(--fs-xs);
+    color: var(--ink-3); line-height: 1.6; }
+  /* The handoff out of a capped group. Sits under the rows it belongs to,
+     indented to the row's own text column so it reads as the list's last
+     line rather than as a second section heading. */
+  .frow-more { margin: var(--s2) 0 0; padding-left: var(--s4);
+    font-size: var(--fs-xs); }
+  .frow-more a { color: var(--accent-ink); }
   .frow { display: grid; grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--s2) var(--s5); align-items: center;
     background: var(--surface); border: 1px solid var(--line);

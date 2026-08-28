@@ -279,3 +279,176 @@ def test_the_eyebrow_reads_the_same_maps_the_feed_facets_do(client):
     # alphabetical by label for tracks.
     assert eyebrow == (
         "Hong Kong, United States · Investment Banking, Sales & Trading")
+
+
+# ---------------------------------------------------------------------------
+# 8. How MANY rows print — the second half of the same defect
+#
+# Section 1 fixed WHICH rows the page counts. It did not fix how many it
+# prints, and on the live corpus that was the bigger number: PwC's campus
+# scope is 716 rows and the page rendered all 716, measured at 66,832px at
+# 1280 and 97,229px at 375 (74 and 120 screens). `?role=all` was 1,496 rows
+# and 126,639px. Everything else on the page — subnav, header, the network
+# slice, the timeline — measured 318px, so the role list was 99.5% of it.
+#
+# It was also a duplicate: /opportunities/?firm=pwc renders those same 716
+# rows in 1,194px inside the firm column's scroll window, with a filter bar,
+# facets and search. So each kind group now prints ROLE_ROWS_PER_GROUP rows
+# and hands the rest to that surface.
+#
+# These assert the two ends of the measured distribution: the eight firms
+# above 60 campus roles, and the median firm at 10 — which must come through
+# completely untouched, no cap, no overflow link, no market line.
+# ---------------------------------------------------------------------------
+from directory.views import ROLE_ROWS_PER_GROUP  # noqa: E402
+
+
+@pytest.fixture
+def pwc(db):
+    """The outlier shape in miniature: two campus groups, both over the cap,
+    plus an experienced pile. PwC's live proportions are 397 internships,
+    319 entry-level and 780 experienced."""
+    firm = _firm(slug="pwc", name="PwC")
+    for i in range(20):
+        _opp(firm, i, bucket="internship", title=f"Summer Analyst {i:02d}")
+    for i in range(40, 55):
+        _opp(firm, i, bucket="entry_level", title=f"Graduate Associate {i}")
+    for i in range(100, 130):
+        _opp(firm, i, bucket=OTHER, title=f"Directory Engineer {i}")
+    return firm
+
+
+def test_a_group_over_the_cap_prints_the_cap_and_not_the_rest(client, pwc):
+    body = _page(client, pwc)
+    assert "Summer Analyst 00" in body
+    assert f"Summer Analyst {ROLE_ROWS_PER_GROUP - 1:02d}" in body
+    assert f"Summer Analyst {ROLE_ROWS_PER_GROUP:02d}" not in body
+    assert "Summer Analyst 19" not in body
+
+
+def test_the_heading_still_states_the_whole_group_not_the_printed_slice(
+        client, pwc):
+    """The count is the page's answer to "how many are open here", and every
+    other surface answers it with the same number. A heading that counted
+    what it printed would be the 925-vs-13 bug rebuilt: two true numbers,
+    neither of them the one the reader asked for."""
+    body = _page(client, pwc)
+    assert 'Open Roles <span class="scrub-count">35</span>' in body
+    assert '>Internship <span class="scrub-count">20</span>' in body
+    assert '>Entry-Level <span class="scrub-count">15</span>' in body
+
+
+def test_the_hidden_rows_are_counted_and_linked_to_the_feed(client, pwc):
+    """A cap is hiding, and this page states what it hides. The count is the
+    page's own arithmetic (group total minus rows printed) and the link lands
+    on the same firm and the same kind in the surface built for the volume."""
+    body = _page(client, pwc)
+    assert f"Show the other {20 - ROLE_ROWS_PER_GROUP} in Opportunities" in body
+    assert f"Show the other {15 - ROLE_ROWS_PER_GROUP} in Opportunities" in body
+    assert 'href="/opportunities/?firm=pwc&amp;role=internship"' in body
+    assert 'href="/opportunities/?firm=pwc&amp;role=entry_level"' in body
+
+
+def test_the_cap_is_per_group_so_no_kind_vanishes(client, pwc):
+    """THE REGRESSION GUARD. `cards` arrives campus-buckets-first, so a flat
+    page-level cap of 12 would have printed 12 internships at PwC and dropped
+    all 319 entry-level rows with nothing saying so — the page's original bug
+    (a scope nobody was told about) rebuilt inside its own fix."""
+    body = _page(client, pwc)
+    assert "Summer Analyst 00" in body
+    assert "Graduate Associate 40" in body
+
+
+def test_the_experienced_optin_is_capped_by_the_same_rule(client, pwc):
+    body = _page(client, pwc, "?role=other")
+    assert 'Open Roles <span class="scrub-count">30</span>' in body
+    assert "Directory Engineer 100" in body
+    assert f"Show the other {30 - ROLE_ROWS_PER_GROUP} in Opportunities" in body
+    assert 'href="/opportunities/?firm=pwc&amp;role=other"' in body
+
+
+def test_role_all_caps_every_group_and_still_names_both_halves(client, pwc):
+    body = _page(client, pwc, "?role=all")
+    assert 'Open Roles <span class="scrub-count">65</span>' in body
+    assert "Showing everything we scraped" in body
+    assert "35 campus, 30 experienced" in body
+    # One sample from each of the three kinds, none of them whole.
+    for lead in ("Summer Analyst 00", "Graduate Associate 40",
+                 "Directory Engineer 100"):
+        assert lead in body
+    assert body.count("Show the other") == 3
+
+
+# ---- The median firm: 10 campus roles, and nothing about it changes -------
+@pytest.fixture
+def cicc(db):
+    """The median: 10 campus roles across the 81 firms that have any. The cap
+    exists for the outliers and must be invisible here."""
+    firm = _firm(slug="cicc", name="CICC")
+    for i in range(10):
+        _opp(firm, i, bucket="internship", title=f"Summer Analyst {i}")
+    return firm
+
+
+def test_the_median_firm_prints_every_row(client, cicc):
+    body = _page(client, cicc)
+    for i in range(10):
+        assert f"Summer Analyst {i}" in body
+
+
+def test_the_median_firm_grows_no_overflow_link_and_no_market_line(
+        client, cicc):
+    """"Simple, minimalistic, no extra things" is measured here, not on PwC.
+    A firm small enough to print in full must render exactly what it rendered
+    before the cap existed."""
+    body = _page(client, cicc)
+    assert "Show the other" not in body
+    # The class ATTRIBUTE, not the string: _styles.html is inlined into every
+    # one of these pages, so a bare "fd-markets" matches its own CSS rule and
+    # this assertion would pass on a page that rendered the line.
+    assert 'class="fd-markets"' not in body
+
+
+def test_a_firm_at_exactly_the_cap_is_not_capped(client):
+    """The off-by-one: `more` is total minus cap, so a group of exactly 12
+    must print 12 rows and say nothing about a remainder of zero."""
+    firm = _firm(slug="edge", name="Edge Capital")
+    for i in range(ROLE_ROWS_PER_GROUP):
+        _opp(firm, i, bucket="internship", title=f"Summer Analyst {i:02d}")
+    body = _page(client, firm)
+    assert f"Summer Analyst {ROLE_ROWS_PER_GROUP - 1:02d}" in body
+    assert "Show the other" not in body
+
+
+# ---- The market line: what makes the cap honest ---------------------------
+def test_a_capped_page_says_which_markets_the_hidden_rows_are_in(client):
+    """Twelve sampled rows cannot tell a student who needs Singapore that 136
+    of PwC's campus roles are there, and 716 printed rows told her only by
+    being unreadable. Words and order come from the feed's own region facet
+    (REGION_LABELS / REGION_ORDER), so the two surfaces cannot drift."""
+    firm = _firm(slug="pwc2", name="PwC 2")
+    for i in range(14):
+        o = _opp(firm, i, bucket="internship", title=f"Summer Analyst {i:02d}")
+        Opportunity.objects.filter(pk=o.pk).update(
+            region="sg" if i < 9 else "eu")
+    for i in range(50, 53):
+        o = _opp(firm, i, bucket="internship", title=f"Unplaced Analyst {i}")
+        Opportunity.objects.filter(pk=o.pk).update(region="")
+
+    body = _page(client, firm)
+    assert 'class="fd-markets"' in body
+    assert "Singapore 9" in body
+    assert "Europe 5" in body
+    # The posting never said, which is not the same fact as a market we do
+    # not track — the facet's own word for it, not "Other".
+    assert "Unstated 3" in body
+
+
+def test_the_market_line_describes_the_scope_in_view(client, pwc):
+    """On `?role=other` the reader is looking at experienced rows, so the
+    line must count those and not the campus rows the page is hiding."""
+    Opportunity.objects.filter(firm=pwc, bucket=OTHER).update(region="us")
+    Opportunity.objects.filter(firm=pwc, bucket="internship").update(region="hk")
+    body = _page(client, pwc, "?role=other")
+    assert "United States 30" in body
+    assert "Hong Kong" not in body

@@ -3791,6 +3791,89 @@ def my_applications(request):
     return render(request, "directory/my_applications.html", _my_applications_context(request))
 
 
+# How many rows one kind group prints before it hands the rest to the feed.
+#
+# Chosen off the measured distribution, not taste. Across the 81 firms with
+# any campus roles the median is 10 and the mean 31: at 12 the median firm is
+# untouched — every row still prints, no overflow link renders, no market line
+# renders, the page is byte-for-byte what it was. The cap exists for the eight
+# firms above 60, where the same template was building a wall (PwC 716 rows =
+# 66,832px at 1280, 97,229px at 375; `?role=all` 1,496 rows = 126,639px).
+# 12 rows is also about one screen at 1280, so a capped group reads as a
+# sample you can take in, not a list you have to leave.
+ROLE_ROWS_PER_GROUP = 12
+
+
+def _role_groups(cards, *, cap=ROLE_ROWS_PER_GROUP):
+    """The role rows as kind groups, each cut to `cap` rows.
+
+    This used to be a `{% regroup %}` in the template, which could group but
+    could not cap — and an uncapped group is how one firm's page became 74
+    screens of scroll. Capping in the template (`|slice`) would have printed
+    the rows and lost the count of what it dropped, which is the one number
+    the reader needs.
+
+    THE CAP IS PER GROUP, DELIBERATELY, not per page. `cards` arrives sorted
+    campus-buckets-first, so a flat page cap would have shown 12 internships
+    at PwC and silently dropped all 319 entry-level rows — the page's original
+    bug (a scope nobody was told about) rebuilt inside the fix. Every kind
+    that has rows keeps its heading, its true total, and a sample.
+
+    Rows within a group arrive deadline-ascending-nulls-last, so a capped
+    group leads with whatever is actually closing. Nothing is re-sorted here.
+    """
+    order: list[dict] = []
+    by_value: dict[str, dict] = {}
+    for c in cards:
+        value = c["role"]["value"]
+        g = by_value.get(value)
+        if g is None:
+            g = by_value[value] = {
+                "value": value,
+                "label": c["role"]["label"],
+                "cards": [],
+            }
+            order.append(g)
+        g["cards"].append(c)
+    for g in order:
+        g["total"] = len(g["cards"])
+        g["more"] = max(g["total"] - cap, 0)
+        g["cards"] = g["cards"][:cap]
+    return order, any(g["more"] for g in order)
+
+
+def _open_markets(opps):
+    """Which markets the rows in scope sit in, counted.
+
+    A cap hides rows, and this page's whole character is that it says what it
+    is hiding (see `firm_detail`'s docstring). "385 more" says how many; it
+    does not say that 136 of PwC's campus roles are in Singapore and 253 in
+    Europe, which is the one thing a student who cannot work in the US needs
+    from a firm page. Constant size — eight markets at the very most — so it
+    costs the same line whether the firm has 20 roles or 1,496.
+
+    Order and words come from REGION_ORDER / REGION_LABELS, the same pair the
+    feed's own region facet reads, so the two surfaces cannot drift into
+    calling `sg` "Singapore" on one page and "SG" on the other. `""` is
+    "Unstated" in the facet's exact wording: the posting never said, which is
+    a different fact from a market we do not track, and the label must not
+    blur them.
+
+    Deliberately not links. The feed is where filtering happens; a row of
+    clickable market counts here would be a filter bar in disguise on the one
+    page that documented its decision not to grow one.
+    """
+    counts = Counter(o.region or "" for o in opps)
+    out = [
+        {"label": REGION_LABELS[r], "n": counts[r]}
+        for r in REGION_ORDER
+        if counts.get(r)
+    ]
+    if counts.get(""):
+        out.append({"label": REGION_NONE_LABEL, "n": counts[""]})
+    return out
+
+
 def firm_detail(request, slug):
     """A single firm's page: its open campus openings plus its cycle timeline
     (firm_dates, confirmed vs rumored).
@@ -3807,6 +3890,31 @@ def firm_detail(request, slug):
     three campus buckets) and, like the feed, states that scope and offers the
     same `?role=` opt-in out of it. Experienced rows are not hidden — they are
     one click away and counted in the sentence that hides them.
+
+    LENGTH. Scoping fixed which rows print, not how many. Measured on the live
+    corpus: PwC's campus scope is 716 rows, and the page printed every one of
+    them — 66,832px at 1280 and 97,229px at 375, or 74 and 120 screens. Nearly
+    all of it was one section: everything above "Open Roles" (subnav, header,
+    the network slice, the timeline) measured 318px on PwC and 571px on
+    Goldman, so the role list WAS the page, 99% of its height.
+
+    And it was the page twice. `/opportunities/?firm=pwc` renders those exact
+    716 rows in 1,194px, inside the firm column's own scroll window, with a
+    filter bar, region and year facets, search, save stars and ranking. This
+    page was a second, 56x taller copy of a surface built for the volume.
+
+    So the role list stops trying to be that surface. Each kind group prints
+    at most ROLE_ROWS_PER_GROUP rows and then hands the rest to the feed,
+    filtered to this firm and this kind. On the median firm (10 campus roles)
+    no group reaches the cap, so nothing changes: no overflow link, no market
+    line, the same flat list. What the cap hides, the page states — the count
+    per group, and `_open_markets` for the shape of the rest.
+
+    WHAT THIS PAGE IS FOR, once the appendix is an appendix: the firm's
+    identity, its cycle dates, and `_my_network_at` — the only section on it
+    that differs between two students. Those are constant-size and they were
+    already on top; they now read as the page rather than as a preamble to a
+    wall.
     """
     firm = get_object_or_404(Firm, slug=slug)
     now = timezone.now()
@@ -3855,6 +3963,7 @@ def firm_detail(request, slug):
     else:
         opps = [o for o in all_open if o.bucket in TARGET_BUCKETS]
     cards = [_card(o, now=now, today=today) for o in opps]
+    role_groups, capped = _role_groups(cards)
     context = {
         "firm": firm,
         # The eyebrow used to `join` firm.regions and firm.tracks raw, under a
@@ -3868,7 +3977,22 @@ def firm_detail(request, slug):
         "eyebrow_regions": _labelled(firm.regions, REGION_LABELS),
         "eyebrow_tracks": _labelled(firm.tracks, TRACK_LABELS, by_label=True),
         "cards": cards,
+        # The rows the page actually prints, already grouped and capped. The
+        # template no longer regroups: see `_role_groups`.
+        "role_groups": role_groups,
+        # True when ANY group had to drop rows. The market line hangs off this
+        # one flag (the per-group overflow link hangs off that group's own
+        # `more`), so a firm small enough to print in full grows neither.
+        "capped": capped,
+        # Markets of the rows IN SCOPE, not of the firm: on `?role=other` this
+        # describes the experienced rows the page is then showing, which is
+        # the set the reader is looking at.
+        "markets": _open_markets(opps) if capped else [],
         "timeline": _timeline(firm, today=today),
+        # Still the full in-scope count, never the printed count. The heading
+        # answers "how many are open here", and every other surface (contacts
+        # board, feed) answers it with this same number — the 925-vs-13 bug in
+        # the docstring above is what a page-local count looks like.
         "total": len(cards),
         "role": role,
         "campus_total": campus_total,

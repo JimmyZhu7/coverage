@@ -106,21 +106,53 @@
       {% endif %}
     {% endif %}
     {% comment %}
+    THE MARKET LINE. Only rendered when a group was capped, because only then
+    is anything hidden that this line has to answer for. A student who cannot
+    work in the US learns from one line that 136 of PwC's campus roles are in
+    Singapore and 253 in Europe — which twelve sampled rows cannot tell her,
+    and 716 printed rows told her only by being unreadable. Plain text, not
+    links: filtering lives in the feed, and the view's `_open_markets` note
+    says why this page does not grow a filter bar by the back door.
+    {% endcomment %}
+    {% if capped and markets %}
+      <p class="fd-markets">{% for m in markets %}{{ m.label }} {{ m.n }}{% if not forloop.last %}<span class="scope-sep">·</span>{% endif %}{% endfor %}</p>
+    {% endif %}
+    {% comment %}
     Grouped by kind under the ruled section label, in the order the view
     already sorts (campus buckets first, deadline inside each). The kind used
     to ride every card as a pill — 75 restatements of five values; one label
     per group says it once and gives this page the same signature the app's
     other section boundaries wear. Rows, not cards: see _card.html for why.
+
+    The groups now arrive pre-cut from views._role_groups: the heading keeps
+    the group's TRUE total, the rows are a sample of it, and the line under
+    them names the remainder and where it lives. A group small enough to print
+    whole grows none of that — which is every group on the median firm.
     {% endcomment %}
-    {% if cards %}
-      {% regroup cards by role.label as kind_groups %}
-      {% for group in kind_groups %}
-        <p class="sec-label frow-group">{{ group.grouper }} <span class="scrub-count">{{ group.list|length }}</span></p>
+    {% if role_groups %}
+      {% for group in role_groups %}
+        <p class="sec-label frow-group">{{ group.label }} <span class="scrub-count">{{ group.total }}</span></p>
         <div class="frows">
-          {% for card in group.list %}
+          {% for card in group.cards %}
             {% include "directory/_card.html" %}
           {% endfor %}
         </div>
+        {% if group.more %}
+          {% comment %}The count is this page's own arithmetic — the group's
+          total minus the rows printed above it — so it can only ever describe
+          THIS page. The destination is the feed narrowed to this firm and
+          this kind, which resolves to the group's total: verified against the
+          live corpus at PwC (internship 397, entry-level 319, experienced
+          780) and Goldman (internship 257, entry-level 60), the two sides
+          matching row for row through both folds.
+
+          Counting `.rolecard` in the feed's DOM does NOT reproduce those
+          numbers and is not meant to: the "Picked for you" column repeats a
+          few of the same roles at the head of the row (see _results.html),
+          so Goldman's internship filter draws 259 cards for 257 roles.
+          {% endcomment %}
+          <p class="frow-more"><a href="{% url 'opportunities' %}?firm={{ firm.slug }}&amp;role={{ group.value }}">Show the other {{ group.more }} in Opportunities</a></p>
+        {% endif %}
       {% endfor %}
     {% else %}
       {% comment %}An empty campus scope is not an empty firm. Saying
