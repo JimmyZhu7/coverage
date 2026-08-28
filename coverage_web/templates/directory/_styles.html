@@ -249,13 +249,19 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      inside a pill only 40px tall, and clipped both. Anything styling a label
      in this bar has to clear that rule. */
   .filters .fit-toggle { display: inline-flex; flex-direction: row;
-    /* flex-start, not center: on desktop the pill is content-width so it
+    /* flex-start, not center: on desktop the control is content-width so it
        reads the same either way, but the mobile drawer stretches every
        control full width and a centred label there was the only one not
        starting at the same left edge as its neighbours. */
     align-items: center; justify-content: flex-start; gap: 8px;
     height: 40px; box-sizing: border-box; padding: 0 16px; flex: 0 0 auto;
-    border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+    /* --r-ctl, not 999px. Every other control in this row — Search, the
+       four selects, Companies — is squared to --r-ctl; a fully round pill
+       here was the one shape in the row that didn't match, reported
+       directly against the live bar ("why is eligible only in a pill while
+       others look like that"). Same border/surface/shadow/hover language
+       as its neighbours now, just a checkbox instead of a caret. */
+    border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer;
     background: var(--surface); box-shadow: var(--shadow-1);
     font-size: var(--fs-s); color: var(--ink-2);
     text-transform: none; letter-spacing: 0; font-weight: var(--w-med);
