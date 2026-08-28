@@ -12,6 +12,11 @@ urlpatterns = [
     # The literal segment is declared first so the <int:pk> converter can't
     # shadow it.
     path("today/park-all/", views.today_park_all, name="today_park_all"),
+    # The bench's two taps (crm.today._opening_bench): restore un-parks the
+    # one bench contact, leave dismisses this contact for this opening only.
+    # Literal "bench" segment first, same reason "park-all" is.
+    path("today/bench/<int:pk>/<str:verb>/", views.today_bench_act,
+         name="today_bench_act"),
     # htmx: today's brief, generated off the page's own response so an LLM
     # call can never sit in front of the morning load. POST because it can
     # spend money — same rule as the contact AI endpoints below.

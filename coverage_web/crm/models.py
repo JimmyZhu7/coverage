@@ -899,3 +899,45 @@ class PlayDismissal(PrivateModel):
 
     def __str__(self) -> str:
         return f"{self.user_id} dismissed {self.firm_id}/{self.event_kind}/{self.date}"
+
+class BenchDismissal(PrivateModel):
+    """One "Leave parked" tap on one bench card — the durable half of the
+    Today bench (Phase 1, 2026-08-27, `crm.today._opening_bench`).
+
+    WHY THIS TABLE EXISTS AT ALL. The bench's whole premise is "no expiry, no
+    timer, nothing un-parks itself" — a parked chatted/advocate contact only
+    ever leaves the bench pool by a tap, and "Leave parked" is one of the two
+    taps available (the other, `today_bench_act`'s "restore" verb, actually
+    un-parks them and needs no row here — the contact's own `thread_state` is
+    the record). Without persistence, "Leave parked" would be indistinguishable
+    from doing nothing: the bench recomputes fresh on every render straight off
+    current state, so the identical opening would draw the identical card back
+    the moment the page reloaded.
+
+    WHY KEYED ON THE OPENING, NOT JUST THE CONTACT. Dismissing Katy Chen once
+    must not permanently silence her — the design is explicit that dismissal
+    is "per contact + opening", so a NEW live fact at her firm next month (a
+    fresh deadline, a fresh posting) is a new question and gets its own tap.
+    `opening_signature` is `crm.today._opening_signature`'s stable id built
+    only from fields `crm.relevance.firm_openings` already reads off a real
+    row (kind/date/title) — never an invented id.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    contact = models.ForeignKey(
+        Contact, on_delete=models.CASCADE, related_name="bench_dismissals"
+    )
+    opening_signature = models.CharField(max_length=255)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "bench_dismissals"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "contact", "opening_signature"],
+                name="uniq_bench_dismissal",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.contact_id} dismissed for {self.opening_signature!r}"

@@ -32,7 +32,7 @@ from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
 
 from . import campaigns, debrief as debrief_svc, recruitment, relevance as rel, services
-from .models import CalendarEvent, ChatDebrief, Contact, PlayDismissal, Touch, UserFirm
+from .models import (BenchDismissal, CalendarEvent, ChatDebrief, Contact, PlayDismissal, Touch, UserFirm)
 from .utils import (
     ACTION_LABELS,
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
@@ -459,6 +459,212 @@ def _opening_keep_warms(
             "from_opening": True,
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# The bench (Phase 1, 2026-08-27). Parked contacts are not gone, and a live
+# opening at their firm may draw ONE of them back into view per day.
+# ---------------------------------------------------------------------------
+# THE EVIDENCE. 113 of the founder's 182 live contacts are parked — 102
+# proposed by cadence branch 6 and bulk-clicked in one minute on Aug 10, 15
+# more the same way on Aug 25. He was clearing a screen, not pruning a
+# network: both of his only two advocates, 14 chatted contacts and 13 replied
+# contacts went with it, and Katy Chen — Nomura, IB VP, tier 1, already
+# chatted, a role at her firm closing Sep 30, the highest expected value in
+# his entire dataset — became unreachable by any surface.
+#
+# THE DIAGNOSIS. Park is not the disease; park doing two jobs is. Parking a
+# cold non-replier correctly stops the clock, but "park" ALSO means
+# "invisible everywhere", and those are different claims. There is no state
+# between "in the cadence" and "gone", so the ordinary outcome of cold
+# outreach — silence — funnels everyone into "gone" alike.
+#
+# THE SPLIT IS THE WHOLE DESIGN, and it runs on warmth, exactly like
+# `_opening_keep_warms` above runs on warmth for ACTIVE contacts:
+#   - cold-parked: stays dark. `reply_received` already un-parks through the
+#     pipeline ratchet (TOUCH_TRANSITIONS sets thread_state on ANY inbound
+#     reply, whatever it was before) — this function must never duplicate
+#     that job, so it never benches them.
+#   - replied-parked: already gets `coverage_domain.cadence` branch 3's
+#     confirmed-close re-ping ahead of the branch-4 parked skip — the engine
+#     already disagrees with blanket park for them. Nothing here changes
+#     that; this function does not touch them either.
+#   - chatted/advocate-parked: bench-eligible. Somebody the student actually
+#     met, whose file the product parked anyway. A live opening at their firm
+#     may raise ONE of them.
+#
+# WHY THIS SITS BESIDE `_opening_keep_warms` RATHER THAN INSIDE IT. That
+# function's three guards ("never someone parked, quiet, archived or
+# snoozed") assume an ACTIVE relationship — parked is the one state it
+# deliberately excludes. This function exists for exactly the case it
+# excludes, so merging the two into one ambiguous branch would blur the line
+# the whole design rests on. They share warmth vocabulary
+# (`_WARM_UPKEEP_WARMTHS`) and the opening machinery (`crm.relevance
+# .firm_openings`) on purpose — same "what's real today" question, answered
+# for two disjoint populations.
+#
+# HARD RULES, so this can never become the 29-card flood the design exists
+# to prevent:
+#   1. No expiry, no timer, nothing un-parks itself — only a tap
+#      (`today_bench_act`'s "restore" verb) does. This function recomputes
+#      fresh off current state on every render; the ONLY durable signal is
+#      `BenchDismissal`, written by the OTHER tap ("leave").
+#   2. At most `BENCH_PLAN_MAX` cards.
+#   3. Dismissible per contact + opening (`_opening_signature`), and once
+#      dismissed it never returns for that SAME opening — a fresh one (a new
+#      deadline, a new posting) is a new question and gets its own tap.
+BENCH_PLAN_MAX = 1
+
+# warmth -> the thread_state a bench "bring back" restores. Parking only ever
+# writes `thread_state`; it never touches `warmth` (`crm.services
+# .set_contact_state` calls are always thread_state-only from the park
+# paths), so "restore thread_state from warmth" means putting thread_state
+# back at the resting value that warmth level ordinarily carries —
+# `crm.utils.WARMTH_ORDER`'s own pairing, and the same one branch 5b's gate
+# reasons from (chatted's resting state is chat_done, not the terminal
+# `replied` branch 7 owns).
+BENCH_RESTORE_STATE = {
+    "cold": "no_reply",
+    "replied": "replied",
+    "chatted": "chat_done",
+    "advocate": "advocate",
+}
+
+
+def _opening_signature(opening: dict) -> str:
+    """A stable id for ONE opening, built only from fields `firm_openings`
+    already reads off a real row (kind/date/title) — no invented id, the
+    same "no invented facts" discipline `crm.relevance`'s module docstring
+    states. Two different openings at the same firm (a fresh deadline
+    superseding an old one, a fresh posting) get two different signatures,
+    so a dismissal of one never silences the other."""
+    date = opening.get("date")
+    return f"{opening.get('kind')}|{date.isoformat() if date else ''}|{opening.get('title') or ''}"
+
+
+def _opening_bench(user, contacts, actions, today) -> list[dict]:
+    """The bench: at most `BENCH_PLAN_MAX` parked chatted/advocate contacts
+    with a live reason to come back into view today, ranked the same way the
+    rest of the queue is (relevance x relationship x trigger), so the one
+    card shown is always the best one available.
+
+    `contacts` is the plain `Contact` rows `_build_actions` already loaded —
+    no second contact query. `actions` is that same call's OUTPUT, read only
+    for the busy-contact set: a bench card must never sit next to a card the
+    engine already drew for the identical person, same guard
+    `_opening_keep_warms` runs. The last-real-touch clock is read fresh here
+    (`_build_actions`'s own copy is private to that call) over just the small
+    parked/chatted-or-advocate slice, never the whole contact book.
+    """
+    busy = {a["contact"]["id"] for a in actions}
+    now = timezone.now()
+
+    eligible = [
+        c for c in contacts
+        if c.firm_id
+        and c.id not in busy
+        and c.warmth in _WARM_UPKEEP_WARMTHS
+        and c.thread_state == "parked"
+        and not (c.snoozed_until and c.snoozed_until > now)
+    ]
+    if not eligible:
+        return []
+
+    # Same two view-layer exclusions `_build_actions` applies before a
+    # contact ever reaches the queue: a bulk-send panelist or a person the
+    # 2026-08-25 recruitment rule says isn't part of this student's
+    # recruiting is not owed a recruiting nudge just because they are also
+    # parked and chatted.
+    excluded_ids = campaigns.excluded_contact_ids(user)
+    eligible = [c for c in eligible if c.id not in excluded_ids]
+    if not eligible:
+        return []
+
+    tiers = {
+        uf.firm_id: uf.tier
+        for uf in UserFirm.objects.for_user(user)
+        if uf.firm_id
+    }
+    firm_ids = {c.firm_id for c in eligible}
+    firm_rows = {
+        fid: (name, tracks)
+        for fid, name, tracks in Firm.objects.filter(id__in=firm_ids)
+        .values_list("id", "name", "tracks")
+    }
+    firm_tracks = {fid: (tracks or []) for fid, (_, tracks) in firm_rows.items()}
+    eligible = [
+        c for c in eligible
+        if recruitment.contact_verdict(
+            c, tiers=tiers, firm_tracks=firm_tracks,
+            firm_label=firm_rows.get(c.firm_id, ("", None))[0],
+        ).verdict != recruitment.HIDE
+    ]
+    if not eligible:
+        return []
+
+    openings = rel.firm_openings(user, firm_ids, today)
+    dismissed = set(
+        BenchDismissal.objects.for_user(user)
+        .filter(contact_id__in=[c.id for c in eligible])
+        .values_list("contact_id", "opening_signature")
+    )
+
+    # Latest REAL touch per eligible contact — same clock-silent exclusion
+    # (`manual_override`, `bulk_received`) `_build_actions`' own copy applies,
+    # kept as its own small query rather than threading that private dict
+    # through a second function's signature. Ordered so the first row seen
+    # per contact_id is already the latest.
+    last_real: dict[int, Touch] = {}
+    for t in (
+        Touch.objects.for_user(user)
+        .filter(contact_id__in=[c.id for c in eligible])
+        .exclude(kind__in=cadence._CLOCK_SILENT_KINDS)
+        .order_by("contact_id", "-ts")
+    ):
+        last_real.setdefault(t.contact_id, t)
+
+    candidates = []
+    for c in eligible:
+        opening = openings.get(c.firm_id)
+        if not opening:
+            continue
+        last = last_real.get(c.id)
+        if last is None:
+            # Same honest skip `_opening_keep_warms` makes: no dateable
+            # touch on record is not evidence this function can reason from.
+            continue
+        sig = _opening_signature(opening)
+        if (c.id, sig) in dismissed:
+            continue
+        idle = (today - timezone.localtime(last.ts).date()).days
+        tier = tiers.get(c.firm_id)
+        score = (
+            rel._TIER_WEIGHT.get(tier, rel._TIER_UNRANKED_WEIGHT)
+            * rel._RELATIONSHIP_WEIGHT.get(c.warmth, 0.8)
+            * rel._OPENING_WEIGHT.get(opening["kind"], rel._NOW_NOTHING)
+        )
+        candidates.append({
+            "contact": {
+                "id": c.id,
+                "name": c.name,
+                "email": c.email,
+                "warmth": c.warmth,
+                "school_affiliation": c.school_affiliation,
+            },
+            "firm_name": firm_rows.get(c.firm_id, (c.firm_text or c.firm_id, None))[0],
+            "tier": tier,
+            "opening": opening,
+            "opening_signature": sig,
+            "days_since": idle,
+            "restore_state": BENCH_RESTORE_STATE.get(c.warmth, "no_reply"),
+            "reason": rel._opening_clause(opening),
+            "strength_clause": rel._STRENGTH_CLAUSE.get(c.warmth, ""),
+            "mailto": _mailto(c.email or "", body=""),
+            "_score": score,
+        })
+
+    candidates.sort(key=lambda b: -b["_score"])
+    return candidates[:BENCH_PLAN_MAX]
 
 
 def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict) -> list[dict]:
@@ -1950,6 +2156,11 @@ def _cockpit_context(user) -> dict:
     chats that are already on the calendar, and a recent-activity feed."""
     today = timezone.localdate()
     actions, contacts = _build_actions(user)
+    # The bench (see `_opening_bench`'s module note above it): at most one
+    # parked chatted/advocate contact, drawn back into view by a live opening
+    # at their firm today. Computed off `actions`/`contacts` already loaded
+    # above — no re-run of the cadence engine.
+    bench = _opening_bench(user, contacts, actions, today)
     pace = _pace(user, today)
     cap = _daily_cap(pace["goal"], pace["done"], today)
 
@@ -2399,6 +2610,9 @@ def _cockpit_context(user) -> dict:
         "waiting": _waiting_on_reply(user, busy_ids),
         "activity": activity,
         "contact_count": len(contacts),
+        # The bench: parked contacts are not gone. At most one card — see
+        # `_opening_bench` and `BENCH_PLAN_MAX`.
+        "bench": bench,
         # The raw, uncapped queue — carried through only so week() (the full
         # page view, below) can hand it to the daily brief. Deliberately NOT
         # used by _cockpit.html itself: that template is also rendered by
@@ -2569,6 +2783,53 @@ def play_dismiss(request: HttpRequest) -> HttpResponse:
         event_kind=event_kind, date=fact_date.isoformat(),
     )
     return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+
+
+@login_required
+@require_POST
+def today_bench_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
+    """The bench's two equal-weight taps (see `_opening_bench`):
+
+    - `restore`: the ONLY thing that un-parks a bench contact — no timer
+      ever does. Goes through the same audited manual-override path every
+      other thread_state change in this module uses, restoring
+      `thread_state` to the resting value their own `warmth` implies
+      (`BENCH_RESTORE_STATE`), never a guess.
+    - `leave`: the equal-weight alternative. Writes a `BenchDismissal` row
+      for this contact and THIS opening only — the student's original park
+      decision is respected by default, and a fresh opening at the same firm
+      later is a new question, not a repeat of this one.
+
+    Re-derives the bench from the engine rather than trusting anything about
+    the click beyond the contact id, the same posture `today_park_all` takes
+    with the park strip: a stale card (the opening already gone, or someone
+    else's tenant id) simply matches nothing and this is a no-op re-render.
+    """
+    if verb not in ("restore", "leave"):
+        return HttpResponse(status=400)
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    cockpit = _cockpit_context(request.user)
+    candidate = next(
+        (b for b in cockpit["bench"] if b["contact"]["id"] == contact.id), None
+    )
+    if candidate is not None:
+        if verb == "restore":
+            services.set_contact_state(
+                request.user.id, contact.id,
+                thread_state=candidate["restore_state"],
+                note=f"Un-parked from the bench — {candidate['firm_name']}: "
+                     f"{candidate['reason']}".strip(),
+            )
+            record_event("bench_restored", user=request.user, source="today")
+            cockpit = _cockpit_context(request.user)
+        else:
+            BenchDismissal.all_objects.create(
+                user=request.user, contact=contact,
+                opening_signature=candidate["opening_signature"],
+            )
+            record_event("bench_dismissed", user=request.user, source="today")
+            cockpit = _cockpit_context(request.user)
+    return render(request, "crm/_cockpit.html", cockpit)
 
 
 _PAREN = _re.compile(r"\s*\([^)]*\)")

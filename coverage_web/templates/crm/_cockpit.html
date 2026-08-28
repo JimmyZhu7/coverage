@@ -676,6 +676,65 @@ on every quick action so all of it stays in sync.
     {% endif %}
 
     {% comment %}
+    The bench (Phase 1 bench design, 2026-08-27, crm.today._opening_bench).
+    Parked contacts are not gone: a live opening at a chatted/advocate-parked
+    contact's firm may draw ONE of them back into view here, never more than
+    one and never on a timer — only "Bring back" or "Leave parked" changes
+    anything, and both are equal-weight buttons so the student's original
+    park decision is respected by default. Cold- and replied-parked contacts
+    never appear here (see the module note on `_opening_bench`).
+    {% endcomment %}
+    {% if bench %}
+      <section class="lane lane-bench">
+        <h2 class="lane-title">
+          Worth a second look <span class="lane-count" aria-live="polite">{{ bench|length }}</span>
+          <span class="lane-note">parked, but something's live at their firm</span>
+        </h2>
+        <div class="act-grid">
+          {% for b in bench %}
+            <article class="act-card kin-reveal">
+              <div class="act-ident">
+                <div class="act-idtext">
+                  <span class="opp-firm{% if b.contact.school_affiliation %} is-school{% endif %}">{{ b.firm_name|smart_title }}{% if b.contact.school_affiliation %} · alum{% endif %}</span>
+                  <h3 class="act-name"><a href="{% url 'crm:contact_detail' b.contact.id %}">{{ b.contact.name|smart_title }}</a></h3>
+                </div>
+                <span class="chip warmth-{{ b.contact.warmth }}">{{ b.contact.warmth }}</span>
+              </div>
+              <div class="act-context">
+                <div class="act-badges"><span class="prio">Parked</span></div>
+                <p class="act-reason">
+                  {{ b.reason }}{% if b.strength_clause %} You have met — {{ b.strength_clause }}.{% endif %}
+                </p>
+                <p class="act-last">Parked, quiet {{ b.days_since }} day{{ b.days_since|pluralize }}.</p>
+              </div>
+              <div class="act-quick">
+                {% comment %}
+                Equal weight, deliberately — neither `btn-primary` nor
+                `act-ghost`. "Leave parked" is not a dismissal link; it is
+                the student's original decision, respected by default.
+                {% endcomment %}
+                <div class="act-primary">
+                  <button type="button" class="btn act-btn"
+                          aria-label="Bring {{ b.contact.name }} back into the queue"
+                          title="Un-parks this one contact. Nothing else does — no timer ever will."
+                          hx-post="{% url 'crm:today_bench_act' b.contact.id 'restore' %}">Bring back</button>
+                  <button type="button" class="btn act-btn"
+                          aria-label="Leave {{ b.contact.name }} parked for this opening"
+                          title="Stays parked. This exact opening won't suggest them again; a new one later can."
+                          hx-post="{% url 'crm:today_bench_act' b.contact.id 'leave' %}">Leave parked</button>
+                  {% if b.contact.email %}
+                    <a class="btn act-btn" href="{{ b.mailto }}"
+                       aria-label="Compose an email to {{ b.contact.name }}">Compose</a>
+                  {% endif %}
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% comment %}
     Gone-quiet strip. These are exits, not work, so they never occupy a plan
     slot. The bulk button only appears once one-by-one parking has stopped
     being a decision and started being make-work; it loops the audited

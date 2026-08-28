@@ -73,6 +73,7 @@ from .today import (  # noqa: F401
     play_dismiss,
     rendered_proposals_qs,
     today_act,
+    today_bench_act,
     today_park_all,
     week,
 )
