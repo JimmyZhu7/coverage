@@ -42,7 +42,22 @@ def logged_in(client, student):
 
 
 @pytest.fixture
-def body(client, logged_in):
+def body(client, logged_in, settings):
+    # Force GMAIL_LIVE_* unset regardless of what's in the environment this
+    # suite happens to run in. The founder's own local `.env` sets all four
+    # (the live poll loop depends on it), which used to make
+    # `test_the_rail_lists_every_section_and_every_section_exists` fail on
+    # his machine while passing in CI/a clean checkout — a real assertion
+    # ("the rail has no gmail-live entry when the feature is dark") that
+    # only held by environmental accident. Every structural claim below
+    # (credits always renders, Gmail Live only when configured, etc.) is
+    # about the UNCONFIGURED shape of the page, so this fixture pins that
+    # shape for the whole file rather than leaving it to whatever happens
+    # to be set outside the test.
+    settings.GMAIL_LIVE_CLIENT_ID = ""
+    settings.GMAIL_LIVE_CLIENT_SECRET = ""
+    settings.GMAIL_LIVE_PUBSUB_TOPIC = ""
+    settings.GMAIL_LIVE_TOKEN_KEY = ""
     return client.get(reverse(SETTINGS)).content.decode()
 
 

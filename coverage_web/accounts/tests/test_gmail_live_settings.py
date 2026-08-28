@@ -83,11 +83,22 @@ def test_no_gmail_live_section_at_all_when_not_connected(logged_in, student):
     assert "Scan Now" not in html
 
 
+@override_settings(
+    GMAIL_LIVE_CLIENT_ID="", GMAIL_LIVE_CLIENT_SECRET="",
+    GMAIL_LIVE_PUBSUB_TOPIC="", GMAIL_LIVE_TOKEN_KEY="",
+)
 def test_gmail_live_section_absent_entirely_when_unconfigured(logged_in, student):
     """With no GMAIL_LIVE_* settings (the default in every test/deploy
     without it set up), the whole section — including any "Scan Now"
     control — must not render at all. `gmail_live.is_configured()` is the
-    off-switch for the whole feature, not just the button."""
+    off-switch for the whole feature, not just the button.
+
+    Force-unset explicitly rather than relying on the environment's
+    defaults: the founder's own local `.env` sets all four (the live poll
+    loop depends on it), which used to make this test fail on his machine
+    while passing in a clean checkout — the assertion is about the
+    UNCONFIGURED state, not about whatever happens to be in the
+    environment the suite runs in."""
     resp = logged_in.get(reverse("accounts:settings"))
     html = resp.content.decode()
     assert "gmail-live" not in html
