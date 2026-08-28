@@ -8,6 +8,7 @@ the demo seed's own placeholder row."""
 from __future__ import annotations
 
 import pytest
+from django.db import IntegrityError, transaction
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
 
@@ -81,15 +82,28 @@ def test_synthetic_firm_is_flagged_but_real_firms_are_not():
 
 
 @pytest.mark.django_db
-def test_firm_date_with_out_of_band_confidence_is_flagged():
+def test_an_out_of_band_confidence_can_no_longer_be_written_at_all():
+    """This used to assert the audit REPORTS a confidence of 95.0 — the real
+    value that sat on a J.P. Morgan row after somebody typed 95 meaning 95%
+    into a 0-to-1 column.
+
+    That row is no longer reachable. `firm_dates_confidence_in_range` (see
+    `directory.models.FirmDate`) now rejects it in Postgres, before the audit
+    or any application code gets a look. So the honest assertion is that the
+    write fails, not that we notice it afterwards: prevention outranks
+    detection, and a test that still described detection would be describing
+    a state the schema forbids.
+
+    The audit's own out-of-band check stays where it is, deliberately. It
+    costs nothing, and it is the thing that would still speak up if the
+    constraint were ever dropped in a future migration."""
     firm = Firm.objects.create(slug="jpm", name="J.P. Morgan")
-    FirmDate.objects.create(
-        firm=firm, cycle="2027", region="us", event_kind="app_close",
-        confidence=95.0, source_url="", found_on=None, history=[],
-    )
-    out = _run()
-    assert "J.P. Morgan" in out
-    assert "confidence=95.0" in out
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            FirmDate.objects.create(
+                firm=firm, cycle="2027", region="us", event_kind="app_close",
+                confidence=95.0, source_url="", found_on=None, history=[],
+            )
 
 
 @pytest.mark.django_db
