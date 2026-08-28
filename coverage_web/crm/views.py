@@ -1711,18 +1711,34 @@ def contact_unarchive(request: HttpRequest, pk: int) -> HttpResponse:
 def contact_archived(request: HttpRequest) -> HttpResponse:
     """The archived list — the view that makes archiving reversible in
     practice rather than only in principle. Deliberately plain: this is a
-    recovery surface, not a second Network board."""
-    contacts = list(
+    recovery surface, not a second Network board.
+
+    `?firm=<id>` scopes the ledger to one firm — the destination Today's
+    play cards link a "N parked" count to (crm.today._plays' `live_total`
+    note): `directory:firm_detail`'s own network section excludes archived
+    contacts, so a card that counts parked people needs somewhere that
+    actually shows them, at the SAME firm the card was about. An
+    unrecognised or missing value is the existing unscoped behaviour, not
+    an error — every other entry point into this page (Settings, the
+    archive confirmation message) has no firm in mind at all.
+    """
+    firm = None
+    firm_id = request.GET.get("firm", "").strip()
+    contacts_qs = (
         Contact.objects.for_user(request.user)
         .filter(archived=True)
         .select_related("firm")
         .annotate(last_touch_ts=models_Max("touches__ts"))
         .order_by("name")
     )
+    if firm_id.isdigit():
+        contacts_qs = contacts_qs.filter(firm_id=int(firm_id))
+        firm = Firm.objects.filter(id=firm_id).first()
+    contacts = list(contacts_qs)
     return render(
         request,
         "crm/contact_archived.html",
-        {"contacts": contacts, "contact_total": len(contacts)},
+        {"contacts": contacts, "contact_total": len(contacts), "firm": firm},
     )
 
 

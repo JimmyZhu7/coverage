@@ -38,14 +38,29 @@ on every quick action so all of it stays in sync.
               {% if p.sourcing %}
                 <p class="play-people">You have nobody here yet.</p>
               {% else %}
+                {% comment %}
+                A "parked" count in this line names people the firm page's
+                own network section will not show (it excludes archived
+                contacts, same as the Network board) — so that count gets
+                its own link to where they actually live, rather than
+                riding along under the card's one "View contacts" button as
+                a promise the destination can't keep. See crm.today._plays'
+                `live_total` note.
+                {% endcomment %}
                 <p class="play-people">
                   {{ p.total }} contact{{ p.total|pluralize }} here —
-                  {% for row in p.breakdown %}{{ row.count }} {{ row.label }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                  {% for row in p.breakdown %}{% if row.key == "parked" %}<a class="play-parked-link" href="{% url 'crm:contact_archived' %}?firm={{ p.firm.id }}">{{ row.count }} {{ row.label }}</a>{% else %}{{ row.count }} {{ row.label }}{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}
                 </p>
               {% endif %}
               <div class="play-foot">
                 {% if p.sourcing %}
                   <a class="btn play-cta" href="{% url 'crm:contact_new' %}?firm={{ p.firm.slug }}">Source contacts</a>
+                {% elif p.live_total == 0 %}
+                  {% comment %}Every contact here is parked: firm_detail
+                  would show none of them, so the button goes where they
+                  actually render instead of to an honest-looking empty
+                  page.{% endcomment %}
+                  <a class="btn play-cta" href="{% url 'crm:contact_archived' %}?firm={{ p.firm.id }}">View parked contacts</a>
                 {% else %}
                   <a class="btn play-cta" href="{% url 'directory:firm_detail' p.firm.slug %}">View contacts</a>
                 {% endif %}

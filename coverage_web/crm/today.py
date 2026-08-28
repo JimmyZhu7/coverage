@@ -1498,6 +1498,23 @@ def _plays(user, today) -> list[dict]:
             # The single source both the card and this function's own tests
             # read — never resummed from `breakdown` a second time.
             "total": len(cs),
+            # WHAT THE "View contacts" LINK CAN ACTUALLY SHOW. That button
+            # points at `directory:firm_detail`, whose "My Network here"
+            # section excludes archived contacts (directory.views.
+            # _my_network_at) — the same exclusion the Network board itself
+            # applies. `total` above counts parked people INTO the card's
+            # headline sentence on purpose (a parked relationship is still a
+            # relationship you have at this firm, worth knowing about), but
+            # a sentence that says "3 contacts here" over a button that
+            # shows 0 is the counts-must-equal-what-renders bug this repo
+            # has now shipped five times. `live_total` is what the button's
+            # destination will actually display, so the template can choose
+            # the right destination instead of the one destination this
+            # lane always used to offer. The parked count itself gets its
+            # own link in `_cockpit.html` — to `crm:contact_archived`,
+            # scoped to this firm — rather than being folded silently into
+            # a number the firm page cannot back up.
+            "live_total": len(live),
             # A firm with a live date and nobody there is still a play: the
             # card reads as a sourcing prompt rather than a roster.
             "sourcing": not cs,

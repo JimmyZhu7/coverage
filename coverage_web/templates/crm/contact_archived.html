@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load textstyle %}
 
-{% block title %}Archived Contacts · Coverage{% endblock %}
+{% block title %}{% if firm %}Archived at {{ firm.name }} · Coverage{% else %}Archived Contacts · Coverage{% endif %}{% endblock %}
 
 {% block head %}{% include "crm/_styles.html" %}{% endblock %}
 
@@ -17,7 +17,11 @@
   <header class="pagehead">
     <div class="pagehead-text">
       <p class="pagehead-eyebrow">Network</p>
-      <h1 class="pagehead-title">Archived Contacts</h1>
+      {% if firm %}
+        <h1 class="pagehead-title">Archived at {{ firm.name|smart_title }}</h1>
+      {% else %}
+        <h1 class="pagehead-title">Archived Contacts</h1>
+      {% endif %}
       <p class="pagehead-sub">
         Off the board and out of the queue. Nothing is deleted: every touch
         stays on the record and comes back with the person.
@@ -27,7 +31,7 @@
 
   {% if not contacts %}
     <div class="empty">
-      <p>Nothing archived.</p>
+      <p>{% if firm %}Nothing archived at {{ firm.name|smart_title }}.{% else %}Nothing archived.{% endif %}</p>
       <p><a href="{% url 'crm:contact_list' %}">Back to Network</a></p>
     </div>
   {% else %}

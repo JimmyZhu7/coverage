@@ -305,3 +305,68 @@ def test_the_dismiss_endpoint_rejects_a_malformed_fact(client):
     resp = client.post(reverse("crm:play_dismiss"), {"firm": "not-a-number"})
     assert resp.status_code == 400
     assert PlayDismissal.objects.for_user(user).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# A play card must not count people its own link cannot show.
+#
+# `directory:firm_detail`'s "My Network here" section excludes archived
+# contacts (directory.views._my_network_at), same exclusion as the Network
+# board. A card whose breakdown says "1 parked" and whose only button points
+# at that page was promising a person the destination hides — this is that
+# same "counts must equal what renders" bug, instance six.
+# ---------------------------------------------------------------------------
+def test_live_total_excludes_parked_contacts_the_firm_page_cannot_show(client):
+    """`live_total` is what `directory:firm_detail` will actually render —
+    it must match that page's own count, not the card's headline `total`
+    (which still counts parked people in, on purpose, as a fact worth
+    knowing)."""
+    user = _user()
+    today = timezone.localdate()
+    firm = _firm("citi")
+    _confirmed(firm, today=today, days=2)
+    _contact(user, firm, name="Live One", warmth="cold")
+    _contact(user, firm, name="Live Two", warmth="chatted")
+    _contact(user, firm, name="Parked One", warmth="cold", archived=True)
+
+    play = _plays(user, today)[0]
+    assert play["total"] == 3
+    assert play["live_total"] == 2
+
+    client.force_login(user)
+    resp = client.get(reverse("directory:firm_detail", args=[firm.slug]))
+    assert resp.context["my_total"] == play["live_total"]
+    shown_names = {p["c"].name for p in resp.context["my_contacts"]}
+    assert shown_names == {"Live One", "Live Two"}
+    assert "Parked One" not in shown_names
+
+
+def test_parked_link_shows_the_people_the_firm_page_hides(client):
+    """The fix: the breakdown's "parked" count and the card's fallback CTA
+    both point at `crm:contact_archived` scoped to this firm, and THAT page
+    shows exactly the people `firm_detail` will not."""
+    user = _user()
+    today = timezone.localdate()
+    firm = _firm("nomura-parked")
+    _confirmed(firm, today=today, days=2)
+    _contact(user, firm, name="Parked Here", warmth="cold", archived=True)
+
+    play = _plays(user, today)[0]
+    assert play["live_total"] == 0
+    breakdown = {row["key"]: row["count"] for row in play["breakdown"]}
+    assert breakdown == {"parked": 1}
+
+    client.force_login(user)
+    firm_page = client.get(reverse("directory:firm_detail", args=[firm.slug]))
+    assert firm_page.context["my_total"] == 0
+    assert list(firm_page.context["my_contacts"]) == []
+
+    archived_page = client.get(reverse("crm:contact_archived"), {"firm": firm.id})
+    assert archived_page.status_code == 200
+    assert [c.name for c in archived_page.context["contacts"]] == ["Parked Here"]
+    assert archived_page.context["firm"] == firm
+
+    # The Today template itself renders the fixed link, not the old
+    # firm_detail-only one, for a play whose only people are parked.
+    cockpit_html = client.get(reverse("crm:week")).content.decode()
+    assert f"contacts/archived/?firm={firm.id}" in cockpit_html
