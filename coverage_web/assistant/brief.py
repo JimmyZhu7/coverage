@@ -150,6 +150,9 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
         return None  # nothing to say — don't spend a call to say so
 
     prompt = (
+        f"Today's date is {today.isoformat()}. Any deadline below is a "
+        "calendar date, not a relative one — work out how far off it "
+        "actually is from today's date rather than guessing.\n\n"
         "You are Coverage's recruiting advisor. In 1-2 SHORT "
         "sentences, tell this student what matters most today — "
         "lead with the single highest-priority thing, name it "

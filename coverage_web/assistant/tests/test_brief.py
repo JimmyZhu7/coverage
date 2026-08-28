@@ -278,6 +278,24 @@ def test_a_situation_event_is_folded_into_the_same_prompt_not_a_second_call():
     assert "2026-08-01" in prompt and "2026-08-15" in prompt
 
 
+def test_prompt_states_todays_date_so_relative_timing_is_not_a_guess():
+    """Regression: the prompt handed the model a `closes_on` date (e.g.
+    `2026-08-30`) but never said what today is, so the model had nothing to
+    diff it against but its own training cutoff — observed live as a Today's
+    Move card claiming a role "closes in under two years" when the queue's
+    own deadline chip, computed from the real date, said 3 days. Anchoring
+    today's date in the prompt is what makes "closes in 3 days" the only
+    number the model can produce.
+    """
+    user = _user()
+    client = FakeClient(_response("Reach out to Ada before Friday."))
+
+    brief.get_or_build(user, [_action(closes_on="2026-08-30")], client=client)
+
+    prompt = client.messages.requests[0]["messages"][0]["content"]
+    assert timezone.localdate().isoformat() in prompt
+
+
 def test_situation_events_alone_with_an_empty_queue_still_spends_a_call():
     """An empty cadence queue used to mean "nothing worth saying" — but a
     deadline moving on a tracked role is worth saying even when the queue
