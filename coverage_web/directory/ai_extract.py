@@ -231,12 +231,46 @@ def _iso_day(value) -> str | None:
 _MIN_QUOTE_CHARS = 12
 
 
+# A scraped posting's `detail_text` routinely carries real Unicode
+# typography -- an HTML entity like `&#8217;` or `&mdash;` decoded once at
+# fetch time, never re-encoded -- and a model asked to quote it "verbatim"
+# reliably straightens that punctuation back to ASCII: curly quotes to
+# straight ones, an em/en dash to a hyphen, the single ellipsis character to
+# three periods. That is not a paraphrase and not a fabricated sentence --
+# the words, their order, and their meaning are all exactly the source's --
+# but a bare substring check sees a changed character and rejects a true,
+# correctly-cited answer the same as it would reject an invented one.
+#
+# This table is the fix the module's own rule calls for: normalize how the
+# comparison reads the SAME mark written two ways, never loosen what counts
+# as a match. It only ever widens what compares EQUAL, exactly like the
+# whitespace collapse below it -- a quote this table would have rejected
+# before still gets rejected; nothing here can turn a paraphrase or an
+# invented sentence into a match.
+_TYPOGRAPHIC_EQUIVALENTS = str.maketrans({
+    "‘": "'", "’": "'", "ʼ": "'", "′": "'",  # quotes -> '
+    "“": '"', "”": '"', "″": '"',                # quotes -> "
+    "–": "-", "—": "-", "‒": "-",                # dashes -> -
+    "…": "...",                                            # ellipsis -> ...
+})
+
+# The other half of the em/en dash case: a model just as often reaches for
+# the ASCII-art convention (two or three hyphens) as it does a single
+# straight one. Collapsing a run of 2+ hyphens to one, after the table
+# above has already turned any real dash character into a hyphen too, means
+# a real em dash, an en dash, "--" and "---" all normalize to the exact same
+# single "-" -- one mark, four spellings a model reaches for when asked to
+# copy it in plain ASCII.
+_DASH_RUN_RE = re.compile(r"-{2,}")
+
+
 def _grounded(quote: str | None, source: str) -> bool:
     """The model's quote must appear verbatim in the source text, and must be
-    long enough to BE a quote. Whitespace is the only normalization allowed --
-    a model that lightly reflows a paragraph while copying it should not lose
-    an otherwise-real quote, but anything else (a paraphrase, a fabricated
-    sentence) will not match."""
+    long enough to BE a quote. Whitespace collapse and the typographic
+    normalization above are the only ones allowed -- a model that lightly
+    reflows a paragraph, straightens a curly quote, or writes a dash as
+    "--" while copying it is still quoting it; anything else (a paraphrase,
+    a fabricated sentence) will not match."""
     # A non-STRING quote is not a quote, and refusing it here rather than
     # letting `re.sub` decide is the difference between "no answer" and a
     # `TypeError` raised out of a mailbox sync: a model can emit
@@ -244,7 +278,12 @@ def _grounded(quote: str | None, source: str) -> bool:
     # sentence, and a non-empty list clears the falsiness check above.
     if not quote or not isinstance(quote, str):
         return False
-    norm = lambda s: re.sub(r"\s+", " ", s).strip()
+
+    def norm(s: str) -> str:
+        s = s.translate(_TYPOGRAPHIC_EQUIVALENTS)
+        s = _DASH_RUN_RE.sub("-", s)
+        return re.sub(r"\s+", " ", s).strip()
+
     cleaned = norm(quote)
     if len(cleaned) < _MIN_QUOTE_CHARS:
         return False

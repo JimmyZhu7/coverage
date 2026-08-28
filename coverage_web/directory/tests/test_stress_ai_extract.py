@@ -146,16 +146,128 @@ def test_every_extractor_accepts_a_verbatim_quote(monkeypatch, name, call, key, 
 
 @pytest.mark.parametrize("name,call,key,value", EXTRACTORS, ids=EXTRACTOR_IDS)
 @override_settings(ANTHROPIC_API_KEY=KEY)
-def test_reflowed_whitespace_is_the_only_normalization_allowed(
+def test_reflowed_whitespace_is_accepted(
     monkeypatch, name, call, key, value
 ):
     """A model that copies a line but collapses the source's own line breaks
-    is still quoting it. Nothing else about the characters may change."""
+    is still quoting it."""
     _reply(monkeypatch, {
         key: value,
         "quote": "Applications must be received\n  by October 30, 2026\tat 11:59pm HKT.",
     })
     assert call() is not None, name
+
+
+# ===========================================================================
+# INVARIANT — a model that straightens the SOURCE's own typography is still
+# grounded. Whitespace reflow and typographic-mark normalization (curly
+# quotes, en/em dashes spelled as one character or as an ASCII "--"/"---"
+# run, the single ellipsis character) are the only normalizations allowed;
+# an actual paraphrase or a fabricated sentence still must not match.
+#
+# THE HOLE THIS CLOSES. `Opportunity.raw["detail_text"]` is real scraped
+# HTML, decoded once at fetch time -- a curly apostrophe and an em dash are
+# exactly what a posting's own copy looks like after that decode, never
+# authored in plain ASCII. A model told to quote a sentence "verbatim"
+# reliably straightens that punctuation back to ASCII while copying the
+# words, their order, and their meaning exactly -- and the bare
+# whitespace-only substring check saw the changed character and rejected a
+# TRUE, correctly-cited answer the same as it would an invented one. Found
+# live: `_grounded("We're looking for driven students to join our Summer
+# Analyst Program.", source_with_a_curly_apostrophe)` returned `False`.
+# ===========================================================================
+SOURCE_TYPOGRAPHIC = (
+    "2027 Summer Analyst Programme, Hong Kong. We’re looking for driven "
+    "students — applications must be received by October 30, 2026 at "
+    "11:59pm HKT. We do not sponsor employment visas for this position."
+)
+
+EXTRACTORS_TYPO = [
+    ("deadline", lambda: ai_extract.extract_deadline_ai(SOURCE_TYPOGRAPHIC),
+     "deadline_iso", "2026-10-30"),
+    ("sponsorship", lambda: ai_extract.extract_sponsorship_ai(SOURCE_TYPOGRAPHIC),
+     "sponsorship", "no"),
+    ("application_event", lambda: ai_extract.extract_application_event_ai(SOURCE_TYPOGRAPHIC),
+     "event", "rejected"),
+    ("mail_fact", lambda: ai_extract.extract_mail_fact_ai(SOURCE_TYPOGRAPHIC),
+     "fact", "out_of_office"),
+]
+
+
+@pytest.mark.parametrize("name,call,key,value", EXTRACTORS_TYPO, ids=EXTRACTOR_IDS)
+@override_settings(ANTHROPIC_API_KEY=KEY)
+def test_a_model_that_straightens_the_sources_own_typography_is_still_grounded(
+    monkeypatch, name, call, key, value
+):
+    """Same words, same order, same meaning as `SOURCE_TYPOGRAPHIC`'s own
+    sentence -- only the apostrophe and the dash were straightened to plain
+    ASCII, exactly what a real model does when asked to copy real scraped
+    text verbatim. This is a citation, not a paraphrase, and must be
+    accepted."""
+    _reply(monkeypatch, {
+        key: value,
+        "quote": (
+            "We're looking for driven students -- applications must be "
+            "received by October 30, 2026 at 11:59pm HKT."
+        ),
+    })
+    guess = call()
+    assert guess is not None, (
+        f"{name} rejected a quote that only straightened the source's own "
+        "typography back to ASCII"
+    )
+    assert guess.value == value
+
+
+@override_settings(ANTHROPIC_API_KEY=KEY)
+def test_a_paraphrase_is_still_rejected_even_in_typographic_ascii(monkeypatch):
+    """The fix only widens what counts as the SAME mark -- it must never let
+    an actual paraphrase or a fabricated sentence through, typographic
+    dressing or not."""
+    _reply(monkeypatch, {
+        "deadline_iso": "2026-10-30",
+        "quote": "The programme's deadline is around the end of October -- don't miss it.",
+    })
+    assert ai_extract.extract_deadline_ai(SOURCE_TYPOGRAPHIC) is None
+
+
+def test_typographic_punctuation_normalizes_to_the_same_mark():
+    """Direct coverage of `_grounded`'s own contract: curly quotes, an em
+    dash spelled as one character or as an ASCII "--"/"---" run, and the
+    ellipsis character all compare equal to their plain-ASCII spelling, in
+    either direction."""
+    source = "We’re open — read the “full” brief… today."
+    assert ai_extract._grounded("We're open -- read the \"full\" brief... today.", source)
+    assert ai_extract._grounded("We're open - read the \"full\" brief... today.", source)
+    assert ai_extract._grounded("We're open --- read the \"full\" brief... today.", source)
+    # And the reverse direction: an ASCII quote is still grounded against a
+    # source that itself uses the Unicode marks.
+    ascii_source = "We're open -- read the \"full\" brief... today."
+    assert ai_extract._grounded("We’re open — read the “full” brief… today.", ascii_source)
+
+
+def test_typographic_normalization_cannot_shrink_a_quote_under_the_floor():
+    """Canonicalization only ever WIDENS a character (the ellipsis character
+    becomes three periods) -- it must never let a quote that reads as a bare
+    fragment after normalization sneak under `_MIN_QUOTE_CHARS`."""
+    assert not ai_extract._grounded("…", "See the posting… for details.")
+    assert not ai_extract._grounded("--", "Roles open now -- apply today.")
+
+
+def test_mailfacts_grounded_agrees_with_ai_extract_grounded_on_typography():
+    """`capture.mailfacts._detect_ai` re-verifies, over the identical text, a
+    quote `extract_mail_fact_ai` already accepted -- through its OWN
+    `_grounded`, a separate function. If the two didn't normalize
+    punctuation identically, a quote the AI layer just verified as grounded
+    could be thrown away one call later for a reason that has nothing to do
+    with whether it is a real citation. See `capture.mailfacts._grounded`'s
+    own docstring."""
+    from capture import mailfacts
+
+    source = "Priya is no longer with the firm — please contact Dan instead."
+    quote = "Priya is no longer with the firm -- please contact Dan instead."
+    assert ai_extract._grounded(quote, source)
+    assert mailfacts._grounded(quote, source)
 
 
 # ===========================================================================

@@ -111,6 +111,7 @@ from capture import inbound
 from capture.models import ContactProposal, MailFact
 from capture.providers import normalize_email
 from crm.models import Contact
+from directory import ai_extract
 
 # Outcome counters for `apply_findings`' SyncResult.
 @dataclass
@@ -224,10 +225,23 @@ def _grounded(quote: str, source: str) -> bool:
     """Whitespace-normalized verbatim-substring check — the same rule as
     `directory.ai_extract._grounded`, enforced here even for quotes this
     module built itself, so a refactor can never quietly store a sentence
-    the message did not say."""
+    the message did not say.
+
+    Also the same typographic table `directory.ai_extract._grounded` uses:
+    `_detect_ai` below hands this function a quote `extract_mail_fact_ai`
+    already accepted, over the identical subject+snippet text — if this
+    check normalized punctuation any differently than that one, a quote the
+    AI layer just verified as grounded could still be thrown away right
+    here, one call later, for a reason that has nothing to do with whether
+    it is a real citation."""
     if not quote:
         return False
-    norm = lambda s: re.sub(r"\s+", " ", s).strip()
+
+    def norm(s: str) -> str:
+        s = s.translate(ai_extract._TYPOGRAPHIC_EQUIVALENTS)
+        s = ai_extract._DASH_RUN_RE.sub("-", s)
+        return re.sub(r"\s+", " ", s).strip()
+
     return norm(quote) in norm(source)
 
 
@@ -586,8 +600,6 @@ def _detect_ai(text: str, finding: dict) -> list[Detected]:
     """The long tail: ask the model WHICH fact the text states and WHERE,
     then re-run the deterministic extractors over the grounded text for
     every structured datum. The model can point; it cannot dictate."""
-    from directory import ai_extract
-
     subject = (finding.get("subject") or "").strip()
     snippet = html.unescape((finding.get("snippet") or "").strip())
     guess = ai_extract.extract_mail_fact_ai(subject, snippet)
