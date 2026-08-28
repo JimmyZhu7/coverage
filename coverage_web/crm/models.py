@@ -856,3 +856,46 @@ class ContactMerge(PrivateModel):
 
     def __str__(self) -> str:
         return f"{self.duplicate_id} -> {self.primary_id} ({self.status})"
+
+
+class PlayDismissal(PrivateModel):
+    """One dismissed Today "play" — see `crm.today._plays`.
+
+    A play is a dated world fact (a confirmed `FirmDate`) joined to the
+    student's own people at that firm. Dismissal is remembered against the
+    FACT — the tuple `(firm, event_kind, date)` — and never against the
+    card's rendered shape or a row id. This is deliberate and load-bearing:
+    the founder bulk-parked 113 contacts because an earlier surface asked too
+    much, and a play that keeps coming back after being dismissed is exactly
+    that bug wearing a new hat.
+
+    WHY A VALUE TUPLE AND NOT AN FK TO `FirmDate`. A firm's own board gets
+    re-scraped and `FirmDate` rows are updated IN PLACE (see that model's
+    `history` field) — the same row can carry Aug 30 today and Sep 5 next
+    week. An FK keyed on the row's id would still match after that edit and
+    would wrongly keep the dismissal alive on a fact that no longer holds.
+    Storing `date` as a plain value means a changed date makes a NEW tuple,
+    which is exactly the anti-nag rule's escape hatch: "once dismissed it
+    never renders again unless the date changes" (see the task brief this
+    model was built against). `event_kind` is stored as the same raw string
+    `FirmDate.event_kind` carries (not the human label), so a label wording
+    change can never accidentally resurrect or re-dismiss a fact.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    firm = models.ForeignKey(Firm, on_delete=models.CASCADE)
+    event_kind = models.CharField(max_length=64)
+    date = models.DateField()
+    dismissed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "play_dismissals"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "firm", "event_kind", "date"],
+                name="uniq_play_dismissals_fact",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} dismissed {self.firm_id}/{self.event_kind}/{self.date}"
