@@ -53,9 +53,25 @@ def test_settings_renders_the_new_sections(client, logged_in):
     resp = client.get(reverse(SETTINGS))
     assert resp.status_code == 200
     body = resp.content.decode()
-    for anchor in ("work-auth", "cadence", "pace"):
+    for anchor in ("work-auth", "cadence"):
         assert f'id="{anchor}"' in body
         assert f'href="#{anchor}"' in body  # rail entry
+
+
+def test_the_weekly_pace_control_moved_into_the_cadence_card(client, logged_in):
+    """There is no `#pace` section any more: a heading, a subtitle and a card
+    frame around ONE number, sat directly under a card that already promised
+    "how hard Coverage chases". The control, its ring, its id and its POST
+    section are all unchanged — they moved into the card whose subject they
+    already were."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert 'id="pace"' not in body
+    assert 'href="#pace"' not in body
+    cadence = body.split('id="cadence"', 1)[1].split("</section>", 1)[0]
+    assert 'name="section" value="pace"' in cadence
+    assert 'name="section" value="cadence"' in cadence
+    assert 'id="id_weekly_touch_goal"' in cadence
+    assert 'id="pace-ring"' in cadence  # the ring came with it
 
 
 def test_cadence_section_shows_each_default_inline(client, logged_in):

@@ -590,11 +590,16 @@ def settings_view(request):
             saved = True
             if request.headers.get("HX-Request"):
                 # htmx in-place save: swap back the form with a saved flag.
+                # `cycle_months` rides along because the cycle band is INSIDE
+                # this partial now (it captions the target-cycle picker rather
+                # than standing as its own card); leaving it out would make the
+                # band vanish on every in-place save until the next full load.
                 return render(
                     request,
                     "accounts/_profile_form.html",
                     {"form": ProfileForm.from_user(request.user),
-                     "saved": True, "cycle_suggestions": CYCLE_SUGGESTIONS},
+                     "saved": True, "cycle_suggestions": CYCLE_SUGGESTIONS,
+                     "cycle_months": _cycle_months()},
                 )
             messages.success(request, "Profile saved.")
             return redirect(reverse("accounts:settings"))
@@ -610,7 +615,8 @@ def settings_view(request):
             return render(
                 request,
                 "accounts/_profile_form.html",
-                {"form": form, "cycle_suggestions": CYCLE_SUGGESTIONS},
+                {"form": form, "cycle_suggestions": CYCLE_SUGGESTIONS,
+                 "cycle_months": _cycle_months()},
             )
     elif request.method == "POST":
         # A POST that names neither a recognised `section` nor "profile" —
@@ -682,7 +688,11 @@ def settings_view(request):
             "campaign_kind_unclassified": Campaign.KIND_UNCLASSIFIED,
             "credits": _credits_context(request.user),
             "gmail_free_rescan_interval_days": django_settings.GMAIL_FREE_RESCAN_INTERVAL_DAYS,
-            "target_firm_count": UserFirm.objects.for_user(request.user).count(),
+            # There is no `target_firm_count` here any more. Your Data used to
+            # print it as a bare number three cards below the Target Firms
+            # board, which states the same total as three live per-tier counts
+            # you can drag firms between. One page saying one number twice, in
+            # the weaker of the two places.
             "contact_count": contact_count,
             # Split out rather than folded in: "Contacts: 137" counted archived
             # rows while the Network page showed 112, so the two pages
