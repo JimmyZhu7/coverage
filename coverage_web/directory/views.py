@@ -21,6 +21,7 @@ user's targeted firms in the feed.
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 from datetime import date
 
@@ -279,16 +280,184 @@ _PLACE_FALLBACK = {r: REGION_LABELS[r] for r in REGION_LABELS if r != "other"}
 _PLACE_WHY = ("The posting did not state a city. This is the market it was "
               "filed under.")
 
+# ---------------------------------------------------------------------------
+# TIDYING A SCRAPED PLACE STRING, AT RENDER TIME.
+#
+# `location` is evidence and stays raw in the database (the same rule that
+# keeps `smart_title`/`smart_location` in the template layer). But `_place`
+# handed that raw string straight to the page, so the place line — the one
+# element a student reads to answer "is this in a market I can work in" —
+# arrived in whatever shape a careers site happened to emit. Measured on the
+# live corpus (2,599 open campus roles / 16,561 open rows):
+#
+#   "2 Locations"                                97 feed / 1,321 open  a COUNT
+#   "9-10 TAUNUSANLAGE:FRANKFURT AM MAIN"         5 feed /    21 open  colon join
+#   "NY 10001"                                    8 feed /     8 open  a ZIP
+#   "Denver, CO, US, 80206"                      29 feed /   108 open  postal tail
+#   "New York, 745 7th Avenue"                   21 feed /   270 open  street
+#   "Chicago, …; Greenwich, …; Houston, …" ×6    33 feed /   123 open  list, 160ch
+#   "Online via Microsoft Teams&#160"             1 feed /     1 open  entity
+#
+# 172 of 2,599 feed place lines (6.6%) were one of those. The two existing
+# repair paths cannot close it: `normalize_workday_locations` has already
+# been run to exhaustion (0 of 11,350 open Workday rows would change today)
+# and its slot-gap rule does not see a colon join, while
+# `backfill_detail_locations` needs a stored `detail_location` that 0 of the
+# 1,321 "N Locations" rows actually have. So the gap is in the NORMALIZATION,
+# and the render path is where it can be closed for every source at once.
+#
+# EVERY RULE HERE SUBTRACTS. Nothing is inferred, completed, or reworded: a
+# segment is either kept as the source wrote it or dropped, and whatever was
+# dropped is still quoted back in the `why` tooltip. That is the difference
+# between tidying and inventing, and only the first is allowed on this page.
+
+# Workday joins a site address to its city with a BARE colon and no spaces
+# ("90 WESTERN PKY:BEDFORD", "RBC WATERPARK PLACE, 88 QUEENS QUAY W:TORONTO").
+# The city is the right half in every one of the 7 distinct shapes this
+# produces across all 24,775 rows — with ONE counter-example that decides the
+# guard below: "Istanbul, Büyükdere Caddesi No:175", where the colon is part
+# of a house number and the right half is not a place at all. So the split
+# only fires when the right half reads like a place AND the left reads like
+# an address; anything else keeps the string it arrived with. Spaces around
+# the colon mean something else again (Evercore's "Crum Auditorium : RRH
+# 1.400" is a room), which the lookarounds exclude.
+_PLACE_COLON = re.compile(r"(?<=\S):(?=\S)")
+
+# Workday's aggregate placeholder for a multi-city posting. It is a count, not
+# a place, and answers nothing a student asked.
+_PLACE_COUNT = re.compile(r"^\d+\s+locations?$", re.I)
+
+# One place among several. Boards list them semicolon-separated.
+_PLACE_LIST = re.compile(r"\s*;\s*")
+
+# Segment separators INSIDE one place: a comma, or a spaced dash ("Toronto -
+# 18 York Street"). Unspaced dashes are part of names ("Santander-Platz").
+_PLACE_SEG = re.compile(r"\s*,\s*|\s+[-–]\s+")
+
+# A whole segment that is only a postal code: 10001, 10001-1234, 65760,
+# L-1855 (Luxembourg), K1A 0B1 (Canada), EC2N 4AY (UK).
+_PLACE_POSTAL = re.compile(
+    r"^(?:\d{4,6}(?:-\d{4})?"
+    r"|[A-Z]{1,2}-\d{3,5}"
+    r"|[A-Z]\d[A-Z][ ]?\d[A-Z]\d"
+    r"|[A-Z]{1,2}\d[A-Z\d]?[ ]?\d[A-Z]{2})$", re.I)
+
+# "NY 10001" — a state code with a ZIP welded on. The state is the fact; the
+# ZIP is leaked source data. (These 8 rows are the residue of
+# `backfill_sitemap_postal_titles`, which correctly moved the code OUT of the
+# title and into `location`, where nothing then trimmed it.)
+_PLACE_STATE_ZIP = re.compile(r"^([A-Z]{2})\s+\d{5}(?:-\d{4})?$")
+
+# A street address rather than a place. Two shapes, both requiring a NUMBER:
+# a house-number head ("745 7th Avenue", the same anchored rule the Workday
+# connector uses), or a street/premises word standing beside a standalone
+# digit run ("Marina Bay Financial Tower 2"). The digit is load-bearing —
+# without it "Ave Maria, FL" and "Avenue Road" would read as addresses. So
+# would every "St. Louis" if `st` were in the word list, which is why it is
+# not: only words that are unambiguous outside an address qualify.
+_PLACE_STREET_HEAD = re.compile(r"^\d{1,6}(?:[-/]\d{1,6})?[ ,-]\S")
+_PLACE_STREET_WORD = re.compile(
+    r"\b(street|road|avenue|ave|boulevard|blvd|parkway|pkwy|pky|quay|plaza|"
+    r"suite|floor|tower|building|bldg|anlage|strasse|straße)\b\.?", re.I)
+_PLACE_DIGIT_RUN = re.compile(r"\b\d{1,6}\b")
+
+
+def _is_street(segment: str) -> bool:
+    return bool(_PLACE_STREET_HEAD.match(segment)
+                or (_PLACE_STREET_WORD.search(segment)
+                    and _PLACE_DIGIT_RUN.search(segment)))
+
+
+def _split_colon_join(text: str) -> str:
+    """Workday's `<site address>:<CITY>` run, reduced to the city."""
+    m = None
+    for m in _PLACE_COLON.finditer(text):
+        pass                      # the LAST bare colon is the site/city seam
+    if m is None:
+        return text
+    left, right = text[:m.start()].strip(), text[m.end():].strip()
+    place_like = (any(ch.isalpha() for ch in right)
+                  and not _PLACE_POSTAL.match(right))
+    address_like = bool(_PLACE_DIGIT_RUN.search(left)
+                        or _PLACE_STREET_WORD.search(left))
+    return right if (place_like and address_like) else text
+
+
+def _tidy_entry(entry: str) -> str:
+    """One place, minus the parts of it that are not a place.
+
+    Returns `entry` UNCHANGED when nothing is dropped. That is not an
+    optimisation: `_PLACE_SEG` splits on a spaced dash so the street rule can
+    see "Toronto - 18 York Street", and re-joining on ", " unconditionally
+    would have rewritten 1,100-odd innocent rows' punctuation ("Singapore -
+    Central" -> "Singapore, Central") for no gain. Tidying subtracts; it does
+    not restyle a line it has no complaint about.
+    """
+    segs = [s.strip() for s in _PLACE_SEG.split(entry) if s.strip()]
+    trimmed = [_PLACE_STATE_ZIP.sub(r"\1", s) for s in segs]
+    kept = [s for s in trimmed if not _PLACE_POSTAL.match(s)]
+    # A row whose EVERY segment is a postal code ("L-1855") keeps them: an
+    # empty place line is a worse answer than an imprecise one, and silence
+    # here would claim the posting said nothing when it did.
+    kept = kept or trimmed
+    # Same guard for the street rule — "1 New York Plaza" is a whole location
+    # and dropping it would leave the card blank, so a street segment only
+    # goes when a place-shaped segment survives it.
+    place_like = [s for s in kept if not _is_street(s)] or kept
+    if place_like == segs:
+        return entry.strip()
+    return ", ".join(place_like)
+
+
+def tidy_place(raw: str) -> tuple[str, int]:
+    """The printable form of a scraped `location`, and how many further places
+    the same string listed.
+
+    `("", 0)` when the string carries no place at all (Workday's "2
+    Locations"), so the caller can fall through to the market the row was
+    filed under instead of printing a count where a city goes.
+    """
+    text = html_lib.unescape(raw or "").replace("\xa0", " ")
+    text = _split_colon_join(text)
+    text = re.sub(r"\s+", " ", text).strip(" ,;")
+    if not text or _PLACE_COUNT.match(text):
+        return "", 0
+    entries = [e for e in (_tidy_entry(p) for p in _PLACE_LIST.split(text)) if e]
+    if not entries:
+        return "", 0
+    # A six-city list is 160 characters in a slot that ellipsises at ~34, so
+    # what a student actually read was "Chicago, Illinois, United States;
+    # Greenwich, Connect…". Name the first and COUNT the rest. The count rides
+    # OUT of the string on purpose: it is copy we wrote, and `smart_location`
+    # is a filter for text a board wrote — piping it through produced "+5
+    # More".
+    return entries[0], len(entries) - 1
+
+
+# What a tidied line says it did, so nothing is dropped silently.
+_PLACE_TIDIED = "The posting listed: "
+_PLACE_COUNT_WHY = ("The board gave a count of locations instead of naming "
+                    "them ({raw}). This is the market it was filed under.")
+
 
 def _place(opp) -> dict:
     """One role's place, and how well we know it. `text` may be "" — a caller
-    that prints something for an empty `text` is re-introducing the defect."""
-    if opp.location:
-        return {"text": opp.location, "exact": True, "why": ""}
+    that prints something for an empty `text` is re-introducing the defect.
+    `more` is how many further places the same posting listed (0 usually)."""
+    raw = (opp.location or "").strip()
+    text, more = tidy_place(raw)
+    if text:
+        return {"text": text, "more": more, "exact": True,
+                "why": "" if (text == raw and not more) else _PLACE_TIDIED + raw}
     market = _PLACE_FALLBACK.get(opp.region or "", "")
     if market:
-        return {"text": market, "exact": False, "why": _PLACE_WHY}
-    return {"text": "", "exact": False, "why": ""}
+        # A location that tidied away to nothing was never a place, so this
+        # row is in exactly the position a blank-location row is in: we hold
+        # the market and not the city. Saying so — coarse, and marked coarse
+        # — beats printing "2 Locations" in the slot where a city goes.
+        return {"text": market, "more": 0, "exact": False,
+                "why": (_PLACE_COUNT_WHY.format(raw=raw) if raw else _PLACE_WHY)}
+    return {"text": "", "more": 0, "exact": False, "why": ""}
 
 
 def _card(opp, *, now, today):
@@ -304,6 +473,7 @@ def _card(opp, *, now, today):
     class_tag = _class_tag(opp)
     if class_tag:
         tags.append(class_tag)
+    place = _place(opp)
     # No sponsorship pill here any more. `_fact_chips` below now carries the
     # sponsorship answer AND its source on every surface, so appending the
     # pill as well printed the same fact twice on this page and only this
@@ -315,11 +485,13 @@ def _card(opp, *, now, today):
         "id": opp.id,
         "firm_name": opp.firm.name,
         "firm_slug": opp.firm.slug,
-        "title": opp.title,
+        # Minus a trailing city the place line below already prints — see
+        # `_title_without_place_echo`. Never minus anything else.
+        "title": _title_without_place_echo(opp.title, place["text"]),
         "location": opp.location,
         # What the row PRINTS — see `_place`. `location` above stays raw for
         # callers that need the stated string itself.
-        "place": _place(opp),
+        "place": place,
         "url": opp.url,
         "region": opp.region,
         "role": {"value": bucket, "label": BUCKET_LABELS.get(bucket, bucket)},
@@ -341,6 +513,36 @@ def _card(opp, *, now, today):
         # URL could not reconfirm it — see `_unconfirmed_note`.
         "unconfirmed": _unconfirmed_note(opp),
     }
+
+
+# The title's own trailing city, when the place line one row below already
+# prints it. 297 of 2,599 open campus cards end their title in the very city
+# their `.rolecard-sub` names ("2027 APAC Banking Summer Analyst - Hong Kong"
+# above "Hong Kong, Hong Kong") — the same fact twice on one card, in two
+# rows, and the expensive one: a scraped title is clamped to two lines and
+# 268 of those 297 were hitting the clamp. Dropping the echo takes that to
+# 207, so 61 cards stop losing their END to an ellipsis in order to spend
+# their width restating their own location.
+#
+# THE GUARANTEE IS AGAINST THE PRINTED PLACE, not `Opportunity.location`.
+# `_family_key` below tests the raw column because grouping siblings is a
+# different question, but a DISPLAY cut has to be checked against what the
+# display shows: "Building 400-Whippany Campus, Jefferson Park" contains
+# "Whippany" and tidies to "Jefferson Park", so keying off the raw column
+# would have deleted the only mention of the city on the card. Every 4+
+# letter word of the tail must survive into `place.text` or the title keeps
+# it.
+def _title_without_place_echo(title: str, place_text: str) -> str:
+    m = _TITLE_TAIL.search(title or "")
+    if not m or not place_text:
+        return title
+    tail = m.group(1).strip()
+    words = [w for w in re.split(r"[ ,]+", tail.lower()) if len(w) >= 4]
+    base = (title[:m.start()] or "").strip()
+    place = place_text.lower()
+    if base and words and all(w in place for w in words):
+        return base
+    return title
 
 
 def _monogram(name: str) -> str:
@@ -1450,18 +1652,21 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
     explicit "deadline passed" state — see the three-way split below)."""
     bucket = o.bucket or OTHER
     seen_days = (now - o.first_seen).days if o.first_seen else None
+    place = _place(o)
     item = {
         "id": o.id,
         "firm_name": o.firm.name,
         "firm_slug": o.firm.slug,
         "monogram": _monogram(o.firm.name),
         "category": FIRM_CATEGORIES.get(o.firm.slug, ""),
-        "title": o.title,
+        # Minus a trailing city the place line below already prints — see
+        # `_title_without_place_echo`. Never minus anything else.
+        "title": _title_without_place_echo(o.title, place["text"]),
         "url": o.url,
         "location": o.location,
         # Same resolver the firm page reads — see `_place`. The two surfaces
         # used to disagree about a blank `location`, this is where they stop.
-        "place": _place(o),
+        "place": place,
         "bucket": bucket,
         "bucket_label": BUCKET_LABELS.get(bucket, bucket),
         # Programme/intake year — rendered next to the role type, never as a
@@ -2539,6 +2744,13 @@ def role_description(request, pk):
         "o": opp,
         "firm": opp.firm,
         "net": net,
+        # The drawer was the THIRD surface printing `location` raw, after the
+        # feed card and the firm row. `_place` exists because two surfaces
+        # disagreeing about one row's location is a defect; three is the same
+        # defect with more places to notice it — the card said "Putrajaya"
+        # while the drawer it opens said "PERSIARAN IRC 2, IOI RESORT CITY IOI
+        # CITY TOWER ONE:PUTRAJAYA" about the identical row.
+        "place": _place(opp),
         "bucket_label": BUCKET_LABELS.get(opp.bucket, opp.bucket),
         "blocks": paragraphs(raw.get("detail_text")),
         "fetched": bool(raw.get("detail_text")),

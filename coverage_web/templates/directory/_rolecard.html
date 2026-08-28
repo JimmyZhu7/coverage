@@ -67,8 +67,12 @@ without cutting text off.
     for the identical role. The resolver also fills the 51 cards that rendered
     an entirely empty `.rolecard-sub` but whose region we do hold.
     {% endcomment %}
+    {% comment %}
+    `place.more` rides OUTSIDE `smart_location`: it is copy we wrote, and that
+    filter cases text a careers board wrote, so "+5 more" came back "+5 More".
+    {% endcomment %}
     {% if r.place.text %}<span class="rolecard-loc{% if not r.place.exact %} is-market{% endif %}"
-      {% if r.place.why %}title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}</span>{% endif %}
+      {% if r.place.why %}title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}{% if r.place.more %} +{{ r.place.more }} more{% endif %}</span>{% endif %}
   </div>
 
   {% comment %}
@@ -136,8 +140,21 @@ without cutting text off.
       one of them.{% endcomment %}
       <span class="meta-status meta-undated">No date posted</span>
     {% endif %}
-    {% if r.seen_days is not None %}
-      <span class="meta-seen">first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>
+    {% comment %}
+    …and only where nothing better answers the same question. "First seen"
+    measures how long a role has been sitting in front of a student, which is
+    the ONLY time signal an undated role has — 86% of feed cards say "No date
+    posted" and 3% "Rolling", and for those the age is the whole answer to
+    "has this been here a while".
+
+    On a DATED card it is noise wearing the same grey as the countdown: the
+    deadline already answers when to act, better and about the ROLE rather
+    than about our scraper. 288 of 2,599 feed cards were carrying both, so
+    "Closes in 3 days · first seen 35d ago" spent half the meta row arguing
+    with itself. The fact isn't lost — the countdown supersedes it.
+    {% endcomment %}
+    {% if r.seen_days is not None and not r.dated %}
+      <span class="meta-seen">· first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>
     {% endif %}
     {% comment %}
     Read, only where there is something to read. The description was fetched

@@ -23,6 +23,12 @@ from directory.views import (
 TODAY = timezone.localdate()
 NOW = timezone.now()
 
+# The page inlines its stylesheet, and CSS COMMENTS reach the response body.
+# Any assertion about card copy has to strip them or it can pass off a note
+# someone left about a retired element — see
+# `test_feed_badge_reads_first_seen_not_new`, which did exactly that.
+_STYLE_RE = re.compile(r"<style.*?</style>", re.S)
+
 
 def _firm(slug="evercore", name="Evercore", **kw):
     return Firm.objects.create(slug=slug, name=name, **kw)
@@ -60,12 +66,20 @@ def test_fresh_label_says_what_it_measures(seen_days, expected):
 def test_feed_badge_reads_first_seen_not_new(client):
     """The bug: after a bulk import, a role backfilled today reads "New"
     even though the firm posted it long ago — `first_seen` is when the row
-    entered OUR db (auto_now_add), not when the firm posted."""
+    entered OUR db (auto_now_add), not when the firm posted.
+
+    THE STYLE BLOCK IS STRIPPED FIRST, and that is the whole reliability of
+    this test. It used to assert "First seen 3d ago" against the raw
+    response, which the page satisfied from a CSS COMMENT in _styles.html
+    describing the badge this change RETIRED — capital F and all. The card's
+    own visible copy is lowercase, so the assertion was green whether or not
+    the card said anything, and would have gone red if someone tidied a
+    comment. Assert what a reader sees.
+    """
     firm = _firm()
     o = _seen(_opp(firm, "https://x/1"), 3)
-    resp = client.get(reverse("opportunities"))
-    body = resp.content.decode()
-    assert "First seen 3d ago" in body
+    body = _STYLE_RE.sub("", client.get(reverse("opportunities")).content.decode())
+    assert "first seen 3d ago" in body
     assert ">New<" not in body
 
 

@@ -90,7 +90,12 @@ walks the same URL as a plain page load.
                   so a comma join makes a "+3" label run into seven
                   comma-separated fragments with nothing marking where one
                   place ends and the next begins.{% endcomment %}
-                  <summary>+{{ r.variants|length }} more location{{ r.variants|length|pluralize }}: {% for v in r.variants %}{{ v.location|smart_location }}{% if not forloop.last %} · {% endif %}{% endfor %}</summary>
+                  {% comment %}`v.place.text`, not `v.location`: the raw column
+                  is the one this summary used to print, so the ONE place on the
+                  page that names several cities at once was also the one place
+                  that skipped `views._place` and could still say "2 Locations"
+                  or "9-10 Taunusanlage:frankfurt Am Main".{% endcomment %}
+                  <summary>+{{ r.variants|length }} more location{{ r.variants|length|pluralize }}: {% for v in r.variants %}{{ v.place.text|smart_location }}{% if not forloop.last %} · {% endif %}{% endfor %}</summary>
                   {% for r in r.variants %}
                     {% include "directory/_rolecard.html" %}
                   {% endfor %}
