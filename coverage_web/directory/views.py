@@ -60,7 +60,9 @@ from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
 from directory.recommend import Candidate, Profile, parse_target_cycle, recommend
 from directory.sponsorship import effective_sponsorship, firm_policy_map, firm_policy_q
-from directory.timeline import EVENT_LABELS
+from directory.timeline import (
+    EVENT_LABELS, TRACK_SHORT, cycle_slug_for_target,
+)
 
 # Firm category labels — the insider taxonomy students actually sort firms
 # by ("who has coverage on this account" energy, per the brand voice). Keyed
@@ -709,7 +711,13 @@ def _group_picks(cards):
 # Splitting the suffix by KIND (rather than labelling `region` through
 # REGION_LABELS, the intuitive fix) is what actually removes the duplication —
 # labelling would have produced "SA 2028 · HONG KONG · HONG KONG".
-_CYCLE_TRACKS = {"ib": "IB", "pe": "PE", "st": "S&T", "am": "AM"}
+# Now `directory.timeline.TRACK_SHORT`, so the desk abbreviations this page
+# prints and the ones the vocabulary module defines cannot drift apart. The
+# dict here covered four of the six preference-eligible tracks; the two it
+# missed (consulting, corp-strat) fell through to `.title()`, which spells
+# corp-strat "Corp Strat" by luck and would have spelled a seventh slug
+# whatever its hyphens happened to say.
+_CYCLE_TRACKS = TRACK_SHORT
 
 
 def _cycle_suffix(cycle: str) -> str:
@@ -731,8 +739,17 @@ def cycle_region(cycle: str) -> str:
     return suffix if suffix in REGION_LABELS else ""
 
 
-def cycle_label(cycle: str) -> str:
-    """`sa2028_ib` -> `SA 2028 · IB`. Cycle and TRACK; never the market.
+def cycle_label(cycle: str, track: str = "") -> str:
+    """`("sa2028", "ib")` -> `SA 2028 · IB`. Cycle and TRACK; never the market.
+
+    Since migration 0014 the desk lives in `FirmDate.track` and `cycle` holds
+    only a season+year slug, so the normal call is `cycle_label(fd.cycle,
+    fd.track)`. The suffix-parsing below is kept anyway, and deliberately: it
+    is the only thing that renders a legacy spelling readably if one ever
+    reaches this function again — a row written by a pre-0014 process, a
+    fixture, or a `manage.py shell` insert. Formatting a stale value costs
+    nothing; printing `SA2028_IB` in the product's own body copy, which is what
+    this function was written to stop, costs a student's trust in the page.
 
     The column holds two spellings of one vocabulary — importers wrote
     `sa2028_ib`, the seeds wrote `SA 2028` — and the firm page printed
@@ -758,8 +775,13 @@ def cycle_label(cycle: str) -> str:
         label = head.replace("-", " ").title()
     if tail.lower() in REGION_LABELS:   # a market, not a desk — see cycle_region
         return label
-    track = _CYCLE_TRACKS.get(tail.lower(), tail.replace("-", " ").title() if tail else "")
-    return f"{label} · {track}" if track else label
+    # The row's own `track` column first; a suffix only where there is no
+    # column to read. A column that DISAGREES with a legacy suffix is the same
+    # class of thing `_firm_date_row` resolves for region — stated beats
+    # inherited, and the stated one is the one a writer can still correct.
+    desk = (track or tail or "").strip().lower()
+    desk = _CYCLE_TRACKS.get(desk, desk.replace("-", " ").title() if desk else "")
+    return f"{label} · {desk}" if desk else label
 
 
 # How a firm_dates row says where its date came from. `FirmDate.source_url` is
@@ -832,7 +854,11 @@ def _firm_date_row(fd, *, today):
 
     confirmed = (fd.confidence or 0.0) >= 0.8 and prec in ("day", "month", "")
     return {
-        "cycle": cycle_label(fd.cycle),
+        "cycle": cycle_label(fd.cycle, fd.track),
+        # The stored slug rides along beside its label so `_timeline` can match
+        # it against the cycles the student STATED without re-parsing prose.
+        "cycle_slug": fd.cycle,
+        "track": fd.track,
         # The row's own column when it has one, else the market its cycle slug
         # names. Stated beats inferred; a slug whose suffix DISAGREES with the
         # column is a data error rather than a second fact worth printing (no
@@ -950,10 +976,68 @@ def _flag_conflicting_closes(rows: list[dict]) -> list[dict]:
     return rows
 
 
-def _timeline(firm, *, today):
+# ---------------------------------------------------------------------------
+# The one place a student's stated preference reaches the timeline.
+#
+# THE GAP THIS CLOSES. The founder's profile states a target cycle ("2028
+# Summer Internship"), the ranker parses it, and `recommend.W_CYCLE` is worth
+# 15 points — and it fires on 2 of the 2,617 open campus rows, because SA 2028
+# postings do not exist yet. That is not a missing preference field. It is a
+# preference the student stated, that the system stored and parsed correctly,
+# aimed at the one dataset that cannot answer it: the listings feed is 1,108
+# rows of SA 2027 and 1,333 rows that state no intake year at all.
+#
+# The dataset that CAN answer it is this one. 38 of the 41 firm_dates rows are
+# sa2028, all 34 future-dated rows sit at a firm the founder has tiered, and
+# every one of them is a date about the cycle he said he is recruiting for.
+# Until 0014 closed the vocabulary there was no way to ask: the same cycle was
+# spelled four ways, so no query could group it.
+#
+# WHAT IS AND IS NOT ASSERTED. This marks a row only when the student's OWN
+# stated `target_cycles` parses to the row's cycle slug — a fact they entered,
+# echoed back in their own words. Nothing here is inferred, and nothing
+# inferred belongs here: the tiered-firm list, who they email and what they
+# save are all readable signals about preference, but a page that told a
+# student "your cycle" on the strength of an inference would be asserting
+# something they never said. Ordering is untouched for the same reason a
+# timeline is chronological — the marker changes what a row SAYS, not where it
+# sits, so a nearer deadline never falls below a further one.
+# ---------------------------------------------------------------------------
+def _stated_cycle_slugs(user) -> set[str]:
+    """The `FirmDate.cycle` slugs a signed-in student's own profile names.
+
+    Empty for anonymous users, for a profile with no target cycle, and for a
+    stated cycle that has no slug in this corpus (an Insight week — see
+    `timeline.cycle_slug_for_target`). Empty means "mark nothing", never
+    "mark everything".
+    """
+    if not getattr(user, "is_authenticated", False):
+        return set()
+    slugs = set()
+    for raw in (getattr(user, "target_cycles", None) or []):
+        parsed = parse_target_cycle(str(raw or ""))
+        if parsed is None:
+            continue
+        slug = cycle_slug_for_target(*parsed)
+        if slug:
+            slugs.add(slug)
+    return slugs
+
+
+def _timeline(firm, *, today, user=None):
     rows = firm.firm_dates.all().order_by(F("date").asc(nulls_last=True), "cycle", "event_kind")
     rows = _drop_contradicted_openings([_firm_date_row(fd, today=today) for fd in rows])
-    return _flag_conflicting_closes(rows)
+    rows = _flag_conflicting_closes(rows)
+
+    wanted = _stated_cycle_slugs(user)
+    for row in rows:
+        if row["cycle_slug"] and row["cycle_slug"] in wanted:
+            row["for_you"] = {
+                "label": "your cycle",
+                "why": f"You told us you're recruiting for {row['cycle']} — "
+                       f"this date belongs to that cycle.",
+            }
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -3988,7 +4072,11 @@ def firm_detail(request, slug):
         # describes the experienced rows the page is then showing, which is
         # the set the reader is looking at.
         "markets": _open_markets(opps) if capped else [],
-        "timeline": _timeline(firm, today=today),
+        # `user=` so the timeline can mark the rows belonging to the cycle the
+        # student actually stated. Signed-out passes an anonymous user and
+        # gets no marker, which is the honest answer: there is no stated
+        # cycle to match against.
+        "timeline": _timeline(firm, today=today, user=request.user),
         # Still the full in-scope count, never the printed count. The heading
         # answers "how many are open here", and every other surface (contacts
         # board, feed) answers it with this same number — the 925-vs-13 bug in

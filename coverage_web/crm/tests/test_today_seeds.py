@@ -318,7 +318,7 @@ def test_a_confirmed_deadline_leads_the_card_for_an_empty_firm(client):
     UserFirm.all_objects.create(user=user, firm=gs, tier=1)
     close = timezone.localdate() + timedelta(days=26)
     FirmDate.objects.create(
-        firm=gs, cycle="2028", region="us", event_kind="app_close",
+        firm=gs, cycle="sa2028", region="us", event_kind="app_close",
         date=close, confidence=1.0,
     )
     plays = _cockpit_context(user)["plays"]
@@ -337,7 +337,7 @@ def test_a_rumoured_date_never_becomes_a_countdown():
     gs = Firm.objects.create(name="Goldman Sachs", slug="goldman-sachs")
     UserFirm.all_objects.create(user=user, firm=gs, tier=1)
     FirmDate.objects.create(
-        firm=gs, cycle="2028", region="us", event_kind="app_close",
+        firm=gs, cycle="sa2028", region="us", event_kind="app_close",
         date=timezone.localdate() + timedelta(days=26), confidence=0.5,
     )
     plays = _cockpit_context(user)["plays"]
@@ -453,7 +453,7 @@ def _silent_today_query_count(client, user, n_firms: int) -> int:
         f = Firm.objects.create(name=f"F{user.pk}-{i}", slug=f"f{user.pk}-{i}")
         UserFirm.all_objects.create(user=user, firm=f, tier=1)
         FirmDate.objects.create(
-            firm=f, cycle="2028", region="us", event_kind="app_close",
+            firm=f, cycle="sa2028", region="us", event_kind="app_close",
             date=timezone.localdate() + timedelta(days=20), confidence=1.0,
         )
     client.force_login(user)

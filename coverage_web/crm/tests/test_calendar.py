@@ -291,10 +291,10 @@ def test_only_confirmed_deadlines_reach_the_calendar(client, logged_in):
     events nobody has confirmed."""
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
     today = timezone.localdate()
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=today.replace(day=15), confidence=1.0)
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="hk",
                             event_kind="app_open",
                             date=today.replace(day=16), confidence=0.3)
 
@@ -328,7 +328,7 @@ def test_a_bad_submission_still_reports_the_months_real_counts(client, logged_in
     at the moment it tells you you got something wrong."""
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
     today = timezone.localdate()
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=today.replace(day=15), confidence=1.0)
 
@@ -386,7 +386,7 @@ def test_your_own_events_can_be_removed_from_the_page(client, logged_in):
 def test_a_firm_deadline_offers_no_remove_button(client, logged_in):
     """Directory data is not the user's to delete from here."""
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=timezone.localdate().replace(day=15), confidence=1.0)
     body = client.get(reverse("crm:calendar")).content.decode()
@@ -515,10 +515,10 @@ def test_the_rail_spans_two_years_around_today_and_marks_where_you_are(client, l
 def test_the_rail_counts_both_your_events_and_confirmed_deadlines(client, logged_in):
     today = timezone.localdate()
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=today.replace(day=15), confidence=1.0)
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="hk",
                             event_kind="app_open",
                             date=today.replace(day=16), confidence=0.3)
     CalendarEvent.all_objects.create(
@@ -620,11 +620,11 @@ def test_the_feed_serves_events_and_confirmed_deadlines(client, user):
         user=user, contact=c, title="Chat with Ada Lovelace",
         starts_at=_at(days=2), kind="chat", thread_id="t-ics")
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=timezone.localdate() + timedelta(days=9),
                             confidence=1.0)
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="hk",
                             event_kind="app_open",
                             date=timezone.localdate() + timedelta(days=9),
                             confidence=0.3)
@@ -805,7 +805,7 @@ def test_the_feed_carries_tracked_deadlines_with_alarms(client, user):
 
 def test_a_date_that_opens_something_gets_no_alarm(client, user):
     firm = Firm.objects.create(slug="jpm", name="J.P. Morgan")
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_open",
                             date=timezone.localdate() + timedelta(days=9),
                             confidence=1.0)
@@ -1008,7 +1008,7 @@ def _firm_date(event_kind, day=15, *, slug="gs", name="Goldman Sachs"):
     firm = Firm.objects.get_or_create(slug=slug, defaults={"name": name})[0]
     today = timezone.localdate()
     return FirmDate.objects.create(
-        firm=firm, cycle="SA 2028", region="us", event_kind=event_kind,
+        firm=firm, cycle="sa2028", region="us", event_kind=event_kind,
         date=today.replace(day=day), confidence=1.0)
 
 

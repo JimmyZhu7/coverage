@@ -234,11 +234,11 @@ def test_network_gaps_weight_a_confirmed_deadline_only(client):
     today = date.today()
     # 1.0 is the stored float for "confirmed_official"; 0.3 is "rumor".
     FirmDate.objects.create(
-        firm=soon, cycle="2027", region="us", event_kind="app_close",
+        firm=soon, cycle="ft2027", region="us", event_kind="app_close",
         date=today + timedelta(days=7), confidence=1.0,
     )
     FirmDate.objects.create(
-        firm=rumor, cycle="2027", region="us", event_kind="app_close",
+        firm=rumor, cycle="ft2027", region="us", event_kind="app_close",
         date=today + timedelta(days=3), confidence=0.3,
     )
 

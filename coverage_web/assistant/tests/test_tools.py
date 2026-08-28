@@ -293,7 +293,7 @@ def test_get_firm_reports_tier_dates_open_roles_and_my_people_by_warmth(user, fi
     UserFirm(user=user, firm=firm, tier=2).save()
     FirmDate.objects.create(
         firm=firm,
-        cycle="2028",
+        cycle="sa2028",
         region="hk",
         event_kind="applications_open",
         date=timezone.localdate() + timedelta(days=5),

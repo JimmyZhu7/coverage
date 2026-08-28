@@ -107,7 +107,7 @@ def test_an_out_of_band_confidence_can_no_longer_be_written_at_all():
     with pytest.raises(IntegrityError):
         with transaction.atomic():
             FirmDate.objects.create(
-                firm=firm, cycle="2027", region="us", event_kind="app_close",
+                firm=firm, cycle="ft2027", region="us", event_kind="app_close",
                 confidence=95.0, source_url="", found_on=None, history=[],
             )
 
@@ -130,7 +130,7 @@ def test_legitimately_seeded_firm_date_is_not_flagged():
     from django.utils import timezone
 
     FirmDate.objects.create(
-        firm=firm, cycle="SA 2028", region="hk", event_kind="app_close",
+        firm=firm, cycle="sa2028", region="hk", event_kind="app_close",
         confidence=0.6, source_url="https://example.org/careers",
         found_on=timezone.now(), history=[{"date": "2026-09-30", "confidence": "reported"}],
     )
@@ -142,7 +142,7 @@ def test_legitimately_seeded_firm_date_is_not_flagged():
 def test_demo_seed_marker_row_is_not_flagged():
     firm = Firm.objects.create(slug="apollo", name="Apollo")
     FirmDate.objects.create(
-        firm=firm, cycle="sa2028_ib", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", track="ib", region="us", event_kind="app_close",
         confidence=1.0, source_url="seed:demo", found_on=None, history=[],
     )
     out = _run()

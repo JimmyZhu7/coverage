@@ -921,7 +921,12 @@ def _get_firm(user, args) -> dict:
     dates = [
         {
             "event": fd.event_kind,
-            "cycle": fd.cycle,
+            "cycle": fd.cycle or "unstated",
+            # The desk used to ride inside `cycle` as a suffix (`sa2028_ib`);
+            # migration 0014 gave it its own column, so the advisor reads it
+            # from its own key rather than losing it when the cycle was
+            # normalised.
+            "track": fd.track or "unstated",
             "region": fd.region or "unstated",
             "date": _iso(fd.date),
             "confidence": round(fd.confidence or 0.0, 2),

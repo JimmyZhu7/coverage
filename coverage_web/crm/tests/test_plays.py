@@ -46,7 +46,7 @@ def _firm(slug, name=None):
     return Firm.objects.create(slug=slug, name=name or slug.title())
 
 
-def _confirmed(firm, *, today, days, event_kind="app_close", cycle="SA 2028"):
+def _confirmed(firm, *, today, days, event_kind="app_close", cycle="sa2028"):
     return FirmDate.objects.create(
         firm=firm, cycle=cycle, region="us", event_kind=event_kind,
         date=today + timedelta(days=days), confidence=1.0,
@@ -239,7 +239,7 @@ def test_an_unconfirmed_date_never_plays():
     today = timezone.localdate()
     firm = _firm("rumor-bank")
     FirmDate.objects.create(
-        firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
         date=today + timedelta(days=3), confidence=0.3,
     )
     _contact(user, firm, name="Someone")

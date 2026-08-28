@@ -990,7 +990,7 @@ def test_deadlines_are_named_not_just_counted(client):
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
     today = timezone.localdate()
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="insight_deadline",
                             date=today + timedelta(days=2), confidence=1.0)
 
@@ -1031,7 +1031,7 @@ def test_an_unconfirmed_date_never_reaches_the_rail():
     worse than no countdown."""
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="hk",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="hk",
                             event_kind="app_close",
                             date=timezone.localdate() + timedelta(days=3),
                             confidence=0.3)
@@ -1041,7 +1041,7 @@ def test_an_unconfirmed_date_never_reaches_the_rail():
 def test_a_past_deadline_is_not_upcoming():
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=timezone.localdate() - timedelta(days=1),
                             confidence=1.0)
@@ -1111,7 +1111,7 @@ def test_a_chat_today_gets_a_prep_card_with_what_you_learned_last_time(client):
     CalendarEvent.all_objects.create(
         user=user, contact=c, title="Chat with Ada Lovelace",
         starts_at=at, kind="chat", thread_id="t-prep")
-    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
                             event_kind="app_close",
                             date=timezone.localdate() + timedelta(days=9),
                             confidence=1.0)

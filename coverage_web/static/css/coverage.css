@@ -1355,6 +1355,11 @@ a.pill:hover { text-decoration: underline; }
 .pill.conf-unrated { background: var(--conf-unrated-s); color: var(--conf-unrated-t); border-color: var(--conf-unrated-l); }
 .pill.spon-known   { background: var(--spon-known-s);   color: var(--spon-known-t);   border-color: var(--spon-known-l); }
 .pill.spon-none    { background: var(--spon-none-s);    color: var(--spon-none-t);    border-color: var(--spon-none-l); }
+/* The firm timeline's "your cycle" marker — the accent look, because it is the
+   one pill on that row about the reader rather than about the date. Shares
+   tag-cat's tokens deliberately: a second accent recipe is a second thing to
+   keep in step with the theme. */
+.pill.for-you   { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
 /* Opportunity-card tags: firm category + class year. */
 .pill.tag-cat   { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
 .pill.tag-class { background: var(--surface); color: var(--ink-2); border-color: var(--line-strong); }

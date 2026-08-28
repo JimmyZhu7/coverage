@@ -910,7 +910,7 @@ def test_the_fit_scores_timeline_axis_names_the_event_in_words(client):
     Touch.all_objects.create(user=user, contact=contact, ts=now - timedelta(days=3),
                              kind="chat", channel="coffee_chat")
     FirmDate.objects.create(
-        firm=firm, cycle="sa2028_ib", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", track="ib", region="us", event_kind="app_close",
         date=(now + timedelta(days=77)).date(), precision="day", confidence=1.0,
     )
 

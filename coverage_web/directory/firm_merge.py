@@ -136,8 +136,14 @@ def _merge_opportunity_pair(keep: Opportunity, lose: Opportunity) -> None:
 def _merge_firm_dates(canonical: Firm, duplicate: Firm) -> tuple[int, int]:
     moved = merged = 0
     for fd in FirmDate.objects.filter(firm=duplicate):
+        # Must match `uniq_firm_dates_firm_cycle_track_region_event` column for
+        # column: this lookup is what decides between reparenting the row and
+        # folding it into an existing one, so a key narrower than the
+        # constraint's reparents a row the constraint then rejects. `track`
+        # joined that key in migration 0014.
         existing = FirmDate.objects.filter(
-            firm=canonical, cycle=fd.cycle, region=fd.region, event_kind=fd.event_kind,
+            firm=canonical, cycle=fd.cycle, track=fd.track, region=fd.region,
+            event_kind=fd.event_kind,
         ).first()
         if existing is None:
             fd.firm = canonical
