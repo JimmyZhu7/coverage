@@ -503,27 +503,60 @@
       {# Round-trips the region tab so a bulk action returns you to the #}
       {# board you were looking at, not to "All". #}
       <input type="hidden" name="scope" value="{{ scope }}">
-    {% for section in sections %}
-      {% comment %}
-      Replied/Chatted/Advocates are small and worth seeing at a glance, so
-      they open by default like every other section here always has.
-      Emailed-No-Reply is the one that's routinely 90+ cards deep and
-      genuinely does swamp the board — that one alone defaults collapsed, and
-      so does Not-Contacted-Yet for the same reason and at the same size.
-      Empty sections stay collapsed regardless (nothing to show).
-      {% endcomment %}
-      <details class="warmth-section" data-group{% if section.cards and section.key != "no_reply" and section.key != "not_contacted" %} open{% endif %}>
-        <summary class="net-group-head">
-          {% comment %}Every section is a warmth bucket now — School scope
-          used to have a fifth kind of section (grouped by university, no
-          dot) here, which is what this conditional was guarding against.
-          Both cold halves wear the cold dot: `no_reply` and `not_contacted`
-          are the same warmth split by whether anything was ever sent.{% endcomment %}
-          <span><i class="dot dot-{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"></i> {{ section.label }}</span>
-          <span class="scrub-count" data-group-count>{{ section.cards|length }}</span>
-        </summary>
+    {% comment %}
+    THE WARMTH LEDGER. Redesigned 2026-08-27 against the founder's own
+    174-contact board: five collapsed cards at ~100px apiece (a border, a
+    shadow, a margin to the next one) to say five numbers. They are one
+    list a reader scans top to bottom, not five peers each wanting a panel,
+    so they now share one bordered surface (`.warmth-list`, styles.html)
+    and split from each other with a hairline instead of a card boundary —
+    the same move already made for `.arch-row` and the parked-cohort list.
+
+    A row holding nobody is skipped outright: the per-section "if it has
+    cards" guard below never renders a `<details>` for it. "Not Contacted Yet" reads 0
+    on the founder's real account today, and a permanently-empty row is
+    the same "standing reproach for a state the product allows" already
+    named for the zeroed-out "Other countries" scope tab and the archived/
+    parked/hidden links above — fixed the identical way: render only when
+    the count is real. This is a TEMPLATE-level skip, not a narrower query:
+    `sections` from the view still lists all five warmth keys in order and
+    still sums to `contact_total` exactly — see
+    `test_the_warmth_sections_account_for_every_contact_the_header_counts`,
+    which asserts against `resp.context["sections"]` directly and is
+    untouched by what the template chooses to draw. A contact_total of
+    zero (nobody added yet) falls through to one plain line rather than an
+    empty bordered box.
+
+    Order is fixed (Replied, Chatted, Advocates, then the two cold halves),
+    not sorted by size: with only five fixed categories, a reader benefits
+    more from "Replied is always first" than from a leaderboard that
+    reshuffles as counts change — the same lesson the Coverage Gaps strip
+    already drew from dropping its rank badge (04eb8cb). The dominant
+    category (137 of 174 on the live account) is instead marked by WEIGHT:
+    each row's own background fills left-to-right by its real share of
+    `contact_total` (`--share` below) — a continuous read of an existing
+    number, not a new metric or a threshold.
+    {% endcomment %}
+    {% if contact_total %}
+    <div class="warmth-list">
+      {% for section in sections %}
         {% if section.cards %}
-          <div class="contact-grid">
+          {% comment %}Every section is a warmth bucket — School scope used
+          to have a fifth kind (grouped by university, no dot), which is
+          what this conditional guards against. Both cold halves wear the
+          cold dot and the cold row-tint: `no_reply` and `not_contacted`
+          are the same warmth split by whether anything was ever
+          sent.{% endcomment %}
+          <details class="warmth-row warmth-row--{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"
+                   data-group{% if section.key != "no_reply" and section.key != "not_contacted" %} open{% endif %}>
+            <summary style="--share: {% widthratio section.cards|length contact_total 100 %}%">
+              <i class="dot dot-{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"></i>
+              <span class="warmth-row-label">{{ section.label }}</span>
+              <span class="warmth-row-meta">
+                <span class="scrub-count" data-group-count>{{ section.cards|length }}</span>
+              </span>
+            </summary>
+            <div class="contact-grid">
             {% for card in section.cards %}
               <div class="contact-card kin-reveal" style="--i:{{ forloop.counter0 }}"
                    data-searchable data-order="{{ forloop.counter0 }}"
@@ -566,7 +599,6 @@
                           title="{% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}">
                       {% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}
                     </span>
-                    {% if card.school %}<span class="pill cc-school">{{ card.school }}</span>{% endif %}
                   </div>
                 </div>
                 {% comment %}
@@ -617,11 +649,13 @@
             {% endfor %}
           </div>
           <p class="net-none" data-group-empty hidden>No matches in this group.</p>
-        {% else %}
-          <p class="net-none">No contacts.</p>
+          </details>
         {% endif %}
-      </details>
-    {% endfor %}
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="net-none">No contacts yet.</p>
+    {% endif %}
       {% comment %}
       The bulk bar. Sticky to the bottom of the viewport and `hidden` until
       something is ticked, so it costs nothing on a board with no selection.

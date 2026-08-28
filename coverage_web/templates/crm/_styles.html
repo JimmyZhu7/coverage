@@ -1081,7 +1081,21 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      `[hidden]` override remembered per component (see `.bulk-bar[hidden]`
      above for the alternative, and the bug it was fixing). */
   .is-csearch-hidden { display: none; }
-  @media (max-width: 560px) { .csearch-bar { flex-direction: column; } }
+  @media (max-width: 560px) {
+    .csearch-bar { flex-direction: column; align-items: stretch; }
+    /* FOUND while measuring this pass on a phone: `flex: 1 1 260px`'s
+       260px is a flex-BASIS, read against whichever axis is main at the
+       time. In the row layout above it means "a comfortable starting
+       width"; once the bar switches to a column here, the main axis is
+       height, and the exact same declaration told the search field to
+       start at 260px TALL and then grow with `flex-grow: 1` — measured
+       at 313px on a 375px-wide phone, an icon and one input rendered as
+       tall as seven stacked rows of this exact widget. `flex-basis: auto`
+       lets the field size to its own content (the 41px input) again;
+       `width: 100%` is what actually makes it span the column now that
+       `flex-grow` no longer has anywhere to put its "1". */
+    .csearch-field { flex-basis: auto; width: 100%; }
+  }
 
   /* Every board panel shares one pattern: the strip-title sits ABOVE a
      single surface panel. The panels have the SAME fixed height and always
@@ -1269,17 +1283,86 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     overflow: hidden; text-overflow: ellipsis; }
   .fc-act-link:hover { text-decoration: underline; }
 
-  .warmth-section { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s4) var(--s5); margin-bottom: var(--s4);
-    box-shadow: var(--shadow-1); }
-  /* Collapsible warmth section — empty ones render collapsed (no `open`). */
-  .warmth-section > summary { cursor: pointer; list-style: none; position: relative;
-    padding-right: 22px; }
-  .warmth-section > summary::-webkit-details-marker { display: none; }
-  .warmth-section > summary::after { content: "\25BE"; position: absolute; right: 0;
-    top: 2px; color: var(--ink-3); transition: transform var(--t-fast); }
-  .warmth-section:not([open]) > summary::after { transform: rotate(-90deg); }
-  .warmth-section:not([open]) { padding-bottom: var(--s3); opacity: 0.85; }
+  /* ---- Contacts: one warmth ledger, not five separate cards ------------
+     Reported directly against the founder's live board: five collapsed
+     rows at ~100px apiece — a bordered card, its own shadow, its own
+     margin to the next one — to say five numbers ("Replied 14",
+     "Chatted 21", …). The five warmth states are one list a reader scans
+     top to bottom, not five peers each claiming a panel of their own, so
+     they now share ONE bordered surface (`.warmth-list`) and separate
+     from each other with a hairline, the same move this exact pass
+     already made for `.arch-row` and the parked-cohort list: a row is a
+     line with a rule under it, not a card, unless it needs to be one.
+
+     A row holding nobody does not render at all. On the founder's own
+     174-contact account "Not Contacted Yet" reads 0 today — the identical
+     "standing reproach for a state the product allows" already named for
+     the zeroed-out "Other countries" scope tab and the archived/parked/
+     hidden links above, and fixed the same way: render only when the
+     count is real. Nothing about the underlying data narrows to make
+     this true — `sections` in the view still lists all five warmth keys
+     and still sums to `contact_total` exactly, which
+     `test_the_warmth_sections_account_for_every_contact_the_header_counts`
+     pins; only the template (below) skips a `<details>` with zero cards.
+     A student with zero contacts at all keeps a plain "No contacts yet."
+     line instead of an empty bordered box. */
+  .warmth-list { background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-1);
+    margin-bottom: var(--s6); overflow: hidden; }
+  .warmth-row { border-top: 1px solid var(--line); }
+  .warmth-row:first-of-type { border-top: 0; }
+  /* The whole line is the disclosure control, not just the glyph at its
+     end — cursor, hover tint and the chevron glued to the count (below)
+     all say so together, rather than one tiny triangle carrying the
+     entire "this opens" affordance alone. */
+  .warmth-row > summary { display: flex; align-items: center; gap: var(--s3);
+    list-style: none; cursor: pointer; padding: var(--s3) var(--s4);
+    /* The share-of-total fill. `--share` is set inline per row from the
+       one real number this widget has to show it with — count over
+       `contact_total`, the same total the header above already states —
+       so "Emailed, No Reply" (79% of a 174-contact board) reads as a
+       visibly longer fill than "Advocates" (1%) without a second badge
+       claiming a percentage nobody asked for. Painted as the summary's
+       own background rather than a separate element, so it sits behind
+       the text with no z-index or extra markup. */
+    background: linear-gradient(to right,
+      color-mix(in srgb, var(--row-tint, var(--accent)) 13%, var(--surface)) var(--share, 0%),
+      var(--surface) var(--share, 0%));
+    transition: background-color var(--t-fast); }
+  .warmth-row > summary::-webkit-details-marker { display: none; }
+  .warmth-row > summary:hover { background-color: var(--paper); }
+  .warmth-row > summary:focus-visible { outline-offset: -2px; }
+  /* Flex item, not the inline dot's usual `margin-right` — the row's own
+     `gap` already spaces dot/label/meta evenly. */
+  .warmth-row .dot { flex: none; margin-right: 0; }
+  /* A real word at a real size, not a shouted micro-caption — the old
+     all-caps treatment gave "REPLIED" and its own count the identical
+     weight, which was problem one on the live board. */
+  .warmth-row-label { font-size: var(--fs-m); font-weight: var(--w-med);
+    color: var(--ink); min-width: 0; }
+  /* Count and disclosure glued into one unit at the row's end, so the
+     triangle reads as "this number opens" instead of a mark stranded at
+     the far edge with no visible tie to what it discloses. */
+  .warmth-row-meta { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .warmth-row-meta .scrub-count { margin-left: 0; font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; font-size: var(--fs-m); font-weight: var(--w-bold);
+    color: var(--ink); }
+  .warmth-row-meta::after { content: "\25BE"; color: var(--ink-3); font-size: 11px;
+    transition: transform var(--t-fast); }
+  .warmth-row:not([open]) .warmth-row-meta::after { transform: rotate(-90deg); }
+  /* Open content sits inside the row's own left/right rule rather than
+     flush with the panel edge the hairline gave up. */
+  .warmth-row .contact-grid { margin: 0 var(--s4) var(--s4); }
+  .warmth-row .net-none { margin: 0 var(--s4) var(--s4); text-align: left; }
+  /* The same four warmth colours the segment bars and dots already use
+     elsewhere on this board, reused as a faint tint for each row's own
+     fill rather than a fifth palette invented for this one widget. Both
+     cold halves ("Emailed, No Reply" and "Not Contacted Yet") share the
+     cold tint, same as they share the cold dot. */
+  .warmth-row--cold     { --row-tint: var(--w-cold-bar); }
+  .warmth-row--replied  { --row-tint: var(--w-replied-bar); }
+  .warmth-row--chatted  { --row-tint: var(--w-chatted-bar); }
+  .warmth-row--advocate { --row-tint: var(--w-advocate-bar); }
   /* ---- Archived list: ledger rows, hairline-separated ----
      One anatomy, shared by all four off-board ledgers (Archived, Parked,
      Not Your Recruiting, Not Related to Recruitment): identity, one
