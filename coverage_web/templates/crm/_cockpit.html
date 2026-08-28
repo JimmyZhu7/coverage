@@ -7,9 +7,178 @@ lanes. Everything the cap held back is one click away under "Up next", with
 the exact count and the policy holding it. Right: the weekly pace ring, the
 chats already on the calendar, and a recent-activity feed. Re-rendered whole
 on every quick action so all of it stays in sync.
+
+
+WHAT LEADS THIS COLUMN, AND WHY. Read this before moving a section.
+
+The order below is not the order these features were built in. It was, and
+that is exactly what was wrong with it: the day's actual plan rendered sixth,
+behind a debrief lane, a proposals queue and a paid-feature pitch, so a
+student opening Today to find out what was urgent scrolled past an
+advertisement to reach it.
+
+THE RULE IS THE PAGE'S OWN, ONE LEVEL UP. `crm/today.py` already ranks
+individual actions by whose clock is running: `CLASS_CRITICAL` is defined
+there as "a real clock the world produced", `_stale_critical` splits a live
+deadline (a clock that "belongs to the world, not to how long the student has
+been ignoring us") from a question that merely went unanswered, and `_board`
+says a confirmed date "always leads" while a coverage hole "is true today and
+will still be true tomorrow". Sections are ranked by that same question, not
+by a second opinion about what matters:
+
+  1. a clock owned by the world that runs out TODAY and cannot be re-run
+  2. work due against such a clock
+  3. clocks that already fired and the plan stopped budgeting for
+  4. facts with a date on them the student has not been asked to act on yet
+  5. records that DECAY — true now, worth less each day, but nothing closes
+  6. decisions waiting on nobody's clock
+  7. standing backlog — as true tomorrow as today
+  8. anything that is not information about this student's pipeline at all
+
+TWO TIE-BREAKS THIS ORDER LEANS ON.
+
+  * A MIXED SECTION RANKS BY THE MOST TIME-CRITICAL FACT IT CAN CARRY. "Your
+    board" holds both a confirmed close in three days (rung 4) and a firm
+    where the student knows nobody (rung 7), in one lane by design. It is
+    placed at rung 4, because burying a date that passes costs an opportunity
+    outright while promoting a backlog card costs a few hundred pixels. Rank
+    a mixed lane by what it would be worst to hide.
+  * A DISCLOSURE TRAVELS WITH THE THING IT DISCLOSES. "Up next" is not a
+    section of work, it is the footnote that explains the "2 of 29 today" in
+    the lane heading above it. It is not ranked; it follows the plan.
+
+WHAT THIS ORDER DELIBERATELY DOES NOT DO. It does not move a section by how
+old its contents are. The page has exactly one age-driven mechanism —
+`_stale_critical` — and it moves CARDS between sections rather than moving a
+section up and down the page. A page whose shape changes daily is a page a
+student cannot learn, and every span here is bounded anyway (a debrief
+expires, `DEBRIEF_EXPIRES_AFTER_DAYS`; a critical decays out at
+`CRITICAL_STALE_BUSINESS_DAYS`). Severity picks the slot once; it does not
+re-sort the page every morning.
+
+THE ORDER, with the rung each section is claiming:
+
+   1. Chat prep .......... 1  a chat today, at a time. Nothing else on this
+                             page expires at 2pm.
+   2. Today's plan ....... 2  the day's work; `_today_sort_key` already puts
+                             its criticals first WITHIN it, so the section
+                             needs no "is one of these critical" flag to
+                             earn this slot — it is always claiming rung 2.
+   3. Up next ............ -  the plan's own disclosure. Travels with it.
+   4. Your board ......... 4  dated firm facts, then coverage holes. See the
+                             mixed-section rule above.
+   5. Empty states ....... -  the page's headline when there is no plan.
+                             Mutually exclusive with BOTH the plan and the
+                             board (every branch tests `not plays`), so its
+                             position among them is never observable.
+   6. Start here ......... -  introduced by the headline directly above it;
+                             that adjacency is why it sits here and not by
+                             rung. Gated in Python to a queue with nothing
+                             in it, so it never competes with real work.
+   7. Still open ......... 3  criticals that aged out of the exemption. The
+                             plan has stopped budgeting for them and there
+                             is no morning on which they arrive.
+   8. Log what you learned  5 an unwritten debrief decays; nothing closes.
+   9. Found in your inbox   6 real, waiting on a yes or no, on no clock.
+  10. Run Autopilot ...... 8  the pitch, and only the pitch. Below the cards
+                             it is an offer about. See its own note.
+  11. Waiting / bench / park / new at your firms — reassurance, second looks
+      and exits. Unchanged, and correctly last: none of it is work.
+
+Rungs 3 and 7 land out of numeric order on purpose. "Still open" sits below
+the empty-state headline because that headline names it ("N questions are
+still open below") and is the page's opening sentence on a day with no plan.
+Ordering is a compromise with copy exactly once, and this is the once.
 {% endcomment %}
 <div class="cockpit">
   <div class="cockpit-main">
+
+    {% comment %}
+    Chat prep. RUNG 1, and first on the page whenever it exists: a
+    conversation happening in a few hours outranks every follow-up email, and
+    the work is not remembering it — it is walking in with the last one in
+    your head. Only ever today, and only chats with a real time on them.
+
+    This comment already said "first on the page" while the section rendered
+    fourth. The sentence was right and the position was not; it is the
+    clearest single piece of evidence that this column was in build order
+    rather than in any order at all.
+    {% endcomment %}
+    {% if chat_prep %}
+      <section class="lane lane-prep">
+        <h2 class="lane-title">
+          <span class="lane-dot"></span>
+          Chat{{ chat_prep|length|pluralize }} today
+          <span class="lane-count" aria-live="polite">{{ chat_prep|length }}</span>
+        </h2>
+        <div class="act-grid">
+          {% for p in chat_prep %}
+            <article class="act-card kin-reveal act-prep" style="--i:{{ forloop.counter0 }}">
+              <div class="act-top">
+                <span class="opp-firm">{% if p.contact.firm %}{{ p.contact.firm.name|smart_title }}{% else %}{{ p.contact.firm_text|smart_title }}{% endif %}</span>
+                <span class="prep-at">{{ p.when }}</span>
+              </div>
+              <h3 class="act-name"><a href="{% url 'crm:contact_detail' p.contact.id %}">{{ p.contact.name|smart_title }}</a></h3>
+              {% if p.contact.role %}<p class="act-role">{{ p.contact.role|smart_title }}</p>{% endif %}
+              <div class="act-badges">
+                <span class="chip warmth-{{ p.contact.warmth }}">{{ p.contact.warmth }}</span>
+                {% if p.firm_date %}
+                  <span class="prio prio-prep">{{ p.firm_date_label }} · {{ p.firm_date_days }}d</span>
+                {% endif %}
+              </div>
+              {% if p.learned %}
+                {% comment %}Last time's debrief, verbatim and clamped. This is
+                the whole reason the card exists.{% endcomment %}
+                <p class="act-reason prep-learned">Last time: {{ p.learned }}</p>
+              {% else %}
+                <p class="act-reason">No notes from last time. Debrief this one afterwards and there will be.</p>
+              {% endif %}
+              <div class="act-quick">
+                <div class="act-primary">
+                  <a class="btn btn-primary act-btn" href="{% url 'crm:contact_detail' p.contact.id %}">Open their file</a>
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% comment %}
+    Today's plan. RUNG 2, and the reason this whole column was reordered: it
+    used to render sixth, behind the board, a debrief lane, a proposals queue
+    and a pitch for a paid feature. The first thing a student sees on a page
+    called Today should be what the day actually asks of them.
+
+    Only non-empty lanes render. A capped lane says "N of M today" — never a
+    bare count that mixes what's shown with what isn't.
+
+    NO "IS ANYTHING IN HERE CRITICAL" FLAG, and none is needed. The obvious
+    design is a boolean that lifts this section when it holds a
+    CLASS_CRITICAL card, but `_today_sort_key` already sorts criticals to the
+    front WITHIN these lanes and `_TODAY_LANES` gives them the first lane, so
+    a plan that has one leads with it automatically. The section is always
+    claiming rung 2, and a conditional would only be deciding between rung 2
+    and something lower on a day the plan holds nothing urgent — a day on
+    which the sections it would swap with are, by their own gates, mostly
+    empty too. A flag that changes the page's shape day to day is a real cost
+    for no reachable benefit, so the whole reorder adds no context key at
+    all: this is the same ranking the page already computed, applied to
+    headings instead of cards.
+    {% endcomment %}
+    {% for lane in lanes %}
+      <section class="lane lane-{{ lane.key }}">
+        <h2 class="lane-title">
+          {% if lane.key == "critical" %}<span class="lane-dot"></span>{% endif %}
+          {{ lane.label }}
+          <span class="lane-count" aria-live="polite">{% if lane.capped %}{{ lane.count }} of {{ lane.total }} today{% else %}{{ lane.count }}{% endif %}</span>
+        </h2>
+        <div class="act-grid">
+          {% for a in lane.items %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+        </div>
+      </section>
+    {% endfor %}
+
     {% comment %}
     Your board — the firm-level half of Today. See crm.today._board.
 
@@ -27,8 +196,22 @@ on every quick action so all of it stays in sync.
     is a week the cadence queue had nothing due while a bank closed in three
     days and six of his own contacts sat there unmentioned. The board renders
     on a day the queue is empty — that is the whole point of it — which is
-    also why those gates now ask `not plays`: a page with board cards on it
-    is not a page with nothing on it, and used to say both at once.
+    also why those gates ask `not plays`: a page with board cards on it is not
+    a page with nothing on it, and used to say both at once.
+
+    RUNG 4, below the plan, by the mixed-section rule in this file's leading
+    comment. Two reasons it does not lead:
+
+      * Its dated half and the plan's critical lane frequently name the SAME
+        clock — `cadence._closing_soon` builds a re-ping off the very
+        FirmDate a board card prints. When they do, one is the action and the
+        other is the notice about it, and the action leads.
+      * a005530 built this lane as the backstop for a trough: something true
+        to say on a day the cadence queue is empty. Backstop content is by
+        construction subordinate to the queue having something to say. On the
+        day it matters most the plan is empty and renders nothing, so this
+        lane leads the page by itself, with no conditional needed — and it is
+        capped at two rather than one on exactly that day.
 
     Dismissal is per-FACT (firm + event kind + date, crm.models.PlayDismissal)
     rather than per-card: dismissing this exact close date never suppresses a
@@ -156,12 +339,17 @@ on every quick action so all of it stays in sync.
       `still_open` is named here for the same reason `held` and `park` are: a
       "Done for today" that stays silent about two three-week-old unanswered
       questions is the page marking its own homework.
+
+      THE THREE CLAUSES ARE IN THE ORDER THE THREE SECTIONS APPEAR BELOW —
+      still open, then up next, then gone quiet. A summary that lists its own
+      subjects in a different order than it renders them makes the reader
+      hunt. Reorder these together or not at all.
       {% endcomment %}
       <div class="empty empty--done">
         <h2>Done for today.</h2>
         <p>
-          {% if held_total %}{{ held_total }} more {% if held_total == 1 %}is{% else %}are{% endif %} pacing out over the coming days. {% endif %}
           {% if still_open_total %}{{ still_open_total }} {% if still_open_total == 1 %}question is{% else %}questions are{% endif %} still open below. {% endif %}
+          {% if held_total %}{{ held_total }} more {% if held_total == 1 %}is{% else %}are{% endif %} pacing out over the coming days. {% endif %}
           {% if park_total %}{{ park_total }} {% if park_total == 1 %}contact has{% else %}contacts have{% endif %} gone quiet; park them below when you're ready. {% endif %}
           That's {{ pace.done }} of {{ pace.goal }} this week.
         </p>
@@ -169,63 +357,100 @@ on every quick action so all of it stays in sync.
     {% endif %}
 
     {% comment %}
-    Day-one seeds. Only ever present when the queue is silent (the view's own
-    gate), so this can never push real work down the page — where there is
-    work, `seeds` is empty and this renders nothing at all.
+    Day-one seeds. NOT RANKED, and it does not need to be: `_cockpit_context`
+    already conditions this lane on the ABSENCE of real work rather than
+    merely ordering it behind — no lane, no debrief, no chat prep, nothing
+    held, nothing still open, and fewer than SEED_NETWORK_FLOOR contacts. So
+    it cannot push real work down the page whatever its position: where there
+    is work, `seeds` is empty and this renders nothing at all.
+
+    It sits here because the empty-state headline directly above it is the
+    sentence that introduces it ("Your network is still thin ... Start here").
+    That adjacency is the whole reason for this slot. The board is the one
+    section seeds can co-render with, and it leads — a confirmed date the
+    student can still act on outranks a setup step even on day one.
     {% endcomment %}
     {% if seeds %}{% include "crm/_seed_lane.html" %}{% endif %}
 
     {% comment %}
-    Chat prep. First on the page whenever it exists: a conversation happening
-    in a few hours outranks every follow-up email, and the work is not
-    remembering it — it is walking in with the last one in your head. Only
-    ever today, and only chats with a real time on them.
+    Still open. Critical prompts that have gone unanswered so long they stopped
+    being urgent and started being stuck (crm.today._stale_critical). They keep
+    every control a card has — the student is the only one who can say whether
+    the chat happened — they just stop spending a plan slot to ask it again.
+    Above the gone-quiet strip because these are unfinished work; parks are
+    exits.
+
+    RUNG 3, AND ABOVE "UP NEXT" NOW. These are the most NEGLECTED thing on
+    the page: a clock that already fired, that the plan has explicitly
+    stopped budgeting for ("there is no such morning" — see the return dict
+    in `_cockpit_context`). "Up next" is the opposite — work with a morning
+    coming, held back by the cap alone. A fired clock outranks an unfired
+    one, and two three-week-old questions should not sit underneath a
+    collapsed accordion.
+
+    NOT HIGHER THAN THAT, and the restraint is the point. It is tempting to
+    read "most overdue" as "most urgent" and lead the page with it. The page
+    has already answered that question in writing: `_stale_critical` exists
+    because these cards, given the top slots, rendered the identical sentence
+    on sixteen consecutive working days and starved everything else. Their
+    urgency is precisely what decayed away. Promoting them by position would
+    undo by layout what the decay does by rank.
     {% endcomment %}
-    {% if chat_prep %}
-      <section class="lane lane-prep">
+    {% if still_open_total %}
+      <section class="lane lane-stale">
         <h2 class="lane-title">
-          <span class="lane-dot"></span>
-          Chat{{ chat_prep|length|pluralize }} today
-          <span class="lane-count" aria-live="polite">{{ chat_prep|length }}</span>
+          Still open <span class="lane-count" aria-live="polite">{{ still_open_total }}</span>
+          <span class="lane-note">no longer taking a slot</span>
         </h2>
         <div class="act-grid">
-          {% for p in chat_prep %}
-            <article class="act-card kin-reveal act-prep" style="--i:{{ forloop.counter0 }}">
-              <div class="act-top">
-                <span class="opp-firm">{% if p.contact.firm %}{{ p.contact.firm.name|smart_title }}{% else %}{{ p.contact.firm_text|smart_title }}{% endif %}</span>
-                <span class="prep-at">{{ p.when }}</span>
-              </div>
-              <h3 class="act-name"><a href="{% url 'crm:contact_detail' p.contact.id %}">{{ p.contact.name|smart_title }}</a></h3>
-              {% if p.contact.role %}<p class="act-role">{{ p.contact.role|smart_title }}</p>{% endif %}
-              <div class="act-badges">
-                <span class="chip warmth-{{ p.contact.warmth }}">{{ p.contact.warmth }}</span>
-                {% if p.firm_date %}
-                  <span class="prio prio-prep">{{ p.firm_date_label }} · {{ p.firm_date_days }}d</span>
-                {% endif %}
-              </div>
-              {% if p.learned %}
-                {% comment %}Last time's debrief, verbatim and clamped. This is
-                the whole reason the card exists.{% endcomment %}
-                <p class="act-reason prep-learned">Last time: {{ p.learned }}</p>
-              {% else %}
-                <p class="act-reason">No notes from last time. Debrief this one afterwards and there will be.</p>
-              {% endif %}
-              <div class="act-quick">
-                <div class="act-primary">
-                  <a class="btn btn-primary act-btn" href="{% url 'crm:contact_detail' p.contact.id %}">Open their file</a>
-                </div>
-              </div>
-            </article>
-          {% endfor %}
+          {% for a in still_open %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
         </div>
       </section>
     {% endif %}
 
     {% comment %}
-    Debrief lane. Sits above the cadence lanes because it is about a
-    conversation that ALREADY happened — what you remember from it is
-    decaying while the rest of the queue waits. Empties itself: a chat
-    older than crm.debrief.DEBRIEF_EXPIRES_AFTER_DAYS stops asking.
+    The remainder, stated. Held is not gone: the count is exact, the policy
+    holding it is named in words, and Show all opens the complete list with
+    fully working cards. The cap paces; it never filters.
+
+    NOT RANKED. This is a disclosure, not a section of work — it is the
+    footnote that explains the "2 of 29 today" in the plan's own lane
+    headings, and it belongs near what it footnotes rather than at whatever
+    rung its contents would score. Collapsed, it costs one line of scroll.
+    {% endcomment %}
+    {% if held_total %}
+      <details class="upnext">
+        <summary>
+          <span class="upnext-count">{{ held_total }} more queued</span>
+          <span class="upnext-why">pacing out at {{ daily_cap }} a day</span>
+          <span class="upnext-toggle">Show all</span>
+        </summary>
+        <div class="act-grid upnext-grid">
+          {% for a in held %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
+        </div>
+      </details>
+    {% endif %}
+
+    {% comment %}
+    Debrief lane. RUNG 5, the page's one DECAYING record: a conversation that
+    already happened, whose detail is worth less every day it goes unwritten.
+    Decay outranks the things on nobody's clock below it, and loses to
+    everything with a real deadline above it — nothing closes if this waits a
+    day, it just gets vaguer. Empties itself: a chat older than
+    crm.debrief.DEBRIEF_EXPIRES_AFTER_DAYS stops asking.
+
+    THE SECTION DOES NOT MOVE WITH THE AGE OF ITS CARDS, and the temptation
+    to make it is worth naming. A three-day-old debrief is genuinely worse
+    than today's. But `DEBRIEF_EXPIRES_AFTER_DAYS` already bounds the whole
+    span, `pending()` already sorts newest-first inside the lane, and the
+    page's only age-driven mechanism (`_stale_critical`) moves CARDS between
+    sections rather than sliding a section around. A heading that appears at
+    a different height every morning is one the student has to re-find every
+    morning. Age belongs inside a lane, never to the lane.
+
+    It used to sit above the cadence lanes on the strength of that decay
+    argument. It does not any more: an unwritten note is a copy of something
+    that already happened, and a deadline that passes is gone.
     {% endcomment %}
     {% if debriefs %}
       <section class="lane lane-debrief">
@@ -279,9 +504,22 @@ on every quick action so all of it stays in sync.
     proposals, not contacts. Nothing is in the CRM until Add is tapped
     (capture/discovery.py), and Dismiss is remembered forever by the SCAN —
     never again proposed automatically, always restorable by hand (the Undo
-    strip above, and Settings > Dismissed from your inbox). Sits with the
-    debrief lane above the plan: both are about mail that already happened.
+    strip above, and Settings > Dismissed from your inbox).
+
+    RUNG 6, BELOW THE PLAN. This lane used to sit above it, filed with the
+    debrief lane as "mail that already happened". That grouping was about
+    provenance, not urgency, and it is what put a review queue in front of
+    the day's overdue work. A proposal is real and it is waiting on the
+    student, but nothing external is closing on it: an unanswered yes/no
+    costs nothing today and the same nothing tomorrow.
+
+    The internal order of this family — undo strip, autopilot narration,
+    reviewed batch, proposals, what your mail said, application updates — is
+    left exactly as it was. Reshuffling inside it would be inventing severity
+    the page does not compute; the fix was where the family sits, not what it
+    contains.
     {% endcomment %}
+
     {% comment %}
     The Undo strip. Present only in the response to a dismissal (see
     crm.views._dismiss_undo_offer) — any later swap re-renders this cockpit
@@ -333,20 +571,20 @@ on every quick action so all of it stays in sync.
                   quiet line (never a button) when everything on the page
                   has already been read. Most days are this day, and this
                   day must not read as an invitation to spend.
+
+    ONE CHAIN, TWO PLACES, STILL EXACTLY ONE STRIP. `idle` renders at the
+    FOOT of this family instead of here (see its own note down there). It is
+    a separate `{% if %}` rather than a branch of this chain, and that is
+    safe for a reason worth stating: every branch tests the same single value
+    `autopilot_state.phase`, so at most one branch anywhere on the page can
+    fire. The split changes where a strip lands, never whether one does.
+
+    The four states BELOW stay here, above the cards, because they are
+    narration ABOUT those cards — what a run is doing to them, or did to
+    them. A status line reads correctly before its subject; an offer does
+    not.
     {% endcomment %}
-    {% if autopilot_state.phase == "idle" %}
-      <div class="prop-undo ap-strip" role="status">
-        <span class="prop-undo-said">
-          Autopilot can read {% if autopilot_state.preview.clamped %}{{ autopilot_state.preview.decidable }} of {{ autopilot_state.preview.candidates }}{% else %}{{ autopilot_state.preview.candidates }}{% endif %} card{{ autopilot_state.preview.candidates|pluralize }} for you{% if autopilot_state.preview.free_rows %}, plus {{ autopilot_state.preview.free_rows }} application update{{ autopilot_state.preview.free_rows|pluralize }}{% endif %}.
-          <span class="prop-undo-note">
-            About {{ autopilot_state.preview.credits }} credit{{ autopilot_state.preview.credits|pluralize }} of your {{ autopilot_state.preview.balance }}. It decides only — nothing is added to your network until you tap again.{% if autopilot_state.preview.clamped %} The rest stay as cards, untouched.{% endif %}
-          </span>
-        </span>
-        <button type="button" class="btn btn-primary prop-undo-btn"
-                title="Read every card and write up a verdict for each. Nothing is added until you tap Add all."
-                hx-post="{% url 'crm:autopilot_start' %}">Run Autopilot</button>
-      </div>
-    {% elif autopilot_state.phase == "active" %}
+    {% if autopilot_state.phase == "active" %}
       <div class="prop-undo ap-strip" role="status" aria-live="polite"
            hx-get="{% url 'crm:autopilot_state' %}" hx-trigger="every 4s">
         <span class="prop-undo-said">
@@ -608,58 +846,38 @@ on every quick action so all of it stays in sync.
     {% include "crm/_application_lane.html" %}
 
     {% comment %}
-    Today's plan. Only non-empty lanes render. A capped lane says "N of M
-    today" — never a bare count that mixes what's shown with what isn't.
-    {% endcomment %}
-    {% for lane in lanes %}
-      <section class="lane lane-{{ lane.key }}">
-        <h2 class="lane-title">
-          {% if lane.key == "critical" %}<span class="lane-dot"></span>{% endif %}
-          {{ lane.label }}
-          <span class="lane-count" aria-live="polite">{% if lane.capped %}{{ lane.count }} of {{ lane.total }} today{% else %}{{ lane.count }}{% endif %}</span>
-        </h2>
-        <div class="act-grid">
-          {% for a in lane.items %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
-        </div>
-      </section>
-    {% endfor %}
+    Run Autopilot — the offer, at the FOOT of the cards it is an offer about.
 
-    {% comment %}
-    The remainder, stated. Held is not gone: the count is exact, the policy
-    holding it is named in words, and Show all opens the complete list with
-    fully working cards. The cap paces; it never filters.
-    {% endcomment %}
-    {% if held_total %}
-      <details class="upnext">
-        <summary>
-          <span class="upnext-count">{{ held_total }} more queued</span>
-          <span class="upnext-why">pacing out at {{ daily_cap }} a day</span>
-          <span class="upnext-toggle">Show all</span>
-        </summary>
-        <div class="act-grid upnext-grid">
-          {% for a in held %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
-        </div>
-      </details>
-    {% endif %}
+    RUNG 8, the bottom of the ladder, because this is the one strip on Today
+    that says nothing about the student's own pipeline. Every other section
+    reports a fact they own: a chat at 2pm, a close in three days, a question
+    nobody answered. This reports that a paid feature exists and prices it.
+    It rendered SIXTH from the top, above the day's overdue work, which meant
+    a student opening Today to find out what was urgent scrolled past an
+    advertisement to reach it. Nothing about the product justifies that; only
+    the order the features were built in ever did.
 
-    {% comment %}
-    Still open. Critical prompts that have gone unanswered so long they stopped
-    being urgent and started being stuck (crm.today._stale_critical). They keep
-    every control a card has — the student is the only one who can say whether
-    the chat happened — they just stop spending a plan slot to ask it again.
-    Above the gone-quiet strip because these are unfinished work; parks are
-    exits.
+    Below rather than above, deliberately. `today_state` only returns `idle`
+    when there is something decidable, so this strip always has subject
+    matter — the proposals and application updates directly above it. After
+    them it reads as an offer to process what you just looked at. Before
+    them it reads as a toll gate.
+
+    The other four phases stay above those cards; see the note up there for
+    why a status line and an offer want opposite sides of their subject.
     {% endcomment %}
-    {% if still_open_total %}
-      <section class="lane lane-stale">
-        <h2 class="lane-title">
-          Still open <span class="lane-count" aria-live="polite">{{ still_open_total }}</span>
-          <span class="lane-note">no longer taking a slot</span>
-        </h2>
-        <div class="act-grid">
-          {% for a in still_open %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
-        </div>
-      </section>
+    {% if autopilot_state.phase == "idle" %}
+      <div class="prop-undo ap-strip" role="status">
+        <span class="prop-undo-said">
+          Autopilot can read {% if autopilot_state.preview.clamped %}{{ autopilot_state.preview.decidable }} of {{ autopilot_state.preview.candidates }}{% else %}{{ autopilot_state.preview.candidates }}{% endif %} card{{ autopilot_state.preview.candidates|pluralize }} for you{% if autopilot_state.preview.free_rows %}, plus {{ autopilot_state.preview.free_rows }} application update{{ autopilot_state.preview.free_rows|pluralize }}{% endif %}.
+          <span class="prop-undo-note">
+            About {{ autopilot_state.preview.credits }} credit{{ autopilot_state.preview.credits|pluralize }} of your {{ autopilot_state.preview.balance }}. It decides only — nothing is added to your network until you tap again.{% if autopilot_state.preview.clamped %} The rest stay as cards, untouched.{% endif %}
+          </span>
+        </span>
+        <button type="button" class="btn btn-primary prop-undo-btn"
+                title="Read every card and write up a verdict for each. Nothing is added until you tap Add all."
+                hx-post="{% url 'crm:autopilot_start' %}">Run Autopilot</button>
+      </div>
     {% endif %}
 
     {% comment %}

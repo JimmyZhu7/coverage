@@ -137,7 +137,37 @@ def _build_actions(user):
     each action for display (label, prose reason, warmth, compose link,
     last-touch evidence, deadline chip).
     Returns (actions, contacts)."""
-    now = timezone.now()
+    # localtime, NOT the bare `timezone.now()` this used to be. Same INSTANT
+    # either way — `localtime` only changes which zone the value is expressed
+    # in — but `cadence.due_actions` does `today = as_of.date()` on it
+    # (cadence.py, and its docstring says so: "`today = as_of.date()` drives
+    # all business-day math"), so the representation decides which calendar
+    # day the entire queue is scored against.
+    #
+    # THE SKEW, MEASURED. `settings.TIME_ZONE` is UTC and the founder's
+    # account is Asia/Hong_Kong (+8), activated per request by
+    # `accounts.middleware`. Between HK midnight and HK 8am — a third of
+    # every day, and the third a student on that clock actually opens the
+    # page in — the UTC date is still yesterday. Every business-day
+    # threshold in the engine then ran a day behind: follow-up windows,
+    # park-after days, and the `closes_on` filter that decides what is
+    # CRITICAL. Concretely, `cadence._closing_soon` drops a deadline with
+    # `d < today`, so an application that closed yesterday in Hong Kong was
+    # still "today" in UTC and kept firing a priority-0 re-ping — the page
+    # putting its loudest card on a deadline the student had already missed.
+    #
+    # `cadence` knew: the `not_yet` guard in its thank-you branch names
+    # "any caller whose `as_of` is behind the touch's own clock (see the
+    # UTC-vs-local skew the web layer currently has)". This is that caller,
+    # and this is that skew. The guard stays — it is defending against
+    # future-dated touches generally, not just against us.
+    #
+    # One variable, not two: `now`'s other use below is
+    # `c.snoozed_until > now`, an ordering of two aware datetimes, which is
+    # decided by the instant and never by the zone it is printed in. Same
+    # `timezone.localtime(timezone.now())` pattern already used at
+    # `_schedule`.
+    now = timezone.localtime(timezone.now())
     today = timezone.localdate()
     # Deliberately NOT filtered on `snoozed_until` — see _SNOOZE_EXEMPT_ACTIONS.
     # The engine sees every live contact; the snooze is applied to the actions

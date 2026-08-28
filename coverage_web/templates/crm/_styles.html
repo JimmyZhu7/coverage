@@ -220,29 +220,67 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      dashed one. Danger tint only when the date itself is urgent — the same
      bar the deadlines rail and the cadence engine hold, so a colour here
      never disagrees with the same firm's colour there. */
+  /* THE CARD IS A ROW, NOT A COLUMN — measured, 2026-08-28, demo account at
+     a 1440px viewport. The board lane is full-width in `cockpit-main`, so
+     every card was a 1048 x 140px rectangle holding four SHORT single lines
+     of text. `space-between` on the head and the foot then pushed their
+     right-hand element the entire width of the card away from its own
+     sibling: 918px of nothing between "J.P. Morgan" and its "2d" chip, and
+     844px between "View contacts" and "Dismiss". Stacking the button row
+     UNDER text that occupied a fifth of the available width cost another
+     40px of height on top of that. Same on all four card states — the two
+     voids are structural to the card, not something a longer people-line
+     ever fills.
+
+     So: two columns. Everything the card SAYS runs down the left at its
+     natural width, everything the card OFFERS clusters at the right, and
+     the height is now the taller of the two rather than their sum. Nothing
+     is removed and no markup changed — `.play-foot` simply moves beside the
+     text instead of below it. Measured after: 140.4px -> 92.4px a card,
+     561px -> 370px for the founder's four-card lane, and both horizontal
+     voids gone (`flex-start` / `flex-end` in place of `space-between`).
+
+     This is `e9bd00b`'s rule on a different widget: a card's height is what
+     it holds, never a reserved gap. */
   .lane-plays { margin-bottom: var(--s6); }
   .play-list { list-style: none; margin: 0; padding: 0;
     display: flex; flex-direction: column; gap: var(--s2); }
   .play-card { background: var(--surface); border: 1px solid var(--line);
     border-left: 3px solid var(--accent-line);
-    border-radius: var(--r-panel); padding: var(--s3) var(--s4); }
+    border-radius: var(--r-panel); padding: var(--s3) var(--s4);
+    display: grid; align-items: center; column-gap: var(--s4);
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "head   foot"
+                         "fact   foot"
+                         "people foot"; }
   .play-card.is-urgent { border-left-color: var(--danger); }
-  .play-head { display: flex; align-items: baseline; justify-content: space-between;
-    gap: var(--s3); }
+  /* flex-start, not space-between: the countdown belongs to the name it is
+     counting down for, and reads as a pair only when it sits beside it. */
+  .play-head { grid-area: head; display: flex; align-items: baseline;
+    justify-content: flex-start; gap: var(--s2); min-width: 0; }
   .play-firm { font-weight: var(--w-med); color: var(--ink); }
   .play-when { font-family: var(--font-mono); font-size: var(--fs-xs);
     color: var(--ink-3); white-space: nowrap; }
   .play-when.is-urgent { color: var(--danger); font-weight: var(--w-med); }
-  .play-fact { margin: 2px 0 0; font-size: var(--fs-s); color: var(--ink-2); }
-  .play-people { margin: var(--s2) 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
-  .play-foot { display: flex; align-items: center; justify-content: space-between;
-    gap: var(--s3); margin-top: var(--s3); }
+  .play-fact { grid-area: fact; margin: 2px 0 0; font-size: var(--fs-s);
+    color: var(--ink-2); min-width: 0; }
+  /* --s1 between two lines that now sit inside one tight block; --s2 was
+     spacing them as if the foot were still going to land underneath. */
+  .play-people { grid-area: people; margin: var(--s1) 0 0;
+    font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; }
+  .play-foot { grid-area: foot; display: flex; align-items: center;
+    justify-content: flex-end; gap: var(--s2); }
   .play-cta { padding: 6px 12px; font-size: var(--fs-xs); white-space: nowrap; }
   .play-dismiss { background: transparent; border-color: transparent;
     color: var(--ink-3); padding: 3px 8px; font-size: var(--fs-xs); }
   .play-dismiss:hover { background: var(--paper); border-color: var(--line); color: var(--ink-2); }
+  /* Narrow: there is no width to put a second column in, so the card goes
+     back to one and the buttons return below the text they act on. */
   @media (max-width: 560px) {
-    .play-foot { flex-wrap: wrap; }
+    .play-card { grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "head" "fact" "people" "foot"; }
+    .play-foot { flex-wrap: wrap; justify-content: flex-start;
+      margin-top: var(--s3); }
   }
 
   /* Up next: the held-back remainder. Collapsed by default, exact count in
