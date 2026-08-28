@@ -116,6 +116,8 @@ class Opportunity(models.Model):
     status = models.CharField(max_length=32, blank=True, default="")
     deadline = models.DateField(null=True, blank=True)
     deadline_precision = models.CharField(max_length=32, blank=True, default="")
+    # 0.0-1.0 only — see `Meta.constraints`'s `opportunities_confidence_in_range`
+    # for why that is a database CHECK and not a validator here.
     confidence = models.FloatField(default=0.0)
     # Tri-state (sponsors / does not sponsor / unknown), not a plain
     # boolean — §6's honesty theme ("labeled honestly ... because v1 has
@@ -166,6 +168,22 @@ class Opportunity(models.Model):
         db_table = "opportunities"
         constraints = [
             models.UniqueConstraint(fields=["firm", "url"], name="uniq_opportunity_firm_url"),
+            # See `firm_slug_not_blank` on `Firm` for the precedent: a
+            # database CHECK rather than a field validator, because a
+            # validator only runs inside a ModelForm's `full_clean()` and
+            # every writer here (`ingest.py`, `enrich_postings`, admin,
+            # `manage.py shell`) calls `.save()`/`.create()` directly.
+            # `confidence` is a 0.0-1.0 float everywhere it's read
+            # (`confidence_marker`, `deadline_provenance`'s `_CONFIRMED_AT`
+            # comparison) — a stray percentage (`95` for "95%") would clear
+            # every `>=` threshold those readers use while being 95x too
+            # large, silently. See `firm_dates_confidence_in_range` below;
+            # this is its sibling on the other table sharing the same column
+            # shape and the same unrestricted admin `ModelAdmin`.
+            models.CheckConstraint(
+                condition=models.Q(confidence__gte=0.0) & models.Q(confidence__lte=1.0),
+                name="opportunities_confidence_in_range",
+            ),
         ]
         ordering = ["-first_seen"]
         # Until now this table carried exactly two indexes — the primary key
@@ -364,6 +382,12 @@ class FirmDate(models.Model):
     event_kind = models.CharField(max_length=64)
     date = models.DateField(null=True, blank=True)
     precision = models.CharField(max_length=32, blank=True, default="")
+    # 0.0-1.0 — the three-band vocabulary `import_firm_dates.CONFIDENCE_BAND` /
+    # `seed_directory._CONFIDENCE_BAND` map onto (rumor 0.3, reported 0.6,
+    # confirmed_official 1.0), and the only vocabulary `crm.utils._confidence_label`
+    # and every `>= 0.8`/`== 1.0` reader downstream understands. See
+    # `Meta.constraints`'s `firm_dates_confidence_in_range` for why this is a
+    # database CHECK rather than a validator on the field.
     confidence = models.FloatField(default=0.0)
     source_url = models.URLField(max_length=1024, blank=True, default="")
     found_on = models.DateTimeField(null=True, blank=True)
@@ -375,6 +399,36 @@ class FirmDate(models.Model):
             models.UniqueConstraint(
                 fields=["firm", "cycle", "region", "event_kind"],
                 name="uniq_firm_dates_firm_cycle_region_event",
+            ),
+            # A row (id 44, J.P. Morgan, app_close) once carried
+            # `confidence=95.0` — someone meant "95%" and typed the number
+            # the column's own scale disagrees with. `history=[]` and
+            # `found_on=None` on that row rule out both real writers
+            # (`import_firm_dates.py`, `seed_directory.py` — both look the
+            # label up in a `{"rumor": 0.3, ...}` dict, so neither can ever
+            # emit anything but 0.0/0.3/0.6/1.0); it came in through
+            # `FirmDateAdmin`, which places no bounds on the raw float, or an
+            # equivalent `manage.py shell` write — the same class of path
+            # `firm_slug_not_blank` was added for on `Firm`, and for the same
+            # reason a validator is the wrong tool: `full_clean()` never runs
+            # on a bare `.save()`, which is what the admin's own change form
+            # and every management command here use.
+            #
+            # The corruption was not cosmetic. `_firm_date_row` in
+            # `directory/views.py` treats `confidence >= 0.8` as "confirmed"
+            # and `confidence_marker` renders it as a percentage — 95.0 cleared
+            # both, rendering a "confirmed · 9500%" badge on the firm's public
+            # timeline page. It happened to fall short of the *exact* `== 1.0`
+            # checks the calendar (`crm/calendar_views.py`, `crm/today.py`) and
+            # the cadence/Coverage-Gaps engine (`crm.utils._confidence_label`,
+            # keyed off `round(value, 1)`) use, so neither the calendar nor a
+            # re-ping ever fired on it — but a 0.3 or 0.6 fat-fingered as 30 or
+            # 60 the same way would only need to land on a different reader to
+            # do worse, which is why the guard is on the column, not on a
+            # handful of the callers.
+            models.CheckConstraint(
+                condition=models.Q(confidence__gte=0.0) & models.Q(confidence__lte=1.0),
+                name="firm_dates_confidence_in_range",
             ),
         ]
         ordering = ["firm_id", "cycle", "event_kind"]
