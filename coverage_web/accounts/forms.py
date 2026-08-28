@@ -613,21 +613,19 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
     "followup_after_business_days": (
         "First Follow-Up",
         "business days",
-        "How long a cold contact sits without a reply before Coverage asks "
-        "you to follow up.",
+        "How long a cold contact goes unanswered before Coverage flags a "
+        "follow-up.",
     ),
     "park_after_business_days": (
         "Park After",
         "business days",
-        "Silence after your last touch before the contact is parked and stops "
-        "surfacing.",
+        "Silence after your last touch before Coverage parks the contact.",
     ),
     "max_cold_touches": (
         "Max Cold Touches",
         "touches",
-        "How many times you'll reach out to someone who's never replied, "
-        "before Coverage parks them. Capped at 2 — one note, one "
-        "follow-up, never a second.",
+        "How many times you'll reach out to someone who never replies. "
+        "Capped at 2: one note, one follow-up.",
     ),
     "advocate_touch_min_weeks": (
         "Advocate Check-In",
@@ -640,7 +638,7 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
         "Keep-Warm Check-In",
         "weeks",
         "How long after a coffee chat before Coverage reminds you to circle "
-        "back, for people you've met who aren't advocates yet.",
+        "back.",
     ),
     "pre_deadline_reping_days": (
         "Pre-Deadline Re-Ping",
@@ -770,8 +768,8 @@ class CadenceForm(SectionForm):
             "field": self["advocate_target"],
             "unit": "advocates",
             "description": (
-                "Advocates at a firm before Coverage calls it covered. Feeds "
-                "the gap ladder on Network and your firm fit score."
+                "Advocates at a firm before Coverage calls it covered. "
+                "Feeds your firm fit score."
             ),
             "default": DEFAULT_ADVOCATE_TARGET,
         })

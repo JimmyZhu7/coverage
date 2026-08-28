@@ -593,7 +593,6 @@
                aria-labelledby="profile-h">
         <div class="set-head">
           <h2 id="profile-h">Profile</h2>
-          <p>Who you are, where you study, and what you are recruiting for.</p>
         </div>
         <div class="set-body">
           <form class="set-form" method="post" action="{% url 'accounts:settings' %}"
@@ -627,7 +626,6 @@
                aria-labelledby="work-auth-h">
         <div class="set-head">
           <h2 id="work-auth-h">Work Authorization</h2>
-          <p>Where you can work without sponsorship.</p>
         </div>
         <div class="set-body">
           <form method="post" action="{% url 'accounts:settings' %}">
@@ -667,14 +665,12 @@
                aria-labelledby="preferences-h">
         <div class="set-head">
           <h2 id="preferences-h">Preferences</h2>
-          <p>How Coverage looks, and how it reaches you.</p>
         </div>
         <div class="set-body">
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Theme</span>
-              <div class="set-row-desc">Light, dark, or whatever this device says.
-                Saved on this device, not your account.</div>
+              <div class="set-row-desc">Saved on this device, not your account.</div>
             </div>
             <div class="set-row-control">
               <div class="theme-pick" role="radiogroup" aria-label="Theme">
@@ -722,7 +718,7 @@
             <input type="hidden" name="section" value="notifications">
             <div class="set-row-main">
               <label class="set-row-label" for="{{ notifications_form.weekly_digest_enabled.id_for_label }}">Weekly Email Digest</label>
-              <div class="set-row-desc">What closes this week, who to ping, and what's new. Sent only when there's something to report.</div>
+              <div class="set-row-desc">What closes this week and who to ping. Sent only when there's news.</div>
             </div>
             <div class="set-row-control">
               {{ notifications_form.weekly_digest_enabled }}
@@ -745,7 +741,6 @@
                aria-labelledby="firms-h">
         <div class="set-head">
           <h2 id="firms-h">Target Firms</h2>
-          <p>Who you're recruiting for, by tier.</p>
         </div>
         <div class="set-body">
           {% comment %}
@@ -986,7 +981,6 @@
                aria-labelledby="cadence-h">
         <div class="set-head">
           <h2 id="cadence-h">Pace &amp; Cadence</h2>
-          <p>How much you aim for, and how hard Coverage chases.</p>
         </div>
         <div class="set-body">
           {% comment %}
@@ -1010,9 +1004,8 @@
               </div>
               <div class="pace-main">
                 <label class="set-row-label" for="{{ pace_form.weekly_touch_goal.id_for_label }}">Weekly Touch Goal</label>
-                <div class="set-row-desc" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">The target the pace ring on Today measures you
-                  against. <span class="set-default">Leave blank to use the default of
-                  {{ default_weekly_goal }}.</span></div>
+                <div class="set-row-desc" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">What the pace ring on Today measures you against.
+                  <span class="set-default">Default: {{ default_weekly_goal }}.</span></div>
                 {% if pace_form.weekly_touch_goal.errors %}
                   <div class="set-row-err" id="{{ pace_form.weekly_touch_goal.auto_id }}-err">{{ pace_form.weekly_touch_goal.errors }}</div>
                 {% endif %}
@@ -1157,12 +1150,10 @@
           <div class="set-group" id="campaigns">
             <h3 class="set-group-h">Bulk Sends</h3>
             <p class="set-note">
-              Tell us which of these were your job search. A send you say was
-              something else comes off your daily queue and off your network
-              board. The people stay in your contacts, your search and your
-              history, and the board says how many it is hiding and lets you
-              look. Anyone who writes to you still surfaces, whatever the send
-              was.
+              Tell us which of these were your job search. Marking one as
+              something else takes it off your daily queue and network
+              board. Contacts stay in your CRM and history, and anyone who
+              writes to you still surfaces.
             </p>
             {% for c in campaigns %}
             <div class="set-row">
@@ -1229,10 +1220,9 @@
           <div class="set-group" id="dismissed-proposals">
             <h3 class="set-group-h">Dismissed From Your Inbox</h3>
             <p class="set-note">
-              People you told Coverage not to propose. A dismissed person is
-              never proposed again by a scan. That stands until you restore
-              them here, which puts them back on Today waiting for your tap.
-              Nothing was written to your network either way.
+              Never proposed again until you restore them here, back on
+              Today waiting for your tap. Nothing was written to your
+              network either way.
             </p>
             {% for p in dismissed_proposals %}
             <div class="set-row">
@@ -1284,11 +1274,9 @@
           <div class="set-group" id="duplicates">
             <h3 class="set-group-h">One Person, Two Cards?</h3>
             <p class="set-note">
-              Pairs that look like the same person. Nothing merges without
-              your tap. Merging keeps the first card, moves the other card's
-              history onto it, and archives the spare. Every merge can be
-              undone here. If they are two people, say so once and Coverage
-              remembers.
+              Nothing merges without your tap. Merging folds the duplicate's
+              history into the kept card and archives the spare. Every merge
+              can be undone here.
             </p>
             {% for s in merge_suggestions %}
             <div class="set-row">
@@ -1402,7 +1390,7 @@
               <span class="set-row-label">Buy More Credits</span>
               <div class="set-row-desc">
                 {% if credits.stripe_configured %}
-                  One-time top-ups, on top of your monthly refill. Never expire.
+                  One-time top-ups on top of your monthly refill. Never expire.
                 {% else %}
                   Top-ups aren't switched on yet. Your monthly refill is unaffected.
                 {% endif %}
@@ -1433,7 +1421,7 @@
                aria-labelledby="gmail-live-h">
         <div class="set-head">
           <h2 id="gmail-live-h">Gmail Live</h2>
-          <p>Real-time reply and bounce detection, straight from your inbox.
+          <p>Real-time reply and bounce detection from your inbox.
             {% if gmail_live.trial_days_left %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro trial &middot; {{ gmail_live.trial_days_left }} day{{ gmail_live.trial_days_left|pluralize }} left</span>
             {% elif not gmail_live.is_pro %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro</span>{% endif %}</p>
         </div>
@@ -1466,13 +1454,12 @@
                         Real-time sync is queued and will turn on shortly.
                       {% endif %}
                     {% else %}
-                      Real-time sync is off on the Free plan — use Scan Now
-                      below to check for updates.
+                      Real-time sync is off on Free — use Scan Now below.
                     {% endif %}
                   {% endif %}
                 {% else %}
-                  Not connected. Coverage only reads mail to detect bounces,
-                  replies, and calendar invites — no message bodies are stored.
+                  Not connected. Coverage only reads mail for bounces,
+                  replies, and calendar invites — never stores message bodies.
                 {% endif %}
               </div>
             </div>
@@ -1504,7 +1491,7 @@
                 {% if gmail_live.backfill_status == "done" %}
                   Done — {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize }} logged from your existing contacts' history.
                 {% elif gmail_live.backfill_status == "running" %}
-                  Running now — this can take a few minutes for a year of mail.
+                  Running — can take a few minutes for a year of mail.
                 {% elif gmail_live.backfill_status == "failed" %}
                   Hit a snag — it'll retry automatically.
                 {% else %}
@@ -1527,7 +1514,7 @@
               <span class="set-row-label">Rescan Gmail</span>
               <div class="set-row-desc">
                 {% if gmail_live.rescan_status == "running" %}
-                  Running now — this can take a few minutes.
+                  Running — can take a few minutes.
                 {% elif gmail_live.rescan_status == "pending" %}
                   Queued — starts shortly.
                 {% elif gmail_live.rescan_status == "failed" %}
@@ -1540,7 +1527,7 @@
                     {% endif %}
                   {% endwith %}
                 {% else %}
-                  Re-check your whole Gmail history against all of your contacts.
+                  Re-check your Gmail history against all your contacts.
                 {% endif %}
                 {% comment %}
                 Free's once-per-GMAIL_FREE_RESCAN_INTERVAL_DAYS throttle
@@ -1586,7 +1573,6 @@
                aria-labelledby="security-h">
         <div class="set-head">
           <h2 id="security-h">Sign-In &amp; Security</h2>
-          <p>How you get into this account.</p>
         </div>
         <div class="set-body">
           <div class="set-row">
@@ -1616,7 +1602,7 @@
               <span class="set-row-label">Password</span>
               <div class="set-row-desc">
                 {% if has_usable_password %}
-                  Used together with your email address to sign in.
+                  Used with your email to sign in.
                 {% else %}
                   You don't have a password. You sign in with a connected account.
                 {% endif %}
@@ -1652,7 +1638,7 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Sign Out Other Devices</span>
-              <div class="set-row-desc">End every other signed-in session, like the library computer you forgot about. This device stays signed in.</div>
+              <div class="set-row-desc">Ends every other signed-in session. This device stays signed in.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:signout_all' %}"
@@ -1676,7 +1662,6 @@
                aria-labelledby="data-h">
         <div class="set-head">
           <h2 id="data-h">Your Data</h2>
-          <p>What Coverage holds, and the terms it holds it under.</p>
         </div>
         <div class="set-body">
           {% comment %}
@@ -1726,9 +1711,8 @@
             <div class="set-row-main">
               <span class="set-row-label">Import &amp; Export</span>
               <div class="set-row-desc">Bring contacts in from a CSV, or download
-                everything Coverage holds on you as one ZIP of CSVs: contacts,
-                touches, firms, applications, tasks, debriefs, scores,
-                and your profile.</div>
+                everything Coverage holds as one ZIP: contacts, touches, firms,
+                applications, tasks, debriefs, scores, and your profile.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:import' %}">Import</a>
@@ -1763,7 +1747,6 @@
                aria-labelledby="danger-h">
         <div class="set-head">
           <h2 id="danger-h">Danger Zone</h2>
-          <p>Irreversible. Read before you tap.</p>
         </div>
         <div class="set-body">
           <div class="set-row">
@@ -1771,7 +1754,7 @@
               <span class="set-row-label">Delete Account</span>
               <div class="set-row-desc">Permanently delete your account and everything in it.
                 This can't be undone. <a href="{% url 'accounts:export' %}">Export your data</a>
-                first if you might want it.</div>
+                first if you want it.</div>
             </div>
             <div class="set-row-control">
               <a class="btn btn-danger" href="{% url 'accounts:delete' %}"
