@@ -637,6 +637,39 @@ def test_the_onboarding_wizard_no_longer_offers_an_assets_step(client, logged_in
     assert "Your Angles" not in body
 
 
+class TestTheLastStepLeadsWithGmail:
+    """The wizard's last step used to have one door (upload a CSV) and told
+    students to walk through it BEFORE connecting Gmail, because the
+    historical pass searched per-contact and so found nobody new. The sent
+    sweep (capture/gmail_live.py) changed the fact under that argument, so
+    Gmail leads — but only where the deploy can honour it.
+    """
+
+    def _cfg(self, monkeypatch, value):
+        from accounts import views
+        monkeypatch.setattr(views.gmail_live, "is_configured", lambda: value)
+
+    def test_connect_gmail_is_the_primary_action(self, client, logged_in, monkeypatch):
+        self._cfg(monkeypatch, True)
+        body = client.get(_step("import")).content.decode()
+        assert reverse("capture:gmail_connect") in body
+        assert "Import a CSV" in body  # the second door, still there
+
+    def test_an_unconfigured_deploy_renders_no_dead_button(
+        self, client, logged_in, monkeypatch
+    ):
+        """`capture:gmail_connect` raises Http404 without credentials."""
+        self._cfg(monkeypatch, False)
+        body = client.get(_step("import")).content.decode()
+        assert reverse("capture:gmail_connect") not in body
+        assert "Import a CSV" in body
+
+    def test_the_step_order_did_not_change(self, client, logged_in):
+        from accounts.views import ONBOARDING_STEPS
+
+        assert ONBOARDING_STEPS == ["profile", "work_auth", "firms", "import"]
+
+
 def test_onboarding_step_counter_covers_every_step(client, logged_in):
     from accounts.views import ONBOARDING_STEPS
 
