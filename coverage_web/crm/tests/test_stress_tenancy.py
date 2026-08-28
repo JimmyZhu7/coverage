@@ -427,21 +427,22 @@ def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
         line for line in proc.stdout.splitlines()
         if "/tests/" not in line and "/migrations/" not in line
     ]
-    # Measured at 77 lines on the audit of 2026-08-27 (a handful are prose
+    # Measured at 77 lines on the audit of 2026-08-27, raised to 84 the same
+    # night after several concurrent merges (the bench/park dismissal writes
+    # in crm/today.py, the firm-tier setter in crm/views.py, and others) each
+    # added one properly-scoped call. Each of the 7 new lines was read before
+    # raising this number: every one carries an explicit `user=request.user`
+    # predicate on the write it performs. A handful of the 84 are prose
     # mentions inside docstrings rather than calls; the grep is deliberately
-    # blunt so it cannot be evaded by formatting). Every actual call site was
-    # read that day and either carries an explicit `user=` predicate or is a
-    # documented cross-tenant path — a worker loop that enumerates tenants, a
-    # staff-only aggregate, or a write whose `user` is the argument it is
-    # scoped by.
+    # blunt so it cannot be evaded by formatting.
     #
     # A RATCHET, not a limit. The headroom is small on purpose: this is meant
     # to fire on the next batch of unscoped calls so somebody looks at them,
     # which is the whole justification for `all_objects` being greppable.
     # Raising the number is a legitimate response — AFTER reading the diff.
-    assert len(lines) <= 80, (
-        f"{len(lines)} unscoped `all_objects` lines, up from the 77 reviewed "
-        "on 2026-08-27. Each new call site needs an explicit `user=` predicate "
+    assert len(lines) <= 87, (
+        f"{len(lines)} unscoped `all_objects` lines, up from the 84 reviewed "
+        "on 2026-08-28. Each new call site needs an explicit `user=` predicate "
         "or a written cross-tenant justification — read the diff, then raise "
         "this number deliberately."
     )
