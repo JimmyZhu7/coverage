@@ -2674,15 +2674,23 @@ def week(request: HttpRequest) -> HttpResponse:
     from assistant.situation import build_situation
 
     situation = build_situation(request.user)
-    cockpit.pop("_actions_for_brief", None)
-    daily_brief = get_cached_brief(request.user)
+    # `_actions_for_brief` is the SAME already-filtered queue `_cockpit_context`
+    # just built for the cards above — parked, campaign-excluded, recruitment-
+    # hidden and snoozed contacts are already gone from it. Popped rather than
+    # left on `cockpit` (the template has no business reading it directly, see
+    # the key's own comment) but handed to `get_cached`/`is_pending` first: a
+    # cached brief that named someone who has since dropped out of THIS list
+    # entirely (parked from the queue an hour after this morning's generation,
+    # the founder's live case) is stale, and these two calls are what notice.
+    brief_actions = cockpit.pop("_actions_for_brief", None) or []
+    daily_brief = get_cached_brief(request.user, brief_actions)
     return render(
         request,
         "crm/week.html",
         {**cockpit, **_dashboard_context(request.user),
          "daily_brief": daily_brief,
          # Only when there is nothing cached AND the feature is live.
-         "daily_brief_pending": daily_brief is None and brief_pending(request.user),
+         "daily_brief_pending": daily_brief is None and brief_pending(request.user, brief_actions),
          # Capped to 3 for the card strip — same number the brief's own
          # queue-card cap uses (assistant.brief.MAX_SITUATION_SUMMARIZED),
          # so the sentence above never references a 4th change nobody can
