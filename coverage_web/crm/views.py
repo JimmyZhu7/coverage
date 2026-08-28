@@ -1994,6 +1994,7 @@ def _parked_cohorts(user) -> list[dict]:
         Contact.objects.for_user(user)
         .filter(archived=False, thread_state="parked")
         .select_related("firm")
+        .annotate(last_touch_ts=models_Max("touches__ts"))
         .order_by("name")
     )
     if not parked:

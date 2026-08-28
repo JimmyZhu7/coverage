@@ -55,7 +55,7 @@
               <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
               <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}</span>
             </div>
-            <span class="arch-when">
+            <span class="arch-reason">
               {{ c.hide_reason|truncatechars:64 }}
             </span>
             {% comment %}

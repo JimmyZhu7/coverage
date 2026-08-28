@@ -16,13 +16,9 @@
       <p class="pagehead-eyebrow">Network</p>
       <h1 class="pagehead-title">Parked Contacts</h1>
       <p class="pagehead-sub">
-        Grouped by the action that parked them, read straight off the record
-        — not re-derived. Park is a decision, not a deletion: every touch
-        stays, and one click below brings a whole cohort back into the
-        queue. Cold contacts you bring back with nothing new will simply be
-        proposed for park again in about two weeks; chatted and advocate
-        contacts also get a bench card on Today when their firm has
-        something live to talk about.
+        Grouped by how they were parked. Park is a decision, not a
+        deletion: every touch stays, and one click brings a person or a
+        whole cohort back.
       </p>
     </div>
   </header>
@@ -33,53 +29,71 @@
       <p><a href="{% url 'crm:contact_list' %}">Back to Network</a></p>
     </div>
   {% else %}
-    <p class="sec-label">{{ parked_total }} parked</p>
-    {% for cohort in cohorts %}
-      <div class="panel">
-        <form method="post" action="{% url 'crm:contact_parked_unpark' %}"
-              data-unpark-form data-count="{{ cohort.count }}" data-cold="{{ cohort.cold_count }}">
-          {% csrf_token %}
-          {% for c in cohort.contacts %}<input type="hidden" name="ids" value="{{ c.id }}">{% endfor %}
-          <div class="cohort-head">
-            <div>
-              <p class="cohort-label">
-                {% if cohort.when %}{{ cohort.when|date:"M j, Y, g:i A" }} — {% endif %}{{ cohort.label }}
-              </p>
-              <p class="cohort-warmth">
-                {{ cohort.count }} contact{{ cohort.count|pluralize }}
-                {% for w in cohort.warmth_counts %}{% if w.n %} · {{ w.n }} {{ w.key }}{% endif %}{% endfor %}
-              </p>
-            </div>
-            {% comment %}
-            Equal-weight bulk verb, not a dismissal link — the same "your
-            original decision is respected by default" posture the bench
-            card's own "Leave parked" button holds, just applied to a whole
-            cohort instead of one person. Restores thread_state from EACH
-            contact's own warmth (crm.today.BENCH_RESTORE_STATE), never one
-            value for everybody.
-            {% endcomment %}
-            <button type="submit" class="btn btn-primary">Bring these {{ cohort.count }} back</button>
-          </div>
-        </form>
-        <div class="arch-list">
-          {% for c in cohort.contacts %}
-            <div class="arch-row">
-              <div class="arch-id">
-                <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
-                <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}</span>
+    {% comment %}
+    Same search+sort toolbar the other three off-board ledgers carry
+    (`_contact_search.html`) — the one thing this page was missing to read
+    as a sibling of theirs, and the page most likely to want it: 115 of the
+    founder's contacts are parked, nearly all of them in two single-minute
+    bulk cohorts, so finding one name means scanning the largest list of
+    the four. `data-group` on each cohort's panel keeps sort scoped inside
+    its own cohort rather than shuffling people between bulk-unpark forms.
+    {% endcomment %}
+    <div id="parked-contacts">
+      <p class="sec-label">{{ parked_total }} parked</p>
+      {% include "crm/_contact_search.html" with target="parked-contacts" %}
+      {% for cohort in cohorts %}
+        <div class="panel" data-group>
+          <form method="post" action="{% url 'crm:contact_parked_unpark' %}"
+                data-unpark-form data-count="{{ cohort.count }}" data-cold="{{ cohort.cold_count }}">
+            {% csrf_token %}
+            {% for c in cohort.contacts %}<input type="hidden" name="ids" value="{{ c.id }}">{% endfor %}
+            <div class="cohort-head">
+              <div>
+                <p class="cohort-label">
+                  {% if cohort.when %}{{ cohort.when|date:"M j, Y, g:i A" }} — {% endif %}{{ cohort.label }}
+                </p>
+                <p class="cohort-warmth">
+                  {{ cohort.count }} contact{{ cohort.count|pluralize }}
+                  {% for w in cohort.warmth_counts %}{% if w.n %} · {{ w.n }} {{ w.key }}{% endif %}{% endfor %}
+                </p>
               </div>
-              <span class="chip warmth-{{ c.warmth }}">{{ c.warmth }}</span>
-              <form method="post" action="{% url 'crm:contact_parked_unpark' %}"
-                    data-unpark-form data-count="1" data-cold="{% if c.warmth == 'cold' %}1{% else %}0{% endif %}">
-                {% csrf_token %}
-                <input type="hidden" name="ids" value="{{ c.id }}">
-                <button type="submit" class="btn">Bring back</button>
-              </form>
+              {% comment %}
+              Equal-weight bulk verb, not a dismissal link — the same "your
+              original decision is respected by default" posture the bench
+              card's own "Leave parked" button holds, just applied to a whole
+              cohort instead of one person. Restores thread_state from EACH
+              contact's own warmth (crm.today.BENCH_RESTORE_STATE), never one
+              value for everybody. Always the WHOLE cohort, so this count
+              never follows the search box above.
+              {% endcomment %}
+              <button type="submit" class="btn btn-primary">Bring these {{ cohort.count }} back</button>
             </div>
-          {% endfor %}
+          </form>
+          <p class="cd-none" data-group-empty hidden>No matches in this cohort.</p>
+          <div class="arch-list">
+            {% for c in cohort.contacts %}
+              <div class="arch-row" data-searchable data-order="{{ forloop.counter0 }}"
+                   data-name="{{ c.name }}"
+                   data-firm="{% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %}"
+                   data-touch="{% if c.last_touch_ts %}{{ c.last_touch_ts|date:'U' }}{% endif %}"
+                   data-search="{{ c.name }} {% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %} {{ c.role }}">
+                <div class="arch-id">
+                  <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
+                  <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}</span>
+                </div>
+                <span class="chip warmth-{{ c.warmth }}">{{ c.warmth }}</span>
+                <form method="post" action="{% url 'crm:contact_parked_unpark' %}"
+                      data-unpark-form data-count="1" data-cold="{% if c.warmth == 'cold' %}1{% else %}0{% endif %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="ids" value="{{ c.id }}">
+                  <button type="submit" class="btn">Bring back</button>
+                </form>
+              </div>
+            {% endfor %}
+          </div>
         </div>
-      </div>
-    {% endfor %}
+      {% endfor %}
+    </div>
   {% endif %}
 </div>
 

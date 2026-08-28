@@ -1280,9 +1280,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     top: 2px; color: var(--ink-3); transition: transform var(--t-fast); }
   .warmth-section:not([open]) > summary::after { transform: rotate(-90deg); }
   .warmth-section:not([open]) { padding-bottom: var(--s3); opacity: 0.85; }
-  /* ---- Archived list: ledger rows, hairline-separated ---- */
+  /* ---- Archived list: ledger rows, hairline-separated ----
+     One anatomy, shared by all four off-board ledgers (Archived, Parked,
+     Not Your Recruiting, Not Related to Recruitment): identity, one
+     contextual middle column, one bring-back action. The middle column's
+     capped to 320px — wide enough that most cited reasons (44 truncated
+     characters) still fit one line, tight enough that a long one wraps to
+     a second rather than stretching the whole row — same reason the
+     button column stays `auto` and never competes with it for space. */
   .arch-list { display: flex; flex-direction: column; }
-  .arch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  .arch-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px) auto;
     align-items: center; gap: var(--s3) var(--s4);
     padding: 10px 0; border-top: 1px solid var(--line); }
   .arch-row:first-child { border-top: 0; }
@@ -1291,12 +1298,23 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .arch-id a { font-weight: var(--w-med); color: var(--ink); }
   .arch-meta { font-size: var(--fs-s); color: var(--ink-3); min-width: 0;
     overflow-wrap: anywhere; }
+  /* A value: a date, on the one ledger (Archived) whose middle column is
+     one. Mono/tabular so it reads as data, single line since it never
+     runs long. */
   .arch-when { font-family: var(--font-mono); font-size: var(--fs-xs);
     font-variant-numeric: tabular-nums; color: var(--ink-3); white-space: nowrap; }
+  /* A quotation: the rule's own cited reason (Not Related to Recruitment)
+     or the send it arrived on (Not Your Recruiting) — HOLD #2's "checkable,
+     not magic" line. This used to reuse `.arch-when`'s mono/nowrap
+     treatment, built for a short date, which either squeezed a whole
+     sentence onto one line or let it run past the row. Body type, allowed
+     to wrap, set in italics so it reads as a quote rather than a value. */
+  .arch-reason { font-size: var(--fs-s); font-style: italic; color: var(--ink-2);
+    white-space: normal; overflow-wrap: anywhere; }
   .arch-row .btn { padding: 6px 14px; font-size: var(--fs-xs); }
   @media (max-width: 640px) {
     .arch-row { grid-template-columns: minmax(0, 1fr) auto; }
-    .arch-when { grid-column: 1 / -1; }
+    .arch-when, .arch-reason { grid-column: 1 / -1; }
   }
 
   /* ---- Parked cohorts (crm/contact_parked.html): one bulk verb per group,
@@ -1432,6 +1450,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   /* The Compose draft editor on the contact page. */
   .cd-opener { margin-top: var(--s3); }
+  /* The Relationship summary card reuses this same disclosure as its ONLY
+     child (nothing precedes it to space away from), so the margin above
+     that every other `.cd-opener` needs would just be a dead gutter here. */
+  .cd-card > .cd-opener:first-child { margin-top: 0; }
   .cd-opener > summary { cursor: pointer; list-style: none; font-size: var(--fs-s);
     font-weight: var(--w-med); color: var(--ink-2); display: inline-flex;
     align-items: center; gap: 7px; }

@@ -84,12 +84,21 @@ values.
     own words about this person and this is not, so the two must never share
     a box a reader could mistake for one authorship. Own htmx target too, for
     the same reason the coffee-chat brief has one — rewriting a summary must
-    not discard an unsaved opener draft in the card above.{% endcomment %}
+    not discard an unsaved opener draft in the card above.
+
+    Collapsed by default, open once written — the same rule the compose
+    draft below uses for the same reason: on the founder's own 223 contacts
+    nobody has ever written one yet, so an always-expanded card here was a
+    full-height "nothing to see" box on every single contact page. The
+    `.cd-opener` disclosure this reuses is the same control the coffee-chat
+    brief already uses one card over.{% endcomment %}
     <div class="cd-card kin-reveal" style="--i:1">
-      <h2 class="cd-h">Relationship summary</h2>
-      <div id="contact-ai-summary" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
-        {% include "crm/_contact_ai_summary.html" %}
-      </div>
+      <details class="cd-opener"{% if contact.ai_summary %} open{% endif %}>
+        <summary>Relationship summary</summary>
+        <div id="contact-ai-summary" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+          {% include "crm/_contact_ai_summary.html" %}
+        </div>
+      </details>
     </div>
 
     {# ---- Where this stands, and moving it ---- #}
