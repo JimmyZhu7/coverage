@@ -13,17 +13,16 @@ float to the top.
 {% comment %}
 THE BOARD STATE — the totals and the shape of the cycle, bound into one unit.
 
-They were two free-floating strips with a 12px gap, which made them read as
-two unrelated bands in a stack of seven. They answer one question between
-them ("what does the board look like right now": how many, and when they
-close), they are the only two bands here that are always present, and they
-sit on the boundary between what you ASKED for (the controls above) and what
-the board ANSWERS (the roles below). A hairline marks that boundary — the
-same rule the section labels wear.
+They answer one question between them ("what does the board look like right
+now": how many, and when they close), and they are the only two rows here
+that are always present.
 
-Grouped here rather than inside _cycle_band.html because that partial is
-shared with Settings' target-cycle picker, where there is no stat strip to
-bind to.
+The hairline that used to mark the boundary above THIS div now sits above
+`#cov-scope` instead (see `_styles.html`'s `#cov-scope` rule) — it fences the
+whole status group (what's hidden, the save prompt, and this) as one bounded
+section, not just the bottom half of it. Grouped in this file rather than
+inside _cycle_band.html because that partial is shared with Settings'
+target-cycle picker, where there is no stat strip to bind to.
 {% endcomment %}
 <div class="board-state">
 <div class="stat-strip">
@@ -47,9 +46,25 @@ bind to.
   {% if checked_ago %}<span class="ss-item ss-checked">checked {{ checked_ago }} ago</span>{% endif %}
 </div>
 
-{% comment %}When this cycle actually closes, month by month — the aggregate
-truth behind every fuse below. See _cycle_band.html.{% endcomment %}
-{% include "directory/_cycle_band.html" %}
+{% comment %}
+THE MONTH RAIL, FOLDED. Real navigation on this page is a link or a form
+control; this is neither — `_cycle_band.html` renders `role="img"`, drawn
+bars with a tooltip, nothing inside it is clickable, and it does not filter
+or scroll anything. That makes it the one row in the old six-band stack that
+was purely supplementary ("when does this cycle actually close", a fact nice
+to have, never needed to read the totals above it or to reach the first role
+card), so it is the one that moves behind a click rather than staying
+permanently paid for in height. `cycle_months` is checked here too (not just
+inside the include) so a call with nothing to draw never renders a toggle
+that opens onto emptiness — the same "never disclose to nothing" rule the
+filter bar's own <details> follows.
+{% endcomment %}
+{% if cycle_months %}
+<details class="cyc-fold">
+  <summary>See it by month</summary>
+  {% include "directory/_cycle_band.html" %}
+</details>
+{% endif %}
 </div>
 
 {% comment %}

@@ -545,13 +545,44 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      numbers in the display family, a hairline divider between items. */
   /* Left-aligned and a size quieter than v4: the strip is orientation, not a
      dashboard, and the fs-l numbers were competing with the firm names below. */
-  /* The board state: totals + cycle shape as one unit. The hairline is the
-     boundary between the controls above and the answer below; the children
-     lose their own bottom margins so the group spaces itself. */
-  .board-state { border-top: 1px solid var(--line); padding-top: var(--s3);
-    margin: 0 0 var(--s4); }
+  /* THE BOARD STATUS — #cov-scope (what's hidden, and the save prompt) and
+     .board-state (the totals + cycle shape) as ONE bounded section, not two.
+     The hairline used to sit only above .board-state, so the hidden-roles
+     sentence and the save banner floated above it unbounded — three
+     page-level meta rows reading as three separate bands when they answer
+     one connected question ("what does this board look like, and what of it
+     is not shown"). The hairline moves to the top of #cov-scope so it fences
+     the WHOLE group at once; .board-state keeps only its bottom margin, the
+     boundary into the firm columns below. `#cov-scope` renders even when
+     empty (no active hides, no save prompt), in which case this pads a
+     hairline directly onto .board-state with nothing between — the same
+     rendered result the old split produced for that case, so no visual
+     regression when there is nothing to disclose. */
+  #cov-scope { border-top: 1px solid var(--line); padding-top: var(--s3); }
+  .board-state { margin: 0 0 var(--s4); }
   .board-state .stat-strip { margin-bottom: 6px; }
   .board-state .cycband { margin-bottom: 0; }
+
+  /* The month rail, folded. It is a decorative shape (role="img" — a shown
+     COUNT per month, no link, no filter, nothing to click inside it), not a
+     control, so it earns a lighter disclosure than the row-2 Filters fold: a
+     dotted-underline toggle in the stat strip's own rhythm rather than a
+     bordered summary box. Collapsed by default because every fact it draws
+     ("when does this cycle actually close") is supplementary context, not
+     something needed to read the totals above it. */
+  .cyc-fold { margin: 6px 0 0; }
+  .cyc-fold > summary { cursor: pointer; list-style: none; display: inline-flex;
+    align-items: center; gap: 4px; width: fit-content;
+    font-family: var(--font-mono); font-size: var(--fs-nano);
+    letter-spacing: 0.04em; color: var(--ink-3);
+    text-decoration: underline dotted currentColor; text-underline-offset: 3px;
+    transition: color var(--t-fast); }
+  .cyc-fold > summary::-webkit-details-marker { display: none; }
+  .cyc-fold > summary:hover { color: var(--accent-ink); }
+  .cyc-fold > summary:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; }
+  .cyc-fold[open] > summary { margin-bottom: var(--s2); }
+  .cyc-fold .cycband { margin-top: 0; }
 
   .stat-strip { display: flex; flex-wrap: wrap; align-items: center;
     justify-content: flex-start; gap: var(--s2) var(--s3); margin: 0 0 var(--s3);
