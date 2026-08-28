@@ -877,7 +877,21 @@ def _stale_window_days(c, params) -> int:
 
 def _contact_card(c, *, tier, today, cadence=None, as_of=None):
     """One full contact card (radar style): initials, pills, firm · role,
-    note bullets in plain grammar, and days since the last touch.
+    and days since the last touch.
+
+    THE DESCRIPTION LINE THAT USED TO LIVE HERE. This card used to parse
+    `notes`/`angle` into up to 3 "bullets" and clamp them to 2 lines with
+    CSS. Read across the founder's own 182-contact board (2026-08-27): 120
+    of those bullets were pure provenance noise the capture pipeline wrote
+    for itself ("Found in your sent mail · Aug 27, 2026", "You wrote to
+    them: <subject line>") and the CSS line-clamp guillotined the genuinely
+    useful ones ("Replied to your email: coffee in HK, offered...") at
+    exactly the point a reader needed the rest of the sentence. Redesigned
+    on the founder's own call ("I prefer no description, simplify") to drop
+    it from the card entirely rather than trim it — `notes` and `angle`
+    still render in full, unclamped, on the contact detail page
+    (`crm/_contact_live.html`'s `.cd-notes`/`.cd-angle`), one click away via
+    this card's own "Log Touch" link.
 
     `as_of` mirrors `crm.debrief.pending`'s optional parameter of the same
     name: `None` means "real current time" (every live caller), and tests
@@ -885,12 +899,6 @@ def _contact_card(c, *, tier, today, cadence=None, as_of=None):
     the clock."""
     parts = [p for p in (c.name or "").split() if p]
     initials = "".join(p[0] for p in parts[:2]).upper()
-    bullets = []
-    for raw in (c.notes, c.angle):
-        for frag in (raw or "").replace(";", "\n").splitlines():
-            frag = frag.strip().strip("-• ").rstrip(".")
-            if frag:
-                bullets.append(frag[0].upper() + frag[1:])
     last = c.last_touch_ts
     days_since = _calendar_days_ago(last, as_of=as_of) if last else None
     window = _stale_window_days(c, cadence or {})
@@ -906,17 +914,12 @@ def _contact_card(c, *, tier, today, cadence=None, as_of=None):
         # Blank when unknown — the chip simply doesn't render, rather than the
         # card asserting a region nobody set.
         "region": (c.region or "").upper(),
-        "bullets": bullets[:3],
         "days_since": days_since,
         "stale_pct": round(stale * 100),
         # The tint threshold decided here, where the arithmetic lives, not by
         # a CSS substring hack that cannot tell 8% from 80%.
         "stale_tint": ("due" if stale >= 1.0 else
                        "warming" if stale >= 0.7 else "fresh"),
-        # Compose surface: same rule as every other mailto: on the site —
-        # body from `opener` ONLY, never `angle` (that's the user's private
-        # note ABOUT the person, not a draft addressed TO them).
-        "mailto": _mailto(c.email or "", body=(c.opener or "")),
     }
 
 

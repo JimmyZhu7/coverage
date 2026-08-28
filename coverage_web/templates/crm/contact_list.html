@@ -599,10 +599,10 @@
                   {% comment %}
                   The card's own checkbox, not a wrapping <label>: unlike
                   `.net-mini`, this card is already full of its own click
-                  targets (the mailto link, Log Touch, Edit) — turning the
-                  whole card into a label would fight every one of them for
-                  the click. So the box is the explicit, deliberate target,
-                  same as ticking a row in a mail client.
+                  targets (Log Touch, Edit) — turning the whole card into a
+                  label would fight both of them for the click. So the box
+                  is the explicit, deliberate target, same as ticking a row
+                  in a mail client.
                   {% endcomment %}
                   <input class="cc-check" type="checkbox" name="ids"
                          value="{{ card.c.id }}"
@@ -627,12 +627,32 @@
                     {% if card.school %}<span class="pill cc-school">{{ card.school }}</span>{% endif %}
                   </div>
                 </div>
-                {% if card.bullets %}
-                  <ul class="cc-bullets">
-                    {% for b in card.bullets %}<li>{{ b }}.</li>{% endfor %}
-                  </ul>
-                {% endif %}
-                {% if card.c.email %}<a class="cc-email" href="{{ card.mailto }}">{{ card.c.email }}</a>{% endif %}
+                {% comment %}
+                No description line and no on-card email, on the founder's
+                own call reviewing his live board ("think about if there
+                really should be description. I prefer no description").
+
+                The old `.cc-bullets` parsed `notes`/`angle` into up to 3
+                lines and clamped them to 2 with CSS. Read across his real
+                182-contact board: 120 of those bullets were provenance
+                noise the capture pipeline logs for itself ("Found in your
+                sent mail · Aug 27, 2026", "You wrote to them: <subject
+                line>"), and the clamp cut off the useful ones ("Replied to
+                your email: coffee in HK, offered...") right where a reader
+                needed the rest of the sentence — a card spending two lines
+                to be unreadable. Both fields still render in full on the
+                contact detail page (`_contact_live.html`'s `.cd-notes` /
+                `.cd-angle`), unclamped, one click away via Log Touch.
+
+                The email address (and its Gmail-compose link) went for the
+                same reason from the other direction: real addresses on this
+                board run past what a ~250px card can show on one line
+                (`nicholas.atkinson@guggenheimpartners.com`, 40 characters),
+                and a truncated fragment ending in an ellipsis is exactly
+                what this redesign is against. Compose is one click away too
+                — the contact detail page's primary "Compose" button, seeded
+                from the same opener draft this card's link used to carry.
+                {% endcomment %}
                 <div class="cc-foot">
                   <span class="cc-since">
                     {% if card.days_since is not None %}{{ card.days_since }}d since last touch{% else %}Never contacted{% endif %}

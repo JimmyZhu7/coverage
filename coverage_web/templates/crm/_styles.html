@@ -1276,15 +1276,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cohort-label { font-weight: var(--w-med); color: var(--ink); margin: 0; }
   .cohort-warmth { font-size: var(--fs-s); color: var(--ink-3); margin: 2px 0 0; }
 
-  /* Capped to two rows (roughly 8 cards at this page's usual desktop
-     width) and internally scrollable, matching .net-panel's own pattern
-     two sections up: a warmth group holding 93 cards ("Emailed, No
-     Reply") used to push the whole page to match its length, burying
-     Firm Coverage and everything below it a full screen down. 460px =
-     two .contact-card rows (212px floor × 2) plus one gap, with a little
-     slack for a card that grows past its floor. */
+  /* Capped and internally scrollable, matching .net-panel's own pattern two
+     sections up: a warmth group holding 93 cards ("Emailed, No Reply") used
+     to push the whole page to match its length, burying Firm Coverage and
+     everything below it a full screen down. 416px = three .contact-card
+     rows (128px floor × 3) plus two gaps — redone for the simplified card
+     below and MEASURED against it (a one-line name + one-line firm renders
+     at 125px; the floor gives it 3px to breathe, same small-bump-over-the-
+     tight-value move `.net-mini`'s own floor already took). Was two rows at
+     a 212px floor, back when the card still carried a description and an
+     email line — same visual footprint, one more row of cards in it. */
   .contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--s4); max-height: 460px; overflow-y: scroll; }
+    gap: var(--s4); max-height: 416px; overflow-y: scroll; }
   .contact-grid { scrollbar-width: thin; scrollbar-color: var(--line-strong) var(--paper); }
   .contact-grid::-webkit-scrollbar { width: 12px; }
   .contact-grid::-webkit-scrollbar-track { background: var(--paper);
@@ -1294,16 +1297,21 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     min-height: 40px; }
   .contact-grid::-webkit-scrollbar-thumb:hover { background: var(--accent);
     border: 3px solid var(--paper); background-clip: padding-box; }
-  /* Fixed height so every contact card is identical; the footer pins to the
-     bottom (margin-top:auto) and the variable bits (bullets, email) are
-     clamped so nothing overflows. */
-  /* 212px is the FLOOR, not a fixed height — same correction as .rolecard in
-     directory/_styles.html. The clamp on .cc-bullets caps the angle at two
-     lines, but two lines plus a long name that wraps, plus pills, email and
-     the action row, still exceeded 212px: `overflow: hidden` then guillotined
-     the second bullet line mid-glyph and the email collided with it. The clamp
-     bounds one field; it can't bound the sum of all of them. */
-  .contact-card { border: 1px solid var(--line); border-radius: var(--r-panel); min-height: 212px;
+  {% comment %}
+  Redesigned on the founder's own call, reviewing his live Network board: no
+  description line, no on-card email, visually simplistic — applied to every
+  card here. What used to make a card 212px tall was a `.cc-bullets` field
+  (up to 3 notes/angle fragments, clamped to 2 lines) plus a `.cc-email`
+  line; both are gone (see the template comment above `.cc-foot` in
+  contact_list.html for why, and views.py::_contact_card for what the real
+  data showed). What is left — checkbox, avatar with its staleness ring,
+  name with its pills, firm · role, and the foot row (days since last touch,
+  Log Touch, Edit) — is a 125px card instead of a 212px one (measured on the
+  demo board, one-line name and firm, no wrap): identity, standing, and the
+  two actions a student uses 174 of these cards for, nothing that sends a
+  reader to the detail page to finish reading it.
+  {% endcomment %}
+  .contact-card { border: 1px solid var(--line); border-radius: var(--r-panel); min-height: 128px;
     padding: var(--s4); display: flex; flex-direction: column; gap: var(--s2);
     overflow: hidden;
     transition: border-color var(--t-fast), box-shadow var(--t-med);
@@ -1312,7 +1320,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        scrolled near — the single biggest render saving on this page. The
        intrinsic-size matches min-height so the scrollbar doesn't jump as
        cards materialise. */
-    content-visibility: auto; contain-intrinsic-size: auto 212px; }
+    content-visibility: auto; contain-intrinsic-size: auto 128px; }
   .contact-card:hover { border-color: var(--accent-line); box-shadow: var(--shadow-1); }
   /* Selected, for bulk actions (`crm:contacts_bulk` — see `#cc-bulk-form`
      in the template). Same tint `.net-mini.is-picked` uses on the Unplaced
@@ -1322,10 +1330,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     background: var(--accent-soft); }
   .cc-head { display: flex; gap: var(--s3); align-items: flex-start; }
   /* The explicit selection control. NOT a wrapping <label> like
-     `.net-mini` — this card already has its own click targets (the mailto
-     link, Log Touch, Edit), so the box has to be its own deliberate target
-     rather than fighting those for the click. Sized like `.net-mini-check`
-     and aligned to the avatar's cap-height, not stretched to the card. */
+     `.net-mini` — this card already has its own click targets (Log Touch,
+     Edit), so the box has to be its own deliberate target rather than
+     fighting those for the click. Sized like `.net-mini-check` and aligned
+     to the avatar's cap-height, not stretched to the card. */
   .cc-check { flex: none; margin-top: 3px; accent-color: var(--accent);
     width: 15px; height: 15px; cursor: pointer; }
   .cc-avatar { width: 40px; height: 40px; border-radius: 50%; flex: none;
@@ -1339,14 +1347,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cc-firm { font-size: var(--fs-s); color: var(--ink-2); }
   .cc-school { align-self: flex-start; background: var(--stale-s); color: var(--stale-t);
     border-color: var(--stale-l); }
-  /* Clamp to 2 clean lines (no mid-glyph cut) rather than a pixel max-height,
-     which guillotines descenders when the face's metrics change. */
-  .cc-bullets { margin: 0; padding-left: 1.1rem; font-size: var(--fs-s);
-    line-height: 1.45; color: var(--ink-2);
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; }
-  .cc-email { font-size: var(--fs-s); line-height: 1.6; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; }
   .cc-foot { display: flex; justify-content: space-between; align-items: center;
     gap: var(--s3); margin-top: auto; padding-top: var(--s2); flex-wrap: wrap; }
   .cc-since { font-size: var(--fs-xs); color: var(--ink-3);
