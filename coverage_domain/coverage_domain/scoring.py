@@ -185,6 +185,31 @@ _ROLE_PHRASES: list[tuple[str, float]] = [
     ("analyst", 30.0),
     ("intern", 20.0),
 ]
+
+# THE ONE PHRASE THAT MAY NOT MATCH AS A BARE SUBSTRING, and it is the lowest
+# tier in the table, which is what made it dangerous. "intern" sits inside
+# "internal" and "international": an "Internal Audit Manager" and an
+# "International Equities" seat both scored 20.0 — the intern tier — where the
+# honest answer is the unrecognized-role baseline (`leverage_unknown_role`,
+# 30.0) or better. The direction of that error is the bad one: it does not
+# merely fail to promote a senior contact, it actively DEMOTES a real one
+# below the score a blank role string would have got, on nothing but a
+# spelling coincidence.
+#
+# `\b` on both ends, with the real intern suffixes spelled out so the tier
+# still catches every shape it was written for: "Intern", "Interns",
+# "Internship", "Summer Internship". Nothing else in `_ROLE_PHRASES` needs
+# this — no other entry is a prefix of a common unrelated word — so the rest
+# keep plain substring semantics exactly as before, via `re.escape`.
+_ROLE_PHRASE_PATTERNS: list[tuple[re.Pattern[str], float]] = [
+    (
+        re.compile(r"\bintern(?:s|ship|ships)?\b" if phrase == "intern"
+                   else re.escape(phrase)),
+        score,
+    )
+    for phrase, score in _ROLE_PHRASES
+]
+
 _ROLE_TOKENS: dict[str, float] = {
     "md": 100.0, "partner": 100.0, "ceo": 100.0, "cfo": 100.0, "coo": 100.0,
     "chief": 100.0, "president": 100.0, "ed": 90.0, "svp": 70.0, "vp": 65.0,
@@ -248,6 +273,27 @@ def _as_dt(value: Any) -> datetime | None:
                 continue
         return None
     return None
+
+
+def _required_as_of(value: Any) -> datetime:
+    """`as_of` coerced to a tz-aware UTC datetime, or a NAMED failure.
+
+    `_as_dt` answers "parse this if you can" and returns None when it cannot,
+    which is right for a touch timestamp — one unreadable `ts` among twenty
+    should be skipped, not fatal. It is wrong for `as_of`, which every axis
+    reads: `score_contact(..., as_of=None)` used to return None from `_as_dt`
+    and then surface, sixty lines later, as `'NoneType' object has no
+    attribute 'astimezone'` — a stack trace that names the serializer rather
+    than the argument, for every unparseable shape alike (None, "", "not a
+    date", an int). There is no defensible default for "when is now", so this
+    refuses at the boundary and says which argument was wrong.
+    """
+    parsed = _as_dt(value)
+    if parsed is None:
+        raise ValueError(
+            f"as_of must be a datetime, date, or ISO-8601 string; got {value!r}"
+        )
+    return parsed
 
 
 def _days_between(later: datetime, earlier: datetime) -> float:
@@ -354,7 +400,20 @@ def _score_responsiveness(
     points purely for having been logged as a chat."""
     sends = [t for t in touches if t.get("kind") in _OUTBOUND_KINDS]
     replies = [t for t in touches if t.get("kind") in _MEANINGFUL_KINDS]
-    meta: dict[str, Any] = {"sends": len(sends), "replies": len(replies), "median_latency_days": None}
+    # `reply_ratio` is seeded here rather than only on the way out, so the
+    # axis dict has the SAME KEYS for every contact. It used to be written
+    # only past the early return below, which meant a contact with no
+    # touches at all came back without it while everyone else had it — a
+    # consumer indexing `axes["responsiveness"]["reply_ratio"]` would work on
+    # 99% of a network and KeyError on the newest person in it. Nothing reads
+    # it today; a payload this engine serializes into a snapshot should not
+    # have an optional field waiting for the first reader to find out.
+    meta: dict[str, Any] = {
+        "sends": len(sends),
+        "replies": len(replies),
+        "median_latency_days": None,
+        "reply_ratio": 0.0,
+    }
     if not sends and not replies:
         return 0.0, meta
 
@@ -421,8 +480,8 @@ def _seniority_from_role(role: str | None) -> float | None:
     if not role:
         return None
     text = role.lower()
-    for phrase, score in _ROLE_PHRASES:
-        if phrase in text:
+    for pattern, score in _ROLE_PHRASE_PATTERNS:
+        if pattern.search(text):
             return score
     tokens = {tok for tok in "".join(ch if ch.isalnum() else " " for ch in text).split()}
     best: float | None = None
@@ -480,8 +539,20 @@ def _contact_reason(
 
     if depth_level >= 3:
         clauses.append("advocate")
-    elif depth_level == 2:
+    elif depth_level == 2 and chat_count:
         clauses.append(f"{chat_count} chat{'s' if chat_count != 1 else ''}")
+    elif depth_level == 2:
+        # DEPTH 2 WITH NO `chat` TOUCH ON RECORD, which is a real state and
+        # not a contradiction: `pipeline.set_state`'s manual_override is the
+        # documented path for a student marking somebody "chatted" without
+        # logging the conversation itself, and both the CRM's own override
+        # control and `assistant.tools.set_contact_status` write exactly that.
+        # The counted clause read "0 chats" for them — a card asserting zero
+        # conversations as its evidence that the conversation happened, which
+        # is the same sentence-arguing-with-itself defect the counted-silence
+        # comment above describes. The count only earns its place when there
+        # is one; otherwise the level is the whole fact.
+        clauses.append("chatted")
     elif depth_level == 1:
         clauses.append("replied, no chat yet")
     elif not counted_silence:
@@ -549,7 +620,7 @@ def score_contact(
         byte-stable.
     """
     p = _merged_params(params)
-    as_of = _as_dt(as_of)  # naive -> UTC, so the serialized as_of never depends on machine tz
+    as_of = _required_as_of(as_of)  # naive -> UTC, so the serialized as_of never depends on machine tz
     tlist = list(touches)
 
     depth_level = _depth_level(tlist)
@@ -666,7 +737,15 @@ def _score_momentum(
             base += 1
             if age <= recent_days:
                 recent += 1
-    meta = {"recent_count": recent, "base_count": base}
+    # `trend_ratio` seeded here, not only written on the way out — same
+    # same-shape-for-every-firm rule as `_score_timeline`'s meta and
+    # `_score_responsiveness`'s `reply_ratio`. `None` is the honest value:
+    # a firm with no interactions in the base window has no trend, which is
+    # different from a trend of zero. `_firm_reason` already reads it with
+    # `.get` and gates on `base_count`, so it is unaffected either way.
+    meta: dict[str, Any] = {
+        "recent_count": recent, "base_count": base, "trend_ratio": None,
+    }
     if base == 0:
         return 0.0, meta
     recent_rate = recent / recent_days
@@ -720,9 +799,16 @@ def _score_timeline(
     nxt = _next_firm_date(firm_dates, user, today)
     warm = sum(1 for cs in contact_scores if cs["composite"] >= params["warm_threshold"])
     advocates = sum(1 for cs in contact_scores if cs["axes"]["depth"]["level"] >= 3)
+    # Every key is seeded here, including the two only the dated path
+    # computes, so the axis payload has the SAME SHAPE for every firm. Same
+    # reasoning as `_score_responsiveness`'s `reply_ratio`: `axes` is
+    # serialized into a snapshot, and a field present for most firms and
+    # absent for the ones with no confirmed date is a KeyError waiting for
+    # its first reader. `None` is the honest value for "no date, so nothing
+    # was measured against one".
     meta: dict[str, Any] = {
         "warm_contacts": warm, "advocates": advocates,
-        "next_event": None, "days_until": None,
+        "next_event": None, "days_until": None, "network_readiness": None,
     }
     if nxt is None:
         # No confirmed date -> not measurably behind; neutral, and say so.
@@ -1032,7 +1118,7 @@ def score_firm(
          "reasoning", "params_version", "inputs_hash", "as_of"}.
     """
     p = _merged_params(params)
-    as_of = _as_dt(as_of)  # naive -> UTC, so the serialized as_of never depends on machine tz
+    as_of = _required_as_of(as_of)  # naive -> UTC, so the serialized as_of never depends on machine tz
     clist = list(contacts)
     tlist = list(touches)
     fdates = list(firm_dates or ())

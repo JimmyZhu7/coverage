@@ -65,6 +65,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import date
 
 from django.conf import settings
 
@@ -89,7 +90,7 @@ class AIExtractError(Exception):
 
 @dataclass(frozen=True)
 class DeadlineGuess:
-    value: str          # ISO date, YYYY-MM-DD
+    value: str          # ISO date, YYYY-MM-DD — parsed, not merely regex-shaped
     phrase: str          # the exact sentence the model quoted, verified as a substring of the input
     confidence: float    # 0.5 -- see module docstring; deliberately below the 0.6 regex tier
 
@@ -153,15 +154,101 @@ def _extract_response_text(api_response: dict) -> str:
     return ""
 
 
+def _parsed_object(raw: str) -> dict:
+    """The model's reply as the JSON OBJECT every prompt here asks for, or an
+    empty dict. Never raises.
+
+    THE BUG THIS REPLACES, which all four grounded extractors had in the same
+    shape: each one did `json.loads(raw)` inside a `try` catching
+    `(ValueError, TypeError)`, then read `parsed.get(...)` OUTSIDE it. That
+    covers a reply that is not JSON, and misses the reply that is PERFECTLY
+    VALID JSON but is not an object -- and `null` is the single most likely
+    such reply, because every prompt in this module spends a paragraph
+    teaching the model to answer with nulls. `json.loads("null")` is `None`,
+    `None.get` is an `AttributeError`, and it is raised from a line no
+    `except` in this module covers.
+
+    Where that landed mattered more than that it happened. The two board-side
+    passes run under management commands that catch `AIExtractError` per row,
+    so one `null` ended a paid batch partway through with a stack trace. The
+    two mail-side passes run INSIDE a mailbox sync and swallow
+    `AIExtractError` precisely so a bad row cannot stop the sync -- an
+    `AttributeError` from three lines further down walked straight past that
+    and took the sync with it, in a function whose docstring promises "never
+    raises". `[]`, `42` and `"a string"` all do the same thing one type over.
+
+    Also unwraps a code fence: models produce one despite the instruction not
+    to, and refusing it would throw away a real answer over its packaging.
+    """
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", (raw or "").strip())
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _iso_day(value) -> str | None:
+    """A model's answer as a bare ISO day in this century, or None.
+
+    Two checks, and both are load-bearing. The `fullmatch` is the CENTURY
+    gate -- it is what keeps "1926-10-30", "26-10-30" and a datetime with a
+    time on it out. `date.fromisoformat` is the CALENDAR gate: "2026-02-30"
+    and "2026-13-01" both satisfy the regex and neither is a day that exists.
+
+    The `isinstance` comes FIRST, because `value` is whatever JSON the model
+    emitted: `re.fullmatch` raises `TypeError` on a bool or an int, and
+    `True` / `20261030` are both replies a model can produce for a field it
+    was told answers with a date or a null.
+    """
+    if not isinstance(value, str):
+        return None
+    if not re.fullmatch(r"20\d{2}-\d{2}-\d{2}", value):
+        return None
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return None
+    return value
+
+
+#: A quote shorter than this is not a citation, whatever it matches. Every
+#: prompt in this module asks for "the exact sentence" that states the fact,
+#: and a substring check alone cannot tell a sentence from a fragment: the
+#: single character "." is a verbatim substring of almost every posting ever
+#: written, and so is the bare year "2027" of any posting that mentions one.
+#: Without a floor, a model that answered {"deadline_iso": "2027-01-15",
+#: "quote": "2027"} would clear the grounding gate on a page that says
+#: "2027 Summer Analyst Program" and nothing about a deadline at all -- a
+#: fabricated date wearing a real substring, which is the exact failure the
+#: grounding rule exists to make impossible.
+#:
+#: Twelve characters, measured after whitespace normalization, is below the
+#: shortest real deadline sentence this app has seen ("Closes 30/10/2026" is
+#: seventeen) and above every fragment a model can reach for by accident. It
+#: only ever TIGHTENS the gate: a quote rejected here would have been trusted
+#: before, never the other way round.
+_MIN_QUOTE_CHARS = 12
+
+
 def _grounded(quote: str | None, source: str) -> bool:
-    """The model's quote must appear verbatim in the source text. Whitespace
-    is the only normalization allowed -- a model that lightly reflows a
-    paragraph while copying it should not lose an otherwise-real quote, but
-    anything else (a paraphrase, a fabricated sentence) will not match."""
-    if not quote:
+    """The model's quote must appear verbatim in the source text, and must be
+    long enough to BE a quote. Whitespace is the only normalization allowed --
+    a model that lightly reflows a paragraph while copying it should not lose
+    an otherwise-real quote, but anything else (a paraphrase, a fabricated
+    sentence) will not match."""
+    # A non-STRING quote is not a quote, and refusing it here rather than
+    # letting `re.sub` decide is the difference between "no answer" and a
+    # `TypeError` raised out of a mailbox sync: a model can emit
+    # `"quote": ["a", "b"]` or `"quote": 42` for a field it was told holds a
+    # sentence, and a non-empty list clears the falsiness check above.
+    if not quote or not isinstance(quote, str):
         return False
     norm = lambda s: re.sub(r"\s+", " ", s).strip()
-    return norm(quote) in norm(source)
+    cleaned = norm(quote)
+    if len(cleaned) < _MIN_QUOTE_CHARS:
+        return False
+    return cleaned in norm(source)
 
 
 def extract_deadline_ai(
@@ -195,22 +282,19 @@ def extract_deadline_ai(
         timeout=timeout,
         retries=retries,
     )
-    raw = _extract_response_text(response).strip()
-    # Models occasionally wrap JSON in a code fence despite instructions;
-    # strip one if present rather than failing the whole row over it.
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
-    try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
-        return None
+    parsed = _parsed_object(_extract_response_text(response))
 
-    deadline_iso = parsed.get("deadline_iso")
+    # `_iso_day`, not a bare regex: `DeadlineGuess.value` is documented as
+    # "ISO date, YYYY-MM-DD" and its caller assigns it straight to a
+    # `DateField`, so a date-SHAPED string naming no real day is exactly the
+    # "unparseable date" the module docstring already says resolves to no
+    # answer. Validating at the SOURCE makes that sentence true for the next
+    # caller too, rather than making each of them re-earn it.
+    deadline_iso = _iso_day(parsed.get("deadline_iso"))
     quote = parsed.get("quote")
     if not deadline_iso or not quote:
         return None
     if not _grounded(quote, t):
-        return None
-    if not re.fullmatch(r"20\d{2}-\d{2}-\d{2}", deadline_iso or ""):
         return None
 
     # 0.5, not the regex tier's 0.6: this is a second-pass, LLM-derived
@@ -298,12 +382,7 @@ def extract_sponsorship_ai(
         timeout=timeout,
         retries=retries,
     )
-    raw = _extract_response_text(response).strip()
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
-    try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
-        return None
+    parsed = _parsed_object(_extract_response_text(response))
 
     value = parsed.get("sponsorship")
     quote = parsed.get("quote")
@@ -411,12 +490,7 @@ def extract_application_event_ai(
         )
     except AIExtractError:
         return None
-    raw = _extract_response_text(response).strip()
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
-    try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
-        return None
+    parsed = _parsed_object(_extract_response_text(response))
 
     value = parsed.get("event")
     quote = parsed.get("quote")
@@ -519,12 +593,7 @@ def extract_mail_fact_ai(
         )
     except AIExtractError:
         return None
-    raw = _extract_response_text(response).strip()
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
-    try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
-        return None
+    parsed = _parsed_object(_extract_response_text(response))
 
     value = parsed.get("fact")
     quote = parsed.get("quote")
