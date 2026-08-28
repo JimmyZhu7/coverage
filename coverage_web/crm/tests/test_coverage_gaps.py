@@ -202,13 +202,18 @@ def test_network_page_shows_gaps_and_advocate_fractions(client):
     assert "Exposed Co" in body
     gap_block = _gap_strip(body)
     assert "Exposed Co" in gap_block and "Covered Co" not in gap_block
-    # Advocate fractions on the cards, both sides of the target.
-    # The fraction became advocate SOCKETS — dots that fill — with the words
-    # kept in the accessible name. Assert both halves of that contract: the
-    # spoken fraction, and a filled and an empty socket actually drawn.
-    assert "2 of 2 advocates" in body and "0 of 2 advocates" in body
+    # The covered card's advocate progress. The fraction became advocate
+    # SOCKETS — dots that fill — with the words kept in the accessible name.
+    assert "2 of 2 advocates" in body
     assert 'adv-socket is-filled' in body
-    assert '<i class="adv-socket"></i>' in body
+    # Exposed Co has zero contacts, so its card renders no bar and no
+    # sockets at all — an empty bar next to two empty dots said nothing its
+    # own "＋ Add a contact" line (already asserted via the gap strip above)
+    # didn't already say. See crm/tests/test_firm_card_badges.py::
+    # test_a_firm_with_nobody_added_shows_no_bar_or_sockets and
+    # ::test_sockets_hide_until_a_firm_has_an_advocate for that contract in
+    # full, including where the "0 of N advocates" number moved to for a
+    # firm that HAS contacts but no advocate yet.
     # The tier cost line ("2 firms × 2 = 4 advocates · ... in place · ... to
     # go") was pulled from Firm Coverage per direct feedback that it read as
     # clutter under every tier label. coverage.tier_cost() is still exercised

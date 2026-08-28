@@ -314,13 +314,22 @@
   <section class="net-coverage">
     <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a card between lanes to change a firm's tier.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
       <div class="net-panel">
-      <div class="net-legend">
-        <span><i class="dot dot-cold"></i> Emailed, No Reply</span>
-        <span><i class="dot dot-replied"></i> Replied</span>
-        <span><i class="dot dot-chatted"></i> Chatted</span>
-        <span><i class="dot dot-advocate"></i> Advocate</span>
-        <span><span class="pill fc-spon">SP</span> Sponsors visas</span>
-      </div>
+      {% comment %}
+      THE LEGEND that used to open this panel is gone. Four warmth dots and
+      an "SP" swatch, explained once, above a grid where most of 54 cards
+      show an empty bar — a fixed row asking every reader to hold "colour =
+      meaning" in their head while scanning dozens of tracks that mostly
+      have no colour to decode. Nothing it said is lost: "SP" already
+      carries its own explanation in the chip's own `title=` below
+      (`fc-spon`), and the warmth words themselves — Replied, Chatted,
+      Emailed No Reply, Advocates — are the section headers of the Contacts
+      list further down this page, dot and label both (see
+      `_WARMTH_SECTIONS` in views.py). A hover on any card's own bar now
+      gives the SAME colours in words, with real counts for that one firm
+      instead of a generic swatch (see `firm_card`'s `bar_title`) — more
+      specific than the legend ever was, and it costs a row only on the
+      card that needs it.
+      {% endcomment %}
       {% for section in tier_sections %}
         <div class="tier-section" data-tier="{{ section.tier|default:'' }}">
           {% comment %}
@@ -357,10 +366,12 @@
                 answers it. Shortened to "SP" and moved into the head row,
                 beside the close date rather than on a row of its own — a
                 card with both used to be four lines for two facts. The
-                board's own legend spells it out once, in `.net-legend`
-                above the tier grid, the same place the warmth dots are
-                explained, so the abbreviation never has to guess at being
-                self-explanatory on a 10px chip.
+                explanation used to live one hop away, spelled out once in
+                a `.net-legend` row above the grid; that row is gone now (see
+                the comment above `.net-panel`'s opening tag), so the chip
+                carries its own explanation directly in `title=` below —
+                still spelled out exactly once, just on the chip itself
+                rather than in furniture above it.
 
                 One removed badge did NOT survive as a sort key, so it moved
                 up to the name row instead of quietly going with the rest:
@@ -382,30 +393,47 @@
                   {% endif %}
                 </div>
                 {% comment %}
-                Bar + advocate sockets share one row — the card is a short
-                grid cell and a stacked line would push the bar out of view
-                (see _styles.html).
+                The whole foot row — bar and sockets both — is gone for a
+                firm with zero contacts. An empty grey track next to two
+                empty dots was the loudest piece of "identical decoration on
+                nearly every card" of everything on this board: a firm
+                nobody has been added to has nothing for a warmth bar to
+                plot, and the suggestion line below ("＋ Add a contact")
+                already says the one true thing about it. Nothing is lost —
+                zero contacts trivially means zero advocates too, the exact
+                fraction the sockets would have shown.
                 {% endcomment %}
+                {% if fc.contact_count %}
                 <div class="firm-card-foot">
-                  <div class="firm-bar" title="{{ fc.contact_count }} contact{{ fc.contact_count|pluralize }}">
+                  <div class="firm-bar" title="{{ fc.bar_title }}">
                     {% for seg in fc.segments %}{% if seg.pct %}<i class="seg seg-{{ seg.warmth }}" style="width: {{ seg.pct }}%"></i>{% endif %}{% endfor %}
                   </div>
-                  {% comment %}Advocate SOCKETS, not a fraction: the target
-                  is 2 or 3 slots, and dots that visibly fill say "one more to
-                  go" faster than 1/2 does. The number stays in the title and
-                  in the accessible name; filled sockets pop with the same
-                  chip-check spring the rest of the product uses. Both name
-                  the target as YOURS, set in Settings — the number alone
-                  ("0/2 advocates") reads like a fixed rule with no visible
-                  source; it's `crm.coverage.advocate_target`, user-editable
-                  and defaulting to 2.{% endcomment %}
+                  {% comment %}
+                  Advocate SOCKETS, not a fraction: the target is 2 or 3
+                  slots, and dots that visibly fill say "one more to go"
+                  faster than 1/2 does. That form is unchanged from the
+                  prior pass. What changed is WHEN it earns a place on the
+                  card: every firm here starts at zero advocates, so a pair
+                  of empty sockets was the single most repeated element on
+                  the whole board — decoration on nearly every card, exactly
+                  as reported. The widget now shows only once there is a
+                  fill to show (`fc.advocates`); the "0 of N" case moves into
+                  the bar's own title above instead of staying a permanent
+                  fixture. The number still names the target as YOURS, set
+                  in Settings, wherever it renders — it's
+                  `crm.coverage.advocate_target`, user-editable and
+                  defaulting to 2.
+                  {% endcomment %}
+                  {% if fc.advocates %}
                   <span class="fc-adv{% if fc.adv_met %} is-met{% endif %}"
                         role="img"
                         aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings"
                         title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings &gt; Cadence">
                     {% for slot in fc.adv_slots %}<i class="adv-socket{% if slot %} is-filled{% endif %}"></i>{% endfor %}{% if fc.adv_met %} ✓{% endif %}
                   </span>
+                  {% endif %}
                 </div>
+                {% endif %}
                 {% comment %}
                 What the Coverage Gaps strip above already gives its worst 6
                 firms, extended to all of them: a status is not a task, and

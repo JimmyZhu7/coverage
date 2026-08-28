@@ -40,10 +40,8 @@ pytestmark = pytest.mark.django_db
 def _tier_board(body: str) -> str:
     """Just the tier cards, not the board around them. The Coverage Gaps
     strip above it names the same firms and legitimately still carries an
-    "N Open" badge, and `.net-legend` (also inside this section) explains
-    the "SP" chip once with a live sample of it — so a whole-section search
-    for `fc-spon` can never tell a real card's pill apart from the legend's.
-    Starting at the first tier lane skips both and leaves only the cards."""
+    "N Open" badge. Starting at the first tier lane skips it and leaves only
+    the cards."""
     start = body.index('<div class="tier-section"')
     return body[start : body.index("</section>", start)]
 
@@ -97,9 +95,8 @@ def test_the_sponsors_pill_is_not_a_count_and_stays(client, student):
     whether this firm is open to them at all — and no other surface on this
     board answers it. Removing it as collateral would drop information, not
     noise. Shortened to "SP" on the card itself (a 10px chip has no room for
-    a word), with the full claim in its title attribute and spelled out once
-    in the legend above the grid — see `test_the_legend_explains_the_sp_chip`
-    for that half."""
+    a word), with the full claim carried in its own title attribute — see
+    `test_the_sp_chip_explains_itself_without_a_legend` for that half."""
     _busy_firm(student, sponsors=True)
     board = _board(client, student)
 
@@ -129,11 +126,60 @@ def test_the_progress_bar_and_the_suggestion_are_what_stayed(client, student):
     board = _board(client, student)
 
     assert 'class="firm-bar"' in board, "the warmth progress bar is gone"
-    assert "adv-socket" in board, "the advocate sockets are gone from the bar row"
     assert "Work Nick Tehle" in board, (
         "the reach-out suggestion is gone — with the badges removed it is the "
         "only thing on the card telling a student what to do next."
     )
+
+
+def test_sockets_hide_until_a_firm_has_an_advocate(client, student):
+    """Every firm on a 54-card board starts at zero advocates, so a pair of
+    empty dot sockets was the one piece of decoration reported as identical
+    on nearly every card. `_busy_firm` has one contact and no advocate yet —
+    exactly the common case — so its card shows the bar (it has real warmth
+    to plot) but not the socket widget. The number these sockets would have
+    shown does not disappear: it moves into the bar's own tooltip instead,
+    the one element a reader is already hovering to read this firm's
+    coverage."""
+    _busy_firm(student)
+    board = _board(client, student)
+
+    assert "adv-socket" not in board, (
+        "a firm with zero advocates is still drawing empty dot sockets."
+    )
+    assert "0 of 2 advocates" in board, (
+        "the advocate target disappeared instead of moving into the bar's "
+        "own tooltip."
+    )
+
+
+def test_sockets_return_once_a_firm_has_an_advocate(client, student):
+    """The widget earns its place back the moment it has a fill to show."""
+    firm = _busy_firm(student)
+    Contact.all_objects.create(user=student, name="Amy Advocate", firm=firm, warmth="advocate")
+    board = _board(client, student)
+
+    assert "adv-socket" in board and "is-filled" in board, (
+        "a firm with a real advocate no longer shows the fill it earned."
+    )
+
+
+def test_a_firm_with_nobody_added_shows_no_bar_or_sockets(client, student):
+    """The furniture question, answered: an empty-coverage firm does NOT
+    render the same bar-and-sockets row a covered one does. A 0-of-everything
+    bar next to two empty sockets said nothing an untouched firm's own
+    "＋ Add a contact" line doesn't already say — zero contacts trivially
+    means zero advocates too."""
+    quiet = Firm.objects.create(slug="untouched-co", name="Untouched Co", regions=["us"])
+    UserFirm.all_objects.create(user=student, firm=quiet, tier=1)
+    board = _board(client, student)
+
+    assert "Untouched Co" in board
+    card_start = board.index("Untouched Co")
+    card = board[card_start : card_start + 600]
+    assert 'class="firm-bar"' not in card, "an untouched firm still draws an empty bar"
+    assert "adv-socket" not in card, "an untouched firm still draws empty sockets"
+    assert "＋ Add a contact" in card, "the one verb a bare card owes a student is gone"
 
 
 def test_a_confirmed_close_date_survives_the_badges_it_came_in_with(client, student):
@@ -248,19 +294,19 @@ def test_the_removed_counts_still_decide_which_firm_reads_first(client, student)
     )
 
 
-def test_the_legend_explains_the_sp_chip(client, student):
-    """The legend, not the card, is where "SP" earns the right to be an
-    abbreviation. It has to hold both the same chip a card wears (so the two
-    can never drift apart) and the words that spell out what it means — a
-    reader who has never hovered a card should still be able to learn "SP"
-    from the board itself, the same way the warmth dots already are."""
-    client.force_login(student)
-    body = client.get(reverse("crm:contact_list")).content.decode()
-    legend = body[
-        body.index('<div class="net-legend"') : body.index("</div>", body.index('<div class="net-legend"'))
-    ]
+def test_the_sp_chip_explains_itself_without_a_legend(client, student):
+    """The permanent `.net-legend` row that used to spell out "SP" (and four
+    warmth dots most of the board's cards show no colour for) is gone —
+    reported directly as decoration explaining a mapping most cards don't
+    need explained. "SP" still has to be learnable without a prior hover,
+    so the explanation now lives directly on the chip's own title attribute
+    instead of one hop away in a legend."""
+    _busy_firm(student, sponsors=True)
+    board = _board(client, student)
 
-    assert "pill fc-spon" in legend and ">SP<" in legend, (
-        "the legend doesn't show the actual SP chip, only refers to it."
+    assert '<div class="net-legend"' not in board, "the legend row is back"
+    assert "pill fc-spon" in board and ">SP<" in board
+    assert "Sponsors visas" in board, (
+        "the chip's own title attribute no longer explains what SP means, "
+        "and there is no legend left to do it for it."
     )
-    assert "Sponsors visas" in legend

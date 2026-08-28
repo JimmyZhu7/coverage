@@ -1146,14 +1146,58 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     def firm_card(uf):
         cs = by_firm_contacts.get(uf.firm_id, [])
         total = len(cs) or 1
+        seg_counts = {
+            w: sum(1 for c in cs if c.warmth == w)
+            for w in ("cold", "replied", "chatted", "advocate")
+        }
         segments = [
-            {"warmth": w, "pct": round(sum(1 for c in cs if c.warmth == w) * 100 / total)}
+            {"warmth": w, "pct": round(seg_counts[w] * 100 / total)}
             for w in ("cold", "replied", "chatted", "advocate")
         ]
-        advocates = sum(1 for c in cs if c.warmth == "advocate")
+        advocates = seg_counts["advocate"]
         adv_met = advocates >= adv_target
         close = closes.get(uf.firm_id)
         days_out = (close - today).days if close else None
+        # The bar's own tooltip, not a permanent legend row above the grid.
+        # A legend explaining four warmth colours earned a fixed line when
+        # most of its 54 cards were about to show it an empty bar — the
+        # reader had to hold "dot = colour" in their head while scanning
+        # dozens of tracks that mostly had no colour to decode at all. This
+        # says the SAME thing the dots said, but on the one card it is
+        # actually true of, with real counts instead of a swatch. Nothing
+        # is lost: the identical warmth labels ("Replied", "Chatted",
+        # "Emailed, No Reply", "Advocates") are still spelled out, with the
+        # same colour dots, as the section headers of the Contacts list
+        # further down this same page (crm/views.py::_WARMTH_SECTIONS) —
+        # this was never the only place that vocabulary lived, just the
+        # only place it cost a permanent row to repeat it.
+        bar_title = None
+        if cs:
+            labels = {
+                "cold": "emailed, no reply", "replied": "replied",
+                "chatted": "chatted",
+                "advocate": "advocate" if seg_counts["advocate"] == 1 else "advocates",
+            }
+            breakdown = " · ".join(
+                f"{seg_counts[w]} {labels[w]}"
+                for w in ("cold", "replied", "chatted", "advocate")
+                if seg_counts[w]
+            )
+            bar_title = (
+                f"{len(cs)} contact{'' if len(cs) == 1 else 's'} — {breakdown}"
+            )
+            # The advocate SOCKETS only render once there is a fill to show
+            # (see the template) — every firm on this board starts at zero
+            # advocates, so "0 of 2" dots were the one piece of decoration
+            # nearly every one of 54 cards wore identically. The number
+            # does not disappear with the widget: it moves in here, onto
+            # the one element a reader is already hovering to read the
+            # rest of this firm's coverage.
+            if not advocates:
+                bar_title += (
+                    f" · 0 of {adv_target} advocates — your target, "
+                    "set in Settings > Cadence"
+                )
         return {
             "firm": uf.firm,
             "tier": uf.tier,
@@ -1210,6 +1254,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             ),
             "contact_count": len(cs),
             "segments": segments,
+            "bar_title": bar_title,
             # "1/2 advocates" against the user's target. `met` is the whole
             # point of showing a fraction rather than a count: a firm that
             # has hit the target should read as finished, not as 2 more

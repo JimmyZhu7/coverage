@@ -1100,21 +1100,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .net-panel::-webkit-scrollbar-thumb:hover { background: var(--accent);
     border: 3px solid var(--paper); background-clip: padding-box; }
 
-  .net-legend { display: flex; gap: var(--s4); flex-wrap: wrap; align-items: center;
-    font-size: var(--fs-s); color: var(--ink-2); margin-bottom: var(--s3); }
+  /* `.net-legend` (the four warmth dots + the SP swatch, once pinned above
+     this grid) is gone — reported directly as decoration explaining colour
+     that most of 54 cards don't even show. `.dot`/`.dot-cold` etc. stay:
+     `.net-group-head` below (the Contacts list's own warmth section
+     headers) still draws them, and that is now the one place on this page
+     the colour-to-word mapping is spelled out permanently — see the
+     comment on `.net-panel`'s markup in contact_list.html for where "SP"
+     and the warmth words each live instead. */
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     margin-right: 4px; }
   .dot-cold { background: var(--w-cold-bar); }
   .dot-replied { background: var(--w-replied-bar); }
   .dot-chatted { background: var(--w-chatted-bar); }
   .dot-advocate { background: var(--w-advocate-bar); }
-  /* "SP" reads as an acronym only on the card, where a 10px chip has no
-     room for a whole word. The legend is where it earns that shorthand —
-     spelled out once, in the same place the warmth dots already are, so a
-     first-time reader never has to guess what a two-letter pill means. The
-     swatch is the actual chip, not a copy of its color, so a change to
-     `.fc-spon` can never drift from what the legend shows. */
-  .net-legend .fc-spon { margin-right: 4px; }
 
   /* Tier rows (radar layout): the TIER label sits above a full-width row of
      firm cards that packs as many columns as the panel allows. */
@@ -1126,24 +1125,29 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
   .tier-empty { margin: var(--s2) 0; text-align: left; }
   /* The 92px floor was the height of a card carrying a badge row, and there
-     is no badge row any more. What a card holds now is a name, a 6px bar
-     with its advocate sockets, and one short suggestion line — 62px measured
-     with all three present. 64px is the floor that fits that and nothing
-     spare.
+     is no badge row any more. A card's own height now depends on how much of
+     it there is to show: a firm with nobody added yet renders a name and one
+     suggestion line and nothing else — no bar, no advocate sockets, both
+     dropped for exactly that firm because a 0-of-everything bar and a pair
+     of empty sockets said nothing an untouched firm's own "＋ Add a contact"
+     doesn't already say (see contact_list.html, `firm-card-foot`). A firm
+     with real contacts keeps the bar (and the sockets too, once it has an
+     advocate to show). 44px is the floor that fits the SHORTEST of those —
+     name plus one line — with nothing spare.
 
-     `minmax(64px, auto)` and not a fixed 64px, and the reason is NOT the one
+     `minmax(44px, auto)` and not a fixed 44px, and the reason is NOT the one
      the old comment gave. Wrapped badges were what used to overflow a fixed
      row, get squeezed by `overflow: hidden`, and clip the title mid-letter;
      that failure is designed out rather than absorbed. The floor stays a
-     floor because a row still mixes cards that carry a suggestion line with
-     covered firms that don't, and because the deadline tag can push a long
-     firm name onto its own line — a row is as tall as its tallest card, and
-     that is the truthful shape of holding more. Same doctrine as the feed's
-     role card: the box gives way, not the text. */
+     floor because a row now mixes THREE card shapes — bare name-plus-verb,
+     bar-only, and bar-plus-sockets — and because the deadline tag can push a
+     long firm name onto its own line; a row is as tall as its tallest card,
+     and that is the truthful shape of holding more. Same doctrine as the
+     feed's role card: the box gives way, not the text. */
   /* Each tier is bounded (~2 rows) and scrolls its own firms, so a tier with
      many firms doesn't stretch the whole coverage panel. */
   .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    grid-auto-rows: minmax(64px, auto); gap: var(--s3); max-height: 200px; overflow-y: auto;
+    grid-auto-rows: minmax(44px, auto); gap: var(--s3); max-height: 200px; overflow-y: auto;
     padding-right: 4px; scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent; }
   .tier-grid::-webkit-scrollbar { width: 8px; }
@@ -1223,7 +1227,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      extended to the whole board. Deliberately NOT `.gap-act`'s full button
      chrome: 55-odd of 69 cards show this, and the strip's tall button would
      have pushed the grid rows well past what a status board should cost. A
-     quiet 10px link adds one short line — the grid's `minmax(64px, auto)`
+     quiet 10px link adds one short line — the grid's `minmax(44px, auto)`
      rows absorb it, and a row mixing covered firms (no line) with uncovered
      ones (a line) is simply as tall as its tallest card. Now that the badges
      are gone this line is the card's ONLY verb, which is the point: the ask
