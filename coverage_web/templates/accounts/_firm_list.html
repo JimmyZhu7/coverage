@@ -13,9 +13,20 @@ spans. The checked state is preserved from the user's existing target firms.
 A filtered-out tile is HIDDEN, not removed: its checkbox stays in the form
 and still posts, so narrowing the search can never silently drop a firm the
 student already picked.
+
+`matching_firms` / `other_firms` (accounts/views.py `_split_by_declared_profile`)
+split the SAME full set by the regions/tracks the student already declared —
+nothing is excluded, the split only decides which group prints first, so a
+firm outside it is one scroll away rather than gone. Callers that haven't been
+updated to pass the split still work: `matching_firms` falls back to empty and
+`other_firms` to the plain `firms` list, so the heading never renders and the
+grid looks exactly as it always has.
 {% endcomment %}
 <div class="ob-firms" id="firm-list">
-  {% for firm in firms %}
+  {% if matching_firms %}
+    <p class="ob-firms-heading">Matches your profile</p>
+  {% endif %}
+  {% for firm in matching_firms %}
     {% comment %}`smart_title` on the name only; the meta keeps the
     vocabulary's own casing.{% endcomment %}
     <label class="ob-firm"
@@ -30,8 +41,22 @@ student already picked.
       separating a track from nothing.{% endcomment %}
       <span class="ob-firm-meta">{{ firm.regions|join:", " }}{% if firm.regions and firm.tracks %} · {% endif %}{% if firm.tracks %}{{ firm.tracks|join:", " }}{% endif %}</span>
     </label>
+  {% endfor %}
+  {% if matching_firms %}
+    <p class="ob-firms-heading">All firms</p>
+  {% endif %}
+  {% for firm in other_firms|default:firms %}
+    <label class="ob-firm"
+           data-search="{{ firm.name|smart_title|lower }} {{ firm.regions|join:' '|lower }} {{ firm.tracks|join:' '|lower }}">
+      <input type="checkbox" name="firms" value="{{ firm.id }}"
+             {% if firm.id in selected_firm_ids %}checked{% endif %}>
+      <span class="ob-firm-name">{{ firm.name|smart_title }}</span>
+      <span class="ob-firm-meta">{{ firm.regions|join:", " }}{% if firm.regions and firm.tracks %} · {% endif %}{% if firm.tracks %}{{ firm.tracks|join:", " }}{% endif %}</span>
+    </label>
   {% empty %}
-    <p class="ob-firms-empty">No firms in the directory yet.</p>
+    {% if not matching_firms %}
+      <p class="ob-firms-empty">No firms in the directory yet.</p>
+    {% endif %}
   {% endfor %}
   {% comment %}The no-results state for the CLIENT-SIDE filter, which is a
   different sentence from the empty clause above: that one means the

@@ -466,6 +466,13 @@
     font-size: var(--fs-s); color: var(--ink-2); }
   .tf-result:hover { background: var(--accent-soft); }
   .tf-result.is-hidden { display: none; }
+  /* The regroup heading above (`matching_untracked_firms` /
+     `other_untracked_firms`) — same convention as onboarding's
+     `.ob-firms-heading`. */
+  .tf-group-heading { margin: var(--s2) 0 2px; padding: 0 10px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.05em; }
+  .tf-group-heading:first-child { margin-top: 0; }
   .tf-add-btns { flex: none; display: flex; gap: 6px; }
   .tf-add-btn { border: 1px solid var(--line); background: var(--surface);
     color: var(--ink-2); border-radius: 999px; padding: 3px 11px;
@@ -653,8 +660,33 @@
 
           <label for="tf-search">Add a Firm</label>
           <input type="text" id="tf-search" placeholder="Search firms…" autocomplete="off">
+          {% comment %}
+          Same regroup as onboarding's Firms step
+          (accounts/views.py `_split_by_declared_profile`) applied to this
+          search, so Settings and onboarding can't form two different
+          opinions about what's relevant to the same student. Nothing here
+          is excluded — `matching_untracked_firms` and
+          `other_untracked_firms` together are still every untracked firm —
+          the split only decides which heading a firm prints under.
+          {% endcomment %}
           <div class="tf-results" id="tf-results">
-            {% for f in untracked_firms %}
+            {% if matching_untracked_firms %}
+              <p class="tf-group-heading">Matches your profile</p>
+            {% endif %}
+            {% for f in matching_untracked_firms %}
+              <div class="tf-result" data-firm="{{ f.id }}" data-firm-name="{{ f.name|lower }}">
+                <span>{{ f.name|smart_title }}</span>
+                <span class="tf-add-btns">
+                  <button type="button" class="tf-add-btn" data-tf-add="{{ f.id }}" data-tf-tier="1">Tier 1</button>
+                  <button type="button" class="tf-add-btn" data-tf-add="{{ f.id }}" data-tf-tier="2">Tier 2</button>
+                  <button type="button" class="tf-add-btn" data-tf-add="{{ f.id }}" data-tf-tier="3">Tier 3</button>
+                </span>
+              </div>
+            {% endfor %}
+            {% if matching_untracked_firms %}
+              <p class="tf-group-heading">All firms</p>
+            {% endif %}
+            {% for f in other_untracked_firms|default:untracked_firms %}
               <div class="tf-result" data-firm="{{ f.id }}" data-firm-name="{{ f.name|lower }}">
                 <span>{{ f.name|smart_title }}</span>
                 <span class="tf-add-btns">
@@ -664,7 +696,9 @@
                 </span>
               </div>
             {% empty %}
-              <p class="tf-empty-search">Every firm in the directory is already on one of your tiers.</p>
+              {% if not matching_untracked_firms %}
+                <p class="tf-empty-search">Every firm in the directory is already on one of your tiers.</p>
+              {% endif %}
             {% endfor %}
           </div>
           <p class="tf-empty-search" data-tf-no-results hidden>No firms match that search.</p>

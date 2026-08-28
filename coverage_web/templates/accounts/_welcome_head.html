@@ -350,6 +350,16 @@ this file is not redundant with it — see the note there.
   .ob-firms-empty { grid-column: 1 / -1; margin: 0; padding: var(--s5) var(--s3);
     text-align: center; color: var(--ink-3); font-size: var(--fs-s); }
 
+  /* The Firms step regroups by the regions/tracks the student already
+     declared (accounts/views.py `_split_by_declared_profile`) rather than
+     filtering — see that function's comment for why. `grid-column: 1/-1`
+     is what lets a plain <p> interrupt the tile grid as a full-width row
+     instead of trying to sit in one column of it. */
+  .ob-firms-heading { grid-column: 1 / -1; margin: var(--s2) 0 0;
+    font-size: var(--fs-xs); font-weight: var(--w-med); color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.05em; }
+  .ob-firms-heading:first-child { margin-top: 0; }
+
   /* ===================================================================
      8. Step 4 — Import
 

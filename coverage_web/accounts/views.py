@@ -247,11 +247,66 @@ def onboarding_preview_view(request):
     )
 
 
+# A walkthrough found the Firms step showing all 131 firms alphabetically
+# with equal weight, no matter what the student had just told step 2
+# (regions) and step 1 (tracks) — a US-only IB student saw Hong Kong quant
+# funds and consulting shops with the same prominence as their own targets.
+#
+# REORDER, not filter. Two things rule filtering out:
+#
+# 1. `directory.recommend.role_matches_regions` already spells out why
+#    `Firm.regions`/`Firm.tracks` are too coarse to gate ANYTHING on: they
+#    are firm-level, and "a firm can run desks in five markets and post a
+#    role in only one of them" is the documented reason the Opportunities
+#    feed reads a ROLE's own region instead of trusting the firm's list for
+#    that axis. A firm picker has no role to fall back on — the firm-level
+#    list is all there is — so hard-filtering the board on it risks hiding a
+#    firm the student actually wants over a list that was never precise
+#    enough to exclude on.
+# 2. The brief this fix answers says it plainly: "a student's targets
+#    legitimately exceed their declared tracks." Browsing the full board and
+#    picking what you want is a real position, not a bug — the bug is that
+#    a US-only IB student has to scroll the SAME distance past HK quant
+#    funds as a HK/quant student would.
+#
+# So both surfaces below only ever REGROUP: everything the student can pick
+# stays reachable in one scroll, in the same alphabetical order it always
+# was, and a firm outside their declared regions/tracks never disappears —
+# it just isn't first. An already-picked firm is never affected by this at
+# all, because nothing here removes rows; it only decides which group a row
+# prints in.
+def _split_by_declared_profile(firms, user):
+    """`firms` split into (matches declared regions/tracks, everything else),
+    order preserved within each half. Both halves together are still every
+    firm passed in — see the module note above for why this never excludes.
+
+    OR, not AND: a track hit with no region hit (or vice versa) is still
+    worth surfacing first — the two axes are independent facts a student
+    stated, and requiring both would bury a firm that matches exactly one
+    of them behind firms that match neither."""
+    regions = set(r.lower() for r in (getattr(user, "regions", None) or ()) if r)
+    tracks = set(getattr(user, "tracks", None) or ())
+    if not regions and not tracks:
+        return [], list(firms)
+    matches, rest = [], []
+    for f in firms:
+        f_regions = set(r.lower() for r in (f.regions or ()))
+        f_tracks = set(f.tracks or ())
+        hit = bool(regions and f_regions & regions) or bool(tracks and f_tracks & tracks)
+        (matches if hit else rest).append(f)
+    return matches, rest
+
+
 def _firm_picker_context(user) -> dict:
     firms = list(Firm.objects.all().order_by("name"))
+    matching_firms, other_firms = _split_by_declared_profile(firms, user)
     selected = set(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
     return {
+        # Kept alongside the split for anything that still wants the plain
+        # full list (e.g. a JS-off screen reader announcement of the total).
         "firms": firms,
+        "matching_firms": matching_firms,
+        "other_firms": other_firms,
         "selected_firm_ids": selected,
         "region_choices": REGION_CHOICES,
         "track_choices": TRACK_CHOICES,
@@ -289,13 +344,19 @@ def _target_firms_context(user) -> dict:
     all_tracked_ids = set(
         UserFirm.objects.for_user(user).values_list("firm_id", flat=True)
     )
+    untracked = list(Firm.objects.exclude(id__in=all_tracked_ids).order_by("name"))
+    # Same regroup as the onboarding Firms step (`_split_by_declared_profile`)
+    # applied to the same "add a firm" search — Settings must not form a
+    # second opinion about what's relevant to this student just because it
+    # is a different page reading the same profile.
+    matching_untracked, other_untracked = _split_by_declared_profile(untracked, user)
     return {
         "firm_tiers": [
             {"tier": tier, "firms": by_tier[tier]} for tier in TARGET_FIRM_TIERS
         ],
-        "untracked_firms": list(
-            Firm.objects.exclude(id__in=all_tracked_ids).order_by("name")
-        ),
+        "untracked_firms": untracked,
+        "matching_untracked_firms": matching_untracked,
+        "other_untracked_firms": other_untracked,
     }
 
 
