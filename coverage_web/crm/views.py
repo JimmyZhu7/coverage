@@ -71,6 +71,7 @@ from .today import (  # noqa: F401
     _today_sort_key,
     _workdays_left,
     play_dismiss,
+    rendered_proposals_qs,
     today_act,
     today_park_all,
     week,
@@ -330,22 +331,20 @@ def proposals_bulk(request: HttpRequest, verb: str) -> HttpResponse:
     so it comes back with the same Undo strip a one-by-one dismiss does,
     naming the count it just buried."""
     from capture import discovery
-    from capture.models import ContactProposal
 
     if verb not in ("accept", "dismiss"):
         return HttpResponse(status=400)
     # Exactly the slice the cockpit rendered — same status filter, same
-    # ordering, same cap (`crm.today.PROPOSALS_RENDER_CAP`). The buttons
-    # promise "everyone listed here", and acting on the unbounded pending
-    # set instead once dismissed-forever 28 people the lane never showed
+    # ordering, same cap (`crm.today.rendered_proposals_qs`,
+    # `PROPOSALS_RENDER_CAP`). Routed through the identical query
+    # `_cockpit_context` builds, not a second copy of it: the buttons
+    # promise "everyone listed here", and a second copy of the ordering
+    # rule is one edit away from disagreeing with the first — which is
+    # exactly how "Dismiss all" once buried 28 people the lane never showed
     # (52 pending on the founder's first whole-mailbox scan, 24 rendered).
     # Whatever remains past the cap stays pending and fills the lane on the
     # re-render this view returns.
-    pending = list(
-        ContactProposal.objects.for_user(request.user)
-        .filter(status=ContactProposal.STATUS_PENDING)
-        .order_by("created")[:PROPOSALS_RENDER_CAP]
-    )
+    pending = list(rendered_proposals_qs(request.user)[:PROPOSALS_RENDER_CAP])
     for proposal in pending:
         if verb == "accept":
             discovery.accept(proposal)

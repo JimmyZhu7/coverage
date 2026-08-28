@@ -672,6 +672,61 @@ QUIET_UPKEEP_PLAN_MAX = 1
 # showed 24; "Dismiss all" then buried 28 people no card ever showed).
 PROPOSALS_RENDER_CAP = 24
 
+
+def rendered_proposals_qs(user):
+    """Pending `ContactProposal` rows, in the exact order and slice the
+    cockpit renders them.
+
+    ONE FUNCTION, CALLED FROM BOTH SIDES OF THE PROMISE. `_cockpit_context`
+    (below) and `crm.views.proposals_bulk` used to each write their own
+    `.filter(status=PENDING).order_by("created")[:PROPOSALS_RENDER_CAP]`,
+    and two copies of an ordering rule are one copy away from disagreeing —
+    which is exactly how "Dismiss all" once buried 28 people the lane never
+    showed (see `PROPOSALS_RENDER_CAP`'s own note). Routing both call sites
+    through this one queryset makes that class of drift impossible rather
+    than merely documented against: there is only one ordering rule now
+    because there is only one place it is written.
+
+    ORDERED BY EVIDENCE RECENCY, NOT `created`. `created` is when the SCAN
+    wrote the row, and a first mailbox sweep writes every proposal it finds
+    within the same second — measured, 205 people in one pass on the
+    founder's real mailbox. Every row in that batch carries functionally
+    the same `created`, so ordering on it is really ordering on whatever
+    order the scan happened to iterate threads in, which the student reads
+    as random because it is. `occurred_at` is the date of the MAIL that
+    produced the proposal (the message's own Date header, parsed by
+    `capture.discovery._parse_occurred_at`), so it is the one field on this
+    row that answers the question the lane is actually for: who reached out,
+    or got reached out to, most recently? A banker who replied last week now
+    sorts above a cold send from March; under `created` the two could land
+    in either order depending on which thread the scan happened to visit
+    first.
+
+    `evidence_kind` and firm tier were considered and rejected as the
+    primary key. Both describe WHAT happened, not WHEN, and "worth
+    tracking at all" already gated on the finding's strength before this
+    row ever existed (`capture.discovery._evidence_kind`) — re-litigating
+    strength here would be a second, worse copy of that judgment, and
+    ordering strangers by their employer's tier is the firm-alphabet bug
+    `_today_sort_key` above already had to fix once, in a different lane.
+
+    `occurred_at` is nullable (a Date header that failed to parse), so a
+    missing one falls back to `created` — the row's only other timestamp —
+    rather than sorting an unparseable row to either extreme. `-id` breaks
+    the rare exact tie and keeps the order stable across re-renders and
+    across this call and `proposals_bulk`'s, which is the entire point.
+    """
+    from django.db.models.functions import Coalesce
+
+    from capture.models import ContactProposal
+
+    return (
+        ContactProposal.objects.for_user(user)
+        .filter(status=ContactProposal.STATUS_PENDING)
+        .annotate(_evidence_date=Coalesce("occurred_at", "created"))
+        .order_by("-_evidence_date", "-created", "-id")
+    )
+
 # Display class per cadence action, lower shown first. This is the Today
 # page's ordering, and it lives HERE rather than in the engine on purpose:
 # `cadence.due_actions`' `(priority, tier, firm_name)` sort is ported code
@@ -2005,20 +2060,15 @@ def _cockpit_context(user) -> dict:
     # PROPOSALS, not contacts — nothing exists in the CRM until accept (see
     # capture/discovery.py). Capped as a rendering guard only; the judgment
     # chain usually keeps real volume below it, but a first whole-mailbox
-    # scan does not (52 on the founder's own 2026-08-26 scan), so the lane
-    # count says "24 of 52" rather than a bare 24, and the bulk buttons act
-    # on exactly the rendered slice (see `crm.views.proposals_bulk` and
-    # `PROPOSALS_RENDER_CAP`).
-    from capture.models import ContactProposal
-
-    pending_proposals = (
-        ContactProposal.objects.for_user(user)
-        .filter(status=ContactProposal.STATUS_PENDING)
-    )
+    # scan does not (205 on the founder's own real mailbox in one pass), so
+    # the lane count says "24 of 205" rather than a bare 24, and the bulk
+    # buttons act on exactly the rendered slice — see `rendered_proposals_qs`
+    # for the ordering rule (evidence recency, not scan insertion order) and
+    # `PROPOSALS_RENDER_CAP` for why the slice itself has to match.
+    pending_proposals = rendered_proposals_qs(user)
     proposals_total = pending_proposals.count()
     proposals = list(
-        pending_proposals.select_related("firm")
-        .order_by("created")[:PROPOSALS_RENDER_CAP]
+        pending_proposals.select_related("firm")[:PROPOSALS_RENDER_CAP]
     )
 
     # Autopilot's reviewed batch, if one is waiting — the strip that turns
