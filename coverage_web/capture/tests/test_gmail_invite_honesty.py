@@ -272,6 +272,46 @@ def test_processing_the_same_cancellation_twice_is_the_same_as_once(student, lil
     assert CalendarEvent.all_objects.filter(user=student).count() == 1
 
 
+def test_rereading_the_same_scheduled_chat_does_not_recount_it(student, lily):
+    """IDEMPOTENCE, on the counter rather than the row. The rolling window
+    means the SAME "scheduled" finding for an already-current chat comes
+    back on every sync pass until it ages out of the search window —
+    `_upsert_scheduled_chat` used to return True unconditionally once it
+    reached the update path, so `SyncResult.chats_scheduled` (the number a
+    sync digest reports) went up once per pass even when nothing on the row
+    had changed. "3 chats scheduled" could mean 3 new chats or 0 new and 3
+    re-touched, with no way to tell which from the digest alone."""
+    invite = _invite("thread-a", _at(days=3, hour=15), sent_at=timezone.now())
+    first = apply_findings(student, [invite])
+    assert first.chats_scheduled == 1, "the actual creation counts once"
+
+    for _ in range(3):
+        again = apply_findings(student, [invite])
+        assert again.chats_scheduled == 0, (
+            "re-reading the identical finding must not recount a chat that "
+            "is already scheduled"
+        )
+
+    assert CalendarEvent.all_objects.filter(user=student).count() == 1
+
+
+def test_a_genuinely_later_invite_still_counts_as_scheduled(student, lily):
+    """The counter is not just latched off after the first hit — a real
+    change to the row (the organiser moving the time) must still register,
+    the same way `test_a_dated_invite_still_moves_a_row_...` shows the row
+    itself still moves."""
+    first_time = _at(days=3, hour=15)
+    moved_time = _at(days=5, hour=9)
+    apply_findings(student, [_invite("thread-a", first_time, sent_at=timezone.now())])
+
+    result = apply_findings(student, [
+        _invite("thread-a", moved_time, sent_at=timezone.now() + timedelta(minutes=1))])
+
+    assert result.chats_scheduled == 1, "a genuine reschedule still counts"
+    assert timezone.localtime(
+        CalendarEvent.objects.for_user(student).get().starts_at) == moved_time
+
+
 def test_the_original_invite_resurfacing_does_not_revive_the_chat(student, lily):
     """THE REASON THE ROW IS RETIRED RATHER THAN DELETED. The sync reads a
     rolling window of the mailbox, so the original REQUEST is still sitting in
