@@ -106,12 +106,20 @@ materials.
      CSS pseudo-element, not a JS-driven toggle. ---- */
   .as-folder { border-radius: var(--r-ctl); position: relative; }
   .as-folder + .as-folder { margin-top: 2px; }
-  /* 34px is this head row's own height (8px+8px padding around ~18px of
+  /* 36px is this head row's own height (9px+9px padding around ~18px of
      content) — every absolutely-positioned control below anchors to that
      fixed band, not to `.as-folder` (the WHOLE <details>, body included
-     when open) the way `top: 50%`/`top: 100%` would by default. */
+     when open) the way `top: 50%`/`top: 100%` would by default.
+
+     Padding is 9px/12px on both axes — the same figures `.as-history-link`
+     uses below — so a folder's own row and every plain chat row (nested or
+     unfiled) share one row height and one left inset. Before this, the head
+     used 8px/6px: 1px shorter and 6px shallower than a chat row, which is
+     what let "BofA prep" read as flush-left while its own child ("Test")
+     and the unfiled rows below sat at two OTHER, uneven left edges — three
+     rows, three rulers. */
   .as-folder-head { display: flex; align-items: center; gap: 6px; cursor: pointer;
-    list-style: none; padding: 8px 6px; border-radius: var(--r-ctl);
+    list-style: none; padding: 9px 12px; border-radius: var(--r-ctl);
     transition: background-color var(--t-fast); }
   .as-folder-head::-webkit-details-marker { display: none; }
   .as-folder-head:hover { background: var(--accent-soft); }
@@ -123,16 +131,32 @@ materials.
   .as-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink-2); }
   .as-folder-count { flex: none; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--ink-3); }
-  .as-history-kebab.as-folder-kebab { top: 5px; right: 4px; transform: none; opacity: 0; }
+  .as-history-kebab.as-folder-kebab { top: 6px; right: 4px; transform: none; opacity: 0; }
   .as-folder:hover .as-folder-kebab,
   .as-folder-kebab[aria-expanded="true"] { opacity: 1; }
-  .as-history-menu.as-folder-menu { top: 34px; }
-  .as-folder-rename-input { position: absolute; top: 3px; left: 24px; right: 30px; height: 28px;
+  .as-history-menu.as-folder-menu { top: 36px; }
+  .as-folder-rename-input { position: absolute; top: 4px; left: 30px; right: 30px; height: 28px;
     z-index: 1; box-sizing: border-box; }
   .as-folder.is-editing .as-folder-head > * { visibility: hidden; }
-  .as-folder-body { padding-left: 8px; }
+  /* One deliberate 6px nesting step past the folder head's own 12px inset
+     (see above) — enough to read as "inside this folder", not so much that
+     it eats into a 248px column's already-tight title width. Flex+gap so a
+     folder holding more than one chat gets the same 2px row rhythm the
+     unfiled list gets from `.as-history-unfiled` below; a bare block div
+     here previously left folder rows flush against each other with no gap
+     at all whenever a folder held more than the founder's own single
+     "Test" row. */
+  .as-folder-body { padding-left: 6px; display: flex; flex-direction: column; gap: 2px; }
   .as-history-unfiled { display: flex; flex-direction: column; gap: 2px; }
-  .as-folder + .as-history-unfiled, .as-folder-body + .as-folder { margin-top: 4px; }
+  /* The unfiled list reads as this list's own continuation, not a second,
+     disconnected block — a hairline seam (the app's own convention for
+     stacked rows elsewhere: Network board, the off-board list) marks
+     exactly where "inside a folder" ends and "not in any folder" begins,
+     without wrapping the whole 248px column in the heavier bordered-panel
+     treatment those wider boards use. */
+  .as-folder + .as-history-unfiled { margin-top: var(--s2); padding-top: var(--s2);
+    border-top: 1px solid var(--line); }
+  .as-folder-body + .as-folder { margin-top: 4px; }
 
   @media (max-width: 860px) {
     .as-sidebar-toggle { display: inline-flex !important; }
