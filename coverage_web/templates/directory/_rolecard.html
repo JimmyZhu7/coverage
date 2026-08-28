@@ -176,5 +176,11 @@ without cutting text off.
   a glance and costs no vertical space, so a dated card and a
   rolling one measure identically.
   {% endcomment %}
-  {% if r.dated %}<span class="rolecard-fuse fuse-{{ r.level }}"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>{% endif %}
+  {% comment %}
+  Gated on `fuse_pct`, not on `dated`. A fuse burns down to a specific
+  afternoon, so `_urgency_item` sets it to None on a date whose precision
+  never named a day ("Sep 2026") — those rows are dated and still get no
+  fuse. Gating on `dated` would have drawn `--fuse: None%`.
+  {% endcomment %}
+  {% if r.fuse_pct is not None %}<span class="rolecard-fuse fuse-{{ r.level }}"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>{% endif %}
 </div>

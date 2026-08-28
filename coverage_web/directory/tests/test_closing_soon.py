@@ -255,3 +255,81 @@ def test_lens_rows_show_the_stage_they_are_counted_in(client, board, tracked):
     # sentence, but the overlap claim still has to be ON the page somewhere.
     assert "sorted by deadline instead of stage" in body
     assert f"of {resp.context['live_total']} live" in body
+
+
+# ---------------------------------------------------------------------------
+# The feed's own countdown vs. the date's stated precision.
+#
+# `_urgency_item` builds its countdown inline rather than calling
+# `deadline_marker`, so for a release it printed "Closes in 4 days" on a row
+# whose precision never named a day — the firm page (which does call
+# `deadline_marker`) rendered the same row honestly, and the two surfaces
+# disagreed about one date.
+#
+# The fix splits the two jobs `days_left` was doing. It stays the true day
+# count, because four consumers sort and aggregate on it; only the reader-
+# facing countdown, urgency band and fuse move to the coarser unit.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "precision,expected_countdown",
+    [("month", "closes in 2 months"), ("estimated", "estimated in 2 months")],
+)
+def test_an_inexact_deadline_gets_no_day_countdown_on_the_feed(
+    precision, expected_countdown
+):
+    from directory.views import _urgency_item
+
+    today = timezone.localdate()
+    firm = Firm.objects.create(slug="inexact-co", name="Inexact Co")
+    opp = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", status="open",
+        bucket=next(iter(TARGET_BUCKETS)),
+        url="https://inexact.example/1",
+        # ~62 days out, so a day-level reading would say "Closes in 62 days".
+        deadline=today + timedelta(days=62),
+        deadline_precision=precision,
+    )
+
+    item = _urgency_item(
+        opp, now=timezone.now(), today=today, my_firm_ids=set()
+    )
+
+    assert item["countdown"] == expected_countdown
+    assert "62 days" not in item["countdown"]
+    # The fuse burns down to a specific afternoon, so an inexact date gets
+    # none — and the template gates on this being None, not on `dated`.
+    assert item["fuse_pct"] is None
+    # ...while `days_left` keeps the true day count, because the feed sort,
+    # the firm cluster's `next_days`, the cluster role sort and the
+    # closing-this-week count all read it and each breaks on a coarser value.
+    assert item["days_left"] == 62
+    assert item["dated"] is True
+    # A month-level date cannot earn a day-level urgency band.
+    assert item["level"] == "upcoming"
+
+
+@pytest.mark.django_db
+def test_a_day_precise_deadline_still_gets_its_day_countdown():
+    """The guard on the fix: 633 live rows carry day precision and must be
+    completely unaffected."""
+    from directory.views import _urgency_item
+
+    today = timezone.localdate()
+    firm = Firm.objects.create(slug="exact-co", name="Exact Co")
+    opp = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", status="open",
+        bucket=next(iter(TARGET_BUCKETS)),
+        url="https://exact.example/1",
+        deadline=today + timedelta(days=4),
+        deadline_precision="day",
+    )
+
+    item = _urgency_item(
+        opp, now=timezone.now(), today=today, my_firm_ids=set()
+    )
+
+    assert item["countdown"] == "Closes in 4 days"
+    assert item["days_left"] == 4
+    assert item["level"] == "soon"
+    assert item["fuse_pct"] is not None

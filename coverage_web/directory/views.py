@@ -1928,29 +1928,46 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
                      "rolling_stated": stated,
                      "rolling_why": (((o.raw or {}).get("facts") or {})
                                      .get("rolling", {}).get("phrase", ""))})
-    # NOT FIXED HERE, and deliberately: this branch builds its own countdown
-    # rather than calling `deadline_marker`, so it does not carry that
-    # function's rule that a date whose precision refuses to name a day gets
-    # no day count (see `_INEXACT_PRECISIONS`). A `deadline_precision` of
-    # "month"/"estimated" therefore still reaches the feed as "Closes in 4
-    # days", with a day-level urgency band and a fuse bar burning down to a
-    # specific afternoon. Correcting it is not a local edit: `days_left` set
-    # here is an ORDERING and AGGREGATION key for `_urgency_feed`'s sort, the
-    # firm cluster's `next_days` (which must never go negative — see its
-    # comment below), the cluster role sort, and the closing-this-week count,
-    # and a coarser value breaks each differently. Zero live rows carry an
-    # inexact precision today, so this is latent, not shipped.
+    # An inexact date keeps its exact `days_left` and loses its day-level
+    # VOICE. The two are different jobs and only one of them can lie.
+    #
+    # `days_left` is an ordering and aggregation key — `_urgency_feed`'s sort,
+    # the firm cluster's `next_days` (which must never go negative), the
+    # cluster role sort, and the closing-this-week count all read it, and each
+    # breaks differently on a coarser value. So it stays the true day count:
+    # a "Sep 2026" row still sorts among the September rows, which is right.
+    #
+    # What the reader SEES is the part that has to respect precision. The
+    # countdown borrows `deadline_marker`'s own phrasing rather than restating
+    # it, so the feed and the firm page can never word the same row two ways;
+    # the urgency band drops to "upcoming" (a month-level date cannot earn the
+    # red "closes today" treatment); and the fuse bar — which burns down to a
+    # specific afternoon — is suppressed outright rather than drawn against a
+    # day nothing stated.
     elif o.deadline >= today:
         days = (o.deadline - today).days
+        prec = (o.deadline_precision or "").lower()
+        inexact = prec in _INEXACT_PRECISIONS
         item.update({
             "dated": True,
             "days_left": days,
-            "countdown": ("Closes today" if days == 0 else
-                          "Closes tomorrow" if days == 1 else
-                          f"Closes in {days} days"),
-            "level": "today" if days <= 2 else "soon" if days <= 7 else "upcoming",
+            "countdown": (
+                deadline_marker(o.deadline, prec, today=today)["countdown"]
+                if inexact else
+                "Closes today" if days == 0 else
+                "Closes tomorrow" if days == 1 else
+                f"Closes in {days} days"
+            ),
+            "level": (
+                "upcoming" if inexact else
+                "today" if days <= 2 else "soon" if days <= 7 else "upcoming"
+            ),
             # Remaining fraction of the fuse (100 = far out, ~0 = closing).
-            "fuse_pct": max(4, round((1 - min(days, _FUSE_HORIZON) / _FUSE_HORIZON) * 100)),
+            # None on an inexact date: a fuse is a day-level claim.
+            "fuse_pct": (
+                None if inexact else
+                max(4, round((1 - min(days, _FUSE_HORIZON) / _FUSE_HORIZON) * 100))
+            ),
         })
     else:
         item.update({
