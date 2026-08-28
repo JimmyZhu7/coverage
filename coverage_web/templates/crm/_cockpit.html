@@ -11,31 +11,44 @@ on every quick action so all of it stays in sync.
 <div class="cockpit">
   <div class="cockpit-main">
     {% comment %}
-    Plays: a dated world fact (a confirmed firm date) joined to the
-    student's own people there — see crm.today._plays. Deliberately OUTSIDE
-    the zero-state gate just below: the gap this closes is a week the
-    cadence queue had nothing due while a bank closed in three days and six
-    of his own contacts sat there unmentioned, so a play has to render on a
-    day the queue is empty, not just on a day it's full.
+    Your board — the firm-level half of Today. See crm.today._board.
 
-    At most 3, ever. A firm with a live date and no contacts still plays —
-    it reads as a sourcing prompt rather than a roster. Dismissal is
-    per-FACT (firm + event kind + date, crm.models.PlayDismissal) rather
-    than per-card: dismissing this exact close date never suppresses a
-    later, different date at the same firm.
+    Two kinds of fact, ONE card anatomy: firm, the fact, the people, one
+    verb, dismiss. Which verb and where it goes is decided in Python
+    (`cta_label` / `cta_href`) so this template branches on the FACT only
+    and every card in the lane reads the same way.
+
+      * a confirmed, dated firm event joined to the student's own contacts
+        there (crm.today._plays), and
+      * a firm on their board, at a tier they set, where they know nobody
+        (crm.today._coverage_cards).
+
+    Deliberately OUTSIDE the zero-state gates just below: the gap this closes
+    is a week the cadence queue had nothing due while a bank closed in three
+    days and six of his own contacts sat there unmentioned. The board renders
+    on a day the queue is empty — that is the whole point of it — which is
+    also why those gates now ask `not plays`: a page with board cards on it
+    is not a page with nothing on it, and used to say both at once.
+
+    Dismissal is per-FACT (firm + event kind + date, crm.models.PlayDismissal)
+    rather than per-card: dismissing this exact close date never suppresses a
+    later, different date at the same firm. A coverage card has no date of its
+    own, so it dismisses on a sentinel and means "stop asking about this firm".
     {% endcomment %}
     {% if plays %}
       <section class="lane lane-plays" aria-labelledby="plays-lane-h">
-        <h2 class="lane-title" id="plays-lane-h">Plays</h2>
+        <h2 class="lane-title" id="plays-lane-h">Your board</h2>
         <ul class="play-list">
           {% for p in plays %}
             <li class="play-card{% if p.urgent %} is-urgent{% endif %}">
               <div class="play-head">
                 <a class="play-firm" href="{% url 'directory:firm_detail' p.firm.slug %}">{{ p.firm.name|smart_title }}</a>
-                <span class="play-when{% if p.urgent %} is-urgent{% endif %}">{{ p.when }}</span>
+                {% if p.when %}<span class="play-when{% if p.urgent %} is-urgent{% endif %}">{{ p.when }}</span>{% endif %}
               </div>
-              <p class="play-fact">{{ p.label }} · {{ p.date|date:"M j" }}</p>
-              {% if p.sourcing %}
+              <p class="play-fact">{{ p.label }}{% if p.date %} · {{ p.date|date:"M j" }}{% endif %}</p>
+              {% if p.people_line %}
+                <p class="play-people">{{ p.people_line }}</p>
+              {% elif p.sourcing %}
                 <p class="play-people">You have nobody here yet.</p>
               {% else %}
                 {% comment %}
@@ -43,9 +56,8 @@ on every quick action so all of it stays in sync.
                 own network section will not show (it excludes archived
                 contacts, same as the Network board) — so that count gets
                 its own link to where they actually live, rather than
-                riding along under the card's one "View contacts" button as
-                a promise the destination can't keep. See crm.today._plays'
-                `live_total` note.
+                riding along under the card's one button as a promise the
+                destination can't keep. See crm.today._plays' `live_total`.
                 {% endcomment %}
                 <p class="play-people">
                   {{ p.total }} contact{{ p.total|pluralize }} here —
@@ -53,22 +65,12 @@ on every quick action so all of it stays in sync.
                 </p>
               {% endif %}
               <div class="play-foot">
-                {% if p.sourcing %}
-                  <a class="btn play-cta" href="{% url 'crm:contact_new' %}?firm={{ p.firm.slug }}">Source contacts</a>
-                {% elif p.live_total == 0 %}
-                  {% comment %}Every contact here is parked: firm_detail
-                  would show none of them, so the button goes where they
-                  actually render instead of to an honest-looking empty
-                  page.{% endcomment %}
-                  <a class="btn play-cta" href="{% url 'crm:contact_archived' %}?firm={{ p.firm.id }}">View parked contacts</a>
-                {% else %}
-                  <a class="btn play-cta" href="{% url 'directory:firm_detail' p.firm.slug %}">View contacts</a>
-                {% endif %}
+                <a class="btn play-cta" href="{{ p.cta_href }}">{{ p.cta_label }}</a>
                 <button type="button" class="btn play-dismiss"
                         aria-label="Dismiss {{ p.firm.name }} {{ p.label }}"
                         hx-post="{% url 'crm:play_dismiss' %}"
-                        hx-vals='{"firm": "{{ p.firm.id }}", "event_kind": "{{ p.event_kind }}", "date": "{{ p.date|date:"Y-m-d" }}"}'
-                        title="Never show this exact date again">Dismiss</button>
+                        hx-vals='{"firm": "{{ p.firm.id }}", "event_kind": "{{ p.event_kind }}", "date": "{{ p.dismiss_date|date:"Y-m-d" }}"}'
+                        title="{% if p.kind == 'coverage' %}Stop asking about this firm{% else %}Never show this exact date again{% endif %}">Dismiss</button>
               </div>
             </li>
           {% endfor %}
@@ -83,26 +85,36 @@ on every quick action so all of it stays in sync.
     {% endcomment %}
     {% comment %}
     The quiet-day header. `quiet` (crm/today.py's `_cockpit_context`) is
-    true only when there is nothing else on the page — no plan, no chat
-    prep, no debrief, nothing pacing out, no stuck prompt, no park backlog,
-    no batch waiting for a tap, and (thin network) no starter seeds — AND
-    `_next_wave` found a concrete future date to name. A queue that is
-    empty for some OTHER reason (everything handled/snoozed, or a real
-    park backlog waiting on a decision) keeps its own earned line below
-    instead: this header adds one new fact, it doesn't replace every
-    empty state. `not plays and not bench` composes in the two sibling
-    sections landing on this same page: Django reads an absent context key
-    as falsy, so this line is correct today (neither key exists yet) and
-    stays correct once they do. One sentence, nothing else — never the
-    achievement-toned "Done for today" banner, which is exactly the copy
-    that read as a saturated pace ring's punchline on a day there was
-    nothing to do.
+    true only when there is nothing else on the page — no plan, no board
+    card, no bench card, no chat prep, no debrief, nothing pacing out, no
+    stuck prompt, no park backlog, no batch waiting for a tap, and (thin
+    network) no starter seeds — AND `_next_wave` found a concrete future
+    date to name. A queue that is empty for some OTHER reason (everything
+    handled/snoozed, or a real park backlog waiting on a decision) keeps
+    its own earned line below instead: this header adds one new fact, it
+    doesn't replace every empty state.
+
+    ONE COPY OF THE RULE, in Python. This used to be `{% if quiet and not
+    plays and not bench %}` because those two sections landed later and the
+    view could not name them; they exist now, so the whole test is in
+    `would_be_quiet` and this asks one question. The split version is what
+    let the founder's own page render three board cards above a full-width
+    "You're all caught up" panel: the header's copy of the rule knew about
+    `plays` and the two `{% elif %}` branches below it did not.
+
+    What "quiet" now MEANS is stricter, and better for it: nothing is due
+    AND the board has no holes. With 25 empty target firms that is a
+    sentence the founder has to earn, which is exactly the right bar for a
+    page that is not allowed to manufacture work OR to paper over a real
+    empty day. One sentence, nothing else — never the achievement-toned
+    "Done for today" banner, which is exactly the copy that read as a
+    saturated pace ring's punchline on a day there was nothing to do.
     {% endcomment %}
-    {% if quiet and not plays and not bench %}
+    {% if quiet %}
       <div class="empty empty--quiet">
         <p class="quiet-line">{{ quiet_line }}</p>
       </div>
-    {% elif not queue_total and not debriefs and not proposals and not app_events and not mail_facts %}
+    {% elif not queue_total and not plays and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
       <div class="empty">
         {% if contact_count %}
           {% comment %}
@@ -135,7 +147,7 @@ on every quick action so all of it stays in sync.
         {% endcomment %}
         {% if not seeds %}<a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>{% endif %}
       </div>
-    {% elif not lanes and not debriefs and not proposals and not app_events and not mail_facts %}
+    {% elif not lanes and not plays and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
       {% comment %}
       The plan is clear but the queue is not. This is the product working, so
       it is styled as a win — and it names what's left rather than implying
@@ -914,9 +926,17 @@ on every quick action so all of it stays in sync.
     {% endif %}
 
     {% comment %}
-    Deadlines, named. The ribbon at the foot of the page counts these; a count
-    creates a click and a name creates an action. Confirmed dates only — the
-    same bar the cadence engine acts on.
+    Deadlines the board hasn't already named. The ribbon at the foot of the
+    page counts these; a count creates a click and a name creates an action.
+    Confirmed dates only — the same bar the cadence engine acts on.
+
+    OVERFLOW, since 2026-08-27. This card and the board lane were printing
+    the same rows off the same query: measured on the founder's account its
+    four rows were the three board cards verbatim plus one the board's
+    one-card-per-firm rule folds away. The view now hands over only the dates
+    no board card is showing (crm.today._cockpit_context, "deadlines"), so
+    most days this renders nothing — which is the correct amount of card for
+    "no dates you haven't already been told about".
     {% endcomment %}
     {% if deadlines %}
       <div class="rail-card">

@@ -980,7 +980,13 @@ def test_the_funnel_counts_still_match_the_stage_the_label_names(client):
 # ---------------------------------------------------------------------------
 def test_deadlines_are_named_not_just_counted(client):
     """The ribbon counts these. A count creates a click; a name creates an
-    action you can take this morning."""
+    action you can take this morning.
+
+    The NAME now lands on the board card rather than on the rail, and the
+    rail carries only what the board has not already said (see
+    `_cockpit_context`'s "deadlines" note). Same guarantee, one card: it was
+    two, printing the same rows off the same query.
+    """
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
     today = timezone.localdate()
@@ -989,12 +995,35 @@ def test_deadlines_are_named_not_just_counted(client):
                             date=today + timedelta(days=2), confidence=1.0)
 
     ctx = _cockpit_context(user)
-    assert [d["firm"].name for d in ctx["deadlines"]] == ["Morgan Stanley"]
-    assert ctx["deadlines"][0]["when"] == "2d"
-    assert ctx["deadlines"][0]["urgent"] is True
+    assert [p["firm"].name for p in ctx["plays"]] == ["Morgan Stanley"]
+    assert ctx["plays"][0]["when"] == "2d"
+    assert ctx["plays"][0]["urgent"] is True
+    assert ctx["deadlines"] == [], (
+        "the rail must not repeat a date the board is already showing")
 
     body = _login_and_get(client, user)
     assert "Insight deadline" in body
+
+
+def test_the_rail_still_names_a_date_the_board_folded_away(client):
+    """The other half of the dedup, and the reason it filters on the FACT
+    rather than on the firm: the board shows one card per firm, so a firm's
+    SECOND confirmed date has nowhere to go. Dropping it to tidy the rail
+    would be deleting a confirmed deadline."""
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="gs2", name="Goldman Sachs")
+    today = timezone.localdate()
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="insight_open",
+                            date=today + timedelta(days=2), confidence=1.0)
+    FirmDate.objects.create(firm=firm, cycle="SA 2028", region="us",
+                            event_kind="app_close",
+                            date=today + timedelta(days=25), confidence=1.0)
+
+    ctx = _cockpit_context(user)
+    assert [(p["firm"].name, p["event_kind"]) for p in ctx["plays"]] == [
+        ("Goldman Sachs", "insight_open")]
+    assert [d["event_kind"] for d in ctx["deadlines"]] == ["app_close"]
 
 
 def test_an_unconfirmed_date_never_reaches_the_rail():
