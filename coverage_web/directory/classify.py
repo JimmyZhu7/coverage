@@ -714,6 +714,15 @@ _SENIOR = _rx(
 _ENTRY = _rx(
     r"\bgraduates?\b",
     r"\bnew\s+grad(?:uate)?s?\b",
+    # "Class of 2027 Investment Analyst" (Houlihan Lokey, live row) states a
+    # graduating class outright, which is a stronger campus signal than any
+    # other rule in this list and carries no false-positive risk — no
+    # experienced-hire posting is ever titled "Class of YYYY". Checked after
+    # the senior veto like every other _ENTRY pattern, so "Class of 2027
+    # Managing Director" (hypothetical, never seen live) would still veto.
+    # Year range matches `_YEAR` below; inlined because _YEAR is defined
+    # later in the module and this list is built at import time.
+    r"\bclass\s+of\s+20(?:2[4-9]|3[0-5])\b",
     r"\bcampus\b",
     r"\bentry[\s-]?level\b",
     r"\bfull[\s-]?time\s+analyst\b",
@@ -1005,6 +1014,48 @@ def board_is_campus(board) -> bool:
         for attr in ("site", "token", "org", "board_url", "path_filter")
     )
     return bool(_CAMPUS_BOARD.search(ident))
+
+
+def campus_hint_pairs(board_entries) -> frozenset[tuple[str, str]]:
+    """Collapse a `(firm slug, board)` catalog into the `(slug, provider)`
+    pairs it is safe to treat as campus-scoped once a row's specific board is
+    forgotten.
+
+    A live ingest calls `board_is_campus` per board and never needs this: the
+    scraper is iterating one board at a time, so the hint it passes to
+    `classify_role` is always that exact board's own verdict. `reclassify`
+    (and any other pass that only has an already-stored row) is different —
+    the row remembers `source` (a provider name: "workday", "greenhouse", the
+    connector, one per firm‑ish) but not which of a firm's several boards on
+    that provider produced it, so it can only ask "is THIS (slug, provider)
+    pair campus-scoped?"
+
+    Two firms in the live catalog answer that question differently depending
+    on which board you ask: Solomon Partners runs both a Greenhouse
+    "studentsgraduates" board and a Greenhouse "professionals" board — the
+    literal opposite of campus — and Citi runs both a Workday
+    "Citi_Early_Careers_Events_Site" board and a second Workday site with no
+    campus token at all. A naive "does ANY of the firm's boards on this
+    provider look like campus" test (an `any()` over the per-board verdicts)
+    answers "yes" for both pairs, and that "yes" then applies to every row
+    ever stored with that (slug, provider) — including the professionals
+    board's own rows. A neutral title with no senior/experienced word
+    ("Investment Banking Associate - Technology") is exactly what the
+    campus-hint fallback exists to promote, so a lateral hire posted to
+    Solomon Partners' professionals board would silently promote to
+    entry_level on the next backfill.
+
+    `all()` instead of `any()` is the fix: a pair counts only when every
+    catalog board sharing it agrees. Same "silence over a guess" contract as
+    the rest of this module — an ambiguous (slug, provider) stays unhinted,
+    which only means its neutral titles stay in `other` (rule 7), never a
+    false promotion. Boards unique to their pair are unaffected either way,
+    since `all()` of one verdict is that verdict.
+    """
+    verdicts: dict[tuple[str, str], list[bool]] = {}
+    for slug, board in board_entries:
+        verdicts.setdefault((slug, board.provider), []).append(board_is_campus(board))
+    return frozenset(pair for pair, vs in verdicts.items() if all(vs))
 
 
 # ---------------------------------------------------------------------------
