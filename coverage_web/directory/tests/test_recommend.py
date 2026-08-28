@@ -674,6 +674,29 @@ def _p(**kw):
     ("Relationship Banker | Meadowbrook Branch", "none"),
     # ...but NOT by banning "retail", which is also an IB coverage group.
     ("Investment Banking - Consumer & Retail - Analyst", "ib"),
+    # Internal technology and treasury departments. 55 live rows across
+    # Morgan Stanley, Bank of America, UBS, Deutsche Bank, SocGen and
+    # Goldman were silent on track and inherited their bank's ib/st coverage
+    # by construction — Nomura's "2026 Insight Day: Corporate Infrastructure"
+    # ("these are the teams that power and support our business every day")
+    # was the founder's own #1 pick, ahead of every dated Morgan Stanley and
+    # HSBC internship on the board.
+    ("2027 Technology Summer Analyst Program (New York)", "none"),
+    ("Global Technology Summer Analyst (Business Analyst) - 2027", "none"),
+    ("2027 Graduate Talent Program - Group Technology Office - Singapore", "none"),
+    ("Internship - Technology Process Analysis (f/m/x)", "none"),
+    ("Global Technology Governance Intern", "none"),
+    ("Global Technology & Engineering Analyst - Trainee", "none"),
+    ("Corporate Treasury — Summer Analyst", "none"),
+    ("Corporate Planning & Management — Summer Analyst", "none"),
+    ("2026 Insight Day: Corporate Infrastructure", "none"),
+    # ...but NOT by banning bare "technology" or "corporate": both are ALSO
+    # coverage-group / division names a real IB posting states outright.
+    ("Investment Banking Associate - Technology", "ib"),
+    ("Investment Banking Financial Analyst | Boston Technology (Class of 2027)", "ib"),
+    ("M&A intern - Large Cap Generalist / Technology team - Paris", "ib"),
+    ("Investment Banking - Corporate Finance Associate", "ib"),
+    ("Capital Markets, Corporate Banking Summer Analyst", "ib"),
     # Nothing stated: the firm's coverage is allowed to speak.
     ("Intern", ""),
     ("Summer Analyst Program", ""),

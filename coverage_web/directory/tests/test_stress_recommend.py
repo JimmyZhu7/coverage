@@ -378,6 +378,14 @@ def test_every_dropdown_choice_round_trips():
     ("Carnegie Mellon University", "us"),
     ("University of Oxford", "eu"),
     ("University of Cambridge", "eu"),
+    # The other word order for the same two names — "Oxford University,"
+    # "Cambridge University" — is at least as common as "University of X"
+    # and was missing entirely: same silent-zero bug as USC above, for the
+    # same reason (only one spelling of a two-spelling name was in the
+    # table). Safe without the bare-word ambiguity guard: nothing else on
+    # earth calls itself "Oxford University" or "Cambridge University".
+    ("Oxford University", "eu"),
+    ("Cambridge University", "eu"),
     ("London School of Economics and Political Science", "eu"),
     ("Nanyang Technological University", "sg"),
     ("The University of Hong Kong", "hk"),

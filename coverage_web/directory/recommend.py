@@ -192,6 +192,19 @@ SCHOOL_REGION_KEYS: Mapping[str, tuple[str, ...]] = {
         "lse", "ucl", "imperial", "warwick", "oxbridge", "insead", "bocconi",
         "hec", "esade", "essec", "st gallen", "lbs", "wharton-lbs",
         "university of oxford", "university of cambridge",
+        # The other word order — "Oxford University", "Cambridge University"
+        # — is at least as common as "University of X" for these two
+        # (it's the everyday British short form and how most international
+        # applicants write it), and was missing: the section comment above
+        # says "EVERY NAME NEEDS BOTH OF ITS SPELLINGS," and only one order
+        # was added. Unlike the bare city names, this pair is safe: nothing
+        # else calls itself "Oxford University" or "Cambridge University" —
+        # Oxford, Georgia's Emory campus is "Oxford College of Emory
+        # University," never "Oxford University" on its own, and Cambridge,
+        # Massachusetts answers to Harvard or MIT, neither of which uses
+        # this name either. So this order needs no city-collision guard the
+        # bare word did.
+        "oxford university", "cambridge university",
         "london school of economics", "university college london",
     ),
     "cn": ("tsinghua", "peking", "fudan", "sjtu", "清华", "北大", "复旦"),
@@ -724,7 +737,48 @@ _NON_TRACK_FUNCTION = re.compile(
     # "Investment Banking — Consumer & Retail" analyst roles as non-track.
     r"|\bbranch\b"
     r"|\brisk management\b|\bcredit risk\b|\bmodel validation\b"
-    r"|\baccounting\b|\bfinancial report(ing)?\b|\bprocurement\b",
+    r"|\baccounting\b|\bfinancial report(ing)?\b|\bprocurement\b"
+    # Internal technology department, named the way the department names
+    # itself, never a bare `\btechnology\b`: that word is ALSO an IB coverage
+    # sector ("Investment Banking Associate - Technology" at Solomon
+    # Partners, "M&A intern - ... Technology team" at Lazard — 6 live rows,
+    # all with the track stated elsewhere in the same title). The five
+    # phrases below are the department's own job-title and org-name
+    # vocabulary, never a sector suffix: on the live board every one of them
+    # is an internal engineering/infra function with no track word anywhere
+    # in the title — "2027 Technology Summer Analyst Program" (Morgan
+    # Stanley, six cities), "Global Technology Summer Analyst" (Bank of
+    # America, four rows), "Group Technology Office" (UBS, four rows),
+    # "Technology Process Analysis" / "Global Technology Governance Intern"
+    # (Deutsche Bank), "Global Technology & Engineering Analyst" (SocGen) —
+    # 55 silent rows in total, every one of them at a firm whose `Firm.
+    # tracks` includes ib and/or st, so every one scored as a track match by
+    # inheritance. Checked against the whole open+closed board (25,294
+    # rows): the only titles this phrasing touches that also state a track
+    # elsewhere are three ambiguous "embedded tech within the business line"
+    # roles (e.g. "Investment Banking Technology Analyst") and two internal
+    # "Technology Solutions Consultant" titles at Vanguard/Baird, none of
+    # them a clean front-office match to begin with — the same "co-occurring
+    # non-track word, decline rather than guess" call this file already
+    # makes for "Trading Operations Analyst".
+    r"|\btechnology\s+(?:summer\s+analyst|analyst|associate|internship|intern)\b"
+    r"|\btechnology\s+(?:office|infrastructure|process|governance|solutions?)\b"
+    r"|\bgroup\s+technology\s+office\b"
+    r"|\btechnology\s+(?:&|and)\s+engineering\b"
+    # Corporate Treasury / Corporate Planning: the bank's own balance-sheet
+    # and internal-planning functions, never a track. "Corporate Treasury"
+    # is unambiguous on the live board — 7 rows, all at Goldman, Morgan
+    # Stanley or Ares, none with a track word elsewhere in the title — unlike
+    # bare `\bcorporate\b`, which is also how boutiques name their IB
+    # division ("Corporate Finance" at Houlihan Lokey, "Corporate Advisory"
+    # at Goldman and Citi, "Corporate Banking" at RBC and JPMorgan) and so
+    # stays deliberately OUT of this list. "Corporate Infrastructure" is the
+    # same call for Nomura's "2026 Insight Day: Corporate Infrastructure" —
+    # ranked the #1 pick on the founder's own live profile ahead of every
+    # dated Morgan Stanley and HSBC internship on the board, for a division
+    # whose own event description says "these are the teams that power and
+    # support our business every day."
+    r"|\bcorporate treasury\b|\bcorporate planning\b|\bcorporate infrastructure\b",
     re.I)
 
 
