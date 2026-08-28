@@ -29,10 +29,10 @@ def _firm(slug="barclays", name="Barclays"):
     return Firm.objects.create(slug=slug, name=name)
 
 
-def _opp(firm, n, *, bucket, title=None):
+def _opp(firm, n, *, bucket, title=None, region=""):
     return Opportunity.objects.create(
         firm=firm, url=f"https://x/{n}", bucket=bucket, status="open",
-        title=title or f"Role {n}",
+        title=title or f"Role {n}", region=region,
     )
 
 
@@ -182,13 +182,34 @@ def test_a_freshly_confirmed_row_wears_no_caution(client):
 
 
 # ---------------------------------------------------------------------------
-# 7. The eyebrow speaks the product's vocabulary, not firms.yaml's
+# 7. The eyebrow speaks the product's vocabulary, and says whose claim it is
 #
 # Live, the line above the firm's name joined the raw slug arrays under
 # .pagehead-eyebrow's `text-transform: uppercase`: /firms/hsbc/ "HK · IB",
 # /firms/bofa/ "US · IB, ST", /firms/alibaba/ "CORP-STRAT", /firms/mlt/
 # "US · PIPELINE". The Opportunities facets spell the same concepts "Hong
 # Kong", "Investment Banking", "Corporate Strategy" from the very same maps.
+#
+# Labelling those words fixed how they READ and not what they CLAIMED, which
+# was the second half of the same defect. firms.yaml's regions and tracks are
+# a coverage DECLARATION — where and what a firm recruits, in general. The
+# rows below are a FACT, each stamped with its own market. Bare, the eyebrow
+# wore the same grammar as the fact and lost to it: /firms/cicc/ read "Hong
+# Kong" above ten Mainland China roles, /firms/macquarie/ "Hong Kong" above
+# two in Manila, /firms/gs/ "United States, Hong Kong" when its largest live
+# market is Europe at 113. Measured over the corpus: of the 42 firms that
+# declare a region, 25 have a top live market they never declared and 13 have
+# no live row in ANY declared market. Five agree exactly.
+#
+# That is the 925-vs-13 defect this module opens with, with markets instead
+# of counts — two true statements answering different questions, and nothing
+# saying which was which. So the line names its own question: "Recruits:".
+#
+# The prefix and not a live-market swap, because the declaration has to
+# survive the case where there is no fact to swap in: 50 of 131 firms have no
+# open campus row at all, 33 of them declaring a region. Those firms are the
+# reason every test below builds a firm with ZERO opportunities — the
+# declaration is all such a page can honestly say, and it must still say it.
 # ---------------------------------------------------------------------------
 def _eyebrow(client, firm):
     """The eyebrow as a READER sees it — entities resolved, tags stripped."""
@@ -205,7 +226,7 @@ def test_the_eyebrow_labels_both_halves(client):
     firm = _firm(slug="hsbc", name="HSBC")
     firm.regions, firm.tracks = ["hk"], ["ib"]
     firm.save()
-    assert _eyebrow(client, firm) == "Hong Kong · Investment Banking"
+    assert _eyebrow(client, firm) == "Recruits: Hong Kong · Investment Banking"
 
 
 def test_a_multi_track_firm_labels_every_track(client):
@@ -216,7 +237,7 @@ def test_a_multi_track_firm_labels_every_track(client):
     firm.regions, firm.tracks = ["us"], ["ib", "st"]
     firm.save()
     assert _eyebrow(client, firm) == (
-        "United States · Investment Banking, Sales & Trading")
+        "Recruits: United States · Investment Banking, Sales & Trading")
 
 
 def test_the_hyphenated_slug_is_the_worst_case_and_is_covered(client):
@@ -224,7 +245,7 @@ def test_the_hyphenated_slug_is_the_worst_case_and_is_covered(client):
     firm = _firm(slug="alibaba", name="Alibaba")
     firm.regions, firm.tracks = ["hk"], ["corp-strat"]
     firm.save()
-    assert _eyebrow(client, firm) == "Hong Kong · Corporate Strategy"
+    assert _eyebrow(client, firm) == "Recruits: Hong Kong · Corporate Strategy"
 
 
 def test_the_track_that_had_no_label_at_all_now_has_one(client):
@@ -234,7 +255,7 @@ def test_the_track_that_had_no_label_at_all_now_has_one(client):
     firm.regions, firm.tracks = ["us"], ["pipeline"]
     firm.save()
     eyebrow = _eyebrow(client, firm)
-    assert eyebrow == "United States · Career Access Programme"
+    assert eyebrow == "Recruits: United States · Career Access Programme"
     assert "pipeline" not in eyebrow.lower()
 
 
@@ -243,7 +264,7 @@ def test_a_region_less_firm_renders_the_track_half_alone(client):
     firm = _firm(slug="akuna", name="Akuna Capital")
     firm.regions, firm.tracks = [], ["st"]
     firm.save()
-    assert _eyebrow(client, firm) == "Sales & Trading"
+    assert _eyebrow(client, firm) == "Recruits: Sales & Trading"
 
 
 def test_a_firm_with_neither_renders_an_empty_eyebrow(client):
@@ -278,7 +299,88 @@ def test_the_eyebrow_reads_the_same_maps_the_feed_facets_do(client):
     # ordered the way its own facet lists it — REGION_ORDER for markets,
     # alphabetical by label for tracks.
     assert eyebrow == (
-        "Hong Kong, United States · Investment Banking, Sales & Trading")
+        "Recruits: Hong Kong, United States · Investment Banking, Sales & Trading")
+
+
+# ---- The honesty guard: the declaration must not read as today's fact -----
+def test_a_declared_market_the_live_rows_contradict_is_not_asserted_bare(
+        client):
+    """CICC's live shape: declares Hong Kong, has ten open campus roles and
+    every one of them in Mainland China. The old eyebrow printed a bare "Hong
+    Kong" directly above ten rows each stamped "Mainland China" — a market
+    claim the page's own rows refuted, in the same grammar they used.
+
+    The declaration itself is not wrong and is not removed. What the page owes
+    the reader is which question it answers, so the assertion has to arrive
+    attributed."""
+    firm = _firm(slug="cicc", name="CICC")
+    firm.regions, firm.tracks = ["hk"], ["ib"]
+    firm.save()
+    for i in range(10):
+        _opp(firm, i, bucket="internship", title=f"Beijing Analyst {i}",
+             region="cn")
+
+    eyebrow = _eyebrow(client, firm)
+    assert eyebrow == "Recruits: Hong Kong · Investment Banking"
+    # The point of the prefix: the market words never stand as a bare claim.
+    assert not eyebrow.startswith("Hong Kong")
+
+    body = _page(client, firm)
+    # The contradiction the eyebrow used to lose to is still on the page, in
+    # the rows, unchanged — the fix is attribution, not suppression.
+    assert "Mainland China" in body
+
+
+def test_the_declaration_survives_a_firm_with_no_open_roles_at_all(client):
+    """33 of the 131 live firms declare a region and have no open campus row.
+    A live-market line cannot describe them, which is why the eyebrow stayed
+    the declaration rather than being swapped for one. The empty state below
+    says the rows are empty; the eyebrow still says what the firm recruits."""
+    firm = _firm(slug="citadel", name="Citadel")
+    firm.regions, firm.tracks = ["hk"], ["st"]
+    firm.save()
+
+    body = _page(client, firm)
+    assert _eyebrow(client, firm) == "Recruits: Hong Kong · Sales & Trading"
+    assert "Nothing open right now." in body
+
+
+def test_the_eyebrow_does_not_change_with_the_row_scope(client):
+    """A declaration is about the firm, not about whichever rows the reader
+    opted into, so `?role=all` and `?role=other` must not move it. The live
+    market line is the thing that tracks the scope (see `_open_markets`);
+    if the eyebrow moved too, the page would have two scope-dependent market
+    statements and no way to tell them apart."""
+    firm = _firm(slug="macquarie", name="Macquarie")
+    firm.regions, firm.tracks = ["hk"], ["ib"]
+    firm.save()
+    _opp(firm, 1, bucket="internship", title="Manila Analyst", region="other")
+    _opp(firm, 2, bucket=OTHER, title="Manila VP", region="other")
+
+    expected = "Recruits: Hong Kong · Investment Banking"
+    for qs in ("", "?role=all", "?role=other", "?role=banana"):
+        import html
+        import re
+        m = re.search(r'<p class="pagehead-eyebrow">(.*?)</p>',
+                      _page(client, firm, qs), re.S)
+        got = " ".join(html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).split())
+        assert got == expected, f"{qs} moved the declaration to {got!r}"
+
+
+def test_the_declaration_reads_the_same_signed_in(client, django_user_model):
+    """The eyebrow is firm data, not user data — `_my_network_at` is the only
+    section on this page that differs between two students. Asserted because
+    the signed-in page renders a whole extra section above the fold and the
+    header is shared markup."""
+    firm = _firm(slug="hsbc", name="HSBC")
+    firm.regions, firm.tracks = ["hk"], ["ib"]
+    firm.save()
+    assert _eyebrow(client, firm) == "Recruits: Hong Kong · Investment Banking"
+
+    user = django_user_model.objects.create_user(
+        email="demo@example.com", password="x" * 12)
+    client.force_login(user)
+    assert _eyebrow(client, firm) == "Recruits: Hong Kong · Investment Banking"
 
 
 # ---------------------------------------------------------------------------

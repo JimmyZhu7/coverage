@@ -4058,6 +4058,23 @@ def firm_detail(request, slug):
         # built from the same two maps, spell them "Hong Kong" and "Corporate
         # Strategy". views.py:98 already states the position: raw slugs read
         # as internal shorthand and this page is public-facing.
+        #
+        # These are firms.yaml's DECLARATION, not this page's rows, and the
+        # template prefixes them "Recruits:" for exactly that reason. Labels
+        # fixed how the words READ, not what they CLAIMED, and bare they
+        # claimed the wrong thing: 25 of the 42 firms that declare a region
+        # have a top live market they never declared, and 13 have no live row
+        # in ANY declared market. See firm_detail.html's eyebrow comment — the
+        # short version is that a bare "Hong Kong" over ten Mainland China
+        # roles is the 925-vs-13 defect in the docstring above, with markets
+        # instead of counts.
+        #
+        # Still the declaration and NOT `_open_markets`: 50 of 131 firms have
+        # no open campus row at all, 33 of them declaring a region, so there
+        # is frequently no live market to derive and the declaration is the
+        # only honest thing left to print. Swapping meaning by whether rows
+        # happen to exist would put two answers in one slot, which is the
+        # defect this prefix exists to close.
         "eyebrow_regions": _labelled(firm.regions, REGION_LABELS),
         "eyebrow_tracks": _labelled(firm.tracks, TRACK_LABELS, by_label=True),
         "cards": cards,

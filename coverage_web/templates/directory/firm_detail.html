@@ -18,8 +18,31 @@
       the two firms whose track had no label at all, "PIPELINE". The labels
       come from views.py, from the same REGION_LABELS and TRACK_LABELS the
       Opportunities facets read, so the two surfaces cannot drift.
+
+      "RECRUITS:" IS THE WHOLE POINT OF THIS LINE. Labelling those words
+      fixed how they READ and not what they CLAIM, and bare, they claimed
+      the wrong thing. firms.yaml's regions and tracks are a coverage
+      declaration — where and what this firm recruits, in general. The rows
+      below are a fact: what is open today, each one stamped with its own
+      market by _card.html. Bare, the eyebrow sat in the same grammar as
+      that fact and lost to it: /firms/cicc/ said "Hong Kong" above ten
+      Mainland China roles, /firms/macquarie/ said "Hong Kong" above two in
+      Manila, /firms/gs/ said "United States, Hong Kong" when its biggest
+      live market is Europe at 113. Measured over the corpus, 25 of the 42
+      firms that declare a region have a top live market they never
+      declared, and 13 have no live row in ANY declared market.
+
+      This is the 925-vs-13 defect in the section below, with markets
+      instead of counts: two true statements answering different questions,
+      and nothing saying which was which. The prefix says which. It is one
+      word rather than a live-market line because the rows already carry
+      that (and `_open_markets` prints it in aggregate the moment the cap
+      hides any), and because the declaration must survive the 39 firms
+      whose campus scope is empty, where it is the only thing that can be
+      said at all.
       {% endcomment %}
       <p class="pagehead-eyebrow">
+        {% if eyebrow_regions or eyebrow_tracks %}Recruits:{% endif %}
         {% if eyebrow_regions %}{{ eyebrow_regions|join:", " }}{% endif %}
         {% if eyebrow_regions and eyebrow_tracks %} · {% endif %}
         {% if eyebrow_tracks %}{{ eyebrow_tracks|join:", " }}{% endif %}
