@@ -593,6 +593,33 @@ def process_notification(gmail_address: str, published_history_id: str) -> None:
         )
     except GmailConnection.DoesNotExist:
         return  # disconnected or unknown mailbox — nothing to do
+    except GmailConnection.MultipleObjectsReturned:
+        # This is the ONE place in the app where a tenant is selected by a
+        # value that arrives from outside it: `gmail_address` comes off
+        # Google's Pub/Sub payload, and the docstring above says so. The
+        # column is a plain EmailField with NO unique constraint (see
+        # `capture.models.GmailConnection` — only `user` is unique, via the
+        # OneToOneField), so two accounts connecting the same mailbox is a
+        # shape the schema permits and this lookup cannot resolve.
+        #
+        # Refuse, loudly, rather than sync. `.get()` was already raising here
+        # — uncaught, so a single ambiguous address broke every notification
+        # the worker processed after it. Catching it stops that. What this
+        # must never become is `.first()`: that reads as a tidy fix and turns
+        # an ambiguous address into a silent, arbitrary choice of whose
+        # mailbox to sync into whose CRM, which is a cross-tenant write
+        # decided by row order. If this ever fires, the fix is a unique
+        # constraint on the column, not a tiebreak here.
+        logger.error(
+            "gmail_live: %s active connections share gmail_address=%r — "
+            "refusing to sync; a notification cannot say which tenant it is "
+            "for. Add a unique constraint on GmailConnection.gmail_address.",
+            GmailConnection.all_objects.filter(
+                gmail_address=gmail_address, status="active"
+            ).count(),
+            gmail_address,
+        )
+        return
 
     # Defensive drop, not the primary gate: neither `connect_gmail` nor
     # `renew_watches` ever registers a watch for a non-Pro connection, so a

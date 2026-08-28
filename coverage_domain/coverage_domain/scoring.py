@@ -377,7 +377,12 @@ def _score_responsiveness(
         n = len(latencies)
         median = latencies[n // 2] if n % 2 else (latencies[n // 2 - 1] + latencies[n // 2]) / 2
         meta["median_latency_days"] = _round1(median)
-        latency_score = _clamp(1.0 - median / params["resp_latency_zero_days"], 0.0, 1.0)
+        # `or 1` — same params-bundle guard as the recency half-life and the
+        # momentum windows; a zero here means "any latency at all scores 0",
+        # which a ramp of one day expresses without dividing by zero.
+        latency_score = _clamp(
+            1.0 - median / (params["resp_latency_zero_days"] or 1), 0.0, 1.0
+        )
     else:
         latency_score = 0.0
 
@@ -400,7 +405,13 @@ def _score_recency(
         return 0.0, {"days_since_meaningful": None}
     last = max(meaningful)
     days = max(0.0, _days_between(as_of, last))
-    weight = 0.5 ** (days / params["recency_half_life_days"])
+    # `or 1` for the same reason as the momentum windows and the timeline
+    # runway: this is a params key a caller may override wholesale, and a
+    # zero half-life would raise ZeroDivisionError out of the middle of a
+    # scorer rather than being rejected at the boundary. A half-life of one
+    # day is the fastest decay the formula can express and is what "no
+    # half-life" degenerates to.
+    weight = 0.5 ** (days / (params["recency_half_life_days"] or 1))
     return _clamp(100.0 * weight), {"days_since_meaningful": _round1(days)}
 
 
@@ -638,8 +649,13 @@ def _score_momentum(
     base window. Accelerating -> 100, steady -> 50, decelerating/stalled ->
     below 50 / 0. Overlapping windows (recent inside base) are intentional —
     a fresh burst reads as momentum."""
-    recent_days = params["momentum_recent_days"]
-    base_days = params["momentum_base_days"]
+    # `or 1` on both, for the same reason as `_score_timeline`'s runway: these
+    # are params keys, a caller may hand in a full override bundle, and a 0
+    # window would divide by zero inside the scorer instead of being rejected
+    # at the boundary. A zero-length window holds nothing, and `recent/1` over
+    # an empty window is 0, which is what a zero-length window should score.
+    recent_days = params["momentum_recent_days"] or 1
+    base_days = params["momentum_base_days"] or 1
     recent = base = 0
     for t in touches:
         dt = _as_dt(t.get("ts"))
@@ -721,7 +737,13 @@ def _score_timeline(
     target = params["advocate_target"]
     network_readiness = min(1.0, (advocates + 0.5 * max(0, warm - advocates)) / target) if target else 1.0
 
-    runway = params["timeline_runway_days"]
+    # `or 1` rather than a bare divide: `timeline_runway_days` is a params key
+    # and a caller may pass a full override bundle (see `_merged_params`), so a
+    # 0 here is a ZeroDivisionError raised from inside a scorer rather than a
+    # rejected parameter. A runway of 0 means "no comfortable lead time at
+    # all", which is the same thing as being at the date already — urgency
+    # pinned to 1 — and that is what falling back to 1 produces.
+    runway = params["timeline_runway_days"] or 1
     urgency = _clamp((runway - days_until) / runway, 0.0, 1.0)  # 0 far out, 1 at/after the date
     readiness_fraction = 1.0 - urgency * (1.0 - network_readiness)
     meta["network_readiness"] = _round1(network_readiness * 100) / 100
@@ -742,6 +764,100 @@ def _overlap(a: Iterable[str] | None, b: Iterable[str] | None) -> bool | None:
 # else — including a missing entry — is UNKNOWN, never a guess.
 WORK_AUTH_CITIZEN = "citizen"
 WORK_AUTH_SPONSORSHIP = "sponsorship"
+
+
+def relevant_regions(
+    user_regions: Iterable[str] | None, firm_regions: Iterable[str] | None
+) -> set[str]:
+    """The regions where this user × firm pairing could actually happen.
+
+    The overlap between the two sides, falling back to whichever side is known
+    when the overlap is empty (an unstated preference on either side, or a firm
+    the user is browsing outside their regions), and to the empty set when
+    neither is. Case- and whitespace-normalized.
+
+    Extracted so `needs_sponsorship` (the USER's side of the sponsorship
+    question) and `resolve_firm_sponsors` (the FIRM's side) scope to the same
+    regions by construction. Two functions answering one question against two
+    different region sets is how a student gets told a firm sponsors in a
+    market neither of them was talking about.
+    """
+    user_set = {(r or "").strip().lower() for r in (user_regions or [])} - {""}
+    firm_set = {(r or "").strip().lower() for r in (firm_regions or [])} - {""}
+    return user_set & firm_set or firm_set or user_set
+
+
+def resolve_firm_sponsors(sponsors: Any, relevant: Iterable[str] | None) -> bool | None:
+    """Does this firm sponsor in the regions in play? True / False / None.
+
+    WHY THIS EXISTS. `_score_structural` used to read the firm's sponsorship
+    stance as `bool(firm.get("sponsors"))`, and the web layer
+    (`crm.views._contact_live`) hands it `directory.Firm.sponsors` — a
+    JSONField whose documented shape is a PER-REGION dict, `{"us": True,
+    "hk": "unknown"}`. Truthiness over a dict answers a different question
+    from the one being asked: it reports whether the column is non-empty.
+
+    Measured on the live board the day this was written, 131 firms:
+
+      - 73 carry `{}` — the column's own default, meaning "nobody has recorded
+        a policy". `bool({})` is False, so the scorer asserted `sponsorship_ok
+        = False`, docked the structural axis 20 points, and printed "no
+        sponsorship" in the reasoning line. 14 of those 73 are firms a real
+        user has tiered. That is a confident negative claim manufactured out
+        of an empty column, against the function's own contract two lines up:
+        "Unknown inputs are neutral (0.5), never a hard penalty."
+      - 6 carry a dict with no `True` in it (`{"hk": "unknown"}`, and the
+        all-False shape the dict exists to express). `bool` of a non-empty
+        dict is True, so a firm that sponsors NOWHERE — or has explicitly
+        written down that it does not know — scored full marks and drew no
+        warning at all. `directory/sponsorship.py` names this direction as the
+        expensive one: for an international student a wrong "yes" sends them at
+        a role they cannot hold.
+
+    THE RULES, matching `directory.sponsorship._resolve_firm_fact` so the fit
+    score and the posting pill cannot disagree about one column:
+
+      - a `bool` is the CALLER'S OWN collapsed answer and is returned as-is.
+        This is the shape every fixture and every direct caller of `score_firm`
+        passes, and it keeps meaning exactly what it has always meant.
+      - a dict is looked up PER REGION, restricted to `relevant`. Any relevant
+        region saying yes -> True (a student only has to be employable in one
+        of a firm's markets), the same best-case rule `needs_sponsorship` uses
+        for the other side of the pairing. Otherwise, every relevant region
+        having said no -> False. Anything else — a missing region, a literal
+        "unknown", an empty dict, no relevant regions to look up — is None.
+      - anything else (None, a string, a list) is None.
+
+    None is UNKNOWN and `_score_structural` scores it 0.5. That is the whole
+    point: silence is not a "no", and a blob that names no region cannot answer
+    a region-scoped question.
+    """
+    if isinstance(sponsors, bool):
+        return sponsors
+    if not isinstance(sponsors, dict) or not sponsors:
+        return None
+    keyed = {
+        (k or "").strip().lower(): v
+        for k, v in sponsors.items()
+        if isinstance(k, str)
+    }
+    scope = {(r or "").strip().lower() for r in (relevant or [])} - {""}
+    if not scope:
+        return None
+    facts = []
+    for region in sorted(scope):
+        value = keyed.get(region)
+        if value is True or value == "true":
+            facts.append(True)
+        elif value is False or value == "false":
+            facts.append(False)
+        else:
+            facts.append(None)
+    if any(f is True for f in facts):
+        return True
+    if facts and all(f is False for f in facts):
+        return False
+    return None
 
 
 def needs_sponsorship(
@@ -783,9 +899,7 @@ def needs_sponsorship(
         False (no sponsorship needed), True (needs it everywhere relevant), or
         None (not enough information — scored neutral).
     """
-    user_set = {(r or "").strip().lower() for r in (user_regions or [])} - {""}
-    firm_set = {(r or "").strip().lower() for r in (firm_regions or [])} - {""}
-    relevant = user_set & firm_set or firm_set or user_set
+    relevant = relevant_regions(user_regions, firm_regions)
     if not relevant:
         return None
 
@@ -820,8 +934,14 @@ def _score_structural(
     elif not needs:
         spon = True   # no sponsorship needed -> no conflict possible
     else:
-        firm_sponsors = firm.get("sponsors")
-        spon = None if firm_sponsors is None else bool(firm_sponsors)
+        # `resolve_firm_sponsors`, not `bool(...)` — see that function for the
+        # two opposite wrong answers truthiness gave over the live per-region
+        # `Firm.sponsors` blob, and for why an unrecorded policy has to score
+        # neutral rather than "no sponsorship".
+        spon = resolve_firm_sponsors(
+            firm.get("sponsors"),
+            relevant_regions(user.get("regions"), firm.get("regions")),
+        )
 
     w = params["structural_weights"]
     score = 100.0 * (w["region"] * comp(region) + w["track"] * comp(track) + w["sponsorship"] * comp(spon))
