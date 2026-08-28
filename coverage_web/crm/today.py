@@ -2004,6 +2004,47 @@ def _starter_seeds(user, today) -> list[dict]:
                          f"?firm={uf.firm.slug}&quick=1"),
             })
 
+    # AHEAD OF THE CSV SEED, and that order is the point (2026-08-27). This
+    # block used to sit last, below `track` — with `SEED_MAX` at 3 and a
+    # brand-new account offering firms/import/track, it was truncated away
+    # on exactly the render it exists for. Verified on a fresh account: the
+    # page said "Start here 3" and Connect Gmail was not one of the three.
+    #
+    # It leads now because of what connecting actually does on an empty
+    # account. The first-connect pass sweeps six months of the student's own
+    # SENT mail and proposes everyone they wrote to at a directory firm
+    # (capture/gmail_live.py) — evidence they already have, versus a
+    # spreadsheet they have not written. "Import first" was only ever right
+    # while the historical pass searched per-contact and could find nobody
+    # new.
+    #
+    # NEVER promised on a deploy where it is dark. `is_configured()` is the
+    # same runtime gate every gmail_live entry point holds and the same one
+    # Settings' own card branches on — a seed offering a connection this
+    # install cannot make is the exact class of over-claim this page exists
+    # to avoid.
+    #
+    # Imported HERE, not at module scope: `capture.gmail_live` pulls in the
+    # Google API client stack and imports `crm.models` on the way, and this
+    # module is imported by `crm.views` at startup. A local import keeps that
+    # weight off every process that never renders a silent queue, and keeps
+    # the crm -> capture -> crm loop from having to exist at all.
+    from capture import gmail_live
+    from capture.models import GmailConnection
+
+    if len(seeds) < SEED_MAX and gmail_live.is_configured():
+        if not GmailConnection.objects.for_user(user).exists():
+            seeds.append({
+                "key": "gmail",
+                "title": "Connect Gmail",
+                "why": "Already emailing people? Coverage reads six months of "
+                       "your sent mail once and offers whoever you wrote to "
+                       "at a firm on your board. Nothing is added until you "
+                       "tap. After that, replies log themselves.",
+                "cta": "Connect Gmail",
+                "href": f"{reverse('accounts:settings')}#gmail-live",
+            })
+
     if len(seeds) < SEED_MAX:
         # The "small enough that one paste changes it" half of this is the
         # gate's job (SEED_NETWORK_FLOOR) — nothing here runs above it. What
@@ -2029,31 +2070,6 @@ def _starter_seeds(user, today) -> list[dict]:
             "cta": "Set your track",
             "href": f"{reverse('accounts:settings')}#profile",
         })
-
-    # NEVER promised on a deploy where it is dark. `is_configured()` is the
-    # same runtime gate every gmail_live entry point holds and the same one
-    # Settings' own card branches on — a seed offering a connection this
-    # install cannot make is the exact class of over-claim this page exists
-    # to avoid.
-    #
-    # Imported HERE, not at module scope: `capture.gmail_live` pulls in the
-    # Google API client stack and imports `crm.models` on the way, and this
-    # module is imported by `crm.views` at startup. A local import keeps that
-    # weight off every process that never renders a silent queue, and keeps
-    # the crm -> capture -> crm loop from having to exist at all.
-    from capture import gmail_live
-    from capture.models import GmailConnection
-
-    if len(seeds) < SEED_MAX and gmail_live.is_configured():
-        if not GmailConnection.objects.for_user(user).exists():
-            seeds.append({
-                "key": "gmail",
-                "title": "Connect Gmail",
-                "why": "Replies land in your mailbox. Connected, Coverage logs "
-                       "them for you and the queue stays true.",
-                "cta": "Connect Gmail",
-                "href": f"{reverse('accounts:settings')}#gmail-live",
-            })
 
     return seeds[:SEED_MAX]
 

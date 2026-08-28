@@ -335,6 +335,58 @@ def test_the_gmail_seed_appears_where_gmail_live_is_live(settings):
     assert "gmail" in _seed_keys(user)
 
 
+def test_the_gmail_seed_survives_the_cap_on_a_brand_new_account(settings):
+    """THE ORDERING BUG, and why this seed moved above the CSV one.
+
+    A brand-new account offers firms, import and track — three seeds, which
+    is exactly `SEED_MAX`. The Gmail seed used to be appended last and was
+    therefore truncated away on the one render it exists for: verified on a
+    live fresh account (2026-08-27), Today said "Start here 3" and Connect
+    Gmail was not among the three.
+
+    It leads now because of what connecting does on an EMPTY account: the
+    first-connect pass sweeps six months of the student's own sent mail and
+    proposes everyone they wrote to at a directory firm
+    (capture/gmail_live.py). "Import your CSV first" was only ever the right
+    order while the historical pass searched per-contact and could find
+    nobody new.
+    """
+    settings.GMAIL_LIVE_CLIENT_ID = "id"
+    settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
+    settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
+    settings.GMAIL_LIVE_TOKEN_KEY = "key"
+    # No tracks, no firms, no contacts — the emptiest possible account, and
+    # the one that would fill every slot before Gmail got a look in.
+    user = _user()
+    user.onboarded_at = timezone.now()
+    user.save(update_fields=["onboarded_at"])
+
+    keys = _seed_keys(user)
+    assert len(keys) == SEED_MAX
+    assert "gmail" in keys
+    assert keys.index("gmail") < keys.index("import")
+
+
+def test_a_connected_mailbox_gives_the_slot_back_to_the_csv_seed(settings):
+    """The seed is an offer, not a permanent fixture: once the mailbox is
+    connected the slot returns to whatever is still undone."""
+    from capture.models import GmailConnection
+
+    settings.GMAIL_LIVE_CLIENT_ID = "id"
+    settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
+    settings.GMAIL_LIVE_PUBSUB_TOPIC = "projects/p/topics/t"
+    settings.GMAIL_LIVE_TOKEN_KEY = "key"
+    user = _user(tracks=["ib"])
+    assert "gmail" in _seed_keys(user)
+
+    GmailConnection.all_objects.create(
+        user=user, gmail_address=user.email, refresh_token_encrypted="x",
+    )
+    keys = _seed_keys(user)
+    assert "gmail" not in keys
+    assert "import" in keys
+
+
 def test_seeds_are_capped_so_the_page_stays_a_nudge_not_a_curriculum(settings):
     settings.GMAIL_LIVE_CLIENT_ID = "id"
     settings.GMAIL_LIVE_CLIENT_SECRET = "secret"
