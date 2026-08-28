@@ -134,6 +134,15 @@ def set_target_firms(user, firm_ids, *, tier: int = DEFAULT_FIRM_TIER) -> int:
 _FIELD_ALIASES: dict[str, set[str]] = {
     "name": {"name", "fullname", "contact", "contactname", "person"},
     "email": {"email", "emailaddress", "mail"},
+    # No path in this app ever fetches or guesses a LinkedIn URL — Gmail
+    # capture hands over an address, not a profile link, and sourcing only
+    # ever opens a LinkedIn *search*, never a specific profile (see
+    # crm/sourcing.py). A CSV column is the one bulk alternative to typing
+    # 200 URLs into the edit form one contact at a time, and the alias list
+    # includes the export's own header ("LinkedIn URL" — see
+    # CONTACT_EXPORT_COLUMNS) so a re-import of a student's own export
+    # round-trips this field instead of silently dropping it.
+    "linkedin": {"linkedin", "linkedinurl", "linkedinprofile"},
     "firm": {"firm", "company", "organization", "organisation", "employer", "org"},
     "role": {"role", "title", "position", "jobtitle"},
     "notes": {"notes", "note", "comments", "comment"},
@@ -141,7 +150,7 @@ _FIELD_ALIASES: dict[str, set[str]] = {
 }
 
 # Column order for the downloadable import template.
-IMPORT_TEMPLATE_COLUMNS = ["name", "email", "firm", "role", "notes", "angle"]
+IMPORT_TEMPLATE_COLUMNS = ["name", "email", "linkedin", "firm", "role", "notes", "angle"]
 
 
 def _norm(text: str) -> str:
@@ -436,6 +445,7 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
             firm_text="" if matched_firm else firm_raw[:255],
             role=values.get("role", "")[:255],
             email=email[:254],
+            linkedin=values.get("linkedin", "")[:512],
             notes=values.get("notes", ""),
             angle=values.get("angle", ""),
             source="import",
@@ -554,6 +564,7 @@ def import_template_csv() -> str:
         [
             "Jane Banker",
             "jane.banker@example.com",
+            "https://www.linkedin.com/in/janebanker",
             "Goldman Sachs",
             "Analyst",
             "Met at the spring info session",
