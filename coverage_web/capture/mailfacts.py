@@ -821,7 +821,20 @@ def _apply_ooo(
     existing = _existing_fact(user, sender, MailFact.KIND_OOO)
     if existing is not None:
         # A NEW leave later on updates the one row rather than being blocked
-        # forever by the dedup — but only ever forward.
+        # forever by the dedup — but only ever forward, and only while the
+        # row is still LIVE. `dismissed`/`undone` are closed states the
+        # student themselves put this card into — `dismiss()` only accepts
+        # `pending`/`applied` and `undo()` only acts on `applied`, both
+        # refusing to touch a row already in one of those two terminal
+        # states. This update branch is the one path in the module that
+        # skipped that check: a later, perfectly ordinary "still out,
+        # pushed my return back" auto-reply from the same sender would
+        # flip `status` back to `applied` and push `contact.snoozed_until`
+        # forward again — reviving a card the student had explicitly
+        # closed, and moving a CRM field with no new tap behind it. See
+        # `test_mailfacts.TestOooDismissedStaysDismissed`.
+        if existing.status not in (MailFact.STATUS_PENDING, MailFact.STATUS_APPLIED):
+            return
         if (
             return_on is not None
             and (existing.return_on is None or return_on > existing.return_on)

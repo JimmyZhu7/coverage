@@ -716,11 +716,31 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
             return False
         event.cancelled_at = None
 
+    # NOT IDEMPOTENT WITHOUT THIS SNAPSHOT (fixed 2026-08-28). The rolling
+    # window means the SAME "scheduled" finding for an already-current chat
+    # comes back on every sync pass until it ages out — and this function
+    # used to return True unconditionally once it reached the update path,
+    # whether or not anything below actually moved. `apply_findings`
+    # increments `chats_scheduled` on every True, so a chat that has not
+    # changed since yesterday still counted as "scheduled" again today,
+    # every day it stayed in the search window — a digest reading "3 chats
+    # scheduled" could mean "0 new, 3 re-touched." Captured before ANY
+    # mutation below (including the cancellation-revival two lines up) so a
+    # genuine revive still counts as a change even when the time itself
+    # does not move.
+    before = (
+        event.title, event.all_day, event.kind, event.source, event.contact_id,
+        event.ics_uid, event.starts_at, event.thread_id, event.invite_sent_at,
+        event.cancelled_at,
+    )
+
+    deleted_dup = False
     if thread_id and event.thread_id != thread_id:
-        CalendarEvent.all_objects.filter(
+        deleted, _ = CalendarEvent.all_objects.filter(
             user=user, thread_id=thread_id,
             source=CalendarEvent.SOURCE_CAPTURE, kind=CalendarEvent.KIND_CHAT,
         ).exclude(pk=event.pk).delete()
+        deleted_dup = deleted > 0
 
     event.title = f"Chat with {label}"
     event.all_day = False
@@ -760,6 +780,17 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
         event.starts_at = when
         event.thread_id = thread_id or event.thread_id
         event.invite_sent_at = sent_at or event.invite_sent_at
+
+    after = (
+        event.title, event.all_day, event.kind, event.source, event.contact_id,
+        event.ics_uid, event.starts_at, event.thread_id, event.invite_sent_at,
+        event.cancelled_at,
+    )
+    if not deleted_dup and before == after:
+        # Same finding re-read on a later pass, nothing to say that wasn't
+        # already on the row. No write, and no "chats_scheduled" credit for
+        # a chat that was already scheduled.
+        return False
     event.save(update_fields=[
         "title", "all_day", "kind", "source", "contact", "ics_uid",
         "starts_at", "thread_id", "invite_sent_at", "cancelled_at",
