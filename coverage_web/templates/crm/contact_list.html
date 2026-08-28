@@ -160,7 +160,7 @@
           implied ("{{ g.target }}" is the user's own Settings > Cadence
           target, `crm.coverage.advocate_target`, not a constant).
           {% endcomment %}
-          <div class="gap-state" title="{{ g.advocates }} of {{ g.target }} advocates toward your target for this firm. Set in Settings &gt; Cadence.">{{ g.label }}</div>
+          <div class="gap-state" title="{{ g.advocates }} of {{ g.target }} advocate{{ g.target|pluralize }} toward your target for this firm. Set in Settings &gt; Cadence.">{{ g.label }}</div>
           {% comment %}
           "Who to find": the other half of the card. Everything above it
           says how exposed this firm is; the button below it says "Add",
@@ -440,8 +440,8 @@
                   {% if fc.advocates %}
                   <span class="fc-adv{% if fc.adv_met %} is-met{% endif %}"
                         role="img"
-                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings"
-                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings &gt; Cadence">
+                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocate{{ fc.adv_target|pluralize }} at this firm — your target, set in Settings"
+                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocate{{ fc.adv_target|pluralize }} at this firm — your target, set in Settings &gt; Cadence">
                     {% for slot in fc.adv_slots %}<i class="adv-socket{% if slot %} is-filled{% endif %}"></i>{% endfor %}{% if fc.adv_met %} ✓{% endif %}
                   </span>
                   {% endif %}

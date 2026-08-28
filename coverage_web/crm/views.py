@@ -1213,9 +1213,14 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             # the one element a reader is already hovering to read the
             # rest of this firm's coverage.
             if not advocates:
+                # Same singular/plural rule as the "N advocates" breakdown
+                # just above (`labels["advocate"]`) — a target of 1, which
+                # `advocate_target` allows, must read "0 of 1 advocate", not
+                # "0 of 1 advocates".
                 bar_title += (
-                    f" · 0 of {adv_target} advocates — your target, "
-                    "set in Settings > Cadence"
+                    f" · 0 of {adv_target} "
+                    f"{'advocate' if adv_target == 1 else 'advocates'} — "
+                    "your target, set in Settings > Cadence"
                 )
         return {
             "firm": uf.firm,
