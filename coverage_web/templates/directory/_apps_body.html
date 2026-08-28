@@ -144,7 +144,15 @@ survives even if it was in the batch.
                 </span>
                 <span class="lens-role">
                   <a href="{{ r.url }}" target="_blank" rel="nofollow noopener">{{ r.title|smart_title }}</a>
-                  <span class="lens-firm">{{ r.firm_name|smart_title }}{% if r.location %} · {{ r.location|smart_location }}{% endif %}</span>
+                  {% comment %}
+                  `r.place`, not `r.location` — views._place, the same
+                  resolver the Opportunities feed card and firm row use. This
+                  lens was printing whatever a careers site emitted raw
+                  ("9-10 TAUNUSANLAGE:FRANKFURT AM MAIN", "NY 10001", "2
+                  Locations"), the same defect `_place` already closed on the
+                  feed card two clicks away from every one of these rows.
+                  {% endcomment %}
+                  <span class="lens-firm">{{ r.firm_name|smart_title }}{% if r.place.text %} · <span{% if r.place.why %} title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}{% if r.place.more %} +{{ r.place.more }} more{% endif %}</span>{% endif %}</span>
                   {% comment %}Same sentence the role drawer shows for the
                   same fact one click away, and it changes with the stage:
                   a posting closing after you applied leaves your
@@ -214,8 +222,13 @@ survives even if it was in the batch.
               <span class="apps-firm">{{ uo.firm_name|smart_title }}</span>
               <h3 class="apps-title"><a href="{{ uo.url }}" target="_blank" rel="nofollow noopener">{{ uo.title|smart_title }}</a></h3>
               {% comment %}City variants share a title; the location is the
-              only thing telling two saves apart.{% endcomment %}
-              {% if uo.location %}<span class="apps-loc">{{ uo.location|smart_location }}</span>{% endif %}
+              only thing telling two saves apart.
+              `uo.place`, not `uo.location` — views._place, the same
+              resolver the Opportunities feed card and firm row use. Same
+              defect this closes: a raw postal tail or colon join standing
+              in for a city, on the surface where a student is deciding
+              which of two saved roles to keep.{% endcomment %}
+              {% if uo.place.text %}<span class="apps-loc"{% if uo.place.why %} title="{{ uo.place.why }}"{% endif %}>{{ uo.place.text|smart_location }}{% if uo.place.more %} +{{ uo.place.more }} more{% endif %}</span>{% endif %}
               {% if stage.key == 'closed' %}<span class="apps-done-mark">Done, no longer live</span>{% endif %}
               {% comment %}Two different "closed" can be true of one card and
               they are marked separately on purpose. Above: the student put

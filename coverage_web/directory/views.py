@@ -3359,6 +3359,11 @@ def _lens_item(uo, *, today):
         "title": o.title,
         "url": o.url,
         "location": o.location,
+        # What the row PRINTS — see `_place`, the same resolver the feed
+        # card and firm row use. `location` above stays raw for callers
+        # (the weekly digest, deadline push alerts) that need the stated
+        # string itself.
+        "place": _place(o),
         "stage": stage,
         "stage_label": _STAGE_LABELS.get(stage, stage.title()),
         "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
@@ -3422,6 +3427,9 @@ def _stage_card(uo, *, today, people_by_firm=None) -> dict:
         # save, and the same-titled BofA forum sitting in Applied AND
         # Interviewing reading as one application in two stages at once.
         "location": o.location,
+        # What the card PRINTS — see `_place`, the same resolver the feed
+        # card and firm row use. `location` above stays raw.
+        "place": _place(o),
         "url": o.url,
         "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
         "reported": deadline_provenance(o),
