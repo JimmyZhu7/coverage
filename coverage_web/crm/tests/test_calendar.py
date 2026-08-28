@@ -342,7 +342,16 @@ def test_a_bad_submission_still_reports_the_months_real_counts(client, logged_in
     # assertion alone still passes against the old hard-coded "s".
     assert "<b>1</b> Deadline" in body
     assert "<b>1</b> Deadlines" not in body
-    assert "<b>0</b> Chats" in body and "<b>0</b> Events" in body
+    # The real count either way — the bug this guards against was the error
+    # path passing a hard-coded zero regardless of what the month actually
+    # holds. A zero chip renders nothing now (see the month-rail-style
+    # zero-hiding on the legend), so the context dict, not a chip's text, is
+    # what proves the error re-render used the month's REAL counts rather
+    # than the old placeholder.
+    assert resp.context["counts"]["chat"] == 0
+    assert resp.context["counts"]["event"] == 0
+    assert ('class="cal-key cal-key-chat"' not in body
+            and 'class="cal-key cal-key-event"' not in body)
 
 
 def test_clicking_a_day_prefills_that_date_and_opens_the_form(client, logged_in):
@@ -1015,7 +1024,10 @@ def test_an_applications_open_row_is_not_counted_as_a_deadline(client, logged_in
     assert resp.context["counts"]["deadline"] == 0
     assert resp.context["counts"]["opening"] == 1
     body = resp.content.decode()
-    assert "<b>0</b> Deadlines" in body
+    # A zero count earns no chip at all now — the same rule the month rail
+    # already applied to its own empty months. The deadline key isn't there
+    # to miscount against; it just isn't there.
+    assert 'class="cal-key cal-key-deadline"' not in body
     assert "<b>1</b> Opening" in body and "<b>1</b> Openings" not in body
 
 
@@ -1059,7 +1071,28 @@ def test_the_opening_no_longer_wears_the_deadline_colour(client, logged_in):
 
 
 def test_the_page_head_lists_what_the_page_now_counts(client, logged_in):
-    assert "Chats, events, deadlines, openings" in _month(client).content.decode()
+    """The eyebrow used to spell out "Chats, events, deadlines, openings" in
+    prose; the legend row right below already says the same thing in colour,
+    with the month's real counts, so the eyebrow was shortened to match every
+    other page's two-word pattern ("Your relationships", "Your pipeline").
+    What has to survive that cut is the legend itself still naming all four
+    kinds, each with its own count, when all four occur in the same month."""
+    now = timezone.localtime(timezone.now())
+    CalendarEvent.all_objects.create(
+        user=logged_in, kind=CalendarEvent.KIND_CHAT,
+        source=CalendarEvent.SOURCE_MANUAL, title="Coffee with Ada",
+        starts_at=now.replace(day=5, hour=15, minute=0, second=0, microsecond=0))
+    CalendarEvent.all_objects.create(
+        user=logged_in, kind=CalendarEvent.KIND_EVENT,
+        source=CalendarEvent.SOURCE_MANUAL, title="Superday", all_day=True,
+        starts_at=now.replace(day=6, hour=0, minute=0, second=0, microsecond=0))
+    _firm_date("app_close", day=10)
+    _firm_date("app_open", day=20, slug="ms", name="Morgan Stanley")
+    body = _month(client).content.decode()
+    for chip, label in (("cal-key-chat", "Chat"), ("cal-key-event", "Event"),
+                        ("cal-key-deadline", "Deadline"),
+                        ("cal-key-opening", "Opening")):
+        assert chip in body and label in body
 
 
 def test_an_opening_still_reaches_the_subscribed_feed_without_an_alarm(client, logged_in):
