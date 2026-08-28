@@ -1037,6 +1037,18 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # appearing in their firm's tabs marked unconfirmed. That is the designed
     # steady state.
     unplaced_total = sum(1 for c in contacts if not c.region)
+    # Tab counts, read off this SAME pre-scope list with the SAME predicates
+    # `_scoped` filters by below — a tab that shows a number it didn't also
+    # use to decide what renders is exactly the class of bug this repo has
+    # shipped five times. "All" is the pool size before any scope narrows
+    # it; each region count uses `_in_scope`, the one function `_scoped`
+    # itself calls, so the two can never disagree.
+    all_total = len(contacts)
+    school_total = sum(1 for c in contacts if c.school or c.school_affiliation)
+    region_counts = {
+        code: sum(1 for c in contacts if _in_scope(c, code))
+        for code in NETWORK_SCOPE_REGIONS
+    }
     contacts = _scoped(contacts)
     # The caveat's number goes through the SAME filter as the board it is a
     # caveat about. A US tab reading "9 hidden" while eight of them are in
@@ -1050,6 +1062,23 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # caveat, an unscoped bool for the way back.
     unrelated_total = len(_scoped(unrelated))
     unrelated_any = bool(unrelated)
+    # A fourth way off this board, alongside the two gates above: the student
+    # archived them by hand (`contact_archive`). Unlike them, this one used to
+    # render unconditionally — the 2026-08-27 tab-bar simplification pass
+    # applied the same hide-when-empty rule here too, on purpose: most
+    # students have archived nobody yet, and a permanent link to a list that
+    # is always empty is the exact "standing reproach" the founder flagged on
+    # a permanently-zero "Other countries" tab.
+    archived_any = Contact.objects.for_user(user).filter(archived=True).exists()
+    # Parked is a route OFF this board, not a lens on it, so it sits on the
+    # off-board line with Archived rather than in the filter pill. Gated the
+    # same way: a student who has parked nobody is not shown the way back to
+    # an empty list. Django reads a missing context key as falsy, so without
+    # this the link would simply never render — silently, which is worse than
+    # loudly.
+    parked_any = Contact.objects.for_user(user).filter(
+        archived=False, thread_state="parked"
+    ).exists()
     # How many of the shown contacts are here on a guess rather than a set
     # region. Rendered as a one-line caveat under the Contacts header so a
     # region tab never silently passes off "unknown" as "confirmed".
@@ -1082,7 +1111,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # "Other Markets" wording belongs to postings.
     region_scopes = [
         {"code": code,
-         "label": "Other countries" if code == "other" else REGION_LABELS[code]}
+         "label": "Other countries" if code == "other" else REGION_LABELS[code],
+         "count": region_counts[code]}
         for code in NETWORK_SCOPE_REGIONS
         if code == "other"
         or not interested_regions or code in interested_regions
@@ -1387,6 +1417,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         {
             "scope": scope,
             "region_scopes": region_scopes,
+            "all_total": all_total,
+            "school_total": school_total,
             "unplaced_scope": UNPLACED_SCOPE,
             # Unscoped, like `hidden_any`: the tab is the way TO the pool, and
             # a way that vanishes depending on which tab you're standing on is
@@ -1410,6 +1442,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "hidden_any": hidden_any,
             "unrelated_total": unrelated_total,
             "unrelated_any": unrelated_any,
+            "archived_any": archived_any,
+            "parked_any": parked_any,
         },
     )
 

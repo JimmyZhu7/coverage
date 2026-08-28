@@ -10,8 +10,20 @@
 <div class="page page--full">
   {% url 'crm:contact_new' as add_contact_url %}
   {% include "_pagehead.html" with eyebrow="Your relationships" title="Network" sub="Everyone you know at each firm, how warm they are, and who's next." action_url=add_contact_url action_label="＋ Add Contact" %}
+  {% comment %}
+  2026-08-27: cut down from eight tabs (nine with the campaign one showing)
+  to the four that are actually a lens on the board — All, the regions, and
+  School. They were never eight peers: three more were escape hatches to
+  something deliberately hidden (Archived, campaign-hidden, recruitment-
+  hidden) and one was a chore queue (Unplaced), not a way of looking at the
+  network. Both kinds moved OUT of this pill, below — nothing became
+  unreachable, see the comments at their new spots. Every tab left in the
+  pill now shows its own size (`.scope-count`), so it's judgeable before
+  you click it — the counts come off the exact same list `_scoped` filters
+  with, so a tab can't show a number the board disagrees with.
+  {% endcomment %}
   <nav class="subnav scope-tabs standalone">
-    <a href="{% url 'crm:contact_list' %}"{% if not scope %} aria-current="page"{% endif %}>All</a>
+    <a href="{% url 'crm:contact_list' %}"{% if not scope %} aria-current="page"{% endif %}>All <span class="scope-count">{{ all_total }}</span></a>
     {% comment %}
     Narrowed to Settings > Profile's "Regions of Interest" (crm/views.py's
     `region_scopes`) — a student recruiting only HK/US doesn't carry
@@ -20,50 +32,100 @@
     filters already follow.
     {% endcomment %}
     {% for r in region_scopes %}
-      <a href="?scope={{ r.code }}"{% if scope == r.code %} aria-current="page"{% endif %}>{{ r.label }}</a>
+      {% comment %}
+      "Other countries" is the one region nothing on this board ever infers
+      — a human has to say "London" by hand (the region_other bulk verb) —
+      so on most students' data it sits at zero forever. That is the exact
+      "standing reproach" the founder called out, and it gets the same fix
+      already proven on the two hidden-contact links below: render only
+      when it actually holds somebody. The one exception is standing on it
+      already — answering "London" for your very first Other contact must
+      not make the tab you're looking at disappear out from under you.
+      {% endcomment %}
+      {% if r.code != "other" or r.count or scope == r.code %}
+        <a href="?scope={{ r.code }}"{% if scope == r.code %} aria-current="page"{% endif %}>{{ r.label }} <span class="scope-count">{{ r.count }}</span></a>
+      {% endif %}
     {% endfor %}
-    {% comment %}
-    Everyone the write path declined to place. Coverage never infers a region
-    it cannot entail from something the student actually stated (see
-    crm/models.py `Contact.resolve_region` for the measurement that killed
-    every probabilistic signal), so some people stay unplaced — by design.
-    This tab is the only ask the product makes about it: no badge, no Today
-    card, no digest line. Rendered only when somebody is actually unplaced,
-    the same rule the two hidden-contact tabs follow — a permanent tab reading
-    "0" would be a standing reproach for a state that is allowed.
-    {% endcomment %}
-    {% if unplaced_total %}
-      <a href="?scope={{ unplaced_scope }}"{% if scope == unplaced_scope %} aria-current="page"{% endif %}>Unplaced</a>
-    {% endif %}
-    <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School</a>
-    {# Not a scope — a separate list. Archived contacts are excluded from every #}
-    {# board query, so this is the only way back to them. #}
-    <a href="{% url 'crm:contact_archived' %}">Archived</a>
-    {# Parked contacts stay ON this board (they still sit in their warmth #}
-    {# section below) — this is the bulk way back, not a hidden-contacts #}
-    {# ledger, so it renders unconditionally like Archived does. #}
-    <a href="{% url 'crm:contact_parked' %}">Parked</a>
-    {% comment %}
-    The other way a contact leaves this board: you answered "that bulk send
-    was not my recruiting" in Settings. Rendered only when somebody is
-    actually hidden — most students never mail-merge anything and a permanent
-    tab explaining a feature that will never fire for them is a tab that makes
-    the board harder to read. `hidden_any` is deliberately UNSCOPED where the
-    caveat below is scoped: the tab is the way back to the list, and a way
-    back that vanishes on the School tab is a dead end, not a filter.
-    {% endcomment %}
-    {% if hidden_any %}
-      <a href="{% url 'crm:contact_campaign_hidden' %}">Not recruiting</a>
-    {% endif %}
-    {% comment %}
-    The third way off the board: the person themselves is not related to the
-    user's recruiting (crm/recruitment.py). Same render-only-when-somebody-is-
-    hidden rule as the campaign tab above, for the same reason.
-    {% endcomment %}
-    {% if unrelated_any %}
-      <a href="{% url 'crm:contact_unrelated' %}">Not recruitment</a>
-    {% endif %}
+    <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School <span class="scope-count">{{ school_total }}</span></a>
   </nav>
+
+  {% comment %}
+  Everyone the write path declined to place. Coverage never infers a region
+  it cannot entail from something the student actually stated (see
+  crm/models.py `Contact.resolve_region` for the measurement that killed
+  every probabilistic signal), so some people stay unplaced — by design.
+  This link is the only ask the product makes about it: no badge, no Today
+  card, no digest line. Rendered only when somebody is actually unplaced —
+  a permanent line reading "0 unplaced" would be a standing reproach for a
+  state that is allowed.
+
+  Moved out of the segmented pill above (2026-08-27): it was never a lens on
+  the board like "Hong Kong" or "School" — it's the region-ask surface, a
+  chore the product owes the student an answer for, so it now sits with the
+  board's other honesty lines below rather than among the filters. Nothing
+  about the ask changed: same unscoped count, same link, same `?scope=` this
+  page has always understood.
+  {% endcomment %}
+  {% if unplaced_total %}
+    <p class="net-caveat net-caveat--board">
+      {{ unplaced_total }} unplaced. <a href="?scope={{ unplaced_scope }}">Say where they are.</a>
+    </p>
+  {% endif %}
+
+  {% comment %}
+  The three ways off this board, collapsed (2026-08-27) from three segmented
+  tabs sitting among the filters into one quiet line beneath them. None of
+  the routes changed — same three URLs, same hide-when-empty rule the
+  campaign and recruitment gates below already used. Archived now follows
+  that same rule too, on purpose: it used to render unconditionally, but
+  most students have archived nobody, and a permanent link to a list that's
+  always empty is the same standing reproach as a permanently-zero tab.
+
+  All three stay UNSCOPED, exactly like the tabs they replace: a way back
+  that disappears depending which filter you're standing on is a dead end,
+  not a filter.
+  {% endcomment %}
+  {% if archived_any or parked_any or hidden_any or unrelated_any %}
+    <nav class="subnav standalone net-offboard">
+      {% comment %}
+      Not a scope — a separate list. Archived contacts are excluded from
+      every board query, so this is the only way back to them.
+      {% endcomment %}
+      {% if archived_any %}
+        <a href="{% url 'crm:contact_archived' %}">Archived</a>
+      {% endif %}
+      {% comment %}
+      Parked contacts stay ON this board — they still sit in their warmth
+      section below — so this is the bulk way back, not a hidden-contacts
+      ledger. It joins this line rather than the filter pill for the same
+      reason the other three did: it is a route off the board, not a lens
+      on it. Gated like its neighbours; a student who has parked nobody
+      does not need the link.
+      {% endcomment %}
+      {% if parked_any %}
+        <a href="{% url 'crm:contact_parked' %}">Parked</a>
+      {% endif %}
+      {% comment %}
+      The other way a contact leaves this board: you answered "that bulk
+      send was not my recruiting" in Settings. Rendered only when somebody
+      is actually hidden — most students never mail-merge anything and a
+      permanent link explaining a feature that will never fire for them
+      makes the board harder to read.
+      {% endcomment %}
+      {% if hidden_any %}
+        <a href="{% url 'crm:contact_campaign_hidden' %}">Not recruiting</a>
+      {% endif %}
+      {% comment %}
+      The third way off the board: the person themselves is not related to
+      the user's recruiting (crm/recruitment.py). Same render-only-when-
+      somebody-is-hidden rule as the campaign link above, for the same
+      reason.
+      {% endcomment %}
+      {% if unrelated_any %}
+        <a href="{% url 'crm:contact_unrelated' %}">Not recruitment</a>
+      {% endif %}
+    </nav>
+  {% endif %}
 
   {% comment %}
   THE BOARD SAYS WHAT IT IS NOT SHOWING. Classifying a send "not my

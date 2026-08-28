@@ -956,6 +956,20 @@ main { flex: 1 0 auto; }
 }
 .subnav.scope-tabs a:hover { background: var(--accent-soft); color: var(--ink); }
 .subnav.scope-tabs a[aria-current="page"] { background: var(--accent); color: var(--on-accent); }
+/* 2026-08-27: a tab's own size, so it's judgeable before you click it. No
+   explicit color — it inherits the segment's current color (muted ink-2,
+   or on-accent when selected) at reduced opacity, so it never needs its own
+   rule for hover/current. */
+.scope-count {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 0.85em; opacity: 0.65; margin-left: 2px;
+}
+/* The three off-board escape hatches (Archived / Not recruiting / Not
+   recruitment), demoted from the segmented pill above into one quiet line —
+   plain breadcrumb links, not a second capsule, so the row reads as a
+   footnote rather than more filters. */
+.net-offboard { margin: 0 0 var(--s3); }
+.net-offboard a { color: var(--ink-3); }
 .section { margin-top: var(--s6); }
 .tier {
   font-size: var(--fs-micro); color: var(--ink-3);
