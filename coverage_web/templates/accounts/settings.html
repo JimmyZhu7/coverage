@@ -129,8 +129,14 @@
      control so a long message doesn't squeeze the input. */
   .set-row-err { color: var(--danger); font-size: var(--fs-s); margin-top: 4px; }
   .set-row-err ul, .set-row-err p { margin: 0; padding: 0; list-style: none; }
-  /* Numeric override inputs: narrow, with the unit + default read as one line. */
-  .set-num { display: flex; align-items: center; gap: var(--s2); }
+  /* Numeric override inputs: narrow, with the unit + default read as one
+     line. `flex-wrap` because the widest unit ("Business Days") plus a
+     "Default 10" chip is wider than the 12rem control track that holds
+     them (see .set-field's own comment on why that track is fixed) — the
+     chip drops to its own second line there rather than spilling past the
+     card, while the shorter units (weeks, days, advocates, touches) fit
+     everything on the one line this is named for. */
+  .set-num { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
   .set-num input { width: 88px; margin: 0; text-align: right;
     font-variant-numeric: tabular-nums; }
   .set-num .set-unit { color: var(--ink-3); font-size: var(--fs-s); white-space: nowrap; }
@@ -145,8 +151,14 @@
      the SAME chip visually in its idle state (the type treatment below is
      unchanged), so a page where every number sits on its default looks exactly
      as it did; the difference appears only once you have something to undo.
-     `disabled` is the server-rendered idle state and the JS drops it. */
-  .set-default { display: block; margin-top: 4px; color: var(--accent-ink);
+     `disabled` is the server-rendered idle state and the JS drops it.
+
+     2026-08-29: moved from its own line under a description to sit beside
+     the unit inside `.set-num` (a flex row), now that the description
+     itself no longer prints — see CADENCE_LABELS's comment in forms.py. A
+     flex child ignores its own `display` for layout purposes, so this stays
+     a flex item regardless; only the stacking margin is dead weight now. */
+  .set-default { display: block; margin: 0; color: var(--accent-ink);
     font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-weight: var(--w-med); font-size: var(--fs-xs); white-space: nowrap;
     padding: 0; border: 0; background: none; text-align: left;
@@ -196,16 +208,14 @@
     outline-offset: -2px; }
   /* The default used to be marked ON the chosen option — small caps
      shouting a third fact (name, then VALUE, then DEFAULT) into a control
-     that only needed to state one thing at a time. A spinner beside this
-     one states its default the same quiet way regardless of which option
-     is live: a sentence-case line under the description ("Default 6"), not
-     a badge fused to the value. This control now says it there too — see
-     .cad-seg-default below and the row markup — so a toggle and a spinner
-     read as the same kind of fact in the same place, and the toggle itself
-     goes back to showing exactly one thing: which of the two is chosen. */
-  .cad-seg-default { display: block; margin-top: 4px; color: var(--accent-ink);
+     that only needed to state one thing at a time. It reads the same quiet
+     way a spinner's "Default 6" chip does instead: sentence case, beside
+     the control rather than a badge fused to the value — and beside it in
+     the literal layout sense too now (2026-08-29), since the description
+     paragraph it used to sit under no longer prints. */
+  .cad-seg-default { display: inline-block; color: var(--accent-ink);
     font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-weight: var(--w-med); font-size: var(--fs-xs); }
+    font-weight: var(--w-med); font-size: var(--fs-xs); white-space: nowrap; }
   /* Two knobs to a row (Cadence only, so far). Seven full-width .set-rows
      put seven near-identical spinners in a 700px column, each one label and
      one number marooned at opposite edges of the card with a rule between —
@@ -1301,11 +1311,11 @@
               </div>
               <div class="pace-main">
                 <label class="set-row-label" for="{{ pace_form.weekly_touch_goal.id_for_label }}">Weekly Touch Goal</label>
-                {# Same default chip as the cadence rows below — one behaviour for every number on this card. #}
-                <div class="set-row-desc" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">What the pace ring on Today measures you against.
-                  <button type="button" class="set-default" disabled
-                          data-default-for="{{ pace_form.weekly_touch_goal.id_for_label }}"
-                          data-default="{{ default_weekly_goal }}">Default {{ default_weekly_goal }}</button></div>
+                {% comment %}
+                The ring IS the explanation now — see the cadence rows' own
+                comment on why the sentence moved to .set-sr.
+                {% endcomment %}
+                <span class="set-sr" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">What the pace ring on Today measures you against.</span>
                 {% if pace_form.weekly_touch_goal.errors %}
                   <div class="set-row-err" id="{{ pace_form.weekly_touch_goal.auto_id }}-err">{{ pace_form.weekly_touch_goal.errors }}</div>
                 {% endif %}
@@ -1317,7 +1327,11 @@
                 The bar is reserved for the card's last form (Save Cadence).
                 {% endcomment %}
                 <div class="pace-inline">
-                  <span class="set-num">{{ pace_form.weekly_touch_goal }}<span class="set-unit">A Week</span></span>
+                  {# Same default chip and merged-unit line the cadence rows below use — one behaviour for every number on this card. #}
+                  <span class="set-num">{{ pace_form.weekly_touch_goal }}<span class="set-unit">A Week</span>
+                    <button type="button" class="set-default" disabled
+                            data-default-for="{{ pace_form.weekly_touch_goal.id_for_label }}"
+                            data-default="{{ default_weekly_goal }}">Default {{ default_weekly_goal }}</button></span>
                   <button type="submit" class="btn">Save</button>
                 </div>
                 <p class="pace-read" id="pace-read"></p>
@@ -1395,12 +1409,19 @@
               {% for row in cadence_form.rows %}
                 <div class="set-field{% if row.segmented %} is-seg{% endif %}">
                   {% comment %}
+                  2026-08-29 simplify pass: the description no longer prints
+                  on the row. The diagram above this form already narrates
+                  every one of these seven numbers in a full live sentence,
+                  so a second sentence per row — six or seven of them,
+                  stacked — was the heaviest, most repetitive thing on the
+                  card. What's left is .set-sr: present for a screen reader
+                  that tabs straight to the field without reading the
+                  diagram first, invisible to everyone else. See
+                  CADENCE_LABELS's own comment in forms.py.
+
                   A SEGMENTED row (row.segmented) has no unit: its options
                   are the unit — "Once" and "Twice" are the two values, not a
-                  count you type. Its default is stated in the description,
-                  same as a spinner's, rather than on the option itself — see
-                  .cad-seg-default's CSS comment for why that moved. See
-                  accounts.forms.CADENCE_SEGMENTS.
+                  count you type. See accounts.forms.CADENCE_SEGMENTS.
 
                   A radiogroup, not a <label for>: the row's label names a set
                   of radios, and pointing `for` at one of them would make the
@@ -1428,41 +1449,37 @@
                           </label>
                         {% endfor %}
                       </div>
-                    </div>
-                    <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
                       {% comment %}
                       Real text in the DOM, not a CSS ::after — the default is
-                      data (hold #3), so it has to survive a screen reader and
-                      a stylesheet that failed to load. Same quiet sentence
-                      case a spinner's "Default 6" chip uses, just not a
-                      button: there is no single input for a click-to-reset
-                      handler to act on (two radios share one `name`), and
-                      tapping the named option already IS the reset gesture.
+                      data, so it has to survive a screen reader and a
+                      stylesheet that failed to load. Beside the toggle now,
+                      not under a description that no longer prints: there is
+                      no single input for a click-to-reset handler to act on
+                      (two radios share one `name`), and tapping the named
+                      option already IS the reset gesture, so this states the
+                      fact rather than offering a second way to it.
                       {% endcomment %}
-                      <span class="cad-seg-default">Default {{ row.default_label }}</span></div>
+                      <span class="cad-seg-default">Default {{ row.default_label }}</span>
+                    </div>
+                    <span class="set-sr" id="{{ row.field.auto_id }}-desc">{{ row.description }}</span>
                   {% else %}
                     <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                    {% comment %}
+                    Unit and default used to be two lines: the unit rode the
+                    input, the default sat in its own paragraph below a
+                    description. One quiet line now — the default chip is
+                    still the control that restores it ("Default 6" while
+                    the box is empty, "Reset to 6" once you've typed over
+                    it, one tap back), just beside the unit instead of under
+                    a sentence.
+                    {% endcomment %}
                     <div class="set-row-control set-num">
                       {{ row.field }}<span class="set-unit">{{ row.unit|title }}</span>
-                    </div>
-                    {% comment %}
-                    The default was a static "Default: N" line. It is now the
-                    control that RESTORES it, and it still states the number in
-                    both states, so nothing was traded away: "Default 6" while
-                    the box is empty (you are on it), "Reset to 6" the moment
-                    you override it (one tap back).
-
-                    That way back already existed and was invisible — clearing
-                    the box is what `CadenceForm.apply_to` reads as "drop the
-                    override" — so this is the rare case where adding a control
-                    removes the sentence that would otherwise have to explain
-                    it. Server-rendered in the idle state, so with no JS it is
-                    an inert chip printing exactly what the old line printed.
-                    {% endcomment %}
-                    <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
                       <button type="button" class="set-default" disabled
                               data-default-for="{{ row.field.id_for_label }}"
-                              data-default="{{ row.default }}">Default {{ row.default }}</button></div>
+                              data-default="{{ row.default }}">Default {{ row.default }}</button>
+                    </div>
+                    <span class="set-sr" id="{{ row.field.auto_id }}-desc">{{ row.description }}</span>
                   {% endif %}
                   {% if row.field.errors %}
                     <div class="set-row-err" id="{{ row.field.auto_id }}-err">{{ row.field.errors }}</div>

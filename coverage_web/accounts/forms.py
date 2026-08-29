@@ -595,21 +595,32 @@ class WorkAuthorizationForm(SectionForm):
         user.save(update_fields=["work_authorization"])
 
 
-# Presentation for the tunable cadence knobs: label, unit, and the one-line
-# "what does this actually change" description. Keyed by the same names as
-# crm.views.TUNABLE_CADENCE_PARAMS, which stays the authority on WHICH keys
-# exist and what range each accepts — this map only dresses them.
+# Presentation for the tunable cadence knobs: label, unit, and a short
+# description. Keyed by the same names as crm.views.TUNABLE_CADENCE_PARAMS,
+# which stays the authority on WHICH keys exist and what range each accepts
+# — this map only dresses them.
+#
+# The description is a FRAGMENT now, not a sentence (2026-08-29 simplify
+# pass), and it no longer prints on the row at all — settings.html renders
+# it into a visually-hidden span (.set-sr) that only `aria-describedby`
+# reaches, because the diagram directly above this form (`.cad-viz`) already
+# narrates every one of these six numbers in a full live sentence ("No
+# reply after N business days: one follow-up..."). A second full sentence
+# per row, stacked six times, was restating what a reader just read thirty
+# pixels up. What's left is the fallback for whoever tabs straight into a
+# field without reading the diagram first — short enough that shortening it
+# further would stop adding anything a screen reader hasn't already said
+# via the diagram's own sentence, which sits earlier in the same page.
 CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
     "followup_after_business_days": (
         "First Follow-Up",
         "business days",
-        "How long a cold contact goes unanswered before Coverage flags a "
-        "follow-up.",
+        "Silence before the first follow-up.",
     ),
     "park_after_business_days": (
         "Park After",
         "business days",
-        "Silence after your last touch before Coverage parks the contact.",
+        "Silence before Coverage parks them.",
     ),
     # Rendered as a two-option segment, not a spinner (see CADENCE_SEGMENTS),
     # so the description no longer has to say "Capped at 2: one note, one
@@ -620,25 +631,24 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
     "max_cold_touches": (
         "Cold Outreach",
         "touches",
-        "How many times to nudge someone who never replies.",
+        "How many times to nudge them.",
     ),
     "advocate_touch_min_weeks": (
         "Advocate Check-In",
         "weeks",
-        "How often your advocates get a keep-warm touch.",
+        "How often to check on advocates.",
     ),
     # Paired with crm.views.TUNABLE_CADENCE_PARAMS — this dict is looked up by
     # key with no fallback, so the two must be added and removed together.
     "chatted_touch_min_weeks": (
         "Keep-Warm Check-In",
         "weeks",
-        "How long after a coffee chat before Coverage reminds you to circle "
-        "back.",
+        "Silence after a coffee chat.",
     ),
     "pre_deadline_reping_days": (
         "Pre-Deadline Re-Ping",
         "days",
-        "How far ahead of a confirmed deadline warm contacts get re-pinged.",
+        "Days before a deadline.",
     ),
 }
 
@@ -826,14 +836,23 @@ class CadenceForm(SectionForm):
         rows = []
         for key in TUNABLE_CADENCE_PARAMS:
             _label, unit, desc = CADENCE_LABELS[key]
+            # A segmented row draws no unit chip (its options are the
+            # only values it can take), but it DOES need the default
+            # stated in words the same quiet way a spinner's "Default 6"
+            # is: the option that posts blank carries the number on
+            # `data-default-value`, not a human label, so the template
+            # needs the matching choice text handed to it separately.
+            default_label = None
+            if key in CADENCE_SEGMENTS:
+                default_label = next(
+                    label for value, label in CADENCE_SEGMENTS[key] if not value
+                )
             rows.append({
                 "field": self[key],
                 "unit": unit,
                 "description": desc,
                 "default": CADENCE_DEFAULTS[key],
-                # A segmented row draws no unit and no "Default N" chip: its
-                # options carry both, so printing them again beside it would
-                # be the same fact twice in one row.
+                "default_label": default_label,
                 "segmented": key in CADENCE_SEGMENTS,
             })
         # Sits with the other engine knobs rather than in a card of its own —
@@ -842,10 +861,7 @@ class CadenceForm(SectionForm):
         rows.append({
             "field": self["advocate_target"],
             "unit": "advocates",
-            "description": (
-                "Advocates at a firm before Coverage calls it covered. "
-                "Feeds your firm fit score."
-            ),
+            "description": "Advocates before a firm counts as covered.",
             "default": DEFAULT_ADVOCATE_TARGET,
             "segmented": False,
         })
