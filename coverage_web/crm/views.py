@@ -672,6 +672,8 @@ def autopilot_undo(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("crm:autopilot_log")
 
 
+@login_required
+@require_POST
 def app_event_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     """One tap on an application-status card. Accept writes the pipeline
     move through `capture.appmail.accept` — the ONLY path from a detected

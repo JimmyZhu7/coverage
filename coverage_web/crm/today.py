@@ -2388,7 +2388,15 @@ def _next_wave(user, today) -> dict | None:
         outbound = sum(1 for t in ctouches if t.kind in cadence._OUTBOUND_KINDS)
         if outbound == 0 or outbound >= max_cold:
             continue
-        lt_date = real[-1].ts.date()
+        # `timezone.localtime(...).date()`, never a raw `.ts.date()` — the
+        # stored timestamp is UTC-aware, and `.date()` on it is the UTC
+        # calendar day, not the account's own (see `crm.utils
+        # ._calendar_days_ago`'s Touch 558 docstring for the exact same
+        # class of bug this convention exists to close). A touch logged at
+        # HK local 00:30 stores as UTC 16:30 the day before; walking the
+        # follow-up window from that UTC day instead of the HK one the
+        # student actually lived lands the forecast a full day off.
+        lt_date = timezone.localtime(real[-1].ts).date()
         if cadence.business_days_since(lt_date, today) >= followup_bd:
             continue  # already due today's queue would have surfaced it
 

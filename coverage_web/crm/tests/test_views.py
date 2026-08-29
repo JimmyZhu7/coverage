@@ -1061,3 +1061,35 @@ def test_sync_bookkeeping_markers_never_reach_the_page(client):
     # And the database still carries the marker — display-only stripping.
     stored = Touch.all_objects.filter(contact=contact, kind="outreach").get()
     assert stored.note.startswith("[gmail:")
+
+
+# ---------------------------------------------------------------------------
+# 8. app_event_act — every other "one tap on a card" view in this module
+#    (proposal_act, mail_fact_act, autopilot_apply/undo, contact_campaign_
+#    keep, contact_unrelated_keep) carries both @login_required and
+#    @require_POST, and crm/urls.py's own module docstring states the
+#    invariant those decorators enforce: "Login required on every view."
+#    app_event_act was the one view in the file missing both.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_app_event_act_requires_login(client):
+    """Anonymous must be redirected to login, never reach the view body —
+    matching every sibling quick-action endpoint (e.g.
+    test_contact_edit_requires_login above)."""
+    resp = client.get(reverse("crm:app_event_act", args=[1, "accept"]))
+    assert resp.status_code == 302 and "/accounts/login/" in resp["Location"]
+    resp = client.post(reverse("crm:app_event_act", args=[1, "accept"]))
+    assert resp.status_code == 302 and "/accounts/login/" in resp["Location"]
+
+
+@pytest.mark.django_db
+def test_app_event_act_is_post_only(client):
+    """A GET that accepts or dismisses an application event would fire on
+    any crawl or link prefetch — the same CSRF-via-GET shape
+    test_archive_is_post_only_and_tenant_scoped pins for contact_archive.
+    405 has to come from the decorator, before the view ever looks up a
+    row, so this holds even for a pk that doesn't exist."""
+    client.force_login(_user())
+    assert client.get(
+        reverse("crm:app_event_act", args=[1, "accept"])
+    ).status_code == 405
