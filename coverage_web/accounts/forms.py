@@ -620,7 +620,7 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
     "max_cold_touches": (
         "Cold Outreach",
         "touches",
-        "How far Coverage chases someone who never replies.",
+        "How many times to nudge someone who never replies.",
     ),
     "advocate_touch_min_weeks": (
         "Advocate Check-In",
@@ -697,7 +697,12 @@ class DefaultingRadioSelect(forms.RadioSelect):
 # with a spinner offered exactly two reachable values while looking like a free
 # number, and the description had to spend a sentence saying so.
 CADENCE_SEGMENTS: dict[str, list[tuple[str, str]]] = {
-    "max_cold_touches": [("1", "Note only"), ("", "Note + follow-up")],
+    # "Once"/"Twice", not "Note only"/"Note + follow-up": the knob is a COUNT
+    # (max_cold_touches, capped at 1 or 2), and naming the two touches spent
+    # two lines describing a mechanism to answer a question the student asked
+    # as "how many times". The count is also what the label above it asks
+    # about, so the pair now reads as one sentence.
+    "max_cold_touches": [("1", "Once"), ("", "Twice")],
 }
 
 

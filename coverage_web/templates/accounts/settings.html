@@ -541,7 +541,11 @@
   .tf-col-title { display: flex; align-items: center; gap: var(--s2);
     margin: 0 0 var(--s2); font-family: var(--font-mono); font-size: var(--fs-xs);
     letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
-  .tf-col-count { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  /* A counted pill, not a bare numeral trailing the title: "TIER 1 15" read
+     as one number ("tier one fifteen") at this size and letter-spacing. */
+  .tf-col-count { font-variant-numeric: tabular-nums; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 999px; padding: 0 6px; letter-spacing: 0; }
   /* ~3 rows before it scrolls internally, same "bounded peek, not an
      unbounded list" contract as .tier-grid and .tf-results below. */
   .tf-chips { display: flex; flex-wrap: wrap; align-content: flex-start;
@@ -550,7 +554,7 @@
   .tf-chips::-webkit-scrollbar { width: 8px; }
   .tf-chips::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
   .tf-chip { flex: none; display: flex; align-items: center;
-    gap: 6px; max-width: 250px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
+    gap: 6px; max-width: 210px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
     border-radius: 999px; background: var(--paper); cursor: grab;
     font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink);
     box-shadow: var(--shadow-1); animation: chip-check 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -566,11 +570,17 @@
      chip's own tier caption in the same 10px mono the rest of the app uses
      for micro-data; the control chrome arrives on hover and focus, which is
      when someone is actually aiming at it. `appearance: none` for the
-     chevron. The options spell the tier out ("Tier 2") rather than
-     abbreviating it, because a screen reader reads the chosen OPTION and
-     not the box's `aria-label` — the label names the firm, the option
-     names the tier, and neither can be dropped. The pill grew to 250px to
-     pay for it; the name was already the part that ellipsises. */
+     chevron.
+
+     The options are bare numerals. They used to spell the tier out
+     ("Tier 2") on the theory that a screen reader reads the chosen OPTION
+     and not the box's `aria-label` — but that is not how a native select
+     is announced: the accessible name comes first, then the value ("Tier
+     for Barclays, combo box, 1"), so the word was never load-bearing for
+     a11y and was pure repetition on screen. It printed "Tier 1" sixteen
+     times down a single lane whose own heading already said it, and
+     pushed the firm name — the one thing that differs chip to chip — into
+     the ellipsis. Dropping it also gives the pill its width back. */
   .tf-tier { flex: none; width: auto; appearance: none; -webkit-appearance: none;
     border: 1px solid transparent; border-radius: 999px; background: transparent;
     padding: 1px 13px 1px 5px; margin: 0;
@@ -882,7 +892,7 @@
           hint describes; the drag is still bound underneath as the pointer
           shortcut for people who have a pointer.
           {% endcomment %}
-          <p class="field-hint">Pick a tier on any firm, or drag it. Higher tiers get more attention from Coverage.</p>
+          <p class="field-hint">Tier 1 gets the most attention. Drag a firm, or change its number.</p>
           <div class="tf-board" id="tf-board" data-tf-board>
             {% for col in firm_tiers %}
               <div class="tf-col" data-tier="{{ col.tier }}">
@@ -902,10 +912,21 @@
                       it on the Network board: the gesture belongs to the
                       control, not to the chip around it.
                       {% endcomment %}
+                      {% comment %}
+                      The options read as bare numerals, not "Tier 1": this
+                      chip is already inside the Tier 1 column, so spelling
+                      the word out put "Tier 1" on screen sixteen times in
+                      one lane (once in the heading, once per chip) and made
+                      the firm name — the only thing that differs card to
+                      card — the least prominent text on the row. The
+                      `aria-label` still names the firm and the control, so
+                      a screen reader hears "Tier for Bank of America, 1"
+                      rather than losing the word.
+                      {% endcomment %}
                       <select class="tf-tier" draggable="false" data-no-csel data-tf-tier-sel
                               aria-label="Tier for {{ f.name|smart_title }}">
                         {% for t in firm_tiers %}
-                          <option value="{{ t.tier }}"{% if t.tier == col.tier %} selected{% endif %}>Tier {{ t.tier }}</option>
+                          <option value="{{ t.tier }}"{% if t.tier == col.tier %} selected{% endif %}>{{ t.tier }}</option>
                         {% endfor %}
                       </select>
                       <button type="button" class="tf-chip-x" data-tf-remove="{{ f.id }}"
@@ -1418,12 +1439,16 @@
           {% if campaigns %}
           <div class="set-group" id="campaigns">
             <h3 class="set-group-h">Bulk Sends</h3>
-            <p class="set-note">
-              Tell us which of these were your job search. Marking one as
-              something else takes it off your daily queue and network
-              board. Contacts stay in your CRM and history, and anyone who
-              writes to you still surfaces.
-            </p>
+            {% comment %}
+            One line, not four. The three sentences this replaces spelled out
+            what marking a send does, what it does NOT do, and a second
+            exception — but each row below already prints its own outcome in
+            bold ("Not your recruiting. Off your daily queue and your network
+            board."), so the paragraph was explaining a consequence the reader
+            meets again, per row, at the moment it applies. Nothing is
+            deleted: it moved to where it is true.
+            {% endcomment %}
+            <p class="set-note">Which of these were your job search? Nothing is deleted either way.</p>
             {% for c in campaigns %}
             <div class="set-row">
               <div class="set-row-main">
@@ -1542,11 +1567,16 @@
           {% if merge_suggestions or recent_merges %}
           <div class="set-group" id="duplicates">
             <h3 class="set-group-h">One Person, Two Cards?</h3>
-            <p class="set-note">
-              Nothing merges without your tap. Merging folds the duplicate's
-              history into the kept card and archives the spare. Every merge
-              can be undone here.
-            </p>
+            {% comment %}
+            The mechanism sentence ("folds the duplicate's history into the
+            kept card and archives the spare") went: every row below already
+            spells the specific move out with the two real names in it
+            ("Keep Ebba Af Klercker, fold in Ebba Kler"), which says the same
+            thing about the people actually in front of the reader. What
+            survives is the part no row can say for itself — that this is
+            opt-in and reversible.
+            {% endcomment %}
+            <p class="set-note">Nothing merges without your tap, and every merge can be undone here.</p>
             {% for s in merge_suggestions %}
             <div class="set-row">
               <div class="set-row-main">
