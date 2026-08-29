@@ -241,8 +241,19 @@
      right edges lined up, and a bordered box is the thing the eye tracks.
      12rem clears the widest pairing (88px input + gap + 82px of "business
      days" = 178px) so every input starts at the same x down the column. */
+  /* `control` occupies ONLY the label row, not a two-row span down into
+     `desc` -- `desc` here is always an invisible `.set-sr` (absolutely
+     positioned, see below), never real visible text, so there is nothing
+     for the control to visually ride beside on a second line. Spanning it
+     anyway still let the grid's auto row-sizing hand a few phantom pixels
+     of height to the (content-less) desc row to satisfy the span, which
+     centered the control against a taller box than the label centered
+     itself against -- consistent across every row, but consistently a few
+     px off, which is what "the label still isn't centered" meant. Giving
+     label and control the exact same single-row track removes the
+     possibility of the two ever disagreeing again. */
   .set-field { display: grid; grid-template-columns: minmax(0, 1fr) 12rem;
-    grid-template-areas: "label control" "desc control" "err err";
+    grid-template-areas: "label control" "desc ." "err err";
     column-gap: var(--s3); }
   /* `margin: 0` matters here, not just tidiness: a real <label> (every
      numeric row) inherits the global `label { margin: 16px 0 4px; }` rule
@@ -250,13 +261,9 @@
      note on why — pointing `for` at one radio of several would be wrong),
      which gets none of that margin. Unreset, the two heading types sized
      their own "label" grid row differently — 44px with the margin, 24px
-     without — so `align-self: center` on the control below centered it
-     against two different tracks and Cold Outreach's toggle came out
-     top-aligned with its own heading instead of centered on it, the one
-     segmented row on the card standing visibly apart from its six numeric
-     siblings. Resetting the margin here (once, on the class both tag types
-     share) and centering the label the same way the control already is
-     puts every row through the identical centering math regardless of tag. */
+     without. Resetting it here (once, on the class both tag types share)
+     means the row's only track is sized by the label alone, the same
+     track `align-self: center` below centers the control against. */
   .set-field > .set-row-label { grid-area: label; margin: 0; align-self: center; }
   .set-field > .set-row-control { grid-area: control; justify-self: start;
     align-self: center; }
