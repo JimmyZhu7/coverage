@@ -18,12 +18,22 @@
      moves `.is-active` as you scroll, so growing a segment of the spine
      turns that into a marker that appears to travel with the page.
      `position: relative` is the spine's containing block. */
+  /* A plain sticky rail — no `max-height`/`overflow-y` of its own. That
+     combination used to be here so the last nav item stayed reachable on a
+     short viewport, but it gave the rail a SECOND, independent scroll
+     region: hovering it and scrolling moved the nav's own list instead of
+     the page, while the page scrolled the rail as one pinned block the rest
+     of the time — two different scroll behaviours depending on where the
+     cursor happened to sit, which reads as broken rather than merely
+     imperfect. A plain sticky element has exactly one scroll behaviour: it
+     rides with the page until its own bottom edge would leave the
+     `.settings-wrap` column, then it stops being pinned and scrolls away
+     with everything else, same as `.set-card` does. On a viewport too short
+     for the whole rail, the last item or two scrolls past the fold instead
+     of into a second scrollbar — a smaller cost than a rail that never
+     agrees with itself about who owns the wheel. */
   .settings-nav { position: sticky; top: 88px; display: flex; flex-direction: column; gap: 2px;
-    /* 11 items plus 4 group headers overflow the sticky box on a short
-       laptop viewport and the last entries become unreachable, so the nav
-       scrolls itself rather than the page. */
-    max-height: calc(100vh - 108px); overflow-y: auto;
-    position: sticky; padding-left: 15px; }
+    padding-left: 15px; }
   .settings-nav::before { content: ""; position: absolute; left: 0; top: 6px;
     bottom: 6px; width: 2px; border-radius: 2px; background: var(--line); }
 
