@@ -42,13 +42,13 @@ def test_a_percentage_written_as_a_raw_number_is_rejected_on_insert(firm):
     0.3/0.6/1.0."""
     with pytest.raises(IntegrityError), transaction.atomic():
         FirmDate.objects.create(
-            firm=firm, cycle="2027", region="us", event_kind="app_close", confidence=95.0
+            firm=firm, cycle="ft2027", region="us", event_kind="app_close", confidence=95.0
         )
 
 
 def test_a_healthy_confidence_cannot_be_overwritten_with_one_out_of_range(firm):
     fd = FirmDate.objects.create(
-        firm=firm, cycle="2027", region="us", event_kind="app_close", confidence=1.0
+        firm=firm, cycle="ft2027", region="us", event_kind="app_close", confidence=1.0
     )
     with pytest.raises(IntegrityError), transaction.atomic():
         FirmDate.objects.filter(pk=fd.pk).update(confidence=95.0)
@@ -61,9 +61,9 @@ def test_the_constraint_holds_for_raw_sql(firm):
     with pytest.raises(IntegrityError), transaction.atomic():
         with connection.cursor() as cur:
             cur.execute(
-                "INSERT INTO firm_dates (firm_id, cycle, region, event_kind, "
+                "INSERT INTO firm_dates (firm_id, cycle, track, region, event_kind, "
                 "precision, confidence, source_url, history) "
-                "VALUES (%s, '2027', 'us', 'app_close', '', 95.0, '', '[]')",
+                "VALUES (%s, 'ft2027', '', 'us', 'app_close', '', 95.0, '', '[]')",
                 [firm.pk],
             )
 
@@ -71,7 +71,7 @@ def test_the_constraint_holds_for_raw_sql(firm):
 @pytest.mark.parametrize("value", [0.0, 0.3, 0.6, 1.0])
 def test_the_three_band_vocabulary_is_untouched(firm, value):
     fd = FirmDate.objects.create(
-        firm=firm, cycle="2027", region="us", event_kind="app_close", confidence=value
+        firm=firm, cycle="ft2027", region="us", event_kind="app_close", confidence=value
     )
     fd.refresh_from_db()
     assert fd.confidence == value
@@ -82,7 +82,7 @@ def test_a_negative_confidence_is_rejected_too(firm):
     as wrong as `95` is for `0.95`."""
     with pytest.raises(IntegrityError), transaction.atomic():
         FirmDate.objects.create(
-            firm=firm, cycle="2027", region="us", event_kind="app_close", confidence=-30.0
+            firm=firm, cycle="ft2027", region="us", event_kind="app_close", confidence=-30.0
         )
 
 

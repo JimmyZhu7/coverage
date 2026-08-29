@@ -234,11 +234,11 @@ def test_network_gaps_weight_a_confirmed_deadline_only(client):
     today = date.today()
     # 1.0 is the stored float for "confirmed_official"; 0.3 is "rumor".
     FirmDate.objects.create(
-        firm=soon, cycle="2027", region="us", event_kind="app_close",
+        firm=soon, cycle="ft2027", region="us", event_kind="app_close",
         date=today + timedelta(days=7), confidence=1.0,
     )
     FirmDate.objects.create(
-        firm=rumor, cycle="2027", region="us", event_kind="app_close",
+        firm=rumor, cycle="ft2027", region="us", event_kind="app_close",
         date=today + timedelta(days=3), confidence=0.3,
     )
 
@@ -339,12 +339,27 @@ def test_a_covered_firm_shows_no_action_at_all(client):
 
 
 @pytest.mark.django_db
-def test_the_gap_strip_shows_its_score_without_a_hover(client):
-    """The full formula lives in a `title=` tooltip, unreachable on any
-    touch device — but the SCORE it resolves to, the thing a card is
-    actually ranked by, must be plain text, not hover-only. Spelled out as
-    "exposure", not the "exp" abbreviation nobody could read without the
-    tooltip (which touch devices can never reach in the first place)."""
+def test_the_gap_strip_shows_no_number_on_its_face(client):
+    """No measurement on the card at all — not the score, not the rank.
+
+    The founder asked what "exposure" meant, heard the answer, and said
+    drop the number. A first pass read that as "drop the SCORE" and put
+    the card's rank there instead ("ranked 1 of 6"); shown that, he said
+    it was not what he meant either. The second reading is the one this
+    test pins.
+
+    The earlier guard here defended a real constraint — `title=` is
+    unreachable on touch, so the order must be justifiable without a
+    hover — but it defended it with the wrong thing. Rank does not
+    justify an order; it restates it, to a reader already looking down
+    the list it describes. What justifies the order is WHY each firm is
+    on the strip, and the tier tag, the gap label and the deadline tag
+    all carry that in plain text on the face, with no number to compare
+    across cards.
+
+    So: no `.gap-exp` element, no "exposure" and no "ranked" in the
+    strip's plain text — while the full arithmetic stays in the hover
+    tooltip for anyone who wants it."""
     user = User.objects.create_user(email="math@example.com", password="x")
     firm = Firm.objects.create(slug="exposed-co", name="Exposed Co")
     UserFirm.all_objects.create(user=user, firm=firm, tier=1)
@@ -352,13 +367,17 @@ def test_the_gap_strip_shows_its_score_without_a_hover(client):
     client.force_login(user)
     body = client.get(reverse("crm:contact_list")).content.decode()
     gap_block = _gap_strip(body)
-    # Tier 1, no contacts: 3 × 4 = exposure 12. "· exposure 12" (not the bare
-    # substring) is the plain-text reading specifically — the hover tooltip
-    # below also contains "exposure 12" via its own "= exposure 12", and the
-    # two must not be conflated.
-    assert 'class="gap-exp"' in gap_block
-    assert "· exposure 12" in gap_block
-    # The full breakdown still rides along in the hover tooltip.
+    # The only tiered firm on the account, so it is the sole (and first)
+    # card in the strip.
+    assert 'class="gap-exp"' not in gap_block, (
+        "the gap card grew a number back on its face"
+    )
+    # Neither number reaches the card's plain-text face...
+    assert "· exposure" not in gap_block
+    assert "ranked 1 of" not in gap_block
+    # ...but the full breakdown, "exposure" included, still rides along in
+    # the hover tooltip for anyone on a pointer device. Tier 1, no
+    # contacts: 3 × 4 = exposure 12.
     assert "= exposure 12" in gap_block
 
 
@@ -374,6 +393,12 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
     does the same job by ORDERING the tied cards instead: the firm with seats
     open right now is the one worth a contact today, in a way the exposure
     formula has no term for.
+
+    The card's face prints no number at all now (see
+    test_the_gap_strip_shows_no_number_on_its_face), so two tied cards do
+    read as identical text again — and that is the point of this test.
+    ORDER is what separates them, and order is what has to be right,
+    because it is now the only thing carrying the distinction.
 
     Named so that the OLD tie-break would get this wrong: alphabetically
     "Zeta" comes last, and it is the one that has to come first.
@@ -395,8 +420,12 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
     body = client.get(reverse("crm:contact_list")).content.decode()
     gap_block = _gap_strip(body)
 
-    # Both tied at exposure 12 (Tier 1 × no_contacts = 3 × 4)...
-    assert gap_block.count("· exposure 12") == 2
+    # Both tied at exposure 12 (Tier 1 × no_contacts = 3 × 4) in the hover
+    # tooltip's arithmetic...
+    assert gap_block.count("= exposure 12") == 2
+    # ...and nothing on either card's face repeats it, or ranks them.
+    assert "· exposure" not in gap_block
+    assert "ranked" not in gap_block
     # ...and the tie is broken by who is hiring, not by the alphabet.
     assert gap_block.index("Zeta Co") < gap_block.index("Alpha Co"), (
         "the firm with three seats open sorts below a firm with none, on the "
@@ -420,3 +449,95 @@ def test_tied_gap_cards_are_ordered_by_who_is_actually_hiring(client):
 #    longest-silent-first ordering claim itself is still exercised where the
 #    queue actually lives now: see crm/tests/test_today.py.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# `deadline_bonus` over its whole domain, not three examples.
+# ---------------------------------------------------------------------------
+def test_deadline_bonus_is_defined_and_bounded_across_the_domain():
+    """Generated inputs rather than another example. Three invariants:
+
+    1. Every answer is one of the declared bonuses. A band table read in the
+       wrong order, or a missing final `return 0`, breaks this before it
+       breaks any single hand-picked case.
+    2. Urgency never RISES as a deadline moves further away. This is the
+       property the bands exist to express; `DEADLINE_BONUS` being a
+       first-match-wins tuple means a re-ordered or overlapping entry would
+       violate it silently while every existing example still passed.
+    3. The far edges are finite answers, not exceptions — the closes this
+       reads come from `FirmDate.date`, an unbounded DateField, so a row
+       dated in 2099 or in 2015 reaches here as a five-figure day count.
+    """
+    allowed = {b for _limit, b in coverage.DEADLINE_BONUS} | {0}
+    domain = list(range(-400, 400)) + [-100000, -1, 100000, 10**9]
+    for days in domain:
+        assert coverage.deadline_bonus(days) in allowed, days
+
+    ordered = sorted(domain)
+    scores = [coverage.deadline_bonus(d) for d in ordered]
+    assert scores == sorted(scores, reverse=True), (
+        "a deadline further out must never score MORE urgent"
+    )
+
+
+def test_a_deadline_already_passed_scores_the_maximum():
+    """The docstring's own claim, held at the boundary rather than at -4: a
+    deadline you missed at a firm you have no coverage at is the most exposed
+    a firm can be, not the least."""
+    top = max(b for _limit, b in coverage.DEADLINE_BONUS)
+    assert coverage.deadline_bonus(-1) == top
+    assert coverage.deadline_bonus(0) == top
+
+
+@pytest.mark.django_db
+def test_an_estimated_close_never_reaches_the_exposure_formula(client):
+    """`rank_gaps` does no confidence filtering of its own by design — its
+    caller does, and the caller's bar is now both halves of "confirmed". An
+    estimated month-level guess adds up to 3 exposure points and can reorder
+    the whole strip, so it must not arrive as an `app_close` at all."""
+    user = User.objects.create_user(email="est@example.com", password="pw12345!")
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=3)
+    today = date.today()
+    fd = FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
+        date=today + timedelta(days=5), confidence=1.0,
+    )
+    FirmDate.objects.filter(pk=fd.pk).update(precision="estimated")
+
+    client.force_login(user)
+    body = _gap_strip(client.get(reverse("crm:contact_list")).content.decode())
+    assert "Goldman Sachs" in body, "the firm is still a gap — it has nobody"
+    assert "5d to close" not in body, (
+        "a month-level guess must not print a day countdown on the strip"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The persistence -> domain adapter, at its one dangerous boundary.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "stored,label",
+    [
+        (1.0, "confirmed_official"),
+        (0.6, "reported"),
+        (0.3, "rumor"),
+        (0.0, "reported"),
+        # The band boundary. `round(0.99, 1)` is 1.0, so everything from 0.96
+        # up used to come back "confirmed_official" — the label
+        # `cadence._closing_soon` and the re-ping branch act on. The column's
+        # CheckConstraint bounds the RANGE, not the band, so 0.99 is a legal
+        # stored value; nothing else stopped an unconfirmed date from firing
+        # a pre-deadline re-ping and printing a countdown.
+        (0.99, "reported"),
+        (0.96, "reported"),
+        (0.95, "reported"),
+        (0.8, "reported"),
+        (None, "reported"),
+        ("confirmed_official", "confirmed_official"),
+    ],
+)
+def test_a_confidence_below_the_band_is_never_laundered_into_confirmed(stored, label):
+    from crm.utils import _confidence_label
+
+    assert _confidence_label(stored) == label

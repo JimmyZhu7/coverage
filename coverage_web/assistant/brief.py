@@ -14,11 +14,24 @@ import the moment either app loads. The caller (crm/today.py's own view,
 which already computes the day's actions for the queue itself) passes the
 action list IN; this module never goes and fetches it.
 
-COST SHAPE: exactly one model call per student per calendar day, ever — the
-`DailyBrief` row is the cache, checked before anything else runs, and once
-it exists this function is a single indexed read for the rest of the day.
-Always the cheap tier, like the title generator (assistant.agent._ai_title):
-this is bookkeeping copy, not the judgement call a student is on a plan for.
+COST SHAPE: one model call per student per calendar day IN THE ORDINARY
+CASE — the `DailyBrief` row is the cache, checked before anything else runs,
+and once it exists this function is a single indexed read for the rest of
+the day. Always the cheap tier, like the title generator
+(assistant.agent._ai_title): this is bookkeeping copy, not the judgement
+call a student is on a plan for.
+
+THE ONE EXCEPTION: a SECOND call, same day, if `_is_stale` finds that a
+contact the cached text actually named has since left the queue entirely
+(parked, campaign-excluded, recruitment-hidden or archived after the
+morning's generation). A cached sentence is a claim about contacts who were
+in the queue at generation time; it is wrong, not merely dated, once one of
+them no longer is — see `_is_stale`'s own docstring for the live case that
+forced this. Rare by construction (it takes a same-day state change on a
+contact the brief actually named), and still capped at one refresh: the
+refreshed row is exactly as cache-first as the original for the rest of the
+day, it just isn't pinned to the FIRST answer when that answer has been
+overtaken by something the student did on their own screen.
 """
 
 from __future__ import annotations
@@ -94,9 +107,50 @@ def _summarize_situation(events: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def get_cached(user) -> str | None:
-    """Today's brief IF it has already been generated, else None. Never calls
-    the model, never writes.
+def _live_contact_ids(actions: list[dict]) -> set[int]:
+    """Every contact id still standing in a (fresh, already-filtered) action
+    list. `_build_actions`/`_gate_and_rank` in crm/today.py have already done
+    the real work here — dropping parked, campaign-excluded, recruitment-
+    hidden and snoozed contacts before this ever sees the list — so a plain
+    `id` collection is enough; this function has no relevance opinion of its
+    own to apply."""
+    return {
+        cid for a in actions
+        if (cid := (a.get("contact") or {}).get("id")) is not None
+    }
+
+
+def _is_stale(existing: DailyBrief, actions: list[dict]) -> bool:
+    """Whether `existing`'s text names someone the CURRENT queue no longer
+    has anything to say about — the founder's Anant Taparia / Xinyi Xu case.
+
+    Both contacts were `thread_state=replied` when the 18:14 generation ran
+    and the model correctly wrote "propose those 15-minute chats". At 23:04
+    the founder parked both from the Today queue — `crm.today`'s cadence
+    branch 4 and `_gate_and_rank` now agree they get no action at all — but
+    the cache is a once-a-day write with nothing that ever told it the
+    sentence it wrote hours ago had been overtaken. The Today page kept
+    surfacing the identical "respond immediately" card against contacts he
+    had just told the product, twice, to leave alone.
+
+    Deliberately NOT "was this contact ever parked" — that would also catch
+    the un-park case (`reply_received` moves thread_state off `parked`
+    unconditionally, see `coverage_domain.pipeline.TOUCH_TRANSITIONS`; only
+    `advocate` is a terminal state). This checks the CURRENT queue only: a
+    contact who replied again after being parked is back in `actions` by the
+    time anyone asks, so it never trips this check to begin with — there is
+    nothing here to suppress a real inbound reply.
+
+    An empty `contact_ids` (situation-only brief, or a row written before
+    this field existed) can never be stale by this test — there is nothing
+    recorded to have gone missing.
+    """
+    return bool(existing.contact_ids) and not set(existing.contact_ids) <= _live_contact_ids(actions)
+
+
+def get_cached(user, actions: list[dict] | None = None) -> str | None:
+    """Today's brief IF it has already been generated AND it has not gone
+    stale, else None. Never calls the model, never writes.
 
     Exists so the Today page can render the brief when it is already there —
     one indexed read — without the FIRST load of each day paying for the
@@ -106,19 +160,37 @@ def get_cached(user) -> str | None:
     one, so the whole day's impression of the product's speed was being set
     by the one request that had to wait for an LLM.
 
+    `actions` is optional and, when omitted, this can only ever answer from
+    the cached text as written — the caller that has nothing fresher than
+    the DB row (there is currently no such caller, but the signature stays
+    permissive rather than forcing every future one to compute a queue it
+    may not need). `crm.today.week` already builds the day's actions for the
+    cockpit itself, so handing the same list here costs nothing extra and is
+    what actually catches a park/exclude/archive/snooze that happened after
+    generation — see `_is_stale`.
+
     `crm.views.daily_brief` is the htmx endpoint that does the generating,
     after the page is already interactive. See its docstring.
     """
     today = timezone.localdate()
     row = DailyBrief.objects.for_user(user).filter(date=today).first()
-    return row.text if row is not None else None
+    if row is None:
+        return None
+    if actions is not None and _is_stale(row, actions):
+        return None
+    return row.text
 
 
-def is_pending(user) -> bool:
-    """Whether a brief could still be generated for today — i.e. the feature
-    is live and nothing has been written yet. False means the Today page must
-    not render a placeholder that would never resolve."""
-    return is_configured() and get_cached(user) is None
+def is_pending(user, actions: list[dict] | None = None) -> bool:
+    """Whether a brief could still be (re)generated for today — i.e. the
+    feature is live and nothing USABLE has been written yet. False means the
+    Today page must not render a placeholder that would never resolve.
+
+    A stale cached row (see `_is_stale`) counts as "nothing usable": passing
+    `actions` through to `get_cached` is what lets a park/exclude/archive
+    that happened after this morning's generation put the placeholder back
+    on screen so `crm.views.daily_brief` gets a chance to rewrite it."""
+    return is_configured() and get_cached(user, actions) is None
 
 
 def get_or_build(user, actions: list[dict], situation: list[dict] | None = None, *, client=None) -> str | None:
@@ -138,10 +210,22 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     together afterward."""
     today = timezone.localdate()
     existing = DailyBrief.objects.for_user(user).filter(date=today).first()
-    if existing is not None:
+    # A cached row is only good while every contact it named is still in the
+    # queue's own answer for "what's true right now" — see `_is_stale`. The
+    # founder's live case: generated 18:14 while Anant Taparia and Xinyi Xu
+    # were both `thread_state=replied`, parked by hand at 23:04, and the
+    # Today page kept repeating "respond immediately" at two people he had
+    # just told the product to leave alone. `stale` short-circuits nothing by
+    # itself — it only decides which branch below WRITES the refreshed text.
+    stale = existing is not None and _is_stale(existing, actions)
+    if existing is not None and not stale:
         return existing.text
 
     if client is None and not is_configured():
+        # Can't refresh a stale row without a model call, and a wrong
+        # "respond immediately" is worse than no card at all — same
+        # graceful-dark posture as every other early return here, just
+        # reached from a different door (a stale row instead of no row).
         return None
 
     queue_summary = _summarize_actions(actions)
@@ -190,6 +274,23 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     if not text:
         return None
     text = text[:MAX_BRIEF_CHARS]
+    # The queue slice `_summarize_actions` actually read from, capped the
+    # same way — this is the staleness fingerprint `_is_stale` compares
+    # against tomorrow (or later today), not a display field.
+    contact_ids = sorted(_live_contact_ids(actions[:MAX_ACTIONS_SUMMARIZED]))
+
+    if stale:
+        # A plain UPDATE, deliberately not get_or_create: the row already
+        # exists (that is what made `stale` true), so there is no create-race
+        # to guard against here, only a rewrite of a sentence the queue has
+        # since disowned. Two refresh attempts landing at once just overwrite
+        # each other with two freshly-true answers — an ordinary cache
+        # overwrite, not the first-generation race the branch below handles.
+        DailyBrief.objects.for_user(user).filter(date=today).update(
+            text=text, contact_ids=contact_ids,
+        )
+        return text
+
     # get_or_create, not a plain save(): this endpoint is reachable twice for
     # the same student/day (a double-load of Today, two tabs, a client-side
     # retry against a slow response) and both requests can pass the
@@ -210,6 +311,6 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     # own kwargs/defaults, not from whatever filters happen to already be on
     # the queryset.
     row, _created = DailyBrief.objects.for_user(user).get_or_create(
-        user=user, date=today, defaults={"text": text},
+        user=user, date=today, defaults={"text": text, "contact_ids": contact_ids},
     )
     return row.text

@@ -54,11 +54,26 @@ def _confidence_label(value) -> str:
     """Map a stored FirmDate.confidence to the domain's categorical label.
     Passes a string through unchanged (forward-compatible with a categorical
     column); anything unrecognized degrades to a non-confirmed label so it
-    never spuriously triggers a re-ping."""
+    never spuriously triggers a re-ping.
+
+    ROUNDED TO 2dp, NOT 1. At one decimal place the mapping did the opposite
+    of what the sentence above promises, at the one end where it matters:
+    `round(0.99, 1)` is 1.0, so anything from 0.96 up came back
+    "confirmed_official". The column's own CheckConstraint permits 0.99 —
+    it bounds the range, not the band — and `FirmDateAdmin` and a
+    `manage.py shell` write are both unbounded within it, which is the same
+    class of path the `confidence=95.0` incident arrived through.
+    "confirmed_official" is the label `cadence._closing_soon` and the
+    engine's re-ping branch act on, so a date NOBODY confirmed would have
+    fired a pre-deadline re-ping and printed a countdown, laundered into
+    certainty by a rounding step. Two places is still tolerant of any float
+    round-tripping (the three real values are written from exact literals
+    0.3 / 0.6 / 1.0 and come back exact) while it no longer reaches across a
+    band boundary."""
     if isinstance(value, str):
         return value
     try:
-        return _CONFIDENCE_LABELS.get(round(float(value), 1), "reported")
+        return _CONFIDENCE_LABELS.get(round(float(value), 2), "reported")
     except (TypeError, ValueError):
         return "reported"
 
@@ -200,5 +215,74 @@ FIRM_DATE_LABELS = {
     "insight_open": "Insight programme opens",
     "insight_deadline": "Insight deadline",
 }
+
+
+# ---------------------------------------------------------------------------
+# What "confirmed" means for a firm date. ONE definition, six call sites.
+# ---------------------------------------------------------------------------
+# `directory.views._firm_date_row` — the firm timeline, the page that shows
+# these rows with their provenance attached — has always required TWO things
+# of a date before calling it confirmed rather than rumoured:
+#
+#     confidence >= 0.8  AND  precision in ("day", "month", "")
+#
+# Every one of the CRM's own confirmed-date readers re-spelled that bar as
+# `confidence=1.0` alone and dropped the second half: Today's deadlines rail
+# and plays (`crm.today._next_deadlines`), the Coverage-Gaps exposure input
+# (`_coverage_cards` and `crm.views.contact_list`), the chat-prep card
+# (`_chat_prep`), and the calendar's layer 3 plus its .ics feed. The two
+# halves are not redundant: `confidence` says how sure we are the firm holds
+# this date, `precision` says how exactly the stored day locates it.
+# `precision="estimated"` means the date is a MONTH-level guess, which the
+# timeline renders honestly as "~ Sep 2027" — and which the CRM would render
+# as a hard "3d" countdown, a deadline-coloured cell on one specific square
+# of the grid, and a VALARM waking a phone a week before a day nobody stated.
+#
+# No live row currently pairs 1.0 with "estimated" (the 25 estimated rows all
+# sit at 0.6), but nothing stops one: `import_firm_dates` reads `confidence`
+# and `precision` from two INDEPENDENT keys of the same YAML entry, so a
+# single seed line saying `confidence: confirmed_official` / `precision:
+# estimated` produces it. Excluding it here costs nothing today and closes
+# the gap before a row walks through it.
+CONFIRMED_CONFIDENCE = 1.0
+# Precisions a confirmed date may carry. "" and "day" locate a real day;
+# "month" is shown as a month by every renderer that reads the field.
+# "estimated" is deliberately absent — see above.
+CONFIRMED_PRECISIONS = ("", "day", "month")
+
+
+def firm_date_confidence(fd) -> str:
+    """One stored `FirmDate` row's confidence label for the DOMAIN engines
+    (`coverage_domain.cadence`, `scoring.score_firm`), which only ever act on
+    "confirmed_official".
+
+    The same two-part bar as `confirmed_firm_dates` above, applied to a row
+    rather than a queryset: a date whose own `precision` says it is a
+    month-level estimate is not `confirmed_official` however high its
+    confidence reads, so it cannot fire `cadence._closing_soon`'s
+    pre-deadline re-ping or move `score_firm`'s timeline-readiness axis. It
+    degrades to "reported" — the same landing place `_confidence_label`
+    already uses for everything it does not recognise — rather than being
+    dropped, because the row is still a real fact about the firm; it just is
+    not one anything may set a countdown by.
+    """
+    label = _confidence_label(fd.confidence)
+    if (fd.precision or "") not in CONFIRMED_PRECISIONS:
+        return "reported"
+    return label
+
+
+def confirmed_firm_dates():
+    """`FirmDate` rows the CRM is allowed to put a countdown on.
+
+    A queryset, not a list: every caller narrows it further (by date window,
+    by firm) and none of them wants the whole table.
+    """
+    from directory.models import FirmDate  # local: avoids an app-import cycle
+
+    return FirmDate.objects.filter(
+        confidence=CONFIRMED_CONFIDENCE,
+        precision__in=CONFIRMED_PRECISIONS,
+    )
 
 

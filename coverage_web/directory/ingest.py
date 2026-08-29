@@ -398,25 +398,34 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
     # the row goes back in the enrichment queue rather than showing a
     # countdown to a date the new version may not state.
     #
-    # `max(existing.confidence, final_confidence)` is only correct when the
-    # DATE isn't moving — re-confirming the same deadline with a weaker
-    # signal (this run's prose) than we already had (a past API date) should
-    # not throw away the stronger reading. But when the date IS changing, the
-    # confidence has to describe the value actually being written, not the
-    # provenance of the value it's replacing: a row that held a 1.0
-    # API-sourced deadline, then had its API field go silent while a prose
-    # match in the same payload pointed at a DIFFERENT date, used to keep
-    # writing "confidence 1.0" on a date that came from this run's 0.6
-    # prose reading — the current value falsely wearing its predecessor's
-    # provenance.
+    # `confidence` is a claim about the STORED DATE — how sure we are that
+    # THIS day is the one the firm holds. So it belongs to whichever date is
+    # in the column, and the two cases below are not the same question:
+    #
+    #   the date is REPLACED -> the claim is replaced with it. A prose read
+    #     (0.6) that supersedes a board-published date (1.0) must carry its
+    #     own 0.6. `max()` here kept the 1.0, and then `deadline_provenance`,
+    #     `crm.calendar_views._is_reported` and the feed's "(reported)" tag —
+    #     all of which read `confidence >= 1.0` and nothing else — presented
+    #     our regex's reading of a paragraph as a field the board published.
+    #
+    #   the date is UNCHANGED -> we merely saw it again, and the better of the
+    #     two labels still holds. This is the case `max()` was written for and
+    #     it stays: the list endpoints carry no deadlines, so a 1.0 date
+    #     corroborated this pass only by prose has not become less certain,
+    #     and downgrading it every scrape would walk every stated date down to
+    #     0.6 within a day.
+    #
+    # Both cases are idempotent: re-ingesting an unchanged posting compares
+    # equal and re-maxes the same number.
     if final_deadline is not None:
-        existing.confidence = (
-            max(existing.confidence, final_confidence)
-            if existing.deadline == final_deadline
-            else final_confidence
-        )
         existing.deadline = final_deadline
         existing.deadline_precision = "day"
+        existing.confidence = (
+            max(existing.confidence or 0.0, final_confidence)
+            if final_deadline == prior_deadline
+            else final_confidence
+        )
     elif changed and (existing.confidence or 0) < 1.0 and existing.deadline:
         existing.deadline = None
         existing.deadline_precision = ""

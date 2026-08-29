@@ -156,13 +156,13 @@ def test_merge_combines_firm_dates_without_integrity_error():
     canonical = Firm.objects.create(slug="td", name="TD Securities")
     duplicate = Firm.objects.create(slug="td-closed", name="TD Securities")
     FirmDate.objects.create(
-        firm=canonical, cycle="2027", event_kind="applications_open", confidence=0.4)
+        firm=canonical, cycle="ft2027", event_kind="applications_open", confidence=0.4)
     FirmDate.objects.create(
-        firm=duplicate, cycle="2027", event_kind="applications_open", confidence=0.9)
+        firm=duplicate, cycle="ft2027", event_kind="applications_open", confidence=0.9)
 
     merge_firms(canonical, duplicate)
 
-    rows = FirmDate.objects.filter(firm=canonical, cycle="2027", event_kind="applications_open")
+    rows = FirmDate.objects.filter(firm=canonical, cycle="ft2027", event_kind="applications_open")
     assert rows.count() == 1
     assert rows.get().confidence == 0.9  # the more confident reading survives
 

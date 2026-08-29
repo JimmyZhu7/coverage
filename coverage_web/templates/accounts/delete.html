@@ -5,10 +5,12 @@
 {% block content %}
 <div class="page page--narrow">
   <header class="page-head"><h1>Delete Your Account</h1></header>
-  <p class="lede">This permanently and immediately removes everything below. There is no undo, and no waiting period.</p>
+  {% comment %}The lede used to open by saying this removes everything below,
+  which the panel's own lead-in then said again two lines down.{% endcomment %}
+  <p class="lede">There is no undo, and no waiting period.</p>
 
   <div class="panel" style="border-color: var(--danger-line);">
-    <p>Deleting your account hard-deletes:</p>
+    <p>Deleting your account immediately and permanently removes:</p>
     <ul>
       <li>Your profile and account login</li>
       <li>All of your contacts and their touch history</li>

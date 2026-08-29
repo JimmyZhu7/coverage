@@ -18,12 +18,27 @@ Two shapes, decided by `ev.editable`:
   other way — anything that looks clickable here has to go somewhere.
 {% endcomment %}
 {% if ev.editable %}
+  {% comment %}`ev.cancelled` is an organiser having sent a METHOD:CANCEL for
+  a chat Coverage captured off their original invite. Same treatment, and the
+  same argument, as `posting_closed` below: the row stays on the grid because
+  this page is a RECORD of the month, and it is struck through so it cannot be
+  read as a meeting that is still on. Today's queue is where it stops
+  appearing — that page answers "what is happening", not "what happened". The
+  "Cancelled: " prefix is already in `ev.title` (it is stored on the row, so
+  the .ics feed carries it to a phone too) and must not be repeated here.{% endcomment %}
   <details class="cal-ev-wrap">
-    <summary class="cal-ev cal-ev-{{ ev.kind }}{% if ev.source == 'capture' %} cal-ev-auto{% endif %}">
+    <summary class="cal-ev cal-ev-{{ ev.kind }}{% if ev.source == 'capture' %} cal-ev-auto{% endif %}{% if ev.cancelled %} is-cancelled{% endif %}">
       {% if ev.at_label %}<span class="cal-ev-time">{{ ev.at_label }}</span>{% endif %}
       <span class="cal-ev-title">{{ ev.title }}</span>
+      {% comment %}Spoken, not just struck: strike-through is invisible to a
+      screen reader, and this is the one fact about the row that matters.{% endcomment %}
+      {% if ev.cancelled %}<span class="vh">(cancelled)</span>{% endif %}
     </summary>
     <div class="cal-ev-body">
+      {% if ev.cancelled %}
+        <p class="cal-ev-meta">The organiser cancelled this. It stays here so
+          the date still makes sense.</p>
+      {% endif %}
       {% if ev.all_day %}<p class="cal-ev-meta">All day</p>{% endif %}
       {% if ev.contact %}<p class="cal-ev-meta">{{ ev.contact.name }}</p>{% endif %}
       {% if ev.location %}<p class="cal-ev-meta">{{ ev.location }}</p>{% endif %}

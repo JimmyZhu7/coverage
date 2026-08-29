@@ -26,6 +26,40 @@
   .inst-rows b { font-family: var(--font-mono); font-weight: var(--w-med); }
   .stage-ok { color: var(--ok); }
   .stage-bad { color: var(--danger); }
+
+  /* The pilot table. Same posture as everything above it: shared tokens, one
+     hairline grid, no chrome. A wide table on a narrow screen scrolls inside
+     its own box rather than pushing the page sideways. */
+  .inst-wide { border: 1px solid var(--line); border-radius: var(--r-panel);
+    background: var(--surface); padding: var(--s4); margin-bottom: var(--s5); }
+  .inst-wide h2 { font-family: var(--font-mono); }
+  .inst-scroll { overflow-x: auto; }
+  .inst-tab { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
+  .inst-tab th { text-align: left; font-size: var(--fs-xs); color: var(--ink-3);
+    font-weight: var(--w-med); text-transform: uppercase; letter-spacing: .04em;
+    padding: 0 var(--s3) 6px 0; border-bottom: 1px solid var(--line-strong);
+    white-space: nowrap; }
+  .inst-tab td { padding: 7px var(--s3) 7px 0; border-bottom: 1px solid var(--line);
+    white-space: nowrap; vertical-align: baseline; }
+  .inst-tab tr:last-child td { border-bottom: 0; }
+  .inst-tab .num { font-family: var(--font-mono); }
+  .inst-tab .none { color: var(--ink-3); }
+  .inst-yes { color: var(--ok); }
+  /* Idle is the column that earns a colour: it is the one number that says
+     "this person has gone", and it should be readable without reading. */
+  .inst-idle-hot { color: var(--danger); font-family: var(--font-mono); }
+  .inst-log { list-style: none; margin: var(--s3) 0 0; padding: 0;
+    font-size: var(--fs-s); }
+  .inst-log li { display: grid; grid-template-columns: 150px 190px 1fr;
+    gap: var(--s3); padding: 5px 0; border-top: 1px solid var(--line); }
+  .inst-log li:first-child { border-top: 0; }
+  .inst-log time, .inst-log b { font-family: var(--font-mono);
+    font-weight: var(--w-med); }
+  .inst-log time { color: var(--ink-3); }
+  .inst-log span { color: var(--ink-2); overflow-wrap: anywhere; }
+  @media (max-width: 640px) {
+    .inst-log li { grid-template-columns: 1fr; gap: 2px; }
+  }
 </style>{% endblock %}
 
 {% block content %}
@@ -71,5 +105,85 @@
       </ul>
     </div>
   </div>
+
+  {% comment %}
+  The pilot table. Everything above this line is a total, and a total across
+  ten students cannot say that four of them stopped on the same step — which
+  is the only question a pilot actually asks. One row per non-staff account,
+  every cell a row some other code path already wrote.
+
+  Staff sees real students' behaviour here, deliberately and nowhere else:
+  this page is the only reader of another person's event stream, and it sits
+  behind the same `@staff_member_required` gate the rest of the page always
+  had. Nothing student-facing links here.
+  {% endcomment %}
+  <div class="inst-wide">
+    <h2>Pilot · per user</h2>
+    <p class="inst-sub">Non-staff accounts, oldest first. Pick a row to read that
+      person's last {{ drilldown.cap|default:"50" }} events in order.</p>
+    <div class="inst-scroll">
+      <table class="inst-tab">
+        <thead>
+          <tr>
+            <th scope="col">Person</th>
+            <th scope="col">Signed up</th>
+            <th scope="col">Furthest step</th>
+            <th scope="col">Onboarded</th>
+            <th scope="col">Gmail</th>
+            <th scope="col">Contacts</th>
+            <th scope="col">Touches</th>
+            <th scope="col">Last seen</th>
+            <th scope="col">Idle</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in pilot %}
+            <tr>
+              <td><a href="?user={{ row.user.id }}">{{ row.user.email }}</a></td>
+              <td class="num">{{ row.signed_up|date:"j M Y" }}</td>
+              {% comment %}Blank where nothing was recorded, never a guessed
+              step 1 — an account older than the step events reached steps
+              nobody wrote down.{% endcomment %}
+              <td>{% if row.step %}<span class="num">{{ row.step_number }}/{{ onboarding_step_total }}</span>
+                {{ row.step }}{% else %}<span class="none">not recorded</span>{% endif %}</td>
+              <td>{% if row.onboarded_at %}<span class="num">{{ row.onboarded_at|date:"j M" }}</span>{% else %}<span class="none">no</span>{% endif %}</td>
+              <td>{% if row.gmail %}<span class="inst-yes">yes</span>{% else %}<span class="none">no</span>{% endif %}</td>
+              <td class="num">{{ row.contacts }}</td>
+              <td class="num">{{ row.touches }}</td>
+              <td class="num">{% if row.last_seen %}{{ row.last_seen|date:"j M H:i" }}{% else %}<span class="none">never</span>{% endif %}</td>
+              <td>{% if row.idle_days == None %}<span class="none">—</span>
+                {% elif row.idle_days >= 7 %}<span class="inst-idle-hot">{{ row.idle_days }}d</span>
+                {% else %}<span class="num">{{ row.idle_days }}d</span>{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="9" class="none">No non-staff accounts yet. The first
+              student to sign up appears here.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if drilldown %}
+    <div class="inst-wide" id="drilldown">
+      <h2>{{ drilldown.user.email }}</h2>
+      <p class="inst-sub">
+        Last {{ drilldown.events|length }} of {{ drilldown.total }} events, oldest
+        first{% if drilldown.truncated %} · capped at {{ drilldown.cap }}{% endif %}.
+        <a href="?">Close</a>
+      </p>
+      <ul class="inst-log">
+        {% for e in drilldown.events %}
+          <li>
+            <time datetime="{{ e.ts|date:'c' }}">{{ e.ts|date:"j M H:i:s" }}</time>
+            <b>{{ e.event }}</b>
+            <span>{% if e.props %}{{ e.props }}{% endif %}</span>
+          </li>
+        {% empty %}
+          <li><span>This account has recorded no events.</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
 </div>
 {% endblock %}
