@@ -53,8 +53,8 @@ from capture.models import (
     GmailConnection, MailFact,
 )
 from crm.models import (
-    CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact,
-    ContactMerge, PlayDismissal, Task, Touch, UserFirm,
+    BenchDismissal, CalendarEvent, Campaign, CampaignContact, ChatDebrief,
+    Contact, ContactMerge, PlayDismissal, Task, Touch, UserFirm,
 )
 from directory.models import Firm
 
@@ -600,6 +600,7 @@ APPLICATION_EXPORT_COLUMNS = [
 ]
 TASK_EXPORT_COLUMNS = ["title", "why", "due", "kind", "firm", "status", "created"]
 PLAY_DISMISSAL_EXPORT_COLUMNS = ["firm", "event_kind", "date", "dismissed_at"]
+BENCH_DISMISSAL_EXPORT_COLUMNS = ["contact", "opening_signature", "created"]
 CAMPAIGN_EXPORT_COLUMNS = [
     "label", "kind", "recipients", "first_sent", "last_sent", "classified_at",
 ]
@@ -852,6 +853,24 @@ def play_dismissals_csv(user) -> str:
             [
                 d.firm.name if d.firm_id else "", d.event_kind,
                 d.date.isoformat() if d.date else "", _dt(d.dismissed_at),
+            ]
+            for d in rows
+        ),
+    )
+
+
+def bench_dismissals_csv(user) -> str:
+    """Every Today bench card the student tapped "Leave parked" on — which
+    contact, which opening they said "not now" to, and when. See
+    `crm.models.BenchDismissal`: the same anti-nag memory as
+    `play_dismissals_csv`, just for the bench rather than the play feed."""
+    rows = BenchDismissal.objects.for_user(user).select_related("contact")
+    return _csv(
+        BENCH_DISMISSAL_EXPORT_COLUMNS,
+        (
+            [
+                d.contact.name if d.contact_id else "", d.opening_signature,
+                _dt(d.created),
             ]
             for d in rows
         ),
@@ -1258,6 +1277,9 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("play_dismissals.csv", play_dismissals_csv,
      "Today \"plays\" you dismissed — which firm, which dated fact, and "
      "when."),
+    ("bench_dismissals.csv", bench_dismissals_csv,
+     "Today bench cards you parked — which contact, which opening, and "
+     "when."),
     ("chat_debriefs.csv", chat_debriefs_csv,
      "What each coffee chat taught you, in your own words."),
     ("campaigns.csv", campaigns_csv,
@@ -1387,6 +1409,7 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     ("play_dismissals", PlayDismissal),
     # References `contact` (CASCADE) — deleted before `contacts` below for the
     # same "children before parents" reason as everything above it.
+    ("bench_dismissals", BenchDismissal),
     ("calendar_events", CalendarEvent),
     # References `contact` and `contact_proposal` (both SET_NULL) — kept
     # child-before-parent like everything here, and its `quote` column is
