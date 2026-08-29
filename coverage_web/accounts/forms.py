@@ -167,28 +167,12 @@ def timezone_choices() -> list:
     ]
 
 
-class _StaleValueSelect(forms.Select):
-    """A <select> where exactly one option — the student's own stored value,
-    once it rolls off the current `cycle_choices()` window — renders
-    `disabled`.
-
-    Plain `choices` tuples have no way to mark a single option disabled, and
-    the alternative (a stored-but-unlisted value just renders as nothing
-    selected) is the silent-clear bug this widget exists to avoid: the
-    student would see a blank "Select a cycle" with no sign their answer was
-    ever recorded, and the next save would erase it for good."""
-
-    def __init__(self, *args, disabled_value: str = "", **kwargs):
-        self._disabled_value = disabled_value
-        super().__init__(*args, **kwargs)
-
-    def create_option(self, name, value, *args, **kwargs):
-        option = super().create_option(name, value, *args, **kwargs)
-        if self._disabled_value and str(value) == self._disabled_value:
-            option["attrs"]["disabled"] = True
-        return option
-
-
+# There is no `_StaleValueSelect` widget here any more. It rendered a rolled-off
+# `target_cycle` as a DISABLED <option>, and the field it served became a
+# checkbox group: a disabled checkbox is dropped from the POST entirely, which
+# recreates the silent-clear bug the widget existed to prevent. The stale value
+# is re-offered, checked and enabled, in `ProfileForm.__init__` instead — see
+# the note there.
 
 
 class ProfileForm(forms.Form):
