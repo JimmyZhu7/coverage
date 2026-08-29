@@ -430,19 +430,32 @@ def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
     # Measured at 77 lines on the audit of 2026-08-27, raised to 84 the same
     # night after several concurrent merges (the bench/park dismissal writes
     # in crm/today.py, the firm-tier setter in crm/views.py, and others) each
-    # added one properly-scoped call. Each of the 7 new lines was read before
-    # raising this number: every one carries an explicit `user=request.user`
-    # predicate on the write it performs. A handful of the 84 are prose
-    # mentions inside docstrings rather than calls; the grep is deliberately
-    # blunt so it cannot be evaded by formatting.
+    # added one properly-scoped call, then to 87 on 2026-08-28 for 3 more of
+    # the same shape. A handful of the count are prose mentions inside
+    # docstrings rather than calls; the grep is deliberately blunt so it
+    # cannot be evaded by formatting.
+    #
+    # Raised to 96 on 2026-08-29: merging four overnight cleanup sweeps back
+    # into main (each done in its own worktree, all branched before the
+    # night's other concurrent merges) surfaced 9 net-new call sites diffed
+    # by CONTENT against the 2026-08-28 baseline, not by line number, since
+    # unrelated edits elsewhere in the same files had shifted most of the 84
+    # to new line numbers without changing them. Every one of the 9 reads:
+    # the analytics pilot-funnel dashboard's per-user drilldown queries
+    # (`user_id__in=ids` / `user_id=subject.id`, analytics/views.py, a staff
+    # view scoped to explicit ids gathered earlier in the same function), the
+    # calendar-invite dedup split in capture/gmail.py (`user=user` on both
+    # halves of what used to be one call), and this same night's gmail_poll
+    # import ledger (`user=connection.user`, capture/management/commands/
+    # gmail_poll.py) -- none is a new unscoped read or write.
     #
     # A RATCHET, not a limit. The headroom is small on purpose: this is meant
     # to fire on the next batch of unscoped calls so somebody looks at them,
     # which is the whole justification for `all_objects` being greppable.
     # Raising the number is a legitimate response — AFTER reading the diff.
-    assert len(lines) <= 87, (
-        f"{len(lines)} unscoped `all_objects` lines, up from the 84 reviewed "
-        "on 2026-08-28. Each new call site needs an explicit `user=` predicate "
+    assert len(lines) <= 96, (
+        f"{len(lines)} unscoped `all_objects` lines, up from the 93 reviewed "
+        "on 2026-08-29. Each new call site needs an explicit `user=` predicate "
         "or a written cross-tenant justification — read the diff, then raise "
         "this number deliberately."
     )
