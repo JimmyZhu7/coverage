@@ -23,14 +23,12 @@ scorer's own sentence as each chip's `title`.
 {% if not has_profile or not pick_blocks %}
 <section class="recbar" aria-labelledby="recbar-h">
   {% if not has_profile %}
-    <div class="recbar-head">
-      <h2 class="recbar-title" id="recbar-h">Roles for you</h2>
-    </div>
+    <h2 class="recbar-title" id="recbar-h">Roles for you</h2>
     <p class="recbar-note">
       {% if user.is_authenticated %}
-        We don't know your class year, region, or tracks yet, so there's nothing to
-        tailor. <a href="{% url 'accounts:settings' %}">Fill in your profile</a> and
-        this bar starts picking roles.
+        We don't know your class year, region, or tracks yet.
+        <a href="{% url 'accounts:settings' %}">Fill in your profile</a> and
+        this starts picking roles.
       {% else %}
         Nothing here is personalised; you're signed out.
         <a href="{% url 'account_login' %}">Sign in</a> to get roles picked by your
@@ -38,12 +36,10 @@ scorer's own sentence as each chip's `title`.
       {% endif %}
     </p>
   {% else %}
-    <div class="recbar-head">
-      <h2 class="recbar-title" id="recbar-h">Picked for you</h2>
-    </div>
+    <h2 class="recbar-title" id="recbar-h">Picked for you</h2>
     <p class="recbar-note">
-      Nothing open right now scores high enough against your profile to be worth calling a match. Rather than pad this row with weak ones, it stays empty:
-      browse the full list below, or widen your regions and tracks in
+      Nothing open scores high enough against your profile to call a match.
+      Browse the full list below, or widen your regions and tracks in
       <a href="{% url 'accounts:settings' %}">your profile</a>.
     </p>
   {% endif %}

@@ -171,3 +171,87 @@ def test_a_blank_date_is_still_accepted_after_the_fix(run, gs):
     run([{"firm": "gs", "event_kind": "app_open", "date": "",
           "confidence": "reported"}])
     assert FirmDate.objects.get(firm=gs, event_kind="app_open").date is None
+
+
+# ---------------------------------------------------------------------------
+# Every vocabulary field is checked before it is written
+#
+# `event_kind` was always matched against a closed tuple. `cycle`, `precision`
+# and `confidence` were not, and each silent failure below was reachable with a
+# single typo in a findings file a scheduled agent writes unattended.
+# ---------------------------------------------------------------------------
+def test_a_human_cycle_is_normalised_to_the_stored_vocabulary(run, gs):
+    """This command's own `--cycle` default is "SA 2028" while seed_directory
+    writes `sa2028_ib`. Both now land on one key, which is what makes a cycle
+    groupable across firms at all."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": "SA 2028", "region": "us", "confidence": "confirmed_official"}])
+    fd = FirmDate.objects.get()
+    assert (fd.cycle, fd.track) == ("sa2028", "")
+
+
+def test_a_desk_suffix_lands_in_the_track_column(run, gs):
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": "sa2028_ib", "region": "us", "confidence": "confirmed_official"}])
+    fd = FirmDate.objects.get()
+    assert (fd.cycle, fd.track) == ("sa2028", "ib")
+
+
+def test_an_explicit_track_is_read_too(run, gs):
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": "sa2028", "track": "pe", "confidence": "confirmed_official"}])
+    assert FirmDate.objects.get().track == "pe"
+
+
+def test_a_track_that_contradicts_the_cycle_suffix_is_skipped(run, gs):
+    """A finding that says the desk twice, differently, must not have one of
+    the two chosen for it."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": "sa2028_ib", "track": "pe", "confidence": "confirmed_official"}])
+    assert FirmDate.objects.count() == 0
+
+
+@pytest.mark.parametrize("bad", ["insight", "2028", "next spring", "sa2028_xx"])
+def test_an_unreadable_cycle_is_skipped_and_never_written(run, gs, bad):
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": bad, "confidence": "confirmed_official"}])
+    assert FirmDate.objects.count() == 0
+
+
+def test_an_unreadable_cycle_leaves_a_stored_date_alone(run, gs):
+    """The same posture `_parse_date` takes: a broken finding costs nothing,
+    it does not damage what is already on file."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": "sa2028", "confidence": "confirmed_official"}])
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2027-01-01",
+          "cycle": "insight", "confidence": "confirmed_official"}])
+    fd = FirmDate.objects.get()
+    assert str(fd.date) == "2026-09-15"
+
+
+@pytest.mark.parametrize("bad", ["exact", "approx", "quarter"])
+def test_an_unknown_precision_is_skipped_rather_than_stored(run, gs, bad):
+    """`_firm_date_row` renders an unrecognised precision through its
+    EXACT-DAY branch, so a typo here turns a guess into a specific date on a
+    public page — the class of bug `firm_dates_confidence_in_range` was added
+    for, one column over."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": "sa2028", "precision": bad, "confidence": "confirmed_official"}])
+    assert FirmDate.objects.count() == 0
+
+
+@pytest.mark.parametrize("good", ["", "day", "month", "estimated"])
+def test_the_precision_vocabulary_is_accepted(run, gs, good):
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": "sa2028", "precision": good, "confidence": "confirmed_official"}])
+    assert FirmDate.objects.get().precision == good
+
+
+def test_an_unknown_confidence_band_is_skipped_not_scored_zero(run, gs):
+    """It used to fall back to 0.0. On a new row that writes a real date every
+    `>= 0.8` reader downstream discards; on an existing one, the
+    never-downgrade rule reads it as a weaker claim and quietly keeps the old
+    date. Both look exactly like a successful import."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
+          "cycle": "sa2028", "confidence": "confirmedofficial"}])
+    assert FirmDate.objects.count() == 0

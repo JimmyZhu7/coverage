@@ -173,6 +173,23 @@ _GPA_SOFT = re.compile(r"\b(?:preferred|desired|ideally|prefer)\b", re.IGNORECAS
 _GPA_SOFT_BEFORE = 35
 _GPA_SOFT_AFTER = 25
 
+# A DUAL-SCALE statement restates one bar twice, once per grading scale a
+# school might use -- HSBC's own template writes "a minimum GPA of 4.0/5.0
+# or 3.2/4.0". The forward `_GPA` pattern above finds "GPA of" and grabs the
+# NEAREST decimal, which for this shape is 4.0 -- the numerator of the
+# 5.0-scale reading, not the 4.0-scale bar (3.2) the chip is actually
+# rendered under: `views.py`'s chip prints bare "GPA {value}" with no
+# denominator, on the assumption every value already sits on the standard
+# 4.0 scale. Confirmed live on 2 open HSBC postings sharing this template:
+# the chip read "GPA 4.0" -- a near-perfect-GPA bar -- for a posting whose
+# stated 4.0-scale floor is 3.2, the ordinary difference between "top of
+# your class" and "solidly good," misleading a student off a role they
+# clear. Matched immediately after the forward pattern's own capture (not
+# as an independent scan), so it only ever fires on a number `_GPA` already
+# treated as the candidate cutoff.
+_GPA_DUAL_SCALE = re.compile(
+    r"\s*/\s*(\d\.\d{1,2})\s*or\s*(\d\.\d{1,2})\s*/\s*(\d\.\d{1,2})", re.IGNORECASE)
+
 
 def _gpa_is_hedged(text: str, start: int, end: int) -> bool:
     before_period = text.rfind(".", 0, start)
@@ -184,6 +201,27 @@ def _gpa_is_hedged(text: str, start: int, end: int) -> bool:
     return bool(_GPA_SOFT.search(text[before:after]))
 
 
+def _dual_scale_value(text: str, value: float, pos: int) -> float:
+    """`value` (already captured, sitting right before position `pos`), or
+    the 4.0-scale alternative when what follows is a dual-scale disjunction
+    stating the SAME bar again on a different denominator. Only ever
+    prefers a fraction whose OWN denominator is 4.0 -- when neither half of
+    the disjunction runs on that scale, there is no 4.0-scale reading to
+    prefer, and `value` (the forward match's own answer) stands."""
+    m = _GPA_DUAL_SCALE.match(text, pos)
+    if not m:
+        return value
+    first_denom, second_num, second_denom = m.groups()
+    if first_denom == "4.0":
+        return value  # already the 4.0-scale numerator
+    if second_denom == "4.0":
+        try:
+            return float(second_num)
+        except ValueError:
+            return value
+    return value
+
+
 def extract_gpa(text: str) -> dict | None:
     # Reversed FIRST: a number sitting immediately before the word ("a 3.5
     # GPA") is always the requirement, never the scale.
@@ -192,10 +230,12 @@ def extract_gpa(text: str) -> dict | None:
             gap = m.group(1) if rx is _GPA else ""
             if gap and _GPA_SCALE.search(gap):
                 continue
+            num_group = 2 if rx is _GPA else 1
             try:
-                value = float(m.group(2) if rx is _GPA else m.group(1))
+                value = float(m.group(num_group))
             except ValueError:
                 continue
+            value = _dual_scale_value(text, value, m.end(num_group))
             # 4.5 rather than 4.0: some schools run a 4.3 scale, and a value
             # above that is a version number or a rating, not a grade bar.
             if 1.0 <= value <= 4.5:
@@ -402,8 +442,25 @@ _LANG_SOFT = re.compile(
 # say German is not required. Checked over a window spanning the match
 # itself (not just the text after it) so it catches negations wherever they
 # fall relative to the keyword that triggered the match.
+#
+# `n't\b`, not just `\bnot\b`: PwC Canada's own template runs "We'd love it
+# even more if you're bilingual in English and French, however this ISN'T A
+# REQUIREMENT" on every one of its co-op postings -- a contraction, which
+# `\bnot\b` cannot see (there is no standalone word "not" in "isn't"), so
+# the language survived as an unqualified "French" chip on a posting that
+# explicitly disclaims it. `n't\b` alone (no leading `\b`, since the
+# apostrophe already breaks the preceding word) matches "isn't"/"doesn't"/
+# "aren't"/"wasn't"/"weren't"/"won't"/"wouldn't"/"can't" the same way.
+# "requirement" (the noun) is added to the target list for the same
+# posting: "required" (the adjective this list already carried) does not
+# match inside "requirement" -- the two words share a prefix, not a
+# substring relationship -- so the gate silently never fired on a sentence
+# that states the noun. Confirmed live: 42 of 214 open `language` facts (PwC
+# Canada, every co-op/intern track) carried this exact false "French"
+# requirement before this fix.
 _LANG_NEGATED = re.compile(
-    r"\bnot\b[^.\n]{0,20}?(?:required|essential|necessary|mandatory|needed|a must)\b",
+    r"(?:\bnot\b|n't\b)[^.\n]{0,20}?"
+    r"(?:required|requirement|essential|necessary|mandatory|needed|a must)\b",
     re.IGNORECASE)
 
 
@@ -422,6 +479,35 @@ def extract_languages(text: str) -> dict | None:
     return {"value": " · ".join(found[:2]), "langs": found, "phrase": phrase}
 
 
+# A negation sitting ahead of, or INSIDE, the span a YES-pattern matched --
+# "we do NOT REQUIRE a transcript" (ahead of "cover letter"/"transcript"
+# entirely), "a cover letter ISN'T required" (between the anchor phrase and
+# the trigger word, inside the match's own non-greedy filler). Both
+# `_COVER_NO` and `_TRANSCRIPT_NO` below only ever look for a negation
+# stated in full AFTER the anchor phrase ("cover letter ... not required"),
+# so neither shape is visible to them: the first is textually earlier than
+# where they start looking, and the second is spelled as a contraction
+# ("isn't") their literal "not required" text can't match either. The same
+# blind spot `_LANG_NEGATED` was fixed for on `extract_languages` — a
+# negation window has to span the match itself, not just the text after it.
+# `n't\b` catches the contraction family ("doesn't", "isn't", "aren't") the
+# same way `_LANG_NEGATED` does. No live posting has tripped either gap for
+# these two extractors yet (unlike the identical shape on `language`,
+# confirmed live at scale on PwC Canada) — closed pre-emptively, on the
+# evidence that this exact shape recurs across extractors in this module
+# rather than staying contained to the one it was first found on.
+_NEGATED_NEARBY = re.compile(r"(?:\bnot\b|n't\b)", re.IGNORECASE)
+_NEGATED_NEARBY_BEFORE = 25
+
+
+def _requirement_negated(text: str, start: int, end: int) -> bool:
+    """True when a negation sits in the span from just before `start` through
+    `end` — covering both a negation stated ahead of the match and one
+    folded inside it."""
+    return bool(_NEGATED_NEARBY.search(
+        text[max(0, start - _NEGATED_NEARBY_BEFORE):end]))
+
+
 # --- Cover letter ----------------------------------------------------------
 # Two gates, because "cover letter" alone appears in "a cover letter is
 # optional" just as often as in the sentence that demands one.
@@ -437,7 +523,7 @@ def extract_cover_letter(text: str) -> dict | None:
     if _COVER_NO.search(text):
         return None
     m = _COVER_YES.search(text)
-    if not m:
+    if not m or _requirement_negated(text, m.start(), m.end()):
         return None
     return {"value": "Cover letter", "phrase": _sentence(text, m.start(), m.end())}
 
@@ -798,7 +884,7 @@ def extract_transcript(text: str) -> dict | None:
     if _TRANSCRIPT_NO.search(text):
         return None
     m = _TRANSCRIPT_YES.search(text)
-    if not m:
+    if not m or _requirement_negated(text, m.start(), m.end()):
         return None
     return {"value": "Transcript", "phrase": _sentence(text, m.start(), m.end())}
 

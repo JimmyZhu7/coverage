@@ -1405,7 +1405,22 @@ def undo_decision(decision: AutopilotDecision) -> str:
                     contact=contact
                 ).count()
                 if remaining == 0:
-                    Contact.all_objects.filter(pk=contact.pk).delete()
+                    # `.objects.for_user(...)`, not `all_objects`, and it is
+                    # the only DELETE of a user-owned row in this module.
+                    # `decision.contact` resolves through the FORWARD FK
+                    # descriptor, which Django serves from `_base_manager` —
+                    # pinned to `all_objects` by `PrivateModel.Meta` — so the
+                    # object in hand carries no tenant proof of its own, and
+                    # the delete that followed carried none either. It is safe
+                    # today only because the one caller reaches here through
+                    # `AutopilotDecision.objects.for_user(request.user)`; that
+                    # is an argument about the call graph, not a scope on the
+                    # query, and it is the wrong thing to be relying on for an
+                    # irreversible write. The two sibling statements six lines
+                    # up already scope the same way against the same user.
+                    Contact.objects.for_user(decision.user).filter(
+                        pk=contact.pk
+                    ).delete()
             p = decision.proposal
             p.status = ContactProposal.STATUS_PENDING
             p.resolved_at = None

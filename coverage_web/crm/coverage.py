@@ -210,7 +210,28 @@ def rank_gaps(
                 "open": int(f.get("open") or 0),
             }
         )
-    ranked.sort(key=lambda g: (-g["exposure"], g["tier"], -g["open"], g["name"]))
+    # Four keys, plus a fifth the strip's own promise needs.
+    #
+    # `rank_gaps`' docstring says ties break "so the strip is stable render to
+    # render", and until this line that was only true down to the fourth key.
+    # Two firms at the same tier, in the same gap state, with the same open
+    # count and the same name tie on all four and fall through to `list.sort`'s
+    # stability — i.e. to the order the CALLER built `firms` in, which is a
+    # queryset with no ORDER BY. Measured: six identical firms shuffled 50
+    # times produced 47 distinct strips. Same firms, same data, different
+    # order on the next page load.
+    #
+    # `str(...)` on the name for the same reason `_coerce_tier` exists in the
+    # cadence engine: `f.get("name") or ""` leaves a non-string through
+    # unchanged, and one integer name in the list crashes the whole sort with
+    # `'<' not supported between instances of 'str' and 'int'` — taking down
+    # the Network board rather than mislabelling one card. `firm_id` last is
+    # the actual tiebreak; it is unique per row, so the order is total.
+    ranked.sort(
+        key=lambda g: (
+            -g["exposure"], g["tier"], -g["open"], str(g["name"]), str(g["firm_id"]),
+        )
+    )
     return ranked[:limit]
 
 
@@ -225,7 +246,13 @@ def tier_cost(cards: Iterable[Mapping[str, Any]], target: int) -> dict:
     """
     cards = list(cards)
     firms = len(cards)
-    have = sum(c.get("advocates", 0) for c in cards)
+    # `or 0`, not just the `.get` default: a card carrying an explicit
+    # `advocates=None` (the shape an annotated queryset produces for a firm
+    # with no matching rows, before COALESCE) satisfies `.get("advocates", 0)`
+    # and then raises `TypeError: unsupported operand type(s) for +: 'int' and
+    # 'NoneType'` inside `sum` — the same missing-value trap `_firm_meta`'s
+    # tier coercion documents one module over, in the same shape.
+    have = sum(c.get("advocates") or 0 for c in cards)
     needed = firms * target
     return {
         "firms": firms,

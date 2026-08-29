@@ -11,19 +11,18 @@ float to the top.
 {% include "directory/_scope.html" %}
 
 {% comment %}
-THE BOARD STATE — the totals and the shape of the cycle, bound into one unit.
+THE BOARD STATE — the running totals, on the boundary between what you ASKED
+for (the controls above) and what the board ANSWERS (the roles below). A
+hairline marks that boundary — the same rule the section labels wear.
 
-They were two free-floating strips with a 12px gap, which made them read as
-two unrelated bands in a stack of seven. They answer one question between
-them ("what does the board look like right now": how many, and when they
-close), they are the only two bands here that are always present, and they
-sit on the boundary between what you ASKED for (the controls above) and what
-the board ANSWERS (the roles below). A hairline marks that boundary — the
-same rule the section labels wear.
-
-Grouped here rather than inside _cycle_band.html because that partial is
-shared with Settings' target-cycle picker, where there is no stat strip to
-bind to.
+The month-by-month cycle shape used to render here too, first as an always-on
+band, then folded behind a "See it by month" disclosure. Removed outright
+(2026-08-27, "take this thing away as well"): it was `role="img"`, drawn bars
+with no link or filter inside them, never something needed to reach the first
+role card, and the founder didn't want the disclosure either. `_cycle_band.html`
+itself is untouched — it is still Settings' target-cycle picker's own partial,
+just no longer called from here. The view stopped passing `cycle_months` for
+the same reason.
 {% endcomment %}
 <div class="board-state">
 <div class="stat-strip">
@@ -46,10 +45,6 @@ bind to.
   {% if dash.fresh_count %}<span class="ss-item"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh ({{ dash.fresh_days }}d)</span>{% endif %}
   {% if checked_ago %}<span class="ss-item ss-checked">checked {{ checked_ago }} ago</span>{% endif %}
 </div>
-
-{% comment %}When this cycle actually closes, month by month — the aggregate
-truth behind every fuse below. See _cycle_band.html.{% endcomment %}
-{% include "directory/_cycle_band.html" %}
 </div>
 
 {% comment %}
@@ -98,7 +93,7 @@ exactly the moment it had something to say.
             <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% else %}None match this filter{% endif %}</span>
             {% comment %}
             The shared "why", as ONE text line in the firm columns' own third-
-            line voice ("TIER 1 · 56 CLOSING"), not a row of pills. Pills wrapped
+            line voice ("Tier 1"), not a row of pills. Pills wrapped
             the moment two reasons showed ("2027 INTAKE" + "2027 SUMMER
             INTERNSHIP" is 266px against a 236px row), and a wrapped stats row
             made this header 122px against its neighbours' 92px, pushing every
@@ -144,22 +139,18 @@ exactly the moment it had something to say.
     {% endif %}
     {% include "directory/_columns.html" %}
   </div>
-  {% if not clusters %}
-    {% comment %}The firms came back empty but the grid still rendered (the
-    Picked column had something to say). The empty-state copy belongs beside
-    it, not instead of it.{% endcomment %}
-    <div class="empty empty--incol">
-      {% if has_filters %}
-        <h2>Nothing open under those filters.</h2>
-        <p>Widen the filter, or <a href="{% url 'opportunities' %}">see everything open</a>.</p>
-      {% else %}
-        <h2>Nothing open right now.</h2>
-        <p>We'll list roles here as soon as the next check finds any.</p>
-      {% endif %}
-    </div>
-  {% endif %}
-{% else %}
-  <div class="empty">
+{% endif %}
+
+{% comment %}
+ONE empty state, whichever way the board came back empty. It used to be
+written twice — once beside the grid (when the Picked column still had
+something to say and only the firms came back empty) and once instead of it —
+and two copies of one sentence are two copies free to drift. The `--incol`
+modifier is the only thing that differed, and it still marks the beside-it
+case: the copy belongs next to the Picked column, not in place of it.
+{% endcomment %}
+{% if not clusters %}
+  <div class="empty{% if pick_cluster %} empty--incol{% endif %}">
     {% if has_filters %}
       <h2>Nothing open under those filters.</h2>
       <p>Widen the filter, or <a href="{% url 'opportunities' %}">see everything open</a>.</p>

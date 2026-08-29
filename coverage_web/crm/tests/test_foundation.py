@@ -107,12 +107,23 @@ def test_angle_never_leaks_into_mailto_in_the_cadence_queue(client):
 
 
 @pytest.mark.django_db
-def test_angle_never_leaks_into_mailto_on_the_network_board(client):
-    """The Network board's contact-card email link used to be a bare
-    `mailto:<email>` with no BCC and no body at all -- invisible to
-    Coverage's capture pipeline. Now that it's routed through the same
-    `_mailto` helper as every other compose surface (contact detail, the
-    Today queue), pin the same angle-never-leaks guarantee here too."""
+def test_angle_never_leaks_anywhere_on_the_network_board(client):
+    """The Network board's contact card used to carry its own Gmail-compose
+    link (routed through the same `_mailto` helper as every other compose
+    surface), which is what the previous version of this test pinned. The
+    card-simplification pass (2026-08-27, on the founder's own call
+    reviewing his live board) removed that link along with the on-card
+    email address entirely — see the template comment above `.cc-foot` in
+    contact_list.html and `views.py::_contact_card` for why (real emails on
+    his board run past what the card can show on one line without an
+    honesty-violating ellipsis-truncation). Compose now lives one click away
+    on the contact detail page, which `test_angle_never_leaks_into_mailto_
+    on_contact_detail` above already covers.
+
+    What survives here is the board-level half of the guarantee: with no
+    compose link on the card at all, the private `angle` has no URL to leak
+    into on this page, and this test pins that it also never leaks into the
+    page as plain text."""
     user = _user()
     Contact.all_objects.create(
         user=user, name="Jane Banker", email="jane@acme.com",
@@ -121,13 +132,17 @@ def test_angle_never_leaks_into_mailto_on_the_network_board(client):
     client.force_login(user)
     body = client.get(reverse("crm:contact_list")).content.decode()
 
-    assert "jane@acme.com" in body  # the card is really there
-    for url in _mailto_urls(body):
-        for word in ("insecure", "exit", "opps"):
-            assert word not in url, f"angle leaked into a mailto body: {url}"
-    # And the fix is a positive one, not just an absence: the opener really
-    # is the body, same as everywhere else.
-    assert any("sophomore" in url for url in _mailto_urls(body))
+    assert "Jane Banker" in body  # the card is really there
+    # No compose link on the card any more — nothing for the angle to leak
+    # into. `_mailto_urls` isn't reused here: it asserts at least one match,
+    # which is exactly the thing this redesign removed from this page.
+    assert not _MAILTO_RE.search(body), (
+        "a Gmail-compose link reappeared on the Network board card; the "
+        "email address (and the ellipsis-truncation risk it carried) was "
+        "deliberately removed from the card in the 2026-08-27 redesign."
+    )
+    for word in ("insecure", "exit", "opps"):
+        assert word not in body, f"angle leaked onto the network board: {word!r}"
 
 
 @pytest.mark.django_db

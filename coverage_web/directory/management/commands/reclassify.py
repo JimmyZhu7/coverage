@@ -10,11 +10,13 @@ boards; each improvement needs a cheap, idempotent way to re-run over rows
 already in the shared table. A migration runs once — this runs whenever the
 rules change. New rows are classified at ingest; this backfills the rest.
 
-The board-level campus hint is reconstructed from the boards.py catalog: a
-(firm slug, provider) pair whose catalog board is campus-scoped (e.g.
-Blackstone's Blackstone_Campus_Careers Workday site) gets the same
-`campus_hint=True` that a live ingest of that board would use. Rows whose
-firm/provider pair is not in the catalog fall back to no hint, which only
+The board-level campus hint is reconstructed from the boards.py catalog via
+`classify.campus_hint_pairs`: a (firm slug, provider) pair gets
+`campus_hint=True` only when EVERY catalog board sharing that pair is
+campus-scoped (e.g. Blackstone's Blackstone_Campus_Careers Workday site).
+Rows whose firm/provider pair is not in the catalog, or whose catalog boards
+disagree (Solomon Partners and Citi each run one campus board and one
+non-campus board on the same provider), fall back to no hint, which only
 means neutral Analyst titles stay in `other` — never a false promotion.
 
 Cohort handling mirrors ingest: connector-supplied cohorts don't exist for
@@ -39,7 +41,7 @@ import re
 
 from directory.boards import BOARDS
 from directory.classify import (
-    board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title,
+    bucket_from_contract, campus_hint_pairs, classify_role, clean_title, cohort_from_provider_title,
     derive_class_year, extract_class_year, extract_cohort,
     extract_deadline_from_text, extract_sponsorship, normalize_region, region_from_fields,
     region_from_prose, region_from_title_segments, posting_text,
@@ -61,9 +63,13 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         dry = opts["dry_run"]
 
-        campus_pairs: set[tuple[str, str]] = {
-            (slug, board.provider) for slug, board in BOARDS if board_is_campus(board)
-        }
+        # See classify.campus_hint_pairs: a stored row only remembers its
+        # provider ("workday", "greenhouse", ...), not which of a firm's
+        # several boards on that provider produced it, so a pair counts only
+        # when EVERY catalog board sharing it is campus-scoped — not just any
+        # one of them (Solomon Partners and Citi each run one campus board
+        # and one non-campus board on the same provider).
+        campus_pairs = campus_hint_pairs(BOARDS)
 
         counts: dict[str, int] = {}
         changed = 0

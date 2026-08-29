@@ -293,7 +293,7 @@ def test_get_firm_reports_tier_dates_open_roles_and_my_people_by_warmth(user, fi
     UserFirm(user=user, firm=firm, tier=2).save()
     FirmDate.objects.create(
         firm=firm,
-        cycle="2028",
+        cycle="sa2028",
         region="hk",
         event_kind="applications_open",
         date=timezone.localdate() + timedelta(days=5),
@@ -311,6 +311,33 @@ def test_get_firm_reports_tier_dates_open_roles_and_my_people_by_warmth(user, fi
     assert result["open_roles"] == 1
     assert [d["event"] for d in result["upcoming_dates"]] == ["applications_open"]
     assert [c["name"] for c in result["my_contacts"]] == ["Warm Person", "Cold Person"]
+
+
+def test_get_firm_dates_carry_their_precision_alongside_confidence(user, firm):
+    """`confidence` alone is not the whole claim about a firm date — a
+    `precision="estimated"` row is a month-level GUESS extrapolated from
+    past cycles, not a day the firm stated, however high its `confidence`
+    reads (see `crm.utils.firm_date_confidence`'s identical two-part bar).
+    Before this fix the advisor tool exposed `confidence` alone, which could
+    lead it to state a specific day off a row the firm page itself only
+    ever prints as "~ Sep 2027"."""
+    FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="hk", event_kind="app_open",
+        date=timezone.localdate() + timedelta(days=5),
+        confidence=0.6, precision="estimated",
+    )
+    FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="hk", event_kind="app_close",
+        date=timezone.localdate() + timedelta(days=20),
+        confidence=1.0, precision="",
+    )
+
+    result, is_error = _call(user, "get_firm", {"name_or_slug": "north bank"})
+
+    assert not is_error
+    by_event = {d["event"]: d for d in result["upcoming_dates"]}
+    assert by_event["app_open"]["precision"] == "estimated"
+    assert by_event["app_close"]["precision"] == "day"
 
 
 def test_get_firm_by_slug_and_unknown_firm_is_an_error_not_a_crash(user, firm):

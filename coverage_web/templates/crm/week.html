@@ -52,6 +52,102 @@
     </div>
   </header>
 
+  {% comment %}
+  The directory stats. They led the page once, then spent a stretch at its
+  foot after a hero plus four stat cards ate the whole fold — the queue is
+  the moat, the board is the commodity, and the commodity had the pixels.
+  Back on top after that, in a 56px hairline strip instead of a card row —
+  and then drifted back down anyway, one include at a time: the daily brief
+  and the situation strip both landed ABOVE it later, each a reasonable
+  addition on its own, each pushing this bar one section further from "the
+  first thing on the page" until the claim in this comment stopped being
+  true of the actual DOM. Moved back above both, directly under the header,
+  so the numbers checked on arrival are load-bearing again rather than
+  aspirational.
+
+  The first and third cells used to be "Open now" (every open campus role,
+  board-wide) and "Tracked live" (every open role including the 4,238 the
+  Opportunities feed itself hides as not-yours, plus an HK/US split that
+  never moved day to day). Three of four cells on a personal daily page were
+  describing the BOARD, and the one number this page never said — that the
+  pipeline below sat at zero — went unsaid. Replaced with the two personal
+  counts Opportunities already computes: open roles at the firms this user
+  actually targets, and how many of those name the user's own class year
+  and are still unsaved — the most actionable number on the page.
+  Board-wide totals still exist for the founder view at /instrument/.
+
+  Deliberately NOT `.dash-num`: base.html count-animates that class from 0
+  on first paint, and the intermediate frames are wrong numbers that
+  screenshot as data (80, 152 and 886 were all captured for the same "Open
+  now" figure). The entrance here moves the CELL, never the digits.
+  {% endcomment %}
+  <section class="ribbon" aria-label="Your firms and deadlines">
+    <div class="ribbon-row">
+      <a class="ribbon-stat kin-reveal" style="--i: 0" href="{% url 'opportunities' %}">
+        <span class="ribbon-num">{{ dash.at_your_firms }}</span>
+        <span class="ribbon-lbl"><span class="live-dot"></span> At your firms</span>
+      </a>
+      <a class="ribbon-stat kin-reveal{% if dash.closing_10 %} is-urgent{% endif %}" style="--i: 1" href="{% url 'opportunities' %}">
+        <span class="ribbon-num">{{ dash.closing_10 }}</span>
+        <span class="ribbon-lbl">Closing in 10 days</span>
+      </a>
+      {% comment %}
+      The most actionable number on the page, honest at zero too: nothing
+      unsaved is a real state worth naming, not a bare "0" that reads like
+      the feature is broken.
+
+      The label used to read "Name your year, unsaved" — a phrase that
+      parses as "your profile didn't save" as easily as its intended
+      meaning ("N roles name your class year and you haven't saved them").
+      Spelling out the class year itself (read straight off `user`, not
+      `dash` — `crm.today._dashboard_context` carries the count but not the
+      year) removes the ambiguity instead of relying on word order to
+      carry it.
+      {% endcomment %}
+      {% if dash.eligible_unsaved %}
+        <a class="ribbon-stat kin-reveal is-urgent" style="--i: 2" href="{% url 'opportunities' %}">
+          <span class="ribbon-num">{{ dash.eligible_unsaved }}</span>
+          <span class="ribbon-lbl">For Class of {{ user.class_year }}, not saved yet</span>
+        </a>
+      {% elif dash.has_year %}
+        <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'opportunities' %}">
+          <span class="ribbon-lbl">All caught up on your year</span>
+        </a>
+      {% else %}
+        {% comment %}
+        Zero with NO class year stated is not "caught up" — the check never
+        ran. Day-zero walkthrough caught this cell congratulating a
+        ten-minute-old account on clearing a check it had never taken. Say
+        what is actually missing, and link to where it gets fixed.
+        {% endcomment %}
+        <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'accounts:settings' %}#profile">
+          <span class="ribbon-lbl">Add your class year to check eligibility</span>
+        </a>
+      {% endif %}
+      {% comment %}
+      A funnel reading 0 › 0 › 0 is a diagram of nothing. While there is
+      genuinely nothing in it, say so in words instead.
+      {% endcomment %}
+      {% if dash.funnel.submitted or dash.funnel.interview or dash.funnel.offer %}
+        <span class="ribbon-stat ribbon-funnel kin-reveal" style="--i: 3">
+          <span class="ribbon-num">{{ dash.funnel.submitted }} › {{ dash.funnel.interview }} › {{ dash.funnel.offer }}</span>
+          {% comment %}
+          The stage names come from directory.views._STAGE_LABELS, not from
+          this template. Hardcoded here they read "Submitted › Interview ›
+          Offer" — the raw `applied_status` spellings — while My Applications,
+          its stage dropdown and the feed's track pill all called the same two
+          rows "Applied" and "Interviewing". One vocabulary, one place.
+          {% endcomment %}
+          <span class="ribbon-lbl">{{ dash.funnel_label }}</span>
+        </span>
+      {% else %}
+        <span class="ribbon-stat ribbon-funnel is-empty kin-reveal" style="--i: 3">
+          <span class="ribbon-lbl">Nothing submitted yet.</span>
+        </span>
+      {% endif %}
+    </div>
+  </section>
+
   {% if needs_onboarding %}
     {% comment %}The unfinished-setup banner. It names what setup buys (the
     queue and the personalized feed run on target firms), links straight back
@@ -133,98 +229,6 @@
       {% endfor %}
     </div>
   {% endif %}
-
-  {% comment %}
-  The directory stats. They led the page once, then spent a stretch at its
-  foot after a hero plus four stat cards ate the whole fold — the queue is
-  the moat, the board is the commodity, and the commodity had the pixels.
-  Back on top now because the shape changed: one 56px strip of hairline-
-  separated cells, not a card row, so it costs the queue nothing and the
-  numbers you check on arrival are the first thing on the page.
-
-  The first and third cells used to be "Open now" (every open campus role,
-  board-wide) and "Tracked live" (every open role including the 4,238 the
-  Opportunities feed itself hides as not-yours, plus an HK/US split that
-  never moved day to day). Three of four cells on a personal daily page were
-  describing the BOARD, and the one number this page never said — that the
-  pipeline below sat at zero — went unsaid. Replaced with the two personal
-  counts Opportunities already computes: open roles at the firms this user
-  actually targets, and how many of those name the user's own class year
-  and are still unsaved — the most actionable number on the page, now on
-  the page opened every morning instead of stranded on a different one.
-  Board-wide totals still exist for the founder view at /instrument/.
-
-  Deliberately NOT `.dash-num`: base.html count-animates that class from 0
-  on first paint, and the intermediate frames are wrong numbers that
-  screenshot as data (80, 152 and 886 were all captured for the same "Open
-  now" figure). The entrance here moves the CELL, never the digits.
-  {% endcomment %}
-  <section class="ribbon" aria-label="Your firms and deadlines">
-    <div class="ribbon-row">
-      <a class="ribbon-stat kin-reveal" style="--i: 0" href="{% url 'opportunities' %}">
-        <span class="ribbon-num">{{ dash.at_your_firms }}</span>
-        <span class="ribbon-lbl"><span class="live-dot"></span> At your firms</span>
-      </a>
-      <a class="ribbon-stat kin-reveal{% if dash.closing_10 %} is-urgent{% endif %}" style="--i: 1" href="{% url 'opportunities' %}">
-        <span class="ribbon-num">{{ dash.closing_10 }}</span>
-        <span class="ribbon-lbl">Closing in 10 days</span>
-      </a>
-      {% comment %}
-      The most actionable number on the page, honest at zero too: nothing
-      unsaved is a real state worth naming, not a bare "0" that reads like
-      the feature is broken.
-
-      The label used to read "Name your year, unsaved" — a phrase that
-      parses as "your profile didn't save" as easily as its intended
-      meaning ("N roles name your class year and you haven't saved them").
-      Spelling out the class year itself (read straight off `user`, not
-      `dash` — `crm.today._dashboard_context` carries the count but not the
-      year) removes the ambiguity instead of relying on word order to
-      carry it.
-      {% endcomment %}
-      {% if dash.eligible_unsaved %}
-        <a class="ribbon-stat kin-reveal is-urgent" style="--i: 2" href="{% url 'opportunities' %}">
-          <span class="ribbon-num">{{ dash.eligible_unsaved }}</span>
-          <span class="ribbon-lbl">For Class of {{ user.class_year }}, not saved yet</span>
-        </a>
-      {% elif dash.has_year %}
-        <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'opportunities' %}">
-          <span class="ribbon-lbl">All caught up on your year</span>
-        </a>
-      {% else %}
-        {% comment %}
-        Zero with NO class year stated is not "caught up" — the check never
-        ran. Day-zero walkthrough caught this cell congratulating a
-        ten-minute-old account on clearing a check it had never taken. Say
-        what is actually missing, and link to where it gets fixed.
-        {% endcomment %}
-        <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'accounts:settings' %}#profile">
-          <span class="ribbon-lbl">Add your class year to check eligibility</span>
-        </a>
-      {% endif %}
-      {% comment %}
-      A funnel reading 0 › 0 › 0 is a diagram of nothing. While there is
-      genuinely nothing in it, say so in words instead.
-      {% endcomment %}
-      {% if dash.funnel.submitted or dash.funnel.interview or dash.funnel.offer %}
-        <span class="ribbon-stat ribbon-funnel kin-reveal" style="--i: 3">
-          <span class="ribbon-num">{{ dash.funnel.submitted }} › {{ dash.funnel.interview }} › {{ dash.funnel.offer }}</span>
-          {% comment %}
-          The stage names come from directory.views._STAGE_LABELS, not from
-          this template. Hardcoded here they read "Submitted › Interview ›
-          Offer" — the raw `applied_status` spellings — while My Applications,
-          its stage dropdown and the feed's track pill all called the same two
-          rows "Applied" and "Interviewing". One vocabulary, one place.
-          {% endcomment %}
-          <span class="ribbon-lbl">{{ dash.funnel_label }}</span>
-        </span>
-      {% else %}
-        <span class="ribbon-stat ribbon-funnel is-empty kin-reveal" style="--i: 3">
-          <span class="ribbon-lbl">Nothing submitted yet.</span>
-        </span>
-      {% endif %}
-    </div>
-  </section>
 
   {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}
   <div id="today-cockpit"

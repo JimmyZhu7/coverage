@@ -901,26 +901,39 @@ def test_an_other_campaigns_contacts_come_off_the_network_board(client):
     for c in people:
         assert c.name not in body
     assert resp.context["contact_total"] == 1
-    assert resp.context["hidden_total"] == 10
+    assert len(camp.excluded_contact_ids(user)) == 10
     # And nobody was deleted: the contact book still holds all eleven.
     assert Contact.objects.for_user(user).count() == 11
     assert mine.id not in camp.excluded_contact_ids(user)
 
 
-def test_the_board_says_what_it_is_hiding_and_links_to_it(client):
-    """A count that drops by ten with no explanation is its own bug. The board
-    states the number, the reason, and the way to look."""
+def test_the_product_says_what_it_is_hiding_and_links_to_it(client):
+    """A count that drops by ten with no explanation is its own bug. The
+    number, and the way to look, still exist — they moved.
+
+    They used to sit in a strip above the board itself. That strip was
+    removed on 2026-08-28, twice pointed at and the second time as "take all
+    of this away, hide": three stacked bands of meta-text before the first
+    contact card, none of which was a contact. What was NOT allowed to go
+    with it is this guarantee, so the count and the route live in Settings >
+    Your Data now, beside the archived count that was always there.
+
+    Asserted on Settings rather than the board on purpose: this test is about
+    the promise, not the place, and moving it again should mean moving this
+    assertion again rather than quietly deleting it."""
     from django.urls import reverse
 
     user = _user()
     _classified(user, Campaign.KIND_OTHER)
     client.force_login(user)
 
-    body = _board(client).content.decode()
+    # Gone from the board, and no longer announced there.
+    board = _board(client).content.decode()
+    assert "hidden from this board" not in board
 
-    assert "10 hidden from this board" in body
-    assert "not your recruiting" in body
-    assert reverse("crm:contact_campaign_hidden") in body
+    settings_body = client.get(reverse("accounts:settings")).content.decode()
+    assert "10 not recruiting" in settings_body
+    assert reverse("crm:contact_campaign_hidden") in settings_body
 
 
 def test_an_unclassified_campaign_changes_nothing_on_the_board(client):
@@ -938,8 +951,7 @@ def test_an_unclassified_campaign_changes_nothing_on_the_board(client):
     for c in people:
         assert c.name in body
     assert resp.context["contact_total"] == 10
-    assert resp.context["hidden_total"] == 0
-    assert resp.context["hidden_any"] is False
+    assert camp.excluded_contact_ids(user) == set()
 
 
 def test_a_recruiting_campaign_changes_nothing_on_the_board(client):
@@ -955,7 +967,7 @@ def test_a_recruiting_campaign_changes_nothing_on_the_board(client):
     for c in people:
         assert c.name in body
     assert resp.context["contact_total"] == 10
-    assert resp.context["hidden_total"] == 0
+    assert camp.excluded_contact_ids(user) == set()
 
 
 def test_a_contact_the_campaign_did_not_originate_stays_on_the_board():
@@ -995,7 +1007,7 @@ def test_a_hand_exempted_contact_stays_on_the_board(client):
 
     assert rescued.name in body
     assert resp.context["contact_total"] == 1
-    assert resp.context["hidden_total"] == 9
+    assert len(camp.excluded_contact_ids(user)) == 9
 
 
 def test_every_count_on_the_board_agrees_with_what_it_renders(client):
@@ -1039,11 +1051,19 @@ def test_every_count_on_the_board_agrees_with_what_it_renders(client):
     assert [g["advocates"] for g in ctx["gaps"]] == [1]
 
 
-def test_the_hidden_count_is_scoped_to_the_tab_it_sits_under(client):
-    """A US tab saying "10 hidden" while all ten are in Hong Kong is the same
-    class of lie as hiding them silently. The caveat goes through the same
-    filter as the board it is a caveat about; the TAB does not, because a way
-    back that disappears on one tab is a dead end."""
+def test_the_hidden_count_does_not_move_with_the_board_tab(client):
+    """This used to guard a per-tab caveat: a US tab reading "10 hidden"
+    while all ten sat in Hong Kong is the same class of lie as hiding them
+    silently, so the caveat was scoped and the route back was not.
+
+    The caveat is gone (2026-08-28) and the count moved to Settings, which
+    has no tabs — so the scoping question the old test asked can no longer be
+    asked. What replaces it is the invariant that survived the move: the
+    number is a fact about the ACCOUNT, so standing on any board tab must not
+    change it, and the board must not restate it.
+
+    Ten Hong Kong contacts, read from the US tab: the board mentions none of
+    it, and Settings says ten either way."""
     from django.urls import reverse
 
     user = _user()
@@ -1053,13 +1073,14 @@ def test_the_hidden_count_is_scoped_to_the_tab_it_sits_under(client):
         c.save(update_fields=["region"])
     client.force_login(user)
 
-    us = client.get(reverse("crm:contact_list") + "?scope=us")
-    body = us.content.decode()
+    us = client.get(reverse("crm:contact_list") + "?scope=us").content.decode()
+    hk = client.get(reverse("crm:contact_list") + "?scope=hk").content.decode()
+    for body in (us, hk):
+        assert "hidden from this board" not in body
+        assert "Not recruiting" not in body
 
-    assert us.context["hidden_total"] == 0
-    assert us.context["hidden_any"] is True
-    assert "hidden from this board" not in body
-    assert "Not recruiting" in body
+    settings_body = client.get(reverse("accounts:settings")).content.decode()
+    assert "10 not recruiting" in settings_body
 
 
 def test_the_hidden_list_names_the_send_that_hid_them(client):
@@ -1100,7 +1121,7 @@ def test_bringing_one_back_puts_them_on_the_board_and_leaves_the_rest(client):
     board = _board(client)
     assert rescued.name in board.content.decode()
     assert board.context["contact_total"] == 1
-    assert board.context["hidden_total"] == 9
+    assert len(camp.excluded_contact_ids(user)) == 9
 
 
 def test_another_tenant_cannot_unhide_your_contact(client):

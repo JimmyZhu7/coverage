@@ -32,6 +32,16 @@ was rendering as a real card on the founder's Today page). This command is
 the general form of "how was that one found" — noticing by chance does not
 scale, so this makes the same shape of residue greppable on demand instead.
 
+A FOURTH case is why this command grew past Firm/FirmDate/User/Contact: 60
+rows in `directory.Opportunity` — "Morgan Stanley / '2027 Summer Analyst,
+Seat 0' .. 'Seat 11'" and 48 more at J.P. Morgan, every one carrying a
+`url=https://seed.local/...` address — sat in the founder's live Opportunities
+feed until he found them by scrolling. Nothing above was looking at
+`Opportunity` at all. A FIFTH, six `crm.Contact` rows named "Verify Cold One"
+etc. on the demo account, was the same shape as (5) below but did not match
+its pattern (no "ZZZ"/"smoke test" in the name) — the fix there was widening
+the pattern, not adding a table.
+
 WHAT IT LOOKS FOR
 ------------------
 1. Users signed up at an RFC 2606 reserved, non-deliverable email domain
@@ -59,16 +69,39 @@ WHAT IT LOOKS FOR
    single placeholder row, which is always tagged `source_url="seed:demo"`
    and is excluded by that marker (see `directory/tests/test_firm_timeline.py`,
    which asserts this exact row renders as labeled sample data).
-4. Every private-zone row (see `coverage_web.tenancy.PrivateModel`) owned by
-   a user flagged in (1) — walked generically over every model with a
-   `user` foreign key, via `all_objects` so the tenant-scope guard does not
-   get in the way of an admin-only audit like this one.
-5. `crm.Contact` rows, for ANY owner, whose name matches the exact pattern
-   `purge_test_contacts` was written to clean up (a "ZZZ" prefix, or
-   "Smoke Test" / "Idempotency Test" in the name) — the generalized,
-   standing version of that one-off command's hard-coded id list, so the
-   next occurrence of the same smoke-test pattern shows up here even if it
-   lands somewhere purge_test_contacts's DEFAULT_IDS does not look.
+4. `directory.Opportunity` rows that either carry a `seed.local` URL (no
+   connector this repo ships ever fetches from that host — see
+   `directory/ingest.py`'s `Opportunity.objects.create`, whose `url` always
+   comes straight off a real provider's own API response) or a title with a
+   sequential "Seat N" suffix (real postings are never numbered that way;
+   it is what a script generating N fake rows for one firm produces when it
+   loops). Either tell alone is enough — the two happened to travel
+   together in the one leak found so far, but a future leak reusing only
+   one of them should still be caught. There is no tracked seed file for
+   this table to cross-check against, unlike Firm: `Opportunity` rows are
+   never legitimately created by anything except `ingest.py`'s real scrape,
+   so there is no "real fixture" carve-out to build here at all.
+5. Every private-zone row (see `coverage_web.tenancy.PrivateModel`) owned by
+   a user flagged in (1), OR pointing at an `Opportunity` flagged in (4), OR
+   pointing at a `Firm` flagged in (2) — walked generically over every model
+   with the relevant foreign key, via `all_objects` so the tenant-scope
+   guard does not get in the way of an admin-only audit like this one. This
+   is what surfaces a fixture Opportunity's `analytics.UserOpportunity` /
+   `directory.OpportunityChange` rows (and a fixture Firm's `FirmDate` /
+   `ContactProposal` / `UserFirm` rows) without a bespoke check for each —
+   they have no free-text field of their own to pattern-match, only a
+   foreign key to something already flagged, so cascading is the right
+   generalization rather than one more hand-written check per table.
+6. Free-text name/title fields across every private-zone table an agent
+   plausibly writes to while eyeballing whether a feature renders —
+   `crm.Contact.name`, `capture.ContactProposal.name`,
+   `crm.CalendarEvent.title`, `crm.Campaign.label`/`signature`, and
+   `crm.Touch.note`/`subject` — against one shared pattern: a "ZZZ" prefix,
+   "Verify "/"Test " at the start of the string, or "smoke test"/
+   "idempotency test" anywhere. Checked for ANY owner, not just already-
+   flagged users, because (per the fifth leak above) these rows tend to
+   land on real accounts — the founder's own, or the demo account — not on
+   a throwaway `@example.com` signup.
 
 WHAT IT DELIBERATELY DOES NOT DO
 ---------------------------------
@@ -82,14 +115,17 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from django.apps import apps
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db.models import Q
 
 from accounts.models import User
-from crm.models import Contact
-from directory.models import Firm, FirmDate
+from capture.models import ContactProposal
+from crm.models import Campaign, CalendarEvent, Contact, Touch
+from directory.models import Firm, FirmDate, Opportunity
 from directory.seed_parsers import parse_firms_yaml
 
 # RFC 2606 reserves example.com/.net/.org/.edu and the .invalid / .test TLDs
@@ -121,8 +157,34 @@ _FIXTURE_FIRM_WORDS = re.compile(
 # floats. Anything else did not come from either command.
 _VALID_CONFIDENCE = {0.0, 0.3, 0.6, 1.0}
 
-# The generalized version of purge_test_contacts.FIXTURE_NAME_PREFIX's guard.
-_FIXTURE_CONTACT_NAME = re.compile(r"^ZZZ\b|smoke test|idempotency test", re.IGNORECASE)
+# No connector this repo ships ever points at this host (see
+# directory/ingest.py: `opp.url` is always the provider's own address,
+# fetched live). A bare `icontains` on the DB side would also match it
+# inside an unrelated query string; this checks the actual parsed host so
+# that near-miss can never fire.
+def _has_seed_local_host(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return host == "seed.local" or host.endswith(".seed.local")
+
+
+# Real postings are never titled this way — it's the shape a script
+# generating N fake rows for one firm in a loop produces ("Seat 0" ..
+# "Seat 11"), not anything a recruiting site would post.
+_SEQUENTIAL_SEAT_TITLE = re.compile(r"\bseat\s*\d+\b", re.IGNORECASE)
+
+# The generalized version of purge_test_contacts.FIXTURE_NAME_PREFIX's guard,
+# widened past Contact after a "Verify Cold One"-shaped leak on the demo
+# account didn't match the original ZZZ/smoke-test-only pattern. Shared by
+# every free-text name/title field this command checks (see WHAT IT LOOKS
+# FOR (6)) rather than one regex per table, since the shape an agent's
+# "let me just verify this renders" leaves behind is the same everywhere it
+# lands: a "ZZZ" prefix, or "Verify"/"Test" leading the string (anchored and
+# word-bounded, so "Verify J.P. Morgan" and "Test User" match but "Testino
+# Capital" or "Verifying" do not), or the two exact smoke-test phrases
+# purge_test_contacts already knew about.
+_FIXTURE_NAME_PATTERN = re.compile(
+    r"^(?:ZZZ|Verify|Test)\b|smoke test|idempotency test", re.IGNORECASE
+)
 
 
 def _seeded_firm_slugs() -> set[str]:
@@ -147,7 +209,12 @@ class Command(BaseCommand):
         findings += self._audit_users()
         findings += self._audit_firms()
         findings += self._audit_firm_dates()
+        findings += self._audit_opportunities()
         findings += self._audit_contacts()
+        findings += self._audit_contact_proposals()
+        findings += self._audit_calendar_events()
+        findings += self._audit_campaigns()
+        findings += self._audit_touches()
 
         self.stdout.write("")
         if findings:
@@ -178,19 +245,29 @@ class Command(BaseCommand):
             f"accounts.User — {len(flagged)} account(s) at a reserved test domain"))
         for u in flagged:
             self.stdout.write(f"  #{u.id} {u.email!r} — joined {u.date_joined:%Y-%m-%d}")
-        self._audit_private_rows_for(flagged)
+        self._cascade_rows_for(User, [u.id for u in flagged])
         return len(flagged)
 
-    def _audit_private_rows_for(self, flagged_users) -> None:
-        """Walk every private-zone model with a `user` FK and report rows
-        owned by an already-flagged user — the cascade a User.delete() would
-        take, shown up front rather than discovered mid-review."""
-        uids = [u.id for u in flagged_users]
+    def _cascade_rows_for(self, related_model, ids) -> None:
+        """Walk every model with a foreign key to `related_model` and report
+        rows pointing at one of `ids` — the cascade a delete would take,
+        shown up front rather than discovered mid-review. Originally written
+        for flagged Users only; generalized so a fixture Firm's FirmDate /
+        UserFirm / ContactProposal rows and a fixture Opportunity's
+        UserOpportunity / OpportunityChange rows get the same treatment
+        without a bespoke check per table — those rows carry no free-text
+        field of their own to pattern-match, only a foreign key to something
+        already flagged, so "who points at it" is the only check that makes
+        sense for them. `all_objects` (falling back to `objects` for
+        shared-zone models that don't define it) so the tenant-scope guard
+        never gets in the way of an admin-only audit like this one."""
+        if not ids:
+            return
         for model in apps.get_models():
             for field in model._meta.get_fields():
-                if getattr(field, "related_model", None) is User and field.many_to_one:
+                if getattr(field, "related_model", None) is related_model and field.many_to_one:
                     manager = getattr(model, "all_objects", model.objects)
-                    count = manager.filter(**{f"{field.name}__in": uids}).count()
+                    count = manager.filter(**{f"{field.name}__in": ids}).count()
                     if count:
                         self.stdout.write(
                             f"    cascade: {model._meta.app_label}.{model.__name__} "
@@ -213,6 +290,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"  #{f.id} slug={f.slug!r} name={f.name!r} status={f.status!r} "
                 f"domains={f.domains} opportunities={f.opportunities.count()}")
+        self._cascade_rows_for(Firm, [f.id for f in flagged])
         return len(flagged)
 
     # -------------------------------------------------------- firm dates
@@ -236,16 +314,130 @@ class Command(BaseCommand):
                 f"history_empty={not fd.history}")
         return len(flagged)
 
-    # ---------------------------------------------------------- contacts
+    # ------------------------------------------------------- opportunities
 
-    def _audit_contacts(self) -> int:
-        flagged = [c for c in Contact.all_objects.all() if _FIXTURE_CONTACT_NAME.search(c.name)]
+    def _audit_opportunities(self) -> int:
+        # Coarse DB-side prefilter before the precise Python check. This
+        # table runs ~20k+ rows on the live dev set (see Opportunity.Meta's
+        # index comment) and each carries a `raw` JSONField of the
+        # provider's full posting payload — looping every row through
+        # Python just to regex-check its title/url would mean pulling that
+        # whole payload for every legitimate posting on every audit run.
+        # `icontains`/`iregex` are deliberately broader than the real check
+        # (no word-boundary, no exact-host match): a prefilter that is too
+        # loose only costs a wasted row fetch below, one that is too tight
+        # would silently hide a real finding, so this errs wide on purpose.
+        candidates = (
+            Opportunity.objects
+            .filter(Q(url__icontains="seed.local")
+                    | Q(title__iregex=r"seat\s*[0-9]+"))
+            .select_related("firm")
+        )
+        flagged = [
+            o for o in candidates
+            if _has_seed_local_host(o.url) or _SEQUENTIAL_SEAT_TITLE.search(o.title)
+        ]
         if not flagged:
             return 0
         self.stdout.write(self.style.MIGRATE_HEADING(
-            f"crm.Contact — {len(flagged)} smoke-test-shaped contact(s) "
+            f"directory.Opportunity — {len(flagged)} fixture-shaped posting(s)"))
+        for o in flagged:
+            self.stdout.write(
+                f"  #{o.id} firm={o.firm.name!r} title={o.title!r} url={o.url!r} "
+                f"source={o.source!r} status={o.status!r}")
+        self._cascade_rows_for(Opportunity, [o.id for o in flagged])
+        return len(flagged)
+
+    # ---------------------------------------------------------- contacts
+
+    def _audit_contacts(self) -> int:
+        flagged = [c for c in Contact.all_objects.all() if _FIXTURE_NAME_PATTERN.search(c.name)]
+        if not flagged:
+            return 0
+        self.stdout.write(self.style.MIGRATE_HEADING(
+            f"crm.Contact — {len(flagged)} fixture-shaped contact(s) "
             f"(purge_test_contacts pattern)"))
         for c in flagged:
             owner = User.objects.filter(pk=c.user_id).values_list("email", flat=True).first()
             self.stdout.write(f"  #{c.id} {c.name!r} owner={owner!r} archived={c.archived}")
+        return len(flagged)
+
+    # ------------------------------------------------------ contact proposals
+
+    def _audit_contact_proposals(self) -> int:
+        # Gmail Live's "propose, never auto-create" door (capture/models.py's
+        # ContactProposal docstring) is exactly the kind of surface an agent
+        # checking "does discovery render" would poke at directly, and a
+        # proposal's only free-text field is the sender's display name.
+        flagged = [
+            p for p in ContactProposal.all_objects.all()
+            if _FIXTURE_NAME_PATTERN.search(p.name)
+        ]
+        if not flagged:
+            return 0
+        self.stdout.write(self.style.MIGRATE_HEADING(
+            f"capture.ContactProposal — {len(flagged)} fixture-shaped proposal(s)"))
+        for p in flagged:
+            owner = User.objects.filter(pk=p.user_id).values_list("email", flat=True).first()
+            self.stdout.write(
+                f"  #{p.id} {p.name!r} <{p.email}> owner={owner!r} status={p.status!r}")
+        return len(flagged)
+
+    # -------------------------------------------------------- calendar events
+
+    def _audit_calendar_events(self) -> int:
+        flagged = [
+            e for e in CalendarEvent.all_objects.all()
+            if _FIXTURE_NAME_PATTERN.search(e.title)
+        ]
+        if not flagged:
+            return 0
+        self.stdout.write(self.style.MIGRATE_HEADING(
+            f"crm.CalendarEvent — {len(flagged)} fixture-shaped event(s)"))
+        for e in flagged:
+            owner = User.objects.filter(pk=e.user_id).values_list("email", flat=True).first()
+            self.stdout.write(
+                f"  #{e.id} {e.title!r} owner={owner!r} starts_at={e.starts_at} "
+                f"source={e.source!r}")
+        return len(flagged)
+
+    # -------------------------------------------------------------- campaigns
+
+    def _audit_campaigns(self) -> int:
+        flagged = [
+            c for c in Campaign.all_objects.all()
+            if _FIXTURE_NAME_PATTERN.search(c.label) or _FIXTURE_NAME_PATTERN.search(c.signature)
+        ]
+        if not flagged:
+            return 0
+        self.stdout.write(self.style.MIGRATE_HEADING(
+            f"crm.Campaign — {len(flagged)} fixture-shaped campaign(s)"))
+        for c in flagged:
+            owner = User.objects.filter(pk=c.user_id).values_list("email", flat=True).first()
+            self.stdout.write(
+                f"  #{c.id} label={c.label!r} signature={c.signature!r} "
+                f"owner={owner!r} kind={c.kind!r}")
+        return len(flagged)
+
+    # ----------------------------------------------------------------touches
+
+    def _audit_touches(self) -> int:
+        # Touch has no "name" field — its two free-text fields are `note`
+        # (a hand-typed line) and `subject` (a captured email Subject
+        # header, see the model's docstring). Either is where a
+        # verification touch's fixture-shaped text would land.
+        flagged = [
+            t for t in Touch.all_objects.all()
+            if _FIXTURE_NAME_PATTERN.search(t.note or "")
+            or _FIXTURE_NAME_PATTERN.search(t.subject or "")
+        ]
+        if not flagged:
+            return 0
+        self.stdout.write(self.style.MIGRATE_HEADING(
+            f"crm.Touch — {len(flagged)} fixture-shaped touch(es)"))
+        for t in flagged:
+            owner = User.objects.filter(pk=t.user_id).values_list("email", flat=True).first()
+            self.stdout.write(
+                f"  #{t.id} kind={t.kind!r} owner={owner!r} note={t.note!r} "
+                f"subject={t.subject!r}")
         return len(flagged)

@@ -18,8 +18,31 @@
       the two firms whose track had no label at all, "PIPELINE". The labels
       come from views.py, from the same REGION_LABELS and TRACK_LABELS the
       Opportunities facets read, so the two surfaces cannot drift.
+
+      "RECRUITS:" IS THE WHOLE POINT OF THIS LINE. Labelling those words
+      fixed how they READ and not what they CLAIM, and bare, they claimed
+      the wrong thing. firms.yaml's regions and tracks are a coverage
+      declaration — where and what this firm recruits, in general. The rows
+      below are a fact: what is open today, each one stamped with its own
+      market by _card.html. Bare, the eyebrow sat in the same grammar as
+      that fact and lost to it: /firms/cicc/ said "Hong Kong" above ten
+      Mainland China roles, /firms/macquarie/ said "Hong Kong" above two in
+      Manila, /firms/gs/ said "United States, Hong Kong" when its biggest
+      live market is Europe at 113. Measured over the corpus, 25 of the 42
+      firms that declare a region have a top live market they never
+      declared, and 13 have no live row in ANY declared market.
+
+      This is the 925-vs-13 defect in the section below, with markets
+      instead of counts: two true statements answering different questions,
+      and nothing saying which was which. The prefix says which. It is one
+      word rather than a live-market line because the rows already carry
+      that (and `_open_markets` prints it in aggregate the moment the cap
+      hides any), and because the declaration must survive the 39 firms
+      whose campus scope is empty, where it is the only thing that can be
+      said at all.
       {% endcomment %}
       <p class="pagehead-eyebrow">
+        {% if eyebrow_regions or eyebrow_tracks %}Recruits:{% endif %}
         {% if eyebrow_regions %}{{ eyebrow_regions|join:", " }}{% endif %}
         {% if eyebrow_regions and eyebrow_tracks %} · {% endif %}
         {% if eyebrow_tracks %}{{ eyebrow_tracks|join:", " }}{% endif %}
@@ -70,8 +93,7 @@
           {% endfor %}
         </div>
       {% else %}
-        <p class="fd-none">Nobody here yet. One contact at a firm is the
-          difference between a deadline and a way in.
+        <p class="fd-none">Nobody here yet. One contact turns a deadline into a way in.
           <a href="{% url 'crm:contact_new' %}?firm={{ firm.slug }}">Add your first</a>.</p>
       {% endif %}
     </section>
@@ -79,7 +101,7 @@
 
   <section class="section">
     <h2>Cycle Dates</h2>
-    <p class="lede">Confirmed dates are solid; anything we haven't nailed down is marked rumored, with its confidence shown.</p>
+    <p class="lede">Confirmed dates are solid. Everything else is marked rumored, with its confidence.</p>
     {% include "directory/_timeline.html" %}
   </section>
 
@@ -106,21 +128,53 @@
       {% endif %}
     {% endif %}
     {% comment %}
+    THE MARKET LINE. Only rendered when a group was capped, because only then
+    is anything hidden that this line has to answer for. A student who cannot
+    work in the US learns from one line that 136 of PwC's campus roles are in
+    Singapore and 253 in Europe — which twelve sampled rows cannot tell her,
+    and 716 printed rows told her only by being unreadable. Plain text, not
+    links: filtering lives in the feed, and the view's `_open_markets` note
+    says why this page does not grow a filter bar by the back door.
+    {% endcomment %}
+    {% if capped and markets %}
+      <p class="fd-markets">{% for m in markets %}{{ m.label }} {{ m.n }}{% if not forloop.last %}<span class="scope-sep">·</span>{% endif %}{% endfor %}</p>
+    {% endif %}
+    {% comment %}
     Grouped by kind under the ruled section label, in the order the view
     already sorts (campus buckets first, deadline inside each). The kind used
     to ride every card as a pill — 75 restatements of five values; one label
     per group says it once and gives this page the same signature the app's
     other section boundaries wear. Rows, not cards: see _card.html for why.
+
+    The groups now arrive pre-cut from views._role_groups: the heading keeps
+    the group's TRUE total, the rows are a sample of it, and the line under
+    them names the remainder and where it lives. A group small enough to print
+    whole grows none of that — which is every group on the median firm.
     {% endcomment %}
-    {% if cards %}
-      {% regroup cards by role.label as kind_groups %}
-      {% for group in kind_groups %}
-        <p class="sec-label frow-group">{{ group.grouper }} <span class="scrub-count">{{ group.list|length }}</span></p>
+    {% if role_groups %}
+      {% for group in role_groups %}
+        <p class="sec-label frow-group">{{ group.label }} <span class="scrub-count">{{ group.total }}</span></p>
         <div class="frows">
-          {% for card in group.list %}
+          {% for card in group.cards %}
             {% include "directory/_card.html" %}
           {% endfor %}
         </div>
+        {% if group.more %}
+          {% comment %}The count is this page's own arithmetic — the group's
+          total minus the rows printed above it — so it can only ever describe
+          THIS page. The destination is the feed narrowed to this firm and
+          this kind, which resolves to the group's total: verified against the
+          live corpus at PwC (internship 397, entry-level 319, experienced
+          780) and Goldman (internship 257, entry-level 60), the two sides
+          matching row for row through both folds.
+
+          Counting `.rolecard` in the feed's DOM does NOT reproduce those
+          numbers and is not meant to: the "Picked for you" column repeats a
+          few of the same roles at the head of the row (see _results.html),
+          so Goldman's internship filter draws 259 cards for 257 roles.
+          {% endcomment %}
+          <p class="frow-more"><a href="{% url 'opportunities' %}?firm={{ firm.slug }}&amp;role={{ group.value }}">Show the other {{ group.more }} in Opportunities</a></p>
+        {% endif %}
       {% endfor %}
     {% else %}
       {% comment %}An empty campus scope is not an empty firm. Saying
@@ -136,8 +190,8 @@
             <a href="{% url 'directory:firm_detail' firm.slug %}">Show campus roles</a>.</p>
         {% elif other_total %}
           <h2>No campus roles open right now.</h2>
-          <p>{{ other_total }} experienced role{{ other_total|pluralize }} open here, which is
-            hiring this product is not for.
+          <p>{{ other_total }} experienced role{{ other_total|pluralize }} open here, which this
+            product doesn't cover.
             <a href="{% url 'directory:firm_detail' firm.slug %}?role=all">Show everything</a>.</p>
         {% else %}
           <h2>Nothing open right now.</h2>

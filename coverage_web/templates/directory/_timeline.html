@@ -15,6 +15,19 @@ is neither — it says so instead of picking a winner.
           <span class="tl-scope">{{ row.cycle }}{% if row.region %} · {{ row.region }}{% endif %}</span>
         </span>
         <span class="markers">
+          {% comment %}
+          The student's OWN stated target cycle, echoed back. Set by
+          `_timeline` only where `User.target_cycles` parses to this row's
+          cycle slug — never inferred from tiered firms, saved roles or who
+          they email. The tooltip says "you told us" because that is literally
+          where it came from; a pill that said the same thing off an inference
+          would be the page asserting a preference the student never stated.
+          Absent for signed-out visitors and for anyone who has not filled the
+          cycle in, which is the honest default: mark nothing.
+          {% endcomment %}
+          {% if row.for_you %}
+            <span class="pill for-you" title="{{ row.for_you.why }}">{{ row.for_you.label }}</span>
+          {% endif %}
           {% if row.state == "confirmed" %}
             <span class="pill conf-high" title="High-confidence, dated.">confirmed</span>
           {% elif row.state == "conflicting" %}
