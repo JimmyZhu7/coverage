@@ -487,8 +487,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     border-radius: 999px; }
   .filters-clear:hover { background: var(--accent-soft); text-decoration: none; }
 
-  .hidden-note { color: var(--ink-3); }
-
   /* The scope sentences at the top of #cov-results: what this view excludes,
      in its own voice. Quiet by design — plain words, a plain link, no
      "premium", no lock, no "unlock". The everything mode is free; it is just
@@ -542,31 +540,9 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .recbar-head { display: flex; align-items: baseline; gap: var(--s3);
     flex-wrap: wrap; margin-bottom: var(--s2); }
   .recbar-title { font-size: var(--fs-l); margin: 0; letter-spacing: -0.01em; }
-  /* Tabular figures: the count sits beside a heading and must not jiggle the
-     baseline as it changes. */
-  .recbar-count { font-family: var(--font-mono); font-size: var(--fs-xs);
-    font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: var(--w-med); }
-  .recbar-sub { font-size: var(--fs-xs); color: var(--ink-3); }
   .recbar-note { max-width: 62ch; margin: 0; font-size: var(--fs-s);
     color: var(--ink-2); line-height: 1.5; }
 
-  /* The reasons true of every pick. Stated once, here, instead of repeated on
-     each row — that repetition was the whole defect. */
-
-
-  /* How many roles this block holds — the number that stops a two-role block
-     reading as one card that happens to be tall. */
-
-  /* Roles inside a block. The hairline between them is what says "two roles",
-     and the indent gives the firm head something to be the head OF. */
-
-  /* Rolling is green AND wears a different glyph AND says the word — never
-     colour alone (ux: color-not-only, High). */
-
-  /* Slim inline stat strip — replaces the four oversized stat cards. One line,
-     numbers in the display family, a hairline divider between items. */
-  /* Left-aligned and a size quieter than v4: the strip is orientation, not a
-     dashboard, and the fs-l numbers were competing with the firm names below. */
   /* THE BOARD STATUS — #cov-scope (what's hidden, and the save prompt) and
      .board-state (the totals + cycle shape) as ONE bounded section, not two.
      The hairline used to sit only above .board-state, so the hidden-roles
@@ -606,6 +582,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .cyc-fold[open] > summary { margin-bottom: var(--s2); }
   .cyc-fold .cycband { margin-top: 0; }
 
+  /* Slim inline stat strip — replaces the four oversized stat cards. One line,
+     numbers in the display family, a hairline divider between items. Left-
+     aligned and a size quieter than v4: the strip is orientation, not a
+     dashboard, and the fs-l numbers were competing with the firm names below. */
   .stat-strip { display: flex; flex-wrap: wrap; align-items: center;
     justify-content: flex-start; gap: var(--s2) var(--s3); margin: 0 0 var(--s3);
     padding: 0; font-size: var(--fs-xs); color: var(--ink-2); }
@@ -628,44 +608,23 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 
   /* Role-type badges — campus buckets get the accent family; "other" stays
      muted so experienced rows (in the opt-in views) read as background. */
-  .pill.role { text-transform: none; letter-spacing: 0; }
   .role-insight     { background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line); }
   .role-internship  { background: var(--accent-soft); color: var(--accent-ink); border: 1px solid var(--accent-line); }
   .role-entry_level { background: var(--surface); color: var(--accent-ink); border: 1px solid var(--accent); }
   .role-other       { background: var(--surface); color: var(--ink-3); border: 1px solid var(--line); }
 
-  /* Opportunity cards — v3: soft rounded cards that float up on hover.
-     (Still used on firm pages and My Firms; the Opportunities list itself
-     now renders firm clusters below.) */
-  .cards { display: grid; gap: var(--s4); }
-  .opp-card { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s5);
-    box-shadow: var(--shadow-1);
-    transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
-  .opp-card:hover { border-color: var(--accent-line);
-    box-shadow: var(--shadow-2); transform: translateY(-2px); }
-  .opp-card.is-mine { border-left: 3px solid var(--accent); }
-
   /* ======================================================================
-     Role-card signals — the "fuse" bar that depletes toward a deadline, the
-     live pulse for rolling roles, and the freshness badge. Shared by the
-     firm-column cards below.
+     Role-card signals — the "fuse" bar that depletes toward a deadline and
+     the live pulse for rolling roles. Shared by the firm-column cards below.
      ====================================================================== */
 
-  /* Text is now "First seen Nd ago" rather than bare "NEW" (see views.py's
-     `_fresh_label` — the badge must say what it measures), so uppercase +
-     wide letter-spacing (tuned for a 3-letter word) would both shout and
-     wrap; sentence case + nowrap keeps it a single-line pill. */
-  /* RETIRED. The badge said "First seen 3d ago" in the card's top row while the
+  /* RETIRED. The freshness badge said "First seen 3d ago" in the card's top row while the
      tag below it said "· seen 3d ago" — the same fact twice, on 857 of 879
      cards. It now appears once, in the meta row, next to the status it
      qualifies. The rule is gone rather than left orphaned so nobody
      reintroduces the duplicate by reaching for a class that still styles. */
 
   /* The fuse: a depleting countdown bar that "burns down" on load. */
-  .fuse { display: flex; align-items: center; gap: var(--s2); margin-top: auto; padding-top: var(--s2); }
-  .fuse-track { flex: 1; height: 7px; border-radius: 999px; background: var(--paper);
-    overflow: hidden; border: 1px solid var(--line); }
   .fuse-fill { display: block; height: 100%; width: var(--fuse); border-radius: 999px;
     transform-origin: left; animation: fuse-burn 900ms cubic-bezier(0.4, 0, 0.2, 1) both; }
   @keyframes fuse-burn { from { width: 100%; } to { width: var(--fuse); } }
@@ -687,12 +646,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      live in coverage.css and had already parsed. A template test now guards
      this (directory/tests/test_styles_block.py). */
   .fuse-passed .fuse-fill { background: var(--ink-3); }
-  .fuse-label { font-size: var(--fs-xs); font-weight: var(--w-med); white-space: nowrap;
-    font-family: var(--font-mono); }
-  .fuse-today .fuse-label { color: var(--danger); }
-  .fuse-soon .fuse-label  { color: #a8501f; }
-  .fuse-upcoming .fuse-label { color: var(--accent-ink); }
-  .fuse-passed .fuse-label { color: var(--ink-3); }
   .urg-today .fuse-fill { animation: fuse-burn 900ms both, pulse-red 1.6s ease-in-out 1s infinite; }
   @keyframes pulse-red { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
@@ -1171,15 +1124,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .role-mini.role-insight { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }
   .role-mini.role-internship { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
   .role-mini.role-entry_level { background: var(--surface); color: var(--accent-ink); border-color: var(--accent); }
-  .opp-top { display: flex; justify-content: space-between; gap: var(--s3);
-    align-items: baseline; flex-wrap: wrap; }
-  .opp-firm { font-size: var(--fs-micro); font-weight: var(--w-med);
-    text-transform: uppercase; letter-spacing: 0.05em; }
-  .opp-firm a { color: var(--ink-2); }
-  .opp-card h3 { margin: var(--s1) 0 var(--s1); font-size: 16px; }
-  .opp-card h3 a { color: var(--ink); }
-  .opp-meta { color: var(--ink-2); font-size: var(--fs-s); margin: 0 0 var(--s3); }
-  .opp-meta .dot { color: var(--ink-3); margin: 0 var(--s2); }
 
   /* Section count badge (My Applications, firm detail, Network headings). */
   .scrub-count { color: var(--ink-3); font-size: var(--fs-s); font-weight: var(--w-reg);
