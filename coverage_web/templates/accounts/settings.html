@@ -2065,13 +2065,17 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Password</span>
-              <div class="set-row-desc">
-                {% if has_usable_password %}
-                  Used with your email to sign in.
-                {% else %}
-                  You don't have a password. You sign in with a connected account.
-                {% endif %}
-              </div>
+              {% comment %}
+              2026-08-29 subtitle sweep: "Used with your email to sign in."
+              cleared no bar — the label and the Change Password button
+              beside it already say everything that sentence did. The other
+              branch stays: a social-only account having no password at all
+              is a real, non-obvious fact, and it's why the button on this
+              row reads "Set a Password" instead of "Change Password".
+              {% endcomment %}
+              {% if not has_usable_password %}
+                <div class="set-row-desc">You don't have a password. You sign in with a connected account.</div>
+              {% endif %}
             </div>
             <div class="set-row-control">
               {% if has_usable_password %}
@@ -2102,8 +2106,12 @@
 
           <div class="set-row">
             <div class="set-row-main">
+              {% comment %}
+              2026-08-29 subtitle sweep: deleted outright. "Other" is
+              already in the label and the button ("Sign Out Others"); the
+              sentence restated it in longer form and added nothing.
+              {% endcomment %}
               <span class="set-row-label">Sign Out Other Devices</span>
-              <div class="set-row-desc">Ends every other session. This one stays signed in.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:signout_all' %}"
@@ -2154,12 +2162,19 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Contacts</span>
-              <div class="set-row-desc">In your CRM.
-                {% if archived_count or parked_count or campaign_hidden_count or unrelated_count %}
+              {% comment %}
+              2026-08-29 subtitle sweep: "In your CRM." dropped — the label
+              and the total beside it already say that. The conditional
+              stays in full: it is the ONLY place these four counts and
+              their routes are stated (see the comment above), and it
+              renders nothing at all when every count is zero.
+              {% endcomment %}
+              {% if archived_count or parked_count or campaign_hidden_count or unrelated_count %}
+              <div class="set-row-desc">
                   Off the board:
                   {% if archived_count %}<a href="{% url 'crm:contact_archived' %}">{{ archived_count }} archived</a>{% endif %}{% if archived_count and parked_count %}, {% endif %}{% if parked_count %}<a href="{% url 'crm:contact_parked' %}">{{ parked_count }} parked</a>{% endif %}{% if campaign_hidden_count and archived_count or campaign_hidden_count and parked_count %}, {% endif %}{% if campaign_hidden_count %}<a href="{% url 'crm:contact_campaign_hidden' %}">{{ campaign_hidden_count }} not recruiting</a>{% endif %}{% if unrelated_count and archived_count or unrelated_count and parked_count or unrelated_count and campaign_hidden_count %}, {% endif %}{% if unrelated_count %}<a href="{% url 'crm:contact_unrelated' %}">{{ unrelated_count }} not recruitment</a>{% endif %}.
-                {% endif %}
               </div>
+              {% endif %}
             </div>
             {% comment %}
             Wrapped in .set-row-control like every other right-hand cell on
@@ -2186,8 +2201,12 @@
           </div>
           <div class="set-row">
             <div class="set-row-main">
+              {% comment %}
+              2026-08-29 subtitle sweep: deleted outright. "Privacy &
+              Terms" with Privacy and Terms buttons right beside it needs
+              no sentence saying that's what they are.
+              {% endcomment %}
               <span class="set-row-label">Privacy &amp; Terms</span>
-              <div class="set-row-desc">What we collect and why, and the terms you agreed to.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:privacy' %}">Privacy</a>
