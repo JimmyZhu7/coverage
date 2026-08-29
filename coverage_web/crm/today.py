@@ -36,7 +36,6 @@ from .utils import (
     ACTION_LABELS,
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
     TOUCH_KIND_LABELS,
-    _calendar_days_ago,
     _clock,
     _confidence_label,
     _mailto,
@@ -357,7 +356,6 @@ def _build_actions(user):
             (a.get("ctx") or {}).get("hours"),
             now=now,
         ), today=today)
-        a["warmth_pct"] = _warmth_pct(c.get("warmth", "cold"))
         # Compose surface: the opener seeds the draft body so the weekly list
         # doubles as the place outreach starts (§5).
         a["mailto"] = _mailto(
@@ -688,7 +686,6 @@ def _opening_bench(user, contacts, actions, today) -> list[dict]:
             },
             "firm_name": firm_rows.get(c.firm_id, (c.firm_text or c.firm_id, None))[0],
             "tier": tier,
-            "opening": opening,
             "opening_signature": sig,
             "days_since": idle,
             "restore_state": BENCH_RESTORE_STATE.get(c.warmth, "no_reply"),
@@ -1411,7 +1408,6 @@ def _schedule(user, today) -> list[dict]:
         set_up = timezone.localtime(c.last_ts).date()
         if cadence.business_days_since(set_up, today) > 4:
             continue
-        days_ago = _calendar_days_ago(c.last_ts, as_of=now)
         rows.append({
             # Sorts after every timed row on the same day: a thing with a
             # known time outranks a thing without one.
@@ -1423,7 +1419,6 @@ def _schedule(user, today) -> list[dict]:
             "timed": False,
             "at": None,
             "kind": "chat",
-            "days_ago": days_ago,
         })
 
     # NOT capped here. The rail shows six, but `_chat_prep` and `_daybar`
@@ -1597,7 +1592,7 @@ def _new_at_your_firms(user, limit=5) -> dict:
             continue
         seen_firms.add(o.firm_id)
         roles.append({"title": o.title, "firm": o.firm.name, "id": o.id,
-                      "url": o.url, "slug": o.firm.slug, "location": o.location})
+                      "slug": o.firm.slug, "location": o.location})
         if len(roles) >= limit:
             break
 
@@ -2635,7 +2630,6 @@ def _cockpit_context(user) -> dict:
         for p in proposals:
             note = ap_notes.get(p.pk)
             p.autopilot_quote = note.quote if note else ""
-            p.autopilot_reason = note.reason if note else ""
 
     # The other half of "found in your inbox": an ATS saying one of the
     # student's applications moved. PROPOSALS again — nothing is written to
