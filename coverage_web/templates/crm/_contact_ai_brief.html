@@ -7,7 +7,7 @@ two reasons: out of credits (blocked=True, credit_notice set — see
 crm.ai_brief.credit_block_notice) vs unconfigured/failed (blocked=False).
 {% endcomment %}
 {% if not requested %}
-  <p class="cd-ai-hint">A short prep note drafted from this contact's own history.</p>
+  <p class="cd-ai-hint">Drafted from this contact's own history.</p>
   <button class="btn"
           hx-post="{% url 'crm:contact_ai_brief' contact.pk %}"
           hx-target="#contact-ai-brief" hx-swap="innerHTML"

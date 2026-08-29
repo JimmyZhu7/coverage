@@ -22,12 +22,10 @@ labelled rule between social and email sign-in. Shared by login and signup.{% en
     font: var(--w-med) var(--fs-s)/1.2 var(--font-ui); text-transform: none;
     letter-spacing: normal; box-shadow: var(--shadow-1);
     transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med); }
-  .auth-provider:hover:not(:disabled) { border-color: var(--accent);
+  /* No :disabled / .is-off state: an unconfigured provider renders nothing
+     at all rather than a dead button (see _auth_providers.html). */
+  .auth-provider:hover { border-color: var(--accent);
     box-shadow: var(--shadow-2); transform: translateY(-1px); }
-  .auth-provider.is-off { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
-  .auth-provider-soon { font-family: var(--font-mono); font-size: 10px;
-    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3);
-    border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
   /* Brand marks drawn in CSS so no third-party asset is fetched. */
   .auth-provider-mark { width: 18px; height: 18px; flex: none; border-radius: 3px;
     background-repeat: no-repeat; background-position: center; background-size: contain; }
@@ -52,7 +50,9 @@ labelled rule between social and email sign-in. Shared by login and signup.{% en
   .auth-check { display: flex; flex-direction: row; align-items: center;
     gap: var(--s2); margin: 0 0 var(--s4); font-size: var(--fs-s);
     font-weight: var(--w-reg); text-transform: none; letter-spacing: normal; }
-  .auth-check input { width: auto; margin: 0; flex: none; accent-color: var(--accent); }
+  /* The box is the shared `input[type="checkbox"]` control (coverage.css
+     §11), which already sets size, margin, flex and the drawn tick. The
+     `width: auto` this rule used to carry would now beat that 16px. */
   .auth-submit { width: 100%; justify-content: center; }
   .auth-foot { text-align: center; color: var(--ink-2); font-size: var(--fs-s);
     margin: var(--s5) 0 0; }

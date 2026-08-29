@@ -20,6 +20,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from analytics.events import record_event
 from capture import gmail_live
 from capture.models import GmailConnection
 
@@ -63,6 +64,24 @@ def gmail_callback(request):
         messages.error(request, str(exc))
         return redirect(f"{reverse('accounts:settings')}#gmail-live")
 
+    # The product's magic moment left no trace in the event stream. ~70
+    # `record_event` call sites existed and not one of them fired here, so the
+    # single step that turns Coverage from an empty CRM into a populated one
+    # was the only part of the funnel that could not be counted: a connection
+    # was discoverable as a GmailConnection row, but "when did they connect,
+    # and how long after signing up" was unanswerable.
+    #
+    # Recorded HERE, after the exchange succeeded and the row exists — not on
+    # the redirect out to Google in `gmail_connect`, which is a click on a
+    # button, not a connection, and which a cancelled consent screen would
+    # otherwise record as a success. No address in the props: the event stream
+    # is read on a staff page and a mailbox address is not a metric.
+    record_event(
+        "gmail_connected",
+        user=request.user,
+        plan=request.user.plan,
+        realtime=connection.watch_expiration is not None,
+    )
     messages.success(request, f"Gmail connected: {connection.gmail_address}.")
     if connection.watch_expiration is None:
         if request.user.plan == "pro":

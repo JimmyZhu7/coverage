@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load csp %}
 {% load textstyle %}
 
 {% block title %}Calendar · Coverage{% endblock %}
@@ -314,6 +313,15 @@
      — the red rail is what makes a deadline row read as something to act on,
      and there is nothing to act on here. */
   .cal-ev-tracked.is-shut { border-left-color: var(--line-strong); color: var(--ink-2); }
+  /* A chat the organiser called off. Same visual argument as .is-shut above,
+     one step stronger: the row keeps its place on the day so the record is
+     intact, drops the chat colour off its rail so it stops reading as
+     something on your afternoon, and strikes the title so it is legible as
+     retired at a glance rather than only to whoever reads the "Cancelled: "
+     prefix. */
+  .cal-ev.is-cancelled { border-left-color: var(--line-strong); color: var(--ink-3); }
+  .cal-ev.is-cancelled .cal-ev-title { text-decoration: line-through;
+    font-weight: var(--w-reg); }
   .cal-ev-time { font-family: var(--font-mono); font-size: var(--fs-nano); color: var(--ink-3);
     flex: none; letter-spacing: -0.02em; }
   .cal-ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
@@ -387,12 +395,14 @@
 
 {% block content %}
 <div class="page page--full">
-  {% comment %}The sub does NOT re-list the four layers: the eyebrow above
-  already names them, and saying them twice is what pushed this line to ~110
-  characters and two rows while every other page's sub is one row of ~55. It
-  says the thing the eyebrow cannot — where the entries come from.
-  {% endcomment %}
-  {% include "_pagehead.html" with eyebrow="Chats, events, deadlines, openings" title="Calendar" sub="Chats from your inbox, touches you logged, and the deadlines you track." %}
+  {% comment %}Eyebrow matches every other page's pattern ("Your
+  relationships", "Your pipeline", "Your account") rather than spelling out
+  the four kinds — the legend row right below already does that, in colour,
+  with the month's real counts. Naming them twice, once in prose and once as
+  a count, is the same duplication the sub avoids below. The sub keeps the
+  one thing neither the eyebrow nor the legend says: where an entry came
+  from.{% endcomment %}
+  {% include "_pagehead.html" with eyebrow="Your dates" title="Calendar" sub="Chats from your inbox, touches you logged, and the deadlines you track." %}
 
   <div class="cal-bar">
     <h2 class="cal-month">{{ month_label }}</h2>
@@ -406,17 +416,24 @@
     a one-off snapshot.{% endcomment %}
     <a class="cal-today-link" title="Live-updating feed for Apple/Google Calendar"
        href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe</a>
+    {% comment %}Same rule the month rail already applies to its own zero
+    months: a colour nothing on the grid uses this month is not worth a key
+    entry, and "0 Events" next to three real counts reads as a fourth fact
+    when it is really the absence of one. Written as a plain {% if %} per
+    span, not a loop over CAL_KINDS, so each key keeps its own label text and
+    the opening/deadline split below stays a comment on the row that needs
+    it.{% endcomment %}
     <p class="cal-legend">
-      <span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> Chat{{ counts.chat|pluralize }}</span>
-      <span class="cal-key cal-key-event"><b>{{ counts.event }}</b> Event{{ counts.event|pluralize }}</span>
-      <span class="cal-key cal-key-deadline"><b>{{ counts.deadline }}</b> Deadline{{ counts.deadline|pluralize }}</span>
+      {% if counts.chat %}<span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> Chat{{ counts.chat|pluralize }}</span>{% endif %}
+      {% if counts.event %}<span class="cal-key cal-key-event"><b>{{ counts.event }}</b> Event{{ counts.event|pluralize }}</span>{% endif %}
+      {% if counts.deadline %}<span class="cal-key cal-key-deadline"><b>{{ counts.deadline }}</b> Deadline{{ counts.deadline|pluralize }}</span>{% endif %}
       {% comment %}
       Openings count separately because they are the opposite kind of date:
       nothing is missed by ignoring one. August 2026 read "6 deadlines" when
       the sixth was Goldman Sachs applications OPEN on the 15th — the row's
       own text said so while the tally above it disagreed.
       {% endcomment %}
-      <span class="cal-key cal-key-opening"><b>{{ counts.opening }}</b> Opening{{ counts.opening|pluralize }}</span>
+      {% if counts.opening %}<span class="cal-key cal-key-opening"><b>{{ counts.opening }}</b> Opening{{ counts.opening|pluralize }}</span>{% endif %}
     </p>
   </div>
 
@@ -445,12 +462,14 @@
     </form>
   </details>
 
-  {% comment %}The month rail. Scrolls horizontally through two years, and
-  the active chip is scrolled into view on load by the small script at the
-  foot of this template.
+  {% comment %}The month rail: two years of columns, all of them on screen.
+  It used to be an overflow-x scroller with a script at the foot of this
+  file scrolling the active column into view; the rail wraps instead now
+  (see `.mrail`'s own breakpoints above), so nothing is off-screen and there
+  is no scroll left to set.
   {% endcomment %}
   <div class="mrail-wrap">
-    <nav class="mrail" id="cal-rail" aria-label="Jump to a month">
+    <nav class="mrail" aria-label="Jump to a month">
       {% for mo in rail %}
         <a class="mrail-m{% if mo.active %} is-active{% endif %}{% if mo.is_now %} is-now{% endif %}"
            href="?y={{ mo.y }}&m={{ mo.m }}"
@@ -522,25 +541,14 @@
         </div>
       {% endif %}
     {% endfor %}{% endfor %}
-    {% if not counts.chat and not counts.event and not counts.deadline %}
+    {% comment %}All four counted kinds, not three. `opening` was added to
+    the legend as its own tally and this gate was not updated with it, so a
+    month whose only dated thing was an applications-open date listed that
+    row and then said underneath it that there was nothing on the calendar.
+    {% endcomment %}
+    {% if not counts.chat and not counts.event and not counts.deadline and not counts.opening %}
       <p class="cal-empty">Nothing on the calendar this month.</p>
     {% endif %}
   </div>
 </div>
-
-{% comment %}The rail is 24 months wide and the month you are reading is
-rarely the leftmost, so bring it into view. Everything else on this page
-works without JavaScript and this does too — the rail is a plain row of
-links you can scroll by hand; this only saves the scroll. `instant`, not
-`smooth`: an animation firing on every page load is motion you did not ask
-for, and it fights the browser's own scroll restoration on a back button.
-{% endcomment %}
-{% script %}
-  (function () {
-    var rail = document.getElementById("cal-rail");
-    var active = rail && rail.querySelector(".is-active");
-    if (!active) return;
-    rail.scrollLeft = active.offsetLeft - (rail.clientWidth - active.offsetWidth) / 2;
-  })();
-{% endscript %}
 {% endblock %}

@@ -30,7 +30,7 @@ actively edited elsewhere.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -117,6 +117,51 @@ def test_forecast_matches_the_engines_own_due_date_for_a_known_wave():
         params={"followup_after_business_days": 6},
     )
     assert sum(1 for a in engine_actions_before if a["action"] == "follow_up") == 0
+
+
+def test_forecast_uses_the_accounts_local_calendar_day_not_the_stored_utc_date():
+    """`_next_wave` reads `lt_date = real[-1].ts.date()` straight off the
+    stored (UTC) timestamp, instead of `timezone.localtime(...).date()` —
+    the one convention `crm.utils._calendar_days_ago` exists to enforce
+    everywhere else on this page (see its own Touch 558 docstring: a raw
+    `.date()`/timedelta floor drifts from the account's own calendar day
+    the moment local time crosses a date boundary UTC hasn't).
+
+    A touch logged at HK local 00:30 on Monday Aug 31 2026 is stored at UTC
+    16:30 on SUNDAY Aug 30 — a whole calendar day earlier under a naive
+    `.date()`. Walking the 6-business-day follow-up window from the wrong
+    (Sunday) anchor instead of the right (Monday) one lands the forecast a
+    full day off — Sep 7 instead of the correct Sep 8 for this exact
+    fixture. This is a live-account shape: Coverage's own founder account
+    runs on Asia/Hong_Kong.
+    """
+    from zoneinfo import ZoneInfo
+
+    hk = ZoneInfo("Asia/Hong_Kong")
+    user = _user(
+        email="hk-wave@example.com",
+        cadence_params={"followup_after_business_days": 6},
+        timezone="Asia/Hong_Kong",
+    )
+    contact = Contact.all_objects.create(user=user, name="Wave HK")
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="outreach", channel="email",
+        ts=datetime(2026, 8, 31, 0, 30, tzinfo=hk),
+    )
+
+    timezone.activate(hk)
+    try:
+        wave = _next_wave(user, date(2026, 9, 1))
+    finally:
+        timezone.deactivate()
+
+    assert wave is not None
+    assert wave["count"] == 1
+    assert wave["date"] == _wave_date(date(2026, 8, 31), 6), (
+        "the wave must walk forward from the touch's HK calendar day "
+        "(Monday Aug 31), not the UTC date it happens to be stored under "
+        "(Sunday Aug 30)"
+    )
 
 
 def test_two_waves_land_on_two_different_dates_earliest_reported_first():

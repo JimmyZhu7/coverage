@@ -531,8 +531,20 @@ select on.
         sel.addEventListener("change", syncLabel);
         syncLabel();
       }
+      // `data-no-csel` is the opt-out, and it exists for exactly one
+      // reason: `.csel-panel` is `position: absolute`, so it is clipped by
+      // any ancestor with its own `overflow`. Two tier boards keep their
+      // firms in a bounded, internally-scrolling box on purpose
+      // (`.tf-chips` in Settings, `.tier-grid.is-capped` on Network) — a
+      // panel opened inside either would be cut off at the box's edge.
+      // Only the browser's own dropdown can escape a scroll container, so
+      // those two controls stay native. Everywhere the page is not already
+      // scroll-clipping its own controls, csel is the better one and this
+      // attribute has no business being there.
       function enhanceAll(root) {
-        (root || document).querySelectorAll("select:not([multiple]):not(.csel-native)").forEach(enhance);
+        (root || document)
+          .querySelectorAll("select:not([multiple]):not(.csel-native):not([data-no-csel])")
+          .forEach(enhance);
       }
       if (document.readyState !== "loading") enhanceAll();
       else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });

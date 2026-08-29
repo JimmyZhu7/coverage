@@ -925,3 +925,52 @@ def test_a_fresh_confirm_chat_still_holds_its_uncapped_slot():
         "Just Scheduled"
     ]
     assert ctx["still_open"] == []
+
+
+# ---------------------------------------------------------------------------
+# Confidence is only half the bar for a FirmDate.
+#
+# Six CRM readers were fixed for this and `firm_openings` was the seventh: it
+# tested `_confidence_label(fd.confidence) == "confirmed_official"` and nothing
+# about precision. A row can be fully confident about a MONTH — "~ Sep 2027",
+# precision "estimated", confidence 1.0 — and that is not something to hang a
+# day-level countdown and a keep-warm nudge on.
+#
+# It now goes through `crm.utils.confirmed_firm_dates()`, which holds both
+# halves, so a future third condition is added in one place.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_a_month_precise_firm_date_is_not_a_confirmed_opening():
+    user = _user()
+    firm = _target_firm(user)
+    FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
+        # Certain about the month, silent about the day. Full confidence is
+        # honest here — it is the PRECISION that refuses to name a date.
+        date=timezone.localdate() + timedelta(days=20),
+        precision="estimated", confidence=1.0,
+    )
+
+    openings = rel.firm_openings(user, [firm.id], today=timezone.localdate())
+
+    assert firm.id not in openings, (
+        "a date whose precision never named a day was treated as a confirmed "
+        "opening, which is what puts a day-level countdown on it downstream"
+    )
+
+
+@pytest.mark.django_db
+def test_a_day_precise_firm_date_is_still_a_confirmed_opening():
+    """The guard: the fix must not stop real confirmed dates from counting."""
+    user = _user()
+    firm = _target_firm(user)
+    FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
+        date=timezone.localdate() + timedelta(days=20),
+        precision="day", confidence=1.0,
+    )
+
+    openings = rel.firm_openings(user, [firm.id], today=timezone.localdate())
+
+    assert firm.id in openings
+    assert openings[firm.id]["kind"] == rel.OPENING_FIRM_DATE

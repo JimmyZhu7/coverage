@@ -59,7 +59,7 @@ def test_a_job_with_no_jobrun_ever_is_flagged_never_run(client):
 def test_a_job_that_ran_well_within_its_interval_reads_ok(client):
     _staff_client(client)
     now = timezone.now()
-    # gmail-backfill's expected interval is 15 minutes; a run 2 minutes ago
+    # gmail-backfill's expected interval is 5 minutes; a run 2 minutes ago
     # is well inside it.
     JobRun.objects.create(
         name="gmail-backfill", started_at=now - timedelta(minutes=3),

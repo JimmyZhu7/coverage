@@ -127,6 +127,7 @@ The manual override outranks every future run, forever.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import urllib.error
@@ -143,6 +144,8 @@ from billing import credits as billing_credits
 from . import appmail, discovery
 from .models import ApplicationEvent, AutopilotDecision, AutopilotRun, ContactProposal
 from .providers import normalize_email
+
+logger = logging.getLogger(__name__)
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -811,6 +814,40 @@ def run_autopilot(
         report.ok = False
         report.reason = "failed"
         return report
+    except Exception:  # noqa: BLE001 — see the comment above this try, and below.
+        # `execute_run`'s docstring promises a claimed run is NEVER left at
+        # `running` — every path out is REVIEWED or FAILED. That promise
+        # only held for `AutopilotError` (a transport failure): any OTHER
+        # bug in the decide loop — a malformed model response `_gate` can't
+        # unpack, a KeyError on one row's evidence text, anything — used to
+        # propagate straight past both this function and `execute_run`,
+        # leaving the row at `running` forever (until `reap_stale_runs`'
+        # timeout, which the docstring says can't happen) and, worse, out
+        # of `capture_autopilot_worker`'s per-tick loop entirely: one bad
+        # row for one student stopped every OTHER student's queued run from
+        # being decided that tick. Caught here the same way the AI-outage
+        # branch above already is, so a bug in this loop costs the one run
+        # it happened on, never the whole worker tick.
+        logger.exception("run_autopilot: decide loop raised for user %s", user.pk)
+        if run is not None:
+            run.status = AutopilotRun.STATUS_FAILED
+            run.failure_reason = (
+                "Something went wrong while deciding this batch. Nothing "
+                "was added to your network — start it again when you like."
+            )
+            run.accepts = report.count(AutopilotDecision.DECIDE_ACCEPT)
+            run.escalations = report.count(AutopilotDecision.DECIDE_ESCALATE)
+            run.skips = report.count("skip")
+            run.deferred = report.count("defer")
+            run.llm_calls = report.llm_calls
+            run.save(update_fields=[
+                "status", "failure_reason", "accepts", "escalations",
+                "skips", "deferred", "llm_calls",
+            ])
+            billing_credits.spend_autopilot(user, report.llm_calls)
+        report.ok = False
+        report.reason = "failed"
+        return report
 
     if run is not None:
         run.status = AutopilotRun.STATUS_REVIEWED
@@ -1368,7 +1405,22 @@ def undo_decision(decision: AutopilotDecision) -> str:
                     contact=contact
                 ).count()
                 if remaining == 0:
-                    Contact.all_objects.filter(pk=contact.pk).delete()
+                    # `.objects.for_user(...)`, not `all_objects`, and it is
+                    # the only DELETE of a user-owned row in this module.
+                    # `decision.contact` resolves through the FORWARD FK
+                    # descriptor, which Django serves from `_base_manager` —
+                    # pinned to `all_objects` by `PrivateModel.Meta` — so the
+                    # object in hand carries no tenant proof of its own, and
+                    # the delete that followed carried none either. It is safe
+                    # today only because the one caller reaches here through
+                    # `AutopilotDecision.objects.for_user(request.user)`; that
+                    # is an argument about the call graph, not a scope on the
+                    # query, and it is the wrong thing to be relying on for an
+                    # irreversible write. The two sibling statements six lines
+                    # up already scope the same way against the same user.
+                    Contact.objects.for_user(decision.user).filter(
+                        pk=contact.pk
+                    ).delete()
             p = decision.proposal
             p.status = ContactProposal.STATUS_PENDING
             p.resolved_at = None

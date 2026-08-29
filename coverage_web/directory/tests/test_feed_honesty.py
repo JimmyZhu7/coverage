@@ -16,12 +16,18 @@ from django.utils import timezone
 
 from directory.models import Firm, Opportunity
 from directory.views import (
-    _FRESH_DAYS, REGION_NONE, _fact_chips, _fresh_label, _unconfirmed_note,
+    _FRESH_DAYS, REGION_NONE, _fact_chips, _unconfirmed_note,
     _urgency_feed, _urgency_item,
 )
 
 TODAY = timezone.localdate()
 NOW = timezone.now()
+
+# The page inlines its stylesheet, and CSS COMMENTS reach the response body.
+# Any assertion about card copy has to strip them or it can pass off a note
+# someone left about a retired element — see
+# `test_feed_badge_reads_first_seen_not_new`, which did exactly that.
+_STYLE_RE = re.compile(r"<style.*?</style>", re.S)
 
 
 def _firm(slug="evercore", name="Evercore", **kw):
@@ -46,26 +52,24 @@ def _seen(o, days_ago):
 # A1(a) — the "New" badge must say what it measures (first_seen), not "New".
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("seen_days,expected", [
-    (None, ""),
-    (0, "First seen today"),
-    (1, "First seen 1d ago"),
-    (5, "First seen 5d ago"),
-])
-def test_fresh_label_says_what_it_measures(seen_days, expected):
-    assert _fresh_label(seen_days) == expected
-
-
 @pytest.mark.django_db
 def test_feed_badge_reads_first_seen_not_new(client):
     """The bug: after a bulk import, a role backfilled today reads "New"
     even though the firm posted it long ago — `first_seen` is when the row
-    entered OUR db (auto_now_add), not when the firm posted."""
+    entered OUR db (auto_now_add), not when the firm posted.
+
+    THE STYLE BLOCK IS STRIPPED FIRST, and that is the whole reliability of
+    this test. It used to assert "First seen 3d ago" against the raw
+    response, which the page satisfied from a CSS COMMENT in _styles.html
+    describing the badge this change RETIRED — capital F and all. The card's
+    own visible copy is lowercase, so the assertion was green whether or not
+    the card said anything, and would have gone red if someone tidied a
+    comment. Assert what a reader sees.
+    """
     firm = _firm()
     o = _seen(_opp(firm, "https://x/1"), 3)
-    resp = client.get(reverse("opportunities"))
-    body = resp.content.decode()
-    assert "First seen 3d ago" in body
+    body = _STYLE_RE.sub("", client.get(reverse("opportunities")).content.decode())
+    assert "first seen 3d ago" in body
     assert ">New<" not in body
 
 
@@ -116,6 +120,34 @@ def test_a_future_deadline_is_still_dated_and_a_null_deadline_is_rolling():
 
 
 @pytest.mark.django_db
+def test_fuse_pct_shrinks_as_the_deadline_approaches():
+    """`fuse_pct` feeds `_styles.html`'s `.fuse-fill { width: var(--fuse) }`,
+    which animates DOWN from a full bar to that width — so it is the bar's
+    OWN remaining length: near 100 when the deadline is far off, near the
+    floor of 4 when it is imminent, and exactly 0 once it has passed
+    (`_urgency_item`'s "passed" branch, pinned separately above). A stray
+    `1 -` in the formula inverted this: a role closing TODAY computed to a
+    full 100, and a role at the far edge of `_FUSE_HORIZON` computed to the
+    floor of 4 — a role about to close looking safer than one over a month
+    out."""
+    firm = _firm()
+    closing_today = _urgency_item(
+        _opp(firm, "https://x/today", deadline=TODAY), now=NOW, today=TODAY,
+        my_firm_ids=set(),
+    )
+    far_out = _urgency_item(
+        _opp(firm, "https://x/far", deadline=TODAY + timedelta(days=45)),
+        now=NOW, today=TODAY, my_firm_ids=set(),
+    )
+    assert closing_today["fuse_pct"] < far_out["fuse_pct"], (
+        "a role closing today must show a SHORTER remaining fuse than one "
+        "45 days out, not a longer one"
+    )
+    assert closing_today["fuse_pct"] == 4    # floored, not 0 — still open today
+    assert far_out["fuse_pct"] == 100
+
+
+@pytest.mark.django_db
 def test_a_passed_deadline_never_shows_the_freshness_badge():
     firm = _firm()
     o = _seen(_opp(firm, "https://x/1", deadline=TODAY - timedelta(days=1)), 0)
@@ -149,19 +181,27 @@ def test_feed_and_firm_page_agree_a_passed_deadline_has_passed(client):
 
 
 # ---------------------------------------------------------------------------
-# A3 — the "Show everything" escape hatch must actually reveal the hidden
+# A3 — the "Everything" escape hatch must actually reveal the hidden
 # non-campus roles, preserving the student's other active filters.
+#
+# This used to be a link built from `show_all_qs` (role forced to "all",
+# every other querystring param copied across) surfaced in the header's
+# subset sentence. That sentence — and `show_all_qs` with it — is gone
+# (2026-08-27, "take this thing away"): "Everything" is a normal segment in
+# the Role Type control now, a real form field the browser's own
+# serialization carries alongside every other filter, so there is nothing
+# left to build. The guarantee is asked the same way regardless.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-def test_show_all_qs_actually_shows_the_hidden_roles(client):
+def test_the_everything_segment_actually_shows_the_hidden_roles(client):
     firm = _firm()
     _opp(firm, "https://x/1", bucket="other", region="hk")  # hidden by the default view
     resp = client.get(reverse("opportunities"), {"region": "hk"})
-    show_all_qs = resp.context["show_all_qs"]
-    assert show_all_qs, "show_all_qs must not be empty"
+    everything = next(s for s in resp.context["role_segments"] if s["value"] == "all")
+    assert everything["count"] == 1, "the Everything segment names the hidden role itself"
 
-    follow = client.get(f"{reverse('opportunities')}?{show_all_qs}")
+    follow = client.get(reverse("opportunities"), {"region": "hk", "role": "all"})
     assert follow.context["total"] == 1                # the hidden role is now shown
     assert follow.context["selected"]["role"] == "all"
     assert follow.context["selected"]["region"] == "hk"  # other filters preserved
@@ -484,11 +524,15 @@ def test_the_fit_filter_hides_only_blocking_verdicts_and_says_so(client, student
     assert "Keep Me Intern" in body
     assert "Silent Keeps Intern" in body, "silence never hides"
     assert "Hide Me Intern" not in body
-    # The wording moved into the merged hidden-counts line (four stacked
-    # paragraphs became one sentence with a link per reason); the guarantee
-    # is unchanged — the count is stated and its undo is reachable.
-    assert "1 you don't qualify for" in body, "the scope line owns honesty"
-    assert "show_unfit" in body or "fit=0" in body or "Also hidden" in body or "Hidden:" in body
+    # The wording used to live in the header's merged hidden-counts sentence
+    # ("1 you don't qualify for ... Also hidden: ..."). That sentence is gone
+    # (2026-08-27, "take this thing away") and the guarantee moved to the
+    # control that causes the hide: the Eligible-only checkbox renders
+    # checked, and unchecking it (the follow-up request below) is the
+    # one-click reversal — no count needed anywhere else.
+    assert 'name="fit" value="1" checked' in body
+    restored = client.get("/opportunities/").content.decode()
+    assert "Hide Me Intern" in restored, "unchecking the toggle is the escape hatch"
 
 
 @pytest.mark.django_db
@@ -801,6 +845,102 @@ def test_an_anonymous_visitor_still_sees_the_stated_window(client):
     assert "grads" not in body.replace("Grad 2027–2028", "")
 
 
+# ---------------------------------------------------------------------------
+# FACT-vs-FACT DEDUPLICATION. `_fact_chips`'s docstring already documents the
+# verdict-vs-fact case (year_out suppressing "Grad ..."); these are the two
+# duplications where BOTH sides are facts, and the de-dup turned out to be
+# value-dependent rather than kind-dependent — see `_standing_matches_grad`
+# and `_NON_DISCRIMINATING_STUDY_ON_CAMPUS` in views.py.
+# ---------------------------------------------------------------------------
+
+def _facted(firm, facts, *, bucket="internship", **extra):
+    return Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket=bucket, status="open",
+        url=f"https://x.com/{firm.slug}-{bucket}-facted", raw={"facts": facts},
+        **extra)
+
+
+@pytest.mark.django_db
+def test_an_agreeing_class_standing_and_grad_year_merge_into_one_chip():
+    """"Penultimate year" + "Grad 2028" is one requirement stated twice — 55
+    open rows carry both, none of them disagreeing. The merge must not drop
+    either sentence: the standing's own phrase has to survive in the tooltip
+    of the chip that's left, same as the year_out verdict keeps `grad`'s
+    phrase alive in its own `why`."""
+    firm = Firm.objects.create(slug="gs2", name="Goldman Sachs 2")
+    o = _facted(firm, {
+        "study": {"value": "Penultimate year", "phrase": "In your penultimate year of study"},
+        "grad": {"value": "2028", "years": ["2028"], "phrase": "graduating in 2028"},
+    })
+    chips = _fact_chips(o)
+    labels = [c["label"] for c in chips]
+    assert len(chips) == 1
+    assert labels == ["Penultimate year · Grad 2028"]
+    assert "penultimate" in chips[0]["why"].lower()
+    assert "graduating in 2028" in chips[0]["why"]
+
+
+@pytest.mark.django_db
+def test_a_class_standing_wider_than_its_grad_year_fact_does_not_merge():
+    """"Final year" names ONE imminent year. A grad fact spanning three of
+    them beside it is a different, wider claim — not the same requirement
+    restated — so this must stay two chips rather than quietly picking one."""
+    firm = Firm.objects.create(slug="ms3", name="Morgan Stanley 3")
+    o = _facted(firm, {
+        "study": {"value": "Final year", "phrase": "You are a final year student"},
+        "grad": {"value": "2027-2029", "years": ["2027", "2028", "2029"],
+                 "phrase": "graduating between 2027 and 2029"},
+    })
+    chips = _fact_chips(o)
+    labels = {c["label"] for c in chips}
+    assert labels == {"Final year", "Grad 2027-2029"}, labels
+
+
+@pytest.mark.django_db
+def test_current_student_is_suppressed_on_a_campus_bucket():
+    """"Current student" states nothing a campus bucket (insight/internship/
+    entry_level) doesn't already establish by being on this feed at all — see
+    `_NON_DISCRIMINATING_STUDY_ON_CAMPUS`. A real second fact (GPA) must take
+    the freed slot rather than the row rendering only one chip."""
+    firm = Firm.objects.create(slug="p72", name="Point72")
+    o = _facted(firm, {
+        "study": {"value": "Current student", "phrase": "You are a current student"},
+        "gpa": {"value": "3.5", "phrase": "minimum GPA of 3.5"},
+    }, bucket="entry_level")
+    chips = _fact_chips(o)
+    labels = [c["label"] for c in chips]
+    assert "Current student" not in labels
+    assert "GPA 3.5" in labels
+
+
+@pytest.mark.django_db
+def test_current_student_would_still_show_off_the_campus_buckets():
+    """The suppression is scoped to the bucket, not a blanket rule on the
+    VALUE — `extract_facts` never actually populates `other`-bucket rows
+    today (confirmed live: 0 of 13,962), but `_fact_chips` itself must not
+    be the thing making that true. Constructed directly, bypassing the
+    pipeline, so the render-time gate is what's under test."""
+    firm = Firm.objects.create(slug="exp1", name="Experienced Co")
+    o = _facted(firm, {
+        "study": {"value": "Current student", "phrase": "We also welcome current students"},
+    }, bucket="other")
+    chips = _fact_chips(o)
+    assert [c["label"] for c in chips] == ["Current student"]
+
+
+@pytest.mark.django_db
+def test_recent_graduate_alone_is_not_suppressed_on_a_campus_bucket():
+    """Only the two exact non-discriminating values are gated — "Recent
+    graduate" alone (34 open rows) is real information on an internship
+    bucket, where the default assumption is a still-enrolled student."""
+    firm = Firm.objects.create(slug="pwc2", name="PwC 2")
+    o = _facted(firm, {
+        "study": {"value": "Recent graduate", "phrase": "recent graduates are welcome"},
+    }, bucket="internship")
+    chips = _fact_chips(o)
+    assert [c["label"] for c in chips] == ["Recent graduate"]
+
+
 def test_no_verdict_is_rendered_as_struck_through_text():
     """Strikethrough reads as NEGATION: struck-out "Won't sponsor you" says
     the opposite of what it means. A closed door is stated, not crossed out."""
@@ -949,3 +1089,112 @@ def test_the_drawer_stays_silent_for_a_freshly_confirmed_role(client):
 
     body = client.get(reverse("role_description", args=[o.id])).content.decode()
     assert "drawer-caution" not in body
+
+
+# ---------------------------------------------------------------------------
+# AN INEXACT DATE MAY NOT CARRY AN EXACT COUNTDOWN.
+#
+# `deadline_marker` renders "~ Sep 2026" for `precision="estimated"` and
+# "Sep 2026" for `precision="month"` — a deliberate refusal to name a day —
+# and then returned `countdown="closes in 4 days"` in the same dict. One row,
+# two claims about the same date, and the reader believes the specific one.
+#
+# REACHABILITY, since it decides whether this is a renderer fix or a
+# constraint: `Opportunity.deadline_precision` is a bare `CharField` with no
+# vocabulary CHECK, and `directory.admin.OpportunityAdmin` declares no
+# `fields`, `exclude` or `readonly_fields` — so every column on the model is
+# editable in its admin change form, this one included. That is the same
+# unbounded-ModelAdmin path `opportunities_confidence_in_range` was added for
+# after the `confidence=95.0` write. The value is one admin save (or one
+# `manage.py shell` line) away, and `FirmDate` — same vocabulary, same
+# meaning, closed to it by `firm_dates_precision_vocabulary` — already holds
+# 25 `estimated` rows live. So: fix the rendering. A constraint here could
+# only ban a garbage string, and "estimated" is not garbage; it is a
+# legitimate value the renderer was mishandling.
+# ---------------------------------------------------------------------------
+
+from datetime import date as _date  # noqa: E402
+
+from directory.views import deadline_marker  # noqa: E402
+
+
+def test_an_estimated_deadline_gets_no_day_count():
+    m = deadline_marker(_date(2026, 9, 20), "estimated", today=_date(2026, 9, 16))
+    assert m["label"] == "~ Sep 2026"
+    assert "4 days" not in m["countdown"], (
+        "a day count on a date the label just refused to print as a day")
+    assert m["countdown"] == "estimated this month"
+
+
+def test_a_month_precision_deadline_gets_no_day_count():
+    m = deadline_marker(_date(2026, 9, 20), "month", today=_date(2026, 9, 16))
+    assert m["label"] == "Sep 2026"
+    assert "days" not in m["countdown"]
+    assert m["countdown"] == "closes this month"
+
+
+def test_an_inexact_deadline_counts_in_its_own_unit():
+    assert deadline_marker(_date(2026, 11, 3), "month",
+                           today=_date(2026, 9, 28))["countdown"] == "closes in 2 months"
+    assert deadline_marker(_date(2026, 10, 3), "month",
+                           today=_date(2026, 9, 28))["countdown"] == "closes next month"
+    assert deadline_marker(_date(2027, 3, 1), "estimated",
+                           today=_date(2026, 9, 28))["countdown"] == "estimated in 6 months"
+
+
+def test_an_inexact_deadline_is_not_past_until_its_whole_unit_is():
+    """The lie has a second direction. A "Sep 2026" date is not overdue on
+    Sep 30 — nothing ever said which September day it was — so the
+    danger-red `past` styling would be asserting a day too."""
+    m = deadline_marker(_date(2026, 9, 1), "month", today=_date(2026, 9, 30))
+    assert m["past"] is False
+    assert m["countdown"] == "closes this month"
+
+    gone = deadline_marker(_date(2026, 9, 1), "month", today=_date(2026, 10, 1))
+    assert gone["past"] is True
+    assert gone["countdown"] == "deadline passed"
+
+    est = deadline_marker(_date(2026, 9, 1), "estimated", today=_date(2026, 10, 1))
+    assert est["past"] is True
+    assert est["countdown"] == "estimated date passed"
+
+
+def test_a_day_precise_deadline_still_counts_days():
+    """The fix must not coarsen the 633 live rows that DO name a day."""
+    for prec in ("day", "", None):
+        m = deadline_marker(_date(2026, 9, 20), prec, today=_date(2026, 9, 16))
+        assert m["label"] == "Sep 20, 2026"
+        assert m["countdown"] == "closes in 4 days"
+        assert m["past"] is False
+    assert deadline_marker(_date(2026, 9, 16), "day",
+                           today=_date(2026, 9, 16))["countdown"] == "closes today"
+    assert deadline_marker(_date(2026, 9, 17), "day",
+                           today=_date(2026, 9, 16))["countdown"] == "closes tomorrow"
+    past = deadline_marker(_date(2026, 9, 10), "day", today=_date(2026, 9, 16))
+    assert past["countdown"] == "deadline passed" and past["past"] is True
+
+
+@pytest.mark.django_db
+def test_an_estimated_deadline_never_reaches_the_firm_page_as_a_day_count(client):
+    """End to end, through `_card` — the reader that actually calls
+    `deadline_marker` and prints `countdown|capfirst` on the firm page.
+
+    The Opportunities FEED is deliberately not asserted here: `_urgency_item`
+    builds its own countdown and does NOT go through `deadline_marker`, so it
+    still prints "Closes in 4 days" for this row. That is a real second
+    instance of the same bug, left alone on purpose — see the comment on
+    `_urgency_item`'s inexact-precision branch for why it is not a local
+    edit."""
+    firm = Firm.objects.create(slug="ubs", name="UBS")
+    Opportunity.objects.create(
+        firm=firm, title="Guessed Analyst", bucket="internship", status="open",
+        deadline=TODAY + timedelta(days=4), deadline_precision="estimated",
+        confidence=0.6, url="https://ubs.com/estimated")
+
+    body = re.sub(r"<style.*?</style>", "",
+                  client.get("/firms/ubs/").content.decode(), flags=re.S)
+    assert "Guessed Analyst" in body
+    assert "in 4 days" not in body.lower()
+    # "this month" or "next month" depending on where +4 days lands; the
+    # assertion that matters is the word, not which of the two.
+    assert "Estimated" in body

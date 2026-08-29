@@ -21,6 +21,7 @@ user's targeted firms in the feed.
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 from datetime import date
 
@@ -59,7 +60,9 @@ from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
 from directory.recommend import Candidate, Profile, parse_target_cycle, recommend
 from directory.sponsorship import effective_sponsorship, firm_policy_map, firm_policy_q
-from directory.timeline import EVENT_LABELS
+from directory.timeline import (
+    EVENT_LABELS, TRACK_SHORT, cycle_slug_for_target,
+)
 
 # Firm category labels — the insider taxonomy students actually sort firms
 # by ("who has coverage on this account" energy, per the brand voice). Keyed
@@ -186,9 +189,34 @@ def deadline_provenance(opp) -> dict | None:
             "why": "Read from the posting's own text, not a field the board published"}
 
 
+# Precisions whose LABEL refuses to name a day. The rule the two halves of
+# this function keep between them: a countdown may not count days on a date
+# the label just declined to print as a day. "~ Sep 2026" beside "closes in 4
+# days" is one row stating a month-level guess and an exact day count about
+# the same date, and the reader believes the specific one — which is how a
+# `~`-prefixed estimate reaches a student as a deadline to plan around.
+#
+# `Opportunity.deadline_precision` is a bare `CharField` with no vocabulary
+# constraint and a fully editable `OpportunityAdmin` over it, so this is one
+# admin save away, exactly like the `confidence=95.0` write that
+# `opportunities_confidence_in_range` exists for. `FirmDate` already carries
+# 25 `estimated` rows; the two columns mean the same thing.
+_INEXACT_PRECISIONS = ("month", "estimated")
+
+
+def _month_distance(deadline, today) -> int:
+    """Whole calendar months from `today`'s month to `deadline`'s. 0 = this
+    month. Deliberately month arithmetic and not `days // 30`: the unit has
+    to be the one the label prints, or the countdown is a day count wearing
+    a coarser word."""
+    return (deadline.year - today.year) * 12 + (deadline.month - today.month)
+
+
 def deadline_marker(deadline, precision, *, today=None):
     """Format a deadline honestly, respecting its stated precision, and
-    never fabricating one. A null deadline says so out loud.
+    never fabricating one. A null deadline says so out loud, and an inexact
+    one gets a countdown in its own unit rather than a day count it cannot
+    support — see `_INEXACT_PRECISIONS`.
     """
     if deadline is None:
         return {"posted": False, "label": "No deadline posted", "countdown": "", "past": False}
@@ -201,6 +229,27 @@ def deadline_marker(deadline, precision, *, today=None):
         label = f"{deadline:%b} {deadline.day}, {deadline.year}"
 
     today = today or timezone.localdate()
+    if prec in _INEXACT_PRECISIONS:
+        # `past` moves to the same coarser unit as the countdown. A "Sep 2026"
+        # deadline is not passed on Sep 15 — nothing ever said which September
+        # day it was, so the danger-red "past" styling would be asserting a
+        # day the row does not hold, in the other direction.
+        months = _month_distance(deadline, today)
+        if prec == "estimated":
+            # No "closes": the date is our estimate, not the firm's statement,
+            # and the verb is what makes it read as one.
+            countdown = ("estimated date passed" if months < 0 else
+                         "estimated this month" if months == 0 else
+                         "estimated next month" if months == 1 else
+                         f"estimated in {months} months")
+        else:
+            countdown = ("deadline passed" if months < 0 else
+                         "closes this month" if months == 0 else
+                         "closes next month" if months == 1 else
+                         f"closes in {months} months")
+        return {"posted": True, "label": label, "countdown": countdown,
+                "past": months < 0, "precision": prec}
+
     days = (deadline - today).days
     if days < 0:
         countdown = "deadline passed"
@@ -279,16 +328,184 @@ _PLACE_FALLBACK = {r: REGION_LABELS[r] for r in REGION_LABELS if r != "other"}
 _PLACE_WHY = ("The posting did not state a city. This is the market it was "
               "filed under.")
 
+# ---------------------------------------------------------------------------
+# TIDYING A SCRAPED PLACE STRING, AT RENDER TIME.
+#
+# `location` is evidence and stays raw in the database (the same rule that
+# keeps `smart_title`/`smart_location` in the template layer). But `_place`
+# handed that raw string straight to the page, so the place line — the one
+# element a student reads to answer "is this in a market I can work in" —
+# arrived in whatever shape a careers site happened to emit. Measured on the
+# live corpus (2,599 open campus roles / 16,561 open rows):
+#
+#   "2 Locations"                                97 feed / 1,321 open  a COUNT
+#   "9-10 TAUNUSANLAGE:FRANKFURT AM MAIN"         5 feed /    21 open  colon join
+#   "NY 10001"                                    8 feed /     8 open  a ZIP
+#   "Denver, CO, US, 80206"                      29 feed /   108 open  postal tail
+#   "New York, 745 7th Avenue"                   21 feed /   270 open  street
+#   "Chicago, …; Greenwich, …; Houston, …" ×6    33 feed /   123 open  list, 160ch
+#   "Online via Microsoft Teams&#160"             1 feed /     1 open  entity
+#
+# 172 of 2,599 feed place lines (6.6%) were one of those. The two existing
+# repair paths cannot close it: `normalize_workday_locations` has already
+# been run to exhaustion (0 of 11,350 open Workday rows would change today)
+# and its slot-gap rule does not see a colon join, while
+# `backfill_detail_locations` needs a stored `detail_location` that 0 of the
+# 1,321 "N Locations" rows actually have. So the gap is in the NORMALIZATION,
+# and the render path is where it can be closed for every source at once.
+#
+# EVERY RULE HERE SUBTRACTS. Nothing is inferred, completed, or reworded: a
+# segment is either kept as the source wrote it or dropped, and whatever was
+# dropped is still quoted back in the `why` tooltip. That is the difference
+# between tidying and inventing, and only the first is allowed on this page.
+
+# Workday joins a site address to its city with a BARE colon and no spaces
+# ("90 WESTERN PKY:BEDFORD", "RBC WATERPARK PLACE, 88 QUEENS QUAY W:TORONTO").
+# The city is the right half in every one of the 7 distinct shapes this
+# produces across all 24,775 rows — with ONE counter-example that decides the
+# guard below: "Istanbul, Büyükdere Caddesi No:175", where the colon is part
+# of a house number and the right half is not a place at all. So the split
+# only fires when the right half reads like a place AND the left reads like
+# an address; anything else keeps the string it arrived with. Spaces around
+# the colon mean something else again (Evercore's "Crum Auditorium : RRH
+# 1.400" is a room), which the lookarounds exclude.
+_PLACE_COLON = re.compile(r"(?<=\S):(?=\S)")
+
+# Workday's aggregate placeholder for a multi-city posting. It is a count, not
+# a place, and answers nothing a student asked.
+_PLACE_COUNT = re.compile(r"^\d+\s+locations?$", re.I)
+
+# One place among several. Boards list them semicolon-separated.
+_PLACE_LIST = re.compile(r"\s*;\s*")
+
+# Segment separators INSIDE one place: a comma, or a spaced dash ("Toronto -
+# 18 York Street"). Unspaced dashes are part of names ("Santander-Platz").
+_PLACE_SEG = re.compile(r"\s*,\s*|\s+[-–]\s+")
+
+# A whole segment that is only a postal code: 10001, 10001-1234, 65760,
+# L-1855 (Luxembourg), K1A 0B1 (Canada), EC2N 4AY (UK).
+_PLACE_POSTAL = re.compile(
+    r"^(?:\d{4,6}(?:-\d{4})?"
+    r"|[A-Z]{1,2}-\d{3,5}"
+    r"|[A-Z]\d[A-Z][ ]?\d[A-Z]\d"
+    r"|[A-Z]{1,2}\d[A-Z\d]?[ ]?\d[A-Z]{2})$", re.I)
+
+# "NY 10001" — a state code with a ZIP welded on. The state is the fact; the
+# ZIP is leaked source data. (These 8 rows are the residue of
+# `backfill_sitemap_postal_titles`, which correctly moved the code OUT of the
+# title and into `location`, where nothing then trimmed it.)
+_PLACE_STATE_ZIP = re.compile(r"^([A-Z]{2})\s+\d{5}(?:-\d{4})?$")
+
+# A street address rather than a place. Two shapes, both requiring a NUMBER:
+# a house-number head ("745 7th Avenue", the same anchored rule the Workday
+# connector uses), or a street/premises word standing beside a standalone
+# digit run ("Marina Bay Financial Tower 2"). The digit is load-bearing —
+# without it "Ave Maria, FL" and "Avenue Road" would read as addresses. So
+# would every "St. Louis" if `st` were in the word list, which is why it is
+# not: only words that are unambiguous outside an address qualify.
+_PLACE_STREET_HEAD = re.compile(r"^\d{1,6}(?:[-/]\d{1,6})?[ ,-]\S")
+_PLACE_STREET_WORD = re.compile(
+    r"\b(street|road|avenue|ave|boulevard|blvd|parkway|pkwy|pky|quay|plaza|"
+    r"suite|floor|tower|building|bldg|anlage|strasse|straße)\b\.?", re.I)
+_PLACE_DIGIT_RUN = re.compile(r"\b\d{1,6}\b")
+
+
+def _is_street(segment: str) -> bool:
+    return bool(_PLACE_STREET_HEAD.match(segment)
+                or (_PLACE_STREET_WORD.search(segment)
+                    and _PLACE_DIGIT_RUN.search(segment)))
+
+
+def _split_colon_join(text: str) -> str:
+    """Workday's `<site address>:<CITY>` run, reduced to the city."""
+    m = None
+    for m in _PLACE_COLON.finditer(text):
+        pass                      # the LAST bare colon is the site/city seam
+    if m is None:
+        return text
+    left, right = text[:m.start()].strip(), text[m.end():].strip()
+    place_like = (any(ch.isalpha() for ch in right)
+                  and not _PLACE_POSTAL.match(right))
+    address_like = bool(_PLACE_DIGIT_RUN.search(left)
+                        or _PLACE_STREET_WORD.search(left))
+    return right if (place_like and address_like) else text
+
+
+def _tidy_entry(entry: str) -> str:
+    """One place, minus the parts of it that are not a place.
+
+    Returns `entry` UNCHANGED when nothing is dropped. That is not an
+    optimisation: `_PLACE_SEG` splits on a spaced dash so the street rule can
+    see "Toronto - 18 York Street", and re-joining on ", " unconditionally
+    would have rewritten 1,100-odd innocent rows' punctuation ("Singapore -
+    Central" -> "Singapore, Central") for no gain. Tidying subtracts; it does
+    not restyle a line it has no complaint about.
+    """
+    segs = [s.strip() for s in _PLACE_SEG.split(entry) if s.strip()]
+    trimmed = [_PLACE_STATE_ZIP.sub(r"\1", s) for s in segs]
+    kept = [s for s in trimmed if not _PLACE_POSTAL.match(s)]
+    # A row whose EVERY segment is a postal code ("L-1855") keeps them: an
+    # empty place line is a worse answer than an imprecise one, and silence
+    # here would claim the posting said nothing when it did.
+    kept = kept or trimmed
+    # Same guard for the street rule — "1 New York Plaza" is a whole location
+    # and dropping it would leave the card blank, so a street segment only
+    # goes when a place-shaped segment survives it.
+    place_like = [s for s in kept if not _is_street(s)] or kept
+    if place_like == segs:
+        return entry.strip()
+    return ", ".join(place_like)
+
+
+def tidy_place(raw: str) -> tuple[str, int]:
+    """The printable form of a scraped `location`, and how many further places
+    the same string listed.
+
+    `("", 0)` when the string carries no place at all (Workday's "2
+    Locations"), so the caller can fall through to the market the row was
+    filed under instead of printing a count where a city goes.
+    """
+    text = html_lib.unescape(raw or "").replace("\xa0", " ")
+    text = _split_colon_join(text)
+    text = re.sub(r"\s+", " ", text).strip(" ,;")
+    if not text or _PLACE_COUNT.match(text):
+        return "", 0
+    entries = [e for e in (_tidy_entry(p) for p in _PLACE_LIST.split(text)) if e]
+    if not entries:
+        return "", 0
+    # A six-city list is 160 characters in a slot that ellipsises at ~34, so
+    # what a student actually read was "Chicago, Illinois, United States;
+    # Greenwich, Connect…". Name the first and COUNT the rest. The count rides
+    # OUT of the string on purpose: it is copy we wrote, and `smart_location`
+    # is a filter for text a board wrote — piping it through produced "+5
+    # More".
+    return entries[0], len(entries) - 1
+
+
+# What a tidied line says it did, so nothing is dropped silently.
+_PLACE_TIDIED = "The posting listed: "
+_PLACE_COUNT_WHY = ("The board gave a count of locations instead of naming "
+                    "them ({raw}). This is the market it was filed under.")
+
 
 def _place(opp) -> dict:
     """One role's place, and how well we know it. `text` may be "" — a caller
-    that prints something for an empty `text` is re-introducing the defect."""
-    if opp.location:
-        return {"text": opp.location, "exact": True, "why": ""}
+    that prints something for an empty `text` is re-introducing the defect.
+    `more` is how many further places the same posting listed (0 usually)."""
+    raw = (opp.location or "").strip()
+    text, more = tidy_place(raw)
+    if text:
+        return {"text": text, "more": more, "exact": True,
+                "why": "" if (text == raw and not more) else _PLACE_TIDIED + raw}
     market = _PLACE_FALLBACK.get(opp.region or "", "")
     if market:
-        return {"text": market, "exact": False, "why": _PLACE_WHY}
-    return {"text": "", "exact": False, "why": ""}
+        # A location that tidied away to nothing was never a place, so this
+        # row is in exactly the position a blank-location row is in: we hold
+        # the market and not the city. Saying so — coarse, and marked coarse
+        # — beats printing "2 Locations" in the slot where a city goes.
+        return {"text": market, "more": 0, "exact": False,
+                "why": (_PLACE_COUNT_WHY.format(raw=raw) if raw else _PLACE_WHY)}
+    return {"text": "", "more": 0, "exact": False, "why": ""}
 
 
 def _card(opp, *, now, today):
@@ -305,6 +522,7 @@ def _card(opp, *, now, today):
     class_tag = _class_tag(opp)
     if class_tag:
         tags.append(class_tag)
+    place = _place(opp)
     # No sponsorship pill here any more. `_fact_chips` below now carries the
     # sponsorship answer AND its source on every surface, so appending the
     # pill as well printed the same fact twice on this page and only this
@@ -316,11 +534,13 @@ def _card(opp, *, now, today):
         "id": opp.id,
         "firm_name": opp.firm.name,
         "firm_slug": opp.firm.slug,
-        "title": opp.title,
+        # Minus a trailing city the place line below already prints — see
+        # `_title_without_place_echo`. Never minus anything else.
+        "title": _title_without_place_echo(opp.title, place["text"]),
         "location": opp.location,
         # What the row PRINTS — see `_place`. `location` above stays raw for
         # callers that need the stated string itself.
-        "place": _place(opp),
+        "place": place,
         "url": opp.url,
         "region": opp.region,
         "role": {"value": bucket, "label": BUCKET_LABELS.get(bucket, bucket)},
@@ -342,6 +562,36 @@ def _card(opp, *, now, today):
         # URL could not reconfirm it — see `_unconfirmed_note`.
         "unconfirmed": _unconfirmed_note(opp),
     }
+
+
+# The title's own trailing city, when the place line one row below already
+# prints it. 297 of 2,599 open campus cards end their title in the very city
+# their `.rolecard-sub` names ("2027 APAC Banking Summer Analyst - Hong Kong"
+# above "Hong Kong, Hong Kong") — the same fact twice on one card, in two
+# rows, and the expensive one: a scraped title is clamped to two lines and
+# 268 of those 297 were hitting the clamp. Dropping the echo takes that to
+# 207, so 61 cards stop losing their END to an ellipsis in order to spend
+# their width restating their own location.
+#
+# THE GUARANTEE IS AGAINST THE PRINTED PLACE, not `Opportunity.location`.
+# `_family_key` below tests the raw column because grouping siblings is a
+# different question, but a DISPLAY cut has to be checked against what the
+# display shows: "Building 400-Whippany Campus, Jefferson Park" contains
+# "Whippany" and tidies to "Jefferson Park", so keying off the raw column
+# would have deleted the only mention of the city on the card. Every 4+
+# letter word of the tail must survive into `place.text` or the title keeps
+# it.
+def _title_without_place_echo(title: str, place_text: str) -> str:
+    m = _TITLE_TAIL.search(title or "")
+    if not m or not place_text:
+        return title
+    tail = m.group(1).strip()
+    words = [w for w in re.split(r"[ ,]+", tail.lower()) if len(w) >= 4]
+    base = (title[:m.start()] or "").strip()
+    place = place_text.lower()
+    if base and words and all(w in place for w in words):
+        return base
+    return title
 
 
 def _monogram(name: str) -> str:
@@ -508,7 +758,13 @@ def _group_picks(cards):
 # Splitting the suffix by KIND (rather than labelling `region` through
 # REGION_LABELS, the intuitive fix) is what actually removes the duplication —
 # labelling would have produced "SA 2028 · HONG KONG · HONG KONG".
-_CYCLE_TRACKS = {"ib": "IB", "pe": "PE", "st": "S&T", "am": "AM"}
+# Now `directory.timeline.TRACK_SHORT`, so the desk abbreviations this page
+# prints and the ones the vocabulary module defines cannot drift apart. The
+# dict here covered four of the six preference-eligible tracks; the two it
+# missed (consulting, corp-strat) fell through to `.title()`, which spells
+# corp-strat "Corp Strat" by luck and would have spelled a seventh slug
+# whatever its hyphens happened to say.
+_CYCLE_TRACKS = TRACK_SHORT
 
 
 def _cycle_suffix(cycle: str) -> str:
@@ -530,8 +786,17 @@ def cycle_region(cycle: str) -> str:
     return suffix if suffix in REGION_LABELS else ""
 
 
-def cycle_label(cycle: str) -> str:
-    """`sa2028_ib` -> `SA 2028 · IB`. Cycle and TRACK; never the market.
+def cycle_label(cycle: str, track: str = "") -> str:
+    """`("sa2028", "ib")` -> `SA 2028 · IB`. Cycle and TRACK; never the market.
+
+    Since migration 0014 the desk lives in `FirmDate.track` and `cycle` holds
+    only a season+year slug, so the normal call is `cycle_label(fd.cycle,
+    fd.track)`. The suffix-parsing below is kept anyway, and deliberately: it
+    is the only thing that renders a legacy spelling readably if one ever
+    reaches this function again — a row written by a pre-0014 process, a
+    fixture, or a `manage.py shell` insert. Formatting a stale value costs
+    nothing; printing `SA2028_IB` in the product's own body copy, which is what
+    this function was written to stop, costs a student's trust in the page.
 
     The column holds two spellings of one vocabulary — importers wrote
     `sa2028_ib`, the seeds wrote `SA 2028` — and the firm page printed
@@ -557,8 +822,13 @@ def cycle_label(cycle: str) -> str:
         label = head.replace("-", " ").title()
     if tail.lower() in REGION_LABELS:   # a market, not a desk — see cycle_region
         return label
-    track = _CYCLE_TRACKS.get(tail.lower(), tail.replace("-", " ").title() if tail else "")
-    return f"{label} · {track}" if track else label
+    # The row's own `track` column first; a suffix only where there is no
+    # column to read. A column that DISAGREES with a legacy suffix is the same
+    # class of thing `_firm_date_row` resolves for region — stated beats
+    # inherited, and the stated one is the one a writer can still correct.
+    desk = (track or tail or "").strip().lower()
+    desk = _CYCLE_TRACKS.get(desk, desk.replace("-", " ").title() if desk else "")
+    return f"{label} · {desk}" if desk else label
 
 
 # How a firm_dates row says where its date came from. `FirmDate.source_url` is
@@ -613,6 +883,19 @@ def _source_marker(raw: str) -> dict:
     return {"label": label, "why": why}
 
 
+# A `FirmDate` counts as CONFIRMED only when both halves agree: a high
+# enough `confidence` (the firm holds this date) AND a `precision` that
+# names a real day or a real month (the row locates it — "estimated" is a
+# month-level GUESS about a date nobody stated, and stays out no matter how
+# high `confidence` reads; see `crm.utils`'s identical split, which exists
+# because six CRM readers once re-spelled this bar as `confidence == 1.0`
+# alone and put a countdown on an estimate). One pair of constants, every
+# reader in this module included, so a third copy of the bar never drifts
+# from this one.
+_CONFIRMED_FIRM_DATE_CONFIDENCE = 0.8
+_CONFIRMED_FIRM_DATE_PRECISIONS = ("day", "month", "")
+
+
 def _firm_date_row(fd, *, today):
     """One firm_dates row as a timeline entry. confirmed vs rumored is read
     off confidence + precision: a high-confidence, non-estimated date is
@@ -629,9 +912,14 @@ def _firm_date_row(fd, *, today):
     else:
         date_text = f"{d:%b} {d.day}, {d.year}"
 
-    confirmed = (fd.confidence or 0.0) >= 0.8 and prec in ("day", "month", "")
+    confirmed = ((fd.confidence or 0.0) >= _CONFIRMED_FIRM_DATE_CONFIDENCE
+                 and prec in _CONFIRMED_FIRM_DATE_PRECISIONS)
     return {
-        "cycle": cycle_label(fd.cycle),
+        "cycle": cycle_label(fd.cycle, fd.track),
+        # The stored slug rides along beside its label so `_timeline` can match
+        # it against the cycles the student STATED without re-parsing prose.
+        "cycle_slug": fd.cycle,
+        "track": fd.track,
         # The row's own column when it has one, else the market its cycle slug
         # names. Stated beats inferred; a slug whose suffix DISAGREES with the
         # column is a data error rather than a second fact worth printing (no
@@ -749,10 +1037,68 @@ def _flag_conflicting_closes(rows: list[dict]) -> list[dict]:
     return rows
 
 
-def _timeline(firm, *, today):
+# ---------------------------------------------------------------------------
+# The one place a student's stated preference reaches the timeline.
+#
+# THE GAP THIS CLOSES. The founder's profile states a target cycle ("2028
+# Summer Internship"), the ranker parses it, and `recommend.W_CYCLE` is worth
+# 15 points — and it fires on 2 of the 2,617 open campus rows, because SA 2028
+# postings do not exist yet. That is not a missing preference field. It is a
+# preference the student stated, that the system stored and parsed correctly,
+# aimed at the one dataset that cannot answer it: the listings feed is 1,108
+# rows of SA 2027 and 1,333 rows that state no intake year at all.
+#
+# The dataset that CAN answer it is this one. 38 of the 41 firm_dates rows are
+# sa2028, all 34 future-dated rows sit at a firm the founder has tiered, and
+# every one of them is a date about the cycle he said he is recruiting for.
+# Until 0014 closed the vocabulary there was no way to ask: the same cycle was
+# spelled four ways, so no query could group it.
+#
+# WHAT IS AND IS NOT ASSERTED. This marks a row only when the student's OWN
+# stated `target_cycles` parses to the row's cycle slug — a fact they entered,
+# echoed back in their own words. Nothing here is inferred, and nothing
+# inferred belongs here: the tiered-firm list, who they email and what they
+# save are all readable signals about preference, but a page that told a
+# student "your cycle" on the strength of an inference would be asserting
+# something they never said. Ordering is untouched for the same reason a
+# timeline is chronological — the marker changes what a row SAYS, not where it
+# sits, so a nearer deadline never falls below a further one.
+# ---------------------------------------------------------------------------
+def _stated_cycle_slugs(user) -> set[str]:
+    """The `FirmDate.cycle` slugs a signed-in student's own profile names.
+
+    Empty for anonymous users, for a profile with no target cycle, and for a
+    stated cycle that has no slug in this corpus (an Insight week — see
+    `timeline.cycle_slug_for_target`). Empty means "mark nothing", never
+    "mark everything".
+    """
+    if not getattr(user, "is_authenticated", False):
+        return set()
+    slugs = set()
+    for raw in (getattr(user, "target_cycles", None) or []):
+        parsed = parse_target_cycle(str(raw or ""))
+        if parsed is None:
+            continue
+        slug = cycle_slug_for_target(*parsed)
+        if slug:
+            slugs.add(slug)
+    return slugs
+
+
+def _timeline(firm, *, today, user=None):
     rows = firm.firm_dates.all().order_by(F("date").asc(nulls_last=True), "cycle", "event_kind")
     rows = _drop_contradicted_openings([_firm_date_row(fd, today=today) for fd in rows])
-    return _flag_conflicting_closes(rows)
+    rows = _flag_conflicting_closes(rows)
+
+    wanted = _stated_cycle_slugs(user)
+    for row in rows:
+        if row["cycle_slug"] and row["cycle_slug"] in wanted:
+            row["for_you"] = {
+                "label": "your cycle",
+                "why": f"You told us you're recruiting for {row['cycle']} — "
+                       f"this date belongs to that cycle.",
+            }
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -1160,21 +1506,6 @@ _FRESH_DAYS = 10
 _ROLLING_FEED_CAP = 30
 
 
-def _fresh_label(seen_days: int | None) -> str:
-    """What the "New" badge actually measures, spelled out: `first_seen` is
-    when the row entered OUR db, not when the firm posted it — so the badge
-    must say "first seen", never bare "New". (Bug: after a bulk import, 794
-    of 805 open roles wore "New" because every backfilled row's `first_seen`
-    was the import timestamp, days after the firm actually listed it.)"""
-    if seen_days is None:
-        return ""
-    if seen_days == 0:
-        return "First seen today"
-    if seen_days == 1:
-        return "First seen 1d ago"
-    return f"First seen {seen_days}d ago"
-
-
 def _unconfirmed_note(o) -> dict:
     """Whether Coverage's own most recent check of this posting actually
     reconfirmed it is live, as something a template can render honestly. {}
@@ -1235,6 +1566,57 @@ _FACT_CHIP_ORDER = ("sponsorship", "study", "language", "pay", "grad", "gpa",
                     "duration", "cover_letter", "transcript", "assessment")
 _FACT_CHIPS_MAX = 2
 
+# A class-standing fact ("Penultimate year", "Final year", "First year" — see
+# facts.py's `_STUDY_STAGE`) and a grad-year fact, BOTH stated by the same
+# posting, are two spellings of one requirement often enough to merge — but
+# only when they cannot disagree. `_STUDY_STAGE`'s own comment is why the
+# module never converts a stage into a year: "penultimate" means something
+# different on a three-year UK degree and a four-year US one. What CAN be
+# checked without inventing that translation is breadth — "final year" and
+# "first year" name ONE imminent year; "penultimate year" straddles two (this
+# year's or next year's intake). A grad-year fact wider than that is a
+# DIFFERENT, more specific claim than the stage phrase, not a repeat of it, so
+# it must stay two chips — merging would hide a real mismatch instead of a
+# duplicate. Measured live: 55 open TARGET_BUCKETS rows carry both, and every
+# one agrees (Penultimate year + Grad 2028; Penultimate year + Grad
+# 2027-2028; Final year + Grad 2027; ...) — none contradict.
+_CLASS_STANDING_SPAN = {"First year": 1, "Final year": 1, "Penultimate year": 2}
+
+
+def _standing_matches_grad(study_value, grad_fact):
+    """Whether a class-standing fact and a grad-year fact, stated by the SAME
+    posting, describe one requirement rather than two — see
+    `_CLASS_STANDING_SPAN` above for why "matches" means "not wider than"
+    rather than an exact translation."""
+    span = _CLASS_STANDING_SPAN.get(study_value)
+    if span is None:
+        return False
+    years = (grad_fact or {}).get("years") or []
+    return 1 <= len(years) <= span
+
+
+# "Current student" / "Current student or recent graduate" is not a class
+# standing — facts.py's own comment on `_STUDY_STAGE` calls it out as a
+# distinct stage, not a stand-in for one. On THIS product it is also close to
+# uninformative: `extract_facts` (the management command that populates
+# `raw["facts"]`) only ever runs over `TARGET_BUCKETS` — insight, internship,
+# entry_level, the three buckets `classify.py` defines as campus recruiting —
+# so every row that can carry this fact at all is already, by the
+# classifier's own criterion, a current-student-or-recent-grad row. Measured
+# live: 26 "Current student" + 2 "Current student or recent graduate" rows,
+# 100% of them insight/internship/entry_level, and 0 of the 13,962 open
+# `other` (experienced-hire) rows carry ANY `facts` at all, this one
+# included. Suppressed HERE, at render time, gated on the OPPORTUNITY'S OWN
+# bucket rather than deleted from facts.py's extraction: the day extraction
+# widens to the `other` bucket, or a firm-page surface starts showing facts
+# for experienced roles, this same phrase on that row would be exactly the
+# signal a reader needs (an experienced-hire posting that also welcomes
+# current students is worth flagging), so the extractor keeps finding it —
+# only this campus-scoped chip stops repeating it.
+_NON_DISCRIMINATING_STUDY_ON_CAMPUS = {
+    "Current student", "Current student or recent graduate",
+}
+
 
 def _fact_chips(o, *, verdict=None) -> list[dict]:
     """What this posting states about applying, as at most three chips.
@@ -1268,6 +1650,20 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     repeats the window, so the fact chip is the only place a student can read
     what the posting actually stated, and it stays. Anonymous visitors get no
     verdict at all and are untouched.
+
+    Two more duplications, both FACT-vs-FACT rather than verdict-vs-fact, and
+    the correct de-dup for each turned out to be value-dependent rather than
+    kind-dependent — see `_standing_matches_grad` and
+    `_NON_DISCRIMINATING_STUDY_ON_CAMPUS` for the evidence behind each:
+
+    - A class-standing fact ("Penultimate year") and a grad-year fact ("Grad
+      2028") that AGREE merge into the one grad chip, quoting both sentences.
+      A class-standing fact that does not agree with the grad fact beside it
+      (or has no grad fact at all) is never touched — an apparent mismatch is
+      surfaced, not papered over.
+    - "Current student"/"Current student or recent graduate" is suppressed
+      outright, but only where the posting's own bucket is already one of the
+      three campus buckets this fact is redundant with.
     """
     facts = (o.raw or {}).get("facts") or {}
     made = {}
@@ -1326,14 +1722,37 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     # Walls are the facts that can END the decision: a visa answer, a language
     # you do not speak, a year of study you are not in.
     css = {"language": "fact-wall", "study": "fact-wall", "pay": "fact-pay"}
+    study_fact, grad_fact = facts.get("study"), facts.get("grad")
+    standing_merge = bool(study_fact) and _standing_matches_grad(
+        study_fact.get("value"), grad_fact)
     for fact_kind, label in labels.items():
         if fact_kind == "grad" and kind == "year_out":
             continue           # the verdict beside it already says this
+        if fact_kind == "study" and standing_merge:
+            continue           # merges into the grad chip below instead
         fact = facts.get(fact_kind)
-        if fact:
-            made[fact_kind] = {"label": label(fact),
-                               "css": css.get(fact_kind, "fact-plain"),
-                               "why": fact.get("phrase", "")}
+        if not fact:
+            continue
+        if (fact_kind == "study"
+                and fact.get("value") in _NON_DISCRIMINATING_STUDY_ON_CAMPUS
+                and o.bucket in TARGET_BUCKETS):
+            continue           # true of ~every row this feed can show at all
+        entry = {"label": label(fact), "css": css.get(fact_kind, "fact-plain"),
+                 "why": fact.get("phrase", "")}
+        if fact_kind == "grad" and standing_merge:
+            # One chip, both sentences: the label carries the stage AND the
+            # year, and the tooltip keeps the stage phrase's own evidence
+            # trail alive rather than letting it vanish with the chip it came
+            # from — see the docstring's "quoting both sentences". The `css`
+            # stays `fact-wall` — the standing chip's own styling, not plain
+            # grad's — because a stage-plus-year requirement is still a wall
+            # ("a year of study you are not in"), not a neutral detail.
+            entry["label"] = f"{study_fact['value']} · {entry['label']}"
+            entry["css"] = css["study"]
+            stage_phrase = study_fact.get("phrase", "")
+            if stage_phrase and stage_phrase != entry["why"]:
+                entry["why"] = f"{stage_phrase} {entry['why']}".strip()
+        made[fact_kind] = entry
 
     return [made[k] for k in _FACT_CHIP_ORDER if k in made][:_FACT_CHIPS_MAX]
 
@@ -1451,18 +1870,21 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
     explicit "deadline passed" state — see the three-way split below)."""
     bucket = o.bucket or OTHER
     seen_days = (now - o.first_seen).days if o.first_seen else None
+    place = _place(o)
     item = {
         "id": o.id,
         "firm_name": o.firm.name,
         "firm_slug": o.firm.slug,
         "monogram": _monogram(o.firm.name),
         "category": FIRM_CATEGORIES.get(o.firm.slug, ""),
-        "title": o.title,
+        # Minus a trailing city the place line below already prints — see
+        # `_title_without_place_echo`. Never minus anything else.
+        "title": _title_without_place_echo(o.title, place["text"]),
         "url": o.url,
         "location": o.location,
         # Same resolver the firm page reads — see `_place`. The two surfaces
         # used to disagree about a blank `location`, this is where they stop.
-        "place": _place(o),
+        "place": place,
         "bucket": bucket,
         "bucket_label": BUCKET_LABELS.get(bucket, bucket),
         # Programme/intake year — rendered next to the role type, never as a
@@ -1473,7 +1895,6 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
         "is_mine": o.firm_id in my_firm_ids,
         "seen_days": seen_days,
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
-        "fresh_label": _fresh_label(seen_days),
         "facts": _fact_chips(o, verdict=_eligibility(o, profile)),
         "reported": deadline_provenance(o),
         "verdict": _eligibility(o, profile),
@@ -1508,17 +1929,55 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
                      "rolling_stated": stated,
                      "rolling_why": (((o.raw or {}).get("facts") or {})
                                      .get("rolling", {}).get("phrase", ""))})
+    # An inexact date keeps its exact `days_left` and loses its day-level
+    # VOICE. The two are different jobs and only one of them can lie.
+    #
+    # `days_left` is an ordering and aggregation key — `_urgency_feed`'s sort,
+    # the firm cluster's `next_days` (which must never go negative), the
+    # cluster role sort, and the closing-this-week count all read it, and each
+    # breaks differently on a coarser value. So it stays the true day count:
+    # a "Sep 2026" row still sorts among the September rows, which is right.
+    #
+    # What the reader SEES is the part that has to respect precision. The
+    # countdown borrows `deadline_marker`'s own phrasing rather than restating
+    # it, so the feed and the firm page can never word the same row two ways;
+    # the urgency band drops to "upcoming" (a month-level date cannot earn the
+    # red "closes today" treatment); and the fuse bar — which burns down to a
+    # specific afternoon — is suppressed outright rather than drawn against a
+    # day nothing stated.
     elif o.deadline >= today:
         days = (o.deadline - today).days
+        prec = (o.deadline_precision or "").lower()
+        inexact = prec in _INEXACT_PRECISIONS
         item.update({
             "dated": True,
             "days_left": days,
-            "countdown": ("Closes today" if days == 0 else
-                          "Closes tomorrow" if days == 1 else
-                          f"Closes in {days} days"),
-            "level": "today" if days <= 2 else "soon" if days <= 7 else "upcoming",
+            "countdown": (
+                deadline_marker(o.deadline, prec, today=today)["countdown"]
+                if inexact else
+                "Closes today" if days == 0 else
+                "Closes tomorrow" if days == 1 else
+                f"Closes in {days} days"
+            ),
+            "level": (
+                "upcoming" if inexact else
+                "today" if days <= 2 else "soon" if days <= 7 else "upcoming"
+            ),
             # Remaining fraction of the fuse (100 = far out, ~0 = closing).
-            "fuse_pct": max(4, round((1 - min(days, _FUSE_HORIZON) / _FUSE_HORIZON) * 100)),
+            # None on an inexact date: a fuse is a day-level claim.
+            # `_styles.html`'s `.fuse-fill` renders at `width: var(--fuse)`,
+            # animating DOWN from a full bar to that width — so this number
+            # IS the bar's own remaining length, not "how much has burned".
+            # A stray `1 -` here inverted the mapping: a role closing TODAY
+            # computed to 100 (a full, unburnt-looking bar) and a role 45
+            # days out computed to the floor of 4 (nearly invisible) — the
+            # exact opposite of "the closer the deadline, the shorter the
+            # fuse" the `.fuse-passed` rule two lines below (`fuse_pct: 0`)
+            # already assumes as its other endpoint.
+            "fuse_pct": (
+                None if inexact else
+                max(4, round(min(days, _FUSE_HORIZON) / _FUSE_HORIZON * 100))
+            ),
         })
     else:
         item.update({
@@ -1631,8 +2090,18 @@ def cycle_months(months: int = 12) -> list[dict]:
             status="open", bucket__in=TARGET_BUCKETS,
             deadline__gte=today).values_list("deadline", flat=True):
         counts[(d.year, d.month)] += 1
+    # `confidence=1.0` alone, with no `precision` check, is exactly the bar
+    # `_firm_date_row` was written to replace — a `precision="estimated"`
+    # row (a month-level GUESS, rendered "~ Sep 2027" everywhere else) could
+    # sit at confidence 1.0 and bump this band as if the firm had stated the
+    # day. No live row pairs the two today, but nothing stops one (see
+    # `_CONFIRMED_FIRM_DATE_PRECISIONS`'s comment) — this reads the SAME
+    # confirmed bar `_firm_date_row` uses for the timeline right below it on
+    # the same firm page, so the two can't drift apart.
     for d in FirmDate.objects.filter(
-            confidence=1.0, date__gte=today,
+            confidence__gte=_CONFIRMED_FIRM_DATE_CONFIDENCE,
+            precision__in=_CONFIRMED_FIRM_DATE_PRECISIONS,
+            date__gte=today,
             event_kind__in=("app_close", "insight_deadline")).values_list("date", flat=True):
         counts[(d.year, d.month)] += 1
 
@@ -1804,10 +2273,19 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # gave all six values equal billing while hiding the page's single most
     # important scoping decision behind a closed control.
     #
-    # `other` and `all` are deliberately absent from the four drawn segments —
-    # they are opt-ins, reachable by deep link or by the subset sentence's
-    # "Show everything" link, never a sibling option.
+    # `other` stays deliberately absent from the drawn segments — it is an
+    # opt-in, reachable only by deep link, never a sibling option. `all` used
+    # to be the same kind of opt-in, reachable only through the subset
+    # sentence's "Show everything" link; that sentence was removed from the
+    # header (2026-08-27, "take this thing away") and its escape hatch had to
+    # stay one action away, so `all` is now drawn here too — a real, always
+    # visible fifth segment ("Everything") with its own live count, not a
+    # deep-link-only acknowledgment. `ROLE_OPTIN` (still `(OTHER, "all")`) is
+    # left alone: `firm_detail`'s own simpler `?role=` toggle still reads it
+    # and still treats "all" as an opt-in there, where there is no segmented
+    # control to hold it.
     effective_role = _effective_role(role)
+    FEED_SEGMENT_VALUES = (*SEGMENT_VALUES, "all")
     role_segments = [
         {
             "value": v,
@@ -1820,22 +2298,27 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             "count_id": f"cnt-role-{v or 'campus'}",
             "css": f"seg-{v or 'campus'}",
         }
-        for v in SEGMENT_VALUES
+        for v in FEED_SEGMENT_VALUES
     ]
 
-    # THE CONDITIONAL FIFTH SEGMENT — deep-link honesty, and a real bug guard.
+    # THE CONDITIONAL FIFTH SEGMENT — deep-link honesty, and a real bug guard,
+    # now for `other` alone. `all` graduated to a normal segment above, so
+    # gating this on the full `ROLE_OPTIN` tuple would draw it twice — once as
+    # the always-visible pill, once again here — and check two radios sharing
+    # one value.
     #
-    # Two jobs. (1) With `?role=all` active the bar must say so rather than
-    # drawing four campus pills, none checked, over a feed showing 4,342 rows.
-    # (2) Far less obvious and far more damaging: a radio GROUP WITH NO CHECKED
-    # MEMBER SERIALIZES NOTHING. Without this segment, `?role=all` renders four
-    # unchecked radios, and the moment the student touches Region or Search the
-    # htmx GET goes out with no `role` key at all — the mode silently resets to
-    # campus and 3,456 roles vanish mid-interaction. A checked fifth radio
-    # keeps `role` in the serialization, which is why it is an input and not a
+    # Two jobs remain for `other`. (1) With `?role=other` active the bar must
+    # say so rather than drawing five pills, none checked, over a feed showing
+    # thousands of experienced rows. (2) Far less obvious and far more
+    # damaging: a radio GROUP WITH NO CHECKED MEMBER SERIALIZES NOTHING.
+    # Without this segment, `?role=other` renders five unchecked radios, and
+    # the moment the student touches Region or Search the htmx GET goes out
+    # with no `role` key at all — the mode silently resets to campus and every
+    # experienced row vanishes mid-interaction. A checked fifth radio keeps
+    # `role` in the serialization, which is why it is an input and not a
     # decorative chip.
     role_optin_segment = None
-    if role in ROLE_OPTIN:
+    if role == OTHER:
         role_optin_segment = {
             "value": role,
             "label": SEGMENT_LABELS[role],
@@ -1844,26 +2327,12 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             "count_id": f"cnt-role-{role}",
         }
 
-    # `effective_role`, not `role`: an unrecognised `?role=` renders the campus
-    # scope, so it is hiding the experienced rows too and must say so.
-    hidden_other = bucket_counts.get(OTHER, 0) if effective_role == "" else 0
-
-    # The "Show everything" escape hatch for `hidden_other`: role forced to
-    # "all", every other active filter preserved. Built from the live
-    # querystring, not hardcoded — the bug this replaced rendered a bare `?`
-    # (no `show_all_qs` in context at all), which is `/opportunities/?`: the
-    # default view, i.e. the exact page that hides the roles it promised to
-    # reveal.
-    show_all_params = request.GET.copy()
-    show_all_params["role"] = "all"
-    show_all_qs = show_all_params.urlencode()
-
     # ---- The region honesty line. Picking a concrete market excludes every
     # row whose location resolved to nothing (297 of 886 on the live set), and
     # before this the page said nothing about it. The number is read straight
     # off the Region facet's own "Other / Unstated" option — already crossed
     # against every other active filter — so the sentence and the option can
-    # never disagree. Same live-querystring construction as `show_all_qs`.
+    # never disagree.
     hidden_region = 0
     if region.lower() in REGION_ORDER:
         hidden_region = next(
@@ -1912,9 +2381,14 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # apprentice intakes as parallel reqs — and those reqs close on their own
     # schedules, so the rows must all stay in the database and stay
     # close-tracked. Only the render is collapsed. See directory.dupes.
-    rows, hidden_dupes = ([r for r in rows], 0) if request.GET.get(
-        "dupes", ""
-    ).strip() == "1" else fold_duplicates(rows, sticky_ids=sticky_ids)
+    # `dupes_shown` names the toggle's own state: the "Show repeat listings"
+    # checkbox in the filter bar (opportunities.html) is this control now,
+    # not a lone escape-hatch link — the count that used to live in the
+    # header's subset sentence rides that checkbox's label instead.
+    dupes_shown = request.GET.get("dupes", "").strip() == "1"
+    rows, hidden_dupes = ([r for r in rows], 0) if dupes_shown else fold_duplicates(
+        rows, sticky_ids=sticky_ids
+    )
 
     # The undo, built from the LIVE querystring like every other one on this
     # page — a hardcoded `?dupes=1` would silently drop the student's filters.
@@ -2018,7 +2492,20 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
                 _pick_card(r)
                 for r in recommend(
                     profile,
-                    [
+                    # The page's own clock, not the ranker's default. `recommend`
+                    # keeps itself free of Django and so falls back to
+                    # `date.today()` — the SERVER's local date — while every
+                    # date-sensitive surface in this view (`today` above, the
+                    # urgency feed, `deadlines.closing_soon_window`) reads
+                    # `timezone.localdate()`, i.e. the date in `settings.
+                    # TIME_ZONE` (UTC). On any host whose OS clock is not UTC
+                    # the two are a different day for part of every day — eight
+                    # hours of it on the founder's own machine — and in that
+                    # window the picks dropped a role as expired that the feed
+                    # beside them still rendered as closing today. One clock
+                    # per request, passed in.
+                    today=today,
+                    candidates=[
                         Candidate.from_opportunity(o)
                         # Folded first, and scored second. Two copies of one
                         # posting score identically by construction, so an
@@ -2315,15 +2802,17 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # count and the offer, and neither is anywhere near the card. See
     # `_scope.html` and the `scope_only` return below.
     scope_context = {
-        "hidden_count": len(hidden_ids),
-        "hidden_other": hidden_other,
-        "show_all_qs": show_all_qs,
         "hidden_region": hidden_region,
         "show_unregioned_qs": show_unregioned_qs,
         "hidden_fit": hidden_fit,
         "show_unfit_qs": _qs_without(request, "fit"),
         "hidden_dupes": hidden_dupes,
         "show_dupes_qs": show_dupes_qs,
+        # The "Show repeat listings" checkbox's own checked state
+        # (opportunities.html) — the control that replaced the header
+        # sentence's lone `show_dupes_qs` link, so it needs to render
+        # checked/unchecked like every other filter-bar toggle.
+        "dupes_shown": dupes_shown,
         # The lens→pipeline bridge's trigger: open roles whose text names the
         # user's year and which they have never touched (tracked or
         # dismissed both count as touched — "not for me" outranks "your
@@ -2373,7 +2862,6 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # while the data is radar-cadence; naming the age is what makes the
         # pulse honest.
         "checked_ago": _last_checked(),
-        "cycle_months": cycle_months(),
         "total": total,
         # Recommendation bar. `picks` empty + `has_profile` true is the honest
         # "nothing clears the bar" state; `has_profile` false is the
@@ -2536,6 +3024,13 @@ def role_description(request, pk):
         "o": opp,
         "firm": opp.firm,
         "net": net,
+        # The drawer was the THIRD surface printing `location` raw, after the
+        # feed card and the firm row. `_place` exists because two surfaces
+        # disagreeing about one row's location is a defect; three is the same
+        # defect with more places to notice it — the card said "Putrajaya"
+        # while the drawer it opens said "PERSIARAN IRC 2, IOI RESORT CITY IOI
+        # CITY TOWER ONE:PUTRAJAYA" about the identical row.
+        "place": _place(opp),
         "bucket_label": BUCKET_LABELS.get(opp.bucket, opp.bucket),
         "blocks": paragraphs(raw.get("detail_text")),
         "fetched": bool(raw.get("detail_text")),
@@ -2748,7 +3243,15 @@ def track_eligible(request):
             continue
         if o.id in touched:
             continue
-        UserOpportunity.all_objects.create(user=request.user, opportunity=o)
+        # get_or_create, not create: `touched` was read once, above, before
+        # this loop started, so a concurrent write for the same (user,
+        # opportunity) pair -- a double-click, two tabs open on the same
+        # offer -- can land in the gap between that read and this line.
+        # UserOpportunity enforces uniqueness on exactly that pair, so a
+        # bare `.create()` there raises IntegrityError and 500s the whole
+        # confirm; `track_opportunity`'s own upsert already takes this same
+        # defence for the identical race.
+        UserOpportunity.all_objects.get_or_create(user=request.user, opportunity=o)
         saved_ids.append(o.id)
     saved = len(saved_ids)
     # The offer is consumed either way: a second POST of the same confirm
@@ -3131,6 +3634,11 @@ def _lens_item(uo, *, today):
         "title": o.title,
         "url": o.url,
         "location": o.location,
+        # What the row PRINTS — see `_place`, the same resolver the feed
+        # card and firm row use. `location` above stays raw for callers
+        # (the weekly digest, deadline push alerts) that need the stated
+        # string itself.
+        "place": _place(o),
         "stage": stage,
         "stage_label": _STAGE_LABELS.get(stage, stage.title()),
         "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
@@ -3194,6 +3702,9 @@ def _stage_card(uo, *, today, people_by_firm=None) -> dict:
         # save, and the same-titled BofA forum sitting in Applied AND
         # Interviewing reading as one application in two stages at once.
         "location": o.location,
+        # What the card PRINTS — see `_place`, the same resolver the feed
+        # card and firm row use. `location` above stays raw.
+        "place": _place(o),
         "url": o.url,
         "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
         "reported": deadline_provenance(o),
@@ -3483,6 +3994,89 @@ def my_applications(request):
     return render(request, "directory/my_applications.html", _my_applications_context(request))
 
 
+# How many rows one kind group prints before it hands the rest to the feed.
+#
+# Chosen off the measured distribution, not taste. Across the 81 firms with
+# any campus roles the median is 10 and the mean 31: at 12 the median firm is
+# untouched — every row still prints, no overflow link renders, no market line
+# renders, the page is byte-for-byte what it was. The cap exists for the eight
+# firms above 60, where the same template was building a wall (PwC 716 rows =
+# 66,832px at 1280, 97,229px at 375; `?role=all` 1,496 rows = 126,639px).
+# 12 rows is also about one screen at 1280, so a capped group reads as a
+# sample you can take in, not a list you have to leave.
+ROLE_ROWS_PER_GROUP = 12
+
+
+def _role_groups(cards, *, cap=ROLE_ROWS_PER_GROUP):
+    """The role rows as kind groups, each cut to `cap` rows.
+
+    This used to be a `{% regroup %}` in the template, which could group but
+    could not cap — and an uncapped group is how one firm's page became 74
+    screens of scroll. Capping in the template (`|slice`) would have printed
+    the rows and lost the count of what it dropped, which is the one number
+    the reader needs.
+
+    THE CAP IS PER GROUP, DELIBERATELY, not per page. `cards` arrives sorted
+    campus-buckets-first, so a flat page cap would have shown 12 internships
+    at PwC and silently dropped all 319 entry-level rows — the page's original
+    bug (a scope nobody was told about) rebuilt inside the fix. Every kind
+    that has rows keeps its heading, its true total, and a sample.
+
+    Rows within a group arrive deadline-ascending-nulls-last, so a capped
+    group leads with whatever is actually closing. Nothing is re-sorted here.
+    """
+    order: list[dict] = []
+    by_value: dict[str, dict] = {}
+    for c in cards:
+        value = c["role"]["value"]
+        g = by_value.get(value)
+        if g is None:
+            g = by_value[value] = {
+                "value": value,
+                "label": c["role"]["label"],
+                "cards": [],
+            }
+            order.append(g)
+        g["cards"].append(c)
+    for g in order:
+        g["total"] = len(g["cards"])
+        g["more"] = max(g["total"] - cap, 0)
+        g["cards"] = g["cards"][:cap]
+    return order, any(g["more"] for g in order)
+
+
+def _open_markets(opps):
+    """Which markets the rows in scope sit in, counted.
+
+    A cap hides rows, and this page's whole character is that it says what it
+    is hiding (see `firm_detail`'s docstring). "385 more" says how many; it
+    does not say that 136 of PwC's campus roles are in Singapore and 253 in
+    Europe, which is the one thing a student who cannot work in the US needs
+    from a firm page. Constant size — eight markets at the very most — so it
+    costs the same line whether the firm has 20 roles or 1,496.
+
+    Order and words come from REGION_ORDER / REGION_LABELS, the same pair the
+    feed's own region facet reads, so the two surfaces cannot drift into
+    calling `sg` "Singapore" on one page and "SG" on the other. `""` is
+    "Unstated" in the facet's exact wording: the posting never said, which is
+    a different fact from a market we do not track, and the label must not
+    blur them.
+
+    Deliberately not links. The feed is where filtering happens; a row of
+    clickable market counts here would be a filter bar in disguise on the one
+    page that documented its decision not to grow one.
+    """
+    counts = Counter(o.region or "" for o in opps)
+    out = [
+        {"label": REGION_LABELS[r], "n": counts[r]}
+        for r in REGION_ORDER
+        if counts.get(r)
+    ]
+    if counts.get(""):
+        out.append({"label": REGION_NONE_LABEL, "n": counts[""]})
+    return out
+
+
 def firm_detail(request, slug):
     """A single firm's page: its open campus openings plus its cycle timeline
     (firm_dates, confirmed vs rumored).
@@ -3499,6 +4093,31 @@ def firm_detail(request, slug):
     three campus buckets) and, like the feed, states that scope and offers the
     same `?role=` opt-in out of it. Experienced rows are not hidden — they are
     one click away and counted in the sentence that hides them.
+
+    LENGTH. Scoping fixed which rows print, not how many. Measured on the live
+    corpus: PwC's campus scope is 716 rows, and the page printed every one of
+    them — 66,832px at 1280 and 97,229px at 375, or 74 and 120 screens. Nearly
+    all of it was one section: everything above "Open Roles" (subnav, header,
+    the network slice, the timeline) measured 318px on PwC and 571px on
+    Goldman, so the role list WAS the page, 99% of its height.
+
+    And it was the page twice. `/opportunities/?firm=pwc` renders those exact
+    716 rows in 1,194px, inside the firm column's own scroll window, with a
+    filter bar, region and year facets, search, save stars and ranking. This
+    page was a second, 56x taller copy of a surface built for the volume.
+
+    So the role list stops trying to be that surface. Each kind group prints
+    at most ROLE_ROWS_PER_GROUP rows and then hands the rest to the feed,
+    filtered to this firm and this kind. On the median firm (10 campus roles)
+    no group reaches the cap, so nothing changes: no overflow link, no market
+    line, the same flat list. What the cap hides, the page states — the count
+    per group, and `_open_markets` for the shape of the rest.
+
+    WHAT THIS PAGE IS FOR, once the appendix is an appendix: the firm's
+    identity, its cycle dates, and `_my_network_at` — the only section on it
+    that differs between two students. Those are constant-size and they were
+    already on top; they now read as the page rather than as a preamble to a
+    wall.
     """
     firm = get_object_or_404(Firm, slug=slug)
     now = timezone.now()
@@ -3547,6 +4166,7 @@ def firm_detail(request, slug):
     else:
         opps = [o for o in all_open if o.bucket in TARGET_BUCKETS]
     cards = [_card(o, now=now, today=today) for o in opps]
+    role_groups, capped = _role_groups(cards)
     context = {
         "firm": firm,
         # The eyebrow used to `join` firm.regions and firm.tracks raw, under a
@@ -3557,10 +4177,46 @@ def firm_detail(request, slug):
         # built from the same two maps, spell them "Hong Kong" and "Corporate
         # Strategy". views.py:98 already states the position: raw slugs read
         # as internal shorthand and this page is public-facing.
+        #
+        # These are firms.yaml's DECLARATION, not this page's rows, and the
+        # template prefixes them "Recruits:" for exactly that reason. Labels
+        # fixed how the words READ, not what they CLAIMED, and bare they
+        # claimed the wrong thing: 25 of the 42 firms that declare a region
+        # have a top live market they never declared, and 13 have no live row
+        # in ANY declared market. See firm_detail.html's eyebrow comment — the
+        # short version is that a bare "Hong Kong" over ten Mainland China
+        # roles is the 925-vs-13 defect in the docstring above, with markets
+        # instead of counts.
+        #
+        # Still the declaration and NOT `_open_markets`: 50 of 131 firms have
+        # no open campus row at all, 33 of them declaring a region, so there
+        # is frequently no live market to derive and the declaration is the
+        # only honest thing left to print. Swapping meaning by whether rows
+        # happen to exist would put two answers in one slot, which is the
+        # defect this prefix exists to close.
         "eyebrow_regions": _labelled(firm.regions, REGION_LABELS),
         "eyebrow_tracks": _labelled(firm.tracks, TRACK_LABELS, by_label=True),
         "cards": cards,
-        "timeline": _timeline(firm, today=today),
+        # The rows the page actually prints, already grouped and capped. The
+        # template no longer regroups: see `_role_groups`.
+        "role_groups": role_groups,
+        # True when ANY group had to drop rows. The market line hangs off this
+        # one flag (the per-group overflow link hangs off that group's own
+        # `more`), so a firm small enough to print in full grows neither.
+        "capped": capped,
+        # Markets of the rows IN SCOPE, not of the firm: on `?role=other` this
+        # describes the experienced rows the page is then showing, which is
+        # the set the reader is looking at.
+        "markets": _open_markets(opps) if capped else [],
+        # `user=` so the timeline can mark the rows belonging to the cycle the
+        # student actually stated. Signed-out passes an anonymous user and
+        # gets no marker, which is the honest answer: there is no stated
+        # cycle to match against.
+        "timeline": _timeline(firm, today=today, user=request.user),
+        # Still the full in-scope count, never the printed count. The heading
+        # answers "how many are open here", and every other surface (contacts
+        # board, feed) answers it with this same number — the 925-vs-13 bug in
+        # the docstring above is what a page-local count looks like.
         "total": len(cards),
         "role": role,
         "campus_total": campus_total,

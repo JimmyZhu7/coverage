@@ -19,6 +19,10 @@ import datetime as dt
 
 import pytest
 
+from django.db import transaction
+from django.db.utils import IntegrityError
+from django.utils import timezone
+
 from directory.models import Firm, FirmDate
 
 pytestmark = pytest.mark.django_db
@@ -29,7 +33,12 @@ def _firm(slug="gs", name="Goldman Sachs"):
 
 
 def _date(firm, **kw):
-    kw.setdefault("cycle", "sa2028_ib")
+    # Since migration 0014 `cycle` holds a season+year slug and the desk lives
+    # in its own `track` column; `firm_dates_cycle_vocabulary` rejects the old
+    # fused spellings outright, which is why these fixtures read differently
+    # from the live rows the module docstring describes.
+    kw.setdefault("cycle", "sa2028")
+    kw.setdefault("track", "ib")
     kw.setdefault("region", "us")
     kw.setdefault("event_kind", "app_open")
     kw.setdefault("date", dt.date(2027, 3, 1))
@@ -103,33 +112,48 @@ def test_an_empty_source_shows_no_pill_at_all(client):
 # into the slot that otherwise holds a TRACK, and the template then appended
 # the row's own region again, so seven rows read "SA 2028 · HONG KONG · HK"
 # directly beneath rows reading "SA 2028 · HK".
+#
+# Migration 0014 removed the cause rather than the symptom: a cycle can no
+# longer carry a market at all, because `firm_dates_cycle_vocabulary` refuses
+# anything but a season+year slug and the desk half moved to `track`. What is
+# tested here is therefore split — the constraint that makes the fused
+# spelling unwritable, and the formatter that still reads one safely if a row
+# written before 0014 ever reaches it.
 # ---------------------------------------------------------------------------
-def test_a_region_suffixed_cycle_does_not_print_the_market_twice(client):
-    """The suffix and the region column agreed on all 7 live rows, so the
-    second mention was never carrying a fact — pure duplication."""
+def test_a_cycle_can_no_longer_carry_a_market_at_all(client):
+    """The stored value that produced the duplication is now unwritable."""
     firm = _firm()
-    _date(firm, cycle="sa2028_hk", region="hk")
+    with pytest.raises(IntegrityError), transaction.atomic():
+        _date(firm, cycle="sa2028_hk", track="", region="hk")
+
+
+def test_the_market_is_printed_once_from_the_region_column(client):
+    """With no suffix left to expand there is one source for the market, so
+    there is nothing to print twice."""
+    firm = _firm()
+    _date(firm, cycle="sa2028", track="", region="hk")
     body = _page(client, firm)
     assert "SA 2028 · hk" in body
     assert "Hong Kong" not in body
 
 
-def test_a_track_suffixed_cycle_keeps_both_track_and_region(client):
-    """The middle slot means TRACK. `sa2028_ib` in `us` says two different
+def test_a_track_keeps_both_the_desk_and_the_market(client):
+    """The middle slot means TRACK. `track="ib"` in `us` says two different
     things and must keep saying both."""
     firm = _firm()
-    _date(firm, cycle="sa2028_ib", region="us")
+    _date(firm, cycle="sa2028", track="ib", region="us")
     body = _page(client, firm)
     assert "SA 2028 · IB · us" in body
 
 
-def test_a_region_suffix_still_names_the_market_when_the_row_has_no_region(client):
-    """Dropping the suffix outright would lose the market on any row whose
-    own `region` column is blank."""
-    firm = _firm()
-    _date(firm, cycle="sa2028_hk", region="")
-    body = _page(client, firm)
-    assert "SA 2028 · hk" in body
+def test_a_legacy_region_suffix_still_reads_as_a_cycle_if_one_reaches_the_page():
+    """`cycle_label` keeps its suffix branch on purpose. No row can store this
+    any more, but a fixture or a pre-0014 backup can still hand one over, and
+    printing `SA2028_HK` in the product's own body copy is the failure this
+    function exists to prevent."""
+    from directory.views import cycle_label, cycle_region
+    assert cycle_label("sa2028_hk") == "SA 2028"
+    assert cycle_region("sa2028_hk") == "hk"
 
 
 # ---------------------------------------------------------------------------
@@ -144,13 +168,14 @@ def test_a_region_suffix_still_names_the_market_when_the_row_has_no_region(clien
 # under that same cycle closing in 76 days.
 # ---------------------------------------------------------------------------
 def test_an_estimated_opening_after_a_close_in_the_same_scope_is_dropped(client):
-    """The live hsbc shape exactly: a stored `SA 2028` close, a stored
-    `sa2028_hk` estimated open, one printed scope."""
+    """The live hsbc shape: a dated close and an estimated open, one scope.
+    Before 0014 the two rows stored two spellings of that scope; now they
+    store the same one, which is the point — the ambiguity was never real."""
     firm = _firm("hsbc", "HSBC")
-    _date(firm, cycle="SA 2028", region="hk", event_kind="app_close",
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_close",
           date=dt.date(2026, 10, 30), precision="", confidence=1.0,
           source_url="https://apply.careers.hsbc.com/emergingtalent/job/1365767957/")
-    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_open",
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_open",
           date=dt.date(2027, 9, 1), source_url="seed:historical-pattern")
     body = _page(client, firm)
     assert "Oct 30, 2026" in body           # the dated close survives
@@ -163,9 +188,9 @@ def test_the_rumored_close_shape_is_covered_too(client):
     estimate is contradicted either way — one is a date on file for this
     cycle and market, the other is a guess about it."""
     firm = _firm("ubs", "UBS")
-    _date(firm, cycle="SA 2028", region="hk", event_kind="app_close",
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_close",
           date=dt.date(2026, 8, 3), precision="", confidence=0.3)
-    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_open",
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_open",
           date=dt.date(2027, 9, 1), source_url="seed:historical-pattern")
     body = _page(client, firm)
     assert "Aug 3, 2026" in body
@@ -173,10 +198,10 @@ def test_the_rumored_close_shape_is_covered_too(client):
 
 
 def test_an_estimated_opening_survives_when_nothing_contradicts_it(client):
-    """gs holds the same `sa2028_hk` estimate with no HK close on file. No
+    """gs holds the same HK estimate with no HK close on file. No
     contradiction, so there is nothing to suppress."""
     firm = _firm()
-    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_open",
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_open",
           date=dt.date(2027, 9, 1), source_url="seed:historical-pattern")
     body = _page(client, firm)
     assert "~ Sep 2027" in body
@@ -186,9 +211,9 @@ def test_a_close_in_a_different_market_does_not_suppress_the_estimate(client):
     """Scope is cycle AND market. A US deadline says nothing about when the
     Hong Kong cycle opens, and must not silence it."""
     firm = _firm()
-    _date(firm, cycle="SA 2028", region="us", event_kind="app_close",
+    _date(firm, cycle="sa2028", track="", region="us", event_kind="app_close",
           date=dt.date(2026, 10, 30), precision="", confidence=1.0)
-    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_open",
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_open",
           date=dt.date(2027, 9, 1))
     body = _page(client, firm)
     assert "~ Sep 2027" in body
@@ -197,9 +222,9 @@ def test_a_close_in_a_different_market_does_not_suppress_the_estimate(client):
 def test_an_opening_before_its_close_is_a_coherent_cycle_and_stays(client):
     """The ordinary shape — opens, then closes — must be untouched."""
     firm = _firm()
-    _date(firm, cycle="SA 2028", region="us", event_kind="app_open",
+    _date(firm, cycle="sa2028", region="us", event_kind="app_open",
           date=dt.date(2026, 3, 1))
-    _date(firm, cycle="SA 2028", region="us", event_kind="app_close",
+    _date(firm, cycle="sa2028", region="us", event_kind="app_close",
           date=dt.date(2026, 10, 30), precision="", confidence=1.0)
     body = _page(client, firm)
     assert "~ Mar 2026" in body
@@ -210,9 +235,9 @@ def test_a_confirmed_opening_after_a_close_is_left_visible(client):
     """Two hard dates that disagree is a data conflict, not an over-eager
     estimate. Hiding it would hide the bug."""
     firm = _firm()
-    _date(firm, cycle="SA 2028", region="us", event_kind="app_close",
+    _date(firm, cycle="sa2028", region="us", event_kind="app_close",
           date=dt.date(2026, 10, 30), precision="", confidence=1.0)
-    _date(firm, cycle="SA 2028", region="us", event_kind="app_open",
+    _date(firm, cycle="sa2028", region="us", event_kind="app_open",
           date=dt.date(2027, 9, 1), precision="", confidence=1.0)
     body = _page(client, firm)
     assert "Sep 1, 2027" in body
@@ -222,49 +247,122 @@ def test_a_confirmed_opening_after_a_close_is_left_visible(client):
 # 4. Two contradicted closes must not render side by side
 #
 # The live shape: jpm carried an Aug 30 close and a Sep 3 close for the same
-# printed cycle, both badged "confirmed", nothing on the page telling a
-# student which to believe. `firm_dates`'s uniqueness constraint is keyed on
-# the STORED `cycle` column, so two different spellings of the same scope
-# ("SA 2028" and "sa2028_ib" printing identically once region-suffixed) sail
-# straight past it — the same collision `cycle_label` already causes for
-# app_open/app_close pairs above, just between two closes instead of an open
-# and a close. The fixtures behind the original report were deleted, so this
-# reproduces the shape rather than the literal rows.
+# printed cycle, both badged "confirmed", nothing on the page telling a student
+# which to believe. The old uniqueness constraint was keyed on the STORED
+# `cycle`, so two spellings of one scope ("SA 2028" and "sa2028_hk", which
+# print identically) sailed straight past it.
+#
+# Migration 0014 closed that door from the other side. With one spelling per
+# cycle and the desk in its own column, two rows that PRINT the same scope now
+# necessarily collide on `uniq_firm_dates_firm_cycle_track_region_event` and
+# the second cannot be written at all. So the DB-level reproduction below is
+# now a CONSTRAINT test, and the read-path guard — which is kept, because a
+# constraint only covers writers that go through the ORM — is exercised
+# directly against the rows it takes.
 # ---------------------------------------------------------------------------
-def test_two_closes_for_one_cycle_are_flagged_conflicting_not_both_confirmed(client):
+def test_the_second_close_for_one_scope_can_no_longer_be_written(client):
+    """The jpm shape, at the layer that now stops it."""
     firm = _firm("jpm", "J.P. Morgan")
-    _date(firm, cycle="SA 2028", region="hk", event_kind="app_close",
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_close",
           date=dt.date(2026, 8, 30), precision="", confidence=1.0)
-    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_close",
-          date=dt.date(2026, 9, 3), precision="", confidence=1.0)
-    body = _page(client, firm)
-    # Neither date goes missing — hiding one is how a student misses the
-    # real deadline.
-    assert "Aug 30, 2026" in body
-    assert "Sep 3, 2026" in body
-    # ...but neither gets to claim the unqualified "confirmed" badge alone.
-    assert ">confirmed<" not in body
-    assert "conflicting dates on file" in body
+    with pytest.raises(IntegrityError), transaction.atomic():
+        _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_close",
+              date=dt.date(2026, 9, 3), precision="", confidence=1.0)
+
+
+def test_two_closes_in_one_scope_are_flagged_conflicting_not_both_confirmed():
+    """The read-path guard, on the rows it would receive. Neither date goes
+    missing — hiding one is how a student misses the real deadline — but
+    neither gets to claim the unqualified "confirmed" badge alone."""
+    from directory.views import _flag_conflicting_closes
+    rows = [
+        {"event_kind": "app_close", "date": dt.date(2026, 8, 30),
+         "cycle": "SA 2028", "region": "hk", "state": "confirmed"},
+        {"event_kind": "app_close", "date": dt.date(2026, 9, 3),
+         "cycle": "SA 2028", "region": "hk", "state": "confirmed"},
+    ]
+    out = _flag_conflicting_closes(rows)
+    assert [r["state"] for r in out] == ["conflicting", "conflicting"]
+    assert all(r["conflict"]["label"] == "conflicting dates on file" for r in out)
+    assert {r["date"] for r in out} == {dt.date(2026, 8, 30), dt.date(2026, 9, 3)}
 
 
 def test_a_lone_close_is_still_confirmed(client):
-    """The ordinary, non-conflicting shape must be untouched by the new
-    check — one dated close still earns the plain "confirmed" badge."""
+    """The ordinary, non-conflicting shape must be untouched by the check —
+    one dated close still earns the plain "confirmed" badge."""
     firm = _firm()
-    _date(firm, cycle="SA 2028", region="us", event_kind="app_close",
+    _date(firm, cycle="sa2028", region="us", event_kind="app_close",
           date=dt.date(2026, 10, 30), precision="", confidence=1.0)
     body = _page(client, firm)
     assert ">confirmed<" in body
     assert "conflicting dates on file" not in body
 
 
-def test_two_identical_close_dates_are_not_a_conflict(client):
+def test_two_identical_close_dates_are_not_a_conflict():
     """Two rows that happen to agree on the date are redundant data, not a
     disagreement — nothing here for a student to be warned about."""
+    from directory.views import _flag_conflicting_closes
+    rows = [
+        {"event_kind": "app_close", "date": dt.date(2026, 10, 30),
+         "cycle": "SA 2028", "region": "hk", "state": "confirmed"},
+        {"event_kind": "app_close", "date": dt.date(2026, 10, 30),
+         "cycle": "SA 2028", "region": "hk", "state": "confirmed"},
+    ]
+    assert all(r["state"] == "confirmed" for r in _flag_conflicting_closes(rows))
+
+
+# ---------------------------------------------------------------------------
+# 6. `cycle_months` (the onboarding/Settings deadline band) must use the SAME
+#    confirmed bar the timeline right above it does, not a `confidence`-only
+#    check that ignores `precision`.
+# ---------------------------------------------------------------------------
+
+def _months_at(out, year, month):
+    # `cycle_months` labels each slot with "%b" only (no year), which is not
+    # enough to address a slot directly — walk the same year/month sequence
+    # the function itself builds instead.
+    today = timezone.localdate()
+    y, m = today.year, today.month
+    for r in out:
+        if (y, m) == (year, month):
+            return r["count"]
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    raise AssertionError(f"{year}-{month} is outside the {len(out)}-month window")
+
+
+def test_cycle_months_excludes_an_estimated_date_even_at_full_confidence():
+    """PINS A FIXED BUG: `cycle_months` filtered `FirmDate` on
+    `confidence=1.0` alone, the exact bar `_firm_date_row` (the timeline
+    right below this band on the same firm page) was written to replace,
+    because `precision="estimated"` is a month-level GUESS that can sit at
+    any confidence — nothing in `import_firm_dates` ties the two together
+    (see `_CONFIRMED_FIRM_DATE_PRECISIONS`'s comment). No live row pairs
+    1.0 with "estimated" today, but a band that would count one if it
+    existed is not actually reading the same "confirmed" this page claims
+    to show everywhere else."""
+    from directory.views import cycle_months
+
     firm = _firm()
-    _date(firm, cycle="SA 2028", region="hk", event_kind="app_close",
-          date=dt.date(2026, 10, 30), precision="", confidence=1.0)
-    _date(firm, cycle="sa2028_hk", region="hk", event_kind="app_close",
-          date=dt.date(2026, 10, 30), precision="", confidence=1.0)
-    body = _page(client, firm)
-    assert "conflicting dates on file" not in body
+    today = timezone.localdate()
+    target = today.replace(day=1) + dt.timedelta(days=40)
+    target = target.replace(day=1)  # a later month, comfortably inside the window
+    _date(firm, event_kind="app_close", date=target,
+          precision="estimated", confidence=1.0)
+
+    out = cycle_months(months=12)
+    assert _months_at(out, target.year, target.month) == 0
+
+
+def test_cycle_months_counts_a_genuinely_confirmed_close():
+    """The positive case: a day-precision, full-confidence close still
+    lands in its month — the fix narrows the filter, it does not silence it."""
+    from directory.views import cycle_months
+
+    firm = _firm()
+    today = timezone.localdate()
+    target = (today.replace(day=1) + dt.timedelta(days=40)).replace(day=1)
+    _date(firm, event_kind="app_close", date=target,
+          precision="", confidence=1.0)
+
+    out = cycle_months(months=12)
+    assert _months_at(out, target.year, target.month) == 1

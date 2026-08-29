@@ -169,11 +169,21 @@ def test_a_user_cannot_unsubscribe_another_users_subscription(client, user, othe
 # Settings page context — gates the toggle on VAPID being configured.
 # ---------------------------------------------------------------------------
 @override_settings(VAPID_PUBLIC_KEY="", VAPID_PRIVATE_KEY="")
-def test_settings_renders_the_toggle_disabled_when_vapid_is_unset(client, logged_in):
-    resp = client.get(reverse("accounts:settings"))
-    body = resp.content.decode()
-    assert 'id="notifications"' in body
-    assert "disabled" in body[body.index('id="push-alerts-toggle"'):body.index('id="push-alerts-toggle"') + 200]
+def test_settings_omits_the_toggle_entirely_when_vapid_is_unset(client, logged_in):
+    """It used to render the real checkbox, permanently disabled, over the
+    words "Not set up yet." — an interactive control for a state the reader
+    cannot reach, on every deploy the product has ever had (no VAPID key has
+    ever been configured and no PushSubscription row has ever existed).
+
+    The rule is now the one Gmail Live already followed: unconfigured means
+    the row is not drawn. Nothing about the feature moved — the toggle, its
+    endpoints and accounts/push.py are untouched, and the row comes back the
+    moment VAPID_PUBLIC_KEY is set (asserted by the two tests below). The
+    card it lives in still renders, because its other rows are real."""
+    body = client.get(reverse("accounts:settings")).content.decode()
+    assert 'id="preferences"' in body
+    assert 'id="push-alerts-toggle"' not in body
+    assert "data-push-root" not in body
 
 
 @override_settings(VAPID_PUBLIC_KEY="test-public-key", VAPID_PRIVATE_KEY="test-private-key")
