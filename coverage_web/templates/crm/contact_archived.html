@@ -16,16 +16,11 @@
 
   <header class="pagehead">
     <div class="pagehead-text">
-      <p class="pagehead-eyebrow">Network</p>
       {% if firm %}
         <h1 class="pagehead-title">Archived at {{ firm.name|smart_title }}</h1>
       {% else %}
         <h1 class="pagehead-title">Archived Contacts</h1>
       {% endif %}
-      <p class="pagehead-sub">
-        Off the board and out of the queue. Nothing is deleted: every touch
-        stays on the record and comes back with the person.
-      </p>
     </div>
   </header>
 

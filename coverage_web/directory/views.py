@@ -120,26 +120,6 @@ TRACK_LABELS = {
 }
 
 
-def _labelled(slugs, labels: dict[str, str], *, by_label: bool = False) -> list[str]:
-    """Raw slugs through a label map, deduped, in that facet's own order.
-
-    `by_label` picks WHICH order, because the two facets do not share one:
-    `_region_facet` walks REGION_ORDER (hk before us), `_track_facet` sorts
-    alphabetically by label. A firm's stored array order is arbitrary, so
-    matching each facet is what makes the eyebrow and the filter agree.
-
-    Falls back to the slug when the map has no entry, so a track added to
-    firms.yaml before its label lands degrades to the old behaviour rather
-    than vanishing — but every slug the live data holds IS mapped, and
-    `test_firm_scope` fails the build if a new one is not.
-    """
-    unique = list(dict.fromkeys(s for s in (slugs or []) if s))
-    if by_label:
-        return sorted((labels.get(s, s) for s in unique), key=str.casefold)
-    order = {key: i for i, key in enumerate(labels)}
-    unique.sort(key=lambda s: (order.get(s, len(order)), s))
-    return [labels.get(s, s) for s in unique]
-
 # EVENT_LABELS (the firm_dates event vocabulary) now lives in
 # directory/timeline.py, shared between the firm-detail table and the
 # cycle-timeline heat map.
@@ -4157,33 +4137,6 @@ def firm_detail(request, slug):
     role_groups, capped = _role_groups(cards)
     context = {
         "firm": firm,
-        # The eyebrow used to `join` firm.regions and firm.tracks raw, under a
-        # `text-transform: uppercase`, so /firms/hsbc/ said "HK · IB" and
-        # /firms/alibaba/ said "CORP-STRAT" — a hyphenated internal slug that
-        # does not read as an abbreviation of anything. `pipeline` had no
-        # label in TRACK_LABELS at all. Meanwhile the Opportunities facets,
-        # built from the same two maps, spell them "Hong Kong" and "Corporate
-        # Strategy". views.py:98 already states the position: raw slugs read
-        # as internal shorthand and this page is public-facing.
-        #
-        # These are firms.yaml's DECLARATION, not this page's rows, and the
-        # template prefixes them "Recruits:" for exactly that reason. Labels
-        # fixed how the words READ, not what they CLAIMED, and bare they
-        # claimed the wrong thing: 25 of the 42 firms that declare a region
-        # have a top live market they never declared, and 13 have no live row
-        # in ANY declared market. See firm_detail.html's eyebrow comment — the
-        # short version is that a bare "Hong Kong" over ten Mainland China
-        # roles is the 925-vs-13 defect in the docstring above, with markets
-        # instead of counts.
-        #
-        # Still the declaration and NOT `_open_markets`: 50 of 131 firms have
-        # no open campus row at all, 33 of them declaring a region, so there
-        # is frequently no live market to derive and the declaration is the
-        # only honest thing left to print. Swapping meaning by whether rows
-        # happen to exist would put two answers in one slot, which is the
-        # defect this prefix exists to close.
-        "eyebrow_regions": _labelled(firm.regions, REGION_LABELS),
-        "eyebrow_tracks": _labelled(firm.tracks, TRACK_LABELS, by_label=True),
         "cards": cards,
         # The rows the page actually prints, already grouped and capped. The
         # template no longer regroups: see `_role_groups`.

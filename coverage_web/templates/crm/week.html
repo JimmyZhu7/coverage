@@ -11,22 +11,17 @@
   {% comment %}
   Compact header strip, not a hero. The old hero plus four stat cards spent
   every pixel above the fold at 1440x800 on the commodity layer (deadlines)
-  and pushed the queue — the moat layer — below it. This is a date, a title,
-  and the page's thesis sentence in real numbers.
+  and pushed the queue — the moat layer — below it. This is just a title now.
   {% endcomment %}
   {% comment %}
-  Written out rather than {% include %}d: the summary line is this page's
-  aria-describedby target, so it needs its own id, and the include has no
-  slot for that. Same three classes, so it stays visually identical to every
-  other page header.
+  Written out rather than {% include %}d: the quick-add menu below is a
+  <details> with three links, not the single action_url/action_label anchor
+  the include supports. Same pagehead classes, so it stays visually identical
+  to every other page header.
   {% endcomment %}
   <header class="pagehead">
     <div class="pagehead-text">
-      <p class="pagehead-eyebrow">{% now "l · N j, Y" %}</p>
       <h1 class="pagehead-title">Today</h1>
-      <p class="pagehead-sub" id="today-summary">
-        <b>{{ planned_total }}</b> to do{% if debriefs %} · <b>{{ debriefs|length }}</b> chat{{ debriefs|length|pluralize }} to write down{% endif %} · <b>{{ pace.done }}/{{ pace.goal }}</b> this week
-      </p>
     </div>
     {% comment %}
     Quick add. Something worth recording — a person you just met, a chat that
@@ -232,7 +227,6 @@
 
   {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}
   <div id="today-cockpit"
-       aria-describedby="today-summary"
        hx-target="#today-cockpit" hx-swap="innerHTML"
        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
     {% include "crm/_cockpit.html" %}

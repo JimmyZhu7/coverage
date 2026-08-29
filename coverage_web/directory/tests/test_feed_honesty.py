@@ -210,11 +210,12 @@ def test_the_everything_segment_actually_shows_the_hidden_roles(client):
 # ---------------------------------------------------------------------------
 # A4 — the page must claim a personalized ordering ONLY when it performed one.
 #
-# The claim used to live in a "Sorted for you" chip above the results. That
-# chip is gone (it restated the hero subtitle two inches below it), so the
-# subtitle carries the contract alone and is conditional on `personalized`.
-# Unconditional, it told every signed-out visitor their feed was "sorted to
-# your firms" — exactly the lie the chip had been careful not to tell.
+# The claim used to live in a "Sorted for you" chip above the results, then in
+# the hero subtitle after the chip was retired (it restated the subtitle two
+# inches below it). The subtitle is gone too now (every hero's eyebrow and
+# subtitle were removed), so `personalized` carries the contract with no
+# visible copy at all — asserted directly against context instead of against
+# rendered text that no longer exists.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
@@ -231,8 +232,7 @@ def test_personalized_flag_is_in_context_and_renders(client):
 
     resp = client.get(reverse("opportunities"))
     assert resp.context["personalized"] is True
-    assert "sorted to your firms" in resp.content.decode()
-    # The retired chip must not come back alongside it.
+    # The retired chip must not come back.
     assert "Sorted for you" not in resp.content.decode()
 
 
@@ -242,9 +242,7 @@ def test_signed_out_feed_is_not_personalized(client):
     _opp(firm, "https://x/1")
     resp = client.get(reverse("opportunities"))
     assert resp.context["personalized"] is False
-    body = resp.content.decode()
-    assert "sorted to your firms" not in body
-    assert "Sorted for you" not in body
+    assert "Sorted for you" not in resp.content.decode()
 
 
 # ---------------------------------------------------------------------------

@@ -9,28 +9,8 @@
 {% block content %}
 <div class="page page--full">
   {% comment %}
-  `personalized` is what makes the subtitle honest: unconditional, it told
-  every signed-out visitor their feed was "sorted to your firms" when no firm
-  of theirs was known. See the retired "Sorted for you" chip in _results.html.
-  {% endcomment %}
-  {% comment %}
-  "Deadlines where firms publish them", not "ranked by deadline": after the
-  detail-page enrichment, 12% of open campus roles carry a real deadline and
-  the other 88% of pages state none at all (rolling review). The sort is
-  still deadline-first with nulls last; the sentence just stops implying
-  every card has one.
-  {% endcomment %}
-  {% comment %}
-  No eyebrow here, unlike every other page. It read "Insight · internships ·
-  entry-level" — the exact labels of the bucket tabs rendered ~80px below it,
-  minus the counts those tabs carry. An eyebrow is supposed to encode
-  something the title cannot; this one restated the next control down. The
-  pagehead keeps its accent stroke, so the header still looks like the rest
-  of the app's.
-  {% endcomment %}
-  {% comment %}
   Written out rather than {% include %}d, per _pagehead.html's own note: a
-  page needing richer content on one side writes the same three classes
+  page needing richer content on one side writes the same title class
   instead of growing the include a parameter per case.
 
   The Browse/My-Applications toggle used to sit BELOW the header as a
@@ -42,7 +22,6 @@
   <header class="pagehead">
     <div class="pagehead-text">
       <h1 class="pagehead-title">Opportunities</h1>
-      <p class="pagehead-sub">{% if personalized %}Every open role, sorted to your firms. Deadlines where firms publish them.{% else %}Every open role. Deadlines where firms publish them.{% endif %}</p>
     </div>
     {% if user.is_authenticated %}
       <div class="pagehead-actions">

@@ -5,23 +5,23 @@ headers at all.
 
 Usage:
 
-  {% include "_pagehead.html" with eyebrow="Your relationships" title="Network" sub="…" %}
+  {% include "_pagehead.html" with title="Network" %}
 
-`eyebrow` and `sub` are optional; `title` is not. For an action button on the
-right, pass `action_url` + `action_label`:
+Only `title` renders; it is required. `eyebrow` and `sub` may still be passed
+by call sites but are ignored — the eyebrow and subtitle were dropped from
+every hero. For an action button on the right, pass `action_url` +
+`action_label`:
 
   {% include "_pagehead.html" with title="Network" action_url=… action_label="Add contact" %}
 
 A page needing richer content on either side (Today's live counters, a page
-with two buttons) writes the same three classes itself rather than growing
+with two buttons) writes the same title class itself rather than growing
 this include a parameter per case — the CSS is what enforces consistency, and
 `{% include %}` has no slots worth faking.
 {% endcomment %}
 <header class="pagehead">
   <div class="pagehead-text">
-    {% if eyebrow %}<p class="pagehead-eyebrow">{{ eyebrow }}</p>{% endif %}
     <h1 class="pagehead-title">{{ title }}</h1>
-    {% if sub %}<p class="pagehead-sub">{{ sub }}</p>{% endif %}
   </div>
   {% if action_url %}
     <div class="pagehead-actions">
