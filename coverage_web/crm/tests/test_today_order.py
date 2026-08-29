@@ -163,7 +163,32 @@ def test_the_board_sits_below_the_plan_and_above_the_rest(loud):
     itself, which needs no rule."""
     board = _at(loud, BOARD)
     assert _at(loud, CRITICAL) < board
-    assert board < _at(loud, DEBRIEF) < _at(loud, PROPOSALS)
+    # Above BOTH of the clockless families, asserted separately rather than
+    # as one chain: this test's subject is the board's own rung, and the
+    # debrief-vs-proposals relationship below it is pinned on its own in
+    # `test_the_inbox_family_is_reachable_without_a_scroll`.
+    assert board < _at(loud, DEBRIEF)
+    assert board < _at(loud, PROPOSALS)
+
+
+def test_the_inbox_family_is_reachable_without_a_scroll(loud):
+    """"Found in your inbox" above the debrief lane, 2026-08-29.
+
+    This inverts what rung order alone would give (a decaying debrief is
+    rung 5, a proposal waiting on nobody's clock is rung 6) and the
+    inversion is the point. Ranking purely by "whose clock is running" had
+    put the two AI-fed lanes — what the mailbox proposed, and what an ATS
+    said your applications did — ninth on the page, under the debrief lane
+    and the still-open lane. On an ordinary day that is far enough down
+    that the founder reported both as missing from Today outright.
+
+    A section with no deadline still has to be FINDABLE. A review queue
+    nobody scrolls to is a review queue that does not exist, so the
+    severity ladder yields here to reachability. The autopilot OFFER did
+    not move with the cards: it stays at the foot of the family it is an
+    offer about (pinned by
+    `test_the_autopilot_pitch_sits_below_the_cards_it_is_an_offer_about`)."""
+    assert _at(loud, PROPOSALS) < _at(loud, DEBRIEF)
 
 
 def test_a_fired_clock_outranks_one_that_has_not_fired(client):
