@@ -15,14 +15,17 @@
     <div class="pagehead-text">
       <p class="pagehead-eyebrow">Network</p>
       <h1 class="pagehead-title">Parked Contacts</h1>
+      {% comment %}"read straight off the record, not re-derived" came off
+      this line: it described how the grouping is computed, which is a fact
+      about the code and not one the student can act on. The grouping itself
+      is still read straight off the audit row.{% endcomment %}
       <p class="pagehead-sub">
-        Grouped by the action that parked them, read straight off the record
-        — not re-derived. Park is a decision, not a deletion: every touch
-        stays, and one click below brings a whole cohort back into the
-        queue. Cold contacts you bring back with nothing new will simply be
-        proposed for park again in about two weeks; chatted and advocate
-        contacts also get a bench card on Today when their firm has
-        something live to talk about.
+        Grouped by the action that parked them. Park is a decision, not a
+        deletion: every touch stays, and one click below brings a whole
+        cohort back into the queue. Cold contacts you bring back with
+        nothing new will be proposed for park again in about two weeks;
+        chatted and advocate contacts also get a bench card on Today when
+        their firm has something live.
       </p>
     </div>
   </header>

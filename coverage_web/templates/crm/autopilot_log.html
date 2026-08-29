@@ -17,10 +17,9 @@
       <h1 class="pagehead-title">Autopilot</h1>
       <p class="pagehead-sub">
         What the AI decided about your inbox, and the exact line each
-        decision stands on. It decides on its own; nothing touches your
-        network until your one tap on Today. Anything it applied, one click
-        below reverses — and once you override it on a person, it never
-        decides about them again.
+        decision stands on. Nothing touches your network until your one tap
+        on Today. One click below reverses anything it applied, and once you
+        override it on a person it never decides about them again.
       </p>
     </div>
   </header>
@@ -69,7 +68,7 @@
                 <span class="arch-meta">
                   {% if d.decision == "accept" %}{% if d.status == "applied" %}Added{% elif d.status == "undone" %}Added, then undone by you{% else %}Would add{% endif %}{% else %}Left for you{% endif %}
                   {% if d.detected_by == "ai" %} · confidence {{ d.confidence|floatformat:2 }}{% endif %}
-                  {% if d.overridden %} · your override — never re-decided{% endif %}
+                  {% if d.overridden %} · your override, never re-decided{% endif %}
                 </span>
               </div>
               <span class="arch-when">

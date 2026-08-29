@@ -48,7 +48,7 @@ on every quick action so all of it stays in sync.
                 `live_total` note.
                 {% endcomment %}
                 <p class="play-people">
-                  {{ p.total }} contact{{ p.total|pluralize }} here —
+                  {{ p.total }} contact{{ p.total|pluralize }} here:
                   {% for row in p.breakdown %}{% if row.key == "parked" %}<a class="play-parked-link" href="{% url 'crm:contact_archived' %}?firm={{ p.firm.id }}">{{ row.count }} {{ row.label }}</a>{% else %}{{ row.count }} {{ row.label }}{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}
                 </p>
               {% endif %}
@@ -120,10 +120,10 @@ on every quick action so all of it stays in sync.
           {% endcomment %}
           {% if seeds %}
             <h2>Nothing due today.</h2>
-            <p>Your network is still thin, so the cadence has little to work with. Start here.</p>
+            <p>Your network is still thin, so the cadence has little to work with.</p>
           {% else %}
             <h2>You're all caught up.</h2>
-            <p>Nothing's due right now. Add people or log a touch to keep the cadence moving.</p>
+            <p>Add people or log a touch to keep the cadence moving.</p>
           {% endif %}
         {% else %}
           <h2>No contacts yet.</h2>
@@ -150,7 +150,7 @@ on every quick action so all of it stays in sync.
         <p>
           {% if held_total %}{{ held_total }} more {% if held_total == 1 %}is{% else %}are{% endif %} pacing out over the coming days. {% endif %}
           {% if still_open_total %}{{ still_open_total }} {% if still_open_total == 1 %}question is{% else %}questions are{% endif %} still open below. {% endif %}
-          {% if park_total %}{{ park_total }} {% if park_total == 1 %}contact has{% else %}contacts have{% endif %} gone quiet; park them below when you're ready. {% endif %}
+          {% if park_total %}{{ park_total }} {% if park_total == 1 %}contact has{% else %}contacts have{% endif %} gone quiet; park them below. {% endif %}
           That's {{ pace.done }} of {{ pace.goal }} this week.
         </p>
       </div>
@@ -196,7 +196,7 @@ on every quick action so all of it stays in sync.
                 the whole reason the card exists.{% endcomment %}
                 <p class="act-reason prep-learned">Last time: {{ p.learned }}</p>
               {% else %}
-                <p class="act-reason">No notes from last time. Debrief this one afterwards and there will be.</p>
+                <p class="act-reason">No notes from last time.</p>
               {% endif %}
               <div class="act-quick">
                 <div class="act-primary">
@@ -239,9 +239,14 @@ on every quick action so all of it stays in sync.
                 </div>
                 <span class="chip warmth-{{ d.contact.warmth }}">{{ d.contact.warmth }}</span>
               </div>
+              {% comment %}
+              Badge only. The reason line under it read "Write down what you
+              learned while it's fresh." — the badge's own words, the lane's
+              own title and the primary button all say that already, so the
+              sentence was the fourth thing on one card giving one order.
+              {% endcomment %}
               <div class="act-context">
                 <div class="act-badges"><span class="prio prio-debrief">Write it down</span></div>
-                <p class="act-reason">Write down what you learned while it's fresh.</p>
               </div>
               <div class="act-quick">
                 <div class="act-primary">
@@ -327,11 +332,11 @@ on every quick action so all of it stays in sync.
         <span class="prop-undo-said">
           Autopilot can read {% if autopilot_state.preview.clamped %}{{ autopilot_state.preview.decidable }} of {{ autopilot_state.preview.candidates }}{% else %}{{ autopilot_state.preview.candidates }}{% endif %} card{{ autopilot_state.preview.candidates|pluralize }} for you{% if autopilot_state.preview.free_rows %}, plus {{ autopilot_state.preview.free_rows }} application update{{ autopilot_state.preview.free_rows|pluralize }}{% endif %}.
           <span class="prop-undo-note">
-            About {{ autopilot_state.preview.credits }} credit{{ autopilot_state.preview.credits|pluralize }} of your {{ autopilot_state.preview.balance }}. It decides only — nothing is added to your network until you tap again.{% if autopilot_state.preview.clamped %} The rest stay as cards, untouched.{% endif %}
+            About {{ autopilot_state.preview.credits }} credit{{ autopilot_state.preview.credits|pluralize }} of your {{ autopilot_state.preview.balance }}. It decides only. Nothing is added to your network until you tap again.{% if autopilot_state.preview.clamped %} The rest stay as cards, untouched.{% endif %}
           </span>
         </span>
         <button type="button" class="btn btn-primary prop-undo-btn"
-                title="Read every card and write up a verdict for each. Nothing is added until you tap Add all."
+                title="Read every card and write up a verdict for each."
                 hx-post="{% url 'crm:autopilot_start' %}">Run Autopilot</button>
       </div>
     {% elif autopilot_state.phase == "active" %}
@@ -339,8 +344,8 @@ on every quick action so all of it stays in sync.
            hx-get="{% url 'crm:autopilot_state' %}" hx-trigger="every 4s">
         <span class="prop-undo-said">
           <span class="ap-pulse" aria-hidden="true"></span>
-          {% if autopilot_state.run.status == "queued" %}Autopilot is queued — it starts within a few minutes.{% else %}Autopilot is reading your cards.{% endif %}
-          <span class="prop-undo-note">This can take a few minutes. Nothing is being added to your network — it's writing verdicts for you to tap.</span>
+          {% if autopilot_state.run.status == "queued" %}Autopilot is queued. It starts within a few minutes.{% else %}Autopilot is reading your cards. This can take a few minutes.{% endif %}
+          <span class="prop-undo-note">Nothing is being added to your network. It's writing verdicts for you to tap.</span>
         </span>
         <button type="button" class="btn prop-undo-btn" disabled>Working…</button>
       </div>
@@ -358,7 +363,7 @@ on every quick action so all of it stays in sync.
     {% elif autopilot_state.phase == "reviewed_empty" %}
       <div class="prop-undo ap-strip ap-strip-quiet" role="status">
         <span class="prop-undo-said">
-          Autopilot read {{ autopilot_state.run.llm_calls }} card{{ autopilot_state.run.llm_calls|pluralize }} and left {% if autopilot_state.run.escalations > 1 %}them all{% else %}it{% endif %} for you — nothing was safe enough to add on its own.
+          Autopilot read {{ autopilot_state.run.llm_calls }} card{{ autopilot_state.run.llm_calls|pluralize }} and left {% if autopilot_state.run.escalations > 1 %}them all{% else %}it{% endif %} for you. Nothing was safe enough to add on its own.
           <span class="prop-undo-note">Each one carries the line it read, below. <a href="{% url 'crm:autopilot_log' %}">Check its work</a>.</span>
         </span>
       </div>
@@ -393,7 +398,7 @@ on every quick action so all of it stays in sync.
       <div class="prop-undo ap-strip" role="status">
         <span class="prop-undo-said">
           Autopilot read this scan: {{ autopilot_review.accepts }} ready to add{% if autopilot_review.escalations %}, {{ autopilot_review.escalations }} left for you below{% endif %}.
-          <span class="prop-undo-note">Every decision quotes the line it stands on — <a href="{% url 'crm:autopilot_log' %}">check its work</a>, or undo any of it later from the same page.</span>
+          <span class="prop-undo-note">Every decision quotes the line it stands on. <a href="{% url 'crm:autopilot_log' %}">Check its work</a>, or undo any of it later.</span>
           {% comment %}
           WHAT IT COULD AND COULD NOT READ. A run that judged 53 rows
           having been told "OTHER MAIL … none found" accepted a man who
@@ -408,7 +413,7 @@ on every quick action so all of it stays in sync.
           {% endif %}
         </span>
         <button type="button" class="btn btn-primary prop-undo-btn"
-                title="Apply every reviewed decision at once. Each one is undoable afterwards."
+                title="Apply every reviewed decision at once."
                 hx-post="{% url 'crm:autopilot_apply' autopilot_review.run.pk %}">Add all {{ autopilot_review.accepts }}</button>
       </div>
     {% endif %}
@@ -703,7 +708,7 @@ on every quick action so all of it stays in sync.
               <div class="act-context">
                 <div class="act-badges"><span class="prio">Parked</span></div>
                 <p class="act-reason">
-                  {{ b.reason }}{% if b.strength_clause %} You have met — {{ b.strength_clause }}.{% endif %}
+                  {{ b.reason }}{% if b.strength_clause %} You have met, and {{ b.strength_clause }}.{% endif %}
                 </p>
                 <p class="act-last">Parked, quiet {{ b.days_since }} day{{ b.days_since|pluralize }}.</p>
               </div>
@@ -716,7 +721,7 @@ on every quick action so all of it stays in sync.
                 <div class="act-primary">
                   <button type="button" class="btn act-btn"
                           aria-label="Bring {{ b.contact.name }} back into the queue"
-                          title="Un-parks this one contact. Nothing else does — no timer ever will."
+                          title="Un-parks this one contact. No timer ever will."
                           hx-post="{% url 'crm:today_bench_act' b.contact.id 'restore' %}">Bring back</button>
                   <button type="button" class="btn act-btn"
                           aria-label="Leave {{ b.contact.name }} parked for this opening"

@@ -9,7 +9,12 @@
 {% block content %}
 <div class="page page--full">
   {% url 'crm:contact_new' as add_contact_url %}
-  {% include "_pagehead.html" with eyebrow="Your relationships" title="Network" sub="Everyone you know at each firm, how warm they are, and who's next." action_url=add_contact_url action_label="＋ Add Contact" %}
+  {% comment %}
+  "and who's next" came off this line: the queue it named moved to Today
+  (see the note above Firm Coverage below), so the board was promising a
+  panel it no longer has.
+  {% endcomment %}
+  {% include "_pagehead.html" with eyebrow="Your relationships" title="Network" sub="Everyone you know at each firm, and how warm they are." action_url=add_contact_url action_label="＋ Add Contact" %}
   {% comment %}
   2026-08-27: cut down from eight tabs (nine with the campaign one showing)
   to the four that are actually a lens on the board — All, the regions, and
@@ -306,8 +311,7 @@
     <h2 class="strip-title">Unplaced <span class="scrub-count">{{ contact_total }}</span></h2>
     <p class="net-caveat">
       Nobody has said where these people sit, and Coverage will not guess.
-      Until then they match deadlines in both markets, which is the
-      conservative answer rather than the right one.
+      Until then they match deadlines in both markets.
     </p>
     <form id="place-form" method="post" action="{% url 'crm:contacts_bulk' %}">
       {% csrf_token %}
@@ -448,7 +452,7 @@
                 <div class="firm-card-head">
                   <div class="firm-card-name">{{ fc.firm.name|smart_title }}</div>
                   {% if fc.sponsors %}
-                    <span class="pill fc-spon" title="Sponsors visas — see Opportunities for which regions">SP</span>
+                    <span class="pill fc-spon" title="Sponsors visas. See Opportunities for which regions.">SP</span>
                   {% endif %}
                   {% if fc.close_label %}
                     <span class="gap-due-tag" title="{{ fc.close_title }}">{{ fc.close_label }}</span>
@@ -489,8 +493,8 @@
                   {% if fc.advocates %}
                   <span class="fc-adv{% if fc.adv_met %} is-met{% endif %}"
                         role="img"
-                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings"
-                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings &gt; Cadence">
+                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm. Your target, set in Settings"
+                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm. Your target, set in Settings &gt; Cadence">
                     {% for slot in fc.adv_slots %}<i class="adv-socket{% if slot %} is-filled{% endif %}"></i>{% endfor %}{% if fc.adv_met %} ✓{% endif %}
                   </span>
                   {% endif %}
