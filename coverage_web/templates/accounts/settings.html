@@ -1665,6 +1665,12 @@
                     honest states the Today card uses (see crm/_cockpit.html) —
                     the surface where a decision gets REVERSED has to show at
                     least what the surface where it was made showed.
+
+                    2026-08-29: the dismissed date folds onto this same line
+                    (it did read as its own third line before) — the section
+                    is already titled "Dismissed" and its disclosure already
+                    says "Dismissed (1)"; a lone WHEN is what this line still
+                    owes, not a third repetition of THAT.
                     {% endcomment %}
                     <br>
                     {% if p.thread_subject %}
@@ -1674,7 +1680,7 @@
                     {% else %}
                       {{ p.evidence }}
                     {% endif %}
-                    {% if p.resolved_at %}<br>Dismissed {{ p.resolved_at|date:"j M Y" }}.{% endif %}
+                    {% if p.resolved_at %} · {{ p.resolved_at|date:"j M Y" }}{% endif %}
                   </div>
                 </div>
                 <div class="set-row-control">
