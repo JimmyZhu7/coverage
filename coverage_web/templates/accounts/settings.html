@@ -1993,17 +1993,13 @@
           </div>
           <div class="set-row">
             <div class="set-row-main">
-              <span class="set-row-label">Privacy Policy</span>
-              <div class="set-row-desc">What we collect, why, and who else sees it.</div>
+              <span class="set-row-label">Privacy &amp; Terms</span>
+              <div class="set-row-desc">What we collect and why, and the terms you agreed to.</div>
             </div>
-            <div class="set-row-control"><a class="btn" href="{% url 'accounts:privacy' %}">Read</a></div>
-          </div>
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">Terms of Service</span>
-              <div class="set-row-desc">The agreement between you and Coverage.</div>
+            <div class="set-row-control">
+              <a class="btn" href="{% url 'accounts:privacy' %}">Privacy</a>
+              <a class="btn" href="{% url 'accounts:terms' %}">Terms</a>
             </div>
-            <div class="set-row-control"><a class="btn" href="{% url 'accounts:terms' %}">Read</a></div>
           </div>
         </div>
       </section>
