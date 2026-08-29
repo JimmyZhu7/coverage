@@ -706,7 +706,7 @@ materials.
       </header>
 
       {% if not configured %}
-        <p class="as-off">This page needs an Anthropic API key on the server. Until one is set, it stays switched off — nothing else in Coverage is affected.</p>
+        <p class="as-off">This page needs an Anthropic API key on the server. Nothing else in Coverage is affected.</p>
       {% endif %}
 
       {% include "assistant/_thread.html" %}
@@ -743,7 +743,7 @@ this page.
       </svg>
     </button>
   </div>
-  <p class="as-memory-sub">Facts it's picked up across your chats — not your CRM data, just things worth carrying forward.</p>
+  <p class="as-memory-sub">Facts it's picked up across your chats. Not your CRM data.</p>
   {% include "assistant/_memories.html" %}
 </dialog>
 

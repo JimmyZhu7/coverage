@@ -21,6 +21,9 @@ nothing to click through to; forgetting is the only action there is).
       </div>
     {% endfor %}
   {% else %}
-    <p class="as-memory-empty">Nothing yet — it remembers things as they come up in conversation, the way you'd mention something worth knowing next time.</p>
+    {% comment %}One line only: the dialog's own subtitle right above this
+    already explains what a memory is, so an empty state that explains it
+    again is the same sentence twice on one small screen.{% endcomment %}
+    <p class="as-memory-empty">Nothing yet.</p>
   {% endif %}
 </div>
