@@ -626,8 +626,7 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
         "Max Cold Touches",
         "touches",
         "How many times you'll reach out to someone who's never replied, "
-        "before Coverage parks them. Capped at 2 — one note, one "
-        "follow-up, never a second.",
+        "before Coverage parks them. Capped at 2: one note, one follow-up.",
     ),
     "advocate_touch_min_weeks": (
         "Advocate Check-In",

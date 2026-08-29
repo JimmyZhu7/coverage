@@ -1256,8 +1256,7 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
      "Roles you're tracking, their status, and any interview dates you added."),
     ("tasks.csv", tasks_csv, "Your tasks, open and done."),
     ("play_dismissals.csv", play_dismissals_csv,
-     "Today \"plays\" you dismissed — which firm, which dated fact, and "
-     "when."),
+     "Today \"plays\" you dismissed: which firm, which dated fact, and when."),
     ("chat_debriefs.csv", chat_debriefs_csv,
      "What each coffee chat taught you, in your own words."),
     ("campaigns.csv", campaigns_csv,
@@ -1302,7 +1301,7 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("credit_ledger.csv", credit_ledger_csv,
      "Every credit grant, spend, purchase, and adjustment on your account."),
     ("product_events.csv", product_events_csv,
-     "Your own usage events — which pages and actions you used."),
+     "Your own usage events: which pages and actions you used."),
     ("pro_waitlist.csv", pro_waitlist_csv,
      "Whether you joined the Pro launch waitlist, and when."),
     ("profile.csv", profile_csv,
@@ -1314,7 +1313,7 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
 # rule D4: "everything" is only written when it is everything.
 EXPORT_EXCLUSIONS: list[str] = [
     "Your password (we only ever store a one-way hash of it).",
-    "Shared directory data — firms, roles, deadlines. It isn't yours; it's "
+    "Shared directory data: firms, roles, deadlines. It isn't yours; it's "
     "the same for every user.",
 ]
 
