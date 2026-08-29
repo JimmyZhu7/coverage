@@ -54,7 +54,7 @@ survives even if it was in the batch.
           <span class="apps-fseg-bar"><i style="width: {{ stage.pct }}%"></i></span>
         </a>
       {% else %}
-        <span class="apps-fseg is-empty" title="Nothing at this stage yet.">
+        <span class="apps-fseg is-empty">
           <span class="apps-fseg-n">0</span>
           <span class="apps-fseg-l">{{ stage.label }}</span>
           <span class="apps-fseg-bar"></span>
@@ -183,7 +183,7 @@ survives even if it was in the batch.
               <span>Nothing you're tracking closes in the next {{ closing_soon_days }} days.
                 <a href="{% url 'opportunities' %}">Find roles that do</a>.</span>
             {% else %}
-              <span>Every role you're tracking has a posted deadline, so none of them are rolling.
+              <span>Everything you're tracking has a posted deadline.
                 <a href="{% url 'opportunities' %}">Browse openings</a>.</span>
             {% endif %}
           </p>
@@ -336,8 +336,8 @@ survives even if it was in the batch.
 {% else %}
   <div class="empty">
     <h2>No roles saved yet.</h2>
-    <p>Two ways in: star a role in the feed to keep it here, or just apply.
-      Coverage reads the confirmation email and marks it applied for you.
+    <p>Star a role in the feed to keep it here, or just apply. Coverage reads
+      the confirmation email and marks it applied for you.
       <a href="{% url 'opportunities' %}">Browse openings</a>.</p>
   </div>
 {% endif %}

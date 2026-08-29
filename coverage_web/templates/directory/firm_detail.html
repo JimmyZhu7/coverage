@@ -93,8 +93,7 @@
           {% endfor %}
         </div>
       {% else %}
-        <p class="fd-none">Nobody here yet. One contact at a firm is the
-          difference between a deadline and a way in.
+        <p class="fd-none">Nobody here yet. One contact turns a deadline into a way in.
           <a href="{% url 'crm:contact_new' %}?firm={{ firm.slug }}">Add your first</a>.</p>
       {% endif %}
     </section>
@@ -102,7 +101,7 @@
 
   <section class="section">
     <h2>Cycle Dates</h2>
-    <p class="lede">Confirmed dates are solid; anything we haven't nailed down is marked rumored, with its confidence shown.</p>
+    <p class="lede">Confirmed dates are solid. Everything else is marked rumored, with its confidence.</p>
     {% include "directory/_timeline.html" %}
   </section>
 
@@ -191,8 +190,8 @@
             <a href="{% url 'directory:firm_detail' firm.slug %}">Show campus roles</a>.</p>
         {% elif other_total %}
           <h2>No campus roles open right now.</h2>
-          <p>{{ other_total }} experienced role{{ other_total|pluralize }} open here, which is
-            hiring this product is not for.
+          <p>{{ other_total }} experienced role{{ other_total|pluralize }} open here, which this
+            product doesn't cover.
             <a href="{% url 'directory:firm_detail' firm.slug %}?role=all">Show everything</a>.</p>
         {% else %}
           <h2>Nothing open right now.</h2>

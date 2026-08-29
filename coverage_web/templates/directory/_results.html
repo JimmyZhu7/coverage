@@ -139,22 +139,18 @@ exactly the moment it had something to say.
     {% endif %}
     {% include "directory/_columns.html" %}
   </div>
-  {% if not clusters %}
-    {% comment %}The firms came back empty but the grid still rendered (the
-    Picked column had something to say). The empty-state copy belongs beside
-    it, not instead of it.{% endcomment %}
-    <div class="empty empty--incol">
-      {% if has_filters %}
-        <h2>Nothing open under those filters.</h2>
-        <p>Widen the filter, or <a href="{% url 'opportunities' %}">see everything open</a>.</p>
-      {% else %}
-        <h2>Nothing open right now.</h2>
-        <p>We'll list roles here as soon as the next check finds any.</p>
-      {% endif %}
-    </div>
-  {% endif %}
-{% else %}
-  <div class="empty">
+{% endif %}
+
+{% comment %}
+ONE empty state, whichever way the board came back empty. It used to be
+written twice — once beside the grid (when the Picked column still had
+something to say and only the firms came back empty) and once instead of it —
+and two copies of one sentence are two copies free to drift. The `--incol`
+modifier is the only thing that differed, and it still marks the beside-it
+case: the copy belongs next to the Picked column, not in place of it.
+{% endcomment %}
+{% if not clusters %}
+  <div class="empty{% if pick_cluster %} empty--incol{% endif %}">
     {% if has_filters %}
       <h2>Nothing open under those filters.</h2>
       <p>Widen the filter, or <a href="{% url 'opportunities' %}">see everything open</a>.</p>
