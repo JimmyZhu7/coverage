@@ -192,7 +192,16 @@
   .seg-pick { display: inline-flex; width: auto;
     border: 1px solid var(--line); border-radius: var(--r-ctl);
     overflow: hidden; background: var(--surface); }
-  .seg-opt { display: block; cursor: pointer; }
+  /* `margin: 0` is load-bearing, not tidiness: `.seg-opt` is a bare <label>,
+     which inherits the site-wide form-field label margin (16px top, 4px
+     bottom — see `form p label` below and the identical fix already applied
+     to `.avatar-actions .btn`). Unreset, that 20px of margin rode INSIDE
+     `.seg-pick`'s flex box (a label's margin box counts toward its flex
+     line's height) and inflated the whole toggle to 62px against a 40px
+     `.seg-face` — every neighboring numeric field in this two-up grid is
+     ~40px, so Cold Outreach stood alone as a visibly taller, misaligned box
+     next to Advocate Check-In. */
+  .seg-opt { display: block; cursor: pointer; margin: 0; }
   .seg-opt + .seg-opt .seg-face { border-left: 1px solid var(--line); }
   /* The radio is present and focusable, drawn by the face beside it. */
   .seg-opt input[type="radio"] { position: absolute; width: 1px; height: 1px;
@@ -895,7 +904,6 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Theme</span>
-              <div class="set-row-desc">Saved on this device, not your account.</div>
             </div>
             <div class="set-row-control">
               <div class="theme-pick" role="radiogroup" aria-label="Theme">
@@ -957,7 +965,6 @@
             <input type="hidden" name="section" value="notifications">
             <div class="set-row-main">
               <label class="set-row-label" for="{{ notifications_form.weekly_digest_enabled.id_for_label }}">Weekly Email Digest</label>
-              <div class="set-row-desc">What closes this week and who to ping. Sent only when there's news.</div>
             </div>
             <div class="set-row-control">
               {{ notifications_form.weekly_digest_enabled }}
@@ -1477,35 +1484,12 @@
                           </label>
                         {% endfor %}
                       </div>
-                      {% comment %}
-                      Real text in the DOM, not a CSS ::after — the default is
-                      data, so it has to survive a screen reader and a
-                      stylesheet that failed to load. Beside the toggle now,
-                      not under a description that no longer prints: there is
-                      no single input for a click-to-reset handler to act on
-                      (two radios share one `name`), and tapping the named
-                      option already IS the reset gesture, so this states the
-                      fact rather than offering a second way to it.
-                      {% endcomment %}
-                      <span class="cad-seg-default">Default {{ row.default_label }}</span>
                     </div>
                     <span class="set-sr" id="{{ row.field.auto_id }}-desc">{{ row.description }}</span>
                   {% else %}
                     <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
-                    {% comment %}
-                    Unit and default used to be two lines: the unit rode the
-                    input, the default sat in its own paragraph below a
-                    description. One quiet line now — the default chip is
-                    still the control that restores it ("Default 6" while
-                    the box is empty, "Reset to 6" once you've typed over
-                    it, one tap back), just beside the unit instead of under
-                    a sentence.
-                    {% endcomment %}
                     <div class="set-row-control set-num">
                       {{ row.field }}<span class="set-unit">{{ row.unit|title }}</span>
-                      <button type="button" class="set-default" disabled
-                              data-default-for="{{ row.field.id_for_label }}"
-                              data-default="{{ row.default }}">Default {{ row.default }}</button>
                     </div>
                     <span class="set-sr" id="{{ row.field.auto_id }}-desc">{{ row.description }}</span>
                   {% endif %}
@@ -1515,7 +1499,25 @@
                 </div>
               {% endfor %}
             </div>
-            <div class="set-save"><button type="submit" class="btn btn-primary">Save Cadence</button></div>
+            {% comment %}
+            One button for the whole form, replacing a per-row "Default N" /
+            "Reset to N" chip under every field (2026-08-29) — seven of them
+            stacked was the individual-control version of the same clutter
+            the description sentences were already cut for, and every chip
+            did the identical thing anyway: blank the field (or, for Cold
+            Outreach, check the radio DefaultingRadioSelect already treats as
+            the default — see accounts.forms.CADENCE_SEGMENTS, the `("", ...)`
+            entry) so `CadenceForm.apply_to` pops the override. Reset All is
+            that same action, run once per field instead of once per chip;
+            see the script below for how it finds them. Nothing about
+            SAVING changed — Reset All only clears the boxes, the same as
+            deleting their contents by hand would, and still needs the Save
+            button beside it to actually post.
+            {% endcomment %}
+            <div class="set-save">
+              <button type="button" class="btn" data-reset-cadence>Reset All</button>
+              <button type="submit" class="btn btn-primary">Save Cadence</button>
+            </div>
           </form>
         </div>
       </section>
@@ -1640,42 +1642,51 @@
           {% if dismissed_proposals %}
           <div class="set-group" id="dismissed-proposals">
             <h3 class="set-group-h">Dismissed From Your Inbox</h3>
-            <p class="set-note">
-              Never proposed again until you restore them here, back on
-              Today waiting for your tap. Nothing was written to your
-              network either way.
-            </p>
-            {% for p in dismissed_proposals %}
-            <div class="set-row">
-              <div class="set-row-main">
-                <span class="set-row-label">{{ p.name|smart_title }}</span>
-                <div class="set-row-desc">
-                  {{ p.email }}{% if p.firm %} · {{ p.firm.name|smart_title }}{% endif %}
-                  {% comment %}
-                  The evidence that triggered the proposal, in the same three
-                  honest states the Today card uses (see crm/_cockpit.html) —
-                  the surface where a decision gets REVERSED has to show at
-                  least what the surface where it was made showed.
-                  {% endcomment %}
-                  <br>
-                  {% if p.thread_subject %}
-                    Replied to: <strong>{{ p.thread_subject }}</strong>
-                  {% elif p.threaded_reply %}
-                    Replied to an email you sent. No subject line on it.
-                  {% else %}
-                    {{ p.evidence }}
-                  {% endif %}
-                  {% if p.resolved_at %}<br>Dismissed {{ p.resolved_at|date:"j M Y" }}.{% endif %}
+            {% comment %}
+            Every row here is already a settled answer — a dismissal that
+            already happened, kept only so Restore can reach it — same shape
+            as "Past sends"/"Past merges" above and below, so it gets the
+            same disclosure rather than printing inline by default.
+            {% endcomment %}
+            <details class="dec-settled">
+              <summary>Dismissed ({{ dismissed_proposals|length }})</summary>
+              <p class="set-note">
+                Never proposed again until you restore them here, back on
+                Today waiting for your tap. Nothing was written to your
+                network either way.
+              </p>
+              {% for p in dismissed_proposals %}
+              <div class="set-row">
+                <div class="set-row-main">
+                  <span class="set-row-label">{{ p.name|smart_title }}</span>
+                  <div class="set-row-desc">
+                    {{ p.email }}{% if p.firm %} · {{ p.firm.name|smart_title }}{% endif %}
+                    {% comment %}
+                    The evidence that triggered the proposal, in the same three
+                    honest states the Today card uses (see crm/_cockpit.html) —
+                    the surface where a decision gets REVERSED has to show at
+                    least what the surface where it was made showed.
+                    {% endcomment %}
+                    <br>
+                    {% if p.thread_subject %}
+                      Replied to: <strong>{{ p.thread_subject }}</strong>
+                    {% elif p.threaded_reply %}
+                      Replied to an email you sent. No subject line on it.
+                    {% else %}
+                      {{ p.evidence }}
+                    {% endif %}
+                    {% if p.resolved_at %}<br>Dismissed {{ p.resolved_at|date:"j M Y" }}.{% endif %}
+                  </div>
+                </div>
+                <div class="set-row-control">
+                  <form method="post" action="{% url 'crm:proposal_restore' p.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn">Restore</button>
+                  </form>
                 </div>
               </div>
-              <div class="set-row-control">
-                <form method="post" action="{% url 'crm:proposal_restore' p.id %}">
-                  {% csrf_token %}
-                  <button type="submit" class="btn">Restore</button>
-                </form>
-              </div>
-            </div>
-            {% endfor %}
+              {% endfor %}
+            </details>
           </div>
           {% endif %}
 
@@ -2547,6 +2558,39 @@
       });
       input.addEventListener("input", paint);
       paint();
+    });
+
+    // ---- Reset All (Cadence): blank every field in one tap. --------------
+    // Replaces the per-row chip the block above still runs for Weekly Touch
+    // Goal — Cadence's seven fields got ONE button instead, next to Save.
+    // "Reset" is the same action a per-row chip always did: for a number
+    // input, blank it (CadenceForm.apply_to pops the override on ""); for
+    // Cold Outreach's radiogroup, check the radio DefaultingRadioSelect
+    // already defines as the default (value="", see CADENCE_SEGMENTS) —
+    // there is no "blank" state for a radio, so its default IS a value,
+    // not an absence of one.
+    document.querySelectorAll("[data-reset-cadence]").forEach(function (btn) {
+      var form = btn.closest("form");
+      if (!form) return;
+      btn.addEventListener("click", function () {
+        form.querySelectorAll('input[type="number"]').forEach(function (input) {
+          if (input.value === "") return;
+          input.value = "";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        var groups = {};
+        form.querySelectorAll('input[type="radio"]').forEach(function (radio) {
+          (groups[radio.name] = groups[radio.name] || []).push(radio);
+        });
+        Object.keys(groups).forEach(function (name) {
+          var radios = groups[name];
+          var def = radios.filter(function (r) { return r.value === ""; })[0];
+          if (def && !def.checked) {
+            def.checked = true;
+            def.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        });
+      });
     });
 
     // ---- The pace ring: two-way bound to the weekly-goal input. ----------

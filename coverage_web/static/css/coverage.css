@@ -1309,6 +1309,46 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
   background-color: var(--danger); border-color: var(--danger);
 }
 .avatar-remove:has(input:checked) { color: var(--danger); font-weight: var(--w-med); }
+
+/* School Email (accounts/_profile_form.html) — a chip-per-address picker
+   replacing the old single comma-separated text box. Visual language
+   borrowed straight from .tf-chip/.tf-chip-x (Target Firms, above): same
+   pill shape, same remove-button that stays dim until the chip is hovered
+   or focused. The underlying `<input type="hidden" name="school_emails">`
+   still submits the exact comma-joined string ProfileForm.clean_school_emails
+   already parses — this is a progressive-enhancement layer over that field,
+   not a new one, so the server-side validation (freemail refusal, address
+   format, the 5-address cap) needed no change. See the script at the
+   bottom of _profile_form.html for how the chips and the hidden value
+   stay in sync. */
+.se-field { display: flex; flex-direction: column; gap: var(--s2); }
+.se-chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0; padding: 0;
+  list-style: none; }
+.se-chips:empty { display: none; }
+.se-chip { display: flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 6px 6px 6px 13px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--paper); font-size: var(--fs-s); font-weight: var(--w-med);
+  color: var(--ink); box-shadow: var(--shadow-1);
+  animation: chip-check 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.se-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
+  color: var(--ink-3); cursor: pointer; opacity: 0.4;
+  transition: background-color var(--t-fast), color var(--t-fast), opacity var(--t-fast); }
+.se-chip-x svg { width: 10px; height: 10px; pointer-events: none; }
+.se-chip:hover .se-chip-x, .se-chip:focus-within .se-chip-x { opacity: 1; }
+.se-chip-x:hover { background: var(--danger-soft); color: var(--danger); }
+.se-chip-x:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (hover: none) {
+  .se-chip-x { opacity: 1; }
+}
+/* The text box and Add button read as one control, like a search bar with
+   its button fused on — Add is a click target for a mouse or a touch
+   screen; Enter (or a typed comma/semicolon) does the same thing for a
+   keyboard, so neither input method is a second-class way to use this. */
+.se-add-row { display: flex; gap: var(--s2); max-width: 26rem; }
+.se-input { flex: 1; min-width: 0; }
+.se-add-btn { flex: none; }
 form p label { margin-top: var(--s3); }
 /* `.firm-list label` was a second selector here. The onboarding firm picker
    it styled is a tile grid now (`.ob-firm`, in accounts/_welcome_head.html),

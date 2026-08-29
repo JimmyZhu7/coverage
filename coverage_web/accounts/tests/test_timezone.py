@@ -215,18 +215,6 @@ def test_the_select_offers_the_shortlist_and_the_full_list():
     assert "Europe/Zurich" in every
 
 
-def test_the_settings_page_states_the_following_behaviour_honestly(client, student):
-    """The control has to say what it DOES. It used to explain the UTC-days
-    fallback; the default behaviour is now "follows this device", and the
-    consequence a student needs told is what happens when they fly."""
-    client.force_login(student)
-    # Whitespace-normalised: the hint wraps across source lines, so a raw
-    # substring match would depend on where the template happens to break.
-    body = " ".join(client.get(reverse("accounts:settings")).content.decode().split())
-    assert "On automatic it follows this device" in body
-    assert "stops following" in body, "and how to take manual control"
-
-
 def test_the_zone_round_trips_through_zoneinfo():
     """Every shortlisted zone must be constructible, or the select offers an
     option that would make the middleware fall back."""

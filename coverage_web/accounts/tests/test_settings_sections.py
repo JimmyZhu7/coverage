@@ -78,16 +78,24 @@ def test_cadence_section_shows_each_default_inline(client, logged_in):
     """Every knob still states the number it falls back to, whatever shape its
     control takes.
 
-    A default is data, not prose: it is the value you get back by clearing the
-    override, so it has to be readable without saving anything to find out.
-    Two shapes carry it now and the test accepts either, because which one a
-    knob uses is a rendering decision (accounts.forms.CADENCE_SEGMENTS) and
-    this test is about the number being present:
+    A default is data, not prose: it has to be readable without saving
+    anything to find out. Two shapes carry it now and the test accepts
+    either, because which one a knob uses is a rendering decision
+    (accounts.forms.CADENCE_SEGMENTS) and this test is about the number
+    being present:
 
-    * a spinner row prints it on the reset chip beside the box ("Default 6"
-      while you are on it, "Reset to 6" once you are not — see settings.html);
+    * a spinner row carries it on the input's own `placeholder` — the box
+      shows it the instant a typed override is cleared, with no separate
+      chip needed (2026-08-29: seven per-row "Default N"/"Reset to N" chips
+      came off in favour of one "Reset All" button beside Save Cadence; see
+      settings.html's own comment there for why);
     * a segmented row marks it on the option that IS the default, since that
-      option posts blank and so cannot carry the number in its value.
+      option posts blank and so cannot carry the number in its value — the
+      option's own selected/unselected paint (its filled vs. outlined face)
+      is what the reader sees; the number lives in the attribute a screen
+      reader and Reset All both read, not restated a second time in prose
+      (the "Default Twice" caption that used to sit beside the toggle came
+      off in the same 2026-08-29 pass as the spinner chips).
     """
     body = client.get(reverse(SETTINGS)).content.decode()
     from accounts.forms import CADENCE_SEGMENTS
@@ -101,12 +109,11 @@ def test_cadence_section_shows_each_default_inline(client, logged_in):
             assert blank, f"no default segment rendered for {key}"
             assert f'data-default-value="{default}"' in blank.group(0), (
                 f"{key}'s default segment must carry the number it stands for")
-            # ...and say so in words, not only in an attribute.
-            assert "default" in body[blank.end():blank.end() + 400].lower()
         else:
-            assert f'data-default="{default}"' in body, (
-                f"{key}'s reset chip must carry its default")
-            assert f"Default {default}" in body
+            assert re.search(rf'name="{key}"[^>]*placeholder="{default}"', body) or \
+                re.search(rf'placeholder="{default}"[^>]*name="{key}"', body), (
+                f"{key}'s input must show its default via placeholder"
+            )
 
 
 def test_cadence_diagram_draws_the_same_defaults_the_hints_promise(client, logged_in):

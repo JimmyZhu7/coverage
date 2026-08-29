@@ -46,7 +46,6 @@ replacement for one.
 
 <label for="id_name">Display Name</label>
 {{ form.name }}
-<p class="field-hint">Shown in place of your email. Doesn't change how you sign in.</p>
 {{ form.name.errors }}
 
 {% comment %}Two-up on the settings page (.set-form scopes the grid); a plain stack everywhere else, e.g. the narrow onboarding step.{% endcomment %}
@@ -76,19 +75,32 @@ can actually use it. The only thing that reads it is the discovery gate
 (capture/discovery.py::_own_institution_domains) — and only to EXCLUDE, which
 is what the hint promises out loud, since a field whose effect is invisible
 is a field people fill in wrong.
+
+Chip-per-address, not a comma-separated text box (2026-08-29): typing a
+literal comma to add a second address was a syntax nobody was told about
+except by the hint's own "Comma-separate two" clause, which existed purely
+to teach the box's own input format — a caption whose only job is to
+explain its control is the control's job, not the caption's. The visible
+`<input>`/Add button below are a scratch pad; the REAL field Django binds
+to and validates (ProfileForm.clean_school_emails, unchanged) is the
+hidden input, kept in sync by the script at the bottom of this partial.
+Server-side validation (freemail refusal, address format, the 5-address
+cap) still runs exactly as before — this is a layer over that field, not
+a new one.
 {% endcomment %}
-<label for="{{ form.school_emails.id_for_label }}">School Email</label>
-{{ form.school_emails }}
-{% comment %}
-Trimmed, but the EFFECT stays stated. The gate this feeds
-(capture/discovery.py::_own_institution_domains) only ever excludes, and
-a field whose effect is invisible is a field people fill in wrong -- see
-the note above. What went was the worked example (the housing desk) and
-the comma instruction, which the input's own placeholder can carry.
-{% endcomment %}
-<p class="field-hint">Your school address, if it isn't the one you sign in with.
-  Coverage won't suggest people who write from your own university.
-  Comma-separate two.</p>
+<label for="id_school_emails">School Email</label>
+<div class="se-field" data-se-field>
+  <ul class="se-chips" aria-live="polite"></ul>
+  <div class="se-add-row">
+    <input type="text" id="id_school_emails" class="se-input"
+           placeholder="you@university.edu" autocomplete="off"
+           spellcheck="false" inputmode="email">
+    <button type="button" class="btn se-add-btn">Add</button>
+  </div>
+  <input type="hidden" name="school_emails" data-se-hidden
+         value="{{ form.school_emails.value|default:'' }}">
+</div>
+<p class="field-hint">Coverage won't suggest people who write from your own university.</p>
 {{ form.school_emails.errors }}
 
 {% comment %}
@@ -121,8 +133,6 @@ independent of whether anything currently renders it.
 
 <label for="{{ form.timezone.id_for_label }}">Timezone</label>
 {{ form.timezone }}
-<p class="field-hint">Sets which day Coverage means by "today". On automatic it follows
-  this device; pick a zone and it stops following.</p>
 {{ form.timezone.errors }}
 
 {% comment %}
@@ -213,5 +223,123 @@ would be re-bound on every in-place save, stacking duplicates.
     }
     show(f, file);
   });
+})();
+{% endscript %}
+
+{% comment %}
+School Email's chip widget. Same progressive-enhancement shape as
+base.html's `.csel`/number-stepper enhancers (enhance/enhanceAll, a
+`dataset` flag against double-binding, re-run on `htmx:afterSettle`) rather
+than this file's own avatar script above, which delegates bare listeners on
+`document` — the avatar widget reacts to events with no per-node state to
+build; this one has to SEED the chip list from the hidden field's initial
+value exactly once per element, which is exactly the shape the base.html
+pattern exists for. The listener that re-runs it on htmx swap is bound to
+`document.body` once, on first load, and survives every later swap of
+`#profile-fields` untouched — same reasoning as base.html's own comment on
+its two enhancers.
+{% endcomment %}
+{% script %}
+(function () {
+  function chipSvg() {
+    return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" ' +
+      'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  }
+
+  function makeChip(email) {
+    var li = document.createElement("li");
+    li.className = "se-chip";
+    var span = document.createElement("span");
+    span.textContent = email;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "se-chip-x";
+    btn.setAttribute("aria-label", "Remove " + email);
+    btn.innerHTML = chipSvg();
+    li.appendChild(span);
+    li.appendChild(btn);
+    return li;
+  }
+
+  function currentEmails(list) {
+    var values = [];
+    list.querySelectorAll(".se-chip span").forEach(function (s) { values.push(s.textContent); });
+    return values;
+  }
+
+  // Comma-joined, matching exactly what ProfileForm.apply_to originally
+  // wrote (", ".join(user.school_emails)) and what clean_school_emails
+  // splits back apart -- the hidden field's contract never changed, only
+  // what writes to it.
+  function sync(list, hidden) {
+    hidden.value = currentEmails(list).join(", ");
+  }
+
+  function addEmail(list, hidden, raw) {
+    var value = (raw || "").trim().toLowerCase();
+    if (!value) return false;
+    if (currentEmails(list).indexOf(value) > -1) return true; // silently a no-op, like the old field deduped
+    list.appendChild(makeChip(value));
+    sync(list, hidden);
+    return true;
+  }
+
+  function enhance(field) {
+    if (field.dataset.seDone) return;
+    field.dataset.seDone = "1";
+
+    var list = field.querySelector(".se-chips");
+    var hidden = field.querySelector("[data-se-hidden]");
+    var input = field.querySelector(".se-input");
+    var addBtn = field.querySelector(".se-add-btn");
+
+    // Seed from the server-rendered value. Split on the same
+    // `[,;\s]+` clean_school_emails itself splits on, so a value saved
+    // before this widget existed (or restored from a validation-error
+    // round-trip) renders as the right chips on first paint.
+    (hidden.value || "").split(/[,;\s]+/).forEach(function (piece) {
+      var value = piece.trim();
+      if (value) list.appendChild(makeChip(value));
+    });
+    sync(list, hidden);
+
+    function commit() {
+      if (addEmail(list, hidden, input.value)) input.value = "";
+    }
+    addBtn.addEventListener("click", commit);
+    input.addEventListener("keydown", function (e) {
+      // Comma/semicolon typed IS "I'm done with this one" even though
+      // there is no longer a comma-separated box to type it into --
+      // muscle memory from the old field should still work.
+      if (e.key === "Enter" || e.key === "," || e.key === ";") {
+        e.preventDefault();
+        commit();
+      } else if (e.key === "Backspace" && !input.value) {
+        // Backspace on an empty box edits the last chip back into it --
+        // the same "undo the most recent thing" a comma list gave for
+        // free by just leaving the cursor at the end of the text.
+        var last = list.lastElementChild;
+        if (last) {
+          e.preventDefault();
+          input.value = last.querySelector("span").textContent;
+          last.remove();
+          sync(list, hidden);
+        }
+      }
+    });
+    list.addEventListener("click", function (e) {
+      var btn = e.target.closest(".se-chip-x");
+      if (!btn) return;
+      btn.closest(".se-chip").remove();
+      sync(list, hidden);
+    });
+  }
+
+  function enhanceAll(root) {
+    (root || document).querySelectorAll("[data-se-field]").forEach(enhance);
+  }
+  if (document.readyState !== "loading") enhanceAll();
+  else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });
+  document.body.addEventListener("htmx:afterSettle", function (e) { enhanceAll(e.target); });
 })();
 {% endscript %}
