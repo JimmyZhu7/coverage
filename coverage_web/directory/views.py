@@ -1517,7 +1517,16 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
                           f"Closes in {days} days"),
             "level": "today" if days <= 2 else "soon" if days <= 7 else "upcoming",
             # Remaining fraction of the fuse (100 = far out, ~0 = closing).
-            "fuse_pct": max(4, round((1 - min(days, _FUSE_HORIZON) / _FUSE_HORIZON) * 100)),
+            # `_styles.html`'s `.fuse-fill` renders at `width: var(--fuse)`,
+            # animating DOWN from a full bar to that width — so this number
+            # IS the bar's own remaining length, not "how much has burned".
+            # A stray `1 -` here inverted the mapping: a role closing TODAY
+            # computed to 100 (a full, unburnt-looking bar) and a role 45
+            # days out computed to the floor of 4 (nearly invisible) — the
+            # exact opposite of "the closer the deadline, the shorter the
+            # fuse" the `.fuse-passed` rule two lines below (`fuse_pct: 0`)
+            # already assumes as its other endpoint.
+            "fuse_pct": max(4, round(min(days, _FUSE_HORIZON) / _FUSE_HORIZON * 100)),
         })
     else:
         item.update({
