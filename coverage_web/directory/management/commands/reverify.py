@@ -194,21 +194,7 @@ class Command(BaseCommand):
         # than waiting for them to reach the front of the oldest-NULL queue.
         ids = [int(x) for x in opts["ids"].split(",") if x.strip()]
         if ids:
-            # `status="open"` on purpose, same as the default queue below:
-            # this command's whole contract (module docstring, every branch
-            # below) is a check over OPEN rows, and it has no path that
-            # reopens one — only `reopen_confirmed_live_rows` does,
-            # deliberately, with its own audit trail (flipping `status`
-            # back, clearing `closed_at`). Without this filter, an
-            # `--ids` list that happened to name a closed row would still
-            # call `verify()` for it, and a "verified-open" result would
-            # silently stamp `last_verified`/`deadline` on a row every other
-            # surface still reads as closed — a "closed" posting wearing a
-            # same-day "verified" timestamp, with no status change to
-            # explain it.
-            candidates = list(
-                Opportunity.objects.filter(id__in=ids, status="open").order_by("id")
-            )
+            candidates = list(Opportunity.objects.filter(id__in=ids).order_by("id"))
         else:
             candidates = list(
                 Opportunity.objects.filter(status="open")
