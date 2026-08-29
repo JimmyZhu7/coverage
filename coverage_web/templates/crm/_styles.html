@@ -935,7 +935,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        grid itself was asked for. The grid's own `gap` is the one thing
        that should be setting the space between these cards. */
     margin: 0; }
-  .net-mini-check { flex: none; margin: 0; accent-color: var(--accent);
+  .place-check { flex: none; margin: 0; accent-color: var(--accent);
     width: 13px; height: 13px; cursor: pointer; }
   .net-mini-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
   /* Selected. Tint the whole card, not just the box — at four cards a row
@@ -1156,7 +1156,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .firm-card { background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s3) var(--s4); cursor: grab;
     height: 100%; overflow: hidden;
-    display: flex; flex-direction: column; gap: var(--s2); box-shadow: var(--shadow-1);
+    display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-1);
     transition: box-shadow var(--t-med), transform var(--t-med), opacity var(--t-fast); }
   .firm-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
   .firm-card.dragging { opacity: 0.5; cursor: grabbing; }
@@ -1193,7 +1193,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      read at a glance, and a stacked line spends a whole row saying what fits
      beside the bar. The row is as tall as the 10px sockets; the bar stays
      6px and centres in it. */
-  .firm-card { gap: 6px; }
   .firm-card-foot { display: flex; align-items: center; gap: var(--s2);
     margin-top: auto; flex: none; }
   /* 10px/1 keeps the foot row a flat 10px, same as the sockets beside it. */
@@ -1323,7 +1322,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* The explicit selection control. NOT a wrapping <label> like
      `.net-mini` — this card already has its own click targets (the mailto
      link, Log Touch, Edit), so the box has to be its own deliberate target
-     rather than fighting those for the click. Sized like `.net-mini-check`
+     rather than fighting those for the click. Sized like `.place-check`
      and aligned to the avatar's cap-height, not stretched to the card. */
   .cc-check { flex: none; margin-top: 3px; accent-color: var(--accent);
     width: 15px; height: 15px; cursor: pointer; }

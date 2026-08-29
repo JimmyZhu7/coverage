@@ -1329,9 +1329,6 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 "tier": tier,
                 "label": label,
                 "cards": cards,
-                # What this tier is committing the user to, in advocates.
-                # Only for real tiers: "Unranked" is not a commitment.
-                "cost": coverage.tier_cost(cards, adv_target) if tier else None,
             })
 
     # --- Coverage Gaps strip (top of the page) ---------------------------
@@ -1432,7 +1429,6 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             # Said once per panel, in the module that builds the links, so
             # the promise and the code can't drift apart.
             "sourcing_note": sourcing.DISCLOSURE,
-            "adv_target": adv_target,
             "tier_sections": tier_sections,
             "firm_total": len(user_firms),
             "sections": sections,
@@ -2495,7 +2491,6 @@ def _contact_live_context(
 
     return {
         "contact": contact,
-        "touches": touches,
         "touch_rows": touch_rows,
         "state_line": _status_line(contact),
         "park_note": _park_note(contact),
