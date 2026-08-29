@@ -33,7 +33,7 @@ on actually holding the text.
     {% endcomment %}
     {% if card.place.text %}
       <p class="frow-meta{% if not card.place.exact %} is-market{% endif %}"
-         {% if card.place.why %}title="{{ card.place.why }}"{% endif %}>{{ card.place.text|smart_location }}</p>
+         {% if card.place.why %}title="{{ card.place.why }}"{% endif %}>{{ card.place.text|smart_location }}{% if card.place.more %} +{{ card.place.more }} more{% endif %}</p>
     {% endif %}
     {% if card.facts or card.tags %}
       <div class="frow-chips">

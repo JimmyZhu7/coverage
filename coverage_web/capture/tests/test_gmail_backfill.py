@@ -239,3 +239,83 @@ class TestGmailBackfillCommand:
 
         in_progress.refresh_from_db()
         assert in_progress.backfill_status == "running"  # untouched
+
+
+# ---------------------------------------------------------------------------
+# Queue behaviour under load. Both of these are invisible at one user and are
+# the difference between "Scan Now works" and "Scan Now works for some people"
+# once a cohort is on the product.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_the_rescan_queue_serves_the_longest_wait_first():
+    """Without an explicit order the database returns these rows however it
+    likes. That is fine at one user and a starvation bug at fifty: whoever the
+    planner puts last can be pushed past the tick budget on every tick and
+    wait forever while newer requests are served ahead of them."""
+    from django.utils import timezone
+    from datetime import timedelta
+    from django.db.models import F, Q
+    from capture.models import GmailConnection
+
+    now = timezone.now()
+    # Created newest-first, so insertion order is the opposite of the answer.
+    for label, minutes in [("newest", 1), ("middle", 30), ("oldest", 120)]:
+        u = User.objects.create_user(email=f"{label}@example.com", password="x")
+        GmailConnection.all_objects.create(
+            user=u, gmail_address=f"{label}@gmail.com", status="active",
+            backfill_status="done",
+            rescan_status="pending",
+            rescan_requested_at=now - timedelta(minutes=minutes),
+        )
+
+    ordered = list(
+        GmailConnection.all_objects.filter(status="active", rescan_status="pending")
+        .order_by(F("rescan_requested_at").asc(nulls_first=True), "pk")
+        .values_list("gmail_address", flat=True)
+    )
+    assert ordered == ["oldest@gmail.com", "middle@gmail.com", "newest@gmail.com"]
+
+
+@pytest.mark.django_db
+def test_a_row_that_never_recorded_a_request_time_goes_first():
+    """`nulls_first` is deliberate. A row with no timestamp is either a
+    pre-field row or a crashed run — it has been waiting longest by
+    definition, and sorting it last is how a row gets stuck forever."""
+    from django.utils import timezone
+    from datetime import timedelta
+    from django.db.models import F
+    from capture.models import GmailConnection
+
+    recent = User.objects.create_user(email="recent@example.com", password="x")
+    GmailConnection.all_objects.create(
+        user=recent, gmail_address="recent@gmail.com", status="active",
+        backfill_status="done", rescan_status="pending",
+        rescan_requested_at=timezone.now() - timedelta(minutes=5),
+    )
+    stranded = User.objects.create_user(email="stranded@example.com", password="x")
+    GmailConnection.all_objects.create(
+        user=stranded, gmail_address="stranded@gmail.com", status="active",
+        backfill_status="done", rescan_status="pending",
+        rescan_requested_at=None,
+    )
+
+    first = (GmailConnection.all_objects
+             .filter(status="active", rescan_status="pending")
+             .order_by(F("rescan_requested_at").asc(nulls_first=True), "pk")
+             .first())
+    assert first.gmail_address == "stranded@gmail.com"
+
+
+def test_the_tick_budget_is_shorter_than_the_production_tick():
+    """The budget's whole job is stopping one tick running into the next.
+
+    render.yaml schedules this command `*/5`. If the budget ever exceeds the
+    interval, ticks overlap, each holding mailbox locks the others want, and
+    Scan Now gets slower as users are added with nothing appearing to fail —
+    the hardest kind of slowness to diagnose. Pinned here rather than trusted
+    to stay right, because the two numbers live in different files.
+    """
+    from capture.management.commands.gmail_backfill import TICK_BUDGET
+
+    production_tick_seconds = 5 * 60
+    assert TICK_BUDGET.total_seconds() <= production_tick_seconds

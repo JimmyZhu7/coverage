@@ -185,6 +185,31 @@ _ROLE_PHRASES: list[tuple[str, float]] = [
     ("analyst", 30.0),
     ("intern", 20.0),
 ]
+
+# THE ONE PHRASE THAT MAY NOT MATCH AS A BARE SUBSTRING, and it is the lowest
+# tier in the table, which is what made it dangerous. "intern" sits inside
+# "internal" and "international": an "Internal Audit Manager" and an
+# "International Equities" seat both scored 20.0 — the intern tier — where the
+# honest answer is the unrecognized-role baseline (`leverage_unknown_role`,
+# 30.0) or better. The direction of that error is the bad one: it does not
+# merely fail to promote a senior contact, it actively DEMOTES a real one
+# below the score a blank role string would have got, on nothing but a
+# spelling coincidence.
+#
+# `\b` on both ends, with the real intern suffixes spelled out so the tier
+# still catches every shape it was written for: "Intern", "Interns",
+# "Internship", "Summer Internship". Nothing else in `_ROLE_PHRASES` needs
+# this — no other entry is a prefix of a common unrelated word — so the rest
+# keep plain substring semantics exactly as before, via `re.escape`.
+_ROLE_PHRASE_PATTERNS: list[tuple[re.Pattern[str], float]] = [
+    (
+        re.compile(r"\bintern(?:s|ship|ships)?\b" if phrase == "intern"
+                   else re.escape(phrase)),
+        score,
+    )
+    for phrase, score in _ROLE_PHRASES
+]
+
 _ROLE_TOKENS: dict[str, float] = {
     "md": 100.0, "partner": 100.0, "ceo": 100.0, "cfo": 100.0, "coo": 100.0,
     "chief": 100.0, "president": 100.0, "ed": 90.0, "svp": 70.0, "vp": 65.0,
@@ -248,6 +273,27 @@ def _as_dt(value: Any) -> datetime | None:
                 continue
         return None
     return None
+
+
+def _required_as_of(value: Any) -> datetime:
+    """`as_of` coerced to a tz-aware UTC datetime, or a NAMED failure.
+
+    `_as_dt` answers "parse this if you can" and returns None when it cannot,
+    which is right for a touch timestamp — one unreadable `ts` among twenty
+    should be skipped, not fatal. It is wrong for `as_of`, which every axis
+    reads: `score_contact(..., as_of=None)` used to return None from `_as_dt`
+    and then surface, sixty lines later, as `'NoneType' object has no
+    attribute 'astimezone'` — a stack trace that names the serializer rather
+    than the argument, for every unparseable shape alike (None, "", "not a
+    date", an int). There is no defensible default for "when is now", so this
+    refuses at the boundary and says which argument was wrong.
+    """
+    parsed = _as_dt(value)
+    if parsed is None:
+        raise ValueError(
+            f"as_of must be a datetime, date, or ISO-8601 string; got {value!r}"
+        )
+    return parsed
 
 
 def _days_between(later: datetime, earlier: datetime) -> float:
@@ -354,7 +400,20 @@ def _score_responsiveness(
     points purely for having been logged as a chat."""
     sends = [t for t in touches if t.get("kind") in _OUTBOUND_KINDS]
     replies = [t for t in touches if t.get("kind") in _MEANINGFUL_KINDS]
-    meta: dict[str, Any] = {"sends": len(sends), "replies": len(replies), "median_latency_days": None}
+    # `reply_ratio` is seeded here rather than only on the way out, so the
+    # axis dict has the SAME KEYS for every contact. It used to be written
+    # only past the early return below, which meant a contact with no
+    # touches at all came back without it while everyone else had it — a
+    # consumer indexing `axes["responsiveness"]["reply_ratio"]` would work on
+    # 99% of a network and KeyError on the newest person in it. Nothing reads
+    # it today; a payload this engine serializes into a snapshot should not
+    # have an optional field waiting for the first reader to find out.
+    meta: dict[str, Any] = {
+        "sends": len(sends),
+        "replies": len(replies),
+        "median_latency_days": None,
+        "reply_ratio": 0.0,
+    }
     if not sends and not replies:
         return 0.0, meta
 
@@ -377,7 +436,12 @@ def _score_responsiveness(
         n = len(latencies)
         median = latencies[n // 2] if n % 2 else (latencies[n // 2 - 1] + latencies[n // 2]) / 2
         meta["median_latency_days"] = _round1(median)
-        latency_score = _clamp(1.0 - median / params["resp_latency_zero_days"], 0.0, 1.0)
+        # `or 1` — same params-bundle guard as the recency half-life and the
+        # momentum windows; a zero here means "any latency at all scores 0",
+        # which a ramp of one day expresses without dividing by zero.
+        latency_score = _clamp(
+            1.0 - median / (params["resp_latency_zero_days"] or 1), 0.0, 1.0
+        )
     else:
         latency_score = 0.0
 
@@ -400,7 +464,13 @@ def _score_recency(
         return 0.0, {"days_since_meaningful": None}
     last = max(meaningful)
     days = max(0.0, _days_between(as_of, last))
-    weight = 0.5 ** (days / params["recency_half_life_days"])
+    # `or 1` for the same reason as the momentum windows and the timeline
+    # runway: this is a params key a caller may override wholesale, and a
+    # zero half-life would raise ZeroDivisionError out of the middle of a
+    # scorer rather than being rejected at the boundary. A half-life of one
+    # day is the fastest decay the formula can express and is what "no
+    # half-life" degenerates to.
+    weight = 0.5 ** (days / (params["recency_half_life_days"] or 1))
     return _clamp(100.0 * weight), {"days_since_meaningful": _round1(days)}
 
 
@@ -410,8 +480,8 @@ def _seniority_from_role(role: str | None) -> float | None:
     if not role:
         return None
     text = role.lower()
-    for phrase, score in _ROLE_PHRASES:
-        if phrase in text:
+    for pattern, score in _ROLE_PHRASE_PATTERNS:
+        if pattern.search(text):
             return score
     tokens = {tok for tok in "".join(ch if ch.isalnum() else " " for ch in text).split()}
     best: float | None = None
@@ -469,8 +539,20 @@ def _contact_reason(
 
     if depth_level >= 3:
         clauses.append("advocate")
-    elif depth_level == 2:
+    elif depth_level == 2 and chat_count:
         clauses.append(f"{chat_count} chat{'s' if chat_count != 1 else ''}")
+    elif depth_level == 2:
+        # DEPTH 2 WITH NO `chat` TOUCH ON RECORD, which is a real state and
+        # not a contradiction: `pipeline.set_state`'s manual_override is the
+        # documented path for a student marking somebody "chatted" without
+        # logging the conversation itself, and both the CRM's own override
+        # control and `assistant.tools.set_contact_status` write exactly that.
+        # The counted clause read "0 chats" for them — a card asserting zero
+        # conversations as its evidence that the conversation happened, which
+        # is the same sentence-arguing-with-itself defect the counted-silence
+        # comment above describes. The count only earns its place when there
+        # is one; otherwise the level is the whole fact.
+        clauses.append("chatted")
     elif depth_level == 1:
         clauses.append("replied, no chat yet")
     elif not counted_silence:
@@ -538,7 +620,7 @@ def score_contact(
         byte-stable.
     """
     p = _merged_params(params)
-    as_of = _as_dt(as_of)  # naive -> UTC, so the serialized as_of never depends on machine tz
+    as_of = _required_as_of(as_of)  # naive -> UTC, so the serialized as_of never depends on machine tz
     tlist = list(touches)
 
     depth_level = _depth_level(tlist)
@@ -638,8 +720,13 @@ def _score_momentum(
     base window. Accelerating -> 100, steady -> 50, decelerating/stalled ->
     below 50 / 0. Overlapping windows (recent inside base) are intentional —
     a fresh burst reads as momentum."""
-    recent_days = params["momentum_recent_days"]
-    base_days = params["momentum_base_days"]
+    # `or 1` on both, for the same reason as `_score_timeline`'s runway: these
+    # are params keys, a caller may hand in a full override bundle, and a 0
+    # window would divide by zero inside the scorer instead of being rejected
+    # at the boundary. A zero-length window holds nothing, and `recent/1` over
+    # an empty window is 0, which is what a zero-length window should score.
+    recent_days = params["momentum_recent_days"] or 1
+    base_days = params["momentum_base_days"] or 1
     recent = base = 0
     for t in touches:
         dt = _as_dt(t.get("ts"))
@@ -650,7 +737,15 @@ def _score_momentum(
             base += 1
             if age <= recent_days:
                 recent += 1
-    meta = {"recent_count": recent, "base_count": base}
+    # `trend_ratio` seeded here, not only written on the way out — same
+    # same-shape-for-every-firm rule as `_score_timeline`'s meta and
+    # `_score_responsiveness`'s `reply_ratio`. `None` is the honest value:
+    # a firm with no interactions in the base window has no trend, which is
+    # different from a trend of zero. `_firm_reason` already reads it with
+    # `.get` and gates on `base_count`, so it is unaffected either way.
+    meta: dict[str, Any] = {
+        "recent_count": recent, "base_count": base, "trend_ratio": None,
+    }
     if base == 0:
         return 0.0, meta
     recent_rate = recent / recent_days
@@ -704,9 +799,16 @@ def _score_timeline(
     nxt = _next_firm_date(firm_dates, user, today)
     warm = sum(1 for cs in contact_scores if cs["composite"] >= params["warm_threshold"])
     advocates = sum(1 for cs in contact_scores if cs["axes"]["depth"]["level"] >= 3)
+    # Every key is seeded here, including the two only the dated path
+    # computes, so the axis payload has the SAME SHAPE for every firm. Same
+    # reasoning as `_score_responsiveness`'s `reply_ratio`: `axes` is
+    # serialized into a snapshot, and a field present for most firms and
+    # absent for the ones with no confirmed date is a KeyError waiting for
+    # its first reader. `None` is the honest value for "no date, so nothing
+    # was measured against one".
     meta: dict[str, Any] = {
         "warm_contacts": warm, "advocates": advocates,
-        "next_event": None, "days_until": None,
+        "next_event": None, "days_until": None, "network_readiness": None,
     }
     if nxt is None:
         # No confirmed date -> not measurably behind; neutral, and say so.
@@ -721,7 +823,13 @@ def _score_timeline(
     target = params["advocate_target"]
     network_readiness = min(1.0, (advocates + 0.5 * max(0, warm - advocates)) / target) if target else 1.0
 
-    runway = params["timeline_runway_days"]
+    # `or 1` rather than a bare divide: `timeline_runway_days` is a params key
+    # and a caller may pass a full override bundle (see `_merged_params`), so a
+    # 0 here is a ZeroDivisionError raised from inside a scorer rather than a
+    # rejected parameter. A runway of 0 means "no comfortable lead time at
+    # all", which is the same thing as being at the date already — urgency
+    # pinned to 1 — and that is what falling back to 1 produces.
+    runway = params["timeline_runway_days"] or 1
     urgency = _clamp((runway - days_until) / runway, 0.0, 1.0)  # 0 far out, 1 at/after the date
     readiness_fraction = 1.0 - urgency * (1.0 - network_readiness)
     meta["network_readiness"] = _round1(network_readiness * 100) / 100
@@ -742,6 +850,100 @@ def _overlap(a: Iterable[str] | None, b: Iterable[str] | None) -> bool | None:
 # else — including a missing entry — is UNKNOWN, never a guess.
 WORK_AUTH_CITIZEN = "citizen"
 WORK_AUTH_SPONSORSHIP = "sponsorship"
+
+
+def relevant_regions(
+    user_regions: Iterable[str] | None, firm_regions: Iterable[str] | None
+) -> set[str]:
+    """The regions where this user × firm pairing could actually happen.
+
+    The overlap between the two sides, falling back to whichever side is known
+    when the overlap is empty (an unstated preference on either side, or a firm
+    the user is browsing outside their regions), and to the empty set when
+    neither is. Case- and whitespace-normalized.
+
+    Extracted so `needs_sponsorship` (the USER's side of the sponsorship
+    question) and `resolve_firm_sponsors` (the FIRM's side) scope to the same
+    regions by construction. Two functions answering one question against two
+    different region sets is how a student gets told a firm sponsors in a
+    market neither of them was talking about.
+    """
+    user_set = {(r or "").strip().lower() for r in (user_regions or [])} - {""}
+    firm_set = {(r or "").strip().lower() for r in (firm_regions or [])} - {""}
+    return user_set & firm_set or firm_set or user_set
+
+
+def resolve_firm_sponsors(sponsors: Any, relevant: Iterable[str] | None) -> bool | None:
+    """Does this firm sponsor in the regions in play? True / False / None.
+
+    WHY THIS EXISTS. `_score_structural` used to read the firm's sponsorship
+    stance as `bool(firm.get("sponsors"))`, and the web layer
+    (`crm.views._contact_live`) hands it `directory.Firm.sponsors` — a
+    JSONField whose documented shape is a PER-REGION dict, `{"us": True,
+    "hk": "unknown"}`. Truthiness over a dict answers a different question
+    from the one being asked: it reports whether the column is non-empty.
+
+    Measured on the live board the day this was written, 131 firms:
+
+      - 73 carry `{}` — the column's own default, meaning "nobody has recorded
+        a policy". `bool({})` is False, so the scorer asserted `sponsorship_ok
+        = False`, docked the structural axis 20 points, and printed "no
+        sponsorship" in the reasoning line. 14 of those 73 are firms a real
+        user has tiered. That is a confident negative claim manufactured out
+        of an empty column, against the function's own contract two lines up:
+        "Unknown inputs are neutral (0.5), never a hard penalty."
+      - 6 carry a dict with no `True` in it (`{"hk": "unknown"}`, and the
+        all-False shape the dict exists to express). `bool` of a non-empty
+        dict is True, so a firm that sponsors NOWHERE — or has explicitly
+        written down that it does not know — scored full marks and drew no
+        warning at all. `directory/sponsorship.py` names this direction as the
+        expensive one: for an international student a wrong "yes" sends them at
+        a role they cannot hold.
+
+    THE RULES, matching `directory.sponsorship._resolve_firm_fact` so the fit
+    score and the posting pill cannot disagree about one column:
+
+      - a `bool` is the CALLER'S OWN collapsed answer and is returned as-is.
+        This is the shape every fixture and every direct caller of `score_firm`
+        passes, and it keeps meaning exactly what it has always meant.
+      - a dict is looked up PER REGION, restricted to `relevant`. Any relevant
+        region saying yes -> True (a student only has to be employable in one
+        of a firm's markets), the same best-case rule `needs_sponsorship` uses
+        for the other side of the pairing. Otherwise, every relevant region
+        having said no -> False. Anything else — a missing region, a literal
+        "unknown", an empty dict, no relevant regions to look up — is None.
+      - anything else (None, a string, a list) is None.
+
+    None is UNKNOWN and `_score_structural` scores it 0.5. That is the whole
+    point: silence is not a "no", and a blob that names no region cannot answer
+    a region-scoped question.
+    """
+    if isinstance(sponsors, bool):
+        return sponsors
+    if not isinstance(sponsors, dict) or not sponsors:
+        return None
+    keyed = {
+        (k or "").strip().lower(): v
+        for k, v in sponsors.items()
+        if isinstance(k, str)
+    }
+    scope = {(r or "").strip().lower() for r in (relevant or [])} - {""}
+    if not scope:
+        return None
+    facts = []
+    for region in sorted(scope):
+        value = keyed.get(region)
+        if value is True or value == "true":
+            facts.append(True)
+        elif value is False or value == "false":
+            facts.append(False)
+        else:
+            facts.append(None)
+    if any(f is True for f in facts):
+        return True
+    if facts and all(f is False for f in facts):
+        return False
+    return None
 
 
 def needs_sponsorship(
@@ -783,9 +985,7 @@ def needs_sponsorship(
         False (no sponsorship needed), True (needs it everywhere relevant), or
         None (not enough information — scored neutral).
     """
-    user_set = {(r or "").strip().lower() for r in (user_regions or [])} - {""}
-    firm_set = {(r or "").strip().lower() for r in (firm_regions or [])} - {""}
-    relevant = user_set & firm_set or firm_set or user_set
+    relevant = relevant_regions(user_regions, firm_regions)
     if not relevant:
         return None
 
@@ -820,8 +1020,14 @@ def _score_structural(
     elif not needs:
         spon = True   # no sponsorship needed -> no conflict possible
     else:
-        firm_sponsors = firm.get("sponsors")
-        spon = None if firm_sponsors is None else bool(firm_sponsors)
+        # `resolve_firm_sponsors`, not `bool(...)` — see that function for the
+        # two opposite wrong answers truthiness gave over the live per-region
+        # `Firm.sponsors` blob, and for why an unrecorded policy has to score
+        # neutral rather than "no sponsorship".
+        spon = resolve_firm_sponsors(
+            firm.get("sponsors"),
+            relevant_regions(user.get("regions"), firm.get("regions")),
+        )
 
     w = params["structural_weights"]
     score = 100.0 * (w["region"] * comp(region) + w["track"] * comp(track) + w["sponsorship"] * comp(spon))
@@ -912,7 +1118,7 @@ def score_firm(
          "reasoning", "params_version", "inputs_hash", "as_of"}.
     """
     p = _merged_params(params)
-    as_of = _as_dt(as_of)  # naive -> UTC, so the serialized as_of never depends on machine tz
+    as_of = _required_as_of(as_of)  # naive -> UTC, so the serialized as_of never depends on machine tz
     clist = list(contacts)
     tlist = list(touches)
     fdates = list(firm_dates or ())

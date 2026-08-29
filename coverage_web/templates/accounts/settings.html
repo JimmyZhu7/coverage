@@ -27,12 +27,19 @@
   .settings-nav::before { content: ""; position: absolute; left: 0; top: 6px;
     bottom: 6px; width: 2px; border-radius: 2px; background: var(--line); }
 
-  /* Group headers. There is no "On This Page" title above them any more: a
-     rail sitting beside the sections it links to, under an `aria-label` that
-     already names it, does not need a heading saying it is a rail. The group
-     headers are what a reader actually navigates by. Accent-coloured, in the
-     mono/ledger face, each trailing a hairline that runs to the edge, so a
-     group reads as a divider at a glance instead of on inspection. */
+  /* The nav's own label — the QUIETEST thing here. It names the whole
+     column, which the reader works out instantly; the group headers below
+     are what they actually navigate by, so the hierarchy now runs
+     title < link < group rather than title == group as before. */
+  /* Shared section label (coverage.css §6b), minus the rule — it names a nav
+     group, not a section. Only the indent is local. */
+  .settings-nav-title { padding-left: var(--s3); }
+
+  /* Group headers. Were byte-identical to the title above — same size,
+     colour and weight — so four section breaks read as four more grey
+     labels. Now accent-coloured, a size up, in the mono/ledger face, and
+     each trails a hairline that runs to the edge, so a group reads as a
+     divider at a glance instead of on inspection. */
   .settings-nav-group { display: flex; align-items: center; gap: var(--s2);
     font-family: var(--font-mono); font-size: var(--fs-xs);
     text-transform: uppercase; letter-spacing: 0.08em;
@@ -85,18 +92,32 @@
   /* Now a real <label for> on every row that owns a single control (see the
      a11y note in the markup); the class carries the styling either way. */
   .set-row-label { display: block; font-weight: var(--w-med); font-size: var(--fs-m); }
-  /* Plan badges (.pill.plan-pro/.plan-free/.stale, coverage.css) sit inline
-     after the text they qualify — the Credits card's row label, and the Gmail
-     Live card's subtitle. Same margin-left pattern as pricing.html's
-     .cmp-badge. */
-  .set-row-label .pill, .set-head p .pill { margin-left: var(--s2);
-    vertical-align: 1px; }
+  /* The Credits card's plan badge (.pill.plan-pro/.plan-free, coverage.css)
+     sits inline after the label text — same margin-left pattern as
+     pricing.html's .cmp-badge. */
+  .set-row-label .pill { margin-left: var(--s2); vertical-align: 1px; }
   .set-row-desc { color: var(--ink-3); font-size: var(--fs-s); margin-top: 2px; }
   .set-row-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: 24px; font-weight: var(--w-med); color: var(--accent-ink); flex: none; }
+  .set-row-sub { color: var(--ink-3); font-size: var(--fs-xs); }
   .set-row-control { flex: none; display: flex; gap: var(--s2); align-items: center; }
+  /* A read-only figure: the number over the word that says what it counts.
+     Both live inside .set-row-control like every other right-hand cell, so
+     the two count rows on this page (Credits balance, Contacts total) and
+     every button row share one anatomy. */
+  .set-row-figure { flex-direction: column; align-items: flex-end; gap: 0;
+    line-height: 1.15; }
+  .set-row-figure .set-row-sub { text-transform: uppercase; letter-spacing: 0.06em;
+    font-family: var(--font-mono); }
   /* Every tappable control on this page clears 44px. */
   .set-row-control .btn, .set-save .btn { min-height: 44px; }
+  /* The Save button of a row that saves on change, once a script exists to do
+     the saving. `!important` because `.btn`'s own display would otherwise win
+     — see the script's note on why the `hidden` attribute cannot do this. */
+  .set-row-control .btn.is-autosaved { display: none !important; }
+
+  .set-hint { color: var(--ink-3); font-size: var(--fs-s); margin: var(--s2) 0 0;
+    max-width: 60ch; }
 
   /* Profile form: two-up where it reads better (school + class year). */
   .set-form .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4); }
@@ -120,9 +141,69 @@
      Accent-colored and tabular, like the other live numbers on this page
      (.set-row-value): it is a value, not more prose, and grey-on-grey let
      it disappear into the sentence above it. */
+  /* A <button>, not a <span>, since 2026-08-28 — see the markup note. It is
+     the SAME chip visually in its idle state (the type treatment below is
+     unchanged), so a page where every number sits on its default looks exactly
+     as it did; the difference appears only once you have something to undo.
+     `disabled` is the server-rendered idle state and the JS drops it. */
   .set-default { display: block; margin-top: 4px; color: var(--accent-ink);
     font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-weight: var(--w-med); font-size: var(--fs-xs); white-space: nowrap; }
+    font-weight: var(--w-med); font-size: var(--fs-xs); white-space: nowrap;
+    padding: 0; border: 0; background: none; text-align: left;
+    transition: color var(--t-fast); }
+  /* Idle: not a button in any way the eye or the pointer can tell. It states
+     the default, which is all the old span did. */
+  .set-default[disabled] { cursor: default; opacity: 1; }
+  /* Armed: there IS an override to drop, so the chip becomes the way back. */
+  .set-default:not([disabled]) { cursor: pointer;
+    text-decoration: underline; text-decoration-style: dotted;
+    text-underline-offset: 3px; text-decoration-color: var(--accent-line); }
+  .set-default:not([disabled]):hover { color: var(--accent);
+    text-decoration-color: var(--accent); }
+  .set-default:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; border-radius: var(--r-ctl); }
+
+  /* ---- A two-option segment, for a knob with only two legal values --------
+     Same idea as .theme-pick above (pick one of a few, the chosen one filled),
+     stacked rather than inline because it lives in .set-field's fixed 12rem
+     control track — see that rule's note on why the track is fixed. Two
+     horizontal pills reading "Note only" and "Note + follow-up" do not fit in
+     12rem; two stacked ones do, and they left-align with every number input
+     down the same column.
+
+     The radio itself is the control and stays a real focusable radio (arrow
+     keys, screen reader, the POST); only its default rendering is replaced,
+     which is why this is not a checkbox restyle. */
+  .seg-pick { display: flex; flex-direction: column; width: 100%;
+    border: 1px solid var(--line); border-radius: var(--r-ctl);
+    overflow: hidden; background: var(--surface); }
+  .seg-opt { display: block; cursor: pointer; }
+  .seg-opt + .seg-opt .seg-face { border-top: 1px solid var(--line); }
+  /* The radio is present and focusable, drawn by the face beside it. */
+  .seg-opt input[type="radio"] { position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0);
+    white-space: nowrap; border: 0; appearance: none; }
+  .seg-face { display: flex; align-items: baseline; gap: var(--s2);
+    padding: 8px 12px; min-height: 40px;
+    font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink-2);
+    transition: background-color var(--t-fast), color var(--t-fast); }
+  .seg-face > span { flex: 1 1 auto; }
+  /* "default", marked on the option that is the default — the number the old
+     "Default: 2" line printed, moved onto the thing it describes. */
+  .seg-face u { flex: none; text-decoration: none; font-family: var(--font-mono);
+    font-size: var(--fs-nano); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-3); }
+  .seg-opt:hover .seg-face { background: var(--accent-soft); color: var(--accent-ink); }
+  .seg-opt input:checked + .seg-face { background: var(--accent); color: var(--on-accent); }
+  .seg-opt input:checked + .seg-face u { color: var(--on-accent); opacity: 0.75; }
+  .seg-opt input:focus-visible + .seg-face { outline: 2px solid var(--accent);
+    outline-offset: -2px; }
+  /* A segment is two rows tall where a number input is one, so the field's
+     two text rows would stretch to match it and float apart. A third,
+     text-free row takes the slack instead and the label keeps its description
+     directly under it, exactly like every spinner row beside it. */
+  .set-field.is-seg { grid-template-areas: "label control" "desc control"
+    "fill control" "err err"; grid-template-rows: auto auto 1fr auto; }
   /* Two knobs to a row (Cadence only, so far). Seven full-width .set-rows
      put seven near-identical spinners in a 700px column, each one label and
      one number marooned at opposite edges of the card with a rule between —
@@ -169,6 +250,43 @@
      input the entire width of the card away from its own label — the exact
      defect this layout exists to remove. Half a row of air costs nothing. */
 
+  /* ---- A GROUP INSIDE A CARD ---------------------------------------------
+     The Decisions card holds three lists that used to be three cards. A group
+     is the level BETWEEN a card and a row: an <h3> and, where the list needs
+     one, a single explanatory sentence, then rows in the page's one row
+     anatomy. Deliberately quieter than .set-head h2 — one card, one voice at
+     the top of it — and separated by air plus a hairline rather than by a
+     second border-and-shadow frame, which is what made three cards read as
+     three unrelated features. */
+  /* Same offset .set-card carries. These groups are REAL scroll targets, not
+     just labels: crm.views redirects to #campaigns, #dismissed-proposals and
+     #duplicates after every classify, restore, merge and undo, so a group
+     landing under the sticky header would put the row you just acted on out
+     of sight at the exact moment you look for confirmation. */
+  .set-group { scroll-margin-top: 92px; }
+  .set-group + .set-group { margin-top: var(--s5); padding-top: var(--s5);
+    border-top: 1px solid var(--line); }
+  .set-group-h { margin: 0; font-size: var(--fs-m); font-weight: var(--w-bold);
+    color: var(--ink); }
+  /* A sentence that belongs to a whole group, not to any one row. These used
+     to be rendered AS rows — a .set-row holding a lone .set-row-desc with no
+     label and no control — so the first thing in each of those three cards
+     was a labelled row that labelled nothing and a hairline under prose. */
+  .set-note { margin: var(--s2) 0 0; color: var(--ink-3);
+    font-size: var(--fs-s); line-height: 1.6; max-width: 68ch; }
+  /* The first row of a group is not :first-child (the heading and the note
+     precede it), so it keeps the hairline from the base .set-row rule and the
+     note reads as prose above a list rather than as the list's first item. */
+
+  /* The two forms in Pace & Cadence share a card and must not run together.
+     The pace form ends with its own inline Save; this hairline under it is
+     what starts the cadence mechanism as a new thought, and it is the same
+     hairline every .set-row boundary on the page already uses. */
+  .set-form-lead { padding-bottom: var(--s5); margin-bottom: var(--s5);
+    border-bottom: 1px solid var(--line); }
+  .set-form-lead .pace-set { margin-bottom: 0; }
+  .pace-inline .btn { min-height: 40px; }
+
   /* Visually hidden, still read aloud — the copy-button's live region. */
   .set-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
@@ -182,7 +300,7 @@
     .settings-nav::before { display: none; }
     .settings-nav a::before { display: none; }
     .settings-nav a:hover { transform: none; }
-    .settings-nav-group { display: none; }
+    .settings-nav-title, .settings-nav-group { display: none; }
   }
   @media (max-width: 560px) {
     .set-form .grid-2 { grid-template-columns: 1fr; }
@@ -193,9 +311,14 @@
        leaves a phone about 130px of label, and "Pre-Deadline Re-Ping" does
        not fit in 130px. Label, then input, then the prose — the desktop
        areas collapse to one column in that same order. */
-    .set-field { grid-template-columns: minmax(0, 1fr);
-      grid-template-areas: "label" "control" "desc" "err"; }
+    .set-field, .set-field.is-seg { grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "label" "control" "desc" "err";
+      /* One column means nothing is spanning two rows, so the slack row the
+         segmented field reserves on desktop has no job here. */
+      grid-template-rows: none; }
     .set-field > .set-row-control { justify-self: start; }
+    /* Stacked, the segment gets the full width like every other control. */
+    .set-field.is-seg > .set-row-control { justify-self: stretch; }
     /* A phone gives the track about 200px, and three labels reading name AND
        number do not fit in 200px — they overlapped each other outright. The
        number is the part to drop: the live sentence directly under the rail
@@ -427,7 +550,7 @@
   .tf-chips::-webkit-scrollbar { width: 8px; }
   .tf-chips::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
   .tf-chip { flex: none; display: flex; align-items: center;
-    gap: 6px; max-width: 220px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
+    gap: 6px; max-width: 250px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
     border-radius: 999px; background: var(--paper); cursor: grab;
     font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink);
     box-shadow: var(--shadow-1); animation: chip-check 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -436,6 +559,43 @@
   .tf-chip:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
   .tf-chip.dragging { opacity: 0.5; cursor: grabbing; }
   .tf-chip.is-leaving { opacity: 0; transform: scale(0.85); }
+  /* The tier picker, and the reason it is nearly invisible at rest: it sits
+     on every chip on the board, and a bordered control repeated 60-odd
+     times is the "identical decoration on nearly every card" this app has
+     already pruned once off the Network board. At rest it reads as the
+     chip's own tier caption in the same 10px mono the rest of the app uses
+     for micro-data; the control chrome arrives on hover and focus, which is
+     when someone is actually aiming at it. `appearance: none` for the
+     chevron. The options spell the tier out ("Tier 2") rather than
+     abbreviating it, because a screen reader reads the chosen OPTION and
+     not the box's `aria-label` — the label names the firm, the option
+     names the tier, and neither can be dropped. The pill grew to 250px to
+     pay for it; the name was already the part that ellipsises. */
+  .tf-tier { flex: none; width: auto; appearance: none; -webkit-appearance: none;
+    border: 1px solid transparent; border-radius: 999px; background: transparent;
+    padding: 1px 13px 1px 5px; margin: 0;
+    font-family: var(--font-mono); font-size: 10px; font-weight: var(--w-med);
+    line-height: 1.6; color: var(--ink-3); cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: right 6px top 51%, right 3px top 51%;
+    background-size: 3px 3px, 3px 3px; background-repeat: no-repeat;
+    transition: border-color var(--t-fast), background-color var(--t-fast),
+      color var(--t-fast); }
+  .tf-chip:hover .tf-tier, .tf-tier:hover { border-color: var(--line);
+    background-color: var(--surface); color: var(--ink-2); }
+  .tf-tier:focus-visible { outline: 2px solid var(--accent); outline-offset: 0;
+    border-color: var(--accent); background-color: var(--accent-soft);
+    color: var(--accent-ink); }
+  /* On a device that cannot hover, the resting state IS the only state, so
+     the control wears its chrome all the time. This is the case the whole
+     change exists for — a phone had no way to re-tier a firm at all — and a
+     control that only announces itself on hover would have replaced one
+     invisible affordance with another. */
+  @media (hover: none) {
+    .tf-tier { border-color: var(--line); background-color: var(--surface);
+      color: var(--ink-2); }
+  }
   .tf-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center;
     width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
     color: var(--ink-3); font-size: 14px; line-height: 1; cursor: pointer;
@@ -497,39 +657,39 @@
     {% comment %}
     Rail groups follow the pattern every comparable product converged on
     (LinkedIn, Notion, Linear): "who you are" and "how the product behaves"
-    are separated from "how you get in and what we hold on you". Eleven flat
-    links was already at the limit of scannable; the headers do the work of
-    splitting them without a second navigation level.
+    are separated from "how you get in and what we hold on you".
+
+    THE RAIL AND THE PAGE ARE THE SAME LIST, IN THE SAME ORDER. They were not:
+    the rail read Profile, Work Authorization, Appearance, Target Firms while
+    the page ran Profile, Appearance, Target Firms, Work Authorization, so the
+    marker that rides the spine travelled BACKWARDS as you scrolled past
+    Appearance. A rail whose order is a fiction is worse than no rail. Every
+    entry below is now in page order, and the conditional entries sit exactly
+    where their conditional sections do.
 
     The headers are presentational — the rail's real structure for a screen
     reader is the nav landmark below plus each section's own <h2>. They are
     display:none at ≤820px, where the rail collapses to wrapped chips.
     {% endcomment %}
     <nav class="settings-nav" aria-label="Settings sections">
+      <p class="settings-nav-title">On This Page</p>
       <p class="settings-nav-group">You</p>
       <a href="#profile" class="is-active" aria-current="true">Profile</a>
       <a href="#work-auth">Work Authorization</a>
-      <a href="#appearance">Appearance</a>
+      <a href="#preferences">Preferences</a>
       <p class="settings-nav-group">Your Firms</p>
       <a href="#firms">Target Firms</a>
       <p class="settings-nav-group">How Coverage Paces You</p>
-      <a href="#cadence">Cadence</a>
-      <a href="#pace">Weekly Pace</a>
-      {% if campaigns %}<a href="#campaigns">Campaigns</a>{% endif %}
-      {% if dismissed_proposals %}<a href="#dismissed-proposals">Dismissed</a>{% endif %}
-      {% if merge_suggestions or recent_merges %}<a href="#duplicates">Duplicates</a>{% endif %}
-      <p class="settings-nav-group">Notifications</p>
-      <a href="#notifications">Notifications</a>
+      <a href="#cadence">Pace &amp; Cadence</a>
+      {% if campaigns or dismissed_proposals or merge_suggestions or recent_merges %}
+        <a href="#decisions">Decisions</a>
+      {% endif %}
       <p class="settings-nav-group">Plan &amp; Credits</p>
       <a href="#credits">Credits</a>
-      {% if gmail_live.available %}
-      <p class="settings-nav-group">Gmail Live</p>
-      <a href="#gmail-live">Gmail Live</a>
-      {% endif %}
+      {% if gmail_live.available %}<a href="#gmail-live">Gmail Live</a>{% endif %}
       <p class="settings-nav-group">Account</p>
       <a href="#security">Sign-In &amp; Security</a>
       <a href="#data">Your Data</a>
-      <a href="#legal">Legal</a>
       <a href="#danger">Danger Zone</a>
     </nav>
 
@@ -539,7 +699,6 @@
                aria-labelledby="profile-h">
         <div class="set-head">
           <h2 id="profile-h">Profile</h2>
-          <p>Your School, Class Year, and Recruiting Targets</p>
         </div>
         <div class="set-body">
           <form class="set-form" method="post" action="{% url 'accounts:settings' %}"
@@ -562,36 +721,56 @@
         </div>
       </section>
 
-      {% if cycle_months %}
-        {% comment %}What the target cycle above actually looks like: real
-        deadline density for the next twelve months, same band the feed
-        shows. A cycle picker over an invisible cycle was a label without a
-        referent.{% endcomment %}
-        {% comment %}`aria-labelledby` pointing at the visible <h2>, like every
-        other card here — this one carried an `aria-label` retyping the same
-        words, which is a second copy of a heading that is right there.
-        {% endcomment %}
-        <section class="set-card kin-reveal" style="--i:1" aria-labelledby="cycle-h">
-          <div class="set-head"><h2 id="cycle-h">The Cycle Ahead</h2>
-            <p>Real Deadlines By Month, From The Live Board</p></div>
-          <div class="set-body">{% include "directory/_cycle_band.html" %}</div>
-        </section>
-      {% endif %}
+      {% comment %}
+      ---- Work Authorization ----
+      Second, not fifth. It is the other half of who you are — the structural
+      fact the fit score is built on — and it used to sit BELOW Target Firms,
+      which is why the rail and the page disagreed about their order. A new
+      student answers it once, on the way in.
+      {% endcomment %}
+      <section class="set-card kin-reveal" id="work-auth" style="--i:1"
+               aria-labelledby="work-auth-h">
+        <div class="set-head">
+          <h2 id="work-auth-h">Work Authorization</h2>
+        </div>
+        <div class="set-body">
+          <form method="post" action="{% url 'accounts:settings' %}">
+            {% csrf_token %}
+            <input type="hidden" name="section" value="work_auth">
+            {% comment %}
+            One matrix instead of six near-identical rows. The old rendering
+            repeated the same explanation sentence six times and named the
+            three-state vocabulary inside six closed selects; the matrix says
+            each once and shows the whole answer at a glance. Accessibility is
+            unchanged in substance — each region is a labelled radiogroup and
+            the note is its description, where before each select carried its
+            own label and aria-describedby.
+            {% endcomment %}
+            {% include "accounts/_work_auth_matrix.html" with form=work_auth_form %}
+
+            <div class="set-save"><button type="submit" class="btn btn-primary">Save Work Authorization</button></div>
+          </form>
+        </div>
+      </section>
 
       {% comment %}
-      Appearance. Three states, not a switch: System is the honest default
-      (a phone that flips at sunset should take the app with it), and the two
-      explicit choices exist because a student reading at midnight in a
-      light-mode OS is a real person, not a misconfiguration. Stored in
-      localStorage rather than on the user row: it is a property of the
-      DEVICE you are reading on, and syncing it would drag your laptop's
-      choice onto your phone.
+      ---- Preferences ----
+      Theme and the weekly digest, one card. They were two: an "Appearance"
+      card holding a single theme row, and a "Notifications" card holding the
+      digest. Two headings, two subtitles and two card frames for two rows
+      that answer the same question — how Coverage presents itself to you —
+      and neither of which changes what the engine does.
+
+      They keep their separate save paths because their SCOPES genuinely
+      differ, and each row says which it is: theme is device state written to
+      localStorage (syncing it would drag your laptop's choice onto your
+      phone), the digest is an account preference posted like every other
+      section. Deadline alerts join them when push is configured.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="appearance" style="--i:2"
-               aria-labelledby="appearance-h">
+      <section class="set-card kin-reveal" id="preferences" style="--i:2"
+               aria-labelledby="preferences-h">
         <div class="set-head">
-          <h2 id="appearance-h">Appearance</h2>
-          <p>Light, Dark, or Whatever This Device Says</p>
+          <h2 id="preferences-h">Preferences</h2>
         </div>
         <div class="set-body">
           <div class="set-row">
@@ -607,15 +786,81 @@
               </div>
             </div>
           </div>
+          {% comment %}
+          Push deadline alerts. RENDERED ONLY WHEN VAPID IS CONFIGURED, which
+          is the same rule Gmail Live below already follows and the opposite
+          of what this row used to do: with no key it drew a real checkbox,
+          permanently disabled, over the words "Not set up yet." — an
+          interactive control for a state the reader cannot reach, on every
+          deploy the product has ever had (zero PushSubscription rows exist).
+          Nothing about the feature moved: the toggle, its endpoints and
+          accounts/push.py are untouched, and the row returns the moment
+          VAPID_PUBLIC_KEY is set.
+          {% endcomment %}
+          {% if vapid_public_key %}
+          <div class="set-row" data-push-root
+               data-vapid-public-key="{{ vapid_public_key }}"
+               data-subscribe-url="{% url 'accounts:push_subscribe' %}"
+               data-unsubscribe-url="{% url 'accounts:push_unsubscribe' %}"
+               data-csrf="{{ csrf_token }}">
+            <div class="set-row-main">
+              <label class="set-row-label" for="push-alerts-toggle">Deadline Alerts, On This Device</label>
+              <div class="set-row-desc" data-push-status>
+                {% if push_subscribed %}
+                  On. You'll get an alert when a tracked role is closing soon.
+                {% else %}
+                  Off. Turn on to get an alert on this device.
+                {% endif %}
+              </div>
+            </div>
+            <div class="set-row-control">
+              <input type="checkbox" id="push-alerts-toggle" data-push-toggle
+                     {% if push_subscribed %}checked{% endif %}>
+            </div>
+          </div>
+          {% endif %}
+          {% comment %}
+          ONE control for one boolean. This row used to be a checkbox AND a
+          Save button — two controls for a single yes/no, in a card whose other
+          two rows (Theme above, Deadline Alerts) both apply the instant you
+          touch them. So a reader learned two save models inside one frame, and
+          the only row that needed a second click was the one with the least to
+          decide.
+
+          The button is still in the markup and still works: the script below
+          hides it and submits on change only where there is a script to do so,
+          so a no-JS render keeps exactly the row it always had. The tick is
+          the save either way, which is why the row needs no line saying so.
+          {% endcomment %}
+          <form method="post" action="{% url 'accounts:settings' %}" class="set-row"
+                data-autosave>
+            {% csrf_token %}
+            <input type="hidden" name="section" value="notifications">
+            <div class="set-row-main">
+              <label class="set-row-label" for="{{ notifications_form.weekly_digest_enabled.id_for_label }}">Weekly Email Digest</label>
+              <div class="set-row-desc">What closes this week and who to ping. Sent only when there's news.</div>
+            </div>
+            <div class="set-row-control">
+              {{ notifications_form.weekly_digest_enabled }}
+              <button type="submit" class="btn" data-autosave-btn>Save</button>
+            </div>
+          </form>
         </div>
       </section>
+      {% comment %}
+      Loaded with the row it drives, not unconditionally. Without a key there
+      is no [data-push-root] for it to bind to, so this was a request every
+      settings load paid for a control that was not on the page.
+      {% endcomment %}
+      {% if vapid_public_key %}
+        <script src="{% static 'js/push-subscribe.js' %}" defer></script>
+      {% endif %}
 
       {# ---- Target Firms ---- #}
       <section class="set-card kin-reveal" id="firms" style="--i:3"
                aria-labelledby="firms-h">
         <div class="set-head">
           <h2 id="firms-h">Target Firms</h2>
-          <p>Who You're Recruiting For, By Tier</p>
         </div>
         <div class="set-body">
           {% comment %}
@@ -628,7 +873,16 @@
           docstring), so a drag here and a drag on Network can never
           disagree about what a firm's tier means.
           {% endcomment %}
-          <p class="field-hint">Drag a firm to change its tier. Higher tiers get more attention from Coverage.</p>
+          {% comment %}
+          The hint no longer names dragging as THE method. HTML5
+          drag-and-drop fires on pointers only: on a phone the chips are
+          inert, so a hint reading "Drag a firm to change its tier" was an
+          instruction half this app's readers cannot follow. Every chip now
+          carries its own tier picker (`.tf-tier`), which is the route the
+          hint describes; the drag is still bound underneath as the pointer
+          shortcut for people who have a pointer.
+          {% endcomment %}
+          <p class="field-hint">Pick a tier on any firm, or drag it. Higher tiers get more attention from Coverage.</p>
           <div class="tf-board" id="tf-board" data-tf-board>
             {% for col in firm_tiers %}
               <div class="tf-col" data-tier="{{ col.tier }}">
@@ -638,12 +892,28 @@
                   {% for f in col.firms %}
                     <div class="tf-chip" draggable="true" data-firm="{{ f.id }}" data-firm-name="{{ f.name|lower }}">
                       <span>{{ f.name|smart_title }}</span>
+                      {% comment %}
+                      A native <select>, not a custom popup: it is reachable
+                      by touch, by keyboard and by screen reader for free,
+                      and the browser floats its list ABOVE `.tf-chips`'s
+                      own `overflow-y: auto` — a hand-rolled menu inside a
+                      scrolling column would be clipped by it. `draggable
+                      ="false"` for the same reason `.fc-act-link` carries
+                      it on the Network board: the gesture belongs to the
+                      control, not to the chip around it.
+                      {% endcomment %}
+                      <select class="tf-tier" draggable="false" data-no-csel data-tf-tier-sel
+                              aria-label="Tier for {{ f.name|smart_title }}">
+                        {% for t in firm_tiers %}
+                          <option value="{{ t.tier }}"{% if t.tier == col.tier %} selected{% endif %}>Tier {{ t.tier }}</option>
+                        {% endfor %}
+                      </select>
                       <button type="button" class="tf-chip-x" data-tf-remove="{{ f.id }}"
                               aria-label="Stop tracking {{ f.name|smart_title }}">×</button>
                     </div>
                   {% endfor %}
                 </div>
-                <p class="tf-empty"{% if col.firms %} hidden{% endif %}>Drop a firm here.</p>
+                <p class="tf-empty"{% if col.firms %} hidden{% endif %}>Nothing on this tier yet.</p>
               </div>
             {% endfor %}
           </div>
@@ -763,17 +1033,36 @@
         // than reloading — a full-page reload here would also reset the
         // scroll position away from the section the student is mid-edit
         // on, on a page with a dozen other sections above this one. ----
-        function buildChip(firmId, name) {
+        function buildChip(firmId, name, tier) {
           var chip = document.createElement("div");
           chip.className = "tf-chip";
           chip.draggable = true;
           chip.dataset.firm = firmId;
           chip.dataset.firmName = name.toLowerCase();
-          chip.innerHTML = '<span></span><button type="button" class="tf-chip-x" ' +
+          // Same three parts the server renders, in the same order: name,
+          // tier picker, stop-tracking. A chip added here and a chip that
+          // arrived with the page must be the same chip, or the board grows
+          // two classes of firm with different controls on them.
+          chip.innerHTML = '<span></span>' + tierSelectHtml(tier, name) +
+            '<button type="button" class="tf-chip-x" ' +
             'data-tf-remove="' + firmId + '" aria-label="Stop tracking ' + name.replace(/"/g, "&quot;") + '">×</button>';
           chip.querySelector("span").textContent = name;
           bindDrag(chip);
+          bindTierSelect(chip);
           return chip;
+        }
+        // The tiers the board actually renders, read off the board itself
+        // rather than hard-coded 1/2/3 — `accounts.views.TARGET_FIRM_TIERS`
+        // is the one place that decides, and this reads its output.
+        var tiers = Array.prototype.map.call(
+          board.querySelectorAll(".tf-col"), function (c) { return c.dataset.tier; });
+        function tierSelectHtml(tier, name) {
+          var opts = tiers.map(function (t) {
+            return '<option value="' + t + '"' + (t === String(tier) ? " selected" : "") +
+              ">Tier " + t + "</option>";
+          }).join("");
+          return '<select class="tf-tier" draggable="false" data-no-csel data-tf-tier-sel aria-label="Tier for ' +
+            name.replace(/"/g, "&quot;") + '">' + opts + "</select>";
         }
         function bindAdd(row) {
           row.querySelectorAll("[data-tf-add]").forEach(function (btn) {
@@ -783,7 +1072,7 @@
               post(tierUrl, { firm: firmId, tier: tier }).then(function (resp) {
                 if (!resp.ok) return;
                 var col = colFor(tier);
-                col.querySelector("[data-tf-chips]").appendChild(buildChip(firmId, name));
+                col.querySelector("[data-tf-chips]").appendChild(buildChip(firmId, name, tier));
                 syncEmpty(col);
                 row.remove();
               });
@@ -809,6 +1098,43 @@
         }
         if (search) search.addEventListener("input", filterResults);
 
+        // ---- Re-tier without a pointer. HTML5 drag-and-drop never fires
+        // on a touchscreen and has no keyboard equivalent, so the drag
+        // below cannot be the only route to a tier change: on a phone the
+        // board could add a firm and remove one but never move one. The
+        // per-chip <select> is the route that always works; the drag is the
+        // shortcut for people holding a mouse.
+        function moveChip(chip, tier) {
+          var fromCol = chip.closest(".tf-col");
+          var col = colFor(tier);
+          if (!col || fromCol === col) return;
+          post(tierUrl, { firm: chip.dataset.firm, tier: tier }).then(function (resp) {
+            if (!resp.ok) { syncTierSelect(chip); return; }
+            col.querySelector("[data-tf-chips]").appendChild(chip);
+            syncEmpty(fromCol);
+            syncEmpty(col);
+          }, function () { syncTierSelect(chip); });
+        }
+        // A failed POST leaves the chip where it was, so the picker has to
+        // be walked back too — otherwise it keeps showing a tier the server
+        // never accepted.
+        function syncTierSelect(chip) {
+          var sel = chip.querySelector("[data-tf-tier-sel]");
+          if (sel) sel.value = chip.closest(".tf-col").dataset.tier;
+        }
+        function bindTierSelect(chip) {
+          var sel = chip.querySelector("[data-tf-tier-sel]");
+          if (!sel) return;
+          sel.addEventListener("change", function () { moveChip(chip, sel.value); });
+          // A `draggable` ancestor swallows the press that should open a
+          // native select, so the chip stands down for as long as the
+          // picker has the pointer or the focus, then takes the gesture
+          // back. `focusout` covers both dismissing the list and choosing
+          // from it.
+          sel.addEventListener("pointerdown", function () { chip.draggable = false; });
+          sel.addEventListener("focusout", function () { chip.draggable = true; });
+        }
+
         // ---- Drag-and-drop between tiers: identical mechanism to the
         // Network board's (same endpoint, same event shape) so the two
         // never learn to disagree about what a drag means. ----
@@ -817,7 +1143,10 @@
           chip.addEventListener("dragend", function () { chip.classList.remove("dragging"); });
         }
         var dragged = null;
-        board.querySelectorAll(".tf-chip").forEach(bindDrag);
+        board.querySelectorAll(".tf-chip").forEach(function (chip) {
+          bindDrag(chip);
+          bindTierSelect(chip);
+        });
         board.querySelectorAll(".tf-col").forEach(function (col) {
           col.addEventListener("dragover", function (e) { e.preventDefault(); col.classList.add("drop-hot"); });
           col.addEventListener("dragleave", function () { col.classList.remove("drop-hot"); });
@@ -830,6 +1159,7 @@
             post(tierUrl, { firm: dragged.dataset.firm, tier: col.dataset.tier }).then(function (resp) {
               if (!resp.ok) return;
               col.querySelector("[data-tf-chips]").appendChild(dragged);
+              syncTierSelect(dragged);
               syncEmpty(fromCol);
               syncEmpty(col);
             });
@@ -838,41 +1168,71 @@
       })();
       {% endscript %}
 
-      {# ---- Work Authorization ---- #}
-      <section class="set-card kin-reveal" id="work-auth" style="--i:4"
-               aria-labelledby="work-auth-h">
-        <div class="set-head">
-          <h2 id="work-auth-h">Work Authorization</h2>
-          <p>Where You Can Work Without Sponsorship</p>
-        </div>
-        <div class="set-body">
-          <form method="post" action="{% url 'accounts:settings' %}">
-            {% csrf_token %}
-            <input type="hidden" name="section" value="work_auth">
-            {% comment %}
-            One matrix instead of six near-identical rows. The old rendering
-            repeated the same explanation sentence six times and named the
-            three-state vocabulary inside six closed selects; the matrix says
-            each once and shows the whole answer at a glance. Accessibility is
-            unchanged in substance — each region is a labelled radiogroup and
-            the note is its description, where before each select carried its
-            own label and aria-describedby.
-            {% endcomment %}
-            {% include "accounts/_work_auth_matrix.html" with form=work_auth_form %}
+      {% comment %}
+      ---- Pace & Cadence ----
+      One card, two forms. Weekly Pace was its own section directly below this
+      one: a heading, a subtitle and a card frame around a SINGLE number, sat
+      under a heading that already promised "how hard Coverage chases". How
+      many touches you aim for and how long the engine waits between them are
+      the same subject, and the rail already grouped them under one heading —
+      the page just hadn't caught up.
 
-            <div class="set-save"><button type="submit" class="btn btn-primary">Save Work Authorization</button></div>
-          </form>
-        </div>
-      </section>
-
-      {# ---- Cadence ---- #}
-      <section class="set-card kin-reveal" id="cadence" style="--i:5"
+      The two <form>s stay separate because the POST contract is per-section
+      (`section=pace` and `section=cadence` each validate and save alone, so a
+      bad cadence number can't blank your weekly goal). Same pattern the
+      Preferences card above uses for its two save paths.
+      {% endcomment %}
+      <section class="set-card kin-reveal" id="cadence" style="--i:4"
                aria-labelledby="cadence-h">
         <div class="set-head">
-          <h2 id="cadence-h">Cadence</h2>
-          <p>How Hard Coverage Chases</p>
+          <h2 id="cadence-h">Pace &amp; Cadence</h2>
         </div>
         <div class="set-body">
+          {% comment %}
+          The same ring Today measures you with, as the control that sets the
+          target: drag or click the arc and the number moves, type the number
+          and the arc moves. The visual maxes out at 30 — past that a weekly
+          goal is aspiration, not pacing — while the input still accepts the
+          form's real ceiling. aria-hidden: the input beside it is the
+          accessible control, and two controls announcing one value is noise.
+          {% endcomment %}
+          <form class="set-form-lead" method="post" action="{% url 'accounts:settings' %}">
+            {% csrf_token %}
+            <input type="hidden" name="section" value="pace">
+            <div class="pace-set">
+              <div class="pace-ring-widget" id="pace-ring" aria-hidden="true">
+                <svg viewBox="0 0 120 120">
+                  <circle class="pr-track" cx="60" cy="60" r="54"/>
+                  <circle class="pr-fill" cx="60" cy="60" r="54"/>
+                </svg>
+                <div class="pr-val"><b id="pace-ring-n">–</b><span>a week</span></div>
+              </div>
+              <div class="pace-main">
+                <label class="set-row-label" for="{{ pace_form.weekly_touch_goal.id_for_label }}">Weekly Touch Goal</label>
+                {# Same default chip as the cadence rows below — one behaviour for every number on this card. #}
+                <div class="set-row-desc" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">What the pace ring on Today measures you against.
+                  <button type="button" class="set-default" disabled
+                          data-default-for="{{ pace_form.weekly_touch_goal.id_for_label }}"
+                          data-default="{{ default_weekly_goal }}">Default {{ default_weekly_goal }}</button></div>
+                {% if pace_form.weekly_touch_goal.errors %}
+                  <div class="set-row-err" id="{{ pace_form.weekly_touch_goal.auto_id }}-err">{{ pace_form.weekly_touch_goal.errors }}</div>
+                {% endif %}
+                {% comment %}
+                The save button sits INLINE with the input it saves, not on a
+                full-width bar under the card. Two forms share this card now,
+                and two right-aligned save bars one above the other read as
+                one form that cannot make up its mind about where it ends.
+                The bar is reserved for the card's last form (Save Cadence).
+                {% endcomment %}
+                <div class="pace-inline">
+                  <span class="set-num">{{ pace_form.weekly_touch_goal }}<span class="set-unit">A Week</span></span>
+                  <button type="submit" class="btn">Save</button>
+                </div>
+                <p class="pace-read" id="pace-read"></p>
+              </div>
+            </div>
+          </form>
+
           {% comment %}
           THE CHASE, DRAWN. The six numbers below are one mechanism — when the
           engine follows up, when it gives up, when it circles back — and as a
@@ -941,13 +1301,75 @@
             {% endcomment %}
             <div class="set-grid-2">
               {% for row in cadence_form.rows %}
-                <div class="set-field">
-                  <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
-                  <div class="set-row-control set-num">
-                    {{ row.field }}<span class="set-unit">{{ row.unit|title }}</span>
-                  </div>
-                  <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
-                    <span class="set-default">Default: {{ row.default }}</span></div>
+                <div class="set-field{% if row.segmented %} is-seg{% endif %}">
+                  {% comment %}
+                  A SEGMENTED row (row.segmented) has no unit and no default
+                  chip. Its options are the unit — "Note only" and "Note +
+                  follow-up" are the two values, not a count you type — and the
+                  default is marked ON the option that is the default, which is
+                  where a reader looking at the control will find it. See
+                  accounts.forms.CADENCE_SEGMENTS.
+
+                  A radiogroup, not a <label for>: the row's label names a set
+                  of radios, and pointing `for` at one of them would make the
+                  heading click-select that single option.
+                  {% endcomment %}
+                  {% if row.segmented %}
+                    <span class="set-row-label" id="{{ row.field.auto_id }}-lab">{{ row.field.label }}</span>
+                    <div class="set-row-control">
+                      <div class="seg-pick" role="radiogroup"
+                           aria-labelledby="{{ row.field.auto_id }}-lab"
+                           aria-describedby="{{ row.field.auto_id }}-desc">
+                        {% comment %}
+                        The radio comes FIRST and its face is its next
+                        sibling, so `input:checked + .seg-face` can fill the
+                        chosen segment with a plain sibling selector. Wrapping
+                        the text in the <label> and reaching for :has() would
+                        read better and would make the selected state
+                        invisible on any engine without :has() — a control
+                        whose whole job is to show which of two values is set.
+                        {% endcomment %}
+                        {% for choice in row.field %}
+                          <label class="seg-opt">
+                            {{ choice.tag }}
+                            <span class="seg-face">
+                              <span>{{ choice.choice_label }}</span>
+                              {% comment %}
+                              Real text in the DOM, not a CSS ::after — the
+                              default is data (hold #3), so it has to survive a
+                              screen reader and a stylesheet that failed to load.
+                              {% endcomment %}
+                              {% if not choice.data.value %}<u>default</u>{% endif %}
+                            </span>
+                          </label>
+                        {% endfor %}
+                      </div>
+                    </div>
+                    <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}</div>
+                  {% else %}
+                    <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                    <div class="set-row-control set-num">
+                      {{ row.field }}<span class="set-unit">{{ row.unit|title }}</span>
+                    </div>
+                    {% comment %}
+                    The default was a static "Default: N" line. It is now the
+                    control that RESTORES it, and it still states the number in
+                    both states, so nothing was traded away: "Default 6" while
+                    the box is empty (you are on it), "Reset to 6" the moment
+                    you override it (one tap back).
+
+                    That way back already existed and was invisible — clearing
+                    the box is what `CadenceForm.apply_to` reads as "drop the
+                    override" — so this is the rare case where adding a control
+                    removes the sentence that would otherwise have to explain
+                    it. Server-rendered in the idle state, so with no JS it is
+                    an inert chip printing exactly what the old line printed.
+                    {% endcomment %}
+                    <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
+                      <button type="button" class="set-default" disabled
+                              data-default-for="{{ row.field.id_for_label }}"
+                              data-default="{{ row.default }}">Default {{ row.default }}</button></div>
+                  {% endif %}
                   {% if row.field.errors %}
                     <div class="set-row-err" id="{{ row.field.auto_id }}-err">{{ row.field.errors }}</div>
                   {% endif %}
@@ -959,370 +1381,223 @@
         </div>
       </section>
 
-      {# ---- Weekly Pace ---- #}
-      <section class="set-card kin-reveal" id="pace" style="--i:6"
-               aria-labelledby="pace-h">
+      {% comment %}
+      ---- Decisions ----
+      Campaigns, dismissed inbox proposals and duplicate cards were three
+      separate cards, stacked, each with its own heading, subtitle and frame.
+      Their own comments said they were the same thing: "It is the same shape
+      as the Campaigns card directly above" and "SAME RENDER RULE AS
+      CAMPAIGNS". Three frames around one idea — a durable answer you gave
+      once, kept away from the daily surface, with the way back next to it.
+
+      One card now, three groups inside it, each keeping the id it always had
+      so an old #campaigns or #duplicates link still lands on the right group.
+
+      THE RENDER RULE IS UNCHANGED AND STILL PER-GROUP: a group with nothing
+      in it draws nothing, and with all three empty there is no card and no
+      rail entry. An empty state here would be a card explaining a feature
+      that has never fired for this student.
+      {% endcomment %}
+      {% if campaigns or dismissed_proposals or merge_suggestions or recent_merges %}
+      <section class="set-card kin-reveal" id="decisions" style="--i:5"
+               aria-labelledby="decisions-h">
         <div class="set-head">
-          <h2 id="pace-h">Weekly Pace</h2>
-          <p>Your Touches-Per-Week Target</p>
+          <h2 id="decisions-h">Decisions</h2>
         </div>
         <div class="set-body">
+
           {% comment %}
-          The same ring Today measures you with, as the control that sets the
-          target: drag or click the arc and the number moves, type the number
-          and the arc moves. The visual maxes out at 30 — past that a weekly
-          goal is aspiration, not pacing — while the input still accepts the
-          form's real ceiling. aria-hidden: the input beside it is the
-          accessible control, and two controls announcing one value is noise.
+          One question per bulk send: was that you job hunting, or the other
+          hat you wear. See crm/campaigns.py for the founder's 201-thread club
+          panel mail merge that Coverage read as his recruiting network.
+
+          Three buttons, not a toggle, because there are genuinely three
+          states and one of them is "not answered yet" — same reasoning as the
+          contact form's Recruiting-contact field.
           {% endcomment %}
-          {% comment %}
-          ONE row, ring and input together. The ring, its readout sentence and
-          the goal input are three views of the same number, and they were laid
-          out as three bands — ring + lone sentence floating over a wide void,
-          a rule, then the input on its own row — so the card read sparse and
-          the ring's connection to the input it drives was invisible. Ring on
-          the left; label, description, input and the derived per-weekday
-          sentence stacked beside it. Same ids throughout: the two-way binding
-          looks elements up by id/name, not by position.
-          {% endcomment %}
-          <form method="post" action="{% url 'accounts:settings' %}">
-            {% csrf_token %}
-            <input type="hidden" name="section" value="pace">
-            <div class="pace-set">
-              <div class="pace-ring-widget" id="pace-ring" aria-hidden="true">
-                <svg viewBox="0 0 120 120">
-                  <circle class="pr-track" cx="60" cy="60" r="54"/>
-                  <circle class="pr-fill" cx="60" cy="60" r="54"/>
-                </svg>
-                <div class="pr-val"><b id="pace-ring-n">–</b><span>a week</span></div>
-              </div>
-              <div class="pace-main">
-                <label class="set-row-label" for="{{ pace_form.weekly_touch_goal.id_for_label }}">Weekly Touch Goal</label>
-                {% comment %}"Default: N", the same phrasing every Cadence row
-                uses for the same fact — two wordings for one concept made the
-                page read as two products.{% endcomment %}
-                <div class="set-row-desc" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">The target the pace ring on Today measures you
-                  against. <span class="set-default">Default: {{ default_weekly_goal }}</span></div>
-                {% if pace_form.weekly_touch_goal.errors %}
-                  <div class="set-row-err" id="{{ pace_form.weekly_touch_goal.auto_id }}-err">{{ pace_form.weekly_touch_goal.errors }}</div>
-                {% endif %}
-                <div class="pace-inline">
-                  <span class="set-num">{{ pace_form.weekly_touch_goal }}<span class="set-unit">A Week</span></span>
-                  <p class="pace-read" id="pace-read"></p>
+          {% if campaigns %}
+          <div class="set-group" id="campaigns">
+            <h3 class="set-group-h">Bulk Sends</h3>
+            <p class="set-note">
+              Tell us which of these were your job search. Marking one as
+              something else takes it off your daily queue and network
+              board. Contacts stay in your CRM and history, and anyone who
+              writes to you still surfaces.
+            </p>
+            {% for c in campaigns %}
+            <div class="set-row">
+              <div class="set-row-main">
+                <span class="set-row-label">{{ c.label }}</span>
+                <div class="set-row-desc">
+                  {{ c.recipient_count }} recipient{{ c.recipient_count|pluralize }},
+                  {{ c.first_sent|date:"j M Y" }}.
+                  {% comment %}
+                  The second number is the one that matters and it is stated
+                  plainly rather than folded into the first: a classification
+                  only moves contacts whose relationship with you STARTED in
+                  this send (crm.models.CampaignContact.originates), so "201
+                  recipients" alone would overstate what the answer does.
+                  {% endcomment %}
+                  {{ c.originating_count }} of them first heard from you here.
+                  {% if c.kind == campaign_kind_other %}
+                    <br><strong>Not your recruiting</strong>. Off your daily queue and your network board.
+                  {% elif c.kind == campaign_kind_recruiting %}
+                    <br><strong>Your recruiting</strong>. In your daily queue.
+                  {% endif %}
                 </div>
               </div>
-            </div>
-            <div class="set-save"><button type="submit" class="btn btn-primary">Save Weekly Pace</button></div>
-          </form>
-        </div>
-      </section>
-
-      {% comment %}
-      ---- Campaigns ----
-      One question per bulk send: was that you job hunting, or the other hat
-      you wear. See crm/campaigns.py for the founder's 201-thread club panel
-      mail merge that Coverage read as his recruiting network.
-
-      RENDERED ONLY WHEN THERE IS SOMETHING TO ANSWER. Most students never
-      mail-merge anything, and an empty "Campaigns" card explaining a feature
-      that will never fire for them is a card that makes the page longer and
-      the product harder to understand. No campaigns, no section, no nav link.
-
-      Three buttons, not a toggle, because there are genuinely three states and
-      one of them is "not answered yet" — same reasoning as the contact form's
-      Recruiting-contact field. The current answer renders as a static pill so
-      the user can see what they said without a control implying it is unset.
-      {% endcomment %}
-      {% if campaigns %}
-      <section class="set-card kin-reveal" id="campaigns" style="--i:6.5"
-               aria-labelledby="campaigns-h">
-        <div class="set-head">
-          <h2 id="campaigns-h">Campaigns</h2>
-          <p>Bulk sends we found in your mail. Tell us which ones were your job search.</p>
-        </div>
-        <div class="set-body">
-          <div class="set-row">
-            <div class="set-row-main">
-              <div class="set-row-desc">
-                A send you say was something else comes off your daily queue
-                and off your network board. The people stay in your contacts,
-                your search and your history, and the board says how many it
-                is hiding and lets you look. Anyone who writes to you still
-                surfaces, whatever the send was.
-              </div>
-            </div>
-          </div>
-          {% for c in campaigns %}
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">{{ c.label }}</span>
-              <div class="set-row-desc">
-                {{ c.recipient_count }} recipient{{ c.recipient_count|pluralize }},
-                {{ c.first_sent|date:"j M Y" }}.
-                {% comment %}
-                The second number is the one that matters and it is stated
-                plainly rather than folded into the first: a classification
-                only moves contacts whose relationship with you STARTED in
-                this send (crm.models.CampaignContact.originates), so "201
-                recipients" alone would overstate what the answer does.
-                {% endcomment %}
-                {{ c.originating_count }} of them first heard from you here.
-                {% if c.kind == campaign_kind_other %}
-                  <br><strong>Not your recruiting</strong>. Off your daily queue and your network board.
-                {% elif c.kind == campaign_kind_recruiting %}
-                  <br><strong>Your recruiting</strong>. In your daily queue.
-                {% endif %}
-              </div>
-            </div>
-            <div class="set-row-control">
-              {% if c.is_classified %}
-                <form method="post" action="{% url 'crm:classify_campaign' %}">
-                  {% csrf_token %}
-                  <input type="hidden" name="campaign" value="{{ c.id }}">
-                  <input type="hidden" name="kind" value="{{ campaign_kind_unclassified }}">
-                  <button type="submit" class="btn">Change</button>
-                </form>
-              {% else %}
-                <form method="post" action="{% url 'crm:classify_campaign' %}">
-                  {% csrf_token %}
-                  <input type="hidden" name="campaign" value="{{ c.id }}">
-                  <input type="hidden" name="kind" value="{{ campaign_kind_recruiting }}">
-                  <button type="submit" class="btn">My recruiting</button>
-                </form>
-                <form method="post" action="{% url 'crm:classify_campaign' %}">
-                  {% csrf_token %}
-                  <input type="hidden" name="campaign" value="{{ c.id }}">
-                  <input type="hidden" name="kind" value="{{ campaign_kind_other }}">
-                  <button type="submit" class="btn">Something else</button>
-                </form>
-              {% endif %}
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </section>
-      {% endif %}
-
-      {% comment %}
-      ---- Dismissed from your inbox ----
-      Every person the user tapped Dismiss on in Today's "Found in your inbox"
-      lane, and the way back.
-
-      WHY IT LIVES HERE AND NOT IN THE LANE. It is the same shape as the
-      Campaigns card directly above: a durable list of decisions the user made
-      once, kept somewhere they can go and change their mind, deliberately
-      away from the daily surface. A collapsed "dismissed" section inside the
-      lane itself would put yesterday's answered questions back on the page
-      that exists to hold today's unanswered ones — the Today page is a queue,
-      and re-showing resolved work on it is the exact failure the lane's own
-      cap and the "Waiting on reply" strip are designed to avoid. Settings is
-      also where the user already goes to undo a durable classification, so
-      there is one habit to learn rather than two.
-
-      SAME RENDER RULE AS CAMPAIGNS: nothing dismissed, no card, no nav link.
-      An empty card explaining a feature that has never fired is a longer page
-      and a harder product.
-      {% endcomment %}
-      {% if dismissed_proposals %}
-      <section class="set-card kin-reveal" id="dismissed-proposals" style="--i:6.7"
-               aria-labelledby="dismissed-proposals-h">
-        <div class="set-head">
-          <h2 id="dismissed-proposals-h">Dismissed From Your Inbox</h2>
-          <p>People you told Coverage not to propose.</p>
-        </div>
-        <div class="set-body">
-          <div class="set-row">
-            <div class="set-row-main">
-              <div class="set-row-desc">
-                A dismissed person is never proposed again by a scan. That
-                stands until you restore them here, which puts them back on
-                Today waiting for your tap. Nothing was written to your
-                network either way.
-              </div>
-            </div>
-          </div>
-          {% for p in dismissed_proposals %}
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">{{ p.name|smart_title }}</span>
-              <div class="set-row-desc">
-                {{ p.email }}{% if p.firm %} · {{ p.firm.name|smart_title }}{% endif %}
-                {% comment %}
-                The evidence that triggered the proposal, in the same three
-                honest states the Today card uses (see crm/_cockpit.html) —
-                the surface where a decision gets REVERSED has to show at
-                least what the surface where it was made showed.
-                {% endcomment %}
-                <br>
-                {% if p.thread_subject %}
-                  Replied to: <strong>{{ p.thread_subject }}</strong>
-                {% elif p.threaded_reply %}
-                  Replied to an email you sent. No subject line on it.
+              <div class="set-row-control">
+                {% if c.is_classified %}
+                  <form method="post" action="{% url 'crm:classify_campaign' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="campaign" value="{{ c.id }}">
+                    <input type="hidden" name="kind" value="{{ campaign_kind_unclassified }}">
+                    <button type="submit" class="btn">Change</button>
+                  </form>
                 {% else %}
-                  {{ p.evidence }}
+                  <form method="post" action="{% url 'crm:classify_campaign' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="campaign" value="{{ c.id }}">
+                    <input type="hidden" name="kind" value="{{ campaign_kind_recruiting }}">
+                    <button type="submit" class="btn">My recruiting</button>
+                  </form>
+                  <form method="post" action="{% url 'crm:classify_campaign' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="campaign" value="{{ c.id }}">
+                    <input type="hidden" name="kind" value="{{ campaign_kind_other }}">
+                    <button type="submit" class="btn">Something else</button>
+                  </form>
                 {% endif %}
-                {% if p.resolved_at %}<br>Dismissed {{ p.resolved_at|date:"j M Y" }}.{% endif %}
               </div>
             </div>
-            <div class="set-row-control">
-              <form method="post" action="{% url 'crm:proposal_restore' p.id %}">
-                {% csrf_token %}
-                <button type="submit" class="btn">Restore</button>
-              </form>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </section>
-      {% endif %}
-
-      {% comment %}
-      ---- Duplicate cards ----
-      Pairs of contacts the identity ladder's suggestive rung reads as one
-      person (capture.discovery.duplicate_evidence via crm.merge), and the
-      ledger of what the user answered. Two lists, one card: the open
-      questions, then the merges that can still be undone.
-
-      NOTHING HERE ACTS ON ITS OWN. A false merge fuses two people's
-      histories and there is no clean undo once later touches land on the
-      fused card, so suggestive evidence only ever becomes this card and a
-      tap. The evidence sentence is shown verbatim on both lists: the
-      surface where a decision is made, and the one where it gets reversed,
-      both show what the decision stood on.
-
-      SAME RENDER RULE AS CAMPAIGNS AND DISMISSED: nothing to show, no
-      card, no nav link.
-      {% endcomment %}
-      {% if merge_suggestions or recent_merges %}
-      <section class="set-card kin-reveal" id="duplicates" style="--i:6.8"
-               aria-labelledby="duplicates-h">
-        <div class="set-head">
-          <h2 id="duplicates-h">One Person, Two Cards?</h2>
-          <p>Pairs that look like the same person. Nothing merges without your tap.</p>
-        </div>
-        <div class="set-body">
-          {% if merge_suggestions %}
-          <div class="set-row">
-            <div class="set-row-main">
-              <div class="set-row-desc">
-                Merging keeps the first card, moves the other card's history
-                onto it, and archives the spare. Every merge can be undone
-                below. If they are two people, say so once and Coverage
-                remembers.
-              </div>
-            </div>
+            {% endfor %}
           </div>
           {% endif %}
-          {% for s in merge_suggestions %}
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">
-                {{ s.primary.name|smart_title }} &middot; {{ s.duplicate.name|smart_title }}
-              </span>
-              <div class="set-row-desc">
-                Keep <strong>{{ s.primary.name|smart_title }}</strong>{% if s.primary.email %} ({{ s.primary.email }}){% endif %},
-                fold in {{ s.duplicate.name|smart_title }}{% if s.duplicate.email %} ({{ s.duplicate.email }}){% endif %}.
-                <br>{{ s.evidence }}
+
+          {% comment %}
+          Every person the user tapped Dismiss on in Today's "Found in your
+          inbox" lane, and the way back.
+
+          WHY IT LIVES HERE AND NOT IN THE LANE. A collapsed "dismissed"
+          section inside the lane itself would put yesterday's answered
+          questions back on the page that exists to hold today's unanswered
+          ones — the Today page is a queue, and re-showing resolved work on it
+          is the exact failure the lane's own cap and the "Waiting on reply"
+          strip are designed to avoid.
+          {% endcomment %}
+          {% if dismissed_proposals %}
+          <div class="set-group" id="dismissed-proposals">
+            <h3 class="set-group-h">Dismissed From Your Inbox</h3>
+            <p class="set-note">
+              Never proposed again until you restore them here, back on
+              Today waiting for your tap. Nothing was written to your
+              network either way.
+            </p>
+            {% for p in dismissed_proposals %}
+            <div class="set-row">
+              <div class="set-row-main">
+                <span class="set-row-label">{{ p.name|smart_title }}</span>
+                <div class="set-row-desc">
+                  {{ p.email }}{% if p.firm %} · {{ p.firm.name|smart_title }}{% endif %}
+                  {% comment %}
+                  The evidence that triggered the proposal, in the same three
+                  honest states the Today card uses (see crm/_cockpit.html) —
+                  the surface where a decision gets REVERSED has to show at
+                  least what the surface where it was made showed.
+                  {% endcomment %}
+                  <br>
+                  {% if p.thread_subject %}
+                    Replied to: <strong>{{ p.thread_subject }}</strong>
+                  {% elif p.threaded_reply %}
+                    Replied to an email you sent. No subject line on it.
+                  {% else %}
+                    {{ p.evidence }}
+                  {% endif %}
+                  {% if p.resolved_at %}<br>Dismissed {{ p.resolved_at|date:"j M Y" }}.{% endif %}
+                </div>
+              </div>
+              <div class="set-row-control">
+                <form method="post" action="{% url 'crm:proposal_restore' p.id %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn">Restore</button>
+                </form>
               </div>
             </div>
-            <div class="set-row-control">
-              <form method="post" action="{% url 'crm:contact_merge_act' 'merge' %}">
-                {% csrf_token %}
-                <input type="hidden" name="primary" value="{{ s.primary.id }}">
-                <input type="hidden" name="duplicate" value="{{ s.duplicate.id }}">
-                <button type="submit" class="btn btn-primary">Same person</button>
-              </form>
-              <form method="post" action="{% url 'crm:contact_merge_act' 'reject' %}">
-                {% csrf_token %}
-                <input type="hidden" name="primary" value="{{ s.primary.id }}">
-                <input type="hidden" name="duplicate" value="{{ s.duplicate.id }}">
-                <button type="submit" class="btn">Different people</button>
-              </form>
-            </div>
+            {% endfor %}
           </div>
-          {% endfor %}
-          {% for m in recent_merges %}
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">{{ m.duplicate.name|smart_title }} &rarr; {{ m.primary.name|smart_title }}</span>
-              <div class="set-row-desc">
-                Merged{% if m.resolved_at %} {{ m.resolved_at|date:"j M Y" }}{% endif %}.
-                {{ m.moved_touch_ids|length }} touch{{ m.moved_touch_ids|length|pluralize:"es" }} moved.
-                {% if m.evidence %}<br>{{ m.evidence }}{% endif %}
+          {% endif %}
+
+          {% comment %}
+          Pairs of contacts the identity ladder's suggestive rung reads as one
+          person (capture.discovery.duplicate_evidence via crm.merge), and the
+          ledger of what the user answered.
+
+          NOTHING HERE ACTS ON ITS OWN. A false merge fuses two people's
+          histories and there is no clean undo once later touches land on the
+          fused card, so suggestive evidence only ever becomes a row and a
+          tap. The evidence sentence is shown verbatim on both lists: the
+          surface where a decision is made, and the one where it gets
+          reversed, both show what the decision stood on.
+          {% endcomment %}
+          {% if merge_suggestions or recent_merges %}
+          <div class="set-group" id="duplicates">
+            <h3 class="set-group-h">One Person, Two Cards?</h3>
+            <p class="set-note">
+              Nothing merges without your tap. Merging folds the duplicate's
+              history into the kept card and archives the spare. Every merge
+              can be undone here.
+            </p>
+            {% for s in merge_suggestions %}
+            <div class="set-row">
+              <div class="set-row-main">
+                <span class="set-row-label">
+                  {{ s.primary.name|smart_title }} &middot; {{ s.duplicate.name|smart_title }}
+                </span>
+                <div class="set-row-desc">
+                  Keep <strong>{{ s.primary.name|smart_title }}</strong>{% if s.primary.email %} ({{ s.primary.email }}){% endif %},
+                  fold in {{ s.duplicate.name|smart_title }}{% if s.duplicate.email %} ({{ s.duplicate.email }}){% endif %}.
+                  <br>{{ s.evidence }}
+                </div>
+              </div>
+              <div class="set-row-control">
+                <form method="post" action="{% url 'crm:contact_merge_act' 'merge' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="primary" value="{{ s.primary.id }}">
+                  <input type="hidden" name="duplicate" value="{{ s.duplicate.id }}">
+                  <button type="submit" class="btn btn-primary">Same person</button>
+                </form>
+                <form method="post" action="{% url 'crm:contact_merge_act' 'reject' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="primary" value="{{ s.primary.id }}">
+                  <input type="hidden" name="duplicate" value="{{ s.duplicate.id }}">
+                  <button type="submit" class="btn">Different people</button>
+                </form>
               </div>
             </div>
-            <div class="set-row-control">
-              <form method="post" action="{% url 'crm:contact_merge_undo' m.id %}">
-                {% csrf_token %}
-                <button type="submit" class="btn">Undo</button>
-              </form>
+            {% endfor %}
+            {% for m in recent_merges %}
+            <div class="set-row">
+              <div class="set-row-main">
+                <span class="set-row-label">{{ m.duplicate.name|smart_title }} &rarr; {{ m.primary.name|smart_title }}</span>
+                <div class="set-row-desc">
+                  Merged{% if m.resolved_at %} {{ m.resolved_at|date:"j M Y" }}{% endif %}.
+                  {{ m.moved_touch_ids|length }} touch{{ m.moved_touch_ids|length|pluralize:"es" }} moved.
+                  {% if m.evidence %}<br>{{ m.evidence }}{% endif %}
+                </div>
+              </div>
+              <div class="set-row-control">
+                <form method="post" action="{% url 'crm:contact_merge_undo' m.id %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn">Undo</button>
+                </form>
+              </div>
             </div>
+            {% endfor %}
           </div>
-          {% endfor %}
+          {% endif %}
         </div>
       </section>
       {% endif %}
-
-      {% comment %}
-      ---- Notifications ----
-      Push Alerts and the weekly digest opt-out, one card: they answer the
-      same question ("how do you want to hear about a closing deadline"),
-      even though they save through two different paths. Push is device
-      state (accounts.PushSubscription rows, its own JS/endpoint pair,
-      instant — no Save button) and the digest is an account preference
-      (accounts.forms.NotificationsForm, the same POST-a-section pattern
-      Cadence/Weekly Pace use). Kept as two clearly-labeled rows inside one
-      card rather than merged into one control, since "on this device" and
-      "for this account" are genuinely different scopes and collapsing them
-      would misstate one or the other.
-      {% endcomment %}
-      <section class="set-card kin-reveal" id="notifications" style="--i:7"
-               aria-labelledby="notifications-h">
-        <div class="set-head">
-          <h2 id="notifications-h">Notifications</h2>
-          <p>How You Hear About A Closing Deadline</p>
-        </div>
-        <div class="set-body">
-          <div class="set-row" data-push-root
-               data-vapid-public-key="{{ vapid_public_key }}"
-               data-subscribe-url="{% url 'accounts:push_subscribe' %}"
-               data-unsubscribe-url="{% url 'accounts:push_unsubscribe' %}"
-               data-csrf="{{ csrf_token }}">
-            <div class="set-row-main">
-              <span class="set-row-label">Deadline Alerts, On This Device</span>
-              <div class="set-row-desc" data-push-status>
-                {% if not vapid_public_key %}
-                  Not set up yet.
-                {% elif push_subscribed %}
-                  On. You'll get an alert when a tracked role is closing soon.
-                {% else %}
-                  Off. Turn on to get an alert on this device.
-                {% endif %}
-              </div>
-            </div>
-            <div class="set-row-control">
-              <label for="push-alerts-toggle" class="set-sr">Push deadline alerts</label>
-              <input type="checkbox" id="push-alerts-toggle" data-push-toggle
-                     {% if push_subscribed %}checked{% endif %}
-                     {% if not vapid_public_key %}disabled{% endif %}>
-            </div>
-          </div>
-          <form method="post" action="{% url 'accounts:settings' %}" class="set-row">
-            {% csrf_token %}
-            <input type="hidden" name="section" value="notifications">
-            <div class="set-row-main">
-              <label class="set-row-label" for="{{ notifications_form.weekly_digest_enabled.id_for_label }}">Weekly Email Digest</label>
-              <div class="set-row-desc">What closes this week, who to ping, and what's new. Sent only when there's something to report.</div>
-            </div>
-            <div class="set-row-control">
-              {{ notifications_form.weekly_digest_enabled }}
-              <button type="submit" class="btn">Save</button>
-            </div>
-          </form>
-        </div>
-      </section>
-      <script src="{% static 'js/push-subscribe.js' %}" defer></script>
-
 
       {# ---- Credits ---- #}
       {% comment %}
@@ -1331,67 +1606,75 @@
       Always rendered, unlike Gmail Live below: every account has a plan and
       a balance whether or not Gmail Live is even configured on this deploy.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="credits" style="--i:8"
+      <section class="set-card kin-reveal" id="credits" style="--i:6"
                aria-labelledby="credits-h">
         <div class="set-head">
           <h2 id="credits-h">Credits</h2>
-          <p>What powers the advisor chat and Gmail rescans.</p>
         </div>
         <div class="set-body">
           <div class="set-row">
             <div class="set-row-main">
-              <span class="set-row-label">
-                {{ credits.plan_label }} Plan
-                {% comment %}
-                FIX #2a (walk-in-day bug): a plan flip used to be visible
-                nowhere but this text label. The badge names what changed —
-                the instant a reload picks up the new `user.plan` — without
-                naming the model (Jimmy, 2026-08-20: keep it to "Pro", the
-                model name is implementation detail).
-                {% endcomment %}
+              {% comment %}
+              The plan name ONCE. It used to read "Free Plan  [Free]" — the
+              word, then a pill of the same word, 6px apart. The pill is the
+              part that carries the colour a plan flip is visible by (FIX #2a,
+              the walk-in-day bug: a flip used to be visible nowhere but a
+              text label), so the pill is the part that stays, and the word
+              "Plan" beside it says what the pill names. Deliberately not the
+              model name — Jimmy, 2026-08-20: keep it to "Pro".
+              {% endcomment %}
+              <span class="set-row-label">Plan
                 <span class="pill plan-{{ credits.plan_label|lower }}">{{ credits.plan_label }}</span>
                 {% if credits.trial_days_left %}&middot; Pro trial &middot; {{ credits.trial_days_left }} day{{ credits.trial_days_left|pluralize }} left{% endif %}
               </span>
               <div class="set-row-desc">
+                Powers the advisor chat and Gmail rescans.
                 {{ credits.monthly_grant }} credits refill {{ credits.refill_date|date:"j F" }}.
                 Used {{ credits.month_usage }} so far this month.
               </div>
             </div>
-            <div class="set-row-control">
+            {% comment %}
+            The balance used to be a bare 24px number opposite a label reading
+            "Free Plan" — the biggest thing on the card, naming nothing. Rule
+            D3 again: a number states its population.
+            {% endcomment %}
+            <div class="set-row-control set-row-figure">
               <span class="set-row-value">{{ credits.balance }}</span>
+              <span class="set-row-sub">left</span>
             </div>
           </div>
 
           {% comment %}
           ---- Buy more credits (billing/stripe_gateway.py) ----
-          Always rendered, never hidden — when Stripe isn't configured yet
-          this renders as a visibly disabled "Coming soon" state instead of
-          disappearing, so the feature is visible on the page before it's
-          switched on, same posture as the push-alerts toggle above
-          ("Not set up yet.") when VAPID isn't configured.
+          The DISCLOSURE is unconditional; the dead buttons are not. Without
+          Stripe configured this row used to draw every credit pack as a
+          disabled button next to the words "Coming soon" — two controls that
+          cannot be pressed, on every deploy so far. The sentence survives on
+          its own, so a reader still learns top-ups exist and are not
+          available yet; only the buttons that lie about being pressable go.
+          With Stripe configured nothing here has changed.
           {% endcomment %}
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Buy More Credits</span>
               <div class="set-row-desc">
                 {% if credits.stripe_configured %}
-                  One-time top-ups, on top of your monthly refill. Never expire.
+                  One-time top-ups on top of your monthly refill. Never expire.
                 {% else %}
-                  Not available on this deploy yet.
+                  Top-ups aren't switched on yet. Your monthly refill is unaffected.
                 {% endif %}
               </div>
             </div>
+            {% if credits.stripe_configured %}
             <div class="set-row-control">
               {% for pack_key, pack in credits.credit_packs.items %}
                 <form method="post" action="{% url 'billing:checkout' pack_key %}">
                   {% csrf_token %}
-                  <button type="submit" class="btn"
-                          {% if not credits.stripe_configured %}disabled{% endif %}>
-                    {{ pack.label }}
-                  </button>
+                  <button type="submit" class="btn">{{ pack.label }}</button>
                 </form>
               {% endfor %}
             </div>
+            {% endif %}
           </div>
         </div>
       </section>
@@ -1403,63 +1686,52 @@
       (gmail_live.is_configured()); an unconfigured deploy shows nothing
       here rather than a dead-end connect button.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="gmail-live" style="--i:8.5"
+      <section class="set-card kin-reveal" id="gmail-live" style="--i:7"
                aria-labelledby="gmail-live-h">
         <div class="set-head">
           <h2 id="gmail-live-h">Gmail Live</h2>
-          {% comment %}`.pill.stale`, not pricing.html's `.plan-badge soon` —
-          that class is defined inside pricing's own {% templatetag openblock %} block head {% templatetag closeblock %}
-          and matches nothing here, so the badge rendered as bare text carrying
-          two inline styles written to undo rules that were never applied.
-          `.pill.stale` (coverage.css §8) is the same token pair, globally.
-          {% endcomment %}
-          <p>Real-time reply and bounce detection, straight from your inbox.
-            {% if gmail_live.trial_days_left %}<span class="pill stale">Pro trial &middot; {{ gmail_live.trial_days_left }} day{{ gmail_live.trial_days_left|pluralize }} left</span>
-            {% elif not gmail_live.is_pro %}<span class="pill stale">Pro</span>{% endif %}</p>
         </div>
         <div class="set-body">
           {% comment %}
-          Real-time sync is Pro-only (docs/pricing-rebalance-plan.md §7);
-          Connect Gmail and Scan Now below are open to every plan — this row
-          is the ONLY place the gate is stated so the rest of the card never
-          has to repeat it.
+          Real-time sync is Pro-only (docs/pricing-rebalance-plan.md §7). The
+          card's subtitle used to carry a "Pro"/"Pro trial" badge naming the
+          gate; the subtitle is gone (settings-subtitle sweep, 2026-08-28) and
+          the badge went with it rather than surviving as a floating fragment
+          — the plan/trial fact it carried is not lost, it is what the plan
+          pill and trial countdown on the Credits card above already say for
+          this same account. What's left here is Gmail Live's own status:
+          what the feature does, and what it's doing for THIS account right
+          now. Connect Gmail and Scan Now stay open to every plan exactly as
+          before.
           {% endcomment %}
-          {% if not gmail_live.is_pro %}
-          <div class="set-row">
-            <div class="set-row-main">
-              <div class="set-row-desc">
-                Real-time sync is a Pro feature. Connecting Gmail and
-                on-demand scans below are free on any plan.
-              </div>
-            </div>
-          </div>
-          {% endif %}
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Status</span>
               <div class="set-row-desc">
                 {% if gmail_live.connected %}
+                  Real-time reply and bounce detection from your inbox.
                   {% if gmail_live.status == "revoked" %}
-                    <strong>Access was revoked.</strong> Reconnect below.
+                    <strong>Access was revoked</strong> — reconnect below.
                   {% else %}
                     Connected as {{ gmail_live.gmail_address }}.
-                    {% comment %}Nothing in the Free branch here: the Pro gate
-                    row above renders on exactly the same condition, so a Free
-                    student was told twice, two rows apart, that real-time sync
-                    is off for them.{% endcomment %}
                     {% if gmail_live.is_pro %}
                       {% if gmail_live.last_notification_at %}
                         Last update {{ gmail_live.last_notification_at|timesince }} ago.
                       {% elif gmail_live.watch_active %}
                         No activity seen yet.
                       {% else %}
-                        Real-time sync is queued and turns on shortly.
+                        Real-time sync is queued and will turn on shortly.
                       {% endif %}
+                    {% else %}
+                      Real-time sync is off on Free — use Scan Now below.
                     {% endif %}
                   {% endif %}
                 {% else %}
-                  Not connected. Coverage reads mail only to detect bounces,
-                  replies, and calendar invites. No message bodies are stored.
+                  Not connected. Coverage only reads mail for bounces,
+                  replies, and calendar invites — never stores message bodies.
+                  {% if not gmail_live.trial_days_left and not gmail_live.is_pro %}
+                    Real-time sync needs Pro.
+                  {% endif %}
                 {% endif %}
               </div>
             </div>
@@ -1489,13 +1761,13 @@
               <span class="set-row-label">Past History</span>
               <div class="set-row-desc">
                 {% if gmail_live.backfill_status == "done" %}
-                  Done. {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize }} logged from your contacts' history.
+                  Done — {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize }} logged from your existing contacts' history.
                 {% elif gmail_live.backfill_status == "running" %}
-                  Running now. A year of mail takes a few minutes.
+                  Running — can take a few minutes for a year of mail.
                 {% elif gmail_live.backfill_status == "failed" %}
-                  Hit a snag. Retrying automatically.
+                  Hit a snag — it'll retry automatically.
                 {% else %}
-                  Queued. Starts shortly.
+                  Queued — starts shortly, no action needed.
                 {% endif %}
               </div>
             </div>
@@ -1514,20 +1786,20 @@
               <span class="set-row-label">Rescan Gmail</span>
               <div class="set-row-desc">
                 {% if gmail_live.rescan_status == "running" %}
-                  Running now. This takes a few minutes.
+                  Running — can take a few minutes.
                 {% elif gmail_live.rescan_status == "pending" %}
-                  Queued. Starts shortly.
+                  Queued — starts shortly.
                 {% elif gmail_live.rescan_status == "failed" %}
-                  Last scan hit a snag. Retrying automatically.
+                  Last scan hit a snag — it'll retry automatically.
                 {% elif gmail_live.rescan_status == "done" %}
-                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago. {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize }} logged.
+                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago — {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize }} logged.
                   {% with residue=gmail_live.rescan_stats.residue %}
                     {% if residue.credit_limited %}
-                      {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look. Credits covered {{ residue.residue_threads_processed }}; the rest stay unclassified until credits refill.
+                      {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look; credits covered {{ residue.residue_threads_processed }} of them — the rest stay unclassified until credits refill.
                     {% endif %}
                   {% endwith %}
                 {% else %}
-                  Re-check your whole Gmail history against every contact.
+                  Re-check your Gmail history against all your contacts.
                 {% endif %}
                 {% comment %}
                 Free's once-per-GMAIL_FREE_RESCAN_INTERVAL_DAYS throttle
@@ -1569,11 +1841,10 @@
       {% endcomment %}
 
       {# ---- Sign-In & Security ---- #}
-      <section class="set-card kin-reveal" id="security" style="--i:9"
+      <section class="set-card kin-reveal" id="security" style="--i:8"
                aria-labelledby="security-h">
         <div class="set-head">
           <h2 id="security-h">Sign-In &amp; Security</h2>
-          <p>How You Get Into This Account</p>
         </div>
         <div class="set-body">
           <div class="set-row">
@@ -1603,7 +1874,7 @@
               <span class="set-row-label">Password</span>
               <div class="set-row-desc">
                 {% if has_usable_password %}
-                  Used together with your email address to sign in.
+                  Used with your email to sign in.
                 {% else %}
                   You don't have a password. You sign in with a connected account.
                 {% endif %}
@@ -1639,7 +1910,7 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Sign Out Other Devices</span>
-              <div class="set-row-desc">End every other signed-in session. This device stays signed in.</div>
+              <div class="set-row-desc">Ends every other signed-in session. This device stays signed in.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:signout_all' %}"
@@ -1649,78 +1920,88 @@
         </div>
       </section>
 
-      {# ---- Your Data ---- #}
-      <section class="set-card kin-reveal" id="data" style="--i:10"
+      {% comment %}
+      ---- Your Data ----
+      What Coverage holds on you, how to take it out, and the two documents
+      that say what we may do with it. Legal was a separate card below this
+      one — its own heading and subtitle over two links — and the two are one
+      subject: this is the card that answers "what do you have on me". Both
+      routes are unchanged and both still appear; only the second frame went.
+      For a signed-in student these are the ONLY in-app links to Privacy and
+      Terms, so they can be restyled and they cannot be dropped.
+      {% endcomment %}
+      <section class="set-card kin-reveal" id="data" style="--i:9"
                aria-labelledby="data-h">
         <div class="set-head">
           <h2 id="data-h">Your Data</h2>
-          <p>Import, Export, and Your Totals</p>
         </div>
         <div class="set-body">
+          {% comment %}
+          THE COUNT. This said "137" while the Network page said "112",
+          because it counted archived rows and Network doesn't. A number on
+          this page has to state its population (rule D3), so every way a
+          contact is off the board is broken out and linked.
+
+          There is no "Target Firms" count row under this one any more. It
+          printed a single number for something the Target Firms board four
+          cards up already states as three live per-tier counts you can drag
+          firms between — one page saying one number twice, in the weaker of
+          the two places.
+
+          The four ways a contact is off the Network board, stated once with
+          its count and its route. This used to be a strip above the board
+          itself, in three separate vocabularies; it was removed on 2026-08-28
+          and landed here, which is the page that already exists to say what
+          Coverage holds and how much of it.
+
+          Each clause hides at zero, for the reason the strip's own comments
+          gave: a permanent link to a list that is always empty is a standing
+          reproach for a state that is allowed.
+          {% endcomment %}
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Contacts</span>
-              {% comment %}
-              This said "137" while the Network page said "112", because it
-              counted archived rows and Network doesn't. A number on this page
-              has to state its population (rule D3), so the archived split is
-              broken out and links to the list it refers to.
-              {% endcomment %}
               <div class="set-row-desc">People in your private CRM.
-                {% if archived_count %}
-                  Includes <a href="{% url 'crm:contact_archived' %}">{{ archived_count }} archived</a>,
-                  which the Network board doesn't show.
+                {% if archived_count or parked_count or campaign_hidden_count or unrelated_count %}
+                  Off the Network board:
+                  {% if archived_count %}<a href="{% url 'crm:contact_archived' %}">{{ archived_count }} archived</a>{% endif %}{% if archived_count and parked_count %}, {% endif %}{% if parked_count %}<a href="{% url 'crm:contact_parked' %}">{{ parked_count }} parked</a>{% endif %}{% if campaign_hidden_count and archived_count or campaign_hidden_count and parked_count %}, {% endif %}{% if campaign_hidden_count %}<a href="{% url 'crm:contact_campaign_hidden' %}">{{ campaign_hidden_count }} not recruiting</a>{% endif %}{% if unrelated_count and archived_count or unrelated_count and parked_count or unrelated_count and campaign_hidden_count %}, {% endif %}{% if unrelated_count %}<a href="{% url 'crm:contact_unrelated' %}">{{ unrelated_count }} not recruitment</a>{% endif %}.
                 {% endif %}
               </div>
             </div>
-            <div class="set-row-value">{{ contact_count }}</div>
-          </div>
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">Target Firms</span>
-              <div class="set-row-desc">Firms you've tiered on your Network board.</div>
+            {% comment %}
+            Wrapped in .set-row-control like every other right-hand cell on
+            this page. It used to be a bare .set-row-value child of .set-row,
+            which is the same thing the Credits card does correctly one card
+            up — two spellings of one row anatomy.
+            {% endcomment %}
+            <div class="set-row-control set-row-figure">
+              <span class="set-row-value">{{ contact_count }}</span>
+              <span class="set-row-sub">total</span>
             </div>
-            <div class="set-row-value">{{ target_firm_count }}</div>
           </div>
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Import &amp; Export</span>
-              {% comment %}The ZIP's contents are enumerated on the export page
-              itself, off the builders (`services.export_manifest`), so the
-              list here was a second copy that could only ever drift.
-              {% endcomment %}
               <div class="set-row-desc">Bring contacts in from a CSV, or download
-                everything Coverage holds on you as one ZIP.</div>
+                everything Coverage holds as one ZIP: contacts, touches, firms,
+                applications, tasks, debriefs, scores, and your profile.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:import' %}">Import</a>
               <a class="btn" href="{% url 'accounts:export' %}">Export</a>
             </div>
           </div>
-        </div>
-      </section>
-
-      {# ---- Legal ---- #}
-      <section class="set-card kin-reveal" id="legal" style="--i:11"
-               aria-labelledby="legal-h">
-        <div class="set-head">
-          <h2 id="legal-h">Legal</h2>
-          <p>Privacy and Terms</p>
-        </div>
-        <div class="set-body">
-          {% comment %}Neither row carries a description. "What we collect and
-          why" is what a privacy policy IS, and the Terms row next to it never
-          had one — one row explaining itself and one not read as an omission.
-          {% endcomment %}
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Privacy Policy</span>
+              <div class="set-row-desc">What we collect, why, and who else sees it.</div>
             </div>
             <div class="set-row-control"><a class="btn" href="{% url 'accounts:privacy' %}">Read</a></div>
           </div>
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Terms of Service</span>
+              <div class="set-row-desc">The agreement between you and Coverage.</div>
             </div>
             <div class="set-row-control"><a class="btn" href="{% url 'accounts:terms' %}">Read</a></div>
           </div>
@@ -1734,11 +2015,10 @@
       one bucket would bury it where nobody would look for it.
       {% endcomment %}
       {# ---- Danger Zone ---- #}
-      <section class="set-card is-danger kin-reveal" id="danger" style="--i:12"
+      <section class="set-card is-danger kin-reveal" id="danger" style="--i:10"
                aria-labelledby="danger-h">
         <div class="set-head">
           <h2 id="danger-h">Danger Zone</h2>
-          <p>Irreversible Account Actions</p>
         </div>
         <div class="set-body">
           <div class="set-row">
@@ -1746,7 +2026,7 @@
               <span class="set-row-label">Delete Account</span>
               <div class="set-row-desc">Permanently delete your account and everything in it.
                 This can't be undone. <a href="{% url 'accounts:export' %}">Export your data</a>
-                first if you might want it.</div>
+                first if you want it.</div>
             </div>
             <div class="set-row-control">
               <a class="btn btn-danger" href="{% url 'accounts:delete' %}"
@@ -1812,11 +2092,23 @@
     // below. Reading the placeholder is what makes drift impossible rather
     // than merely fixed once; it is also what the pace ring already does with
     // its own goal input.
+    //
+    // Two control shapes reach this now, and both answer the same way. A
+    // number input carries its override in `.value` and its default in
+    // `.placeholder`. A segment (accounts.forms.CADENCE_SEGMENTS) carries the
+    // override on the checked radio's value and its default on that radio's
+    // `data-default-value` — because the DEFAULT segment posts blank, which is
+    // what `apply_to` reads as "no override". Reading `:checked` first is what
+    // makes the diagram track a segment at all: an unqualified
+    // `[name="max_cold_touches"]` returns the FIRST radio whatever is selected,
+    // so the rail would have drawn "note only" forever.
     function num(name) {
-      var el = document.querySelector('[name="' + name + '"]');
+      var el = document.querySelector('[name="' + name + '"]:checked')
+            || document.querySelector('[name="' + name + '"]');
       if (!el) return NaN;
       var v = parseInt(el.value, 10);
-      return isNaN(v) ? parseInt(el.placeholder, 10) : v;
+      if (!isNaN(v)) return v;
+      return parseInt(el.dataset.defaultValue || el.placeholder, 10);
     }
     function setMark(sel, pct, label) {
       var m = viz.querySelector(sel);
@@ -1955,12 +2247,20 @@
       // number that briefly shows the wrong day count is worse than a
       // widget that skips its own entrance animation.
       drawCadence();
+      // querySelectorAll + change, not querySelector + input: a segmented knob
+      // is SEVERAL elements sharing one name, so binding the first one alone
+      // would leave the rail frozen whenever the other segment was the one
+      // clicked. `change` covers radios in every browser; `input` is what a
+      // number input fires per keystroke, and both are wanted here.
       ["followup_after_business_days", "park_after_business_days",
        "max_cold_touches", "chatted_touch_min_weeks",
        "advocate_touch_min_weeks", "pre_deadline_reping_days"
       ].forEach(function (name) {
-        var el = document.querySelector('[name="' + name + '"]');
-        if (el) el.addEventListener("input", function () { drawCadence(); bump(); });
+        document.querySelectorAll('[name="' + name + '"]').forEach(function (el) {
+          ["input", "change"].forEach(function (evt) {
+            el.addEventListener(evt, function () { drawCadence(); bump(); });
+          });
+        });
       });
       // Label boxes are measured, so anything that changes their size or the
       // rail's has to re-run the packing: the webfont landing after first
@@ -1981,6 +2281,57 @@
       });
     }
 
+    // ---- Rows that save on change, so the tick IS the save. --------------
+    // Progressive enhancement, deliberately in this order: the Save button is
+    // only hidden once we know a script is running to replace it. Hiding it in
+    // CSS and revealing it without JS is not possible, so the button ships
+    // visible and this removes it.
+    //
+    // A CLASS, not the `hidden` attribute. `.btn` sets its own display, an
+    // author rule that beats the user-agent's `[hidden] { display: none }`
+    // regardless of specificity — the same trap the Target Firms search
+    // filter above documents against `.tf-result`. `hidden` here left the
+    // button on screen and saving looked like it needed a click it no longer
+    // needed.
+    document.querySelectorAll("form[data-autosave]").forEach(function (form) {
+      var btn = form.querySelector("[data-autosave-btn]");
+      if (btn) btn.classList.add("is-autosaved");
+      form.addEventListener("change", function () { form.submit(); });
+    });
+
+    // ---- The default chip: states the default, and restores it. ----------
+    // Every number on this card used to carry a static "Default: N" line. The
+    // number is data (it is the value you get back if you clear the box), so
+    // it still prints in both states — but the chip is now the control that
+    // does the clearing, which is a thing the page could previously only have
+    // told you in a sentence.
+    //
+    // ARMED = the input holds ANY value, not "a value different from the
+    // default". That is exactly the underlying contract: `CadenceForm.apply_to`
+    // stores whatever it is handed and pops the key on a blank, so a typed 6 in
+    // a field defaulting to 6 IS a stored override, and the chip must still
+    // offer to remove it.
+    document.querySelectorAll("[data-default-for]").forEach(function (chip) {
+      var input = document.getElementById(chip.dataset.defaultFor);
+      if (!input) return;
+      var def = chip.dataset.default;
+      function paint() {
+        var armed = input.value !== "";
+        chip.disabled = !armed;
+        chip.textContent = armed ? "Reset to " + def : "Default " + def;
+      }
+      chip.addEventListener("click", function () {
+        input.value = "";
+        // A real input event, so the cadence rails and the pace ring redraw
+        // through the same path a keystroke uses rather than a second one.
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        paint();
+        input.focus();
+      });
+      input.addEventListener("input", paint);
+      paint();
+    });
+
     // ---- The pace ring: two-way bound to the weekly-goal input. ----------
     var ring = document.getElementById("pace-ring");
     var goalInput = document.querySelector('[name="weekly_touch_goal"]');
@@ -1998,7 +2349,7 @@
         document.getElementById("pace-read").innerHTML =
           "That's about <b>" + Math.round(g / 5 * 10) / 10 +
           " a weekday</b>." + (goalInput.value ? "" :
-          " Drag the ring or type a number to set your own.");
+          " Using the default — drag the ring or type a number to set your own.");
       }
       function setFromPointer(e) {
         var r = ring.getBoundingClientRect();

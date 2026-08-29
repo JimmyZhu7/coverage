@@ -41,7 +41,7 @@ def _deadline(user, firm_name: str, when: date):
     """One confirmed firm date, which is one of the layers the rail counts."""
     firm = Firm.objects.create(name=firm_name, slug=firm_name.lower().replace(" ", "-"))
     FirmDate.objects.create(
-        firm=firm, cycle="2027", event_kind="applications_close",
+        firm=firm, cycle="ft2027", event_kind="applications_close",
         date=when, confidence=1.0,
     )
     return firm

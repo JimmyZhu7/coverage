@@ -78,10 +78,10 @@ from datetime import timedelta
 from django.utils import timezone
 
 from directory.classify import TARGET_BUCKETS
-from directory.models import FirmDate, Opportunity
+from directory.models import Opportunity
 
 from .models import UserFirm
-from .utils import FIRM_DATE_LABELS, _confidence_label
+from .utils import FIRM_DATE_LABELS, confirmed_firm_dates
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +323,7 @@ def firm_openings(user, firm_ids, today=None) -> dict[int, dict]:
     Three sources, in the order of authority above:
 
       1. A CONFIRMED `FirmDate` inside the horizon. `confidence` is stored as a
-         float and read back through `crm.utils._confidence_label`, the same
+         float and filtered through `crm.utils.confirmed_firm_dates`, the same
          adapter the cadence engine's own re-ping branch goes through, so a
          rumour can never become a countdown here either.
       2. The soonest deadline on an open campus role at that firm that this
@@ -355,11 +355,16 @@ def firm_openings(user, firm_ids, today=None) -> dict[int, dict]:
     # 1. Confirmed firm dates. Ordered latest-first so the last write per firm
     #    is the soonest — the same batching pattern `_chat_prep` and
     #    `_seed_firm_dates` use to keep this to one query.
-    for fd in (FirmDate.objects
+    # `confirmed_firm_dates()`, not a local confidence test. This reader spent
+    # a release checking `_confidence_label(...) == "confirmed_official"` and
+    # nothing else — the seventh copy of a bug six other CRM readers were
+    # fixed for. Confidence alone is half the bar: a row can be certain about
+    # a MONTH ("~ Sep 2027", precision "estimated", confidence 1.0) and that
+    # is not something to hang a day-level countdown on. The helper holds both
+    # halves, so a future third condition lands here once.
+    for fd in (confirmed_firm_dates()
                .filter(firm_id__in=firm_ids, date__gte=today, date__lte=horizon)
                .order_by("-date")):
-        if _confidence_label(fd.confidence) != "confirmed_official":
-            continue
         out[fd.firm_id] = {
             "kind": OPENING_FIRM_DATE,
             "date": fd.date,
@@ -381,7 +386,16 @@ def firm_openings(user, firm_ids, today=None) -> dict[int, dict]:
                 | Q(first_seen__gte=since))
         .select_related("firm")
     )
-    for o in _relevant_to_student(user, rows):
+    # Filtered ONCE and walked twice. `_relevant_to_student` is a pure
+    # function of `rows` — four in-memory passes plus an
+    # `_eligibility_profile(user)` build — and calling it a second time for
+    # the new-role pass below recomputed all of it to get the same list back.
+    # The two loops must stay two loops (every deadline at a firm outranks
+    # every new posting at it, whatever order the board returns them in), but
+    # they can share the work.
+    relevant = _relevant_to_student(user, rows)
+
+    for o in relevant:
         if o.firm_id in out:
             continue
         if o.deadline and today <= o.deadline <= horizon:
@@ -392,7 +406,7 @@ def firm_openings(user, firm_ids, today=None) -> dict[int, dict]:
                 "label": "Applications close",
                 "title": o.title,
             }
-    for o in _relevant_to_student(user, rows):
+    for o in relevant:
         if o.firm_id in out:
             continue
         if o.first_seen and o.first_seen >= since:

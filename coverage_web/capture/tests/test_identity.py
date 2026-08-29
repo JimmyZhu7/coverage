@@ -232,9 +232,16 @@ class TestDuplicateEvidence:
             row("Alvan Tay", "alvan.tay@evercore.com", firm_id=4),
         )
 
-    def test_same_name_at_the_same_firm_is_suggested_not_matched(self):
+    def test_same_name_at_the_same_firm_is_suggested(self):
+        # Offered for a tap. The trailing half of this test's old name — "not
+        # matched" — was never true: one name, one employer, and exactly one
+        # candidate row is precisely the shape `_match_existing`'s name rung
+        # DOES act on, and should, because a reply from a second address at
+        # one firm is far more often the same person than a namesake. The
+        # ladder's abstain is about AMBIGUITY (two candidates) and about two
+        # different directory firms; see `test_stress_identity.py`.
         ev = discovery.duplicate_evidence(
             row("Yuan Li", "yuan.li@gs.com", firm_id=9),
             row("Yuan Li", "yuan.li2@gs.com", firm_id=9),
         )
-        assert ev  # offered for a tap; _match_existing would never fuse them
+        assert ev

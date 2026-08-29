@@ -94,6 +94,21 @@ this page does get a real `for` — see the a11y note in settings.html.
 <label>Target Recruiting Cycle</label>
 <div class="chipset">{{ form.target_cycles }}</div>
 {{ form.target_cycles.errors }}
+{% comment %}
+What the cycle you just picked actually looks like: twelve months of real
+deadline density off the live board, same partial the Opportunities feed
+renders. It used to be its own card on Settings, one below this one, with its
+own heading and subtitle — a section header over a caption. A caption belongs
+against the control it explains, so it sits here now, where the question
+"what am I signing up for?" is being asked.
+
+Renders nothing where `cycle_months` isn't in context (the onboarding step
+reuses this partial), by the partial's own guard.
+{% endcomment %}
+{% if cycle_months %}
+  <p class="field-hint">Real deadlines by month, from the live board.</p>
+  {% include "directory/_cycle_band.html" %}
+{% endif %}
 
 <label>Regions of Interest</label>
 <div class="chipset">{{ form.regions }}</div>

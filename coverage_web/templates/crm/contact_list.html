@@ -50,123 +50,54 @@
   </nav>
 
   {% comment %}
-  Everyone the write path declined to place. Coverage never infers a region
-  it cannot entail from something the student actually stated (see
-  crm/models.py `Contact.resolve_region` for the measurement that killed
-  every probabilistic signal), so some people stay unplaced — by design.
-  This link is the only ask the product makes about it: no badge, no Today
-  card, no digest line. Rendered only when somebody is actually unplaced —
-  a permanent line reading "0 unplaced" would be a standing reproach for a
-  state that is allowed.
+  THE BOARD'S META STRIP IS GONE (2026-08-28). Pointed at twice in a row,
+  the second time as "take all of this away, hide": three stacked bands
+  above the board — an unplaced ask, a row of four off-board links, and two
+  "N hidden from this board" caveats — none of which was a contact.
 
-  Moved out of the segmented pill above (2026-08-27): it was never a lens on
-  the board like "Hong Kong" or "School" — it's the region-ask surface, a
-  chore the product owes the student an answer for, so it now sits with the
-  board's other honesty lines below rather than among the filters. Nothing
-  about the ask changed: same unscoped count, same link, same `?scope=` this
-  page has always understood.
-  {% endcomment %}
-  {% if unplaced_total %}
-    <p class="net-caveat net-caveat--board">
-      {{ unplaced_total }} unplaced. <a href="?scope={{ unplaced_scope }}">Say where they are.</a>
-    </p>
-  {% endif %}
+  Every guarantee they made survives, relocated rather than dropped:
 
-  {% comment %}
-  The three ways off this board, collapsed (2026-08-27) from three segmented
-  tabs sitting among the filters into one quiet line beneath them. None of
-  the routes changed — same three URLs, same hide-when-empty rule the
-  campaign and recruitment gates below already used. Archived now follows
-  that same rule too, on purpose: it used to render unconditionally, but
-  most students have archived nobody, and a permanent link to a list that's
-  always empty is the same standing reproach as a permanently-zero tab.
+  - The unplaced ask is still made TWICE lower on this same page: the
+    `net-unplaced` section (the full grouped-by-firm answer, which is where
+    the question is actually answerable) and the one-line "N of these have
+    no region set. Shown on a guess. Place them" above the contact grid.
+    The band removed here was the third statement of it, and the only one
+    with nowhere useful to go.
+  - The four off-board lists (archived, parked, campaign-hidden,
+    not-recruitment) now hang off Settings > Your Data, beside the archived
+    link that already lived there. They are account-level ledgers, not
+    lenses on this board, and that is the page that already exists to say
+    what Coverage holds and how many.
+  - "The board says what it is not showing" is still honoured, just not
+    three times in three vocabularies at the top of the board. Settings
+    carries the counts and the routes together.
 
-  All three stay UNSCOPED, exactly like the tabs they replace: a way back
-  that disappears depending which filter you're standing on is a dead end,
-  not a filter.
+  What is NOT allowed back: a permanently-rendered line for a state that is
+  allowed (see the old "0 unplaced" argument), or a hidden-count sentence
+  that appears above the first contact card.
   {% endcomment %}
-  {% if archived_any or parked_any or hidden_any or unrelated_any %}
-    <nav class="subnav standalone net-offboard">
-      {% comment %}
-      Not a scope — a separate list. Archived contacts are excluded from
-      every board query, so this is the only way back to them.
-      {% endcomment %}
-      {% if archived_any %}
-        <a href="{% url 'crm:contact_archived' %}">Archived</a>
-      {% endif %}
-      {% comment %}
-      Parked contacts stay ON this board — they still sit in their warmth
-      section below — so this is the bulk way back, not a hidden-contacts
-      ledger. It joins this line rather than the filter pill for the same
-      reason the other three did: it is a route off the board, not a lens
-      on it. Gated like its neighbours; a student who has parked nobody
-      does not need the link.
-      {% endcomment %}
-      {% if parked_any %}
-        <a href="{% url 'crm:contact_parked' %}">Parked</a>
-      {% endif %}
-      {% comment %}
-      The other way a contact leaves this board: you answered "that bulk
-      send was not my recruiting" in Settings. Rendered only when somebody
-      is actually hidden — most students never mail-merge anything and a
-      permanent link explaining a feature that will never fire for them
-      makes the board harder to read.
-      {% endcomment %}
-      {% if hidden_any %}
-        <a href="{% url 'crm:contact_campaign_hidden' %}">Not recruiting</a>
-      {% endif %}
-      {% comment %}
-      The third way off the board: the person themselves is not related to
-      the user's recruiting (crm/recruitment.py). Same render-only-when-
-      somebody-is-hidden rule as the campaign link above, for the same
-      reason.
-      {% endcomment %}
-      {% if unrelated_any %}
-        <a href="{% url 'crm:contact_unrelated' %}">Not recruitment</a>
-      {% endif %}
-    </nav>
-  {% endif %}
-
-  {% comment %}
-  THE BOARD SAYS WHAT IT IS NOT SHOWING. Classifying a send "not my
-  recruiting" used to take those people out of the daily queue only, and the
-  founder opened his own board and asked why there were still club people in
-  his network (crm/campaigns.py). They come off the board now — which makes
-  the contact count, the tier board and the Coverage Gaps strip all drop at
-  once, and a page that shrinks by nine without saying so is the same bug with
-  better manners. Count, reason, and a link to look. Scoped, so the number
-  agrees with the tab it is under.
-  {% endcomment %}
-  {% if hidden_total %}
-    <p class="net-caveat net-caveat--board">
-      {{ hidden_total }} hidden from this board. They came in on a send you
-      said was not your recruiting.
-      <a href="{% url 'crm:contact_campaign_hidden' %}">Show them</a>
-    </p>
-  {% endif %}
-  {% comment %}
-  Same count-reason-link discipline for the recruitment-relevance gate
-  (crm/recruitment.py): the board must say what it is hiding and why, and
-  the number goes through the same scope filter as the board it caveats.
-  {% endcomment %}
-  {% if unrelated_total %}
-    <p class="net-caveat net-caveat--board">
-      {{ unrelated_total }} hidden from this board. Nothing on their row
-      relates them to your recruiting.
-      <a href="{% url 'crm:contact_unrelated' %}">Show them</a>
-    </p>
-  {% endif %}
 
   {% comment %}
   Coverage Gaps: the worst-exposed tiered firms, worst first. The formula is
   documented in crm/coverage.py — tier weight × gap points + a deadline
-  bonus for a CONFIRMED close. Each card shows the one number that formula
-  resolves to (`.gap-exp`), not just a hover tooltip: the title= attribute
-  below is unreachable on any touch device, which is most of this app's own
-  screen sizes, so the rank would be arguable only if you owned a mouse.
-  See `test_the_gap_strip_shows_its_score_without_a_hover` — that test is
-  the reason a later simplification pass (below) still shows `.gap-exp`
-  in plain text rather than folding it into this same hover-only title=.
+  bonus for a CONFIRMED close. NONE of that arithmetic reaches the card's
+  face. The founder asked what "exposure" meant, heard the answer, and said
+  drop the number — then, when a first pass swapped the score for the card's
+  rank ("ranked 1 of 6"), said that was not it either.
+
+  Both readings of "drop the number" were tested against the strip and the
+  second is right: the rank was a number that restated the card's own
+  position in a list the reader is already looking down. It answered "where
+  does this sit" for someone who could see exactly where it sat. What a
+  reader actually needs from the face is WHY this firm is here, and the tier
+  tag, the gap label ("No contacts", "No advocate") and the deadline tag
+  each say something the position cannot.
+
+  The formula still exists and still decides the order; it lives in the
+  card's title= and in the strip heading's own tooltip, both of which say
+  "exposure" in full. `test_the_gap_strip_shows_no_number_on_its_face`
+  pins the face; `test_tied_gap_cards_are_ordered_by_who_is_actually_hiring`
+  pins that tied cards are still separated by ORDER rather than by text.
   {% endcomment %}
   {% if gaps %}
   <section class="gap-strip">
@@ -198,16 +129,21 @@
           rest of the arithmetic it already shows there.
           {% endcomment %}
           {% comment %}
-          The state and the score share one line rather than two: the tier
-          is already the border colour, so restating "T1 ×3" in a second
-          sentence under the state line was the same fact printed three
-          times on one card. `title=` above still carries the full
-          breakdown for anyone hovering — this is the one number from it
-          worth always showing without a hover, not the whole formula.
-          `test_the_gap_strip_shows_its_score_without_a_hover` pins this:
-          `.gap-exp` stays plain text specifically because title= cannot
-          be reached on a touch screen, so it is not a candidate for the
-          next round of trimming even though it looks like one.
+          One line, and it carries a state, not a measurement. The tier is
+          already the border colour, so restating "T1 ×3" underneath was the
+          same fact printed three times on one card.
+
+          Two numbers have now been tried on this line and both were cut on
+          the same objection. "exposure 12" was the raw formula output: a
+          term that means something else in finance, and an integer only
+          readable against its neighbours. "ranked 1 of 6" replaced it and
+          was cut immediately — it told the reader a position they could see
+          for themselves, and it made every card's line end in a different
+          number that changed meaning as the strip's length changed.
+
+          The face is left with what distinguishes: `g.label` says which
+          KIND of hole this is, and that differs card to card in a way rank
+          never did.
 
           The advocate fraction that used to sit between them is gone.
           Asked for directly: cut what repeats without distinguishing.
@@ -224,8 +160,7 @@
           implied ("{{ g.target }}" is the user's own Settings > Cadence
           target, `crm.coverage.advocate_target`, not a constant).
           {% endcomment %}
-          <div class="gap-state" title="{{ g.advocates }} of {{ g.target }} advocates toward your target for this firm. Set in Settings &gt; Cadence.">{{ g.label }}
-            <span class="gap-exp">· exposure {{ g.exposure }}</span></div>
+          <div class="gap-state" title="{{ g.advocates }} of {{ g.target }} advocate{{ g.target|pluralize }} toward your target for this firm. Set in Settings &gt; Cadence.">{{ g.label }}</div>
           {% comment %}
           "Who to find": the other half of the card. Everything above it
           says how exposed this firm is; the button below it says "Add",
@@ -372,9 +307,9 @@
   same endpoint (`crm:contacts_bulk`), same reversibility.
   {% endcomment %}
 
-  {# ---- Firm Coverage by tier (draggable) ---- #}
+  {# ---- Firm Coverage by tier (pick or drag) ---- #}
   <section class="net-coverage">
-    <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a card between lanes to change a firm's tier.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
+    <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Pick a tier on a card, or drag it between lanes.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
       <div class="net-panel">
       {% comment %}
       THE LEGEND that used to open this panel is gone. Four warmth dots and
@@ -395,21 +330,40 @@
       {% for section in tier_sections %}
         <div class="tier-section" data-tier="{{ section.tier|default:'' }}">
           {% comment %}
-          Same explainer a card already carries on hover ("Drag to another
-          tier. Tier drives your action priorities.") — repeated on the
+          Same explainer a card already carries on hover — repeated on the
           lane's own heading so it reaches an EMPTY lane too. A "TIER 1"
-          header over a bare "Drop a firm here" placeholder had nothing on
-          it to hover; the lane label is the one element in that state
-          that's always there.
+          header over a bare placeholder had nothing on it to hover; the
+          lane label is the one element in that state that's always there.
+          Neither sentence names dragging as THE method any more: HTML5
+          drag-and-drop never fires on a touchscreen, so on a phone a hint
+          reading "drag a card here" described a gesture the page could not
+          receive. Every card carries a tier picker now (`.fc-tier`); the
+          drag stayed as the pointer shortcut.
           {% endcomment %}
-          <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a firm card here to set its tier.">
+          {% comment %}
+          The firm count next to the label is the one affordance that costs
+          nothing to render and can't be hidden by a browser's own
+          scrollbar behaviour (macOS hides overlay scrollbars, styled or
+          not, until the user actually scrolls — see `.tier-grid.is-capped`
+          in _styles.html for the other half of the fix). "Tier 1  14" says
+          plainly that there is more than a glance's worth here, the same
+          job `scrub-count` already does for every other section on this
+          page ("Firm Coverage 54", "Contacts 80"). This is a plain count,
+          not the tier-cost sentence ("2 firms x 2 = 4 advocates...") that
+          was pulled from under every tier label as clutter (see
+          crm/tests/test_coverage_gaps.py::test_network_page_shows_gaps_and_advocate_fractions)
+          — that was a computed stat nobody asked for; this is the same
+          single number `scrub-count` already shows everywhere else.
+          {% endcomment %}
+          <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Pick this tier on a card, or drag the card here.">
             <span>{{ section.label }}</span>
+            <span class="scrub-count">{{ section.cards|length }}</span>
           </div>
           <div class="tier-grid">
             {% for fc in section.cards %}
               <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
                    style="--i:{{ forloop.counter0 }}"
-                   title="Drag to another tier. Tier drives your action priorities.">
+                   title="Tier drives your action priorities. Pick a tier below, or drag this card to another lane.">
                 {% comment %}
                 The COUNT badges are gone. Asked for directly: take the
                 counts off these cards and leave the progress bar and the
@@ -489,8 +443,8 @@
                   {% if fc.advocates %}
                   <span class="fc-adv{% if fc.adv_met %} is-met{% endif %}"
                         role="img"
-                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings"
-                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocates at this firm — your target, set in Settings &gt; Cadence">
+                        aria-label="{{ fc.advocates }} of {{ fc.adv_target }} advocate{{ fc.adv_target|pluralize }} at this firm — your target, set in Settings"
+                        title="{{ fc.advocates }} of {{ fc.adv_target }} advocate{{ fc.adv_target|pluralize }} at this firm — your target, set in Settings &gt; Cadence">
                     {% for slot in fc.adv_slots %}<i class="adv-socket{% if slot %} is-filled{% endif %}"></i>{% endfor %}{% if fc.adv_met %} ✓{% endif %}
                   </span>
                   {% endif %}
@@ -504,11 +458,28 @@
                 nowhere else. `draggable="false"` so starting a drag on the
                 link hands off to the card's own drag-to-retier handler
                 instead of the browser's native "drag this link" gesture.
-                Hidden once `adv_met` — a covered firm is a status, not a
-                task, same as the gap strip never nagging about one.
+                The LINK is hidden once `adv_met` — a covered firm is a
+                status, not a task, same as the gap strip never nagging
+                about one. Its row is not: see the note below on why the
+                row itself now always renders.
                 {% endcomment %}
-                {% if fc.gap_label %}
-                  <div class="firm-card-act">
+                {% comment %}
+                The row is unconditional now, because the tier picker beside
+                the verb is: a card whose firm is already covered still has
+                to be re-tierable, and until this control existed the only
+                way to move one was a drag, which a touchscreen cannot
+                send. A covered firm therefore gains one 10px line it did
+                not carry before, and that is the whole cost.
+
+                Options are rendered from `tier_sections` rather than a
+                hard-coded 1/2/3 so the picker can only ever offer a lane
+                that exists in the DOM to move the card into. "Unranked" is
+                built by the view only when something is already sitting
+                there (see `if cards or tier in (1, 2, 3)` in views.py), and
+                that is exactly when the option should appear.
+                {% endcomment %}
+                <div class="firm-card-act">
+                  {% if fc.gap_label %}
                     {% if fc.lever %}
                       <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
                          href="{% url 'crm:contact_detail' fc.lever.id %}">Work {{ fc.lever.name|smart_title }}</a>
@@ -516,13 +487,28 @@
                       <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
                          href="{% url 'crm:contact_new' %}?firm={{ fc.firm.slug }}">＋ Add a contact</a>
                     {% endif %}
-                  </div>
-                {% endif %}
+                  {% endif %}
+                  {% comment %}
+                  A native <select> and not a hand-rolled menu: `.tier-grid`
+                  becomes `overflow-y: auto` once capped, which would clip
+                  any popup drawn inside a card. The browser floats a native
+                  list above that, and hands us touch, keyboard and screen
+                  reader support at the same time. `draggable="false"` for
+                  the same reason `.fc-act-link` carries it: the gesture
+                  belongs to the control, not the card behind it.
+                  {% endcomment %}
+                  <select class="fc-tier" draggable="false" data-no-csel data-fc-tier
+                          aria-label="Tier for {{ fc.firm.name|smart_title }}">
+                    {% for opt in tier_sections %}
+                      <option value="{{ opt.tier|default_if_none:'' }}"{% if opt.tier == section.tier %} selected{% endif %}>{{ opt.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
               </div>
             {% endfor %}
           </div>
           {# Placeholder sits OUTSIDE the grid — a dropped card never shares a row with it; JS toggles it. #}
-          <p class="net-none tier-empty"{% if section.cards %} hidden{% endif %}>Drop a firm here.</p>
+          <p class="net-none tier-empty"{% if section.cards %} hidden{% endif %}>No firms on this tier.</p>
         </div>
       {% endfor %}
       </div>
@@ -552,27 +538,60 @@
       {# Round-trips the region tab so a bulk action returns you to the #}
       {# board you were looking at, not to "All". #}
       <input type="hidden" name="scope" value="{{ scope }}">
-    {% for section in sections %}
-      {% comment %}
-      Replied/Chatted/Advocates are small and worth seeing at a glance, so
-      they open by default like every other section here always has.
-      Emailed-No-Reply is the one that's routinely 90+ cards deep and
-      genuinely does swamp the board — that one alone defaults collapsed, and
-      so does Not-Contacted-Yet for the same reason and at the same size.
-      Empty sections stay collapsed regardless (nothing to show).
-      {% endcomment %}
-      <details class="warmth-section" data-group{% if section.cards and section.key != "no_reply" and section.key != "not_contacted" %} open{% endif %}>
-        <summary class="net-group-head">
-          {% comment %}Every section is a warmth bucket now — School scope
-          used to have a fifth kind of section (grouped by university, no
-          dot) here, which is what this conditional was guarding against.
-          Both cold halves wear the cold dot: `no_reply` and `not_contacted`
-          are the same warmth split by whether anything was ever sent.{% endcomment %}
-          <span><i class="dot dot-{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"></i> {{ section.label }}</span>
-          <span class="scrub-count" data-group-count>{{ section.cards|length }}</span>
-        </summary>
+    {% comment %}
+    THE WARMTH LEDGER. Redesigned 2026-08-27 against the founder's own
+    174-contact board: five collapsed cards at ~100px apiece (a border, a
+    shadow, a margin to the next one) to say five numbers. They are one
+    list a reader scans top to bottom, not five peers each wanting a panel,
+    so they now share one bordered surface (`.warmth-list`, styles.html)
+    and split from each other with a hairline instead of a card boundary —
+    the same move already made for `.arch-row` and the parked-cohort list.
+
+    A row holding nobody is skipped outright: the per-section "if it has
+    cards" guard below never renders a `<details>` for it. "Not Contacted Yet" reads 0
+    on the founder's real account today, and a permanently-empty row is
+    the same "standing reproach for a state the product allows" already
+    named for the zeroed-out "Other countries" scope tab and the archived/
+    parked/hidden links above — fixed the identical way: render only when
+    the count is real. This is a TEMPLATE-level skip, not a narrower query:
+    `sections` from the view still lists all five warmth keys in order and
+    still sums to `contact_total` exactly — see
+    `test_the_warmth_sections_account_for_every_contact_the_header_counts`,
+    which asserts against `resp.context["sections"]` directly and is
+    untouched by what the template chooses to draw. A contact_total of
+    zero (nobody added yet) falls through to one plain line rather than an
+    empty bordered box.
+
+    Order is fixed (Replied, Chatted, Advocates, then the two cold halves),
+    not sorted by size: with only five fixed categories, a reader benefits
+    more from "Replied is always first" than from a leaderboard that
+    reshuffles as counts change — the same lesson the Coverage Gaps strip
+    already drew from dropping its rank badge (04eb8cb). The dominant
+    category (137 of 174 on the live account) is instead marked by WEIGHT:
+    each row's own background fills left-to-right by its real share of
+    `contact_total` (`--share` below) — a continuous read of an existing
+    number, not a new metric or a threshold.
+    {% endcomment %}
+    {% if contact_total %}
+    <div class="warmth-list">
+      {% for section in sections %}
         {% if section.cards %}
-          <div class="contact-grid">
+          {% comment %}Every section is a warmth bucket — School scope used
+          to have a fifth kind (grouped by university, no dot), which is
+          what this conditional guards against. Both cold halves wear the
+          cold dot and the cold row-tint: `no_reply` and `not_contacted`
+          are the same warmth split by whether anything was ever
+          sent.{% endcomment %}
+          <details class="warmth-row warmth-row--{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"
+                   data-group{% if section.key != "no_reply" and section.key != "not_contacted" %} open{% endif %}>
+            <summary style="--share: {% widthratio section.cards|length contact_total 100 %}%">
+              <i class="dot dot-{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"></i>
+              <span class="warmth-row-label">{{ section.label }}</span>
+              <span class="warmth-row-meta">
+                <span class="scrub-count" data-group-count>{{ section.cards|length }}</span>
+              </span>
+            </summary>
+            <div class="contact-grid">
             {% for card in section.cards %}
               <div class="contact-card kin-reveal" style="--i:{{ forloop.counter0 }}"
                    data-searchable data-order="{{ forloop.counter0 }}"
@@ -584,10 +603,10 @@
                   {% comment %}
                   The card's own checkbox, not a wrapping <label>: unlike
                   `.net-mini`, this card is already full of its own click
-                  targets (the mailto link, Log Touch, Edit) — turning the
-                  whole card into a label would fight every one of them for
-                  the click. So the box is the explicit, deliberate target,
-                  same as ticking a row in a mail client.
+                  targets (Log Touch, Edit) — turning the whole card into a
+                  label would fight both of them for the click. So the box
+                  is the explicit, deliberate target, same as ticking a row
+                  in a mail client.
                   {% endcomment %}
                   <input class="cc-check" type="checkbox" name="ids"
                          value="{{ card.c.id }}"
@@ -606,24 +625,58 @@
                       {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
                       {% if card.region %}<span class="pill cc-pill">{{ card.region }}</span>{% endif %}
                     </span>
-                    <span class="cc-firm">
+                    {% comment %}
+                    `title=` carries the whole string for the ellipsis case
+                    below — same "one hover away" doctrine `.net-mini-firm`
+                    states for its own truncation.
+                    {% endcomment %}
+                    <span class="cc-firm"
+                          title="{% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}">
                       {% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}
                     </span>
-                    {% if card.school %}<span class="pill cc-school">{{ card.school }}</span>{% endif %}
                   </div>
                 </div>
-                {% if card.bullets %}
-                  <ul class="cc-bullets">
-                    {% for b in card.bullets %}<li>{{ b }}.</li>{% endfor %}
-                  </ul>
-                {% endif %}
-                {% if card.c.email %}<a class="cc-email" href="{{ card.mailto }}">{{ card.c.email }}</a>{% endif %}
+                {% comment %}
+                No description line and no on-card email, on the founder's
+                own call reviewing his live board ("think about if there
+                really should be description. I prefer no description").
+
+                The old `.cc-bullets` parsed `notes`/`angle` into up to 3
+                lines and clamped them to 2 with CSS. Read across his real
+                182-contact board: 120 of those bullets were provenance
+                noise the capture pipeline logs for itself ("Found in your
+                sent mail · Aug 27, 2026", "You wrote to them: <subject
+                line>"), and the clamp cut off the useful ones ("Replied to
+                your email: coffee in HK, offered...") right where a reader
+                needed the rest of the sentence — a card spending two lines
+                to be unreadable. Both fields still render in full on the
+                contact detail page (`_contact_live.html`'s `.cd-notes` /
+                `.cd-angle`), unclamped, one click away via Log Touch.
+
+                The email address (and its Gmail-compose link) went for the
+                same reason from the other direction: real addresses on this
+                board run past what a ~250px card can show on one line
+                (`nicholas.atkinson@guggenheimpartners.com`, 40 characters),
+                and a truncated fragment ending in an ellipsis is exactly
+                what this redesign is against. Compose is one click away too
+                — the contact detail page's primary "Compose" button, seeded
+                from the same opener draft this card's link used to carry.
+                {% endcomment %}
                 <div class="cc-foot">
                   <span class="cc-since">
                     {% if card.days_since is not None %}{{ card.days_since }}d since last touch{% else %}Never contacted{% endif %}
                   </span>
+                  {% comment %}
+                  Log Touch and Edit are not equals: Log Touch is the verb
+                  this whole board exists to prompt, Edit is the escape
+                  hatch for when a fact on the card is wrong. `btn-primary`
+                  is the same treatment `_contact_live.html` gives its own
+                  Log Touch button — one accent-filled control, one plain
+                  outline, instead of two identically-weighted boxes that
+                  only differed by how long their labels happened to be.
+                  {% endcomment %}
                   <span class="cc-btns">
-                    <a class="btn" href="{% url 'crm:contact_detail' card.c.id %}">Log Touch</a>
+                    <a class="btn btn-primary" href="{% url 'crm:contact_detail' card.c.id %}">Log Touch</a>
                     <a class="btn" href="{% url 'crm:contact_edit' card.c.id %}">Edit</a>
                   </span>
                 </div>
@@ -631,11 +684,13 @@
             {% endfor %}
           </div>
           <p class="net-none" data-group-empty hidden>No matches in this group.</p>
-        {% else %}
-          <p class="net-none">No contacts.</p>
+          </details>
         {% endif %}
-      </details>
-    {% endfor %}
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="net-none">No contacts yet.</p>
+    {% endif %}
       {% comment %}
       The bulk bar. Sticky to the bottom of the viewport and `hidden` until
       something is ticked, so it costs nothing on a board with no selection.
@@ -792,10 +847,173 @@
   })();
 
   (function () {
+    // Two rows of whatever the real card height turns out to be — see the
+    // long comment on `.tier-grid` in crm/_styles.html for why this is
+    // measured live instead of computed from the declared tokens: cards in
+    // the same tier can differ in real height (a bare firm vs. one with a
+    // warmth bar and advocate sockets), and even a bare card's rendered
+    // height doesn't reliably match the padding-plus-line-height
+    // arithmetic. This reads the actual gap between the second and third
+    // row off the layout and writes it back as `--tier-cap`, so the cut
+    // always lands in the gap and never through a card. A tier that fits
+    // in two rows already is left uncapped — nothing to find, nothing to
+    // scroll to.
+    function debounce(fn, ms) {
+      var t;
+      return function () {
+        clearTimeout(t);
+        t = setTimeout(fn, ms);
+      };
+    }
+
+    function capOneGrid(grid) {
+      grid.style.removeProperty("--tier-cap");
+      grid.classList.remove("is-capped");
+      grid.removeAttribute("tabindex");
+      grid.removeAttribute("role");
+      grid.removeAttribute("aria-label");
+
+      var cards = Array.prototype.slice.call(grid.children).filter(function (el) {
+        return el.classList.contains("firm-card");
+      });
+      if (!cards.length) return;
+
+      // Group into rows by rendered top, not by counting children per row —
+      // `auto-fill` puts a different number of cards in a row depending on
+      // viewport width, so the row boundaries have to come off the layout.
+      var gridTop = grid.getBoundingClientRect().top;
+      var rows = [];
+      cards.forEach(function (card) {
+        var rect = card.getBoundingClientRect();
+        var top = Math.round(rect.top - gridTop);
+        var bottom = Math.round(rect.bottom - gridTop);
+        var row = rows.length && Math.abs(rows[rows.length - 1].top - top) < 2
+          ? rows[rows.length - 1] : null;
+        if (!row) { row = { top: top, bottom: bottom }; rows.push(row); }
+        row.bottom = Math.max(row.bottom, bottom);
+      });
+      if (rows.length <= 2) return; // Fits already — no cap, no scrollbar.
+
+      var gapPx = parseFloat(getComputedStyle(grid).rowGap) || 0;
+      // Midpoint of the gap after row two — flush with row two's own
+      // bottom edge reads as a hairline sitting on the last visible card.
+      var cap = rows[1].bottom + gapPx / 2;
+
+      grid.style.setProperty("--tier-cap", cap + "px");
+      grid.classList.add("is-capped");
+      grid.setAttribute("tabindex", "0");
+      grid.setAttribute("role", "region");
+      // Read the two spans separately rather than flattening the label's
+      // textContent: run together it announces as "Tier 1 20 firms", which
+      // is two numbers with nothing between them and no way to hear which
+      // is the tier. Sighted readers get the separation from layout.
+      var label = grid.parentElement.querySelector(".tier-label");
+      var tierName = label && label.firstElementChild
+        ? label.firstElementChild.textContent.trim() : "Tier";
+      grid.setAttribute(
+        "aria-label", tierName + ", " + grid.children.length + " firms. Scroll for more."
+      );
+    }
+
+    function capAllGrids() {
+      document.querySelectorAll(".tier-grid").forEach(capOneGrid);
+    }
+
+    // Measured once immediately (covers reduced-motion, where the cards
+    // never move) and again once the `.kin-reveal` entrance animation
+    // settles (covers everyone else — mid-animation cards briefly report a
+    // translated position, which would misplace the cap). `animationend`
+    // bubbles from every card, so this fires often right after load;
+    // debounced so the burst collapses into one recompute.
+    capAllGrids();
+    var recomputeAfterReveal = debounce(capAllGrids, 60);
+    document.querySelectorAll(".tier-grid").forEach(function (grid) {
+      grid.addEventListener("animationend", recomputeAfterReveal);
+    });
+    window.addEventListener("resize", debounce(capAllGrids, 150));
+    // A tab opened in the background never plays `.kin-reveal` (browsers
+    // pause it while hidden), so its `animationend` recompute never fires
+    // either — recheck once the tab is actually looked at.
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) capAllGrids();
+    });
+
+    // ---- Re-tier a firm. Two gestures, one write.
+    //
+    // The drag came first and was for a long time the only route, which
+    // made the whole board read-only on a phone: HTML5 drag-and-drop does
+    // not fire on touch, and it has no keyboard equivalent either. The
+    // per-card <select> is the route that always works; the drag stays as
+    // the pointer shortcut. Both call `setTier` so the two can never learn
+    // to disagree about what a tier change means, the same contract this
+    // board already keeps with Settings' board through the shared endpoint.
+    function setTier(card, tier, section) {
+      if (!section) return Promise.resolve(false);
+      var body = new URLSearchParams({ firm: card.dataset.firm, tier: tier });
+      return fetch("{% url 'crm:set_firm_tier' %}", {
+        method: "POST",
+        headers: { "X-CSRFToken": "{{ csrf_token }}",
+                   "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      }).then(function (resp) {
+        if (!resp.ok) return false;
+        section.querySelector(".tier-grid").appendChild(card);
+        syncTierSelect(card);
+        // Re-sync every tier's empty-state placeholder AND its count. The
+        // count was left behind by the original drop handler, so a board
+        // that had just been rearranged read "TIER 1 14" over thirteen
+        // cards until the next page load — the one number on the lane label
+        // whose whole job is to say how much is in there. Settings' board
+        // has always done both together (`syncEmpty`); this is that same
+        // pair.
+        document.querySelectorAll(".tier-section").forEach(function (s) {
+          var cards = s.querySelector(".tier-grid").children.length;
+          var empty = s.querySelector(".tier-empty");
+          if (empty) empty.hidden = cards > 0;
+          var count = s.querySelector(".tier-label .scrub-count");
+          if (count) count.textContent = cards;
+        });
+        // The card just moved tiers, so both the old and new grid's row
+        // count changed — recompute every cap rather than track which
+        // two moved.
+        capAllGrids();
+        return true;
+      }, function () { return false; });
+    }
+    // A refused or failed write leaves the card in its old lane, so the
+    // picker has to be walked back to match — otherwise it goes on showing
+    // a tier the server never accepted.
+    function syncTierSelect(card) {
+      var sel = card.querySelector("[data-fc-tier]");
+      if (sel) sel.value = card.closest(".tier-section").dataset.tier;
+    }
+
     var dragged = null;
     document.querySelectorAll(".firm-card").forEach(function (card) {
       card.addEventListener("dragstart", function () { dragged = card; card.classList.add("dragging"); });
       card.addEventListener("dragend", function () { card.classList.remove("dragging"); });
+      var sel = card.querySelector("[data-fc-tier]");
+      if (!sel) return;
+      sel.addEventListener("change", function () {
+        var target = null;
+        document.querySelectorAll(".tier-section").forEach(function (s) {
+          if (s.dataset.tier === sel.value) target = s;
+        });
+        // No lane for that value should be impossible — the options are
+        // rendered from the lanes themselves — but a picker left showing a
+        // tier the card is not on is the one outcome worth ruling out.
+        if (!target) { syncTierSelect(card); return; }
+        if (target === card.closest(".tier-section")) return;
+        setTier(card, sel.value, target).then(function (ok) {
+          if (!ok) syncTierSelect(card);
+        });
+      });
+      // A `draggable` ancestor swallows the press that should open a native
+      // select, so the card stands down for as long as the picker has the
+      // pointer or the focus, then takes the gesture back. `focusout`
+      // covers both dismissing the list and choosing from it.
+      sel.addEventListener("pointerdown", function () { card.draggable = false; });
+      sel.addEventListener("focusout", function () { card.draggable = true; });
     });
     document.querySelectorAll(".tier-section").forEach(function (section) {
       section.addEventListener("dragover", function (e) { e.preventDefault(); section.classList.add("drop-hot"); });
@@ -804,23 +1022,8 @@
         e.preventDefault();
         section.classList.remove("drop-hot");
         if (!dragged) return;
-        var firm = dragged.dataset.firm;
-        var tier = section.dataset.tier;
-        var body = new URLSearchParams({ firm: firm, tier: tier });
-        fetch("{% url 'crm:set_firm_tier' %}", {
-          method: "POST",
-          headers: { "X-CSRFToken": "{{ csrf_token }}",
-                     "Content-Type": "application/x-www-form-urlencoded" },
-          body: body.toString(),
-        }).then(function (resp) {
-          if (!resp.ok) return;
-          section.querySelector(".tier-grid").appendChild(dragged);
-          // Re-sync every tier's empty-state placeholder.
-          document.querySelectorAll(".tier-section").forEach(function (s) {
-            var empty = s.querySelector(".tier-empty");
-            if (empty) empty.hidden = s.querySelector(".tier-grid").children.length > 0;
-          });
-        });
+        if (dragged.closest(".tier-section") === section) return;
+        setTier(dragged, section.dataset.tier, section);
       });
     });
   })();

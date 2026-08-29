@@ -9,9 +9,19 @@ formatted one way on page load and another way on refresh would flicker, and a
 Takes `options` (a facet list of {value,label,count}) and `current` (the
 selected value).
 
-Every option carries a count, per the bar's consistency rule: closed
+Every CONCRETE option carries a count, per the bar's consistency rule: closed
 vocabularies are counted, open-ended ones (Search) and identity ones
-(Companies) are not.
+(Companies) are not. The one exception is each select's own default —
+"Any Year", "Any Region", "Any Track", "Any Sponsorship" (value ""). Its
+count is the same cross-filtered total already sitting one control away in
+the "All Campus (N)" pill (or, once another facet is narrowed, still a number
+with nowhere new to land: four selects, unfiltered, all print the identical
+page total, which is the "(2592) four times" defect — pure repetition of a
+figure already on screen, informative only the instant a filter narrows one
+of the OTHER controls, and by then it is one arithmetic step a student has to
+redo to notice, not a fact stated once and trusted). Every concrete choice
+below it keeps its count — that is the number worth comparing before you
+pick one.
 {% endcomment %}
-{% for o in options %}<option value="{{ o.value }}"{% if o.value == current %} selected{% endif %}>{{ o.label }} ({{ o.count }})</option>
+{% for o in options %}<option value="{{ o.value }}"{% if o.value == current %} selected{% endif %}>{{ o.label }}{% if o.value %} ({{ o.count }}){% endif %}</option>
 {% endfor %}

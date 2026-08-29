@@ -176,10 +176,17 @@ def _markup(client) -> str:
     return _STYLE_RE.sub("", html)
 
 
-def test_first_seen_is_stated_once_per_card(client, two_roles):
+def test_first_seen_is_stated_once_and_only_where_it_is_the_answer(
+        client, two_roles):
     """It used to render as a top-row badge AND in the tag below — the same
     fact twice on 857 of 879 cards. Asserted against the card MARKUP, with
-    real rows on the page: an empty feed would pass this vacuously."""
+    real rows on the page: an empty feed would pass this vacuously.
+
+    It is now also stated only on the UNDATED card. On a dated one the
+    countdown answers "how long has this been here" better and about the role
+    rather than about our scraper, and 288 of 2,599 live feed cards were
+    printing "Closes in 3 days · first seen 35d ago" — two time facts in one
+    grey, competing."""
     html = _markup(client)
 
     cards = html.count('class="rolecard ')
@@ -189,9 +196,10 @@ def test_first_seen_is_stated_once_per_card(client, two_roles):
     assert "fresh-badge" not in html, "the retired duplicate badge is back"
     assert "rolling-tag" not in html, "the retired duplicate tag is back"
 
-    # Exactly one meta row per card, and one provenance string in each.
+    # One meta row per card; the age on the undated one only, and once.
     assert html.count("rolecard-meta") == cards
-    assert html.count("first seen") == cards
+    assert html.count("first seen") == 1
+    assert html.count("rolecard-fuse") == 1, "one dated card in the fixture"
 
 
 def test_the_card_carries_every_fact_the_feed_promises(client, two_roles):

@@ -165,6 +165,18 @@ class SyncResult:
     mail_facts_applied: int = 0
     mail_facts_surfaced: int = 0
     referral_proposals: int = 0
+    # Findings whose ENRICHMENT hook raised and was stepped over, leaving the
+    # primary sync (touches, proposals, bounce clears) to finish normally —
+    # see the two `try` blocks in `apply_findings`. These are the only
+    # counters here that are not a description of the mail: they describe
+    # Coverage failing to read it, which is why they are counted at all
+    # rather than logged. Both hooks used to be unguarded, so an exception in
+    # either took the whole mailbox's sync down with it; now it costs one
+    # message and says so. `> 0` is the entire signal — at this deployment's
+    # volume there is nothing statistical worth computing on top, and
+    # /ops/health/capture/ reads them exactly that plainly.
+    mail_facts_errors: int = 0
+    app_events_errors: int = 0
     # Detected, matched, and already at or past the stage the mail claims —
     # the ATS's own reminder about something the board already knows.
     app_events_already: int = 0
@@ -205,6 +217,8 @@ class SyncResult:
             "mail_facts_applied": self.mail_facts_applied,
             "mail_facts_surfaced": self.mail_facts_surfaced,
             "referral_proposals": self.referral_proposals,
+            "mail_facts_errors": self.mail_facts_errors,
+            "app_events_errors": self.app_events_errors,
             "app_events_already": self.app_events_already,
             "skipped_ambiguous": self.skipped_ambiguous,
             "pattern_delivered": self.pattern_delivered,
@@ -605,6 +619,33 @@ def _record_pattern_evidence(
     return True
 
 
+def _user_aware(user, value: str | None):
+    """`value` (an ISO string) as an aware datetime on the USER's clock, or
+    None if absent/unparseable.
+
+    A naive timestamp means "this clock time, on the user's own clock". It
+    must be anchored to the USER's zone, not the process default: this runs
+    inside a management command, which never passes through
+    TimezoneMiddleware, so get_current_timezone() here is the server's UTC —
+    and a "10am" chat stored as 10:00 UTC reads as 6pm the moment the user
+    sets Asia/Hong_Kong in Settings. Same fallback discipline as the
+    middleware: a blank or unloadable zone name falls back to the project
+    default rather than crashing the sync.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    parsed = parse_datetime(raw)
+    if parsed is None or timezone.is_aware(parsed):
+        return parsed
+    tzname = (getattr(user, "timezone", "") or "").strip()
+    try:
+        zone = ZoneInfo(tzname) if tzname else timezone.get_current_timezone()
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = timezone.get_current_timezone()
+    return timezone.make_aware(parsed, zone)
+
+
 def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     """Put a scheduled chat on the calendar when the finding carries a time.
 
@@ -614,46 +655,270 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     UP because "we do not store a chat datetime anywhere". This is that
     destination.
 
-    Keyed on (user, thread_id) so the twice-daily sync updates the one row
-    rather than stacking a duplicate every run, and so a rescheduled invite
-    on the same thread MOVES the event instead of leaving two. A finding
-    with no time is not an error — most are — it simply makes no event.
+    THE KEY IS THE INVITE, NOT THE THREAD. This was keyed on (user,
+    thread_id) alone, which holds for the twice-daily sync re-reading the
+    same thread but breaks on the case it was written for. A real one from
+    the founder's mailbox: Lily's "Accepted: Jimmy <> Lily Coffee Chat"
+    arrived on thread `1a0346eb...`, and her counter-proposal, "New Time
+    Proposed: Jimmy (USC) <> Lily Coffee Chat", arrived on a DIFFERENT
+    thread, `1a038f4c...` — Google starts a fresh one for it. Two threads
+    meant two rows, so the calendar showed the same chat twice and one of
+    them at the time she had just moved away from. The .ics UID is held
+    constant across REQUEST / REPLY / COUNTER / CANCEL for one event (RFC
+    5545), so it is looked up FIRST and the thread is only the fallback for
+    an invite whose UID could not be read.
+
+    Two consequences of a UID hit, both deliberate:
+
+    * Any OTHER captured chat sitting on the incoming thread is deleted.
+      That row is the duplicate this reconciliation exists to remove — the
+      second copy an earlier run already made — and leaving it would also
+      collide with the (user, thread_id) constraint the moment the surviving
+      row moves onto that thread. Only `source=capture` / `kind=chat` rows
+      qualify: a hand-added event carries a blank thread_id and can never
+      match.
+    * The time only moves FORWARD in invite order. Findings are not sorted
+      outside the backfill, so an older "Accepted:" applied after a newer
+      "New Time Proposed:" would otherwise drag the chat back to the stale
+      time — the same wrong answer as before, just with one row instead of
+      two. `invite_sent_at` records which invite is currently speaking.
+
+    A finding with no time is not an error — most are — it simply makes no
+    event.
     """
-    raw = (finding.get("chat_scheduled_at") or "").strip()
-    thread_id = (finding.get("thread_id") or "").strip()
-    if not raw or not thread_id:
+    when = _user_aware(user, finding.get("chat_scheduled_at"))
+    thread_id = (finding.get("thread_id") or "").strip()[:128]
+    uid = (finding.get("ics_uid") or "").strip()[:255]
+    if when is None or not (thread_id or uid):
         return False
-    when = parse_datetime(raw)
-    if when is None:
-        return False
-    if timezone.is_naive(when):
-        # A naive timestamp means "this clock time, on the user's own clock".
-        # It must be anchored to the USER's zone, not the process default:
-        # this runs inside a management command, which never passes through
-        # TimezoneMiddleware, so get_current_timezone() here is the server's
-        # UTC — and a "10am" chat stored as 10:00 UTC reads as 6pm the moment
-        # the user sets Asia/Hong_Kong in Settings. Same fallback discipline
-        # as the middleware: a blank or unloadable zone name falls back to
-        # the project default rather than crashing the sync.
-        tzname = (getattr(user, "timezone", "") or "").strip()
-        try:
-            zone = ZoneInfo(tzname) if tzname else timezone.get_current_timezone()
-        except (ZoneInfoNotFoundError, ValueError):
-            zone = timezone.get_current_timezone()
-        when = timezone.make_aware(when, zone)
+    sent_at = _user_aware(user, finding.get("occurred_at"))
+
+    event = None
+    if uid:
+        event = CalendarEvent.all_objects.filter(user=user, ics_uid=uid).first()
+    if event is None and thread_id:
+        event = CalendarEvent.all_objects.filter(user=user, thread_id=thread_id).first()
 
     label = contact.name or "Coffee chat"
-    CalendarEvent.all_objects.update_or_create(
-        user=user, thread_id=thread_id[:128],
-        defaults={
-            "title": f"Chat with {label}",
-            "starts_at": when,
-            "all_day": False,
-            "kind": CalendarEvent.KIND_CHAT,
-            "source": CalendarEvent.SOURCE_CAPTURE,
-            "contact": contact,
-        },
+    if event is None:
+        CalendarEvent.all_objects.create(
+            user=user, thread_id=thread_id, ics_uid=uid,
+            title=f"Chat with {label}", starts_at=when, invite_sent_at=sent_at,
+            all_day=False,
+            kind=CalendarEvent.KIND_CHAT, source=CalendarEvent.SOURCE_CAPTURE,
+            contact=contact,
+        )
+        return True
+
+    # A RETIRED CHAT IS INERT TO ANY INVITE THAT CANNOT OUTDATE ITS
+    # CANCELLATION, and this is what stops the retirement being undone by
+    # accident. The sync re-reads a ROLLING WINDOW, so the original REQUEST
+    # is still in the mailbox after the CANCEL lands; without this guard the
+    # very next run would walk over it, rewrite the title back to "Chat with
+    # Lily" and hand the student a cancelled meeting again — the resurrection
+    # loop `_retire_cancelled_chat` rejected outright deletion to avoid,
+    # arriving instead through the update path.
+    #
+    # Same rule as the recency guard below, applied to a different statement:
+    # a cancellation is DATED, so only an invite that can prove it was sent
+    # at or after it may speak over it. The re-read original never can — its
+    # own send time predates the cancellation by definition — while a genuine
+    # re-invite does, and revives the chat by clearing `cancelled_at` and
+    # dropping the marker off the title.
+    if event.cancelled_at is not None:
+        if sent_at is None or sent_at < event.cancelled_at:
+            return False
+        event.cancelled_at = None
+
+    # NOT IDEMPOTENT WITHOUT THIS SNAPSHOT (fixed 2026-08-28). The rolling
+    # window means the SAME "scheduled" finding for an already-current chat
+    # comes back on every sync pass until it ages out — and this function
+    # used to return True unconditionally once it reached the update path,
+    # whether or not anything below actually moved. `apply_findings`
+    # increments `chats_scheduled` on every True, so a chat that has not
+    # changed since yesterday still counted as "scheduled" again today,
+    # every day it stayed in the search window — a digest reading "3 chats
+    # scheduled" could mean "0 new, 3 re-touched." Captured before ANY
+    # mutation below (including the cancellation-revival two lines up) so a
+    # genuine revive still counts as a change even when the time itself
+    # does not move.
+    before = (
+        event.title, event.all_day, event.kind, event.source, event.contact_id,
+        event.ics_uid, event.starts_at, event.thread_id, event.invite_sent_at,
+        event.cancelled_at,
     )
+
+    deleted_dup = False
+    if thread_id and event.thread_id != thread_id:
+        deleted, _ = CalendarEvent.all_objects.filter(
+            user=user, thread_id=thread_id,
+            source=CalendarEvent.SOURCE_CAPTURE, kind=CalendarEvent.KIND_CHAT,
+        ).exclude(pk=event.pk).delete()
+        deleted_dup = deleted > 0
+
+    event.title = f"Chat with {label}"
+    event.all_day = False
+    event.kind = CalendarEvent.KIND_CHAT
+    event.source = CalendarEvent.SOURCE_CAPTURE
+    event.contact = contact
+    # Adopt the UID even when the row was found by thread: that is how a chat
+    # first captured before any of this existed becomes reschedulable.
+    event.ics_uid = uid or event.ics_uid
+    # AN INVITE WE CANNOT DATE MAY NOT OVERWRITE A TIME A DATED INVITE SET.
+    # `_message_occurred_at` returns None for an absent or garbled
+    # `internalDate`, and the guard used to spell that case `sent_at is None ->
+    # take the branch` — i.e. "if we can't date it, trust it most", which is
+    # the exact reverse of what no timestamp means. An undateable invite
+    # carries no evidence of being the NEWER one, so it walked straight in
+    # through the guard's own null branch and dragged the chat back to its
+    # DTSTART: the failure `test_the_older_invite_cannot_drag_the_chat_back`
+    # exists to prevent, arriving by the one door that test left open.
+    #
+    # The rule, stated positively: the incoming invite speaks unless a DATED
+    # invite already established this row's time and this one cannot say it is
+    # newer. So all three of the other cases still move the row —
+    #
+    #   * dated over dated, newer wins (unchanged);
+    #   * dated over a row with no recorded provenance — which is EVERY row
+    #     written before `invite_sent_at` existed, so this is the branch that
+    #     carries the live table, not a corner;
+    #   * undateable over undateable, because neither side has evidence and
+    #     refusing would freeze those same rows at whatever an old sync wrote.
+    #
+    # Only "undateable over dated" is refused. The CREATE path above is
+    # deliberately not gated on this: a row that does not exist yet has no
+    # time to protect, and some evidence beats none.
+    if event.invite_sent_at is None or (
+        sent_at is not None and sent_at >= event.invite_sent_at
+    ):
+        event.starts_at = when
+        event.thread_id = thread_id or event.thread_id
+        event.invite_sent_at = sent_at or event.invite_sent_at
+
+    after = (
+        event.title, event.all_day, event.kind, event.source, event.contact_id,
+        event.ics_uid, event.starts_at, event.thread_id, event.invite_sent_at,
+        event.cancelled_at,
+    )
+    if not deleted_dup and before == after:
+        # Same finding re-read on a later pass, nothing to say that wasn't
+        # already on the row. No write, and no "chats_scheduled" credit for
+        # a chat that was already scheduled.
+        return False
+    event.save(update_fields=[
+        "title", "all_day", "kind", "source", "contact", "ics_uid",
+        "starts_at", "thread_id", "invite_sent_at", "cancelled_at",
+    ])
+    return True
+
+
+# The marker a retired chat wears on every surface that keeps it. A prefix,
+# not a tense change: "Cancelled: Chat with Lily" against "Chat with Lily" is
+# unmissable on a lock screen in a way that editing a verb is not.
+_CANCELLED_PREFIX = "Cancelled: "
+
+
+def _retire_cancelled_chat(user, finding: dict) -> bool:
+    """Mark the chat a `METHOD:CANCEL` invite calls off, so it stops reading
+    as scheduled. True when a row was actually retired.
+
+    No `contact` argument, unlike its sibling above: the invite UID is the
+    event's identity and the row is found by it alone. Narrowing to the
+    contact the finding matched would only add a way to MISS — the original
+    invite may well have been matched to a different card, and a cancellation
+    that silently declines to act is the failure this function exists to end.
+
+    THE HALF THAT WAS MISSING. `_extract_ics_schedule` learned to report no
+    time from a cancellation, which stopped one arriving and re-asserting the
+    meeting at its old DTSTART. It could not do anything about the row the
+    ORIGINAL invite had already written: that row sat on the month grid, rode
+    out to the subscribed .ics feed and onto a phone, and produced a prep card
+    on Today telling a student to get ready for a chat nobody was attending.
+    A cancellation that stops adding to a lie while leaving the lie standing
+    is half a fix.
+
+    RETIRED, NOT DELETED, and the third option is worse than both:
+
+    * DELETE. It destroys the record of a chat that genuinely was on the
+      books — but the disqualifying problem is mechanical, not sentimental.
+      The sync re-reads a ROLLING WINDOW of the mailbox, so the original
+      invite is still sitting in it; delete the row and the very next run
+      walks over that invite and mints it again. The chat would resurrect
+      itself twice a day, forever, and each resurrection looks exactly like a
+      fresh booking. A delete here is not a fix, it is a loop.
+    * RETITLE ONLY, the way the .ics feed retitles a posting the firm pulled
+      (`crm.calendar_views._ics_body`). Right for that layer and not enough
+      for this one: the loudest surface a cancelled chat reaches is Today's
+      "Chats today" lane, and that card renders the CONTACT and the CLOCK —
+      it never prints the event title at all (see `_cockpit.html`). A prefix
+      nobody's most urgent surface displays is a fix you cannot see.
+
+    So both, split by what the surface is FOR. `crm.today._schedule` drops
+    cancelled rows outright, which empties them out of the prep lane and the
+    day track: those answer "what is happening", and this is not happening.
+    The month grid and the .ics feed keep the row, struck and retitled: those
+    are a RECORD, and the feed especially — an entry that silently disappears
+    off someone's phone is the failure mode the pulled-posting comment one
+    layer down already argued through at length.
+
+    ON PROPOSE-THEN-CONFIRM. Mail read on a student's behalf may propose, and
+    only their own tap changes their record — so writing this without a tap
+    needs an argument, and the argument is symmetry. Coverage created this row
+    with no tap either: `_upsert_scheduled_chat` writes on the REQUEST because
+    an .ics is a machine-readable statement from the organiser rather than
+    something inferred out of prose. The CANCEL is the same statement from the
+    same organiser in the same standard, retracting what it asserted. If the
+    assertion needed no tap, the retraction of that same assertion cannot need
+    one; requiring a tap to un-say something we said unasked is not caution,
+    it is an asymmetry that can only ever leave the student holding the FALSE
+    state. The posture guards against Coverage INFERRING things into someone's
+    record, and nothing here is inferred.
+
+    Two limits keep that argument honest. Only `source=capture` rows are
+    touched — a hand-typed event is the student's own record and an inbound
+    .ics has no standing over it, whatever UID it carries. And nothing is
+    destroyed: the time, the contact and the identity all survive, so a
+    re-invite on the same UID lands back in `_upsert_scheduled_chat` and
+    revives it.
+
+    IDEMPOTENT BY STRUCTURE. An already-cancelled row is left exactly alone
+    rather than re-stamped, so the same cancellation on the second, tenth and
+    hundredth sync is indistinguishable from the first — including the
+    timestamp, which a `now()` re-stamp would walk forward on every run.
+    """
+    uid = (finding.get("ics_uid") or "").strip()[:255]
+    thread_id = (finding.get("thread_id") or "").strip()[:128]
+    if not (uid or thread_id):
+        return False
+
+    # Same lookup order as `_upsert_scheduled_chat`: the UID is the identity
+    # that survives a reschedule, the thread is the fallback for an invite
+    # whose UID would not parse. A cancellation typically arrives on a NEW
+    # Gmail thread, so in practice the UID is the only key that finds
+    # anything — which is exactly why the extractor now keeps it.
+    rows = CalendarEvent.all_objects.filter(
+        user=user,
+        source=CalendarEvent.SOURCE_CAPTURE,
+        kind=CalendarEvent.KIND_CHAT,
+        cancelled_at__isnull=True,
+    )
+    event = rows.filter(ics_uid=uid).first() if uid else None
+    if event is None and thread_id:
+        event = rows.filter(thread_id=thread_id).first()
+    if event is None:
+        return False
+
+    # The cancelling invite's own send time when it has one. Falling back to
+    # "now" only when the message could not be dated keeps the column honest
+    # about WHEN this was called off without ever leaving it null, which is
+    # the value that means "not cancelled".
+    event.cancelled_at = _user_aware(user, finding.get("occurred_at")) or timezone.now()
+    if not event.title.startswith(_CANCELLED_PREFIX):
+        # At the FRONT, and in the title rather than the description: the
+        # .ics SUMMARY is the whole of what a phone notification shows. Same
+        # argument, same wording shape, as "Closed:" on a pulled posting.
+        event.title = f"{_CANCELLED_PREFIX}{event.title}"
+    event.save(update_fields=["cancelled_at", "title"])
     return True
 
 
@@ -771,17 +1036,32 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # this feature silently skipped. Writes at most one pending
         # `ApplicationEvent` and never touches the pipeline — see
         # capture/appmail.py.
-        outcome = appmail.consider_finding(
-            user, finding, resolver=appmail_resolver, dry_run=dry_run
-        )
-        if outcome.result == appmail.PROPOSED:
-            result.app_events_proposed += 1
-        elif outcome.result == appmail.UNRESOLVED:
-            result.app_events_unresolved += 1
-        elif outcome.result == appmail.ALREADY_AHEAD:
-            result.app_events_already += 1
-        if outcome.detail:
-            result.details.append(outcome.detail)
+        #
+        # WRAPPED, for the reason spelled out at the mail-facts hook below:
+        # an enrichment layer must not be able to take the primary sync down
+        # with it. Guarded on its OWN axis rather than sharing one try block
+        # with mailfacts, so an ATS-parser bug never reports itself as a
+        # mail-facts failure — the counters exist so an operator knows which
+        # layer to go and fix.
+        try:
+            outcome = appmail.consider_finding(
+                user, finding, resolver=appmail_resolver, dry_run=dry_run
+            )
+        except Exception as exc:  # noqa: BLE001 — see the comment above.
+            result.app_events_errors += 1
+            result.details.append(
+                f"{name}: application-mail read failed, skipped (the rest of "
+                f"this sync is unaffected): {exc}"
+            )
+        else:
+            if outcome.result == appmail.PROPOSED:
+                result.app_events_proposed += 1
+            elif outcome.result == appmail.UNRESOLVED:
+                result.app_events_unresolved += 1
+            elif outcome.result == appmail.ALREADY_AHEAD:
+                result.app_events_already += 1
+            if outcome.detail:
+                result.details.append(outcome.detail)
 
         # THE MAIL-FACTS HOOK. Also before contact matching and for EVERY
         # finding, for the same reason the application hook is: whether the
@@ -793,13 +1073,52 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # routing address), acts only with a verbatim quote, and proposes —
         # never creates — people. See capture/mailfacts.py for the whole
         # contract, including where "act" ends and "propose" begins.
-        facts = mailfacts.consider_finding(
-            user, finding, firm_domains=firm_domains, dry_run=dry_run
-        )
-        result.mail_facts_applied += facts.applied
-        result.mail_facts_surfaced += facts.surfaced
-        result.referral_proposals += facts.referrals
-        result.details.extend(facts.details)
+        #
+        # WRAPPED, AND THE REASON IS THE WHOLE POINT. This call and the
+        # application-mail call above were the only two unguarded hooks left
+        # in this function, and they sit in front of everything: one
+        # malformed auto-reply raising here used to propagate out of
+        # `apply_findings` and kill the ENTIRE sync for that mailbox — the
+        # touches, the outreach notes, the discovery proposals, the bounce
+        # clears, the campaign pass at the bottom — for every finding in the
+        # batch, not just the poisoned one. On a 109-finding rescan (the real
+        # size of the founder's own 2026-08-28 run) that is one bad message
+        # costing a mailbox its whole night of capture.
+        #
+        # Severity is not hypothetical: mailfacts' first real firing in this
+        # product's history was that same run, five rows, all
+        # `detected_by="rules"`. The layer with five rows of history was
+        # standing in front of the layer with the product behind it. The
+        # posture here is the file's own, already stated for
+        # `crm_campaigns.detect` at the bottom of this function and for
+        # `gmail_live.backfill_new_contacts` ("an import must never fail
+        # because enrichment did") — these two hooks were simply missed when
+        # they were added.
+        #
+        # Per FINDING, not per batch, because the hook is per finding: the
+        # catch has to sit inside the loop or one bad message still costs the
+        # remaining ones. And counted rather than silently swallowed —
+        # `backfill_new_contacts` can afford its bare `return None` because
+        # its caller is an HTTP request a human is watching; this path runs
+        # unattended every two minutes, so a hook failing forever with
+        # nothing to show for it is precisely the silence the capture-health
+        # work exists to end. The counter rides out in `as_stats()`, so it
+        # lands in the `Import` ledger rows and on /ops/health/capture/.
+        try:
+            facts = mailfacts.consider_finding(
+                user, finding, firm_domains=firm_domains, dry_run=dry_run
+            )
+        except Exception as exc:  # noqa: BLE001 — see the comment above.
+            result.mail_facts_errors += 1
+            result.details.append(
+                f"{name}: mail-facts read failed, skipped (the rest of this "
+                f"sync is unaffected): {exc}"
+            )
+        else:
+            result.mail_facts_applied += facts.applied
+            result.mail_facts_surfaced += facts.surfaced
+            result.referral_proposals += facts.referrals
+            result.details.extend(facts.details)
 
         try:
             contact = _match_contact(user, finding)
@@ -957,6 +1276,16 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                     result.chats_scheduled += 1
             elif (finding.get("chat_scheduled_at") or "").strip():
                 result.chats_scheduled += 1
+
+        # A cancellation is the only finding that reaches the calendar while
+        # carrying no time — the extractor refuses to report one from a
+        # cancellation, so it can never come through the branch above. Kept
+        # off the `chats_scheduled` counter deliberately: retiring a chat is
+        # not scheduling one, and folding it in would make the sync's own
+        # summary line say the opposite of what happened. Same `is_bulk`
+        # guard, for the same reason as above.
+        if not is_bulk and finding.get("chat_cancelled") and not dry_run:
+            _retire_cancelled_chat(user, finding)
 
         thread_id = (finding.get("thread_id") or "").strip()
         marker = f"[gmail:{thread_id}] " if thread_id else ""

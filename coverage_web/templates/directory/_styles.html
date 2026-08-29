@@ -121,12 +121,22 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     color: var(--accent-ink); border-color: var(--accent-line); }
   .seg-input:checked + .seg-entry_level { background: var(--surface);
     color: var(--accent-ink); border-color: var(--accent); }
-  /* The conditional fifth segment (?role=all / ?role=other). Muted on purpose
-     — it states an opt-in mode honestly without dressing it up as a fifth
-     equal option. Grey, never an accent tint: this mode is not a
-     recommendation. It is only ever rendered CHECKED (it exists only while its
-     mode is active), so it has no unchecked state to contrast against; the
-     four unchecked campus pills beside it are what make it read as selected.
+  /* "Everything" — a real fifth segment now (2026-08-27), not the
+     deep-link-only opt-in it used to be: the header's subset sentence, whose
+     "Show everything" link was its only door, is gone, so this pill is the
+     one-click escape hatch in its place. Muted grey rather than an accent
+     tint on purpose, matching `.seg-optin` below — choosing it is not a
+     recommendation, it is a wider net, and it sits beside the four campus
+     pills as an equal, always-clickable fifth rather than a banner. */
+  .seg-input:checked + .seg-all { background: var(--surface);
+    color: var(--ink-3); border-color: var(--line-strong);
+    box-shadow: inset 0 0 0 1px var(--line-strong); }
+  /* The conditional fifth segment, for `?role=other` alone now. Muted on
+     purpose — it states an opt-in mode honestly without dressing it up as a
+     normal option. Grey, never an accent tint: this mode is not a
+     recommendation. It is only ever rendered CHECKED (it exists only while
+     its mode is active), so it has no unchecked state to contrast against;
+     the campus pills beside it are what make it read as selected.
 
      It sizes to its content here and only spans the full row at <=640px, where
      the 2x2 grid gives it a row of its own. Stretched across 1392px of desktop
@@ -239,21 +249,33 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      inside a pill only 40px tall, and clipped both. Anything styling a label
      in this bar has to clear that rule. */
   .filters .fit-toggle { display: inline-flex; flex-direction: row;
-    /* flex-start, not center: on desktop the pill is content-width so it
+    /* flex-start, not center: on desktop the control is content-width so it
        reads the same either way, but the mobile drawer stretches every
        control full width and a centred label there was the only one not
        starting at the same left edge as its neighbours. */
     align-items: center; justify-content: flex-start; gap: 8px;
     height: 40px; box-sizing: border-box; padding: 0 16px; flex: 0 0 auto;
-    border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+    /* --r-ctl, not 999px. Every other control in this row — Search, the
+       four selects, Companies — is squared to --r-ctl; a fully round pill
+       here was the one shape in the row that didn't match, reported
+       directly against the live bar ("why is eligible only in a pill while
+       others look like that"). Same border/surface/shadow/hover language
+       as its neighbours now, just a checkbox instead of a caret. */
+    border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer;
     background: var(--surface); box-shadow: var(--shadow-1);
     font-size: var(--fs-s); color: var(--ink-2);
     text-transform: none; letter-spacing: 0; font-weight: var(--w-med);
     white-space: nowrap; transition: border-color var(--t-fast),
       background var(--t-fast), color var(--t-fast); }
   .filters .fit-toggle:hover { border-color: var(--accent-line); }
-  .filters .fit-toggle input { accent-color: var(--accent); margin: 0;
-    width: 15px; height: 15px; flex: none; cursor: pointer; }
+  /* The WRAPPER above is untouched: it is a filter control drawn to match
+     its row-mates in this bar, and standardising the app's checkboxes is
+     not a reason to restyle the pill it happens to sit in. The BOX inside
+     it is now the app's one shared checkbox (coverage.css §11) rather than
+     a 15px native widget recoloured with `accent-color`, so its tick agrees
+     with every other tick in the product while the pill goes on reading as
+     a button. Everything this rule used to say — margin, flex, cursor,
+     colour — the shared rule says, and its 15px would now fight it. */
   .filters .fit-toggle:has(input:checked) { background: var(--accent-soft);
     color: var(--accent-ink); border-color: var(--accent); }
   .filters .fit-toggle:focus-within { outline: 2px solid var(--accent);
@@ -465,8 +487,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     border-radius: 999px; }
   .filters-clear:hover { background: var(--accent-soft); text-decoration: none; }
 
-  .hidden-note { color: var(--ink-3); }
-
   /* The scope sentences at the top of #cov-results: what this view excludes,
      in its own voice. Quiet by design — plain words, a plain link, no
      "premium", no lock, no "unlock". The everything mode is free; it is just
@@ -517,42 +537,54 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      slot; 116px of content in a 90px box). A block that needs room takes it.
      ====================================================================== */
   .recbar { margin: 0 0 var(--s4); }
-  .recbar-head { display: flex; align-items: baseline; gap: var(--s3);
-    flex-wrap: wrap; margin-bottom: var(--s2); }
-  .recbar-title { font-size: var(--fs-l); margin: 0; letter-spacing: -0.01em; }
-  /* Tabular figures: the count sits beside a heading and must not jiggle the
-     baseline as it changes. */
-  .recbar-count { font-family: var(--font-mono); font-size: var(--fs-xs);
-    font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: var(--w-med); }
-  .recbar-sub { font-size: var(--fs-xs); color: var(--ink-3); }
+  .recbar-title { font-size: var(--fs-l); margin: 0 0 var(--s2);
+    letter-spacing: -0.01em; }
   .recbar-note { max-width: 62ch; margin: 0; font-size: var(--fs-s);
     color: var(--ink-2); line-height: 1.5; }
 
-  /* The reasons true of every pick. Stated once, here, instead of repeated on
-     each row — that repetition was the whole defect. */
-
-
-  /* How many roles this block holds — the number that stops a two-role block
-     reading as one card that happens to be tall. */
-
-  /* Roles inside a block. The hairline between them is what says "two roles",
-     and the indent gives the firm head something to be the head OF. */
-
-  /* Rolling is green AND wears a different glyph AND says the word — never
-     colour alone (ux: color-not-only, High). */
-
-  /* Slim inline stat strip — replaces the four oversized stat cards. One line,
-     numbers in the display family, a hairline divider between items. */
-  /* Left-aligned and a size quieter than v4: the strip is orientation, not a
-     dashboard, and the fs-l numbers were competing with the firm names below. */
-  /* The board state: totals + cycle shape as one unit. The hairline is the
-     boundary between the controls above and the answer below; the children
-     lose their own bottom margins so the group spaces itself. */
-  .board-state { border-top: 1px solid var(--line); padding-top: var(--s3);
-    margin: 0 0 var(--s4); }
+  /* THE BOARD STATUS — #cov-scope (what's hidden, and the save prompt) and
+     .board-state (the totals + cycle shape) as ONE bounded section, not two.
+     The hairline used to sit only above .board-state, so the hidden-roles
+     sentence and the save banner floated above it unbounded — three
+     page-level meta rows reading as three separate bands when they answer
+     one connected question ("what does this board look like, and what of it
+     is not shown"). The hairline moves to the top of #cov-scope so it fences
+     the WHOLE group at once; .board-state keeps only its bottom margin, the
+     boundary into the firm columns below. `#cov-scope` renders even when
+     empty (no active hides, no save prompt), in which case this pads a
+     hairline directly onto .board-state with nothing between — the same
+     rendered result the old split produced for that case, so no visual
+     regression when there is nothing to disclose. */
+  #cov-scope { border-top: 1px solid var(--line); padding-top: var(--s3); }
+  .board-state { margin: 0 0 var(--s4); }
   .board-state .stat-strip { margin-bottom: 6px; }
   .board-state .cycband { margin-bottom: 0; }
 
+  /* The month rail, folded. It is a decorative shape (role="img" — a shown
+     COUNT per month, no link, no filter, nothing to click inside it), not a
+     control, so it earns a lighter disclosure than the row-2 Filters fold: a
+     dotted-underline toggle in the stat strip's own rhythm rather than a
+     bordered summary box. Collapsed by default because every fact it draws
+     ("when does this cycle actually close") is supplementary context, not
+     something needed to read the totals above it. */
+  .cyc-fold { margin: 6px 0 0; }
+  .cyc-fold > summary { cursor: pointer; list-style: none; display: inline-flex;
+    align-items: center; gap: 4px; width: fit-content;
+    font-family: var(--font-mono); font-size: var(--fs-nano);
+    letter-spacing: 0.04em; color: var(--ink-3);
+    text-decoration: underline dotted currentColor; text-underline-offset: 3px;
+    transition: color var(--t-fast); }
+  .cyc-fold > summary::-webkit-details-marker { display: none; }
+  .cyc-fold > summary:hover { color: var(--accent-ink); }
+  .cyc-fold > summary:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; }
+  .cyc-fold[open] > summary { margin-bottom: var(--s2); }
+  .cyc-fold .cycband { margin-top: 0; }
+
+  /* Slim inline stat strip — replaces the four oversized stat cards. One line,
+     numbers in the display family, a hairline divider between items. Left-
+     aligned and a size quieter than v4: the strip is orientation, not a
+     dashboard, and the fs-l numbers were competing with the firm names below. */
   .stat-strip { display: flex; flex-wrap: wrap; align-items: center;
     justify-content: flex-start; gap: var(--s2) var(--s3); margin: 0 0 var(--s3);
     padding: 0; font-size: var(--fs-xs); color: var(--ink-2); }
@@ -575,44 +607,23 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 
   /* Role-type badges — campus buckets get the accent family; "other" stays
      muted so experienced rows (in the opt-in views) read as background. */
-  .pill.role { text-transform: none; letter-spacing: 0; }
   .role-insight     { background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line); }
   .role-internship  { background: var(--accent-soft); color: var(--accent-ink); border: 1px solid var(--accent-line); }
   .role-entry_level { background: var(--surface); color: var(--accent-ink); border: 1px solid var(--accent); }
   .role-other       { background: var(--surface); color: var(--ink-3); border: 1px solid var(--line); }
 
-  /* Opportunity cards — v3: soft rounded cards that float up on hover.
-     (Still used on firm pages and My Firms; the Opportunities list itself
-     now renders firm clusters below.) */
-  .cards { display: grid; gap: var(--s4); }
-  .opp-card { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s5);
-    box-shadow: var(--shadow-1);
-    transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
-  .opp-card:hover { border-color: var(--accent-line);
-    box-shadow: var(--shadow-2); transform: translateY(-2px); }
-  .opp-card.is-mine { border-left: 3px solid var(--accent); }
-
   /* ======================================================================
-     Role-card signals — the "fuse" bar that depletes toward a deadline, the
-     live pulse for rolling roles, and the freshness badge. Shared by the
-     firm-column cards below.
+     Role-card signals — the "fuse" bar that depletes toward a deadline and
+     the live pulse for rolling roles. Shared by the firm-column cards below.
      ====================================================================== */
 
-  /* Text is now "First seen Nd ago" rather than bare "NEW" (see views.py's
-     `_fresh_label` — the badge must say what it measures), so uppercase +
-     wide letter-spacing (tuned for a 3-letter word) would both shout and
-     wrap; sentence case + nowrap keeps it a single-line pill. */
-  /* RETIRED. The badge said "First seen 3d ago" in the card's top row while the
+  /* RETIRED. The freshness badge said "First seen 3d ago" in the card's top row while the
      tag below it said "· seen 3d ago" — the same fact twice, on 857 of 879
      cards. It now appears once, in the meta row, next to the status it
      qualifies. The rule is gone rather than left orphaned so nobody
      reintroduces the duplicate by reaching for a class that still styles. */
 
   /* The fuse: a depleting countdown bar that "burns down" on load. */
-  .fuse { display: flex; align-items: center; gap: var(--s2); margin-top: auto; padding-top: var(--s2); }
-  .fuse-track { flex: 1; height: 7px; border-radius: 999px; background: var(--paper);
-    overflow: hidden; border: 1px solid var(--line); }
   .fuse-fill { display: block; height: 100%; width: var(--fuse); border-radius: 999px;
     transform-origin: left; animation: fuse-burn 900ms cubic-bezier(0.4, 0, 0.2, 1) both; }
   @keyframes fuse-burn { from { width: 100%; } to { width: var(--fuse); } }
@@ -634,12 +645,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      live in coverage.css and had already parsed. A template test now guards
      this (directory/tests/test_styles_block.py). */
   .fuse-passed .fuse-fill { background: var(--ink-3); }
-  .fuse-label { font-size: var(--fs-xs); font-weight: var(--w-med); white-space: nowrap;
-    font-family: var(--font-mono); }
-  .fuse-today .fuse-label { color: var(--danger); }
-  .fuse-soon .fuse-label  { color: #a8501f; }
-  .fuse-upcoming .fuse-label { color: var(--accent-ink); }
-  .fuse-passed .fuse-label { color: var(--ink-3); }
   .urg-today .fuse-fill { animation: fuse-burn 900ms both, pulse-red 1.6s ease-in-out 1s infinite; }
   @keyframes pulse-red { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
@@ -672,6 +677,18 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      role-level facts only — the page header owns the firm-level ones. ---- */
   .frow-group { margin-top: var(--s5); }
   .frows { display: flex; flex-direction: column; gap: var(--s2); }
+  /* Which markets the in-scope rows sit in — one line, only on a firm big
+     enough that its groups were capped. Deliberately quieter than the scope
+     sentence above it: that line is a disclosure the reader must not miss,
+     this one is an index they glance at. Wraps, never scrolls sideways. */
+  .fd-markets { margin: 0 0 var(--s3); font-size: var(--fs-xs);
+    color: var(--ink-3); line-height: 1.6; }
+  /* The handoff out of a capped group. Sits under the rows it belongs to,
+     indented to the row's own text column so it reads as the list's last
+     line rather than as a second section heading. */
+  .frow-more { margin: var(--s2) 0 0; padding-left: var(--s4);
+    font-size: var(--fs-xs); }
+  .frow-more a { color: var(--accent-ink); }
   .frow { display: grid; grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--s2) var(--s5); align-items: center;
     background: var(--surface); border: 1px solid var(--line);
@@ -826,10 +843,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .firmcol-tier.is-mine { color: var(--accent-ink); }
   .fc-stat { display: inline-flex; align-items: center; gap: var(--s2); }
   .fc-stat::before { content: "·"; color: var(--ink-3); }
-  .fc-closing { color: var(--stale-t); font-weight: var(--w-med); }
+  /* `.fc-closing` removed (2026-08-27): it styled the per-firm "N closing"
+     aggregate cut from `_columns.html` — every dated-and-not-passed role at
+     the firm, which is not the same claim as "closing soon" and duplicated
+     the specific countdown already on each role card below it without
+     changing what to open next. The rule is gone rather than left orphaned
+     so nobody reintroduces the count by reaching for a class that still
+     styles. `.fc-stat` itself stays: `.firmcol-why`'s shared-reasons line
+     still uses it. */
   /* Picked-for-you's third line: the reasons every pick shares, in the same
-     voice and on the same single line as a firm's "TIER 1 · 56 CLOSING". It
-     must never wrap — a second line here is what put this header 30px taller
+     voice and on the same single line as a firm's own tier pill. It must
+     never wrap — a second line here is what put this header 30px taller
      than its neighbours — so it shrinks and ellipsises instead, and the
      `title` carries every full sentence for anyone who wants the rest. */
   .firmcol-why { display: block; min-width: 0; flex: 1 1 auto; overflow: hidden;
@@ -1045,11 +1069,33 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .meta-soon { color: var(--stale-t); }
   .meta-upcoming { color: var(--accent-ink); }
   .meta-passed { color: var(--ink-3); }
-  /* Truncates before the status does — a clipped "Closes in 6 d" would be
+  /* Provenance, trailing. It used to sit directly beside the deadline status
+     with the same visual weight, so the row read as two competing facts
+     ("Closes today" · "first seen 35d ago") rather than one decision and
+     one footnote. `margin-left: auto` claims the row's slack space ahead of
+     it — pushing `.meta-seen` (and `.meta-read` after it, which already
+     carries its own `margin-left: auto`) to the row's trailing end, so the
+     status alone owns the leading position.
+     Font size is UNCHANGED on purpose — still `--fs-xs`, the same size the
+     row already used — rather than a size down: a smaller size here would
+     have been a new, thirteenth type treatment on this card family for a
+     single element, working against "fewer distinct type treatments"
+     rather than for it. Position and colour (`--ink-3`, already the
+     quietest ink token in the row) do the de-emphasis instead.
+     Truncates before the status does — a clipped "Closes in 6 d" would be
      worse than a clipped "first seen 3d…", because one is the reason to act
      today and the other is provenance. */
   .meta-seen { color: var(--ink-3); white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: auto; }
+  /* `.meta-read` (coverage.css) carries its OWN `margin-left: auto`, for the
+     card that has no `.meta-seen` to push it — a dated-but-unfetched role,
+     say. Stack that with `.meta-seen`'s auto margin just above and a flex
+     row with TWO auto margins splits the free space between them, opening a
+     second gap between "first seen…" and Read that nothing asked for. This
+     collapses that second gap on the one card shape where both render: Read
+     rides flush after the provenance text, and `.meta-seen`'s single auto
+     margin does all the pushing away from the deadline status. */
+  .rolecard-meta .meta-seen + .meta-read { margin-left: 0; }
 
   /* The fuse, as a hairline on the card's bottom edge. It used to be an inline
      track competing with the countdown for the meta row's width; on the edge it
@@ -1077,15 +1123,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .role-mini.role-insight { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }
   .role-mini.role-internship { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
   .role-mini.role-entry_level { background: var(--surface); color: var(--accent-ink); border-color: var(--accent); }
-  .opp-top { display: flex; justify-content: space-between; gap: var(--s3);
-    align-items: baseline; flex-wrap: wrap; }
-  .opp-firm { font-size: var(--fs-micro); font-weight: var(--w-med);
-    text-transform: uppercase; letter-spacing: 0.05em; }
-  .opp-firm a { color: var(--ink-2); }
-  .opp-card h3 { margin: var(--s1) 0 var(--s1); font-size: 16px; }
-  .opp-card h3 a { color: var(--ink); }
-  .opp-meta { color: var(--ink-2); font-size: var(--fs-s); margin: 0 0 var(--s3); }
-  .opp-meta .dot { color: var(--ink-3); margin: 0 var(--s2); }
 
   /* Section count badge (My Applications, firm detail, Network headings). */
   .scrub-count { color: var(--ink-3); font-size: var(--fs-s); font-weight: var(--w-reg);
@@ -1118,8 +1155,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        Vertical growth is free here; a hidden option is not. */
     .seg-list { display: grid; grid-template-columns: 1fr 1fr; }
     .filters .seg-pill { width: 100%; padding: 8px 10px; }
-    /* The fifth segment spans both columns: it is a mode, not a fourth-and-a-
-       half option, and its label is the longest text in the control. */
+    /* "Everything" is the fifth, real segment: it spans both columns on its
+       own row rather than sitting alone beside an empty cell. */
+    .filters .seg-all { grid-column: 1 / -1; width: 100%; }
+    /* The conditional sixth segment (`other`) spans both columns too: it is
+       a mode, not a fourth-and-a-half option, and its label is the longest
+       text in the control. */
     .filters .seg-optin { grid-column: 1 / -1; width: 100%; }
 
     /* Stacked, full width at narrow widths. */
