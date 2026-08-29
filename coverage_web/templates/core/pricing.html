@@ -467,11 +467,14 @@
       docs/pricing-rebalance-plan.md §8) that row can be added under the
       credits row.
 
-      Honesty note: the Gmail Live row claims Pro-only, which the code does
-      NOT yet enforce — `capture/gmail_live.py` gates on an env flag, not on
-      user.plan. Nobody has the feature on any deploy today, so no user is
-      affected, but the plan gate must land in the same release that turns
-      Gmail Live on (§7 of the same plan).
+      Honesty note: the Gmail Live row claims Pro-only, and the code now
+      backs that up — `capture/gmail_live.py::connect_gmail`,
+      `renew_watches`, and `process_notification` all gate real-time sync on
+      `user.plan == "pro"` (docs/pricing-rebalance-plan.md §7's fast-follow
+      landed in 299430e). What still keeps the claim moot today is
+      `GMAIL_LIVE_CLIENT_ID`/`GMAIL_LIVE_CLIENT_SECRET` being unset on every
+      deploy (docs/gmail-live-setup.md) — nobody can connect Gmail at all
+      until that OAuth setup happens, plan gate or not.
       {% endcomment %}
       <section class="price-compare kin-reveal" style="--i:2">
         <h2>Side by side.</h2>

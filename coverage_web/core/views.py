@@ -9,7 +9,7 @@ from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
 from billing import credits as billing_credits
-from directory.classify import TARGET_BUCKETS, TRACKED_REGIONS
+from directory.classify import REGION_LABELS, TARGET_BUCKETS, TRACKED_REGIONS
 from directory.models import Firm, Opportunity
 
 
@@ -27,7 +27,16 @@ def home(request):
     """Landing page. The two ledger figures are read-only counts over the
     shared zone — live campus roles (the three target buckets) and firms
     tracked — so the hero states what the instrument actually holds, not a
-    marketing number."""
+    marketing number.
+
+    `region_names` is read from TRACKED_REGIONS/REGION_LABELS rather than
+    typed into the template for the same reason: the Opportunities feature
+    bullet named four markets ("Hong Kong, US, Singapore, Europe") for over
+    a month after Mainland China and Japan joined TRACKED_REGIONS
+    (5329e15) — the exact "four markets while the board tracked six" drift
+    core.views.pricing's own docstring already warns about, just on the
+    other page.
+    """
     firms_by_slug = {
         f.slug: f for f in Firm.objects.filter(slug__in=_STRIP_SLUGS)
     }
@@ -41,6 +50,7 @@ def home(request):
             ).count(),
             "firm_count": Firm.objects.count(),
             "strip_firms": strip_firms,
+            "region_names": [REGION_LABELS[r] for r in TRACKED_REGIONS],
         },
     )
 
