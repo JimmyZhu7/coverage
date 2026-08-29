@@ -217,6 +217,40 @@ def test_reverify_ids_reaches_a_row_the_queue_would_not_get_to_yet(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_reverify_ids_does_not_touch_a_closed_row(monkeypatch):
+    """`reverify` is, by its own module docstring, the routine check over
+    OPEN rows — closed rows are `reopen_confirmed_live_rows`'s job, which
+    exists specifically because reopening needs its own audit trail
+    (flipping `status` back, clearing `closed_at`). Without a `status="open"`
+    guard on the `--ids` path, naming a closed row's id here would call
+    `verify()`, and a `verified-open` result would stamp `last_verified` and
+    even rewrite `deadline` on a row still marked closed everywhere else —
+    an inconsistent state (a "closed" posting with a same-day "verified"
+    timestamp) that this command has no business creating."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    closed = _opp(firm, "https://bmo.wd3.myworkdayjobs.com/closed", days_old=30)
+    closed.status = "closed"
+    closed.closed_at = timezone.now() - timedelta(days=30)
+    closed.save(update_fields=["status", "closed_at"])
+    original_deadline_checked_at = closed.deadline_checked_at
+
+    called = []
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: called.append(url) or _result(url, "verified-open", deadline_dates=["2026-09-04"]),
+    )
+    call_command("reverify", ids=str(closed.id))
+
+    assert called == [], "a closed row must never even reach verify()"
+    closed.refresh_from_db()
+    assert closed.status == "closed", "reverify must never silently reopen a row"
+    assert closed.deadline_checked_at == original_deadline_checked_at
+    # Nothing was a candidate, so the command takes its early "nothing stale
+    # enough" exit and never even opens a ScrapeRun for this pass.
+    assert not ScrapeRun.objects.filter(connector="reverify").exists()
+
+
+@pytest.mark.django_db
 def test_reverify_dry_run_writes_nothing(monkeypatch):
     firm = Firm.objects.create(slug="acme", name="Acme")
     dead = _opp(firm, "https://x/dead")
