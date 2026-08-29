@@ -336,18 +336,11 @@
   {% comment %}
   Account deletion ends here: delete_account writes its receipt ("Deleted 137
   contacts, 138 touches, …") with messages.success and redirects to "/", the
-  only page a just-deleted user can still see. This block is the receipt's
-  ONLY chance to render — without it the flash sat in the session unread and
-  the strongest honesty gesture the product makes was invisible. role=status,
-  not alert: it confirms a completed action, it doesn't interrupt.
+  only page a just-deleted user can still see. base.html now renders every
+  page's messages once, in `<main>`, before this block — so the receipt
+  already appears above; a second copy here rendered the same sentence twice
+  on the one page that had the most reason to get it right.
   {% endcomment %}
-  {% if messages %}
-    <div class="home-msgs">
-      {% for m in messages %}
-        <p class="msg {% if m.tags %}{{ m.tags }}{% endif %}" role="status">{{ m }}</p>
-      {% endfor %}
-    </div>
-  {% endif %}
   {% comment %}
   The hero is the product, not a poster of it: copy on the left, a framed mock
   of the Today queue on the right. `.kin-hero` is kept for the shared card
