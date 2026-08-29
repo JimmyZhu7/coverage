@@ -1425,6 +1425,15 @@ element by the next turn.
         '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
         '<path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.5" ' +
         'stroke-linecap="round"/></svg>';
+      // The same paperclip assistant/_message.html draws on a server-rendered
+      // attachment chip. The streamed path used a "📎" text glyph instead, so
+      // the chip you got the moment you sent a file and the chip you got after
+      // the next page load were two different marks — and `.as-attachment-chip
+      // svg`'s own sizing rule only ever applied to one of them.
+      var CLIP_ICON =
+        '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+        '<path d="M11 5.5v5a3 3 0 0 1-6 0v-6a2 2 0 0 1 4 0v5.5a1 1 0 0 1-2 0V5.5" ' +
+        'stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
       var LOG_TOUCH_URL = "{% url 'assistant:log_draft_touch' %}";
 
       // The same three chip states assistant/_draft_chip.html renders, in the
@@ -1907,7 +1916,8 @@ element by the next turn.
           selectedFiles.forEach(function (f) {
             var chip = document.createElement("span");
             chip.className = "as-attachment-chip";
-            chip.textContent = "📎 " + f.name;
+            chip.innerHTML = CLIP_ICON;
+            chip.appendChild(document.createTextNode(" " + f.name));
             attachWrap.appendChild(chip);
           });
           userTurn.bubble.insertBefore(attachWrap, userTurn.body);
