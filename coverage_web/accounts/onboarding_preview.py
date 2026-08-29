@@ -185,8 +185,7 @@ def profile_preview(user, answers) -> dict:
     rows = []
     if match_count:
         # Local import: `directory.views` imports plenty and this module is
-        # loaded by `accounts.urls` at startup. Same posture as
-        # `accounts.views._cycle_months`.
+        # loaded by `accounts.urls` at startup.
         from directory.views import _eligibility, _eligibility_profile
 
         profile = _eligibility_profile(user)

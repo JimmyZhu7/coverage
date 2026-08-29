@@ -526,11 +526,6 @@ def import_template(request):
 # ---------------------------------------------------------------------------
 # Settings  (/welcome/settings/)
 # ---------------------------------------------------------------------------
-def _cycle_months():
-    from directory.views import cycle_months
-    return cycle_months()
-
-
 def _gmail_live_context(user) -> dict:
     """Cheap enough to compute on every settings render — the point is that
     a connection that quietly went `revoked` should be visible on the page a
@@ -661,16 +656,14 @@ def settings_view(request):
             saved = True
             if request.headers.get("HX-Request"):
                 # htmx in-place save: swap back the form with a saved flag.
-                # `cycle_months` rides along because the cycle band is INSIDE
-                # this partial now (it captions the target-cycle picker rather
-                # than standing as its own card); leaving it out would make the
-                # band vanish on every in-place save until the next full load.
+                # No `cycle_months` here (2026-08-29): the deadline-density
+                # strip came off Settings entirely, and `_profile_form.html`
+                # no longer renders one — see its own comment.
                 return render(
                     request,
                     "accounts/_profile_form.html",
                     {"form": ProfileForm.from_user(request.user),
-                     "saved": True, "cycle_suggestions": CYCLE_SUGGESTIONS,
-                     "cycle_months": _cycle_months()},
+                     "saved": True, "cycle_suggestions": CYCLE_SUGGESTIONS},
                 )
             messages.success(request, "Profile saved.")
             return redirect(reverse("accounts:settings"))
@@ -686,8 +679,7 @@ def settings_view(request):
             return render(
                 request,
                 "accounts/_profile_form.html",
-                {"form": form, "cycle_suggestions": CYCLE_SUGGESTIONS,
-                 "cycle_months": _cycle_months()},
+                {"form": form, "cycle_suggestions": CYCLE_SUGGESTIONS},
             )
     elif request.method == "POST":
         # A POST that names neither a recognised `section` nor "profile" —
@@ -719,10 +711,6 @@ def settings_view(request):
             "form": form,
             "saved": saved,
             "cycle_suggestions": CYCLE_SUGGESTIONS,
-            # The cycle band under the target-cycle picker — the directory's
-            # own deadline density, so the subject of the picker is visible
-            # while you pick.
-            "cycle_months": _cycle_months(),
             "gmail_live": _gmail_live_context(request.user),
             # Bulk sends we detected in this user's own outbound mail, and the
             # one question they answer about each. Read-only here — the answer

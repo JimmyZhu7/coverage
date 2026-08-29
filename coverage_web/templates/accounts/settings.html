@@ -216,6 +216,16 @@
   .cad-seg-default { display: inline-block; color: var(--accent-ink);
     font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-weight: var(--w-med); font-size: var(--fs-xs); white-space: nowrap; }
+  /* `.seg-pick` + this chip are two inline-level boxes with nothing
+     forcing either onto its own line, so on the two-up cadence grid
+     ("Cold Outreach" beside "Advocate Check-In") the pair ran past
+     .set-field's 12rem control track and the chip overlapped the NEXT
+     field's label — the same bug `.set-num` already guards against with
+     its own `flex-wrap`. Same fix, scoped to the segmented row only
+     (`.set-row-control` elsewhere on this page relies on its default,
+     unwrapped layout). */
+  .set-seg-row { display: flex; align-items: center; flex-wrap: wrap;
+    gap: var(--s2) var(--s3); }
   /* Two knobs to a row (Cadence only, so far). Seven full-width .set-rows
      put seven near-identical spinners in a 700px column, each one label and
      one number marooned at opposite edges of the card with a rule between —
@@ -1447,7 +1457,7 @@
                   {% endcomment %}
                   {% if row.segmented %}
                     <span class="set-row-label" id="{{ row.field.auto_id }}-lab">{{ row.field.label }}</span>
-                    <div class="set-row-control">
+                    <div class="set-row-control set-seg-row">
                       <div class="seg-pick" role="radiogroup"
                            aria-labelledby="{{ row.field.auto_id }}-lab"
                            aria-describedby="{{ row.field.auto_id }}-desc">

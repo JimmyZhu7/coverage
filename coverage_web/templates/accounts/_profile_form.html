@@ -101,20 +101,15 @@ this page does get a real `for` — see the a11y note in settings.html.
 <div class="chipset">{{ form.target_cycles }}</div>
 {{ form.target_cycles.errors }}
 {% comment %}
-What the cycle you just picked actually looks like: twelve months of real
-deadline density off the live board, same partial the Opportunities feed
-renders. It used to be its own card on Settings, one below this one, with its
-own heading and subtitle — a section header over a caption. A caption belongs
-against the control it explains, so it sits here now, where the question
-"what am I signing up for?" is being asked.
-
-Renders nothing where `cycle_months` isn't in context (the onboarding step
-reuses this partial), by the partial's own guard.
+The deadline-density band that used to sit here (twelve months of real
+board data captioning the cycle picker) came off Settings entirely,
+2026-08-29 -- the same call the Opportunities feed's own copy of it got
+on 2026-08-27 (see templates/directory/_results.html's comment).
+`directory.views.cycle_months()` and `directory/_cycle_band.html` are
+untouched, not deleted: `cycle_months()` carries its own tested logic
+(a pinned historical bug fix, directory/tests/test_firm_timeline.py)
+independent of whether anything currently renders it.
 {% endcomment %}
-{% if cycle_months %}
-  <p class="field-hint">Real deadlines by month, from the live board.</p>
-  {% include "directory/_cycle_band.html" %}
-{% endif %}
 
 <label>Regions of Interest</label>
 <div class="chipset">{{ form.regions }}</div>
