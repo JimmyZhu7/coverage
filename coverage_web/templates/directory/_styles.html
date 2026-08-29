@@ -465,8 +465,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     border-radius: 999px; }
   .filters-clear:hover { background: var(--accent-soft); text-decoration: none; }
 
-  .hidden-note { color: var(--ink-3); }
-
   /* The scope sentences at the top of #cov-results: what this view excludes,
      in its own voice. Quiet by design — plain words, a plain link, no
      "premium", no lock, no "unlock". The everything mode is free; it is just
@@ -520,11 +518,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .recbar-head { display: flex; align-items: baseline; gap: var(--s3);
     flex-wrap: wrap; margin-bottom: var(--s2); }
   .recbar-title { font-size: var(--fs-l); margin: 0; letter-spacing: -0.01em; }
-  /* Tabular figures: the count sits beside a heading and must not jiggle the
-     baseline as it changes. */
-  .recbar-count { font-family: var(--font-mono); font-size: var(--fs-xs);
-    font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: var(--w-med); }
-  .recbar-sub { font-size: var(--fs-xs); color: var(--ink-3); }
   .recbar-note { max-width: 62ch; margin: 0; font-size: var(--fs-s);
     color: var(--ink-2); line-height: 1.5; }
 
@@ -580,18 +573,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .role-internship  { background: var(--accent-soft); color: var(--accent-ink); border: 1px solid var(--accent-line); }
   .role-entry_level { background: var(--surface); color: var(--accent-ink); border: 1px solid var(--accent); }
   .role-other       { background: var(--surface); color: var(--ink-3); border: 1px solid var(--line); }
-
-  /* Opportunity cards — v3: soft rounded cards that float up on hover.
-     (Still used on firm pages and My Firms; the Opportunities list itself
-     now renders firm clusters below.) */
-  .cards { display: grid; gap: var(--s4); }
-  .opp-card { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s5);
-    box-shadow: var(--shadow-1);
-    transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
-  .opp-card:hover { border-color: var(--accent-line);
-    box-shadow: var(--shadow-2); transform: translateY(-2px); }
-  .opp-card.is-mine { border-left: 3px solid var(--accent); }
 
   /* ======================================================================
      Role-card signals — the "fuse" bar that depletes toward a deadline, the
@@ -1077,15 +1058,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .role-mini.role-insight { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }
   .role-mini.role-internship { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
   .role-mini.role-entry_level { background: var(--surface); color: var(--accent-ink); border-color: var(--accent); }
-  .opp-top { display: flex; justify-content: space-between; gap: var(--s3);
-    align-items: baseline; flex-wrap: wrap; }
-  .opp-firm { font-size: var(--fs-micro); font-weight: var(--w-med);
-    text-transform: uppercase; letter-spacing: 0.05em; }
-  .opp-firm a { color: var(--ink-2); }
-  .opp-card h3 { margin: var(--s1) 0 var(--s1); font-size: 16px; }
-  .opp-card h3 a { color: var(--ink); }
-  .opp-meta { color: var(--ink-2); font-size: var(--fs-s); margin: 0 0 var(--s3); }
-  .opp-meta .dot { color: var(--ink-3); margin: 0 var(--s2); }
 
   /* Section count badge (My Applications, firm detail, Network headings). */
   .scrub-count { color: var(--ink-3); font-size: var(--fs-s); font-weight: var(--w-reg);
