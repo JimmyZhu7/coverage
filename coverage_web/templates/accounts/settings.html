@@ -27,19 +27,12 @@
   .settings-nav::before { content: ""; position: absolute; left: 0; top: 6px;
     bottom: 6px; width: 2px; border-radius: 2px; background: var(--line); }
 
-  /* The nav's own label — the QUIETEST thing here. It names the whole
-     column, which the reader works out instantly; the group headers below
-     are what they actually navigate by, so the hierarchy now runs
-     title < link < group rather than title == group as before. */
-  /* Shared section label (coverage.css §6b), minus the rule — it names a nav
-     group, not a section. Only the indent is local. */
-  .settings-nav-title { padding-left: var(--s3); }
-
-  /* Group headers. Were byte-identical to the title above — same size,
-     colour and weight — so four section breaks read as four more grey
-     labels. Now accent-coloured, a size up, in the mono/ledger face, and
-     each trails a hairline that runs to the edge, so a group reads as a
-     divider at a glance instead of on inspection. */
+  /* Group headers. There is no "On This Page" title above them any more: a
+     rail sitting beside the sections it links to, under an `aria-label` that
+     already names it, does not need a heading saying it is a rail. The group
+     headers are what a reader actually navigates by. Accent-coloured, in the
+     mono/ledger face, each trailing a hairline that runs to the edge, so a
+     group reads as a divider at a glance instead of on inspection. */
   .settings-nav-group { display: flex; align-items: center; gap: var(--s2);
     font-family: var(--font-mono); font-size: var(--fs-xs);
     text-transform: uppercase; letter-spacing: 0.08em;
@@ -189,7 +182,7 @@
     .settings-nav::before { display: none; }
     .settings-nav a::before { display: none; }
     .settings-nav a:hover { transform: none; }
-    .settings-nav-title, .settings-nav-group { display: none; }
+    .settings-nav-group { display: none; }
   }
   @media (max-width: 560px) {
     .set-form .grid-2 { grid-template-columns: 1fr; }
@@ -513,7 +506,6 @@
     display:none at ≤820px, where the rail collapses to wrapped chips.
     {% endcomment %}
     <nav class="settings-nav" aria-label="Settings sections">
-      <p class="settings-nav-title">On This Page</p>
       <p class="settings-nav-group">You</p>
       <a href="#profile" class="is-active" aria-current="true">Profile</a>
       <a href="#work-auth">Work Authorization</a>
@@ -1002,9 +994,11 @@
               </div>
               <div class="pace-main">
                 <label class="set-row-label" for="{{ pace_form.weekly_touch_goal.id_for_label }}">Weekly Touch Goal</label>
+                {% comment %}"Default: N", the same phrasing every Cadence row
+                uses for the same fact — two wordings for one concept made the
+                page read as two products.{% endcomment %}
                 <div class="set-row-desc" id="{{ pace_form.weekly_touch_goal.auto_id }}-desc">The target the pace ring on Today measures you
-                  against. <span class="set-default">Leave blank to use the default of
-                  {{ default_weekly_goal }}.</span></div>
+                  against. <span class="set-default">Default: {{ default_weekly_goal }}</span></div>
                 {% if pace_form.weekly_touch_goal.errors %}
                   <div class="set-row-err" id="{{ pace_form.weekly_touch_goal.auto_id }}-err">{{ pace_form.weekly_touch_goal.errors }}</div>
                 {% endif %}
@@ -1379,7 +1373,7 @@
                 {% if credits.stripe_configured %}
                   One-time top-ups, on top of your monthly refill. Never expire.
                 {% else %}
-                  Coming soon — top-ups aren't available on this deploy yet.
+                  Not available on this deploy yet.
                 {% endif %}
               </div>
             </div>
@@ -1442,25 +1436,26 @@
               <div class="set-row-desc">
                 {% if gmail_live.connected %}
                   {% if gmail_live.status == "revoked" %}
-                    <strong>Access was revoked</strong> — reconnect below.
+                    <strong>Access was revoked.</strong> Reconnect below.
                   {% else %}
                     Connected as {{ gmail_live.gmail_address }}.
+                    {% comment %}Nothing in the Free branch here: the Pro gate
+                    row above renders on exactly the same condition, so a Free
+                    student was told twice, two rows apart, that real-time sync
+                    is off for them.{% endcomment %}
                     {% if gmail_live.is_pro %}
                       {% if gmail_live.last_notification_at %}
                         Last update {{ gmail_live.last_notification_at|timesince }} ago.
                       {% elif gmail_live.watch_active %}
                         No activity seen yet.
                       {% else %}
-                        Real-time sync is queued and will turn on shortly.
+                        Real-time sync is queued and turns on shortly.
                       {% endif %}
-                    {% else %}
-                      Real-time sync is off on the Free plan — use Scan Now
-                      below to check for updates.
                     {% endif %}
                   {% endif %}
                 {% else %}
-                  Not connected. Coverage only reads mail to detect bounces,
-                  replies, and calendar invites — no message bodies are stored.
+                  Not connected. Coverage reads mail only to detect bounces,
+                  replies, and calendar invites. No message bodies are stored.
                 {% endif %}
               </div>
             </div>
@@ -1490,13 +1485,13 @@
               <span class="set-row-label">Past History</span>
               <div class="set-row-desc">
                 {% if gmail_live.backfill_status == "done" %}
-                  Done — {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize }} logged from your existing contacts' history.
+                  Done. {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize }} logged from your contacts' history.
                 {% elif gmail_live.backfill_status == "running" %}
-                  Running now — this can take a few minutes for a year of mail.
+                  Running now. A year of mail takes a few minutes.
                 {% elif gmail_live.backfill_status == "failed" %}
-                  Hit a snag — it'll retry automatically.
+                  Hit a snag. Retrying automatically.
                 {% else %}
-                  Queued — starts shortly, no action needed.
+                  Queued. Starts shortly.
                 {% endif %}
               </div>
             </div>
@@ -1515,20 +1510,20 @@
               <span class="set-row-label">Rescan Gmail</span>
               <div class="set-row-desc">
                 {% if gmail_live.rescan_status == "running" %}
-                  Running now — this can take a few minutes.
+                  Running now. This takes a few minutes.
                 {% elif gmail_live.rescan_status == "pending" %}
-                  Queued — starts shortly.
+                  Queued. Starts shortly.
                 {% elif gmail_live.rescan_status == "failed" %}
-                  Last scan hit a snag — it'll retry automatically.
+                  Last scan hit a snag. Retrying automatically.
                 {% elif gmail_live.rescan_status == "done" %}
-                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago — {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize }} logged.
+                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago. {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize }} logged.
                   {% with residue=gmail_live.rescan_stats.residue %}
                     {% if residue.credit_limited %}
-                      {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look; credits covered {{ residue.residue_threads_processed }} of them — the rest stay unclassified until credits refill.
+                      {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look. Credits covered {{ residue.residue_threads_processed }}; the rest stay unclassified until credits refill.
                     {% endif %}
                   {% endwith %}
                 {% else %}
-                  Re-check your whole Gmail history against all of your contacts.
+                  Re-check your whole Gmail history against every contact.
                 {% endif %}
                 {% comment %}
                 Free's once-per-GMAIL_FREE_RESCAN_INTERVAL_DAYS throttle
@@ -1640,7 +1635,7 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Sign Out Other Devices</span>
-              <div class="set-row-desc">End every other signed-in session, like the library computer you forgot about. This device stays signed in.</div>
+              <div class="set-row-desc">End every other signed-in session. This device stays signed in.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:signout_all' %}"
@@ -1686,10 +1681,12 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Import &amp; Export</span>
+              {% comment %}The ZIP's contents are enumerated on the export page
+              itself, off the builders (`services.export_manifest`), so the
+              list here was a second copy that could only ever drift.
+              {% endcomment %}
               <div class="set-row-desc">Bring contacts in from a CSV, or download
-                everything Coverage holds on you as one ZIP of CSVs: contacts,
-                touches, firms, applications, tasks, debriefs, scores,
-                and your profile.</div>
+                everything Coverage holds on you as one ZIP.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:import' %}">Import</a>
@@ -1707,10 +1704,13 @@
           <p>Privacy and Terms</p>
         </div>
         <div class="set-body">
+          {% comment %}Neither row carries a description. "What we collect and
+          why" is what a privacy policy IS, and the Terms row next to it never
+          had one — one row explaining itself and one not read as an omission.
+          {% endcomment %}
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Privacy Policy</span>
-              <div class="set-row-desc">What we collect and why.</div>
             </div>
             <div class="set-row-control"><a class="btn" href="{% url 'accounts:privacy' %}">Read</a></div>
           </div>
@@ -1994,7 +1994,7 @@
         document.getElementById("pace-read").innerHTML =
           "That's about <b>" + Math.round(g / 5 * 10) / 10 +
           " a weekday</b>." + (goalInput.value ? "" :
-          " Using the default — drag the ring or type a number to set your own.");
+          " Drag the ring or type a number to set your own.");
       }
       function setFromPointer(e) {
         var r = ring.getBoundingClientRect();
