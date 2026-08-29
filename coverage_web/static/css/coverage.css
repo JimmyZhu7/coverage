@@ -1321,10 +1321,13 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
    format, the 5-address cap) needed no change. See the script at the
    bottom of _profile_form.html for how the chips and the hidden value
    stay in sync. */
-.se-field { display: flex; flex-direction: column; gap: var(--s2); }
-.se-chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0; padding: 0;
-  list-style: none; }
-.se-chips:empty { display: none; }
+/* One flex-wrap row, not a chip row stacked over a separate button row:
+   `.se-chips` is `display: contents` so its `<li>` chips become direct
+   flex items of `.se-field` alongside "+ Add Email", sharing the same gap
+   and wrap behaviour — the button sits right after the last chip and
+   only drops to its own line once the row actually runs out of width. */
+.se-field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.se-chips { display: contents; }
 .se-chip { display: flex; align-items: center; gap: 6px; max-width: 100%;
   padding: 6px 6px 6px 13px; border: 1px solid var(--line); border-radius: 999px;
   background: var(--paper); font-size: var(--fs-s); font-weight: var(--w-med);
@@ -1342,13 +1345,23 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
 @media (hover: none) {
   .se-chip-x { opacity: 1; }
 }
-/* The text box and Add button read as one control, like a search bar with
-   its button fused on — Add is a click target for a mouse or a touch
-   screen; Enter (or a typed comma/semicolon) does the same thing for a
-   keyboard, so neither input method is a second-class way to use this. */
-.se-add-row { display: flex; gap: var(--s2); max-width: 26rem; }
-.se-input { flex: 1; min-width: 0; }
-.se-add-btn { flex: none; }
+/* The box itself lives in a <dialog>, not on the page (2026-08-29) — a
+   chip list is the field's steady state, and an empty text input sitting
+   there always was more control than most students ever touch. "+ Add
+   Email" is the only thing on the page; it opens the dialog below. Same
+   showModal()/backdrop-click convention as base.html's command palette
+   (.palette) and directory/_drawer.html — reusing .palette's own
+   csel-open animation and shadow recipe at a much smaller size, since
+   this holds one field, not a results list. */
+.se-dialog { width: min(22rem, calc(100vw - 32px)); border: 1px solid var(--line);
+  border-radius: var(--r-panel); padding: var(--s4); background: var(--surface);
+  box-shadow: 0 24px 64px rgba(15, 27, 42, 0.22);
+  margin: 14vh auto auto; animation: csel-open 140ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
+.se-dialog::backdrop { background: rgba(15, 27, 42, 0.32); }
+.se-dialog label { display: block; margin: 0 0 var(--s2); }
+.se-dialog .se-input { width: 100%; }
+.se-dialog-actions { display: flex; justify-content: flex-end; gap: var(--s2);
+  margin-top: var(--s3); }
 form p label { margin-top: var(--s3); }
 /* `.firm-list label` was a second selector here. The onboarding firm picker
    it styled is a tile grid now (`.ob-firm`, in accounts/_welcome_head.html),

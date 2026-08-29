@@ -72,35 +72,51 @@ replacement for one.
 {% comment %}
 Sits under School because it is the same fact, spelled the way the product
 can actually use it. The only thing that reads it is the discovery gate
-(capture/discovery.py::_own_institution_domains) — and only to EXCLUDE, which
-is what the hint promises out loud, since a field whose effect is invisible
-is a field people fill in wrong.
+(capture/discovery.py::_own_institution_domains), and only to EXCLUDE.
+The sentence saying so out loud came off the page 2026-08-29 — the label
+plus the "you@university.edu" placeholder already carry what the field is
+for; the exclusion effect stays true, just no longer stated inline.
 
 Chip-per-address, not a comma-separated text box (2026-08-29): typing a
 literal comma to add a second address was a syntax nobody was told about
 except by the hint's own "Comma-separate two" clause, which existed purely
 to teach the box's own input format — a caption whose only job is to
-explain its control is the control's job, not the caption's. The visible
-`<input>`/Add button below are a scratch pad; the REAL field Django binds
-to and validates (ProfileForm.clean_school_emails, unchanged) is the
-hidden input, kept in sync by the script at the bottom of this partial.
-Server-side validation (freemail refusal, address format, the 5-address
-cap) still runs exactly as before — this is a layer over that field, not
-a new one.
+explain its control is the control's job, not the caption's. The REAL
+field Django binds to and validates (ProfileForm.clean_school_emails,
+unchanged) is the hidden input, kept in sync by the script at the bottom
+of this partial. Server-side validation (freemail refusal, address format,
+the 5-address cap) still runs exactly as before — this is a layer over
+that field, not a new one.
+
+2026-08-29, second pass: the text box moved off the page and into a
+`<dialog>` — chips are the page's steady state, and a box that sits there
+empty and waiting is more control than a field most students touch once
+ever needs. "+ Add Email" opens the dialog (native <dialog>, same
+showModal()/backdrop-click pattern as base.html's command palette and
+directory/_drawer.html — the browser owns focus trap and Escape); typing
+an address and pressing Add or Enter commits a chip and closes it. It
+cannot be a `<form>` of its own — this partial already renders inside
+Profile's own `<form>` (settings.html), and forms cannot nest — so commit
+and cancel are plain buttons the script drives, same as the chips
+themselves.
 {% endcomment %}
-<label for="id_school_emails">School Email</label>
+<label id="se-label">School Email</label>
 <div class="se-field" data-se-field>
   <ul class="se-chips" aria-live="polite"></ul>
-  <div class="se-add-row">
+  <button type="button" class="btn se-add-open" data-se-open>+ Add Email</button>
+  <dialog class="se-dialog" data-se-dialog aria-labelledby="se-label">
+    <label for="id_school_emails">Add a school email</label>
     <input type="text" id="id_school_emails" class="se-input"
            placeholder="you@university.edu" autocomplete="off"
            spellcheck="false" inputmode="email">
-    <button type="button" class="btn se-add-btn">Add</button>
-  </div>
+    <div class="se-dialog-actions">
+      <button type="button" class="btn" data-se-cancel>Cancel</button>
+      <button type="button" class="btn btn-primary" data-se-confirm>Add</button>
+    </div>
+  </dialog>
   <input type="hidden" name="school_emails" data-se-hidden
          value="{{ form.school_emails.value|default:'' }}">
 </div>
-<p class="field-hint">Coverage won't suggest people who write from your own university.</p>
 {{ form.school_emails.errors }}
 
 {% comment %}
@@ -291,7 +307,10 @@ its two enhancers.
     var list = field.querySelector(".se-chips");
     var hidden = field.querySelector("[data-se-hidden]");
     var input = field.querySelector(".se-input");
-    var addBtn = field.querySelector(".se-add-btn");
+    var openBtn = field.querySelector("[data-se-open]");
+    var dialog = field.querySelector("[data-se-dialog]");
+    var cancelBtn = dialog.querySelector("[data-se-cancel]");
+    var confirmBtn = dialog.querySelector("[data-se-confirm]");
 
     // Seed from the server-rendered value. Split on the same
     // `[,;\s]+` clean_school_emails itself splits on, so a value saved
@@ -303,10 +322,23 @@ its two enhancers.
     });
     sync(list, hidden);
 
+    // The box only exists while the dialog is open -- commit always closes
+    // it, since there is no page-level input left for focus to return to.
     function commit() {
-      if (addEmail(list, hidden, input.value)) input.value = "";
+      if (addEmail(list, hidden, input.value)) dialog.close();
     }
-    addBtn.addEventListener("click", commit);
+    openBtn.addEventListener("click", function () {
+      input.value = "";
+      dialog.showModal();
+      input.focus();
+    });
+    cancelBtn.addEventListener("click", function () { dialog.close(); });
+    confirmBtn.addEventListener("click", commit);
+    // Native <dialog> only closes on Escape; a backdrop click should too,
+    // same convention as base.html's command palette and the role drawer.
+    dialog.addEventListener("click", function (e) {
+      if (e.target === dialog) dialog.close();
+    });
     input.addEventListener("keydown", function (e) {
       // Comma/semicolon typed IS "I'm done with this one" even though
       // there is no longer a comma-separated box to type it into --
