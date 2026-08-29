@@ -973,12 +973,6 @@ _CAMPUS_CONTRACT_KEYS = (
 )
 
 
-def contract_is_campus(contract_type: str | None) -> bool:
-    """True when a provider-stated contract type names a campus programme."""
-    t = (contract_type or "").lower()
-    return bool(t) and any(k in t for k in _CAMPUS_CONTRACT_KEYS)
-
-
 def bucket_from_contract(contract_type: str | None) -> str:
     """The bucket a provider's own filing decides, or "" when it decides
     nothing.
