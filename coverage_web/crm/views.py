@@ -2031,7 +2031,6 @@ def _parked_cohorts(user) -> list[dict]:
         if t is not None:
             m = _MANUAL_OVERRIDE_PARSE.match(t.note or "")
             human = ((m.group("human") if m else "") or "").lstrip()
-            who = "Your advisor" if _ASSISTANT_NOTE.match(human) else "You"
             label = human or "Parked"
             minute = timezone.localtime(t.ts).replace(second=0, microsecond=0)
             key = (minute, label)
@@ -2040,11 +2039,11 @@ def _parked_cohorts(user) -> list[dict]:
             # No audit row on file — a row imported already parked, or one
             # older than this feature's own audit trail. Its own honest
             # cohort rather than silently folded into "Parked".
-            who, label, minute, sort_ts = "", "No park record on file", None, None
+            label, minute, sort_ts = "No park record on file", None, None
             key = (None, label)
         group = groups.get(key)
         if group is None:
-            group = {"label": label, "who": who, "when": minute, "contacts": []}
+            group = {"label": label, "when": minute, "contacts": []}
             groups[key] = group
             order.append((sort_ts, key))
         group["contacts"].append(c)
