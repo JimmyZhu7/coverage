@@ -2398,7 +2398,9 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # "Sorted for you" honesty line at _results.html:22 could never render.
         "personalized": personalized,
         "facets": facets,
-        "role_facet": role_facet,
+        # `role_facet` itself does NOT travel: it exists only to build
+        # `role_count`, which `role_segments`/`role_optin_segment` below
+        # already fold in. No template ever read the raw list.
         # Row 1: the four drawn segments, plus the conditional fifth when an
         # opt-in mode is active. The template renders these; it does not
         # re-derive bucket membership.
