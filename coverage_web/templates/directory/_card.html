@@ -38,7 +38,10 @@ on actually holding the text.
     {% if card.facts or card.tags %}
       <div class="frow-chips">
         {% for f in card.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
-        {% for tag in card.tags %}{% if tag.css != "tag-cat" %}<span class="pill {{ tag.css }}">{{ tag.label }}</span>{% endif %}{% endfor %}
+        {% comment %}`card.tags` never carries a firm-category pill any more
+        — this page's header already names the firm and its category, per
+        the header comment above — so every tag here renders.{% endcomment %}
+        {% for tag in card.tags %}<span class="pill {{ tag.css }}">{{ tag.label }}</span>{% endfor %}
       </div>
     {% endif %}
   </div>
