@@ -82,6 +82,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 from email.utils import getaddresses, parseaddr
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
@@ -193,6 +194,59 @@ def _excluded_by_labels(label_ids) -> bool:
     return bool(_EXCLUDED_LABEL_IDS.intersection(label_ids or ()))
 _ICS_DTSTART_RE = re.compile(r"DTSTART(?:;TZID=([^:]+))?:(\d{8}T\d{6}Z?)")
 _ICS_SUMMARY_RE = re.compile(r"SUMMARY:(.+)")
+# Anchored to the start of a line, unlike the two above: `UID` is a substring
+# of plenty of other property names (`X-MS-OLK-...UID`, `RECURRENCE-ID` in
+# some exporters' custom fields), and picking one of those up would key the
+# calendar on a value that is NOT stable across a reschedule.
+_ICS_UID_RE = re.compile(r"^UID:(.+)$", re.MULTILINE)
+# RFC 5545 line folding: a long property is split across lines, each
+# continuation beginning with one space or tab. Google's UIDs routinely
+# exceed the 75-octet limit and arrive folded, so the text has to be
+# unfolded before any of the regexes above run — a half-read UID is worse
+# than none, because it still looks like a key.
+_ICS_FOLD_RE = re.compile(r"\r?\n[ \t]")
+# A CANCELLED invite states a time it is simultaneously withdrawing. Both
+# spellings are checked because they are two different statements and either
+# one alone is enough: `METHOD:CANCEL` is the iTIP verb on the message
+# (RFC 5546 §3.2.5, what Google and Exchange send when an organiser deletes
+# an event), `STATUS:CANCELLED` is the event object's own state (RFC 5545
+# §3.8.1.11, which some exporters set without changing METHOD). Anchored to
+# line starts so neither can be matched inside a SUMMARY or DESCRIPTION —
+# "Cancelled: Coffee chat" in a subject line is prose, not a property.
+_ICS_CANCELLED_RE = re.compile(
+    r"^(?:METHOD:CANCEL|STATUS:CANCELLED)\s*$", re.MULTILINE | re.IGNORECASE
+)
+
+
+def _ics_zone(tzid: str | None):
+    """The `zoneinfo` zone a `DTSTART;TZID=` names, or None when the name is
+    not one this host's tz database carries.
+
+    WHY THIS EXISTS. The TZID was read and then thrown away, on the reasoning
+    that resolving it needed "a full tz database lookup by name" — but that
+    lookup is `zoneinfo`, in the standard library, and it is already how
+    `accounts.middleware.activate_for_user` resolves `User.timezone`. Without
+    it a `DTSTART;TZID=America/New_York:20260915T090000` parsed to a NAIVE
+    09:00, and `capture.gmail._user_aware` then anchored that naive time to
+    the ACCOUNT OWNER's zone. For a Hong Kong student taking a New York
+    chat that is a 12-hour error that also lands on the wrong calendar day —
+    the exact "consistent days-until from the user's own perspective" the
+    product's US+HK audience makes routine, not exotic.
+
+    Returns None (leaving the time naive, i.e. the previous behaviour) for
+    the two cases that genuinely cannot be resolved: a floating time with no
+    TZID at all, and Windows/Exchange's non-IANA zone names ("Eastern
+    Standard Time"), which `ZoneInfo` does not carry. Falling back rather
+    than guessing is the same posture the middleware takes for a stored zone
+    the host's tzdata no longer has.
+    """
+    name = (tzid or "").strip().strip('"')
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, KeyError):
+        return None
 
 
 class GmailLiveError(Exception):
@@ -582,6 +636,33 @@ def process_notification(gmail_address: str, published_history_id: str) -> None:
         )
     except GmailConnection.DoesNotExist:
         return  # disconnected or unknown mailbox — nothing to do
+    except GmailConnection.MultipleObjectsReturned:
+        # This is the ONE place in the app where a tenant is selected by a
+        # value that arrives from outside it: `gmail_address` comes off
+        # Google's Pub/Sub payload, and the docstring above says so. The
+        # column is a plain EmailField with NO unique constraint (see
+        # `capture.models.GmailConnection` — only `user` is unique, via the
+        # OneToOneField), so two accounts connecting the same mailbox is a
+        # shape the schema permits and this lookup cannot resolve.
+        #
+        # Refuse, loudly, rather than sync. `.get()` was already raising here
+        # — uncaught, so a single ambiguous address broke every notification
+        # the worker processed after it. Catching it stops that. What this
+        # must never become is `.first()`: that reads as a tidy fix and turns
+        # an ambiguous address into a silent, arbitrary choice of whose
+        # mailbox to sync into whose CRM, which is a cross-tenant write
+        # decided by row order. If this ever fires, the fix is a unique
+        # constraint on the column, not a tiebreak here.
+        logger.error(
+            "gmail_live: %s active connections share gmail_address=%r — "
+            "refusing to sync; a notification cannot say which tenant it is "
+            "for. Add a unique constraint on GmailConnection.gmail_address.",
+            GmailConnection.all_objects.filter(
+                gmail_address=gmail_address, status="active"
+            ).count(),
+            gmail_address,
+        )
+        return
 
     # Defensive drop, not the primary gate: neither `connect_gmail` nor
     # `renew_watches` ever registers a watch for a non-Pro connection, so a
@@ -795,16 +876,55 @@ def _decode_body(part: dict) -> str:
         return ""
 
 
-def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None]:
-    """(iso_datetime, summary) from the first `.ics`/`text/calendar` part
-    found, or (None, None). Deterministic per §5 ("scheduling via .ics ...
-    detection") — no language inference, just the invite's own DTSTART."""
+def _extract_ics_schedule(
+    message: dict,
+) -> tuple[str | None, str | None, str | None, bool]:
+    """(iso_datetime, summary, uid, cancelled) from the first
+    `.ics`/`text/calendar` part found, or (None, None, None, False).
+    Deterministic per §5 ("scheduling via .ics ... detection") — no language
+    inference, just the invite's own DTSTART.
+
+    THE UID IS THE STABLE IDENTITY. DTSTART answers "when", the UID answers
+    "which event", and only the second one survives a reschedule. A real
+    case from the founder's mailbox: an "Accepted: Jimmy <> Lily Coffee
+    Chat" reply arrived on one Gmail thread and the counter-proposal ("New
+    Time Proposed: ...") arrived on a DIFFERENT one, because Google starts a
+    fresh thread for it. Keyed on the thread, that is two chats — one of
+    them at a time nobody is turning up to. Keyed on the UID, which RFC 5545
+    holds constant across REQUEST / REPLY / COUNTER / CANCEL for the same
+    event, it is one chat that moved. See `capture.gmail._upsert_scheduled_chat`.
+
+    A CANCELLED INVITE REPORTS NO TIME. An organiser deleting the event sends
+    a `.ics` that still carries the UID, the SUMMARY and the DTSTART — the
+    whole event, plus the statement that it is off. Read for its DTSTART
+    alone, that cancellation was indistinguishable from a fresh invite: it
+    re-asserted the chat at its old time (`chat_status: "scheduled"`,
+    `chat_scheduled_at` set), so `_upsert_scheduled_chat` kept the calendar
+    row alive and `_touch_kind_for` logged another `chat_scheduled` touch for
+    a meeting nobody is attending. There is no honest time to report from a
+    cancellation, so none is reported and the message falls through to the
+    ordinary reply/no-finding paths.
+
+    BUT ITS UID IS STILL REPORTED, and that is what the fourth element is
+    for. Reporting no time stopped the cancellation ADDING to the lie; it did
+    nothing about the row already on the calendar, because returning a bare
+    (None, None, None) threw away the one field that can FIND that row. The
+    UID is the same one the original REQUEST carried (RFC 5545 holds it
+    constant across REQUEST / REPLY / COUNTER / CANCEL), so it is returned
+    alongside the cancellation flag and `capture.gmail._retire_cancelled_chat`
+    keys on it. `dt` stays None regardless: there is still no honest time to
+    report from a cancellation, and nothing downstream may read one.
+    """
     for part in _walk_parts(message.get("payload", {})):
         mime = part.get("mimeType", "")
         filename = part.get("filename", "")
         if mime != "text/calendar" and not filename.endswith(".ics"):
             continue
-        text = _decode_body(part)
+        text = _ICS_FOLD_RE.sub("", _decode_body(part)).replace("\r\n", "\n")
+        if _ICS_CANCELLED_RE.search(text):
+            uid_match = _ICS_UID_RE.search(text)
+            uid = uid_match.group(1).strip() if uid_match else ""
+            return None, None, uid or None, True
         dt_match = _ICS_DTSTART_RE.search(text)
         if not dt_match:
             continue
@@ -815,17 +935,23 @@ def _extract_ics_schedule(message: dict) -> tuple[str | None, str | None]:
                     tzinfo=dt_timezone.utc
                 )
             else:
-                # A floating or TZID-qualified time with no offset info we
-                # can resolve without a full tz database lookup by name —
-                # stored naive, same as the manual sync's own documented
-                # fallback (anchors to the account owner's User.timezone).
                 dt = datetime.strptime(raw, "%Y%m%dT%H%M%S")
+                # A TZID this host's tz database knows makes the time an
+                # absolute instant; anything else (a floating time, a
+                # Windows zone name) stays naive and is anchored downstream
+                # to the account owner's `User.timezone`, the documented
+                # fallback. See `_ics_zone`.
+                zone = _ics_zone(tzid)
+                if zone is not None:
+                    dt = dt.replace(tzinfo=zone)
         except ValueError:
             continue
         summary_match = _ICS_SUMMARY_RE.search(text)
         summary = summary_match.group(1).strip() if summary_match else ""
-        return dt.isoformat(), summary
-    return None, None
+        uid_match = _ICS_UID_RE.search(text)
+        uid = uid_match.group(1).strip() if uid_match else ""
+        return dt.isoformat(), summary, uid or None, False
+    return None, None, None, False
 
 
 def _looks_like_bounce(from_addr: str, subject: str) -> bool:
@@ -1027,7 +1153,7 @@ def classify_message_findings(own_email: str, message: dict) -> list[dict]:
 
 def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
     subject = _header(message, "Subject")
-    ics_dt, ics_summary = _extract_ics_schedule(message)
+    ics_dt, ics_summary, ics_uid, ics_cancelled = _extract_ics_schedule(message)
     return {
         "name": to_name or to_addr.split("@")[0],
         "email": to_addr.lower(),
@@ -1037,9 +1163,18 @@ def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
         "replied": False,
         "chat_status": "scheduled" if ics_dt else "none",
         "chat_scheduled_at": ics_dt,
+        # The invite's own identity, stable across a reschedule that lands
+        # on a different Gmail thread — see `_extract_ics_schedule`.
+        "ics_uid": ics_uid,
+        # The invite says this event is OFF. Never paired with a time (the
+        # extractor refuses to report one from a cancellation), so it can
+        # only ever retire a row, never place one.
+        "chat_cancelled": ics_cancelled,
         "evidence": (
             f"Calendar invite sent: {ics_summary or subject}"
             if ics_dt
+            else f"Calendar invite cancelled: {subject}"
+            if ics_cancelled
             else f"Sent: {subject}"
         ),
         "thread_id": message.get("threadId", ""),
@@ -1066,7 +1201,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
     from_name, from_addr = parseaddr(_header(message, "From"))
     subject = _header(message, "Subject")
     thread_id = message.get("threadId", "")
-    ics_dt, ics_summary = _extract_ics_schedule(message)
+    ics_dt, ics_summary, ics_uid, ics_cancelled = _extract_ics_schedule(message)
     occurred_at = _message_occurred_at(message)
 
     is_outbound = from_addr.lower() == own_email.lower()
@@ -1156,6 +1291,11 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             # thrown away — it is just not claimed as a relationship.
             "chat_status": "none",
             "chat_scheduled_at": None,
+            # False for the same reason `chat_status` is "none" above: a
+            # blast never PLACED a chat, so there is none of ours for it to
+            # retire, and letting a list cancellation reach into the calendar
+            # would give mass mail a write it is denied in every direction.
+            "chat_cancelled": False,
             "bulk": True,
             "bulk_reasons": verdict.reason_text,
             # The counterparty's own mailbox answered by machine — RFC 3834
@@ -1192,6 +1332,14 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         "replied": True,
         "chat_status": "scheduled" if ics_dt else "none",
         "chat_scheduled_at": ics_dt,
+        # See the outbound branch above: this is what makes Lily's "New Time
+        # Proposed" on a brand-new thread move the existing chat instead of
+        # adding a second one at the old time.
+        "ics_uid": ics_uid,
+        # The organiser has called it off. Paired with the UID above, this is
+        # what lets `capture.gmail._retire_cancelled_chat` find the row the
+        # original invite created and stop it reading as scheduled.
+        "chat_cancelled": ics_cancelled,
         "bulk": False,
         # For the discovery hook (capture.discovery, via apply_findings'
         # unmatched branch): whether this message carries a real RFC reply
@@ -1215,6 +1363,8 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         "evidence": (
             f"Calendar invite received: {ics_summary or subject}"
             if ics_dt
+            else f"Calendar invite cancelled: {subject}"
+            if ics_cancelled
             else message.get("snippet", "")[:300]
         ),
         "thread_id": thread_id,

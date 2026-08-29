@@ -19,7 +19,6 @@ import re
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-from django.utils import timezone
 
 from crm.models import Contact
 
@@ -73,26 +72,85 @@ def test_the_rail_lists_every_section_and_every_section_exists(body):
     sections = set(re.findall(r'<section class="set-card[^"]*" id="([a-z-]+)"', body))
     assert anchors == sections
     assert sections == {
-        # Appearance sits under "You" because a theme is a fact about how
-        # this person reads, not about how the engine behaves.
-        "profile", "work-auth", "appearance",
+        # Preferences sits under "You" for the reason Appearance did before
+        # it absorbed the digest row: how you read and how you're written to
+        # are facts about this person, not about how the engine behaves.
+        "profile", "work-auth", "preferences",
         # Target Firms: the same tier-editing "Your Firms" group the
         # Network board's drag-and-drop already writes through
         # (crm:set_firm_tier) — Settings adds the missing start/stop-
         # tracking half the board itself has no control for.
         "firms",
-        "cadence", "pace",
-        # Notifications: Push Alerts (device state) and the weekly digest
-        # opt-out (account preference), one card — see settings.html's
-        # comment on that block for why they share a card but not a save
-        # path.
-        "notifications",
+        # ONE card for the weekly goal and the six cadence knobs. Weekly
+        # Pace used to be its own section immediately below; a heading and
+        # a card frame around a single number, under a heading that already
+        # promised "how hard Coverage chases".
+        "cadence",
         # Credits (docs/credit-system-plan.md §6): always rendered, unlike
         # Gmail Live below it, which only shows up once GMAIL_LIVE_* is
         # configured — every account has a plan and a balance regardless.
         "credits",
-        "security", "data", "legal", "danger",
+        # Legal is inside "data" now: Privacy and Terms are what says what
+        # Coverage may do with what this card counts. Both routes survive
+        # (see test_the_legal_routes_survive_the_fold below); only the
+        # second card frame went.
+        "security", "data", "danger",
     }
+
+
+def test_the_rail_and_the_page_run_in_the_same_order(body):
+    """The rail's `.is-active` marker rides a spine and is moved by an
+    IntersectionObserver as you scroll. When the rail's order and the page's
+    order disagreed — the rail read Profile, Work Authorization, Appearance,
+    Target Firms while the page ran Profile, Appearance, Target Firms, Work
+    Authorization — the marker travelled BACKWARDS past two sections. A rail
+    whose order is a fiction is worse than no rail."""
+    nav = re.search(r'class="settings-nav[^"]*"[^>]*>(.*?)</nav>', body, re.S).group(1)
+    anchors = re.findall(r'href="#([a-z-]+)"', nav)
+    sections = re.findall(r'<section class="set-card[^"]*" id="([a-z-]+)"', body)
+    assert anchors == sections
+
+
+def test_the_legal_routes_survive_the_fold(body):
+    """Privacy and Terms lost their own card, not their links. For a
+    signed-in student these are the only in-app routes to either document."""
+    assert reverse("accounts:privacy") in body
+    assert reverse("accounts:terms") in body
+
+
+def test_the_decisions_groups_keep_their_own_anchors(client, logged_in):
+    """Campaigns, dismissed proposals and duplicates became three groups in
+    one card. Each keeps the id its own card carried, so an existing
+    #campaigns or #duplicates link still lands on the right group — and so
+    the render rule stays PER GROUP: nothing to answer, nothing drawn."""
+    from capture.models import ContactProposal
+
+    body = client.get(reverse(SETTINGS)).content.decode()
+    # Nothing to decide on a fresh account: no card, no rail entry, and none
+    # of the three group anchors.
+    assert 'id="decisions"' not in body
+    assert 'href="#decisions"' not in body
+    for anchor in ("campaigns", "dismissed-proposals", "duplicates"):
+        assert f'id="{anchor}"' not in body
+
+    # One dismissed proposal and the card appears, carrying that group only.
+    ContactProposal.all_objects.create(
+        user=logged_in, name="Buried Banker", email="buried@example.com",
+        status=ContactProposal.STATUS_DISMISSED, evidence="Replied to your note.",
+    )
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert 'id="decisions"' in body
+    assert 'href="#decisions"' in body
+    assert 'id="dismissed-proposals"' in body
+    assert "Buried Banker" in body
+    # The way back is on the row, not just the name of the person.
+    assert reverse("crm:proposal_restore", args=[
+        ContactProposal.objects.for_user(logged_in).get().id
+    ]) in body
+    # The other two groups stay absent — the render rule is per group, not
+    # per card. One answered question must not draw two empty lists.
+    assert 'id="campaigns"' not in body
+    assert 'id="duplicates"' not in body
 
 
 def test_the_cadence_rails_carry_a_fill_span(body):
@@ -161,9 +219,22 @@ def test_the_contact_count_splits_out_archived_rows(client, logged_in):
         Contact.all_objects.create(user=logged_in, name=f"Gone {i}", archived=True)
 
     body = client.get(reverse(SETTINGS)).content.decode()
-    assert ">5</div>" in body  # the total, stated
+    # A <span> inside .set-row-control now, not a bare <div> child of the
+    # row: the same anatomy the Credits balance uses, so the page has one
+    # spelling for "read-only figure on the right of a row" rather than two.
+    assert ">5</span>" in body  # the total, stated
     assert "2 archived" in body  # and its population, stated too
     assert reverse("crm:contact_archived") in body
+
+
+def test_the_target_firm_count_is_not_restated_under_your_data(client, logged_in):
+    """It printed a lone number for something the Target Firms board four
+    cards above already states as three live per-tier counts you can drag
+    firms between. One page, one number, one place — and the stronger of the
+    two places is the one you can act on."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    data = body.split('id="data"', 1)[1].split("</section>", 1)[0]
+    assert "Target Firms" not in data
 
 
 def test_no_archived_note_when_there_is_nothing_archived(client, logged_in):
@@ -263,3 +334,92 @@ def test_rows_use_min_height_never_a_fixed_height(body):
     assert any("min-height" in rule for rule in row_rules)
     for rule in row_rules:
         assert re.search(r"(^|[^-])height:\s*\d", rule) is None, rule
+
+
+# ---------------------------------------------------------------------------
+# Target Firms: re-tiering must not require a pointer
+# ---------------------------------------------------------------------------
+# The board shipped drag-and-drop only. Chips were `draggable="true"` and the
+# columns listened for `dragstart`/`dragover`/`drop`; HTML5 drag-and-drop does
+# not fire on a touchscreen and has no keyboard equivalent. So on a phone a
+# student could START tracking a firm (the search rows carry Tier 1/2/3
+# buttons) and STOP tracking one (the chip's ×) and could never MOVE one
+# between tiers — while the hint above the board read "Drag a firm to change
+# its tier", an instruction the device could not carry out.
+#
+# The Network board's tier lanes had the identical gap and got the identical
+# fix, deliberately: see `crm/tests/test_firm_tier_controls.py`. Both boards
+# write through `crm:set_firm_tier`.
+def _chips(body: str) -> list[str]:
+    return re.split(r'(?=<div class="tf-chip" )', body)[1:]
+
+
+@pytest.fixture
+def tracked_firms(logged_in):
+    from crm.models import UserFirm
+    from directory.models import Firm
+
+    firms = []
+    for tier in (1, 2, 3):
+        firm = Firm.objects.create(
+            slug=f"tier-{tier}-co", name=f"Tier {tier} Co", regions=["us"]
+        )
+        UserFirm.all_objects.create(user=logged_in, firm=firm, tier=tier)
+        firms.append(firm)
+    return firms
+
+
+def test_every_tracked_firm_chip_carries_a_tier_picker(client, tracked_firms):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    chips = _chips(body)
+    assert len(chips) == 3
+    for chip in chips:
+        assert 'class="tf-tier"' in chip, chip
+
+
+def test_the_picker_offers_every_tier_the_board_renders(client, tracked_firms):
+    """`accounts.views.TARGET_FIRM_TIERS` decides which columns exist; the
+    picker reads that same list rather than hard-coding 1/2/3, so a fourth
+    tier would appear in both places or neither."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    board = body[body.index('class="tf-board"') : body.index('for="tf-search"')]
+    columns = set(re.findall(r'<div class="tf-col" data-tier="(\d+)"', board))
+    for chip in _chips(board):
+        picker = chip[chip.index('class="tf-tier"') : chip.index("</select>")]
+        assert set(re.findall(r'<option value="(\d+)"', picker)) == columns
+
+
+def test_the_picker_shows_the_tier_the_chip_is_actually_on(client, tracked_firms):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    for tier, chip in enumerate(_chips(body), start=1):
+        assert f'<option value="{tier}" selected>Tier {tier}</option>' in chip
+
+
+def test_the_picker_names_its_firm_and_spells_the_tier_out(client, tracked_firms):
+    """The `aria-label` says which firm, the option text says which tier. A
+    screen reader reads the chosen OPTION back on change, not the box's
+    label, so an abbreviated "T2" would drop half of what a blind student
+    needs to hear."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    chip = _chips(body)[1]
+    assert 'aria-label="Tier for Tier 2 Co"' in chip
+    assert ">Tier 2</option>" in chip
+
+
+def test_the_drag_survives_as_the_pointer_shortcut(client, tracked_firms):
+    """The picker is the route that always works. It does not cost anyone
+    with a mouse the faster gesture."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert '<div class="tf-chip" draggable="true"' in body
+    for handler in ("dragstart", "dragover", "drop"):
+        assert f'"{handler}"' in body
+
+
+def test_the_board_no_longer_prescribes_a_gesture_touch_cannot_send(
+    client, tracked_firms
+):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert "Drag a firm to change its tier" not in body
+    assert "Drop a firm here" not in body
+    # Whatever it says instead still has to say what tier is FOR.
+    assert "Higher tiers get more attention from Coverage." in body

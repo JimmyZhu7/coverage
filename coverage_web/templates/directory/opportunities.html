@@ -101,9 +101,15 @@
     The <legend> is visible, styled like the uppercase micro-captions on row 2.
     It replaces the old "Role Type" caption rather than hiding beside it.
 
-    `other` and `all` are NOT drawn here. They are opt-in modes, reachable via
-    the subset sentence's link or a ?role= deep link — see the conditional
-    fifth segment below.
+    `other` is NOT drawn here — it stays an opt-in mode, reachable only by a
+    ?role= deep link, see the conditional fifth segment below. `all`
+    ("Everything") IS drawn here, as a real fifth pill with its own live
+    count: it used to be the same kind of deep-link-only opt-in, reachable
+    through the header's subset sentence, but that sentence was removed
+    (2026-08-27) and its escape hatch had to stay one action away — so it is
+    now a normal, always-checkable segment like the four campus buckets
+    beside it (`.seg-all`, muted rather than accent-tinted, because choosing
+    it is not a recommendation).
     {% endcomment %}
     <fieldset class="seg">
       <legend>Role type</legend>
@@ -118,14 +124,16 @@
         {% endfor %}
         {% if role_optin_segment %}
           {% comment %}
-          The conditional fifth segment. It exists for deep-link honesty — with
-          ?role=all the bar must not draw four campus pills over a feed showing
-          everything — but its structural job matters more: A RADIO GROUP WITH
-          NO CHECKED MEMBER SERIALIZES NOTHING. Without a checked radio here,
-          the next htmx GET (the moment the student touches Region or Search)
-          would carry no `role` at all, silently resetting the mode to campus
-          and dropping the roles the user explicitly asked to see. Muted grey,
-          full width, and never a sibling of the four campus options.
+          The conditional fifth segment, for `other` alone now (`all` graduated
+          to a normal segment in the loop above). It exists for deep-link
+          honesty — with ?role=other the bar must not draw five pills, none
+          checked, over a feed of experienced rows — but its structural job
+          matters more: A RADIO GROUP WITH NO CHECKED MEMBER SERIALIZES
+          NOTHING. Without a checked radio here, the next htmx GET (the moment
+          the student touches Region or Search) would carry no `role` at all,
+          silently resetting the mode to campus and dropping the roles the
+          user explicitly asked to see. Muted grey, full width, and never a
+          sibling of the campus options.
           {% endcomment %}
           <input class="seg-input" type="radio" name="role" id="{{ role_optin_segment.input_id }}" value="{{ role_optin_segment.value }}" checked>
           <label class="seg-pill seg-optin" for="{{ role_optin_segment.input_id }}">{{ role_optin_segment.label }} (<span id="{{ role_optin_segment.count_id }}">{{ role_optin_segment.count }}</span>)</label>
@@ -228,6 +236,10 @@
       need to score year + region + track + eligibility together, which is
       what `directory.recommend.recommend()` already does for Picked for
       You; that's a second control, not a rename of this one.
+
+      Unchecking IS the "board says what it's not showing" guarantee here:
+      the control that hides these rows is the control that brings them
+      back, with the same click, so nothing states the count anywhere else.
       {% endcomment %}
       {% if fit_available %}
         <label class="fit-toggle" title="Hide roles whose own text states a requirement you don't meet. Roles that state nothing always show.">
@@ -235,6 +247,25 @@
           <span>Eligible only</span>
         </label>
       {% endif %}
+
+      {% comment %}
+      Repeat listings fold silently now (see directory.dupes.fold_duplicates)
+      — no toggle, no count, no route back. Cut on request, pointing at the
+      filter bar wrapping onto a second row for one lone "All Companies":
+      "this needs to be reduced to one bar... can we take away the show
+      repeated listing button?" (2026-08-28).
+
+      This is a genuine narrowing, not a relocation like its three siblings
+      in `_scope.html`'s header-strip note — there is nowhere left for a
+      folded-duplicate student to see the fold or reverse it. That is a
+      deliberate call, not an oversight: a firm re-filing one job as several
+      requisitions is noise on every reading of this page, never a role a
+      student was trying to reach, unlike the other three hides (fit,
+      region, campaign) which can each hide a role someone actually wants.
+      `?dupes=1` still works as a URL fallback (`directory/views.py`'s
+      `dupes_shown`) — nothing downstream broke — it is simply no longer
+      advertised.
+      {% endcomment %}
 
       {% comment %}
       Companies shows an ACTIVE-SELECTION count ("3 selected"), not a result
@@ -352,35 +383,6 @@ else is htmx and the platform.
     mq.addEventListener("change", apply);
   })();
 
-  // Re-settle each filter <select> after an htmx swap has refreshed its
-  // options with live counts. Two distinct repairs, both observed failing:
-  //
-  // 1. SELECTEDNESS. A <select>'s runtime selection ("selectedness") is a
-  //    different thing from its `selected` ATTRIBUTE, and once the element has
-  //    been rendered the attribute stops governing. htmx swaps innerHTML by
-  //    inserting the new options alongside the old ones and then removing the
-  //    old — and the HTML reset algorithm that runs during that dance leaves
-  //    selectedness on the LAST option. Measured, not theorised: after typing
-  //    in Search, #f-region had `selected` correctly on "Any Region (150)" and
-  //    a live value of "none" — the page would then have filtered to unstated
-  //    regions on the user's next keystroke. The server's rendered attribute
-  //    is the source of truth for what this request selected, so restore from
-  //    it. (Every counted facet guarantees the current selection is present as
-  //    an option, precisely so this always has something to restore from.)
-  //
-  // 2. THE ENHANCED LABEL. base.html wraps every <select> in a styled listbox
-  //    whose button text is a COPY of the selected option's text, taken when
-  //    that option was last read. Without a nudge the hidden native select
-  //    would be correct while the button the user actually reads still showed
-  //    page-load numbers — this redesign's own stale-count bug, one layer up.
-  //
-  // `new Event("change")` DOES NOT BUBBLE by default, and that is load-bearing.
-  // The enhancer's listener is attached directly to the <select>, so it fires;
-  // the form's hx-trigger="change" is attached to the FORM and needs the event
-  // to bubble up to it, so it does not. A bubbling event here would make every
-  // swap trigger another request — an endless loop of the page filtering
-  // itself. Setting `selectedIndex` does not fire `change` on its own.
-
   // The filter bar's stuck-state skin. A passive scroll listener rather
   // than an IntersectionObserver: the observer's callbacks are deferrable
   // (background tabs, embedded panes) in a way that leaves the bar stuck
@@ -476,6 +478,34 @@ else is htmx and the platform.
     });
   })();
 
+  // Re-settle each filter <select> after an htmx swap has refreshed its
+  // options with live counts. Two distinct repairs, both observed failing:
+  //
+  // 1. SELECTEDNESS. A <select>'s runtime selection ("selectedness") is a
+  //    different thing from its `selected` ATTRIBUTE, and once the element has
+  //    been rendered the attribute stops governing. htmx swaps innerHTML by
+  //    inserting the new options alongside the old ones and then removing the
+  //    old — and the HTML reset algorithm that runs during that dance leaves
+  //    selectedness on the LAST option. Measured, not theorised: after typing
+  //    in Search, #f-region had `selected` correctly on "Any Region (150)" and
+  //    a live value of "none" — the page would then have filtered to unstated
+  //    regions on the user's next keystroke. The server's rendered attribute
+  //    is the source of truth for what this request selected, so restore from
+  //    it. (Every counted facet guarantees the current selection is present as
+  //    an option, precisely so this always has something to restore from.)
+  //
+  // 2. THE ENHANCED LABEL. base.html wraps every <select> in a styled listbox
+  //    whose button text is a COPY of the selected option's text, taken when
+  //    that option was last read. Without a nudge the hidden native select
+  //    would be correct while the button the user actually reads still showed
+  //    page-load numbers — this redesign's own stale-count bug, one layer up.
+  //
+  // `new Event("change")` DOES NOT BUBBLE by default, and that is load-bearing.
+  // The enhancer's listener is attached directly to the <select>, so it fires;
+  // the form's hx-trigger="change" is attached to the FORM and needs the event
+  // to bubble up to it, so it does not. A bubbling event here would make every
+  // swap trigger another request — an endless loop of the page filtering
+  // itself. Setting `selectedIndex` does not fire `change` on its own.
   document.body.addEventListener("htmx:afterSettle", function () {
     document.querySelectorAll(".filters select").forEach(function (sel) {
       var i = Array.prototype.findIndex.call(sel.options, function (o) {

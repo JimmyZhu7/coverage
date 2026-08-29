@@ -203,6 +203,39 @@ def test_import_tolerates_column_variants(user, firms):
     assert dana.angle == "alumni"
 
 
+def test_import_maps_a_linkedin_column(user, firms):
+    """`linkedin` is hand-entry-only everywhere else in the product (no
+    capture path or sourcing suggestion ever originates a profile URL — see
+    crm/ai_summary.py's neighbor investigation), so a CSV import that already
+    carries a LinkedIn column is the one *bulk* path a student has for it.
+    Before this test, `_FIELD_ALIASES` had no `linkedin` entry at all, so a
+    "LinkedIn" (or "LinkedIn URL") header was silently dropped as
+    unrecognized and the column's values were never written to any contact.
+    """
+    csv_with_linkedin = (
+        "name,email,linkedin\n"
+        "Jane Banker,jane@gs.com,https://www.linkedin.com/in/janebanker/\n"
+    )
+    result = services.parse_contacts_csv(user, csv_with_linkedin)
+    assert result.created == 1
+    jane = Contact.objects.for_user(user).get(name="Jane Banker")
+    assert jane.linkedin == "https://www.linkedin.com/in/janebanker/"
+
+
+def test_import_tolerates_a_linkedin_url_header_variant(user):
+    """`_norm()` strips spaces/punctuation before matching, so "LinkedIn
+    URL" (the export column's own header — see CONTACT_EXPORT_COLUMNS) must
+    round-trip back in on import."""
+    csv_variant = (
+        "Name,Email,LinkedIn URL\n"
+        "Dana Deal,dana@gs.com,https://linkedin.com/in/danadeal\n"
+    )
+    result = services.parse_contacts_csv(user, csv_variant)
+    assert result.created == 1
+    dana = Contact.objects.for_user(user).get(name="Dana Deal")
+    assert dana.linkedin == "https://linkedin.com/in/danadeal"
+
+
 def test_import_dedup_by_email_on_reimport(user, firms):
     first = services.parse_contacts_csv(user, CSV_BASIC)
     assert first.created == 2
@@ -297,7 +330,7 @@ def test_import_template_downloads(client, user):
     resp = client.get(reverse("accounts:import_template"))
     assert resp.status_code == 200
     assert resp["Content-Type"] == "text/csv"
-    assert b"name,email,firm,role,notes,angle" in resp.content
+    assert b"name,email,linkedin,firm,role,notes,angle" in resp.content
 
 
 # ---------------------------------------------------------------------------

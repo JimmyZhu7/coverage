@@ -21,8 +21,12 @@ A JSON array. Each entry:
       "event_kind": "app_close",        # app_open | app_close |
                                         #   insight_open | insight_deadline
       "date": "2026-09-15",             # ISO; "" for a known-unknown
-      "cycle": "SA 2028",               # optional, defaults to --cycle
+      "cycle": "SA 2028",               # optional, defaults to --cycle;
+                                        #   "sa2028" / "sa2028_ib" also read
+      "track": "ib",                    # optional desk: ib | st | pe | am |
+                                        #   consulting | corp-strat
       "region": "hk",                   # optional ("" = unscoped)
+      "precision": "day",               # optional: "" | day | month | estimated
       "confidence": "confirmed_official",   # rumor | reported |
                                             #   confirmed_official
       "source": "https://...",          # where the claim came from
@@ -32,6 +36,25 @@ A JSON array. Each entry:
 An unknown firm slug is SKIPPED and named, never silently dropped and never
 auto-created: a typo'd slug that invented a firm would pollute the shared
 directory every other user reads.
+
+EVERY VOCABULARY FIELD IS CHECKED BEFORE IT IS WRITTEN
+------------------------------------------------------
+`event_kind`, `cycle`, `track`, `precision` and `confidence` are all closed
+vocabularies, and an entry that misses any of them is skipped with the firm
+named — never written, never coerced. Three of those five checks are new, and
+each replaces a silent failure this command actually had:
+
+  - `cycle` was written verbatim, which is how the table came to hold four
+    spellings of one cycle and why nothing could group a programme across
+    firms. See `directory.timeline`.
+  - `precision` was written verbatim into the field that decides whether a
+    date renders as an exact day, a month, or an estimate. Anything the
+    renderer does not recognise falls through to the EXACT-DAY branch, so a
+    typo turns a guess into a specific date on a public page.
+  - `confidence` fell back to 0.0 for an unrecognised band. On a new row that
+    writes a real date that every `>= 0.8` reader downstream then discards; on
+    an existing one, rule 1 below reads it as a downgrade and quietly keeps the
+    old date. Both look exactly like a successful import.
 
 TWO RULES THAT MAKE THIS SAFE TO RUN ON A SCHEDULE
 --------------------------------------------------
@@ -58,6 +81,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from directory.models import Firm, FirmDate
+from directory.timeline import CYCLE_TRACKS, is_valid_track, parse_cycle
 
 # Same three-band vocabulary seed_directory uses; the float is what the
 # cadence engine compares against (1.0 == confirmed_official).
@@ -66,6 +90,13 @@ CONFIDENCE_BAND = {"rumor": 0.3, "reported": 0.6, "confirmed_official": 1.0}
 # The events the backward planner knows how to act on, plus insight_open,
 # which the directory tracks for display. Anything else is a typo.
 EVENT_KINDS = ("app_open", "app_close", "insight_open", "insight_deadline")
+
+# What `_firm_date_row` in directory/views.py knows how to render a date AT.
+# "" is a full day; "month" prints "Sep 2026"; "estimated" prints "~ Sep 2026"
+# and can never be badged confirmed. A fourth value is not a fourth rendering —
+# it falls through to the exact-day branch, which is how an estimate once
+# printed as a specific day. This command wrote whatever the findings said.
+PRECISIONS = ("", "day", "month", "estimated")
 
 
 class BadDate(ValueError):
@@ -151,10 +182,71 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
 
-            cycle = str(entry.get("cycle") or opts["cycle"]).strip()
+            # `cycle` used to be written through verbatim — the ONLY key on
+            # the row that was never checked, while `event_kind` above was
+            # matched against a closed tuple and `confidence` against a closed
+            # dict. That is how the table came to hold four spellings of "SA
+            # 2028": this command's own `--cycle` default writes the human
+            # one, `seed_directory` writes the slug, and neither could see the
+            # other. `parse_cycle` reads every spelling and returns the one
+            # canonical pair; None means the value does not name a cycle, and
+            # is skipped with the firm named rather than stored — the same
+            # posture `_parse_date` takes toward an unreadable date.
+            raw_cycle = str(entry.get("cycle") or opts["cycle"]).strip()
+            parsed = parse_cycle(raw_cycle)
+            if parsed is None:
+                self.stderr.write(self.style.WARNING(
+                    f"skip {slug}/{event_kind}: unreadable cycle {raw_cycle!r} "
+                    f"(expected a season+year like \"SA 2028\" or \"sa2028\", "
+                    f"optionally suffixed with a desk: sa2028_ib). "
+                    f"Any stored date is left alone."))
+                skipped += 1
+                continue
+            cycle, cycle_track = parsed
+            # An explicit `track` on the finding beats one inferred from a
+            # cycle suffix, and disagreeing with the suffix is an error rather
+            # than a preference — a finding that says both things must not
+            # have one of them silently chosen for it.
+            track = str(entry.get("track", "")).strip().lower() or cycle_track
+            if not is_valid_track(track):
+                self.stderr.write(self.style.WARNING(
+                    f"skip {slug}/{event_kind}: unknown track {track!r} "
+                    f"(expected one of {', '.join(CYCLE_TRACKS)}, or omit it). "
+                    f"Any stored date is left alone."))
+                skipped += 1
+                continue
+            if cycle_track and track != cycle_track:
+                self.stderr.write(self.style.WARNING(
+                    f"skip {slug}/{event_kind}: track {track!r} contradicts the "
+                    f"desk in cycle {raw_cycle!r}. Any stored date is left alone."))
+                skipped += 1
+                continue
+
+            precision = str(entry.get("precision", "")).strip().lower()
+            if precision not in PRECISIONS:
+                self.stderr.write(self.style.WARNING(
+                    f"skip {slug}/{event_kind}: unknown precision {precision!r} "
+                    f"(expected one of {', '.join(repr(p) for p in PRECISIONS)}). "
+                    f"An unrecognised precision renders as an EXACT day. "
+                    f"Any stored date is left alone."))
+                skipped += 1
+                continue
+
             region = str(entry.get("region", "")).strip().lower()
             conf_label = str(entry.get("confidence", "")).strip()
-            conf = CONFIDENCE_BAND.get(conf_label, 0.0)
+            if conf_label not in CONFIDENCE_BAND:
+                # Silently scoring 0.0 for a typo'd band is a downgrade wearing
+                # the clothes of a value: rule 1 below would then treat the
+                # finding as weaker than anything stored and quietly keep the
+                # old date, or — on a NEW row — write a real date at zero
+                # confidence, which every `>= 0.8` reader downstream discards.
+                self.stderr.write(self.style.WARNING(
+                    f"skip {slug}/{event_kind}: unknown confidence "
+                    f"{conf_label!r} (expected one of "
+                    f"{', '.join(CONFIDENCE_BAND)}). Any stored date is left alone."))
+                skipped += 1
+                continue
+            conf = CONFIDENCE_BAND[conf_label]
             try:
                 new_date = _parse_date(entry.get("date"))
             except BadDate as exc:
@@ -174,7 +266,8 @@ class Command(BaseCommand):
             }
 
             existing = FirmDate.objects.filter(
-                firm=firm, cycle=cycle, region=region, event_kind=event_kind
+                firm=firm, cycle=cycle, track=track, region=region,
+                event_kind=event_kind,
             ).first()
 
             if existing is None:
@@ -183,8 +276,9 @@ class Command(BaseCommand):
                                   f"{new_date or '(no date)'} [{conf_label}]")
                 if not dry:
                     FirmDate.objects.create(
-                        firm=firm, cycle=cycle, region=region, event_kind=event_kind,
-                        date=new_date, precision=str(entry.get("precision", "")),
+                        firm=firm, cycle=cycle, track=track, region=region,
+                        event_kind=event_kind,
+                        date=new_date, precision=precision,
                         confidence=conf, source_url=str(entry.get("source", "")),
                         found_on=now, history=[observation],
                     )
@@ -215,7 +309,7 @@ class Command(BaseCommand):
             if not dry:
                 existing.date = new_date
                 existing.confidence = conf
-                existing.precision = str(entry.get("precision", "")) or existing.precision
+                existing.precision = precision or existing.precision
                 existing.source_url = str(entry.get("source", "")) or existing.source_url
                 existing.found_on = now
                 existing.history = list(existing.history or []) + [observation]
