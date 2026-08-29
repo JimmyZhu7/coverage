@@ -397,10 +397,26 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
     # (confidence < 1.0): that reading is now unverified, so it is dropped and
     # the row goes back in the enrichment queue rather than showing a
     # countdown to a date the new version may not state.
+    #
+    # `max(existing.confidence, final_confidence)` is only correct when the
+    # DATE isn't moving — re-confirming the same deadline with a weaker
+    # signal (this run's prose) than we already had (a past API date) should
+    # not throw away the stronger reading. But when the date IS changing, the
+    # confidence has to describe the value actually being written, not the
+    # provenance of the value it's replacing: a row that held a 1.0
+    # API-sourced deadline, then had its API field go silent while a prose
+    # match in the same payload pointed at a DIFFERENT date, used to keep
+    # writing "confidence 1.0" on a date that came from this run's 0.6
+    # prose reading — the current value falsely wearing its predecessor's
+    # provenance.
     if final_deadline is not None:
+        existing.confidence = (
+            max(existing.confidence, final_confidence)
+            if existing.deadline == final_deadline
+            else final_confidence
+        )
         existing.deadline = final_deadline
         existing.deadline_precision = "day"
-        existing.confidence = max(existing.confidence, final_confidence)
     elif changed and (existing.confidence or 0) < 1.0 and existing.deadline:
         existing.deadline = None
         existing.deadline_precision = ""

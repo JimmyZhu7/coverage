@@ -414,6 +414,37 @@ def test_an_api_deadline_sets_full_confidence(monkeypatch):
     assert Opportunity.objects.get(url=U2).confidence == 0.0
 
 
+@pytest.mark.django_db
+def test_a_weaker_prose_reading_does_not_inherit_the_old_apis_confidence(monkeypatch):
+    """Once a real API deadline is on file (confidence 1.0), a later run whose
+    API field has gone silent must not relabel this run's own 0.6-confidence
+    PROSE guess as if it were still the firm's own API statement just because
+    the row once held a 1.0. `existing.confidence = max(existing.confidence,
+    final_confidence)` keeps the OLD row's 1.0 even when the DATE it is
+    stamped on just changed to a completely different value read out of prose
+    this run, not the provider's API field."""
+    from coverage_connectors.models import Opportunity as ConnOpp
+
+    _patch(monkeypatch, [_result([_opp(U1, deadline="2026-09-30")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    assert Opportunity.objects.get(url=U1).confidence == 1.0
+
+    reread = ConnOpp(
+        firm="William Blair", title="Summer Analyst", location="Chicago",
+        url=U1, source="greenhouse", deadline=None,
+        raw={"content": "Applications close November 16, 2026."},
+    )
+    _patch(monkeypatch, [_result([reread])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    assert o.deadline == date(2026, 11, 16), "sanity: the prose reading did land"
+    assert o.confidence == 0.6, (
+        "the date now on the row came from THIS run's prose reading, not "
+        "the provider's API field -- confidence must say so"
+    )
+
+
 # ---------------------------------------------------------------------------
 # WHAT A RE-SCRAPE MUST NOT DESTROY.
 #
