@@ -24,9 +24,7 @@ from django.views.decorators.http import require_POST
 from analytics.events import record_event
 from analytics.models import UserOpportunity
 from coverage_domain import cadence
-from coverage_domain.pipeline import (
-    BULK_RECEIVED_KIND, CHANNELS, MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS,
-)
+from coverage_domain.pipeline import BULK_RECEIVED_KIND, TOUCH_TRANSITIONS
 from directory.classify import TARGET_BUCKETS
 from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
@@ -37,14 +35,12 @@ from .utils import (
     ACTION_LABELS,
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
     TOUCH_KIND_LABELS,
-    CHANNEL_LABELS,
     _calendar_days_ago,
     _clock,
     _confidence_label,
     _mailto,
     _touch_dicts,
     _warmth_pct,
-    WARMTH_ORDER,
 )
 
 import re as _re

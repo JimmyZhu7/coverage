@@ -14,19 +14,17 @@ from __future__ import annotations
 
 import re
 from datetime import datetime as _datetime, timedelta, timezone as dt_timezone
-from math import ceil
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count as models_Count, Max as models_Max, Q
+from django.db.models import Count as models_Count, Max as models_Max
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.timesince import timesince
 from django.views.decorators.http import require_POST
 
 from analytics.events import record_event
@@ -44,7 +42,7 @@ from . import (
     recruitment, services, sourcing,
 )
 from .models import (
-    CalendarEvent, Campaign, ChatDebrief, Contact, Touch, UserFirm,
+    Campaign, ChatDebrief, Contact, Touch, UserFirm,
 )
 
 
