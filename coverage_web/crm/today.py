@@ -42,8 +42,6 @@ from .utils import (
     _confidence_label,
     _mailto,
     _touch_dicts,
-    _warmth_pct,
-    WARMTH_ORDER,
 )
 
 import re as _re
@@ -321,7 +319,6 @@ def _build_actions(user):
             (a.get("ctx") or {}).get("hours"),
             now=now,
         ), today=today)
-        a["warmth_pct"] = _warmth_pct(c.get("warmth", "cold"))
         # Compose surface: the opener seeds the draft body so the weekly list
         # doubles as the place outreach starts (§5).
         a["mailto"] = _mailto(
