@@ -283,23 +283,57 @@ def test_nothing_sets_type_below_the_floor():
         f"type below the {floor:.0f}px floor; use --fs-nano or larger: {offenders}")
 
 
+def _is_icon_only_dimmed_control(selector: str, body: str, file_text: str) -> bool:
+    """True if a `color:` hit is a currentColor tint on an icon child, not
+    real dimmed text.
+
+    A single class selector (e.g. `.tf-chip-x`) that also has a sibling
+    `{selector} svg { ... }` sizing rule in the same file is, by
+    construction, hosting an SVG child — that's the only reason a stylesheet
+    would size an `svg` nested under that exact class. `color:` on such a
+    rule tints the icon via `currentColor`, it doesn't paint text. Requiring
+    the flagged rule itself to carry no `font-size`/`font-family` keeps this
+    narrow: a rule that sizes type is asserting there IS text, icon sibling
+    or not, and must not be waved through.
+    """
+    if not re.fullmatch(r"\.[\w-]+", selector.strip()):
+        return False  # compound/descendant selectors aren't the icon-button shape
+    if re.search(r"font-size|font-family", body):
+        return False
+    cls = re.escape(selector.strip())
+    return re.search(rf"{cls}\s+svg\s*\{{[^}}]*width", file_text) is not None
+
+
 def test_no_rule_dims_text_with_opacity():
     """Opacity on a text element silently multiplies its contrast against a
     ratio that was measured without it. .mrail-yr did exactly this: --ink-3
     is a legible 5:1, and `opacity: .55` turned it into 2.18:1 while the
     token audit above still reported the pair as passing. De-emphasis is a
-    COLOUR decision, so it has to happen in a token the audit can see."""
+    COLOUR decision, so it has to happen in a token the audit can see.
+
+    A faded ICON or decorative bar is legitimate; faded TEXT is a hidden
+    contrast cut. The `color:` half of the heuristic can't tell those apart
+    on its own — currentColor tints an icon exactly the same way it paints
+    text — so `_is_icon_only_dimmed_control` narrows the icon case: a sibling
+    rule sizing an `svg` under the same class, with no font-size/font-family
+    on the flagged rule itself. .se-chip-x and .tf-chip-x are both remove
+    buttons that hold only an aria-hidden SVG glyph (verified against their
+    templates — no visible text node) and fade 1 -> 0.4 until hovered or
+    focused, same as the icon-only tf-tier control above them."""
     root = pathlib.Path(__file__).resolve().parents[2]
     files = list((root / "templates").rglob("*.html")) + [root / "static" / "css" / "coverage.css"]
     offenders = []
     for f in files:
-        for m in re.finditer(r"^\s*([.#][\w.\- >:()\[\]=\"]+)\s*\{([^}]*)\}", f.read_text(), re.M):
-            body = m.group(2)
+        text = f.read_text()
+        for m in re.finditer(r"^\s*([.#][\w.\- >:()\[\]=\"]+)\s*\{([^}]*)\}", text, re.M):
+            selector, body = m.group(1), m.group(2)
             om = re.search(r"(?<!-)opacity:\s*(0?\.\d+)", body)
             # Only flag rules that also set a text property — a faded ICON or
             # decorative bar is legitimate; faded TEXT is a hidden contrast cut.
             if om and re.search(r"font-size|font-family|color:", body):
-                offenders.append(f"{f.name}: {m.group(1).strip()} opacity {om.group(1)}")
+                if _is_icon_only_dimmed_control(selector, body, text):
+                    continue
+                offenders.append(f"{f.name}: {selector.strip()} opacity {om.group(1)}")
     assert offenders == [], offenders
 
 

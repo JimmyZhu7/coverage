@@ -730,9 +730,10 @@
      other route than this button. */
   .tf-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center;
     width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
-    color: var(--ink-3); font-size: 14px; line-height: 1; cursor: pointer;
+    color: var(--ink-3); cursor: pointer;
     opacity: 0.4;
     transition: background-color var(--t-fast), color var(--t-fast), opacity var(--t-fast); }
+  .tf-chip-x svg { width: 10px; height: 10px; pointer-events: none; }
   .tf-chip:hover .tf-chip-x, .tf-chip:focus-within .tf-chip-x { opacity: 1; }
   .tf-chip-x:hover { background: var(--danger-soft); color: var(--danger); }
   .tf-chip-x:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1056,7 +1057,7 @@
                         {% endfor %}
                       </select>
                       <button type="button" class="tf-chip-x" data-tf-remove="{{ f.id }}"
-                              aria-label="Stop tracking {{ f.name|smart_title }}">×</button>
+                              aria-label="Stop tracking {{ f.name|smart_title }}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
                     </div>
                   {% endfor %}
                 </div>
@@ -1192,7 +1193,9 @@
           // two classes of firm with different controls on them.
           chip.innerHTML = '<span></span>' + tierSelectHtml(tier, name) +
             '<button type="button" class="tf-chip-x" ' +
-            'data-tf-remove="' + firmId + '" aria-label="Stop tracking ' + name.replace(/"/g, "&quot;") + '">×</button>';
+            'data-tf-remove="' + firmId + '" aria-label="Stop tracking ' + name.replace(/"/g, "&quot;") + '">' +
+            '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" ' +
+            'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
           chip.querySelector("span").textContent = name;
           bindDrag(chip);
           bindTierSelect(chip);
