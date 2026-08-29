@@ -99,6 +99,23 @@ def test_command_leaves_a_row_untouched_when_the_model_finds_nothing(monkeypatch
 
 @pytest.mark.django_db
 @override_settings(ANTHROPIC_API_KEY="sk-test")
+def test_ids_still_respects_the_never_overwrite_a_stated_deadline_rule(monkeypatch):
+    """`--ids` is documented as bypassing `--limit`'s ORDERING, not the
+    fill-only eligibility rule this command is built around. Naming a row
+    that already carries a stated deadline must not send it to the model —
+    the same invariant `test_command_skips_a_row_that_already_has_a_deadline`
+    pins for the default (no `--ids`) path."""
+    opp = _row(deadline="2026-09-01", deadline_precision="day", confidence=1.0)
+    called = []
+    monkeypatch.setattr(cmd_mod, "extract_deadline_ai", lambda *a, **kw: called.append(1))
+    call_command("extract_deadlines_ai", f"--ids={opp.id}")
+    assert called == []
+    opp.refresh_from_db()
+    assert opp.deadline.isoformat() == "2026-09-01"
+
+
+@pytest.mark.django_db
+@override_settings(ANTHROPIC_API_KEY="sk-test")
 def test_command_respects_ids_and_ignores_limit(monkeypatch):
     a = _row(url="https://jpm.example/apply/a")
     b = _row(url="https://jpm.example/apply/b")

@@ -45,14 +45,25 @@ class Command(BaseCommand):
         dry, limit = opts["dry_run"], opts["limit"]
         tag = "[dry-run] " if dry else ""
 
+        # The eligibility filter — open, campus-bucket, no deadline yet,
+        # cached text present — is the "only fills silence" contract this
+        # command promises. `--ids` bypasses `--limit`'s ORDERING (an
+        # operator-named row is checked now rather than waiting its turn in
+        # the id-ordered queue), never the eligibility itself: an id list
+        # built from an unrelated audit could otherwise name a row that
+        # already has a provider- or regex-stated deadline, and sending that
+        # text to the model would let its guess silently overwrite a stated
+        # answer the module docstring says this command must never touch.
         qs = (Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS, deadline__isnull=True)
               .exclude(raw__detail_text="")
-              .select_related("firm").order_by("id"))
+              .select_related("firm"))
         if opts["ids"]:
             ids = [int(x) for x in opts["ids"].split(",") if x.strip()]
-            qs = Opportunity.objects.filter(id__in=ids).select_related("firm")
-        elif limit:
-            qs = qs[:limit]
+            qs = qs.filter(id__in=ids)
+        else:
+            qs = qs.order_by("id")
+            if limit:
+                qs = qs[:limit]
 
         rows = [o for o in qs if (o.raw or {}).get("detail_text")]
         if not rows:
