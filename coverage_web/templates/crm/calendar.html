@@ -18,20 +18,17 @@
     margin-bottom: var(--s4); }
   .cal-month { font: var(--w-black) clamp(20px, 2.2vw, 26px)/1.1 var(--font-display);
     letter-spacing: -0.01em; margin: 0; min-width: 8ch; }
+  /* 2026-08-29: this bar's controls carried their own one-off pill shape
+     (border-radius: 999px), a permanent box-shadow, and the lighter --line
+     border — none of which is what a button looks like anywhere else in
+     the product (see .btn, coverage.css: --r-ctl radius, --line-strong
+     border, shadow only on hover). ‹ › /Today/Subscribe/+ Add to the
+     calendar now all carry the real .btn class in the markup; what's left
+     here is only what .btn does not already give a circular icon button —
+     the fixed 36px square and centred glyph size. */
   .cal-nav { display: flex; gap: var(--s1); }
-  .cal-nav a { width: 36px; height: 36px; display: inline-flex; align-items: center;
-    justify-content: center; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--surface); color: var(--ink-2); font-size: var(--fs-m);
-    box-shadow: var(--shadow-1);
-    transition: border-color var(--t-fast), color var(--t-fast),
-      transform var(--t-fast), box-shadow var(--t-med); }
-  .cal-nav a:hover { border-color: var(--accent-line); color: var(--accent-ink);
-    text-decoration: none; transform: translateY(-1px); box-shadow: var(--shadow-2); }
-  .cal-nav a:active { transform: translateY(0) scale(0.94); }
-  .cal-today-link { font-size: var(--fs-s); padding: 7px 14px; border-radius: 999px;
-    border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); }
-  .cal-today-link:hover { border-color: var(--accent-line); color: var(--accent-ink);
-    text-decoration: none; }
+  .cal-nav a.btn { width: 36px; height: 36px; padding: 0; border-radius: 999px;
+    font-size: var(--fs-m); }
   /* Legend doubles as the month's counts — the key and the summary are the
      same three facts, so they are one row rather than two. */
   .cal-legend { display: flex; gap: var(--s3); margin-left: auto; flex-wrap: wrap;
@@ -218,26 +215,22 @@
      error are never hidden behind a closed panel.
 
      Lives INSIDE `.cal-bar` now (2026-08-29), not on its own row below it —
-     closed, it is exactly one more pill-shaped button, the same size and
-     shape as Today/Subscribe beside it, so it earns a place in that row
-     rather than a whole line of its own under it. `flex-basis: 100%` on the
-     open state is what keeps the FORM from doing the same: `.cal-bar`
-     already wraps, so a full-width item drops to its own new line instead
-     of squeezing a grid of eight fields between two pill buttons. */
+     closed, the <summary> carries the real `.btn` class, the same button
+     every other control in the product uses, so it earns a place beside
+     Today/Subscribe instead of a whole line of its own under them.
+     `flex-basis: 100%` on the open state is what keeps the FORM from doing
+     the same: `.cal-bar` already wraps, so a full-width item drops to its
+     own new line instead of squeezing a grid of eight fields between two
+     buttons. */
   .cal-add[open] { flex-basis: 100%; }
-  .cal-add > summary { display: inline-flex; align-items: center; gap: 7px;
-    cursor: pointer; list-style: none; width: fit-content;
-    padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line);
-    background: var(--surface); color: var(--ink-2); font-size: var(--fs-s);
-    font-weight: var(--w-med); box-shadow: var(--shadow-1);
-    transition: border-color var(--t-fast), color var(--t-fast),
-      transform var(--t-fast); }
+  /* Everything .btn does not already cover: no bullet/marker (it's a
+     <summary>, not a list item), and the +/× glyph that shows which state
+     a click leads to. */
+  .cal-add > summary { list-style: none; gap: 7px; }
   .cal-add > summary::-webkit-details-marker { display: none; }
   .cal-add > summary::before { content: "+"; font-size: var(--fs-l); line-height: 1;
     transition: transform var(--t-med); }
   .cal-add[open] > summary::before { transform: rotate(45deg); }
-  .cal-add > summary:hover { border-color: var(--accent-line); color: var(--accent-ink);
-    transform: translateY(-1px); }
   .cal-form { margin-top: var(--s3); padding: var(--s4); border: 1px solid var(--line);
     border-radius: var(--r-panel); background: var(--surface);
     box-shadow: var(--shadow-1); animation: rise-in 260ms cubic-bezier(0.22,1,0.36,1) both; }
@@ -293,21 +286,21 @@
   <div class="cal-bar">
     <h2 class="cal-month">{{ month_label }}</h2>
     <div class="cal-nav">
-      <a href="?y={{ prev_y }}&m={{ prev_m }}" aria-label="Previous month" rel="prev">‹</a>
-      <a href="?y={{ next_y }}&m={{ next_m }}" aria-label="Next month" rel="next">›</a>
+      <a class="btn" href="?y={{ prev_y }}&m={{ prev_m }}" aria-label="Previous month" rel="prev">‹</a>
+      <a class="btn" href="?y={{ next_y }}&m={{ next_m }}" aria-label="Next month" rel="next">›</a>
     </div>
-    <a class="cal-today-link" href="{% url 'crm:calendar' %}">Today</a>
+    <a class="btn" href="{% url 'crm:calendar' %}">Today</a>
     {% comment %}Feed URL for the calendar app the user already lives in.
     webcal:// so Calendar.app opens a subscribe dialog instead of downloading
     a one-off snapshot.{% endcomment %}
-    <a class="cal-today-link" title="Live-updating feed for Apple/Google Calendar"
+    <a class="btn" title="Live-updating feed for Apple/Google Calendar"
        href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe</a>
     {% comment %}Add, in the bar rather than under the grid: it is the only
     thing on this page you can DO, and a whole row to itself under a
     five-week grid put it below the fold. See `.cal-add`'s own comment for
     how the open state still gets a full line for its form.{% endcomment %}
     <details class="cal-add" id="add"{% if form_open %} open{% endif %}>
-      <summary>Add to the calendar</summary>
+      <summary class="btn">Add to the calendar</summary>
       <form class="cal-form" method="post" action="{% url 'crm:calendar_add' %}">
         {% csrf_token %}
         <input type="hidden" name="y" value="{{ year }}">
