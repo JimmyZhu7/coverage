@@ -216,8 +216,15 @@
      A <details> so it costs nothing when closed and needs no JS. Open state
      is server-rendered when a submission failed, so the typed values and the
      error are never hidden behind a closed panel.
-     -------------------------------------------------------------------- */
-  .cal-add { margin-bottom: var(--s4); }
+
+     Lives INSIDE `.cal-bar` now (2026-08-29), not on its own row below it —
+     closed, it is exactly one more pill-shaped button, the same size and
+     shape as Today/Subscribe beside it, so it earns a place in that row
+     rather than a whole line of its own under it. `flex-basis: 100%` on the
+     open state is what keeps the FORM from doing the same: `.cal-bar`
+     already wraps, so a full-width item drops to its own new line instead
+     of squeezing a grid of eight fields between two pill buttons. */
+  .cal-add[open] { flex-basis: 100%; }
   .cal-add > summary { display: inline-flex; align-items: center; gap: 7px;
     cursor: pointer; list-style: none; width: fit-content;
     padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line);
@@ -295,6 +302,31 @@
     a one-off snapshot.{% endcomment %}
     <a class="cal-today-link" title="Live-updating feed for Apple/Google Calendar"
        href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe</a>
+    {% comment %}Add, in the bar rather than under the grid: it is the only
+    thing on this page you can DO, and a whole row to itself under a
+    five-week grid put it below the fold. See `.cal-add`'s own comment for
+    how the open state still gets a full line for its form.{% endcomment %}
+    <details class="cal-add" id="add"{% if form_open %} open{% endif %}>
+      <summary>Add to the calendar</summary>
+      <form class="cal-form" method="post" action="{% url 'crm:calendar_add' %}">
+        {% csrf_token %}
+        <input type="hidden" name="y" value="{{ year }}">
+        <input type="hidden" name="m" value="{{ month }}">
+        {% if form.non_field_errors %}<div class="errorlist">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="cal-form-grid">
+          <label class="cal-wide">Title{{ form.title }}{{ form.title.errors }}</label>
+          <label>Date{{ form.day }}{{ form.day.errors }}</label>
+          <label>Time{{ form.at }}{{ form.at.errors }}</label>
+          <label>Kind{{ form.kind }}{{ form.kind.errors }}</label>
+          <label>Who{{ form.contact }}{{ form.contact.errors }}</label>
+          <label class="cal-wide">Where{{ form.location }}{{ form.location.errors }}</label>
+          <label class="cal-wide">Notes{{ form.description }}{{ form.description.errors }}</label>
+        </div>
+        <div class="cal-form-actions">
+          <button type="submit" class="btn btn-primary">Add to calendar</button>
+        </div>
+      </form>
+    </details>
     {% comment %}A colour nothing on the grid uses this month is not worth a
     key entry, and "0 Events" next to three real counts reads as a fourth
     fact when it is really the absence of one. Written as a plain {% if %}
@@ -314,31 +346,6 @@
       {% if counts.opening %}<span class="cal-key cal-key-opening"><b>{{ counts.opening }}</b> Opening{{ counts.opening|pluralize }}</span>{% endif %}
     </p>
   </div>
-
-  {% comment %}Add, above the grid on purpose: it is the only thing on this
-  page you can DO, and under a five-week grid it sat below the fold.
-  {% endcomment %}
-  <details class="cal-add" id="add"{% if form_open %} open{% endif %}>
-    <summary>Add to the calendar</summary>
-    <form class="cal-form" method="post" action="{% url 'crm:calendar_add' %}">
-      {% csrf_token %}
-      <input type="hidden" name="y" value="{{ year }}">
-      <input type="hidden" name="m" value="{{ month }}">
-      {% if form.non_field_errors %}<div class="errorlist">{{ form.non_field_errors }}</div>{% endif %}
-      <div class="cal-form-grid">
-        <label class="cal-wide">Title{{ form.title }}{{ form.title.errors }}</label>
-        <label>Date{{ form.day }}{{ form.day.errors }}</label>
-        <label>Time{{ form.at }}{{ form.at.errors }}</label>
-        <label>Kind{{ form.kind }}{{ form.kind.errors }}</label>
-        <label>Who{{ form.contact }}{{ form.contact.errors }}</label>
-        <label class="cal-wide">Where{{ form.location }}{{ form.location.errors }}</label>
-        <label class="cal-wide">Notes{{ form.description }}{{ form.description.errors }}</label>
-      </div>
-      <div class="cal-form-actions">
-        <button type="submit" class="btn btn-primary">Add to calendar</button>
-      </div>
-    </form>
-  </details>
 
   {# ---- Month grid (>=820px) ---- #}
   <div class="cal-grid">
