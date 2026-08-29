@@ -2128,14 +2128,6 @@ def _qs_without(request, param: str) -> str:
     return q.urlencode()
 
 
-def _last_checked() -> str:
-    """"3 hours" / "2 days" since the newest scrape run, or ""."""
-    from .models import ScrapeRun
-
-    latest = ScrapeRun.objects.exclude(connector="reverify").order_by("-started").first()
-    return timesince(latest.started, depth=1) if latest else ""
-
-
 def opportunities(request, *, dismiss_undo=None, scope_only=False):
     """The Opportunities page (public, no login): open campus roles joined
     to firms, sorted by deadline proximity (nulls last), with querystring
@@ -2858,10 +2850,6 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         "all_cluster_count": len(cluster_list),
         "cols_next": cols_next,
         "cols_qs": _qs_without(request, "cols"),
-        # When the scrape last ran. The strip's pulsing dot said "live"
-        # while the data is radar-cadence; naming the age is what makes the
-        # pulse honest.
-        "checked_ago": _last_checked(),
         "total": total,
         # Recommendation bar. `picks` empty + `has_profile` true is the honest
         # "nothing clears the bar" state; `has_profile` false is the
