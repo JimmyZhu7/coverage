@@ -88,7 +88,7 @@ class Command(BaseCommand):
         # asserts this) and so audit_fixtures's FirmDate check excludes it
         # by name rather than by coincidence.
         FirmDate.objects.get_or_create(
-            firm=f3, cycle="sa2028_ib", region="us", event_kind="app_close",
+            firm=f3, cycle="sa2028", track="ib", region="us", event_kind="app_close",
             defaults={"date": now.date() + timedelta(days=10), "confidence": 1.0,
                       "source_url": "seed:demo"})
 

@@ -29,8 +29,10 @@
   <p class="lede">Everything Coverage holds on you, as CSV, any time. No request, no wait.</p>
 
   <div class="panel">
-    <p><strong>Everything, as one ZIP.</strong> One CSV per table, plus a README
-      listing what's in each. You have {{ contact_count }} contact{{ contact_count|pluralize }}{% if archived_count %},
+    {% comment %}"listing what's in each" described the manifest printed
+    directly below it.{% endcomment %}
+    <p><strong>One ZIP.</strong> One CSV per table, plus a README.
+      You have {{ contact_count }} contact{{ contact_count|pluralize }}{% if archived_count %},
       {{ archived_count }} archived (flagged in the file, not dropped){% endif %}.</p>
     <ul class="exp-files">
       {% for name, description in export_manifest %}

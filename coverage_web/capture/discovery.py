@@ -298,9 +298,15 @@ def _own_institution_domains(user) -> set[str]:
 
 # Display-name separators after which a role/affiliation tends to ride:
 # "Jane Doe, Campus Recruiting", "Jane Doe | Goldman Sachs",
-# "Jane Doe (she/her) - Talent Acquisition". Split on the first, keep both
-# halves. Parsing punctuation the sender typed, never inferring from prose.
-_NAME_SPLIT_RE = re.compile(r"\s*(?:,|\||–|—|-{1,2})\s+")
+# "Jane Doe (she/her) - Talent Acquisition", and — the shape Barclays'
+# address book actually emits — "Liu , Lily : International Corporate
+# Banking". Split on the first, keep both halves. Parsing punctuation the
+# sender typed, never inferring from prose.
+_NAME_SPLIT_RE = re.compile(r"\s*(?:,|\||–|—|:|-{1,2})\s+")
+# Letter runs inside a mailbox localpart: `lily.liu` -> {lily, liu},
+# `christine.j.hwang` -> {christine, hwang} (the single `j` is dropped, the
+# same way a middle initial is set aside everywhere else in this module).
+_LOCALPART_WORD_RE = re.compile(r"[a-z]{2,}")
 _PARENTHETICAL_RE = re.compile(r"\s*\(([^)]*)\)\s*")
 # Pronoun parentheticals are identity, not role — dropped, never hinted.
 _PRONOUN_RE = re.compile(r"^(?:she|he|they)\b", re.IGNORECASE)
@@ -398,10 +404,101 @@ def _is_transactional_domain(email: str) -> bool:
     )
 
 
-def split_display_name(raw: str) -> tuple[str, str]:
+def _localpart_words(email: str) -> frozenset[str]:
+    localpart, _ = _mailbox_parts(email)
+    return frozenset(_LOCALPART_WORD_RE.findall(localpart))
+
+
+def _inverted_reading(raw: str, email: str) -> tuple[str, str] | None:
+    """`("First Last", role_tail)` when `raw` reads as a corporate
+    `Last, First` display form AND THE ADDRESS SAYS SO — otherwise None.
+
+    WHY THIS EXISTS. `_name_tokens` has always known that address books
+    emit "Nunley, Vanessa N" and inverts it, and `capture.gmail`'s matcher
+    gets the benefit because it hands `names_equivalent` the raw header.
+    `consider_finding` does not: it runs `split_display_name` first, which
+    treats the comma as the role separator it usually is and keeps only the
+    left half. Measured on the founder's live mailbox (read-only,
+    2026-08-28), Barclays renders one of his real contacts as
+    `Liu , Lily : International Corporate Banking`, so a proposal for her
+    would have been NAMED "Liu", carried the role "Lily : International
+    Corporate Banking", and — because "Liu" matches no full name — proposed
+    a second card for somebody already on the board.
+
+    WHY THE ADDRESS IS THE ARBITER, and not a rule about which words look
+    like names. "Nunley, Vanessa N" and "Jane Doe, Campus Recruiting" are
+    the same string shape; nothing in the text separates them, and guessing
+    is what this module refuses to do. The mailbox localpart is evidence
+    the sender's own employer wrote: `vanessa.nunley@` says the inverted
+    reading is the person, `jane.doe@` says "Campus Recruiting" is not. So
+    the inversion is taken ONLY when the inverted name's words are exactly
+    the localpart's words — set equality, because `last.first@` is as
+    common as `first.last@`, and middle initials are set aside on both
+    sides the way they are everywhere else here. No corroboration, no
+    change: the parse falls back to exactly what it did before.
+
+    TWO CONVENTIONS, BECAUSE ONE COVERS A QUARTER OF A REAL BOARD. Measured
+    over the founder's 182 live contacts (read-only, 2026-08-28), 47 of them
+    — Peter Hoffmann at `phoffmann@williamblair.com`, Shaunna Lu at
+    `slu@liontree.com`, Somil Agarwal at `sagarwal@allenco.com` — carry an
+    address that spells the surname and only the INITIAL of the given name,
+    so the word-set test above can never fire for them. The second test is
+    that convention read literally: the localpart, stripped of separators
+    and any trailing disambiguation digits, is exactly the given name's
+    first letter followed by the surname. It is the same kind of evidence,
+    not a looser one — `bsingh4@jefferies.com` still refuses "Singh, Jack",
+    because B is not J and which name the B stands for is not this
+    function's to invent."""
+    if "," not in raw:
+        return None
+    head, rest = raw.split(",", 1)
+    head, rest = head.strip(), rest.strip()
+    if not head or not rest:
+        return None
+    pieces = _NAME_SPLIT_RE.split(rest, maxsplit=1)
+    given = pieces[0].strip()
+    tail = pieces[1].strip() if len(pieces) > 1 else ""
+    if not given:
+        return None
+    candidate = f"{given} {head}".replace(",", " ")
+    name_words = tuple(t for t in _name_tokens(candidate) if len(t) > 1)
+    if len(name_words) < 2:
+        return None
+
+    words = _localpart_words(email)
+    corroborated = len(words) >= 2 and frozenset(name_words) == words
+    if not corroborated:
+        # The run-together conventions, where the localpart carries no
+        # separator for the word-set test to split on. Every form here is an
+        # EXACT concatenation — nothing is truncated, abbreviated or guessed
+        # at, so `ebbakler@` still refuses "af Klercker, Ebba" and
+        # `travchen@` still refuses "Chen, Travis".
+        localpart = _mailbox_parts(email)[0]
+        compact = "".join(
+            ch for ch in localpart if ch.isalpha() or ch.isdigit()
+        ).rstrip("0123456789")
+        surname = "".join(t for t in _name_tokens(head) if len(t) > 1)
+        first = next((t for t in _name_tokens(given) if len(t) > 1), "")
+        corroborated = bool(surname and first and compact in {
+            f"{first[0]}{surname}",   # phoffmann@williamblair.com
+            f"{surname}{first[0]}",   # hoffmannp@
+            f"{first}{surname}",      # jerryleung@cmbi.com.hk
+            f"{surname}{first}",      # leungjerry@
+        })
+    if not corroborated:
+        return None
+    return " ".join(candidate.split()), tail
+
+
+def split_display_name(raw: str, *, email: str = "") -> tuple[str, str]:
     """(person_name, role_hint) off a From: display name. Only ever splits on
     punctuation the sender typed; a plain "Jane Doe" comes back whole with no
-    hint. Pronoun parentheticals are dropped from both halves."""
+    hint. Pronoun parentheticals are dropped from both halves.
+
+    `email` is optional corroboration, never a source of name text: when the
+    sender's own mailbox confirms the string is a `Last, First` inversion
+    rather than a name-then-role split, the person's name comes back whole
+    instead of as a bare surname. See `_inverted_reading`."""
     raw = (raw or "").strip()
     if not raw:
         return "", ""
@@ -412,10 +509,14 @@ def split_display_name(raw: str) -> tuple[str, str]:
         raw = _PARENTHETICAL_RE.sub(" ", raw).strip()
         if inner and not _PRONOUN_RE.match(inner):
             hint = inner
-    pieces = _NAME_SPLIT_RE.split(raw, maxsplit=1)
-    name = pieces[0].strip()
-    if len(pieces) > 1 and pieces[1].strip():
-        tail = pieces[1].strip()
+    inverted = _inverted_reading(raw, email) if email else None
+    if inverted is not None:
+        name, tail = inverted
+    else:
+        pieces = _NAME_SPLIT_RE.split(raw, maxsplit=1)
+        name = pieces[0].strip()
+        tail = pieces[1].strip() if len(pieces) > 1 else ""
+    if tail:
         hint = f"{tail} {hint}".strip() if hint else tail
     return name or raw, hint[:255]
 
@@ -455,9 +556,17 @@ def display_subject(raw: str | None) -> str:
 # cannot grow — the same rule that pulled `restore` onto `_match_existing`
 # in the first place.
 #
+# NEITHER RUNG EVER PICKS BETWEEN CANDIDATES. When two rows answer to one
+# name (or one routing form), `_match_existing` returns None and the
+# caller's own door — a proposal card, a new contact, a restored card —
+# puts the question to the user. That is the whole ladder in one sentence:
+# conclusive evidence acts, suggestive evidence offers, ambiguous evidence
+# abstains, and nothing guesses.
+#
 # `capture.gmail._match_contact` is the one exception, and deliberately so:
 # it has a genuinely different contract (active-only, raises on ambiguity
-# instead of picking) that `_match_existing` cannot express. Rather than
+# rather than abstaining, so the sync run can REPORT the drift) that
+# `_match_existing` cannot express. Rather than
 # grow a third opinion about WHO COUNTS AS A MATCH, it imports the same two
 # conclusive rungs — `routing_variant` and `names_equivalent` — and applies
 # its own scoping/ambiguity rules on top. The identity rules live here;
@@ -507,9 +616,28 @@ def names_equivalent(a: str, b: str) -> bool:
     "Vanessa B Nunley" are two people until proven otherwise. And an
     initial never expands into a word — "Jinghan L" does not equal
     "Jinghan Liu", because which Liu/Lau/Lee the L was is exactly the guess
-    this function exists to refuse."""
+    this function exists to refuse.
+
+    THE FIRST-AND-LAST-NAME FLOOR APPLIES TO EXACT EQUALITY TOO (fixed
+    2026-08-28). The paragraph above was true of the middle-initial branch
+    and false of the plain `ta == tb` branch, which happily called two
+    one-word names one person: `names_equivalent("Kevin", "Kevin")` was
+    True. That is not a spelling variant, it is a collision — and it was
+    reachable, because `consider_finding` falls back to the mailbox
+    localpart when a sender has no display name, and the founder's live
+    board carries five one-word cards ("Matt" <matt@nummo.com>, "Diego",
+    "Kirthi", "Daksh", "Alexis"). A second Matt writing in from any address
+    would have been fused onto the first Matt's card, touches and all. One
+    word is a first name, a surname, or a mailbox handle; it never
+    identifies a person. Two one-word rows that really are one person still
+    reach the user as a duplicate CARD (`duplicate_evidence`'s mailbox
+    rung) — an offer, which is the whole point of the ladder."""
     ta, tb = _name_tokens(a), _name_tokens(b)
     if not ta or not tb:
+        return False
+    words_a = tuple(t for t in ta if len(t) > 1)
+    words_b = tuple(t for t in tb if len(t) > 1)
+    if len(words_a) < 2 or len(words_b) < 2:
         return False
     if ta == tb:
         return True
@@ -517,9 +645,7 @@ def names_equivalent(a: str, b: str) -> bool:
     initials_b = sorted(t for t in tb if len(t) == 1)
     if initials_a and initials_b and initials_a != initials_b:
         return False
-    words_a = tuple(t for t in ta if len(t) > 1)
-    words_b = tuple(t for t in tb if len(t) > 1)
-    return len(words_a) >= 2 and words_a == words_b
+    return words_a == words_b
 
 
 def _name_shortening(a: str, b: str) -> bool:
@@ -590,12 +716,30 @@ def routing_variant(email_a: str, email_b: str) -> bool:
     `recruiting@` across subdomains is infrastructure, not a person.
 
     Public (no leading underscore) because `capture.gmail._match_contact`
-    shares this rung too — see that function's docstring."""
+    shares this rung too — see that function's docstring.
+
+    THE LOCALPART FLOOR IS `_personal_localpart`'s, NOT A LOOSER ONE (fixed
+    2026-08-28). This rung used to refuse only role and no-reply
+    localparts, so `jl@bnpparibas.com` and `jl@asia.bnpparibas.com` fused
+    CONCLUSIVELY — while `test_identity.py`'s
+    `test_two_letter_localparts_prove_nothing` asserts the SUGGESTIVE rung
+    refuses that exact pair as proving nothing. A ladder whose conclusive
+    rung acts on evidence its suggestive rung will not even mention is
+    upside down, and `jl@bnpparibas.com` ("Jinghan L") is a live row on the
+    founder's board. `_personal_localpart` is the one place the "four
+    characters or more, two people share initials far too easily" rule is
+    written down, so this rung now asks it rather than restating half of it.
+
+    Freemail is refused outright for the same reason `_FREEMAIL_ORG_LABELS`
+    exists: a subdomain of a mail provider is still the provider's
+    namespace, never one employer's internal routing."""
     la, da = _mailbox_parts(email_a)
     lb, db = _mailbox_parts(email_b)
     if not la or la != lb or da == db:
         return False
-    if _ROLE_ACCOUNT_LOCALPART_RE.match(la) or inbound.looks_like_noreply(email_a):
+    if not _personal_localpart(email_a):
+        return False
+    if _org_label(da) in _FREEMAIL_ORG_LABELS or _org_label(db) in _FREEMAIL_ORG_LABELS:
         return False
     return da.endswith("." + db) or db.endswith("." + da)
 
@@ -617,11 +761,23 @@ def duplicate_evidence(a, b) -> str:
       person. Live proof: the founder's rows 707/706 are one AWS account
       manager tracked as two people.
     - The identical full name where the addresses do not contradict it:
-      same firm, related domains, or one row with no address at all.
+      the SAME employer domain, same firm, related domains, or one row with
+      no address at all.
     - A shared employer alone NEVER suffices, with or without a shared
       surname: two analysts at one bank routinely share both. Different
       full names at unrelated domains never suffice either — a namesake at
-      another firm is two people until a human says otherwise."""
+      another firm is two people until a human says otherwise.
+
+    THE SAME-DOMAIN CASE WAS THE HOLE (fixed 2026-08-28). "Relatedness" was
+    computed only for `da != db`, so the most obvious duplicate shape there
+    is — one name, two addresses at ONE employer domain
+    (john.smith@gs.com next to j.smith@gs.com) — produced nothing unless
+    both rows also carried the same `firm_id` FK. A row whose employer
+    never resolved to a directory firm keeps `firm_id` NULL and lives in
+    `firm_text`, which is exactly the row a CSV import or a hand-add
+    produces, so the pair that most needed asking about was the pair that
+    never got asked. Freemail is excluded: two "Jane Doe"s at gmail.com are
+    two mailboxes at one provider, not two cards for one colleague."""
     la, da = _mailbox_parts(getattr(a, "email", "") or "")
     lb, db = _mailbox_parts(getattr(b, "email", "") or "")
     same_firm = (
@@ -632,17 +788,25 @@ def duplicate_evidence(a, b) -> str:
         da and db and da != db and (da.endswith("." + db) or db.endswith("." + da))
     )
     label_a, label_b = _org_label(da), _org_label(db)
+    same_employer_domain = bool(
+        da and db and da == db and da not in _FREEMAIL_DOMAINS
+    )
     org_related = bool(
         da
         and db
-        and da != db
         and (
-            subdomain_related
-            or same_firm
+            same_employer_domain
             or (
-                label_a
-                and label_a == label_b
-                and label_a not in _FREEMAIL_ORG_LABELS
+                da != db
+                and (
+                    subdomain_related
+                    or same_firm
+                    or (
+                        label_a
+                        and label_a == label_b
+                        and label_a not in _FREEMAIL_ORG_LABELS
+                    )
+                )
             )
         )
     )
@@ -685,7 +849,36 @@ def duplicate_evidence(a, b) -> str:
     return ""
 
 
-def _match_existing(user, email: str, name: str) -> Contact | None:
+def _names_two_directory_firms(
+    email_a: str, email_b: str, firm_domains: "FirmDomains | None" = None
+) -> bool:
+    """Whether these two addresses sit at two DIFFERENT directory firms.
+
+    The one contradiction the name rung is allowed to act on, and it is a
+    fact rather than a guess: both addresses resolve, by `Firm.domains`, to
+    a firm the directory knows, and the two firms are not the same one. A
+    "Xiang Li" at cicc.com.cn and a "Xiang Li" at ubs.com are two people
+    for exactly the reason `duplicate_evidence` already refuses that pair
+    (`test_same_name_at_unrelated_firms_is_a_namesake`).
+
+    Deliberately NOT "the domains are unrelated". An alum replying from
+    their personal gmail is the single most common shape in a student's
+    board, `duplicate_evidence` offers no card for a same-name pair split
+    across an employer and a freemail address, and refusing the name rung
+    there would mint a permanent duplicate with no path back. Two tracked
+    EMPLOYERS is a different claim, and the only one the directory can
+    actually make."""
+    if not email_a or not email_b:
+        return False
+    firm_domains = firm_domains or FirmDomains()
+    a = firm_domains.match(email_a)
+    b = firm_domains.match(email_b)
+    return a is not None and b is not None and a != b
+
+
+def _match_existing(
+    user, email: str, name: str, *, firm_domains: "FirmDomains | None" = None
+) -> Contact | None:
     """The contact this address-or-name already is, across EVERY row
     including archived ones — lifted out of `consider_finding`/`accept` so
     `restore` (and every other door) reconciles by the same rule instead of
@@ -701,22 +894,52 @@ def _match_existing(user, email: str, name: str) -> Contact | None:
        looser. A truncated name, a shared surname, or a shared employer is
        NEVER a match here — that evidence is suggestive at best, and the
        suggestive rung (`duplicate_evidence`) only ever proposes a merge
-       for a tap, never performs one."""
+       for a tap, never performs one.
+
+    AND IT ABSTAINS RATHER THAN PICKS (fixed 2026-08-28). The weak rungs
+    used to end in `next(...)`, so when two rows answered to one name this
+    returned whichever the queryset yielded first — under
+    `Contact.Meta.ordering = ["-created"]`, the most recently added.
+    `capture.gmail._match_contact` calls that exact behaviour out as the
+    bug it was written to fix ("silently picking the first one found would
+    land the touch on whichever row the queryset happened to yield first")
+    and raises `AmbiguousContactError` instead; this function, which is the
+    one every proposal door uses, still did the old thing. Two "Michael
+    Chen" cards and one reply from a third address landed the reply on the
+    newer card.
+
+    Abstaining is safe in all four callers precisely because none of them
+    treats None as "nothing to do": `consider_finding` writes a PROPOSAL (a
+    card the user taps), `accept` creates a new contact, `restore` puts the
+    card back, `mailfacts` skips its referral gate. Every one of those is a
+    false SPLIT — one extra card, and `crm.merge` is built to offer it back
+    — where the old behaviour was a false MERGE, which fuses two people's
+    histories with no clean undo. That is rule one of this module.
+
+    The name rung additionally refuses when the two addresses name two
+    different directory firms — see `_names_two_directory_firms`."""
     rows = list(Contact.objects.for_user(user))
     email = normalize_email(email)
-    match = None
     if email:
-        match = next(
+        exact = next(
             (c for c in rows if normalize_email(c.email or "") == email), None
         )
-        if match is None:
-            match = next(
-                (c for c in rows if c.email and routing_variant(email, c.email)),
-                None,
-            )
-    if match is None:
-        match = next((c for c in rows if names_equivalent(c.name, name)), None)
-    return match
+        if exact is not None:
+            # Two rows on ONE address are two cards for one mailbox, so
+            # picking either states nothing false; the duplicate panel is
+            # where that pair gets resolved.
+            return exact
+        routed = [c for c in rows if c.email and routing_variant(email, c.email)]
+        if len(routed) == 1:
+            return routed[0]
+        if routed:
+            return None
+    named = [c for c in rows if names_equivalent(c.name, name)]
+    if len(named) != 1:
+        return None
+    if _names_two_directory_firms(email, named[0].email or "", firm_domains):
+        return None
+    return named[0]
 
 
 def _evidence_kind(finding: dict, *, outbound_only: bool = False) -> str:
@@ -940,7 +1163,7 @@ def consider_finding(
                     existing.occurred_at = occurred_at
                 if not existing.role_hint:
                     raw_name = (finding.get("name") or "").strip()
-                    _, role_hint = split_display_name(raw_name)
+                    _, role_hint = split_display_name(raw_name, email=email)
                     if role_hint:
                         existing.role_hint = role_hint
                         existing.recruiting_hint = is_recruiting_role(role_hint)
@@ -953,7 +1176,7 @@ def consider_finding(
         return None
 
     raw_name = (finding.get("name") or "").strip() or localpart
-    name, role_hint = split_display_name(raw_name)
+    name, role_hint = split_display_name(raw_name, email=email)
 
     # RECRUITMENT RELEVANCE, the same person-level rule the Network board
     # and the daily queue apply (`crm.recruitment` — the founder's
@@ -972,7 +1195,7 @@ def consider_finding(
     if role_hint and recruitment.role_hint_disqualified(role_hint):
         return None
 
-    match = _match_existing(user, email, name)
+    match = _match_existing(user, email, name, firm_domains=firm_domains)
     if match is not None:
         if match.archived:
             # capture_discover's rule, kept exactly: archiving was a

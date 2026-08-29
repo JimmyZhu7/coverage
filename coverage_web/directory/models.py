@@ -14,6 +14,11 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
 
+# The six preference-eligible desk slugs, imported rather than restated so
+# `FirmDate.track`'s CHECK constraint and `User.tracks` can never disagree
+# about what a track is. `classify` imports nothing from this module.
+from directory.classify import TRACKED_TRACKS
+
 
 class Firm(models.Model):
     # Unique, and never blank. `unique=True` alone permits exactly one blank
@@ -375,12 +380,41 @@ class OpportunityChange(models.Model):
         return cls.objects.filter(observed_at__lt=cutoff).delete()[0]
 
 
+# `FirmDate.precision`'s closed vocabulary. Module-level so both the field's
+# own `PRECISIONS` alias and the CheckConstraint inside `Meta` can name one
+# list — a nested `Meta` cannot see its outer class's attributes, and two
+# hand-kept copies of a vocabulary is how a vocabulary stops being closed.
+# "" means the row never stated a precision, which every renderer treats as
+# day-precise (the date is a real day, nobody qualified it).
+FIRM_DATE_PRECISIONS = ("", "day", "month", "estimated")
+
+
 class FirmDate(models.Model):
     firm = models.ForeignKey(Firm, on_delete=models.CASCADE, related_name="firm_dates")
-    cycle = models.CharField(max_length=16)
+    # The recruiting cycle this date belongs to: `sa2028`, `ft2027`, or "" for
+    # a date whose cycle was never stated. Shape enforced by
+    # `firm_dates_cycle_vocabulary` below; the parser and the reasoning for a
+    # shape rather than an enumeration live in `directory.timeline`.
+    cycle = models.CharField(max_length=16, blank=True, default="")
+    # The desk the date is scoped to, from `classify.TRACKED_TRACKS` — the same
+    # six slugs `User.tracks` holds — or "" for a cycle-wide date. Split out of
+    # `cycle` (which used to carry `sa2028_ib`) so that a firm's programmes can
+    # be grouped across firms and matched against a student's stated tracks;
+    # see `directory.timeline`.
+    track = models.CharField(max_length=32, blank=True, default="")
     region = models.CharField(max_length=64, blank=True, default="")
     event_kind = models.CharField(max_length=64)
     date = models.DateField(null=True, blank=True)
+    # How exactly `date` locates the event, NOT how sure we are it happens —
+    # that is `confidence`. A CLOSED vocabulary, and the closure is what makes
+    # it safe to read: every renderer branches on the three known values and
+    # falls through to an exact "Sep 22, 2026" for anything else
+    # (`deadline_marker`, `_firm_date_row`, `crm.utils.CONFIRMED_PRECISIONS`).
+    # So an unrecognised string does not degrade to "unknown precision", it
+    # silently CLAIMS DAY PRECISION — a date whose own column says it is a
+    # guess, printed as a specific day. See `Meta.constraints`'s
+    # `firm_dates_precision_vocabulary`.
+    PRECISIONS = FIRM_DATE_PRECISIONS
     precision = models.CharField(max_length=32, blank=True, default="")
     # 0.0-1.0 — the three-band vocabulary `import_firm_dates.CONFIDENCE_BAND` /
     # `seed_directory._CONFIDENCE_BAND` map onto (rumor 0.3, reported 0.6,
@@ -396,9 +430,50 @@ class FirmDate(models.Model):
     class Meta:
         db_table = "firm_dates"
         constraints = [
+            # `track` joined this key when it was split out of `cycle`, and it
+            # had to: `sa2028_ib` and `SA 2028` normalise to the SAME cycle, so
+            # without the desk in the key Goldman's two US `app_open` rows (id
+            # 11, "~ Mar 2027" estimated from past cycles; id 33, Aug 15 2026
+            # confirmed off goldmansachs.com) would have collided on migration.
+            #
+            # Widening the key is also what makes the old duplicate-scope class
+            # of bug unreachable rather than merely detected. `_flag_conflicting_
+            # closes` in directory/views.py exists because two spellings of one
+            # cycle both satisfied the OLD four-column key and then printed
+            # identically — the founder's jpm page carried two `app_close` rows
+            # both badged "confirmed" with nothing to separate them. With the
+            # cycle vocabulary closed, two rows that PRINT the same scope now
+            # necessarily collide on this constraint and the second one cannot
+            # be written at all. The read-path guard is kept regardless: it is
+            # cheap, and a constraint only covers the writers that go through
+            # the ORM.
             models.UniqueConstraint(
-                fields=["firm", "cycle", "region", "event_kind"],
-                name="uniq_firm_dates_firm_cycle_region_event",
+                fields=["firm", "cycle", "track", "region", "event_kind"],
+                name="uniq_firm_dates_firm_cycle_track_region_event",
+            ),
+            # `cycle` was the last free-text key on this model, and free text in
+            # a key is the same latent bug `firm_dates_confidence_in_range`
+            # below was added for — one writer's spelling silently failing to
+            # match another's. Four spellings of "SA 2028" were live.
+            #
+            # A regex rather than an `__in` whitelist because the vocabulary is
+            # a SHAPE that moves with the calendar: an enumeration would need a
+            # migration every autumn, which is the same staleness
+            # `recommend.cycle_choices` is a function to avoid. `directory.
+            # timeline.CYCLE_RE` is the same pattern in Python, and
+            # `is_valid_cycle` is what the writers check BEFORE they save, so a
+            # bad finding is skipped with the firm named rather than raising an
+            # IntegrityError halfway through an import.
+            models.CheckConstraint(
+                condition=models.Q(cycle="") | models.Q(cycle__regex=r"^(sa|ft)[0-9]{4}$"),
+                name="firm_dates_cycle_vocabulary",
+            ),
+            # The desk half, closed against the SAME six slugs a student can
+            # state a preference for. A seventh spelling here would silently
+            # stop matching `User.tracks` — the join this column exists for.
+            models.CheckConstraint(
+                condition=models.Q(track="") | models.Q(track__in=list(TRACKED_TRACKS)),
+                name="firm_dates_track_vocabulary",
             ),
             # A row (id 44, J.P. Morgan, app_close) once carried
             # `confidence=95.0` — someone meant "95%" and typed the number
@@ -429,6 +504,27 @@ class FirmDate(models.Model):
             models.CheckConstraint(
                 condition=models.Q(confidence__gte=0.0) & models.Q(confidence__lte=1.0),
                 name="firm_dates_confidence_in_range",
+            ),
+            # The precision vocabulary, on the column for the same reason
+            # `firm_dates_confidence_in_range` is: the writers that CAN put a
+            # bad value here are the ones a field validator never runs for.
+            # `import_firm_dates` passes `str(entry.get("precision", ""))`
+            # straight from a hand-written YAML/JSON findings file with no
+            # vocabulary check at all (the sibling `event_kind` IS checked
+            # against `EVENT_KINDS` two lines earlier, and `confidence` is
+            # looked up in `CONFIDENCE_BAND` — `precision` is the one field
+            # of the four that passes through raw), `FirmDateAdmin` places no
+            # bounds on it, and `full_clean()` runs on none of those paths.
+            #
+            # The failure is quiet and it is a lying date, which is worse
+            # than the loud one: a typo'd "aproximate" does not render as
+            # "unknown", it renders as an exact day (see the field comment).
+            # All 41 live rows and both seed files already use only these
+            # four values, so this constrains nothing that is actually in
+            # use — it stops the fifth from being writable.
+            models.CheckConstraint(
+                condition=models.Q(precision__in=FIRM_DATE_PRECISIONS),
+                name="firm_dates_precision_vocabulary",
             ),
         ]
         ordering = ["firm_id", "cycle", "event_kind"]

@@ -497,6 +497,81 @@ def test_the_warmth_sections_account_for_every_contact_the_header_counts(client)
 
 
 @pytest.mark.django_db
+def test_a_bulk_blast_alone_lands_a_cold_contact_in_not_contacted_not_emailed(client):
+    """FOUND AUDITING CONTACT CATEGORIZATION (2026-08-28), on the founder's own
+    live data: a contact (Caroline Baenen, id 482) whose only rows on file
+    were a `manual_override` correction and two `bulk_received` blasts — real
+    outreach: zero — rendered under "Emailed, No Reply" because `touch_count`
+    counted every row on the table regardless of kind. That section's whole
+    claim is "you wrote to this person and they went quiet"; a program-blast
+    recipient nobody ever personally emailed does not belong there, and
+    telling a student they already reached out when they never did is the
+    wrong-direction error for a board whose job is saying who needs a first
+    note. `coverage_domain.cadence` already excludes `manual_override` and
+    `bulk_received` from its own idle clock (its C2 DIVERGENCE note); this
+    board's `touch_count` annotation didn't match it. Same shape as the
+    2026-08-25 "Not Contacted Yet" fix directly above — a section is only as
+    honest as the count that feeds it."""
+    user = _user()
+    blasted = Contact.all_objects.create(user=user, name="Never Personally Emailed")
+    Touch.all_objects.create(
+        user=user, contact=blasted, kind="bulk_received",
+        ts=timezone.now() - timedelta(days=9),
+    )
+    Touch.all_objects.create(
+        user=user, contact=blasted, kind="manual_override",
+        note="manual override: warmth=cold, thread_state=no_reply — Correction",
+        ts=timezone.now() - timedelta(days=1),
+    )
+    client.force_login(user)
+
+    resp = client.get(reverse("crm:contact_list"))
+    body = resp.content.decode()
+    sections = {s["key"]: s["cards"] for s in resp.context["sections"]}
+
+    assert blasted.name in [c["c"].name for c in sections["not_contacted"]]
+    assert blasted.name not in [c["c"].name for c in sections["no_reply"]]
+    assert "Not Contacted Yet" in body
+
+
+@pytest.mark.django_db
+def test_the_staleness_ring_ignores_a_manual_override_after_the_real_last_touch(client):
+    """Companion to the test above, same root cause: `last_touch_ts` (the
+    Network board's "Xd since last touch" badge and staleness ring) used to
+    be `Max("touches__ts")` with no kind filter, so a `manual_override` —
+    correcting a field, parking, un-parking, promoting to advocate — reset
+    the clock exactly as if the relationship had just been touched.
+    Confirmed on the founder's live data: 5 actively-worked contacts and 118
+    parked ones showed a ring dozens of days fresher than their real last
+    touch. `coverage_domain.cadence`'s own idle-clock math already excludes
+    `manual_override`/`bulk_received` (its C2 DIVERGENCE note); this board's
+    `last_touch_ts` annotation must read the same real-touch clock, not a
+    different one for the same table."""
+    user = _user()
+    contact = Contact.all_objects.create(
+        user=user, name="Really Went Quiet Weeks Ago", warmth="replied",
+        thread_state="replied",
+    )
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="reply_received",
+        ts=timezone.now() - timedelta(days=30),
+    )
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="manual_override",
+        note="manual override: thread_state=replied — Correction",
+        ts=timezone.now() - timedelta(days=1),
+    )
+    client.force_login(user)
+
+    resp = client.get(reverse("crm:contact_list"))
+    cards = [c for s in resp.context["sections"] for c in s["cards"]
+             if c["c"].name == contact.name]
+    assert len(cards) == 1
+    # 30 days since the real touch, not ~1 day since the correction.
+    assert cards[0]["days_since"] >= 29
+
+
+@pytest.mark.django_db
 def test_week_requires_login(client):
     resp = client.get(reverse("crm:week"))
     # login_required redirects unauthenticated users away.
@@ -910,7 +985,7 @@ def test_the_fit_scores_timeline_axis_names_the_event_in_words(client):
     Touch.all_objects.create(user=user, contact=contact, ts=now - timedelta(days=3),
                              kind="chat", channel="coffee_chat")
     FirmDate.objects.create(
-        firm=firm, cycle="sa2028_ib", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", track="ib", region="us", event_kind="app_close",
         date=(now + timedelta(days=77)).date(), precision="day", confidence=1.0,
     )
 
@@ -986,3 +1061,35 @@ def test_sync_bookkeeping_markers_never_reach_the_page(client):
     # And the database still carries the marker — display-only stripping.
     stored = Touch.all_objects.filter(contact=contact, kind="outreach").get()
     assert stored.note.startswith("[gmail:")
+
+
+# ---------------------------------------------------------------------------
+# 8. app_event_act — every other "one tap on a card" view in this module
+#    (proposal_act, mail_fact_act, autopilot_apply/undo, contact_campaign_
+#    keep, contact_unrelated_keep) carries both @login_required and
+#    @require_POST, and crm/urls.py's own module docstring states the
+#    invariant those decorators enforce: "Login required on every view."
+#    app_event_act was the one view in the file missing both.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_app_event_act_requires_login(client):
+    """Anonymous must be redirected to login, never reach the view body —
+    matching every sibling quick-action endpoint (e.g.
+    test_contact_edit_requires_login above)."""
+    resp = client.get(reverse("crm:app_event_act", args=[1, "accept"]))
+    assert resp.status_code == 302 and "/accounts/login/" in resp["Location"]
+    resp = client.post(reverse("crm:app_event_act", args=[1, "accept"]))
+    assert resp.status_code == 302 and "/accounts/login/" in resp["Location"]
+
+
+@pytest.mark.django_db
+def test_app_event_act_is_post_only(client):
+    """A GET that accepts or dismisses an application event would fire on
+    any crawl or link prefetch — the same CSRF-via-GET shape
+    test_archive_is_post_only_and_tenant_scoped pins for contact_archive.
+    405 has to come from the decorator, before the view ever looks up a
+    row, so this holds even for a pk that doesn't exist."""
+    client.force_login(_user())
+    assert client.get(
+        reverse("crm:app_event_act", args=[1, "accept"])
+    ).status_code == 405

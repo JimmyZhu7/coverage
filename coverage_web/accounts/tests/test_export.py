@@ -322,16 +322,13 @@ def test_firms_carry_their_tier(student, loaded):
 
 
 def test_bench_dismissals_carry_the_contact_and_opening(student, loaded):
-    """`BenchDismissal` (crm.models) was a `PrivateModel` with no export
-    builder and no `_DELETE_ORDER` entry at all — its rows were still
-    hard-deleted (the final `user.delete()` cascade sweeps every
-    `PrivateModel`), just invisibly: undercounted in the deletion receipt
-    and unreachable through "download all your data". This is the content
-    check that `bench_dismissals.csv` actually carries the parked contact
-    and the opening it was dismissed for, not just that the file exists."""
+    """`bench_dismissals.csv` exists (see `test_every_deletable_table_is_also_exportable`)
+    but that only proves the file is present, not that it carries anything
+    real. This is the content check: the parked contact and the opening
+    signature it was dismissed for."""
     row = _rows(_zip(student), "bench_dismissals.csv")[0]
     assert row["contact"] == "Live Person"
-    assert row["opening_signature"] == "deadline:2026-09-01"
+    assert row["opening"] == "deadline:2026-09-01"
 
 
 def test_applications_carry_the_interview_dates(student, loaded):

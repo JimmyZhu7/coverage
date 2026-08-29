@@ -129,8 +129,10 @@ today. Belongs beside the other engine knobs in Cadence.
   (the point of use); the form imports them; out-of-range stored values are dropped on read
   AND on form init. `max_cold_touches` is capped at (1, 2) to make "never a second
   follow-up" structural — do not widen (staged windows were tried and reverted 2026-07-28).
-- **The stale-cycle select** (`_StaleValueSelect`): a stored `target_cycle` that rolled off
-  the choices renders disabled instead of silently clearing.
+- **The stale cycle survives** (`ProfileForm.__init__`): a stored `target_cycles` value that
+  rolled off the choices is appended back, checked and enabled, labelled "no longer
+  offered", instead of silently clearing. Enabled, not disabled: a disabled checkbox is
+  dropped from the POST, which is the silent clear itself.
 - **Each section saves independently** with PRG; a failing section re-renders only itself.
 - **Capture copy claims only what's true**: "Your Private BCC Capture Address" — no
   "connects to Gmail" language anywhere (deploy.md §4 gate). Keep it that way.

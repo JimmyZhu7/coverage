@@ -188,6 +188,17 @@ class DailyBrief(PrivateModel):
     date = models.DateField()
     text = models.CharField(max_length=600)
     created = models.DateTimeField(auto_now_add=True)
+    # Ids of the contacts this text actually named (the queue slice
+    # `_summarize_actions` was given, see assistant/brief.py) — not a
+    # display field, a staleness fingerprint. The brief is written once and
+    # cached for the rest of the day, but the founder can park, exclude, or
+    # archive a named contact an hour later; without recording who was named
+    # there is nothing to notice that the cached sentence now tells him to
+    # chase someone he just deliberately set aside. Empty for a brief with no
+    # queue contacts behind it (situation-only) and for any row written
+    # before this field existed — `_is_stale` treats an empty list as
+    # "nothing to check", never as "everybody named is gone".
+    contact_ids = models.JSONField(default=list, blank=True)
 
     class Meta(PrivateModel.Meta):
         db_table = "assistant_daily_briefs"

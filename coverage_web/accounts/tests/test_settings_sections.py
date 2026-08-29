@@ -53,18 +53,60 @@ def test_settings_renders_the_new_sections(client, logged_in):
     resp = client.get(reverse(SETTINGS))
     assert resp.status_code == 200
     body = resp.content.decode()
-    for anchor in ("work-auth", "cadence", "pace"):
+    for anchor in ("work-auth", "cadence"):
         assert f'id="{anchor}"' in body
         assert f'href="#{anchor}"' in body  # rail entry
 
 
+def test_the_weekly_pace_control_moved_into_the_cadence_card(client, logged_in):
+    """There is no `#pace` section any more: a heading, a subtitle and a card
+    frame around ONE number, sat directly under a card that already promised
+    "how hard Coverage chases". The control, its ring, its id and its POST
+    section are all unchanged — they moved into the card whose subject they
+    already were."""
+    body = client.get(reverse(SETTINGS)).content.decode()
+    assert 'id="pace"' not in body
+    assert 'href="#pace"' not in body
+    cadence = body.split('id="cadence"', 1)[1].split("</section>", 1)[0]
+    assert 'name="section" value="pace"' in cadence
+    assert 'name="section" value="cadence"' in cadence
+    assert 'id="id_weekly_touch_goal"' in cadence
+    assert 'id="pace-ring"' in cadence  # the ring came with it
+
+
 def test_cadence_section_shows_each_default_inline(client, logged_in):
-    resp = client.get(reverse(SETTINGS))
-    body = resp.content.decode()
+    """Every knob still states the number it falls back to, whatever shape its
+    control takes.
+
+    A default is data, not prose: it is the value you get back by clearing the
+    override, so it has to be readable without saving anything to find out.
+    Two shapes carry it now and the test accepts either, because which one a
+    knob uses is a rendering decision (accounts.forms.CADENCE_SEGMENTS) and
+    this test is about the number being present:
+
+    * a spinner row prints it on the reset chip beside the box ("Default 6"
+      while you are on it, "Reset to 6" once you are not — see settings.html);
+    * a segmented row marks it on the option that IS the default, since that
+      option posts blank and so cannot carry the number in its value.
+    """
+    body = client.get(reverse(SETTINGS)).content.decode()
+    from accounts.forms import CADENCE_SEGMENTS
     from coverage_domain.cadence import CADENCE_DEFAULTS
 
     for key in TUNABLE_CADENCE_PARAMS:
-        assert f"Default: {CADENCE_DEFAULTS[key]}" in body
+        default = CADENCE_DEFAULTS[key]
+        if key in CADENCE_SEGMENTS:
+            blank = re.search(
+                rf'<input[^>]*name="{key}"[^>]*value=""[^>]*>', body)
+            assert blank, f"no default segment rendered for {key}"
+            assert f'data-default-value="{default}"' in blank.group(0), (
+                f"{key}'s default segment must carry the number it stands for")
+            # ...and say so in words, not only in an attribute.
+            assert "default" in body[blank.end():blank.end() + 400].lower()
+        else:
+            assert f'data-default="{default}"' in body, (
+                f"{key}'s reset chip must carry its default")
+            assert f"Default {default}" in body
 
 
 def test_cadence_diagram_draws_the_same_defaults_the_hints_promise(client, logged_in):
@@ -83,7 +125,20 @@ def test_cadence_diagram_draws_the_same_defaults_the_hints_promise(client, logge
 
     body = client.get(reverse(SETTINGS)).content.decode()
     assert "data-defaults" not in body  # no second source of truth
+    from accounts.forms import CADENCE_SEGMENTS
+
     for key in TUNABLE_CADENCE_PARAMS:
+        if key in CADENCE_SEGMENTS:
+            # A segmented knob has no placeholder to read: its default option
+            # posts blank (so `apply_to` drops the override rather than storing
+            # a number equal to the default), so the number rides on the option
+            # as `data-default-value` and settings.html's `num()` reads it
+            # there. Still ONE copy, still emitted by the form.
+            tag = re.search(
+                rf'<input[^>]*name="{key}"[^>]*value=""[^>]*>', body)
+            assert tag, f"no default segment rendered for {key}"
+            assert f'data-default-value="{CADENCE_DEFAULTS[key]}"' in tag.group(0)
+            continue
         tag = re.search(rf'<input[^>]*name="{key}"[^>]*>', body)
         assert tag, f"no input rendered for {key}"
         assert f'placeholder="{CADENCE_DEFAULTS[key]}"' in tag.group(0)
@@ -209,6 +264,71 @@ def test_cadence_clearing_an_input_removes_the_override(client, logged_in):
     # Removed, not zeroed — `crm.views._cadence_params` would drop a 0 as
     # out-of-range anyway, leaving the page showing a value nothing honors.
     assert logged_in.cadence_params == {"max_cold_touches": 1}
+
+
+# ---------------------------------------------------------------------------
+# The segmented knob (accounts.forms.CADENCE_SEGMENTS)
+# ---------------------------------------------------------------------------
+# `max_cold_touches` has exactly two legal values, so it is picked rather than
+# typed. The field itself is unchanged — same IntegerField, same (1, 2) range,
+# same "blank clears the override" contract — and these pin that, because the
+# whole point of the control change was to alter how the value is CHOSEN
+# without altering what gets stored.
+def test_segmented_knob_renders_two_options_not_a_spinner(client, logged_in):
+    body = client.get(reverse(SETTINGS)).content.decode()
+    radios = re.findall(r'<input[^>]*name="max_cold_touches"[^>]*>', body)
+    assert len(radios) == 2, "one segment per legal value, no more"
+    assert all('type="radio"' in r for r in radios)
+    assert not re.search(
+        r'<input[^>]*type="number"[^>]*name="max_cold_touches"', body)
+    # The two values the control can post: the override, and blank-for-default.
+    assert sorted(re.search(r'value="([^"]*)"', r).group(1) for r in radios) \
+        == ["", "1"]
+
+
+def test_segmented_default_posts_blank_and_removes_the_override(client, logged_in):
+    """Choosing the default must DROP the key, not store a 2.
+
+    The number a segment posts is the whole reason `DefaultingRadioSelect`
+    exists: storing 2 would look identical on screen and quietly turn a
+    "follow the product default" row into a pinned value that stops tracking
+    CADENCE_DEFAULTS if the default ever moves.
+    """
+    logged_in.cadence_params = {"max_cold_touches": 1}
+    logged_in.save(update_fields=["cadence_params"])
+
+    _post(client, **_cadence_post(max_cold_touches=""))
+
+    logged_in.refresh_from_db()
+    assert logged_in.cadence_params == {}
+
+
+def test_segmented_override_still_round_trips(client, logged_in):
+    _post(client, **_cadence_post(max_cold_touches=1))
+    logged_in.refresh_from_db()
+    assert logged_in.cadence_params == {"max_cold_touches": 1}
+
+    body = client.get(reverse(SETTINGS)).content.decode()
+    one = re.search(r'<input[^>]*name="max_cold_touches"[^>]*value="1"[^>]*>', body)
+    assert one and "checked" in one.group(0)
+
+
+def test_segmented_knob_checks_a_segment_for_a_stored_default(client, logged_in):
+    """A row already holding the default AS AN INTEGER — ported at cutover, set
+    by a fixture, or written from a shell — matches neither option's value.
+    Stock RadioSelect would then draw a control with nothing selected on an
+    account whose setting is perfectly valid; `format_value` is what stops it.
+    """
+    from coverage_domain.cadence import CADENCE_DEFAULTS
+
+    logged_in.cadence_params = {"max_cold_touches": CADENCE_DEFAULTS["max_cold_touches"]}
+    logged_in.save(update_fields=["cadence_params"])
+
+    body = client.get(reverse(SETTINGS)).content.decode()
+    radios = re.findall(r'<input[^>]*name="max_cold_touches"[^>]*>', body)
+    checked = [r for r in radios if "checked" in r]
+    assert len(checked) == 1, "exactly one segment must read as selected"
+    assert 'value=""' in checked[0], "the DEFAULT segment is the one to check"
 
 
 @pytest.mark.parametrize("key,bad", [
@@ -391,6 +511,39 @@ def test_checking_the_digest_box_opts_back_in(client, logged_in):
 
     logged_in.refresh_from_db()
     assert logged_in.weekly_digest_opt_out is False
+
+
+def test_the_digest_row_saves_on_the_tick_with_no_second_control(client, logged_in):
+    """One control for one boolean.
+
+    The row used to be a checkbox AND a Save button, in a card whose other rows
+    apply the moment you touch them. The button is still SERVED — it is what a
+    no-JS render saves with — but it is marked for the script to remove, so a
+    browser that can autosave never shows a second thing to press.
+    """
+    body = client.get(reverse(SETTINGS)).content.decode()
+    form = body[body.index('value="notifications"'):]
+    form = form[:form.index("</form>")]
+    assert "data-autosave-btn" in form, (
+        "the no-JS Save button must still be served")
+    root = body[:body.index('value="notifications"')]
+    assert "data-autosave" in root[root.rindex("<form"):], (
+        "the form must be marked for save-on-change")
+
+
+def test_the_digest_save_returns_to_the_card_it_was_ticked_on(client, logged_in):
+    """A section that saves WITHOUT a button press must not dump the reader at
+    the top of a twelve-card page. Sections that save on a deliberate click
+    still redirect plainly — the reader pressed Save and is expecting an
+    answer at the top."""
+    resp = _post(client, section="notifications")
+    assert resp.status_code == 302
+    assert resp["Location"].endswith("#preferences")
+
+    # ...and the button-press sections are untouched by that.
+    resp = _post(client, **_cadence_post(max_cold_touches=1))
+    assert resp.status_code == 302
+    assert "#" not in resp["Location"]
 
 
 def test_notifications_section_renders_checked_by_default(client, logged_in):

@@ -161,7 +161,6 @@ def search(request):
     """
     if _search_throttled(request):
         return HttpResponse("rate limited", status=429)
-    from django.http import JsonResponse
 
     q = (request.GET.get("q") or "").strip()
     if len(q) < 2:
