@@ -39,14 +39,14 @@ replacement for one.
         <label class="avatar-remove">{{ form.remove_avatar }} Remove</label>
       {% endif %}
     </div>
-    <p class="field-hint avatar-hint" data-avatar-hint>Drag an image here, or choose a file. JPEG or PNG, up to 8&nbsp;MB. Cropped to a square automatically.</p>
+    <p class="field-hint avatar-hint" data-avatar-hint>Drag or choose a file. JPEG or PNG, up to 8&nbsp;MB.</p>
     {{ form.avatar.errors }}
   </div>
 </div>
 
 <label for="id_name">Display Name</label>
 {{ form.name }}
-<p class="field-hint">Shown around Coverage in place of your email. Doesn't change how you sign in.</p>
+<p class="field-hint">Shown in place of your email. Doesn't change how you sign in.</p>
 {{ form.name.errors }}
 
 {% comment %}Two-up on the settings page (.set-form scopes the grid); a plain stack everywhere else, e.g. the narrow onboarding step.{% endcomment %}
@@ -79,10 +79,16 @@ is a field people fill in wrong.
 {% endcomment %}
 <label for="{{ form.school_emails.id_for_label }}">School Email</label>
 {{ form.school_emails }}
-<p class="field-hint">The address you email from at school, if it isn't the one you
-  sign in with. Coverage stops suggesting people who write from your own
-  university, so your housing desk never lands in your networking list. Two
-  addresses? Separate them with a comma.</p>
+{% comment %}
+Trimmed, but the EFFECT stays stated. The gate this feeds
+(capture/discovery.py::_own_institution_domains) only ever excludes, and
+a field whose effect is invisible is a field people fill in wrong -- see
+the note above. What went was the worked example (the housing desk) and
+the comma instruction, which the input's own placeholder can carry.
+{% endcomment %}
+<p class="field-hint">Your school address, if it isn't the one you sign in with.
+  Coverage won't suggest people who write from your own university.
+  Comma-separate two.</p>
 {{ form.school_emails.errors }}
 
 {% comment %}
@@ -121,8 +127,7 @@ reuses this partial), by the partial's own guard.
 <label for="{{ form.timezone.id_for_label }}">Timezone</label>
 {{ form.timezone }}
 <p class="field-hint">Sets which day Coverage means by "today". On automatic it follows
-  this device, so flying LA to Hong Kong moves your day with you. Pick a zone
-  and it stops following.</p>
+  this device; pick a zone and it stops following.</p>
 {{ form.timezone.errors }}
 
 {% comment %}
