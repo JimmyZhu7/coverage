@@ -42,5 +42,12 @@ POST contract stay exactly as they were.
     </div>
   {% endfor %}
 </div>
-<p class="wa-note" id="wa-note">Feeds the structural axis of your firm fit
+{% comment %}
+Visually hidden (2026-08-29), not deleted: every .wa-row's radiogroup
+points aria-describedby at this id, so a sighted user drops the sentence
+but a screen reader still gets it announced. `.vh` (coverage.css) rather
+than local markup, since this partial is also the onboarding step's own
+widget and needs a class that resolves there too.
+{% endcomment %}
+<p class="vh" id="wa-note">Feeds the structural axis of your firm fit
   score. A region left blank stays unknown, never guessed.</p>
