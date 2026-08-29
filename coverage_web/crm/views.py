@@ -87,6 +87,8 @@ from .utils import (  # noqa: F401
     _mailto,
     _touch_dicts,
     _warmth_pct,
+    confirmed_firm_dates,
+    firm_date_confidence,
 )
 
 # ---------------------------------------------------------------------------
@@ -854,6 +856,29 @@ def _in_scope(c, scope: str) -> bool:
     return bool(c.firm and scope in (c.firm.regions or []))
 
 
+# The `Q` filter every "real touch" annotation below applies, reusing
+# `coverage_domain.cadence`'s own `_CLOCK_SILENT_KINDS` — same private-name
+# import `crm.today`'s `_coming_up_scheduled_chats` already uses for its
+# `last_ts` annotation, so there is exactly one definition of "not a real
+# touch" for this whole app to drift out of sync with. Its C2 DIVERGENCE note
+# is the full argument: a `manual_override` row is the system correcting its
+# own bookkeeping, not evidence a relationship was maintained, and
+# `bulk_received` is an inbound blast `capture.inbound` already judged wasn't
+# one either. That fix landed in the cadence engine's due-actions math and in
+# Today's own scheduled-chat clock; THIS module's `last_touch_ts` /
+# `touch_count` annotations read the exact same `touches` table but were
+# never updated to match, so a contact whose ONLY row on file is a bulk
+# programme invite, or whose last row is a correction/park/promotion made
+# weeks after their real last touch, rendered as freshly touched here while
+# the engine correctly still called them idle. Confirmed on the founder's
+# live data (2026-08-28): a contact with two `bulk_received` rows and zero
+# real outreach showed under "Emailed, No Reply" (`touch_count` counted the
+# blasts), and 5 actively-worked contacts plus 118 parked ones showed a
+# staleness ring dozens of days fresher than their real last touch
+# (`last_touch_ts` counted a `manual_override`).
+_REAL_TOUCH_Q = ~Q(touches__kind__in=list(cadence._CLOCK_SILENT_KINDS))
+
+
 # The keep-warm clock each warmth class runs on, in days — the same windows
 # the cadence engine acts on (weeks * 7 for the two check-in clocks; cold
 # contacts run on the follow-up window). The staleness ring divides elapsed
@@ -875,7 +900,21 @@ def _stale_window_days(c, params) -> int:
 
 def _contact_card(c, *, tier, today, cadence=None, as_of=None):
     """One full contact card (radar style): initials, pills, firm · role,
-    note bullets in plain grammar, and days since the last touch.
+    and days since the last touch.
+
+    THE DESCRIPTION LINE THAT USED TO LIVE HERE. This card used to parse
+    `notes`/`angle` into up to 3 "bullets" and clamp them to 2 lines with
+    CSS. Read across the founder's own 182-contact board (2026-08-27): 120
+    of those bullets were pure provenance noise the capture pipeline wrote
+    for itself ("Found in your sent mail · Aug 27, 2026", "You wrote to
+    them: <subject line>") and the CSS line-clamp guillotined the genuinely
+    useful ones ("Replied to your email: coffee in HK, offered...") at
+    exactly the point a reader needed the rest of the sentence. Redesigned
+    on the founder's own call ("I prefer no description, simplify") to drop
+    it from the card entirely rather than trim it — `notes` and `angle`
+    still render in full, unclamped, on the contact detail page
+    (`crm/_contact_live.html`'s `.cd-notes`/`.cd-angle`), one click away via
+    this card's own "Log Touch" link.
 
     `as_of` mirrors `crm.debrief.pending`'s optional parameter of the same
     name: `None` means "real current time" (every live caller), and tests
@@ -883,12 +922,6 @@ def _contact_card(c, *, tier, today, cadence=None, as_of=None):
     the clock."""
     parts = [p for p in (c.name or "").split() if p]
     initials = "".join(p[0] for p in parts[:2]).upper()
-    bullets = []
-    for raw in (c.notes, c.angle):
-        for frag in (raw or "").replace(";", "\n").splitlines():
-            frag = frag.strip().strip("-• ").rstrip(".")
-            if frag:
-                bullets.append(frag[0].upper() + frag[1:])
     last = c.last_touch_ts
     days_since = _calendar_days_ago(last, as_of=as_of) if last else None
     window = _stale_window_days(c, cadence or {})
@@ -904,17 +937,12 @@ def _contact_card(c, *, tier, today, cadence=None, as_of=None):
         # Blank when unknown — the chip simply doesn't render, rather than the
         # card asserting a region nobody set.
         "region": (c.region or "").upper(),
-        "bullets": bullets[:3],
         "days_since": days_since,
         "stale_pct": round(stale * 100),
         # The tint threshold decided here, where the arithmetic lives, not by
         # a CSS substring hack that cannot tell 8% from 80%.
         "stale_tint": ("due" if stale >= 1.0 else
                        "warming" if stale >= 0.7 else "fresh"),
-        # Compose surface: same rule as every other mailto: on the site —
-        # body from `opener` ONLY, never `angle` (that's the user's private
-        # note ABOUT the person, not a draft addressed TO them).
-        "mailto": _mailto(c.email or "", body=(c.opener or "")),
     }
 
 
@@ -940,8 +968,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         .filter(archived=False)
         .select_related("firm")
         .annotate(
-            last_touch_ts=models_Max("touches__ts"),
-            touch_count=models_Count("touches"),
+            last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q),
+            touch_count=models_Count("touches", filter=_REAL_TOUCH_Q),
         )
     )
 
@@ -1048,35 +1076,21 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         for code in NETWORK_SCOPE_REGIONS
     }
     contacts = _scoped(contacts)
-    # The caveat's number goes through the SAME filter as the board it is a
-    # caveat about. A US tab reading "9 hidden" while eight of them are in
-    # Hong Kong is the same class of lie as hiding them silently.
-    hidden_total = len(_scoped(hidden))
-    # The tab, unlike the caveat, is NOT scoped: it is the way back to the
-    # list, and a way back that vanishes on the School tab because none of the
-    # hidden nine went to USC is a dead end rather than a filter.
-    hidden_any = bool(hidden)
-    # Same pair for the recruitment-relevance gate: a scoped count for the
-    # caveat, an unscoped bool for the way back.
-    unrelated_total = len(_scoped(unrelated))
-    unrelated_any = bool(unrelated)
-    # A fourth way off this board, alongside the two gates above: the student
-    # archived them by hand (`contact_archive`). Unlike them, this one used to
-    # render unconditionally — the 2026-08-27 tab-bar simplification pass
-    # applied the same hide-when-empty rule here too, on purpose: most
-    # students have archived nobody yet, and a permanent link to a list that
-    # is always empty is the exact "standing reproach" the founder flagged on
-    # a permanently-zero "Other countries" tab.
-    archived_any = Contact.objects.for_user(user).filter(archived=True).exists()
-    # Parked is a route OFF this board, not a lens on it, so it sits on the
-    # off-board line with Archived rather than in the filter pill. Gated the
-    # same way: a student who has parked nobody is not shown the way back to
-    # an empty list. Django reads a missing context key as falsy, so without
-    # this the link would simply never render — silently, which is worse than
-    # loudly.
-    parked_any = Contact.objects.for_user(user).filter(
-        archived=False, thread_state="parked"
-    ).exists()
+    # The counts and routes for the four ways OFF this board — archived,
+    # parked, campaign-hidden, not-recruitment — used to be computed here and
+    # rendered as a meta strip above the first contact card. The strip is
+    # gone (2026-08-28, asked for twice, the second time as "take all of this
+    # away, hide"), and so is the arithmetic that only existed to feed it.
+    #
+    # The guarantee it carried — the board says what it is not showing — now
+    # lives in Settings > Your Data, next to the archived count that was
+    # already there. That is the page whose whole job is stating what
+    # Coverage holds, and it can say it once with all four numbers instead of
+    # three times in three vocabularies at the top of the board.
+    #
+    # `hidden` and `unrelated` themselves are NOT dead: they are still what
+    # takes those people off the board a few lines above. Only their display
+    # counts went.
     # How many of the shown contacts are here on a guess rather than a set
     # region. Rendered as a one-line caveat under the Contacts header so a
     # region tab never silently passes off "unknown" as "confirmed".
@@ -1148,12 +1162,16 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # below is no longer its only reader. Only CONFIRMED official close dates
     # count toward urgency, the same bar `cadence._closing_soon` holds:
     # anything rumored or merely reported must not raise an alarm.
+    # `confirmed_firm_dates()` holds BOTH halves of that bar — confidence AND
+    # a precision that locates a real day. The confidence half alone let a
+    # `precision="estimated"` row (a month-level guess the firm timeline
+    # prints as "~ Nov 2026") arrive here as an `app_close`, where it adds up
+    # to 3 exposure points via `coverage.deadline_bonus` and prints "5d to
+    # close" on the card. See `crm.utils.confirmed_firm_dates`.
     closes: dict[int, Any] = {}
-    for fd in FirmDate.objects.filter(
+    for fd in confirmed_firm_dates().filter(
         firm_id__in=firm_ids, event_kind="app_close", date__gte=today
     ):
-        if _confidence_label(fd.confidence) != cadence.CONFIRMED:
-            continue
         if fd.firm_id not in closes or fd.date < closes[fd.firm_id]:
             closes[fd.firm_id] = fd.date
     act_by_firm: dict[int, int] = {}
@@ -1222,9 +1240,14 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             # the one element a reader is already hovering to read the
             # rest of this firm's coverage.
             if not advocates:
+                # Same singular/plural rule as the "N advocates" breakdown
+                # just above (`labels["advocate"]`) — a target of 1, which
+                # `advocate_target` allows, must read "0 of 1 advocate", not
+                # "0 of 1 advocates".
                 bar_title += (
-                    f" · 0 of {adv_target} advocates — your target, "
-                    "set in Settings > Cadence"
+                    f" · 0 of {adv_target} "
+                    f"{'advocate' if adv_target == 1 else 'advocates'} — "
+                    "your target, set in Settings > Cadence"
                 )
         return {
             "firm": uf.firm,
@@ -1418,11 +1441,14 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "all_total": all_total,
             "school_total": school_total,
             "unplaced_scope": UNPLACED_SCOPE,
-            # Unscoped, like `hidden_any`: the tab is the way TO the pool, and
-            # a way that vanishes depending on which tab you're standing on is
-            # a dead end rather than a filter. Rendered only when somebody is
-            # actually unplaced — a permanent tab reading "0" is a standing
-            # reproach for a state that is allowed.
+            # Nothing renders this any more — `unplaced_groups` below is the
+            # surface, and the one-line caveat above the contact grid uses
+            # `unconfirmed_total`. It stays because it is the assertion
+            # surface for region resolution (crm/tests/test_region_resolution.py):
+            # four tests read "how many contacts still have no region" off
+            # this key rather than re-deriving it, and a count computed the
+            # same way the page computes it is a better witness than one a
+            # test writes itself.
             "unplaced_total": unplaced_total,
             "unplaced_groups": unplaced_groups,
             "region_verbs": REGION_BULK_VERBS,
@@ -1436,12 +1462,6 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "sections": sections,
             "contact_total": len(contacts),
             "unconfirmed_total": unconfirmed_total,
-            "hidden_total": hidden_total,
-            "hidden_any": hidden_any,
-            "unrelated_total": unrelated_total,
-            "unrelated_any": unrelated_any,
-            "archived_any": archived_any,
-            "parked_any": parked_any,
         },
     )
 
@@ -1807,7 +1827,7 @@ def contact_archived(request: HttpRequest) -> HttpResponse:
         Contact.objects.for_user(request.user)
         .filter(archived=True)
         .select_related("firm")
-        .annotate(last_touch_ts=models_Max("touches__ts"))
+        .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
         .order_by("name")
     )
     if firm_id.isdigit():
@@ -1846,7 +1866,7 @@ def contact_campaign_hidden(request: HttpRequest) -> HttpResponse:
             Contact.objects.for_user(request.user)
             .filter(id__in=hidden_ids, archived=False)
             .select_related("firm")
-            .annotate(last_touch_ts=models_Max("touches__ts"))
+            .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
             .order_by("name")
         )
         if hidden_ids
@@ -1935,7 +1955,7 @@ def contact_unrelated(request: HttpRequest) -> HttpResponse:
         for c in Contact.objects.for_user(request.user)
         .filter(archived=False)
         .select_related("firm")
-        .annotate(last_touch_ts=models_Max("touches__ts"))
+        .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
         .order_by("name")
         if c.id not in campaign_ids
     ]
@@ -2006,6 +2026,7 @@ def _parked_cohorts(user) -> list[dict]:
         Contact.objects.for_user(user)
         .filter(archived=False, thread_state="parked")
         .select_related("firm")
+        .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
         .order_by("name")
     )
     if not parked:
@@ -2411,7 +2432,10 @@ def _contact_live_context(
                 "event_kind": fd.event_kind,
                 "region": fd.region,
                 "date": fd.date,
-                "confidence": _confidence_label(fd.confidence),
+                # Both halves of "confirmed" — same reason as the cadence
+                # input in `crm.today._build_actions`. See
+                # `crm.utils.firm_date_confidence`.
+                "confidence": firm_date_confidence(fd),
             }
             for fd in FirmDate.objects.filter(firm=firm)
         ]

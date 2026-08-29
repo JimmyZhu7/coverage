@@ -15,6 +15,7 @@ from directory.classify import (
     INTERNSHIP,
     OTHER,
     board_is_campus,
+    campus_hint_pairs,
     classify_role,
     clean_title,
     extract_class_year,
@@ -64,6 +65,7 @@ CASES = [
     ("Rotational Program Associate", ENTRY_LEVEL),
     ("Investment Banking — New Analyst", ENTRY_LEVEL),          # GS full-time new-grad term
     ("Wealth Management — WMP Analyst", ENTRY_LEVEL),           # GS Wealth Mgmt Program
+    ("Class of 2027 Investment Analyst", ENTRY_LEVEL),           # real Houlihan Lokey row
     # ---- other: experienced / HR / no campus signal ----
     ("Internal Audit Manager", OTHER),               # "intern" must not fire
     ("International Equities, Vice President", OTHER),
@@ -79,6 +81,7 @@ CASES = [
     ("Market Insights Analyst", OTHER),              # unqualified "insights" is a data job
     ("Fund Finance (TRECO), Associate ", OTHER),     # real row
     ("", OTHER),
+    ("Class of 2027 Managing Director", OTHER),      # senior veto beats "class of"
 ]
 
 
@@ -186,6 +189,56 @@ class _FakeBoard:
 )
 def test_board_is_campus(board, expected):
     assert board_is_campus(board) is expected
+
+
+# ---------------------------------------------------------------------------
+# campus_hint_pairs — reclassify's board-forgetting reconstruction of the
+# per-board campus hint. A live ingest always knows its own board and never
+# needs this; reclassify only has a stored row's `source` (a provider name),
+# so it can only ask about the (slug, provider) pair. Two firms in the live
+# catalog run one campus board and one non-campus board on the SAME
+# provider, and `all()` (not `any()`) is what keeps that ambiguity from
+# resolving to a false "yes" — see the function's own docstring.
+# ---------------------------------------------------------------------------
+
+
+def test_campus_hint_pairs_requires_every_board_on_the_pair_to_agree():
+    # Solomon Partners' real catalog shape: a campus Greenhouse board and a
+    # "professionals" (experienced-hire) Greenhouse board share one
+    # provider. The ambiguous pair must NOT count as campus-scoped.
+    boards = [
+        ("solomonpartners", _FakeBoard(provider="greenhouse",
+                                        token="solomonpartnersstudentsgraduates")),
+        ("solomonpartners", _FakeBoard(provider="greenhouse",
+                                        token="solomonpartnersprofessionals")),
+    ]
+    assert campus_hint_pairs(boards) == frozenset()
+
+
+def test_campus_hint_pairs_keeps_a_lone_campus_board():
+    # A firm with exactly one board on a provider, campus-scoped, is
+    # unambiguous and must still count — `all()` of one true is true.
+    boards = [
+        ("blackstone", _FakeBoard(provider="workday",
+                                   site="Blackstone_Campus_Careers")),
+    ]
+    assert campus_hint_pairs(boards) == frozenset({("blackstone", "workday")})
+
+
+def test_campus_hint_pairs_excludes_a_lone_non_campus_board():
+    boards = [("acme", _FakeBoard(provider="greenhouse", token="acme-experienced"))]
+    assert campus_hint_pairs(boards) == frozenset()
+
+
+def test_campus_hint_pairs_keeps_other_pairs_independent():
+    # A firm/provider collision must not affect an unrelated pair sharing
+    # neither the slug nor the provider.
+    boards = [
+        ("citi", _FakeBoard(provider="workday", site="Citi_Early_Careers_Events_Site")),
+        ("citi", _FakeBoard(provider="workday", site="2")),
+        ("blackstone", _FakeBoard(provider="workday", site="Blackstone_Campus_Careers")),
+    ]
+    assert campus_hint_pairs(boards) == frozenset({("blackstone", "workday")})
 
 
 # ---------------------------------------------------------------------------

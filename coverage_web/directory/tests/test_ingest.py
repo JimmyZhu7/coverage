@@ -527,6 +527,110 @@ def test_a_changed_posting_keeps_a_deadline_the_provider_states(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# CONFIDENCE BELONGS TO THE DATE IN THE COLUMN.
+#
+# `confidence` answers one question — how sure are we that the STORED day is
+# the one the firm holds — so when the stored day is replaced, the answer is
+# replaced with it. The upsert used `max(existing, incoming)` for both cases,
+# which is right for one of them and a laundering machine for the other: a
+# 0.6 prose reading that supersedes a 1.0 board-published date inherited the
+# 1.0, and `deadline_provenance` / `crm.calendar_views._is_reported` / the
+# feed's "(reported)" tag read nothing but that number.
+#
+# No live row shows the symptom today (all 225 rows at 1.0 carry a real
+# provider deadline field in `raw`), which is why it needed finding rather
+# than reporting.
+# ---------------------------------------------------------------------------
+
+def _prose(url, text, *, title="Summer Analyst"):
+    """A payload with no deadline FIELD, whose text states one anyway. This
+    is the shape every list endpoint has: none of them carry a deadline."""
+    return ConnOpp(firm="William Blair", title=title, location="Chicago",
+                   url=url, source="greenhouse", deadline=None,
+                   raw={"content": text})
+
+
+@pytest.mark.django_db
+def test_a_prose_deadline_replacing_a_stated_one_drops_to_reported(monkeypatch):
+    """The bug. Run 1: the board publishes 2026-09-15 in its own field ->
+    1.0. Run 2: the field is gone and the description states a DIFFERENT
+    day, which our regex reads. The row now holds a date nobody published,
+    and `max()` kept the 1.0 label from the date it replaced."""
+    _patch(monkeypatch, [_result([_opp(U1, deadline="2026-09-15")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    assert Opportunity.objects.get(url=U1).confidence == 1.0
+
+    _patch(monkeypatch, [_result([
+        _prose(U1, "Applications close on 30 October 2026.")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    assert o.deadline == date(2026, 10, 30), "the new date is the prose one"
+    assert o.confidence == 0.6, (
+        "a date we read out of a paragraph may not wear the label of the "
+        "board-published date it replaced")
+    # The reader that made this a lie on the page, exercised directly.
+    from directory.views import deadline_provenance
+    assert deadline_provenance(o) is not None
+    assert deadline_provenance(o)["label"] == "reported"
+
+
+@pytest.mark.django_db
+def test_seeing_the_same_stated_date_again_in_prose_keeps_full_confidence(monkeypatch):
+    """The case `max()` was written for, and it has to survive the fix. The
+    board's field goes quiet but the description states the SAME day: the
+    date has not moved, so neither has how sure we are of it. Downgrading
+    here would walk every stated date to 0.6 on the next scrape."""
+    _patch(monkeypatch, [_result([_opp(U1, deadline="2026-09-15")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    _patch(monkeypatch, [_result([
+        _prose(U1, "Applications close on 15 September 2026.")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    assert o.deadline == date(2026, 9, 15)
+    assert o.confidence == 1.0
+    from directory.views import deadline_provenance
+    assert deadline_provenance(o) is None
+
+
+@pytest.mark.django_db
+def test_a_stated_date_replacing_a_prose_one_is_promoted(monkeypatch):
+    """The other direction, which `max()` also got right and which must
+    still work: the board starts publishing the field, so the row stops
+    being our reading of anything."""
+    _patch(monkeypatch, [_result([
+        _prose(U1, "Applications close on 30 October 2026.")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+    assert Opportunity.objects.get(url=U1).confidence == 0.6
+
+    _patch(monkeypatch, [_result([_opp(U1, deadline="2026-09-15")])])
+    ingest.ingest_boards([BOARD], label="greenhouse")
+
+    o = Opportunity.objects.get(url=U1)
+    assert o.deadline == date(2026, 9, 15)
+    assert o.confidence == 1.0
+
+
+@pytest.mark.django_db
+def test_reingesting_the_same_posting_does_not_drift_confidence(monkeypatch):
+    """Idempotence, over both bands. Ingest is a command and may write; what
+    it may not do is move a number a little further every pass."""
+    for payload, want_date, want_conf in (
+        (lambda: _opp(U1, deadline="2026-09-15"), date(2026, 9, 15), 1.0),
+        (lambda: _prose(U2, "Applications close on 30 October 2026."),
+         date(2026, 10, 30), 0.6),
+    ):
+        for _ in range(3):
+            _patch(monkeypatch, [_result([payload()])])
+            ingest.ingest_boards([BOARD], label="greenhouse")
+        o = Opportunity.objects.get(url=payload().url)
+        assert (o.deadline, o.confidence, o.deadline_precision) == (
+            want_date, want_conf, "day")
+
+
+# ---------------------------------------------------------------------------
 # A TRUNCATED fetch must not close anything.
 #
 # Closed-detection infers "gone from the board" from "absent from the fetch",

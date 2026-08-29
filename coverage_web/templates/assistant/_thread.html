@@ -18,7 +18,7 @@ same shape as every AI chat surface a student has already used.
   {% else %}
     <div class="as-empty">
       <span class="as-empty-mark" aria-hidden="true">{% include "_logo.html" %}</span>
-      <p class="as-empty-lead">Ask about your own campaign — who to chase, where to spend the week, what closes next.</p>
+      <p class="as-empty-lead">Ask about your own campaign. Who to chase, where to spend the week, what closes next.</p>
       <div class="as-starters">
         {% for s in starters %}
           <button type="button" class="as-starter">{{ s }}</button>
@@ -28,27 +28,38 @@ same shape as every AI chat surface a student has already used.
   {% endif %}
 
   {% comment %}
-  The credit meter (docs/credit-system-plan.md §6 — "the only UI work in
-  the plan beyond the notice copy"). Re-rendered with the rest of this
-  fragment on every non-streamed send, so a debit is visible the instant
-  the reply lands. The streamed path can't swap this fragment (an SSE
-  stream isn't HTML the client re-renders from — see chat.html's own
-  refreshHistory for the identical problem with the sidebar title), so
-  chat.html's JS re-fetches assistant:credits once a streamed turn
-  finishes and writes the number into #as-credits-value directly.
+  The composer's meta line: the credit meter (docs/credit-system-plan.md §6
+  — "the only UI work in the plan beyond the notice copy") beside the
+  AI-drafted reminder — shortened from an original two-sentence version,
+  the same disclosure crm/_contact_ai_brief.html carries, just without the
+  "it can log a touch" aside now that a page with a working composer and a
+  visible evidence line under every answer makes the same point by being
+  used, not by being told. One row instead of two separate paragraphs
+  bracketing the composer, on the same low-emphasis footing.
+
+  The credit half is re-rendered with the rest of this fragment on every
+  non-streamed send, so a debit is visible the instant the reply lands. The
+  streamed path can't swap this fragment (an SSE stream isn't HTML the
+  client re-renders from — see chat.html's own refreshHistory for the
+  identical problem with the sidebar title), so chat.html's JS re-fetches
+  assistant:credits once a streamed turn finishes and writes the number
+  into #as-credits-value directly.
   {% endcomment %}
-  <p class="as-credits" id="as-credits">
-    <span id="as-credits-value">{{ credit_balance }}</span> credit{{ credit_balance|pluralize }} left this month
-    {% comment %}
-    Plan badge (FIX #2a — the walk-in-day bug: nothing on this page told a
-    just-upgraded student what they now had). `plan_limits` comes from
-    `assistant.plans.limits_for`, never a hardcoded model name. chat.html's
-    JS rewrites both spans' text after a streamed turn, same as it already
-    does for #as-credits-value — see assistant:credits below.
-    {% endcomment %}
-    <span class="pill plan-{{ plan_limits.plan }}" id="as-plan-badge">
-      <span id="as-plan-label">{{ plan_limits.label }}</span>
+  <p class="as-meta" id="as-credits">
+    <span class="as-meta-credits">
+      <span id="as-credits-value">{{ credit_balance }}</span> credit{{ credit_balance|pluralize }} left this month
+      {% comment %}
+      Plan badge (FIX #2a — the walk-in-day bug: nothing on this page told a
+      just-upgraded student what they now had). `plan_limits` comes from
+      `assistant.plans.limits_for`, never a hardcoded model name. chat.html's
+      JS rewrites both spans' text after a streamed turn, same as it already
+      does for #as-credits-value — see assistant:credits below.
+      {% endcomment %}
+      <span class="pill plan-{{ plan_limits.plan }}" id="as-plan-badge">
+        <span id="as-plan-label">{{ plan_limits.label }}</span>
+      </span>
     </span>
+    <span class="as-meta-note">AI-drafted from your own data. Check it before you rely on it.</span>
   </p>
 
   {% comment %}

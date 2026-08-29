@@ -38,7 +38,16 @@ happened this pass either way, and both fields exist to mean exactly that.
                            `scrape`'s list-endpoint fetch for a provider
                            whose list API carries no deadline field, e.g.
                            Workday) gets to be corrected once the firm bakes
-                           an updated one into the posting.
+                           an updated one into the posting. `confidence`
+                           moves WITH it, to the tier the answering
+                           connector actually earns (`_verify_confidence`) --
+                           greenhouse/oracle read a structured field and get
+                           1.0, everyone else (tal.net, Workday) is reading
+                           the posting's own text by regex and gets 0.6, the
+                           same split `ingest._apply_opportunity` draws at
+                           first ingest. A date that did not move keeps the
+                           BETTER of its old confidence and this tier, never
+                           the worse.
 - "closed"              -> status="closed"
 - "unreachable"         -> nothing else — an error is never evidence of
                            life OR death (same rule as ingest's failed-board
@@ -48,6 +57,23 @@ happened this pass either way, and both fields exist to mean exactly that.
 
 The honesty contract: `last_verified` moves ONLY on a positive liveness
 signal. The card's "Verified N Days Ago" pill therefore never lies.
+
+AND THE SAME CONTRACT FROM THE OTHER SIDE, for a row that is already
+`status="closed"`. The routine candidate query never selects one, but `--ids`
+is unfiltered by design, so both verdicts have to have an answer:
+
+- "verified-open" on a closed row -> stamp the check fields and say so,
+  nothing more. `last_verified` does not move (it would put "verified today"
+  on a card the board shows as closed) and `deadline` is not refreshed (it
+  would put a live countdown there). Reopening on that evidence is
+  `reopen_confirmed_live_rows`' job — it exists for exactly this, and records
+  what it did. Two commands reading one provider answer and writing two
+  different stories about the same row is how a posting ends up both closed
+  and freshly verified.
+- "closed" on a closed row -> a re-check, not a move. No `OpportunityChange`
+  is written and `closed_at` is left where it is, so re-running the command
+  is idempotent instead of logging a `closed -> closed` "change" into the
+  tracked-role timeline and walking the actual close date forward every run.
 
 Every move this pass makes — a `deadline` corrected from the provider's own
 answer, a posting flipped closed — is also recorded row-by-row in
@@ -98,6 +124,47 @@ def _fresh_deadline(deadline_dates: list[str]) -> date | None:
         except (ValueError, TypeError):
             continue
     return None
+
+
+# Providers whose `verify()` reads `deadline_dates` off a genuinely
+# structured field: `greenhouse.py` reads `application_deadline` straight out
+# of the board's own JSON API, `oracle.py` reads `PostingEndDate` the same
+# way. Every other connector that ever populates `deadline_dates` gets there
+# by regex over the posting's own rendered text -- `talnet.py` matches
+# "Event Date"/"Registration Deadline" out of an HTML meta description,
+# `workday.py`'s `_deadline_from_description` matches a stated "Application
+# Deadline" out of the job description HTML. That is the SAME tier
+# `directory.ingest._apply_opportunity` calls 0.6 ("Deadline-from-prose"),
+# not the 1.0 tier a structured API field earns -- the fact that the regex
+# is reading a clearly-labelled field on the page does not make it any less
+# a regex reading OUR code performed, the same distinction the walkthrough
+# already drew for HSBC's own "Closing Date:" label at ingest time.
+#
+# `verified-open` used to leave `confidence` untouched entirely, so a date
+# `reverify` corrected inherited whatever confidence the row already held --
+# usually 1.0, from an original structured-field ingest, now standing next
+# to a value verify()'s own regex just supplied. Confirmed live: of the 31
+# open rows whose most recent deadline write came from this command, 29 sat
+# at confidence 1.0 while their date came from tal.net's or Workday's own
+# text read. This is `ingest._apply_opportunity`'s "a prose reading
+# inherited a board-published confidence" bug, on this command's write path
+# instead of that one.
+_STRUCTURED_VERIFY_PROVIDERS = frozenset({"greenhouse", "oracle"})
+#: The tier every other connector's `deadline_dates` earns -- matches
+#: `directory.ingest`'s own prose tier so a date means the same thing
+#: wherever it was last written.
+_TEXT_VERIFY_CONFIDENCE = 0.6
+
+
+def _verify_confidence(provider: str) -> float:
+    """What confidence a date drawn from this provider's `verify()` deserves,
+    on the same two-tier scale `ingest._apply_opportunity` uses: 1.0 for a
+    genuine structured field, 0.6 for a regex reading of the posting's own
+    text. An unrecognised provider defaults to the text tier -- the
+    conservative side of the line, and the side every connector that has
+    ever shipped `deadline_dates` other than greenhouse/oracle actually
+    belongs on."""
+    return 1.0 if provider in _STRUCTURED_VERIFY_PROVIDERS else _TEXT_VERIFY_CONFIDENCE
 
 
 class Command(BaseCommand):
@@ -174,19 +241,64 @@ class Command(BaseCommand):
             # next run's candidates too, instead of being retried forever.
             opp.deadline_checked_at = now
             update_fields = ["last_checked", "deadline_checked_at"]
-            if verdict == "verified-open":
+            if verdict == "verified-open" and opp.status == "closed":
+                # A CLOSED ROW THIS COMMAND MUST NOT SPEAK FOR. The routine
+                # candidate query is `status="open"`, so this is only
+                # reachable through `--ids`, which is unfiltered by design.
+                # Stamping `last_verified` here would break the module
+                # docstring's own honesty contract from the other side: the
+                # card's "Verified N days ago" pill would read "today" on a
+                # posting the board still shows as closed, and refreshing
+                # `deadline` would put a live-looking countdown on it too.
+                # Reopening is the right correction, but it is
+                # `reopen_confirmed_live_rows`' decision to make (it exists
+                # for exactly this evidence, and records it), not a side
+                # effect of a staleness sweep. So: record that we looked,
+                # say so loudly, change nothing else.
+                self.stdout.write(self.style.WARNING(
+                    f"  #{opp.pk} — verified OPEN but stored status='closed'. "
+                    f"Left alone; run: reopen_confirmed_live_rows --ids {opp.pk}"))
+                opp.save(update_fields=update_fields)
+            elif verdict == "verified-open":
                 opp.last_verified = now
                 update_fields.append("last_verified")
                 fresh = _fresh_deadline(result.deadline_dates) if result is not None else None
-                if fresh is not None and fresh != opp.deadline:
-                    changes.append(OpportunityChange.entry(
-                        opp.pk, "deadline", opp.deadline, fresh,
-                        stage=OpportunityChange.STAGE_REVERIFY, at=now,
-                        note="provider's verify endpoint states a different date",
-                    ))
-                    opp.deadline = fresh
-                    opp.deadline_precision = "day"
-                    update_fields += ["deadline", "deadline_precision"]
+                if fresh is not None:
+                    tier = _verify_confidence(result.provider)
+                    if fresh != opp.deadline:
+                        # REPLACED: the claim is replaced with it, same rule
+                        # `ingest._apply_opportunity` draws -- this provider's
+                        # OWN tier, not whatever confidence the row happened
+                        # to be carrying before this pass (see
+                        # `_verify_confidence`'s docstring for why that used
+                        # to be wrong).
+                        changes.append(OpportunityChange.entry(
+                            opp.pk, "deadline", opp.deadline, fresh,
+                            stage=OpportunityChange.STAGE_REVERIFY, at=now,
+                            note="provider's verify endpoint states a different date",
+                        ))
+                        opp.deadline = fresh
+                        opp.deadline_precision = "day"
+                        opp.confidence = tier
+                    else:
+                        # UNCHANGED: this pass merely corroborated the date
+                        # already on file. `max()`, not an overwrite -- the
+                        # no-downgrade rule `ingest._apply_opportunity` keeps
+                        # for the identical case: a 1.0 board-published date
+                        # reconfirmed only by a 0.6-tier text read has not
+                        # become less certain.
+                        opp.confidence = max(opp.confidence or 0.0, tier)
+                    update_fields += ["deadline", "deadline_precision", "confidence"]
+                opp.save(update_fields=update_fields)
+            elif verdict == "closed" and opp.status == "closed":
+                # ALREADY CLOSED — a re-check, not a move. Again only
+                # reachable via `--ids`. Writing the transition anyway logged
+                # a `status: closed -> closed` row in the tracked-role
+                # timeline and reset `closed_at` to now, so a student
+                # watching that role saw a fresh "closed" event every time an
+                # audit re-ran the command, and the date it actually closed
+                # walked forward one run at a time. Re-running is now a
+                # no-op beyond the check stamps.
                 opp.save(update_fields=update_fields)
             elif verdict == "closed":
                 changes.append(OpportunityChange.entry(

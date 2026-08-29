@@ -220,29 +220,67 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      dashed one. Danger tint only when the date itself is urgent — the same
      bar the deadlines rail and the cadence engine hold, so a colour here
      never disagrees with the same firm's colour there. */
+  /* THE CARD IS A ROW, NOT A COLUMN — measured, 2026-08-28, demo account at
+     a 1440px viewport. The board lane is full-width in `cockpit-main`, so
+     every card was a 1048 x 140px rectangle holding four SHORT single lines
+     of text. `space-between` on the head and the foot then pushed their
+     right-hand element the entire width of the card away from its own
+     sibling: 918px of nothing between "J.P. Morgan" and its "2d" chip, and
+     844px between "View contacts" and "Dismiss". Stacking the button row
+     UNDER text that occupied a fifth of the available width cost another
+     40px of height on top of that. Same on all four card states — the two
+     voids are structural to the card, not something a longer people-line
+     ever fills.
+
+     So: two columns. Everything the card SAYS runs down the left at its
+     natural width, everything the card OFFERS clusters at the right, and
+     the height is now the taller of the two rather than their sum. Nothing
+     is removed and no markup changed — `.play-foot` simply moves beside the
+     text instead of below it. Measured after: 140.4px -> 92.4px a card,
+     561px -> 370px for the founder's four-card lane, and both horizontal
+     voids gone (`flex-start` / `flex-end` in place of `space-between`).
+
+     This is `e9bd00b`'s rule on a different widget: a card's height is what
+     it holds, never a reserved gap. */
   .lane-plays { margin-bottom: var(--s6); }
   .play-list { list-style: none; margin: 0; padding: 0;
     display: flex; flex-direction: column; gap: var(--s2); }
   .play-card { background: var(--surface); border: 1px solid var(--line);
     border-left: 3px solid var(--accent-line);
-    border-radius: var(--r-panel); padding: var(--s3) var(--s4); }
+    border-radius: var(--r-panel); padding: var(--s3) var(--s4);
+    display: grid; align-items: center; column-gap: var(--s4);
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "head   foot"
+                         "fact   foot"
+                         "people foot"; }
   .play-card.is-urgent { border-left-color: var(--danger); }
-  .play-head { display: flex; align-items: baseline; justify-content: space-between;
-    gap: var(--s3); }
+  /* flex-start, not space-between: the countdown belongs to the name it is
+     counting down for, and reads as a pair only when it sits beside it. */
+  .play-head { grid-area: head; display: flex; align-items: baseline;
+    justify-content: flex-start; gap: var(--s2); min-width: 0; }
   .play-firm { font-weight: var(--w-med); color: var(--ink); }
   .play-when { font-family: var(--font-mono); font-size: var(--fs-xs);
     color: var(--ink-3); white-space: nowrap; }
   .play-when.is-urgent { color: var(--danger); font-weight: var(--w-med); }
-  .play-fact { margin: 2px 0 0; font-size: var(--fs-s); color: var(--ink-2); }
-  .play-people { margin: var(--s2) 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
-  .play-foot { display: flex; align-items: center; justify-content: space-between;
-    gap: var(--s3); margin-top: var(--s3); }
+  .play-fact { grid-area: fact; margin: 2px 0 0; font-size: var(--fs-s);
+    color: var(--ink-2); min-width: 0; }
+  /* --s1 between two lines that now sit inside one tight block; --s2 was
+     spacing them as if the foot were still going to land underneath. */
+  .play-people { grid-area: people; margin: var(--s1) 0 0;
+    font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; }
+  .play-foot { grid-area: foot; display: flex; align-items: center;
+    justify-content: flex-end; gap: var(--s2); }
   .play-cta { padding: 6px 12px; font-size: var(--fs-xs); white-space: nowrap; }
   .play-dismiss { background: transparent; border-color: transparent;
     color: var(--ink-3); padding: 3px 8px; font-size: var(--fs-xs); }
   .play-dismiss:hover { background: var(--paper); border-color: var(--line); color: var(--ink-2); }
+  /* Narrow: there is no width to put a second column in, so the card goes
+     back to one and the buttons return below the text they act on. */
   @media (max-width: 560px) {
-    .play-foot { flex-wrap: wrap; }
+    .play-card { grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "head" "fact" "people" "foot"; }
+    .play-foot { flex-wrap: wrap; justify-content: flex-start;
+      margin-top: var(--s3); }
   }
 
   /* Up next: the held-back remainder. Collapsed by default, exact count in
@@ -814,15 +852,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      contact_list.html for the full argument and the one state where the
      count still mattered). `title=` on this element carries it now. */
   .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
-  /* The one number worth showing without a hover: not the whole formula
-     (tier weight × gap points + bonus — that still lives in the card's
-     `title=` for anyone hovering), just the score it resolves to, so a
-     touch-only screen can still see WHY this card outranks its neighbour.
-     Mono so it reads as a number, not more state-line prose. Protected by
-     `test_the_gap_strip_shows_its_score_without_a_hover`: title= is
-     unreachable on touch, so this cannot fold into it no matter how
-     redundant with sort order it looks on a desktop screen. */
-  .gap-exp { font-family: var(--font-mono); color: var(--ink-2); }
+  /* `.gap-exp` is gone, and with it every number on this card's face. It
+     held the raw "exposure" score, then the card's rank once that score
+     was cut; both were cut on the founder's ask, the second within
+     minutes of the first. The rank failed for its own reason rather than
+     inheriting the score's: it printed a position the reader could
+     already see, and its denominator moved with the strip's length. The
+     arithmetic is not lost — it is in each card's title= and the strip
+     heading's, spelled out with the word "exposure" — it just no longer
+     competes with `g.label` for the one line a reader actually scans.
+     `test_the_gap_strip_shows_no_number_on_its_face` keeps it out. */
   .gap-act { margin-top: auto; padding: 5px var(--s2); font-size: var(--fs-xs);
     text-align: center; white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; display: block; }
@@ -935,6 +974,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        grid itself was asked for. The grid's own `gap` is the one thing
        that should be setting the space between these cards. */
     margin: 0; }
+  /* `.net-mini-check` used to be styled here — a 13px `accent-color` box.
+     The markup has said `class="place-check"` for a while, so the rule was
+     styling nothing: the Unplaced panel's boxes were raw browser widgets,
+     the one place in the app with no treatment at all. Both names are gone
+     now; the box is the shared `input[type="checkbox"]` control
+     (coverage.css §11), which already gives it size, margin, flex and the
+     drawn tick, and gives the next one for free too. */
   .net-mini-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
   /* Selected. Tint the whole card, not just the box — at four cards a row
      a 13px tick is not enough of a signal to count a selection from. */
@@ -1078,7 +1124,21 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      `[hidden]` override remembered per component (see `.bulk-bar[hidden]`
      above for the alternative, and the bug it was fixing). */
   .is-csearch-hidden { display: none; }
-  @media (max-width: 560px) { .csearch-bar { flex-direction: column; } }
+  @media (max-width: 560px) {
+    .csearch-bar { flex-direction: column; align-items: stretch; }
+    /* FOUND while measuring this pass on a phone: `flex: 1 1 260px`'s
+       260px is a flex-BASIS, read against whichever axis is main at the
+       time. In the row layout above it means "a comfortable starting
+       width"; once the bar switches to a column here, the main axis is
+       height, and the exact same declaration told the search field to
+       start at 260px TALL and then grow with `flex-grow: 1` — measured
+       at 313px on a 375px-wide phone, an icon and one input rendered as
+       tall as seven stacked rows of this exact widget. `flex-basis: auto`
+       lets the field size to its own content (the 41px input) again;
+       `width: 100%` is what actually makes it span the column now that
+       `flex-grow` no longer has anywhere to put its "1". */
+    .csearch-field { flex-basis: auto; width: 100%; }
+  }
 
   /* Every board panel shares one pattern: the strip-title sits ABOVE a
      single surface panel. The panels have the SAME fixed height and always
@@ -1142,15 +1202,45 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      long firm name onto its own line; a row is as tall as its tallest card,
      and that is the truthful shape of holding more. Same doctrine as the
      feed's role card: the box gives way, not the text. */
-  /* Each tier is bounded (~2 rows) and scrolls its own firms, so a tier with
-     many firms doesn't stretch the whole coverage panel. */
+  /* Each tier is bounded to two rows and scrolls its own firms, so a tier
+     with many firms doesn't stretch the whole coverage panel. The old
+     `max-height: 200px` was a pixel guess against a card height that has
+     already drifted twice (82px -> 67px empty cards, 64px -> 44px row
+     floor) and will again. A row's REAL height isn't reliably
+     back-computable from the declared tokens either — a bare card renders
+     taller in practice than the padding-plus-line-height arithmetic
+     suggests, and a row mixes bare/bar/bar+sockets cards that each hold a
+     different amount, so the tallest card in a row (not the 44px floor)
+     is what actually sets that row's height. So the cap isn't a formula:
+     `capAllGrids()` (bottom of contact_list.html) measures the real
+     top of each grid's third card after layout and writes the midpoint of
+     the gap above it back here as `--tier-cap`, which lands the cut
+     between rows two and three exactly in the gap, never through a card,
+     no matter how tall any given row turns out to be. `none` is the
+     fallback for a tier that fits in two rows already (nothing to cap —
+     see `.is-capped` below) and for a no-JS load: showing every card
+     unclipped is the one failure mode here that can never slice one. */
   .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    grid-auto-rows: minmax(44px, auto); gap: var(--s3); max-height: 200px; overflow-y: auto;
+    grid-auto-rows: minmax(44px, auto); gap: var(--s3);
+    max-height: var(--tier-cap, none); overflow-y: auto;
     padding-right: 4px; scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent; }
-  .tier-grid::-webkit-scrollbar { width: 8px; }
-  .tier-grid::-webkit-scrollbar-thumb { background: var(--line-strong);
-    border-radius: 999px; }
+  /* Only a grid `capAllGrids()` actually capped gets the loud, always-on
+     scrollbar `.net-panel` already draws above (track + thumb + hover) —
+     a plain `::-webkit-scrollbar` declaration is exactly what this grid
+     had before and the founder's screenshot is the proof it isn't enough:
+     macOS hides an overlay scrollbar, styled or not, until the user
+     scrolls, which is the specific silence being fixed here. A tier that
+     fits in two rows has nothing to scroll to, so it stays plain — the
+     same track drawn around two rows of cards for no reason would be its
+     own rendering-bug read. */
+  .tier-grid.is-capped { scrollbar-color: var(--line-strong) var(--paper); }
+  .tier-grid.is-capped::-webkit-scrollbar { width: 8px; }
+  .tier-grid.is-capped::-webkit-scrollbar-track { background: var(--paper);
+    border-radius: 999px; margin: var(--s2) 0; }
+  .tier-grid.is-capped::-webkit-scrollbar-thumb { background: var(--line-strong);
+    border-radius: 999px; border: 2px solid var(--paper); background-clip: padding-box; }
+  .tier-grid.is-capped::-webkit-scrollbar-thumb:hover { background: var(--accent); }
   .firm-card { background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s3) var(--s4); cursor: grab;
     height: 100%; overflow: hidden;
@@ -1226,30 +1316,145 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      chrome: 55-odd of 69 cards show this, and the strip's tall button would
      have pushed the grid rows well past what a status board should cost. A
      quiet 10px link adds one short line — the grid's `minmax(44px, auto)`
-     rows absorb it, and a row mixing covered firms (no line) with uncovered
-     ones (a line) is simply as tall as its tallest card. Now that the badges
-     are gone this line is the card's ONLY verb, which is the point: the ask
-     was to leave the progress bar and the suggestion. */
-  .firm-card-act { flex: none; margin-top: -2px; }
-  .fc-act-link { display: block; font-size: 10px; font-weight: var(--w-med);
+     rows absorb it. Now that the badges are gone this line is the card's
+     ONLY verb, which is the point: the ask was to leave the progress bar
+     and the suggestion.
+
+     The row it sits on renders on EVERY card now, covered or not, because
+     it also carries the tier picker below — the link is still hidden once a
+     firm is covered, so on those cards the row holds the picker alone. That
+     is one 10px line a covered card did not used to have, and it is what
+     buys a way to re-tier a firm without a mouse. */
+  .firm-card-act { flex: none; margin-top: -2px; display: flex;
+    align-items: center; gap: var(--s2); min-width: 0; }
+  .fc-act-link { flex: 1 1 auto; min-width: 0;
+    font-size: 10px; font-weight: var(--w-med);
     color: var(--accent-ink); text-decoration: none; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
   .fc-act-link:hover { text-decoration: underline; }
+  /* The tier picker shares the verb row, pushed to its right edge — the
+     link is the thing allowed to ellipsise, the control is not. Nearly
+     invisible at rest for the same reason the badges came off these cards:
+     it renders on all 69 of them, and bordered chrome repeated 69 times is
+     decoration. At rest it reads as the card's own tier caption in the same
+     10px mono as `.fc-adv` beside it; the control chrome arrives on hover
+     and focus, which is when someone is aiming at it. */
+  .fc-tier { flex: none; width: auto; margin-left: auto; appearance: none; -webkit-appearance: none;
+    border: 1px solid transparent; border-radius: 999px; background: transparent;
+    padding: 1px 13px 1px 5px;
+    font-family: var(--font-mono); font-size: 10px; font-weight: var(--w-med);
+    line-height: 1.6; color: var(--ink-3); cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: right 6px top 51%, right 3px top 51%;
+    background-size: 3px 3px, 3px 3px; background-repeat: no-repeat;
+    transition: border-color var(--t-fast), background-color var(--t-fast),
+      color var(--t-fast); }
+  .firm-card:hover .fc-tier, .fc-tier:hover { border-color: var(--line);
+    background-color: var(--surface); color: var(--ink-2); }
+  .fc-tier:focus-visible { outline: 2px solid var(--accent); outline-offset: 0;
+    border-color: var(--accent); background-color: var(--accent-soft);
+    color: var(--accent-ink); }
+  /* On a device that cannot hover, the resting state IS the only state, so
+     the control wears its chrome all the time. This is the case the whole
+     change exists for — a phone had no way to re-tier a firm at all — and a
+     control that only announces itself on hover would have replaced one
+     invisible affordance with another. */
+  @media (hover: none) {
+    .fc-tier { border-color: var(--line); background-color: var(--surface);
+      color: var(--ink-2); }
+  }
 
-  .warmth-section { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s4) var(--s5); margin-bottom: var(--s4);
-    box-shadow: var(--shadow-1); }
-  /* Collapsible warmth section — empty ones render collapsed (no `open`). */
-  .warmth-section > summary { cursor: pointer; list-style: none; position: relative;
-    padding-right: 22px; }
-  .warmth-section > summary::-webkit-details-marker { display: none; }
-  .warmth-section > summary::after { content: "\25BE"; position: absolute; right: 0;
-    top: 2px; color: var(--ink-3); transition: transform var(--t-fast); }
-  .warmth-section:not([open]) > summary::after { transform: rotate(-90deg); }
-  .warmth-section:not([open]) { padding-bottom: var(--s3); opacity: 0.85; }
-  /* ---- Archived list: ledger rows, hairline-separated ---- */
+  /* ---- Contacts: one warmth ledger, not five separate cards ------------
+     Reported directly against the founder's live board: five collapsed
+     rows at ~100px apiece — a bordered card, its own shadow, its own
+     margin to the next one — to say five numbers ("Replied 14",
+     "Chatted 21", …). The five warmth states are one list a reader scans
+     top to bottom, not five peers each claiming a panel of their own, so
+     they now share ONE bordered surface (`.warmth-list`) and separate
+     from each other with a hairline, the same move this exact pass
+     already made for `.arch-row` and the parked-cohort list: a row is a
+     line with a rule under it, not a card, unless it needs to be one.
+
+     A row holding nobody does not render at all. On the founder's own
+     174-contact account "Not Contacted Yet" reads 0 today — the identical
+     "standing reproach for a state the product allows" already named for
+     the zeroed-out "Other countries" scope tab and the archived/parked/
+     hidden links above, and fixed the same way: render only when the
+     count is real. Nothing about the underlying data narrows to make
+     this true — `sections` in the view still lists all five warmth keys
+     and still sums to `contact_total` exactly, which
+     `test_the_warmth_sections_account_for_every_contact_the_header_counts`
+     pins; only the template (below) skips a `<details>` with zero cards.
+     A student with zero contacts at all keeps a plain "No contacts yet."
+     line instead of an empty bordered box. */
+  .warmth-list { background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-1);
+    margin-bottom: var(--s6); overflow: hidden; }
+  .warmth-row { border-top: 1px solid var(--line); }
+  .warmth-row:first-of-type { border-top: 0; }
+  /* The whole line is the disclosure control, not just the glyph at its
+     end — cursor, hover tint and the chevron glued to the count (below)
+     all say so together, rather than one tiny triangle carrying the
+     entire "this opens" affordance alone. */
+  .warmth-row > summary { display: flex; align-items: center; gap: var(--s3);
+    list-style: none; cursor: pointer; padding: var(--s3) var(--s4);
+    /* The share-of-total fill. `--share` is set inline per row from the
+       one real number this widget has to show it with — count over
+       `contact_total`, the same total the header above already states —
+       so "Emailed, No Reply" (79% of a 174-contact board) reads as a
+       visibly longer fill than "Advocates" (1%) without a second badge
+       claiming a percentage nobody asked for. Painted as the summary's
+       own background rather than a separate element, so it sits behind
+       the text with no z-index or extra markup. */
+    background: linear-gradient(to right,
+      color-mix(in srgb, var(--row-tint, var(--accent)) 13%, var(--surface)) var(--share, 0%),
+      var(--surface) var(--share, 0%));
+    transition: background-color var(--t-fast); }
+  .warmth-row > summary::-webkit-details-marker { display: none; }
+  .warmth-row > summary:hover { background-color: var(--paper); }
+  .warmth-row > summary:focus-visible { outline-offset: -2px; }
+  /* Flex item, not the inline dot's usual `margin-right` — the row's own
+     `gap` already spaces dot/label/meta evenly. */
+  .warmth-row .dot { flex: none; margin-right: 0; }
+  /* A real word at a real size, not a shouted micro-caption — the old
+     all-caps treatment gave "REPLIED" and its own count the identical
+     weight, which was problem one on the live board. */
+  .warmth-row-label { font-size: var(--fs-m); font-weight: var(--w-med);
+    color: var(--ink); min-width: 0; }
+  /* Count and disclosure glued into one unit at the row's end, so the
+     triangle reads as "this number opens" instead of a mark stranded at
+     the far edge with no visible tie to what it discloses. */
+  .warmth-row-meta { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .warmth-row-meta .scrub-count { margin-left: 0; font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; font-size: var(--fs-m); font-weight: var(--w-bold);
+    color: var(--ink); }
+  .warmth-row-meta::after { content: "\25BE"; color: var(--ink-3); font-size: 11px;
+    transition: transform var(--t-fast); }
+  .warmth-row:not([open]) .warmth-row-meta::after { transform: rotate(-90deg); }
+  /* Open content sits inside the row's own left/right rule rather than
+     flush with the panel edge the hairline gave up. */
+  .warmth-row .contact-grid { margin: 0 var(--s4) var(--s4); }
+  .warmth-row .net-none { margin: 0 var(--s4) var(--s4); text-align: left; }
+  /* The same four warmth colours the segment bars and dots already use
+     elsewhere on this board, reused as a faint tint for each row's own
+     fill rather than a fifth palette invented for this one widget. Both
+     cold halves ("Emailed, No Reply" and "Not Contacted Yet") share the
+     cold tint, same as they share the cold dot. */
+  .warmth-row--cold     { --row-tint: var(--w-cold-bar); }
+  .warmth-row--replied  { --row-tint: var(--w-replied-bar); }
+  .warmth-row--chatted  { --row-tint: var(--w-chatted-bar); }
+  .warmth-row--advocate { --row-tint: var(--w-advocate-bar); }
+  /* ---- Archived list: ledger rows, hairline-separated ----
+     One anatomy, shared by all four off-board ledgers (Archived, Parked,
+     Not Your Recruiting, Not Related to Recruitment): identity, one
+     contextual middle column, one bring-back action. The middle column's
+     capped to 320px — wide enough that most cited reasons (44 truncated
+     characters) still fit one line, tight enough that a long one wraps to
+     a second rather than stretching the whole row — same reason the
+     button column stays `auto` and never competes with it for space. */
   .arch-list { display: flex; flex-direction: column; }
-  .arch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  .arch-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px) auto;
     align-items: center; gap: var(--s3) var(--s4);
     padding: 10px 0; border-top: 1px solid var(--line); }
   .arch-row:first-child { border-top: 0; }
@@ -1258,12 +1463,23 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .arch-id a { font-weight: var(--w-med); color: var(--ink); }
   .arch-meta { font-size: var(--fs-s); color: var(--ink-3); min-width: 0;
     overflow-wrap: anywhere; }
+  /* A value: a date, on the one ledger (Archived) whose middle column is
+     one. Mono/tabular so it reads as data, single line since it never
+     runs long. */
   .arch-when { font-family: var(--font-mono); font-size: var(--fs-xs);
     font-variant-numeric: tabular-nums; color: var(--ink-3); white-space: nowrap; }
+  /* A quotation: the rule's own cited reason (Not Related to Recruitment)
+     or the send it arrived on (Not Your Recruiting) — HOLD #2's "checkable,
+     not magic" line. This used to reuse `.arch-when`'s mono/nowrap
+     treatment, built for a short date, which either squeezed a whole
+     sentence onto one line or let it run past the row. Body type, allowed
+     to wrap, set in italics so it reads as a quote rather than a value. */
+  .arch-reason { font-size: var(--fs-s); font-style: italic; color: var(--ink-2);
+    white-space: normal; overflow-wrap: anywhere; }
   .arch-row .btn { padding: 6px 14px; font-size: var(--fs-xs); }
   @media (max-width: 640px) {
     .arch-row { grid-template-columns: minmax(0, 1fr) auto; }
-    .arch-when { grid-column: 1 / -1; }
+    .arch-when, .arch-reason { grid-column: 1 / -1; }
   }
 
   /* ---- Parked cohorts (crm/contact_parked.html): one bulk verb per group,
@@ -1273,15 +1489,29 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cohort-label { font-weight: var(--w-med); color: var(--ink); margin: 0; }
   .cohort-warmth { font-size: var(--fs-s); color: var(--ink-3); margin: 2px 0 0; }
 
-  /* Capped to two rows (roughly 8 cards at this page's usual desktop
-     width) and internally scrollable, matching .net-panel's own pattern
-     two sections up: a warmth group holding 93 cards ("Emailed, No
-     Reply") used to push the whole page to match its length, burying
-     Firm Coverage and everything below it a full screen down. 460px =
-     two .contact-card rows (212px floor × 2) plus one gap, with a little
-     slack for a card that grows past its floor. */
+  /* Capped and internally scrollable, matching .net-panel's own pattern two
+     sections up: a warmth group holding 93 cards ("Emailed, No Reply") used
+     to push the whole page to match its length, burying Firm Coverage and
+     everything below it a full screen down. 416px = three .contact-card
+     rows (128px floor × 3) plus two gaps — redone for the simplified card
+     below and MEASURED against it (a one-line name + one-line firm renders
+     at 125px; the floor gives it 3px to breathe, same small-bump-over-the-
+     tight-value move `.net-mini`'s own floor already took). Was two rows at
+     a 212px floor, back when the card still carried a description and an
+     email line — same visual footprint, one more row of cards in it. */
+  /* align-items: start, not the grid default of stretch. A CSS grid row
+     sizes itself to its tallest member and then STRETCHES every item in
+     that row to match — the exact "one tall card inflates its siblings"
+     bug the density pass fixed for `.net-mini`'s flex lane, reappearing
+     here on a grid instead of a flex line. Measured on the demo board
+     before this rule existed: a lone one-line card sharing a row with a
+     two-pill card whose name wrapped rendered at the wrapped card's full
+     height, 199px against its own natural 156px — 43px of dead air below
+     its foot row, on every short card unlucky enough to share a row with
+     a tall one. `start` makes each card size to its own content only. */
   .contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--s4); max-height: 460px; overflow-y: scroll; }
+    align-items: start;
+    gap: var(--s4); max-height: 416px; overflow-y: scroll; }
   .contact-grid { scrollbar-width: thin; scrollbar-color: var(--line-strong) var(--paper); }
   .contact-grid::-webkit-scrollbar { width: 12px; }
   .contact-grid::-webkit-scrollbar-track { background: var(--paper);
@@ -1291,16 +1521,21 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     min-height: 40px; }
   .contact-grid::-webkit-scrollbar-thumb:hover { background: var(--accent);
     border: 3px solid var(--paper); background-clip: padding-box; }
-  /* Fixed height so every contact card is identical; the footer pins to the
-     bottom (margin-top:auto) and the variable bits (bullets, email) are
-     clamped so nothing overflows. */
-  /* 212px is the FLOOR, not a fixed height — same correction as .rolecard in
-     directory/_styles.html. The clamp on .cc-bullets caps the angle at two
-     lines, but two lines plus a long name that wraps, plus pills, email and
-     the action row, still exceeded 212px: `overflow: hidden` then guillotined
-     the second bullet line mid-glyph and the email collided with it. The clamp
-     bounds one field; it can't bound the sum of all of them. */
-  .contact-card { border: 1px solid var(--line); border-radius: var(--r-panel); min-height: 212px;
+  {% comment %}
+  Redesigned on the founder's own call, reviewing his live Network board: no
+  description line, no on-card email, visually simplistic — applied to every
+  card here. What used to make a card 212px tall was a `.cc-bullets` field
+  (up to 3 notes/angle fragments, clamped to 2 lines) plus a `.cc-email`
+  line; both are gone (see the template comment above `.cc-foot` in
+  contact_list.html for why, and views.py::_contact_card for what the real
+  data showed). What is left — checkbox, avatar with its staleness ring,
+  name with its pills, firm · role, and the foot row (days since last touch,
+  Log Touch, Edit) — is a 125px card instead of a 212px one (measured on the
+  demo board, one-line name and firm, no wrap): identity, standing, and the
+  two actions a student uses 174 of these cards for, nothing that sends a
+  reader to the detail page to finish reading it.
+  {% endcomment %}
+  .contact-card { border: 1px solid var(--line); border-radius: var(--r-panel); min-height: 128px;
     padding: var(--s4); display: flex; flex-direction: column; gap: var(--s2);
     overflow: hidden;
     transition: border-color var(--t-fast), box-shadow var(--t-med);
@@ -1309,7 +1544,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        scrolled near — the single biggest render saving on this page. The
        intrinsic-size matches min-height so the scrollbar doesn't jump as
        cards materialise. */
-    content-visibility: auto; contain-intrinsic-size: auto 212px; }
+    content-visibility: auto; contain-intrinsic-size: auto 128px; }
   .contact-card:hover { border-color: var(--accent-line); box-shadow: var(--shadow-1); }
   /* Selected, for bulk actions (`crm:contacts_bulk` — see `#cc-bulk-form`
      in the template). Same tint `.net-mini.is-picked` uses on the Unplaced
@@ -1319,12 +1554,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     background: var(--accent-soft); }
   .cc-head { display: flex; gap: var(--s3); align-items: flex-start; }
   /* The explicit selection control. NOT a wrapping <label> like
-     `.net-mini` — this card already has its own click targets (the mailto
-     link, Log Touch, Edit), so the box has to be its own deliberate target
-     rather than fighting those for the click. Sized like `.net-mini-check`
-     and aligned to the avatar's cap-height, not stretched to the card. */
-  .cc-check { flex: none; margin-top: 3px; accent-color: var(--accent);
-    width: 15px; height: 15px; cursor: pointer; }
+     `.net-mini` — this card already has its own click targets (Log Touch,
+     Edit), so the box has to be its own deliberate target rather than
+     fighting those for the click. Drawn by the shared
+     `input[type="checkbox"]` rule (coverage.css §11); the only thing left
+     here is the vertical nudge.
+
+     Centred on the AVATAR, not on the cap-height of the name: the avatar
+     is the fixed, always-40px anchor of this row, while the name/pill line
+     it used to align to varies card to card (one pill vs. three, a
+     two-line wrap on a long name) — a 3px top margin read as "cap-height
+     aligned" only on the shortest cards and as floating high above center
+     on every other one, reported directly against the live board. Centred
+     math: (40px avatar − 16px box) / 2 = 12px. The box is 16px now, not
+     the 15px this was first computed against, because the shared rule
+     sizes every checkbox in the app alike.
+
+     Written as `input.cc-check` and not `.cc-check`: the shared rule sets
+     `margin: 0` at (0,1,1), which a bare class at (0,1,0) loses to no
+     matter where it sits in the cascade. */
+  input.cc-check { margin-top: 12px; }
   .cc-avatar { width: 40px; height: 40px; border-radius: 50%; flex: none;
     background: var(--accent-soft); color: var(--accent-ink);
     display: inline-flex; align-items: center; justify-content: center;
@@ -1333,21 +1582,39 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cc-name { font-weight: var(--w-bold); display: flex; gap: var(--s2);
     align-items: center; flex-wrap: wrap; }
   .cc-pill { font-size: 10px; padding: 1px 7px; }
-  .cc-firm { font-size: var(--fs-s); color: var(--ink-2); }
+  /* ONE line, may honestly ellipsise — same doctrine as `.net-mini-firm`
+     two panels up, and for the same reason: the firm is context for the
+     name, not a second thing to read, and real firm · role strings on the
+     founder's own board run to 124 characters. Before this rule the line
+     had no white-space control at all, so a long one wrapped to two or
+     three lines — which, combined with the grid defaulting every card in
+     that row to stretch-match it (see `.contact-grid`'s `align-items`
+     comment above), turned one long title into a tall row across the
+     whole board. The full string is one hover away in the `title=` the
+     template carries alongside it. */
+  .cc-firm { font-size: var(--fs-s); color: var(--ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cc-school { align-self: flex-start; background: var(--stale-s); color: var(--stale-t);
     border-color: var(--stale-l); }
-  /* Clamp to 2 clean lines (no mid-glyph cut) rather than a pixel max-height,
-     which guillotines descenders when the face's metrics change. */
-  .cc-bullets { margin: 0; padding-left: 1.1rem; font-size: var(--fs-s);
-    line-height: 1.45; color: var(--ink-2);
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; }
-  .cc-email { font-size: var(--fs-s); line-height: 1.6; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; }
+  /* No `margin-top: auto`. That rule was the other half of the empty-band
+     bug reported on the live board: pinning the foot to the BOTTOM of
+     whatever height the card ended up at (its own min-height floor, or a
+     taller row-mate's height before the fix above) left a blank gap
+     between the firm line and "Nd since last touch" on every card that
+     didn't need the full floor. The foot now just follows the head after
+     the flex column's own `gap` — a card's height is the sum of what it
+     actually holds. */
   .cc-foot { display: flex; justify-content: space-between; align-items: center;
-    gap: var(--s3); margin-top: auto; padding-top: var(--s2); flex-wrap: wrap; }
-  .cc-since { font-size: var(--fs-xs); color: var(--ink-3);
-    font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    gap: var(--s3); padding-top: var(--s2); flex-wrap: wrap; }
+  /* Plain body face, not `--font-mono`. The rest of the app reaches for
+     mono+tabular-nums on a date/count that sits in a column of OTHER
+     numbers it needs to line up against (`.arch-when`, `.play-when`,
+     `.lane-count`) — this fact stands alone on the card, nothing beside it
+     to align with, so the mono face bought nothing but a fourth typeface
+     on a four-fact card, competing with the name for a reader's first
+     glance at something that is meant to read third. Same size and color
+     as before; only the face changes. */
+  .cc-since { font-size: var(--fs-xs); color: var(--ink-3); }
   .cc-btns { display: flex; gap: var(--s2); }
   .cc-btns .btn { padding: 6px 14px; font-size: var(--fs-xs); }
 
@@ -1362,6 +1629,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   /* The Compose draft editor on the contact page. */
   .cd-opener { margin-top: var(--s3); }
+  /* The Relationship summary card reuses this same disclosure as its ONLY
+     child (nothing precedes it to space away from), so the margin above
+     that every other `.cd-opener` needs would just be a dead gutter here. */
+  .cd-card > .cd-opener:first-child { margin-top: 0; }
   .cd-opener > summary { cursor: pointer; list-style: none; font-size: var(--fs-s);
     font-weight: var(--w-med); color: var(--ink-2); display: inline-flex;
     align-items: center; gap: 7px; }

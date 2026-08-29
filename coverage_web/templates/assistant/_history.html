@@ -46,7 +46,7 @@ delete — so a rename's new position (ChatConversation.Meta.ordering =
         </button>
         <div class="as-menu-divider"></div>
         <form method="post" action="{% url 'assistant:folder_delete' %}"
-              data-confirm="Delete this folder? Chats inside stay — they just stop being grouped.">
+              data-confirm="Delete this folder? The chats inside stay, just ungrouped.">
           {% csrf_token %}
           <input type="hidden" name="folder" value="{{ group.folder.id }}">
           <input type="hidden" name="current" value="{{ conversation.id }}">
@@ -70,7 +70,7 @@ delete — so a rename's new position (ChatConversation.Meta.ordering =
         {% for c in group.conversations %}
           {% include "assistant/_history_row.html" %}
         {% empty %}
-          <p class="as-history-empty">Nothing here yet — move a chat in.</p>
+          <p class="as-history-empty">Empty. Move a chat in.</p>
         {% endfor %}
       </div>
     </details>

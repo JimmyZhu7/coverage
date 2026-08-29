@@ -52,7 +52,9 @@ labelled rule between social and email sign-in. Shared by login and signup.{% en
   .auth-check { display: flex; flex-direction: row; align-items: center;
     gap: var(--s2); margin: 0 0 var(--s4); font-size: var(--fs-s);
     font-weight: var(--w-reg); text-transform: none; letter-spacing: normal; }
-  .auth-check input { width: auto; margin: 0; flex: none; accent-color: var(--accent); }
+  /* The box is the shared `input[type="checkbox"]` control (coverage.css
+     §11), which already sets size, margin, flex and the drawn tick. The
+     `width: auto` this rule used to carry would now beat that 16px. */
   .auth-submit { width: 100%; justify-content: center; }
   .auth-foot { text-align: center; color: var(--ink-2); font-size: var(--fs-s);
     margin: var(--s5) 0 0; }
