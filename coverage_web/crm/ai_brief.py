@@ -117,10 +117,32 @@ Keep the whole brief under 200 words. No preamble, no sign-off, just the three s
 
 
 def _touch_lines(contact) -> list[str]:
+    """The last few interactions as prompt lines, with this app's own
+    bookkeeping stripped off the notes first.
+
+    `_display_note` is the SAME adapter `crm.ai_summary._touch_lines` and
+    `assistant.tools._get_contact` already run their touch notes through, and
+    it is imported here for the same reason: a raw `Touch.note` is not what
+    the student wrote, it is what the student wrote with machine markers
+    glued to the front — `[gmail:18f3a2b9c]` from the mailbox sync,
+    `[assistant:msg_01ABC]` from a touch the advisor logged, and the whole
+    `manual override: warmth=cold, thread_state=parked` prefix from a state
+    change nobody typed a sentence about. This module was the one surface
+    that skipped it, so a brief the student is invited to copy into a real
+    email was drafted from lines like "[gmail:18f3a2b9c] Following up" — an
+    id the model can echo straight into the draft, and a machine sentence it
+    can narrate back as if it were a fact about the relationship.
+
+    Imported inside the function, not at module scope: `crm.views` imports
+    this module, so a top-level import back into it is a circular import at
+    app load (the same note `crm.ai_summary._touch_lines` carries).
+    """
+    from crm.views import _display_note
+
     touches = contact.touches.order_by("-ts")[:_MAX_TOUCHES]
     lines = []
     for t in touches:
-        note = (t.note or "").strip()[:_MAX_NOTE_CHARS]
+        note = _display_note(t.note)[:_MAX_NOTE_CHARS]
         when = t.ts.date().isoformat()
         line = f"- {when} ({t.kind})"
         if note:

@@ -28,9 +28,12 @@ def _user(email="brief@example.com"):
 
 
 def _action(name="Ada Lovelace", firm="Goldman Sachs", label="Follow up",
-            reason="idle 12 days", closes_on=None):
+            reason="idle 12 days", closes_on=None, contact_id=None):
+    contact = {"name": name, "firm_text": firm}
+    if contact_id is not None:
+        contact["id"] = contact_id
     return {
-        "contact": {"name": name, "firm_text": firm},
+        "contact": contact,
         "label": label,
         "reason": reason,
         "closes_on": closes_on,
@@ -365,3 +368,149 @@ def test_a_concurrent_generation_does_not_crash_on_the_unique_constraint():
     # and the caller gets text back rather than a 500.
     assert DailyBrief.objects.for_user(user).filter(date=today).count() == 1
     assert text is not None
+
+
+# ---------------------------------------------------------------------------
+# Staleness: a cached brief can name someone the queue has since disowned.
+#
+# THE LIVE CASE (2026-08-27, the founder's own account). 18:14 UTC: the brief
+# generates while Anant Taparia (Citi) and Xinyi Xu (Morgan Stanley) are both
+# `thread_state=replied` — cadence branch 7 is correct to say "they replied,
+# propose a 15-min chat", and the brief repeats it. 23:04 UTC: he parks both
+# by hand from the Today queue — a deliberate exit, `crm.today`'s cadence
+# branch 4 and `_gate_and_rank` now agree neither produces any action at all.
+# Nothing told the cached `DailyBrief` row that the sentence it wrote five
+# hours earlier no longer described the queue. The Today page kept telling
+# him to "respond to Anant Taparia... and Xinyi Xu... immediately" against
+# two people he had just told the product, twice, to leave alone.
+# ---------------------------------------------------------------------------
+
+ANANT_ID, XINYI_ID = 741, 740
+
+
+def _founders_queue_before_parking():
+    """The two real actions cadence branch 7 produced pre-park — `advance`,
+    "they replied — propose a 15-min chat" — shaped exactly like
+    `crm.today._build_actions` hands them to `_summarize_actions`."""
+    return [
+        _action("Anant Taparia", "Citi", "Propose a chat",
+                "they replied — propose a 15-min chat", contact_id=ANANT_ID),
+        _action("Xinyi Xu", "Morgan Stanley", "Propose a chat",
+                "they replied — propose a 15-min chat", contact_id=XINYI_ID),
+    ]
+
+
+def test_fails_before_the_fix_a_cached_brief_still_chases_a_contact_just_parked():
+    """Pin the exact regression. Before `_is_stale` existed, `get_or_build`
+    returned `existing.text` unconditionally whenever a row for today was
+    found — this test's FIRST assertion is what failed against that code
+    (confirmed by stashing the fix and re-running: the cached text won
+    unconditionally, `client.messages.requests` stayed empty, and the fresh
+    "no one to chase" queue never got a say)."""
+    user = _user()
+    client = FakeClient(_response(
+        "Respond to **Anant Taparia** at Citi and Xinyi Xu at Morgan Stanley "
+        "immediately by proposing those 15-minute chats before they lose "
+        "interest."
+    ))
+    # 18:14 generation, thread_state=replied for both.
+    first = brief.get_or_build(user, _founders_queue_before_parking(), client=client)
+    assert "Anant Taparia" in first
+    row = DailyBrief.objects.for_user(user).get()
+    assert sorted(row.contact_ids) == sorted([ANANT_ID, XINYI_ID])
+
+    # 23:04: both parked. crm.today's own engine/gate now produce nothing for
+    # either of them; the rest of the queue is untouched (one unrelated cold
+    # contact still due a follow-up) — the same shape `crm.views.daily_brief`
+    # would compute and pass in for real.
+    client.messages.requests.clear()
+    client.messages.response_or_exception = _response(
+        "Follow up with Priya Nair at Bain — no reply after 9 business days."
+    )
+    fresh_queue = [_action("Priya Nair", "Bain", "Follow up",
+                            "no reply after 9 business days", contact_id=999)]
+    second = brief.get_or_build(user, fresh_queue, client=client)
+
+    # The fix: the stale sentence about two parked contacts must not survive,
+    # and regenerating it is what a correct fix has to spend the second call
+    # on. Both assertions fail on the pre-fix code — see the docstring above.
+    assert client.messages.requests, "a stale row naming a parked contact must trigger a refresh"
+    assert "Anant Taparia" not in second
+    assert "Xinyi Xu" not in second
+
+
+def test_a_cached_brief_survives_when_every_named_contact_is_still_in_the_queue():
+    """The non-regression half: an ordinary day where nothing named in the
+    brief has moved must still cost exactly one call, same as before this
+    fix — staleness is opt-in to a REAL disappearance, not a standing tax on
+    every cache hit."""
+    user = _user()
+    client = FakeClient(_response("Respond to **Anant Taparia** at Citi."))
+    brief.get_or_build(user, _founders_queue_before_parking(), client=client)
+
+    client.messages.requests.clear()
+    second = brief.get_or_build(user, _founders_queue_before_parking(), client=client)
+
+    assert second == "Respond to **Anant Taparia** at Citi."
+    assert client.messages.requests == []
+
+
+def test_get_cached_hides_a_stale_brief_without_spending_a_call():
+    """`get_cached` never calls the model (see its own docstring) — it can
+    only say "not usable", not fix it. `crm.today.week` is the caller that
+    matters here: it renders whatever `get_cached` hands back with no
+    generation of its own, so this is the function standing between the
+    founder's screen and the stale sentence on an ordinary page load, not
+    just on the next `get_or_build` call."""
+    user = _user()
+    client = FakeClient(_response("Respond to **Anant Taparia** at Citi."))
+    brief.get_or_build(user, _founders_queue_before_parking(), client=client)
+
+    # Anant Taparia parked; Xinyi Xu untouched — one of the two named
+    # contacts leaving the queue is enough to distrust the whole sentence.
+    still_live = [_action("Xinyi Xu", "Morgan Stanley", contact_id=XINYI_ID)]
+    assert brief.get_cached(user, still_live) is None
+    # Without a fresh queue to check against, the old contract holds — a
+    # caller that hasn't been updated to pass `actions` still gets the row
+    # exactly as written, never a surprise None.
+    assert brief.get_cached(user) == "Respond to **Anant Taparia** at Citi."
+
+
+def test_is_pending_reopens_once_a_named_contact_is_parked(monkeypatch):
+    """`crm.today.week` draws the htmx placeholder off `is_pending` — this is
+    what actually gets the founder's Today page to ask `crm.views.daily_brief`
+    for a fresh sentence instead of silently keeping the stale one on screen
+    for the rest of the day.
+
+    `is_configured` forced True (same reason as
+    `test_with_no_client_and_the_api_dark_it_returns_none`): `is_pending`
+    gates on it directly and a real key on the test machine must not be what
+    makes this pass or fail."""
+    monkeypatch.setattr(brief, "is_configured", lambda: True)
+    user = _user()
+    client = FakeClient(_response("Respond to **Anant Taparia** at Citi."))
+    brief.get_or_build(user, _founders_queue_before_parking(), client=client)
+
+    assert brief.is_pending(user, []) is True
+    assert brief.is_pending(user, _founders_queue_before_parking()) is False
+
+
+def test_reply_after_park_is_never_treated_as_stale():
+    """The ratchet un-parks on `reply_received` because an inbound reply is a
+    real event (`coverage_domain.pipeline.TOUCH_TRANSITIONS`; only `advocate`
+    is terminal) — a contact who writes back after being parked is back in
+    the fresh `actions` list by the time anyone asks, so `_is_stale` never
+    has a reason to fire for them. This pins that the fix does not
+    accidentally suppress that signal."""
+    user = _user()
+    client = FakeClient(_response("Respond to **Anant Taparia** at Citi."))
+    brief.get_or_build(user, _founders_queue_before_parking(), client=client)
+
+    client.messages.requests.clear()
+    # Anant Taparia parked, then replied again — thread_state ratchets to
+    # `replied` and cadence branch 7 puts him straight back in the queue.
+    same_queue = _founders_queue_before_parking()
+    second = brief.get_or_build(user, same_queue, client=client)
+
+    assert second == "Respond to **Anant Taparia** at Citi."
+    assert client.messages.requests == []

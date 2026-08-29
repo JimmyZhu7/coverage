@@ -151,6 +151,23 @@ MAX_PER_FIRM = 2
 # on purpose — "SMU" is Singapore Management University and Southern Methodist
 # University, so it is not in the table and falls through to the location
 # parser, which correctly declines to answer.
+#
+# EVERY NAME NEEDS BOTH OF ITS SPELLINGS. The table started as abbreviations
+# and brand names only, which quietly assumed students type "USC" rather than
+# what is on their diploma. The founder's own account says "University of
+# Southern California": `usc` does not appear in it as a token, and
+# `normalize_region` knows cities and countries but not US states, so his
+# school resolved to "" and the highest-weighted region signal on the board
+# (W_REGION_SCHOOL = 20) scored zero for the only real user of the product.
+# Checked across 52 spelled-out names, 14 missed the same way.
+#
+# The additions below are spellings of institutions the table already meant to
+# cover, never new guesses, and a name that is only unambiguous in its long
+# form is stored in its long form: bare "cambridge" is also Cambridge,
+# Massachusetts (Harvard and MIT both sit in it) and bare "oxford" is also
+# Oxford, Georgia (Emory) and Oxford, Ohio (Miami University), so both are
+# keyed as "university of oxford"/"university of cambridge" and a student who
+# types the bare city still gets the honest "" rather than a coin flip.
 # ---------------------------------------------------------------------------
 SCHOOL_REGION_KEYS: Mapping[str, tuple[str, ...]] = {
     "us": (
@@ -159,12 +176,36 @@ SCHOOL_REGION_KEYS: Mapping[str, tuple[str, ...]] = {
         "princeton", "stanford", "gsb", "booth", "kellogg", "northwestern",
         "ross", "mccombs", "fuqua", "cornell", "dartmouth", "tuck",
         "georgetown", "mcdonough", "emory", "goizueta", "ivey", "stevens",
+        # Spelled-out forms of the same institutions, plus the US schools
+        # whose full names carry no token above at all.
+        "southern california", "massachusetts institute of technology",
+        "pennsylvania", "duke", "vanderbilt", "notre dame", "carnegie mellon",
+        "johns hopkins", "rice university", "virginia", "michigan",
+        "new york university", "university of chicago", "washington university",
     ),
     "hk": ("hku", "cuhk", "hkust", "polyu", "cityu", "hkbu", "ust"),
-    "sg": ("nus", "ntu"),  # see the ambiguity note above re: bare "SMU"
+    "sg": (
+        "nus", "ntu",  # see the ambiguity note above re: bare "SMU"
+        "nanyang technological",
+    ),
     "eu": (
         "lse", "ucl", "imperial", "warwick", "oxbridge", "insead", "bocconi",
         "hec", "esade", "essec", "st gallen", "lbs", "wharton-lbs",
+        "university of oxford", "university of cambridge",
+        # The other word order — "Oxford University", "Cambridge University"
+        # — is at least as common as "University of X" for these two
+        # (it's the everyday British short form and how most international
+        # applicants write it), and was missing: the section comment above
+        # says "EVERY NAME NEEDS BOTH OF ITS SPELLINGS," and only one order
+        # was added. Unlike the bare city names, this pair is safe: nothing
+        # else calls itself "Oxford University" or "Cambridge University" —
+        # Oxford, Georgia's Emory campus is "Oxford College of Emory
+        # University," never "Oxford University" on its own, and Cambridge,
+        # Massachusetts answers to Harvard or MIT, neither of which uses
+        # this name either. So this order needs no city-collision guard the
+        # bare word did.
+        "oxford university", "cambridge university",
+        "london school of economics", "university college london",
     ),
     "cn": ("tsinghua", "peking", "fudan", "sjtu", "清华", "北大", "复旦"),
     "jp": ("waseda", "keio", "todai", "hitotsubashi"),
@@ -487,6 +528,37 @@ class Recommendation:
 # the others, so a test can move exactly one input and watch the ranking move.
 # ---------------------------------------------------------------------------
 
+def _stated_grad_window(profile: Profile, c: Candidate) -> tuple[int, int] | None:
+    """The graduation window this posting STATES in its own words, as an
+    inclusive `(lo, hi)`, or None when it states none — or when the student
+    has no class year for it to be a statement ABOUT.
+
+    Both places a posting can say it: the title ("Class of 2028" ->
+    `Opportunity.class_year`) and the body ("graduate in the winter of 2028 or
+    the spring of 2029" -> the facts extractor's `grad.years`). A single year
+    is returned as the degenerate window `[y, y]` so one code path serves both.
+
+    Factored out of `_class_fit` so `stated_class_mismatch` below cannot drift
+    from the scoring that produced it — the two ARE the same question, and two
+    features reading the same fact and disagreeing about it is precisely what
+    the `grad_years` field was added to stop."""
+    if not profile.class_year:
+        return None
+    stated = _int_or_none(c.class_year)
+    if stated is not None:
+        return (stated, stated)
+    ys = sorted(int(y) for y in c.grad_years if str(y).isdigit())
+    return (ys[0], ys[-1]) if ys else None
+
+
+def stated_class_mismatch(profile: Profile, c: Candidate) -> bool:
+    """True when the posting's OWN WORDS name a graduating class and this
+    student is not in it. Never inference: a programme year that merely
+    IMPLIES a class (`cohort`) is not a statement and never reaches here."""
+    window = _stated_grad_window(profile, c)
+    return window is not None and not (window[0] <= profile.class_year <= window[1])
+
+
 def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     """Class / cycle fit — the axis where the cohort-vs-class-year distinction
     is load-bearing.
@@ -505,15 +577,9 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     # say them: the title ("Class of 2028" -> the `class_year` column) or the
     # body ("graduating between December 2027 and June 2028" -> the grad
     # fact). Both are statements; both bind. A window is checked by
-    # containment, a single year by equality — one code path below serves
-    # both by treating the single year as a [y, y] window.
-    window = None
-    stated = _int_or_none(c.class_year)
-    if stated is not None:
-        window = (stated, stated)
-    elif c.grad_years and profile.class_year:
-        ys = sorted(int(y) for y in c.grad_years)
-        window = (ys[0], ys[-1])
+    # containment, a single year by equality — `_stated_grad_window` serves
+    # both by returning the single year as a [y, y] window.
+    window = _stated_grad_window(profile, c)
 
     if window is not None and profile.class_year:
         lo, hi = window
@@ -671,8 +737,114 @@ _NON_TRACK_FUNCTION = re.compile(
     # "Investment Banking — Consumer & Retail" analyst roles as non-track.
     r"|\bbranch\b"
     r"|\brisk management\b|\bcredit risk\b|\bmodel validation\b"
-    r"|\baccounting\b|\bfinancial report(ing)?\b|\bprocurement\b",
+    r"|\baccounting\b|\bfinancial report(ing)?\b|\bprocurement\b"
+    # Internal technology department, named the way the department names
+    # itself, never a bare `\btechnology\b`: that word is ALSO an IB coverage
+    # sector ("Investment Banking Associate - Technology" at Solomon
+    # Partners, "M&A intern - ... Technology team" at Lazard — 6 live rows,
+    # all with the track stated elsewhere in the same title). The five
+    # phrases below are the department's own job-title and org-name
+    # vocabulary, never a sector suffix: on the live board every one of them
+    # is an internal engineering/infra function with no track word anywhere
+    # in the title — "2027 Technology Summer Analyst Program" (Morgan
+    # Stanley, six cities), "Global Technology Summer Analyst" (Bank of
+    # America, four rows), "Group Technology Office" (UBS, four rows),
+    # "Technology Process Analysis" / "Global Technology Governance Intern"
+    # (Deutsche Bank), "Global Technology & Engineering Analyst" (SocGen) —
+    # 55 silent rows in total, every one of them at a firm whose `Firm.
+    # tracks` includes ib and/or st, so every one scored as a track match by
+    # inheritance. Checked against the whole open+closed board (25,294
+    # rows): the only titles this phrasing touches that also state a track
+    # elsewhere are three ambiguous "embedded tech within the business line"
+    # roles (e.g. "Investment Banking Technology Analyst") and two internal
+    # "Technology Solutions Consultant" titles at Vanguard/Baird, none of
+    # them a clean front-office match to begin with — the same "co-occurring
+    # non-track word, decline rather than guess" call this file already
+    # makes for "Trading Operations Analyst".
+    r"|\btechnology\s+(?:summer\s+analyst|analyst|associate|internship|intern)\b"
+    r"|\btechnology\s+(?:office|infrastructure|process|governance|solutions?)\b"
+    r"|\bgroup\s+technology\s+office\b"
+    r"|\btechnology\s+(?:&|and)\s+engineering\b"
+    # Corporate Treasury / Corporate Planning: the bank's own balance-sheet
+    # and internal-planning functions, never a track. "Corporate Treasury"
+    # is unambiguous on the live board — 7 rows, all at Goldman, Morgan
+    # Stanley or Ares, none with a track word elsewhere in the title — unlike
+    # bare `\bcorporate\b`, which is also how boutiques name their IB
+    # division ("Corporate Finance" at Houlihan Lokey, "Corporate Advisory"
+    # at Goldman and Citi, "Corporate Banking" at RBC and JPMorgan) and so
+    # stays deliberately OUT of this list. "Corporate Infrastructure" is the
+    # same call for Nomura's "2026 Insight Day: Corporate Infrastructure" —
+    # ranked the #1 pick on the founder's own live profile ahead of every
+    # dated Morgan Stanley and HSBC internship on the board, for a division
+    # whose own event description says "these are the teams that power and
+    # support our business every day."
+    r"|\bcorporate treasury\b|\bcorporate planning\b|\bcorporate infrastructure\b",
     re.I)
+
+
+#: Phrases that name the HIRING PROCESS, not the job. "2027 Campus Recruiting
+#: - Investment Banking Summer Associate - Houston" is an investment banking
+#: posting whose title happens to carry the name of the programme that posts
+#: it; `\brecruit(ing|ment)\b` above read that as "this is an HR job" and
+#: returned "none" for all five of Piper Sandler's open IB summer associate
+#: requisitions — the single most on-track thing on the board for a student
+#: recruiting IB, scored as a support function.
+#:
+#: Deliberately only the ATTRIBUTIVE forms ("campus recruiting", "recruitment
+#: event"), never a bare "recruiting": "Campus Recruiting Coordinator" and
+#: "Recruiter Intern" really are HR jobs and must keep answering "none". The
+#: exemption in `role_function` is gated on the title separately naming a
+#: track outright, so a title that is ONLY hiring-process words never reaches
+#: it.
+_HIRING_PROCESS = re.compile(
+    r"\b(campus|graduate|early[\s-]careers?)\s+recruit(ing|ment)\b"
+    r"|\brecruit(ing|ment)\s+(event|day)s?\b",
+    re.I)
+
+
+def _track_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Every span in `text` covered by a phrase that names a track — all
+    patterns, all matches, not just the first. `_stated_track` answers WHICH
+    track; this answers WHERE the evidence for any of them sits."""
+    return tuple(m.span() for rx, _ in _ROLE_FUNCTION for m in rx.finditer(text))
+
+
+def _stated_track(text: str) -> str:
+    """The first track `text` names, "" if none. Pattern order is
+    `_ROLE_FUNCTION`'s, longest-phrase-first by construction."""
+    for rx, track in _ROLE_FUNCTION:
+        if rx.search(text):
+            return track
+    return ""
+
+
+def _names_non_track(text: str) -> bool:
+    """Whether `text` names a function OUTSIDE the track vocabulary.
+
+    A blocklist word lying INSIDE a phrase that names a track is not a second,
+    competing claim about the function — it is one word of a longer and more
+    specific one. `\\boperations?\\b` sits inside the consulting pattern's own
+    `\\bstrategy (and|&) operations\\b`, so that clause could never fire: the
+    author wrote the rule, the blocklist ran first, and every "Consulting -
+    Associate - Strategy & Operations" on the board came back "none" (8 open
+    campus rows at PwC and Deloitte, plus "Consulting - Finance Strategy &
+    Operations Internship"). Strategy & Operations is a flagship consulting
+    practice, not an ops job.
+
+    This is the same reasoning the `\\bbranch\\b` note above already applies to
+    `\\bretail\\b` — a word can be a support function in one title and part of
+    a front-office phrase in another — generalised so it does not have to be
+    re-litigated per word. It can only ever IGNORE a blocklist hit that the
+    track vocabulary itself already spans, so it cannot admit a function no
+    pattern here names: "Trading Operations Analyst" still answers "none"
+    (`\\btrading\\b` spans "Trading", not "Operations"), and so does "2027
+    Commercial & Investment Bank Risk Management Summer Analyst".
+    """
+    spans = _track_spans(text)
+    return any(
+        not any(lo <= m.start() and m.end() <= hi for lo, hi in spans)
+        for m in _NON_TRACK_FUNCTION.finditer(text)
+    )
 
 
 def role_function(title: str) -> str:
@@ -683,13 +855,24 @@ def role_function(title: str) -> str:
     carries both and the function is the job: "2027 Commercial & Investment
     Bank Risk Management Summer Analyst" sits in the investment bank and is a
     risk role, and reading the division first ranked it as an IB match for a
-    student recruiting IB. Where you sit is not what you do."""
-    if _NON_TRACK_FUNCTION.search(title or ""):
-        return "none"
-    for rx, track in _ROLE_FUNCTION:
-        if rx.search(title or ""):
+    student recruiting IB. Where you sit is not what you do.
+
+    Two things are NOT a competing claim about the function, and both were
+    costing real front-office roles their track: a blocklist word that is part
+    of a longer track phrase (`_names_non_track`), and a blocklist word that
+    only names the hiring process (`_HIRING_PROCESS`). The second is exempted
+    only when the title separately names a track outright — a title made of
+    hiring-process words alone ("Campus Recruiting Coordinator") still answers
+    "none", because there is nothing else in it to be the job."""
+    text = title or ""
+    track = _stated_track(text)
+    if not _names_non_track(text):
+        return track
+    if track and _HIRING_PROCESS.search(text):
+        rest = _HIRING_PROCESS.sub(" ", text)
+        if _stated_track(rest) == track and not _names_non_track(rest):
             return track
-    return ""
+    return "none"
 
 
 def role_matches_tracks(title: str, tracks) -> bool:
@@ -1033,6 +1216,27 @@ def recommend(
         # not who it is for.
         if c.blocked:
             continue
+        # Nor anything whose own words name a graduating class this student is
+        # not in. `W_CLASS_STATED_MISMATCH` claims in its own comment to be
+        # "large negative so it cannot be outrun by a tier-1 firm the student
+        # happens to like", and arithmetic says otherwise: tier 1 (26) + a
+        # stated track (26) + the school's own market (20) + a warm contact
+        # (14) - 25 = 61, well clear of MIN_SCORE, so a posting that says out
+        # loud "this is for the Class of 2027" could be recommended to a 2029
+        # student on the strength of knowing somebody there. Today the view
+        # layer filters those rows out before scoring (`Candidate.blocked`,
+        # from `views._eligibility`), which is why no live pick has ever shown
+        # it — a guarantee that lives entirely in the CALLER, for a promise
+        # this module makes about itself. Measured over all 2,599 open campus
+        # rows against the founder's profile, this exclusion and that filter
+        # disagree on zero rows; it is defence in depth for the next caller
+        # that scores without one, not a change of behaviour.
+        #
+        # A veto, deliberately, and only ever on the posting's STATED words —
+        # a programme year that merely implies a class still scores, still
+        # says "likely", and still shows. Silence never hides.
+        if stated_class_mismatch(profile, c):
+            continue
         # Nor anything whose deadline has already passed. A listing may
         # honestly stay on the board after its date — the firm still lists it,
         # and Coverage does not close what the source has not — but a PICK is
@@ -1051,11 +1255,17 @@ def recommend(
     picked: list[Recommendation] = []
     seen: dict[int, int] = {}
     for rec in out:
+        # Checked BEFORE the append, not after it. `if len(picked) >= limit:
+        # break` at the foot of the loop tests a list that has already grown,
+        # so `limit=0` returned one recommendation and `limit=-1` returned one
+        # too — a caller asking for nothing got something. `max_per_firm` is
+        # already floored correctly (its check precedes its own increment),
+        # which is why only this one was wrong.
+        if len(picked) >= limit:
+            break
         n = seen.get(rec.candidate.firm_id, 0)
         if n >= max_per_firm:
             continue
         seen[rec.candidate.firm_id] = n + 1
         picked.append(rec)
-        if len(picked) >= limit:
-            break
     return picked

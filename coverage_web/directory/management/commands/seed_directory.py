@@ -57,6 +57,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from directory.models import Firm, FirmDate
+from directory.timeline import parse_cycle
 from directory.seed_parsers import parse_firms_yaml, parse_timeline_yaml
 
 # The seed data used to be read live out of the founder's pre-Coverage project
@@ -248,11 +249,44 @@ class Command(BaseCommand):
                 if len(parts) != 3:
                     skipped += 1
                     continue
-                slug, cycle, event_kind = parts
+                slug, raw_cycle, event_kind = parts
                 firm = firm_by_slug.get(slug)
                 if firm is None:
                     skipped += 1
                     continue
+
+                # The `key:` middle is where `sa2028_ib` / `sa2028_hk` came
+                # from — this file is the writer that produced the slug
+                # spelling, while import_firm_dates produced the human one.
+                # Both now go through the same parser, so the yaml keeps its
+                # existing keys (nothing in seeds/ has to be rewritten) and the
+                # column holds one vocabulary. An unreadable key is skipped and
+                # named rather than written: with the cycle CHECK constraint in
+                # place a bad key would otherwise abort the whole seed run with
+                # an IntegrityError halfway through.
+                parsed = parse_cycle(raw_cycle)
+                if parsed is None:
+                    # NOT skipped. `ms/insight/insight_open` is the one live
+                    # key like this, and it is a real, dated, sourced event —
+                    # dropping it would take a genuine deadline off the Morgan
+                    # Stanley page to tidy up a key. Nor is it guessed into the
+                    # file's own `cycle: SA 2028`: the entry's note describes
+                    # the "2027 Internship Recruitment" series, so the file
+                    # header, the key and the note name three different things
+                    # and none of them is evidence for the others.
+                    #
+                    # It is written with no cycle, which is a state this column
+                    # has ("" = not stated), and listed by `manage.py
+                    # review_firm_date_cycles` until a human files it. Migration
+                    # 0014 did exactly this to the same row, so a re-seed and
+                    # the migrated database agree rather than fighting.
+                    self.stderr.write(self.style.WARNING(
+                        f"{slug}/{event_kind}: key names no readable cycle "
+                        f"({raw_cycle!r}) — stored with no cycle on file. "
+                        f"See `manage.py review_firm_date_cycles`."))
+                    cycle, track = "", ""
+                else:
+                    cycle, track = parsed
 
                 conf_label = str(entry.get("confidence", "")).strip()
                 history = [{
@@ -275,13 +309,15 @@ class Command(BaseCommand):
                 }
                 if dry:
                     exists = FirmDate.objects.filter(
-                        firm=firm, cycle=cycle, region=region, event_kind=event_kind
+                        firm=firm, cycle=cycle, track=track, region=region,
+                        event_kind=event_kind,
                     ).exists()
                     created += 0 if exists else 1
                     updated += 1 if exists else 0
                     continue
                 _, was_created = FirmDate.objects.update_or_create(
-                    firm=firm, cycle=cycle, region=region, event_kind=event_kind, defaults=defaults
+                    firm=firm, cycle=cycle, track=track, region=region,
+                    event_kind=event_kind, defaults=defaults,
                 )
                 created += 1 if was_created else 0
                 updated += 0 if was_created else 1

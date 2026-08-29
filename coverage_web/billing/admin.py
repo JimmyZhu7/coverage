@@ -11,11 +11,16 @@ class CreditLedgerAdmin(admin.ModelAdmin):
     job: pick the user, a positive `delta`, `kind="adjust"`, and a note in
     `props` if it matters, e.g. {"reason": "beta tester top-up"}.
 
-    Existing rows are read-only, never editable: this is an append-only
-    audit trail (billing/models.py's own docstring), and a row that could
-    be silently edited after the fact stops being one. A mistaken grant is
-    corrected with a second, opposite-sign row — same discipline
-    `analytics.ProductEvent` already gets — not by rewriting history.
+    Existing rows are read-only, never editable, AND never deletable: this
+    is an append-only audit trail (billing/models.py's own docstring), and a
+    row that could be silently edited OR removed after the fact stops being
+    one — deleting a row is a rewrite of history exactly like editing one,
+    and a worse one here, since `billing.credits._raw_balance` sums `delta`
+    over every row: delete a spend and the ledger hands a student back
+    credits they already used, silently, with no error and no trace. A
+    mistaken grant is corrected with a second, opposite-sign row — same
+    discipline `analytics.ProductEvent` already gets — not by rewriting
+    history in either direction.
     """
 
     list_display = ("user", "delta", "kind", "period", "created")
@@ -25,6 +30,9 @@ class CreditLedgerAdmin(admin.ModelAdmin):
     readonly_fields = ("created",)
 
     def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
         return False
 
 

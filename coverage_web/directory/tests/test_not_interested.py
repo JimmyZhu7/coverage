@@ -308,8 +308,16 @@ def test_a_dismissed_role_leaves_the_feed_and_is_counted_out_loud(client):
     body = client.get(reverse("opportunities")).content.decode()
 
     assert "Wealth Management Intern" not in body
-    # Never silently dropped: the scope line says how many and links to them.
-    assert 'you marked "not for me"' in body
+    # Never silently dropped — but the sentence that used to say so above the
+    # board is gone (2026-08-27, "take this thing away"). The count and the
+    # way back live on My Applications' own durable "Not for me" section now,
+    # which is where this guarantee is asked.
+    assert 'you marked "not for me"' not in body
+
+    applications_body = client.get(reverse("my_applications")).content.decode()
+    assert "Wealth Management Intern" in applications_body
+    assert "Not for me" in applications_body
+    assert 'scrub-count">1<' in applications_body
 
 
 @pytest.mark.django_db

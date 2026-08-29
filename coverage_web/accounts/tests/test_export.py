@@ -38,7 +38,8 @@ from assistant.models import (
 from billing.models import CreditLedger
 from capture.models import GmailConnection
 from crm.models import (
-    CalendarEvent, ChatDebrief, Contact, ContactMerge, Task, Touch, UserFirm,
+    BenchDismissal, CalendarEvent, ChatDebrief, Contact, ContactMerge, Task,
+    Touch, UserFirm,
 )
 from directory.models import Firm, Opportunity
 
@@ -150,6 +151,9 @@ def loaded(student, firm):
     CreditLedger.all_objects.create(
         user=student, delta=60, kind=CreditLedger.KIND_GRANT, period="2026-08",
     )
+    BenchDismissal.all_objects.create(
+        user=student, contact=live, opening_signature="deadline:2026-09-01",
+    )
     return live
 
 
@@ -182,6 +186,7 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
         "user_opportunities": "applications.csv",
         "tasks": "tasks.csv",
         "play_dismissals": "play_dismissals.csv",
+        "bench_dismissals": "bench_dismissals.csv",
         "chat_debriefs": "chat_debriefs.csv",
         "campaigns": "campaigns.csv",
         "campaign_contacts": "campaign_contacts.csv",
@@ -314,6 +319,16 @@ def test_the_previously_dropped_contact_columns_are_present(
 def test_firms_carry_their_tier(student, loaded):
     rows = _rows(_zip(student), "firms.csv")
     assert rows == [{"firm": "Test Bank", "tier": "1", "status": "target"}]
+
+
+def test_bench_dismissals_carry_the_contact_and_opening(student, loaded):
+    """`bench_dismissals.csv` exists (see `test_every_deletable_table_is_also_exportable`)
+    but that only proves the file is present, not that it carries anything
+    real. This is the content check: the parked contact and the opening
+    signature it was dismissed for."""
+    row = _rows(_zip(student), "bench_dismissals.csv")[0]
+    assert row["contact"] == "Live Person"
+    assert row["opening"] == "deadline:2026-09-01"
 
 
 def test_applications_carry_the_interview_dates(student, loaded):
@@ -571,3 +586,12 @@ def test_deletion_survives_autopilot_and_mail_fact_rows(student, firm):
     assert counts["mail_facts"] == 1
     assert counts["contact_proposals"] == 1
     assert counts["application_events"] == 1
+
+
+def test_deletion_counts_bench_dismissals(student, loaded):
+    """`BenchDismissal` rows must show up in the deletion receipt's counts,
+    not just get swept invisibly by the final `user.delete()` cascade — see
+    `test_every_private_model_is_covered_by_delete_order`'s docstring for
+    the bug this guards (the fixture's `loaded` state creates exactly one)."""
+    counts = services.delete_user_and_data(student)
+    assert counts["bench_dismissals"] == 1

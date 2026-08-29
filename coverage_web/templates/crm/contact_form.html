@@ -11,7 +11,11 @@
   .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4); }
   .cf-full { grid-column: 1 / -1; }
   .cf-card label { font-size: var(--fs-s); }
-  .cf-card input, .cf-card select, .cf-card textarea { width: 100%; }
+  /* `:not([type="checkbox"])` because this card holds one — "Always keep in
+     my daily queue". A bare `.cf-card input` ties on specificity with the
+     shared `input[type="checkbox"]` rule (coverage.css §11) and, sitting
+     later in the cascade, was stretching a 16px box across the column. */
+  .cf-card input:not([type="checkbox"]), .cf-card select, .cf-card textarea { width: 100%; }
   .cf-actions { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s4); }
   .cf-cancel { font-size: var(--fs-s); }
   .cf-err { color: var(--danger); font-size: var(--fs-xs); margin: 2px 0 var(--s2); }
@@ -23,9 +27,14 @@
 <div class="page cf-wrap">
   <header class="pagehead">
     <div class="pagehead-text">
-      <p class="pagehead-eyebrow">{% if mode == "edit" %}Edit{% else %}New{% endif %} contact</p>
+      {% comment %}The eyebrow says where you are, the way every other CRM
+      subpage's does. It used to read "New contact" / "Edit contact" over a
+      title saying "Add a Contact" / "Edit Contact" — the same two words
+      stacked on themselves, and no route back named anywhere.
+      {% endcomment %}
+      <p class="pagehead-eyebrow">Network</p>
       <h1 class="pagehead-title">{% if mode == "edit" %}Edit Contact{% else %}Add a Contact{% endif %}</h1>
-      <p class="pagehead-sub">{% if mode == "edit" %}Update {{ contact.name }}.{% elif quick %}Ten seconds: who, where, one line so you remember them. Everything else can wait.{% else %}Someone you met: a coffee chat, a recruiter, an alum. Warmth and cadence take it from here.{% endif %}</p>
+      <p class="pagehead-sub">{% if mode == "edit" %}Update {{ contact.name }}.{% elif quick %}Ten seconds: who, where, one line so you remember them.{% else %}Someone you met: a coffee chat, a recruiter, an alum. Warmth and cadence take it from here.{% endif %}</p>
     </div>
   </header>
 

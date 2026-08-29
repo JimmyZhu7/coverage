@@ -335,7 +335,24 @@ def _label_for(touches: list) -> str:
         raw = [(getattr(t, attr) or "").strip() for t in touches]
         raw = [_GMAIL_MARKER_RE.sub("", r).strip() for r in raw if r]
         if raw:
-            return max(set(raw), key=raw.count)[:255]
+            # `sorted(set(...))`, not `set(...)`. `max` returns the FIRST
+            # maximal element in iteration order, and a set of strings iterates
+            # in an order derived from `hash()` — which Python randomizes per
+            # process unless PYTHONHASHSEED is pinned. So when two raw subjects
+            # tie on frequency (a merge sent under two lines, or any group of
+            # two), the label this returns differed BETWEEN WEB WORKERS.
+            # Verified: the same two-element input produced both answers across
+            # 12 hash seeds.
+            #
+            # "Display only" (below) is why this is not a data bug, but the
+            # display in question is a Settings card asking the user to
+            # classify a send they made weeks ago — the label is the entire
+            # means of recognising which send it was, and a question that
+            # renames itself between two page loads is a question nobody should
+            # be asked to answer. Sorting first makes the tiebreak the
+            # alphabetically-first subject: arbitrary, but the same arbitrary
+            # every time.
+            return max(sorted(set(raw)), key=raw.count)[:255]
     return ""
 
 

@@ -19,7 +19,7 @@
       <h1 class="pagehead-title">Not Related to Recruitment</h1>
       <p class="pagehead-sub">
         Nothing on these rows connects the person to the tracks you recruit
-        in — professors, campus offices, roles outside the industry. They are
+        in: professors, campus offices, roles outside the industry. They are
         off your board and out of your queue. Nothing is deleted: every touch
         stays on the record, they still turn up in search, and one click
         below overrides the rule for good.
@@ -55,7 +55,13 @@
               <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
               <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}</span>
             </div>
-            <span class="arch-when">
+            {% comment %}
+            `title=` so the rule's cited reason is still readable when it
+            runs past the 64-char clip — this column exists so the user can
+            check the rule's work, and a silently truncated quote defeats
+            that. Only set when the reason is actually cut.
+            {% endcomment %}
+            <span class="arch-reason"{% if c.hide_reason|length > 64 %} title="{{ c.hide_reason }}"{% endif %}>
               {{ c.hide_reason|truncatechars:64 }}
             </span>
             {% comment %}
