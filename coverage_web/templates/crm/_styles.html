@@ -1244,7 +1244,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .firm-card { background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s3) var(--s4); cursor: grab;
     height: 100%; overflow: hidden;
-    display: flex; flex-direction: column; gap: var(--s2); box-shadow: var(--shadow-1);
+    display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-1);
     transition: box-shadow var(--t-med), transform var(--t-med), opacity var(--t-fast); }
   .firm-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
   .firm-card.dragging { opacity: 0.5; cursor: grabbing; }
@@ -1281,7 +1281,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      read at a glance, and a stacked line spends a whole row saying what fits
      beside the bar. The row is as tall as the 10px sockets; the bar stays
      6px and centres in it. */
-  .firm-card { gap: 6px; }
   .firm-card-foot { display: flex; align-items: center; gap: var(--s2);
     margin-top: auto; flex: none; }
   /* 10px/1 keeps the foot row a flat 10px, same as the sockets beside it. */

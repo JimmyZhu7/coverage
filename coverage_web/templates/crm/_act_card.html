@@ -1,7 +1,7 @@
 {% load textstyle %}
 {% comment %}
-One act card. `a` is a cadence action dict dressed by crm.views._build_actions
-(contact, label, reason, warmth_pct, mailto, has_draft, touch_kind, priority,
+One act card. `a` is a cadence action dict dressed by crm.today._build_actions
+(contact, label, reason, mailto, has_draft, touch_kind, priority,
 last_kind, last_business_days, closes_on, pairs_with_debrief). The buttons post
 to crm:today_act; hx-target/hx-swap/hx-headers are inherited from
 #today-cockpit, so a click re-renders the whole cockpit (queue + pace +

@@ -1352,9 +1352,6 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 "tier": tier,
                 "label": label,
                 "cards": cards,
-                # What this tier is committing the user to, in advocates.
-                # Only for real tiers: "Unranked" is not a commitment.
-                "cost": coverage.tier_cost(cards, adv_target) if tier else None,
             })
 
     # --- Coverage Gaps strip (top of the page) ---------------------------
@@ -1458,7 +1455,6 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             # Said once per panel, in the module that builds the links, so
             # the promise and the code can't drift apart.
             "sourcing_note": sourcing.DISCLOSURE,
-            "adv_target": adv_target,
             "tier_sections": tier_sections,
             "firm_total": len(user_firms),
             "sections": sections,
@@ -2056,7 +2052,6 @@ def _parked_cohorts(user) -> list[dict]:
         if t is not None:
             m = _MANUAL_OVERRIDE_PARSE.match(t.note or "")
             human = ((m.group("human") if m else "") or "").lstrip()
-            who = "Your advisor" if _ASSISTANT_NOTE.match(human) else "You"
             label = human or "Parked"
             minute = timezone.localtime(t.ts).replace(second=0, microsecond=0)
             key = (minute, label)
@@ -2065,11 +2060,11 @@ def _parked_cohorts(user) -> list[dict]:
             # No audit row on file — a row imported already parked, or one
             # older than this feature's own audit trail. Its own honest
             # cohort rather than silently folded into "Parked".
-            who, label, minute, sort_ts = "", "No park record on file", None, None
+            label, minute, sort_ts = "No park record on file", None, None
             key = (None, label)
         group = groups.get(key)
         if group is None:
-            group = {"label": label, "who": who, "when": minute, "contacts": []}
+            group = {"label": label, "when": minute, "contacts": []}
             groups[key] = group
             order.append((sort_ts, key))
         group["contacts"].append(c)
@@ -2519,7 +2514,6 @@ def _contact_live_context(
 
     return {
         "contact": contact,
-        "touches": touches,
         "touch_rows": touch_rows,
         "state_line": _status_line(contact),
         "park_note": _park_note(contact),

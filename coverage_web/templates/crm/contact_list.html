@@ -313,7 +313,13 @@
 
   {# ---- Firm Coverage by tier (pick or drag) ---- #}
   <section class="net-coverage">
-    <h2 class="strip-title" title="Tier drives your action priorities: the queue works Tier 1 firms first. Pick a tier on a card, or drag it between lanes.">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
+    {% comment %}
+    No title= here — the drag-to-retier explainer already sits on every
+    tier's own label (reaching an empty lane too) and on every firm card
+    (the actual drag target). A third copy on this header explained nothing
+    those two don't already cover before you reach a single tier section.
+    {% endcomment %}
+    <h2 class="strip-title">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
       <div class="net-panel">
       {% comment %}
       THE LEGEND that used to open this panel is gone. Four warmth dots and
