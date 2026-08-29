@@ -92,20 +92,18 @@
   /* Now a real <label for> on every row that owns a single control (see the
      a11y note in the markup); the class carries the styling either way. */
   .set-row-label { display: block; font-weight: var(--w-med); font-size: var(--fs-m); }
-  /* The Credits card's plan badge (.pill.plan-pro/.plan-free, coverage.css)
-     sits inline after the label text — same margin-left pattern as
-     pricing.html's .cmp-badge. */
-  .set-row-label .pill { margin-left: var(--s2); vertical-align: 1px; }
+  /* Plan badges (.pill.plan-pro/.plan-free/.stale, coverage.css) sit inline
+     after the text they qualify — the Credits card's row label, and the Gmail
+     Live card's subtitle. Same margin-left pattern as pricing.html's
+     .cmp-badge. */
+  .set-row-label .pill, .set-head p .pill { margin-left: var(--s2);
+    vertical-align: 1px; }
   .set-row-desc { color: var(--ink-3); font-size: var(--fs-s); margin-top: 2px; }
   .set-row-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: 24px; font-weight: var(--w-med); color: var(--accent-ink); flex: none; }
-  .set-row-sub { color: var(--ink-3); font-size: var(--fs-xs); }
   .set-row-control { flex: none; display: flex; gap: var(--s2); align-items: center; }
   /* Every tappable control on this page clears 44px. */
   .set-row-control .btn, .set-save .btn { min-height: 44px; }
-
-  .set-hint { color: var(--ink-3); font-size: var(--fs-s); margin: var(--s2) 0 0;
-    max-width: 60ch; }
 
   /* Profile form: two-up where it reads better (school + class year). */
   .set-form .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4); }
@@ -177,10 +175,6 @@
      edge of whatever it spans, so a full-width Advocate Target threw its
      input the entire width of the card away from its own label — the exact
      defect this layout exists to remove. Half a row of air costs nothing. */
-
-  /* Angles textarea: full width of the card body, monospace-free. */
-  .set-stack { padding: var(--s2) 0; }
-  .set-stack textarea { width: 100%; margin: 0; }
 
   /* Visually hidden, still read aloud — the copy-button's live region. */
   .set-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -1415,9 +1409,15 @@
                aria-labelledby="gmail-live-h">
         <div class="set-head">
           <h2 id="gmail-live-h">Gmail Live</h2>
+          {% comment %}`.pill.stale`, not pricing.html's `.plan-badge soon` —
+          that class is defined inside pricing's own {% templatetag openblock %} block head {% templatetag closeblock %}
+          and matches nothing here, so the badge rendered as bare text carrying
+          two inline styles written to undo rules that were never applied.
+          `.pill.stale` (coverage.css §8) is the same token pair, globally.
+          {% endcomment %}
           <p>Real-time reply and bounce detection, straight from your inbox.
-            {% if gmail_live.trial_days_left %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro trial &middot; {{ gmail_live.trial_days_left }} day{{ gmail_live.trial_days_left|pluralize }} left</span>
-            {% elif not gmail_live.is_pro %}<span class="plan-badge soon" style="position:static; display:inline-block; margin-left:var(--s2);">Pro</span>{% endif %}</p>
+            {% if gmail_live.trial_days_left %}<span class="pill stale">Pro trial &middot; {{ gmail_live.trial_days_left }} day{{ gmail_live.trial_days_left|pluralize }} left</span>
+            {% elif not gmail_live.is_pro %}<span class="pill stale">Pro</span>{% endif %}</p>
         </div>
         <div class="set-body">
           {% comment %}
