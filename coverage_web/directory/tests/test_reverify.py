@@ -20,7 +20,8 @@ from directory.models import Firm, Opportunity, ScrapeRun
 _UNSET = object()
 
 
-def _opp(firm, url, *, days_old=10, deadline=None, deadline_checked_days_old=_UNSET):
+def _opp(firm, url, *, days_old=10, deadline=None, deadline_checked_days_old=_UNSET,
+         confidence=0.0):
     """`deadline_checked_days_old` defaults to mirroring `days_old` — both
     fields age together, the pre-split shape existing callers assume. Pass
     `None` explicitly to build the shape the routine `scrape` pass actually
@@ -36,7 +37,7 @@ def _opp(firm, url, *, days_old=10, deadline=None, deadline_checked_days_old=_UN
         deadline_checked_ts = timezone.now() - timedelta(days=deadline_checked_days_old)
     o = Opportunity.objects.create(
         firm=firm, url=url, title="Summer Analyst", bucket="internship", status="open",
-        deadline=deadline, deadline_precision="day" if deadline else "",
+        deadline=deadline, deadline_precision="day" if deadline else "", confidence=confidence,
     )
     Opportunity.objects.filter(pk=o.pk).update(
         last_checked=ts, last_verified=ts, deadline_checked_at=deadline_checked_ts,
@@ -45,9 +46,9 @@ def _opp(firm, url, *, days_old=10, deadline=None, deadline_checked_days_old=_UN
     return o
 
 
-def _result(url, verdict, deadline_dates=None):
+def _result(url, verdict, deadline_dates=None, provider="greenhouse"):
     return VerificationResult(
-        provider="greenhouse", url=url, result=verdict, evidence="test",
+        provider=provider, url=url, result=verdict, evidence="test",
         deadline_dates=deadline_dates or [],
     )
 
@@ -142,6 +143,81 @@ def test_reverify_leaves_deadline_alone_when_the_provider_states_none(monkeypatc
 
     dated.refresh_from_db()
     assert dated.deadline == date(2026, 5, 24)
+
+
+@pytest.mark.django_db
+def test_reverify_text_read_deadline_does_not_inherit_a_stale_high_confidence(monkeypatch):
+    """PINS A FIXED BUG: a row first ingested with a structured, 1.0-confidence
+    deadline that later drifted (the firm moved the date and the connector's
+    list endpoint never carries a deadline field to notice) gets corrected by
+    `reverify` through a provider whose `verify()` reads the new date out of
+    the posting's own TEXT by regex (tal.net, Workday) — the same 0.6 tier
+    `ingest._apply_opportunity` gives a prose reading. The old code left
+    `confidence` untouched on this branch, so the corrected date inherited the
+    stale 1.0 the ORIGINAL structured field earned — the exact "a prose
+    reading inherited a board-published confidence" bug `ingest.py` was fixed
+    for, just on this write path. Confirmed live: 29 of 31 open rows whose
+    deadline `reverify` most recently moved sit at confidence 1.0 while their
+    date came from tal.net's or Workday's own text read."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    stale = _opp(firm, "https://bmo.wd3.myworkdayjobs.com/x",
+                 deadline=date(2026, 5, 24), confidence=1.0)
+
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-08-30"],
+                             provider="workday"),
+    )
+    call_command("reverify")
+
+    stale.refresh_from_db()
+    assert stale.deadline == date(2026, 8, 30)
+    assert stale.confidence == 0.6, (
+        "a Workday text-read deadline must carry the text tier, not the "
+        "1.0 the row's earlier structured-field date happened to hold")
+
+
+@pytest.mark.django_db
+def test_reverify_structured_provider_deadline_earns_full_confidence(monkeypatch):
+    """The other half of the same split: greenhouse/oracle read a genuinely
+    structured API field, so a date they correct earns 1.0, even starting
+    from a lower confidence (e.g. an original prose-derived 0.6)."""
+    firm = Firm.objects.create(slug="acme", name="Acme")
+    row = _opp(firm, "https://acme.greenhouse.io/x",
+               deadline=date(2026, 5, 24), confidence=0.6)
+
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-08-30"],
+                             provider="greenhouse"),
+    )
+    call_command("reverify")
+
+    row.refresh_from_db()
+    assert row.deadline == date(2026, 8, 30)
+    assert row.confidence == 1.0
+
+
+@pytest.mark.django_db
+def test_reverify_reconfirming_the_same_date_never_downgrades_confidence(monkeypatch):
+    """UNCHANGED case: a board-published 1.0 date merely corroborated by a
+    0.6-tier text read (the date did not move) must not lose certainty —
+    mirrors `ingest._apply_opportunity`'s own no-downgrade rule for the
+    identical shape."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    row = _opp(firm, "https://bmo.wd3.myworkdayjobs.com/y",
+               deadline=date(2026, 8, 30), confidence=1.0)
+
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-08-30"],
+                             provider="workday"),
+    )
+    call_command("reverify")
+
+    row.refresh_from_db()
+    assert row.deadline == date(2026, 8, 30)
+    assert row.confidence == 1.0, "a reconfirmed date must not lose its earlier certainty"
 
 
 @pytest.mark.django_db
@@ -288,3 +364,95 @@ def test_refresh_can_skip_the_network_stage_but_still_extracts(monkeypatch):
     call_command("refresh", no_enrich=True)
     assert "enrich_postings" not in calls
     assert "extract_facts" in calls
+
+
+# ---------------------------------------------------------------------------
+# `--ids` is unfiltered by design, so both verdicts need an answer for a row
+# that is ALREADY closed. The routine query never selects one; --ids can.
+# ---------------------------------------------------------------------------
+
+def _closed_opp(firm, url, *, closed_days_ago=5):
+    o = Opportunity.objects.create(
+        firm=firm, url=url, title="Summer Analyst", bucket="internship",
+        status="closed",
+    )
+    when = timezone.now() - timedelta(days=closed_days_ago)
+    Opportunity.objects.filter(pk=o.pk).update(
+        status="closed", closed_at=when, last_checked=when, last_verified=when,
+    )
+    o.refresh_from_db()
+    return o
+
+
+@pytest.mark.django_db
+def test_reverify_ids_on_an_already_closed_row_is_idempotent(monkeypatch):
+    """A "closed" verdict on a row that is already closed is a RE-CHECK, not
+    a move. It used to be written as one anyway: an `OpportunityChange` of
+    `status: closed -> closed` landed in the tracked-role timeline and
+    `closed_at` was reset to now — so a student watching that role saw a
+    fresh "closed" event every time an audit re-ran the command, and the date
+    it actually closed walked forward one run at a time."""
+    from directory.models import OpportunityChange
+
+    firm = Firm.objects.create(slug="acme", name="Acme")
+    dead = _closed_opp(firm, "https://x/already-dead")
+    original_close = dead.closed_at
+    monkeypatch.setattr(reverify_mod, "verify", lambda url: _result(url, "closed"))
+
+    call_command("reverify", ids=str(dead.id))
+    call_command("reverify", ids=str(dead.id))
+
+    dead.refresh_from_db()
+    assert dead.status == "closed"
+    assert dead.closed_at == original_close, "the real close date must not drift"
+    assert not OpportunityChange.objects.filter(opportunity=dead).exists()
+    # The check itself is still recorded — that is what these two fields are.
+    assert dead.deadline_checked_at is not None
+
+
+@pytest.mark.django_db
+def test_reverify_never_marks_a_closed_row_freshly_verified(monkeypatch, capsys):
+    """The honesty contract from the other side. `reopen_confirmed_live_rows`
+    exists for exactly this evidence and records what it does; a staleness
+    sweep stamping `last_verified` on a closed row instead would put
+    "verified today" on a card the board still shows as closed, and refresh
+    its deadline into a live-looking countdown. Two commands reading one
+    provider answer must not write two different stories about one row."""
+    firm = Firm.objects.create(slug="bmo", name="BMO")
+    row = _closed_opp(firm, "https://bmo.wd3.myworkdayjobs.com/live-really")
+    was_verified = row.last_verified
+    monkeypatch.setattr(
+        reverify_mod, "verify",
+        lambda url: _result(url, "verified-open", deadline_dates=["2026-09-04"]),
+    )
+
+    call_command("reverify", ids=str(row.id))
+
+    row.refresh_from_db()
+    assert row.status == "closed", "reopening is not this command's call"
+    assert row.closed_at is not None
+    assert row.last_verified == was_verified
+    assert row.deadline is None, "no live countdown on a closed row"
+    assert "reopen_confirmed_live_rows" in capsys.readouterr().out
+
+
+@pytest.mark.django_db
+def test_reverify_still_closes_an_open_row_exactly_once(monkeypatch):
+    """The over-reach guard: the new same-status short-circuits must not stop
+    a genuine open -> closed transition from being written and recorded."""
+    from directory.models import OpportunityChange
+
+    firm = Firm.objects.create(slug="acme", name="Acme")
+    live = _opp(firm, "https://x/going-dark")
+    monkeypatch.setattr(reverify_mod, "verify", lambda url: _result(url, "closed"))
+
+    call_command("reverify", ids=str(live.id))
+    live.refresh_from_db()
+    first_close = live.closed_at
+    assert live.status == "closed"
+    assert OpportunityChange.objects.filter(opportunity=live, field="status").count() == 1
+
+    call_command("reverify", ids=str(live.id))
+    live.refresh_from_db()
+    assert live.closed_at == first_close
+    assert OpportunityChange.objects.filter(opportunity=live, field="status").count() == 1

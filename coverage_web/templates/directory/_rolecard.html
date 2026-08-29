@@ -67,20 +67,33 @@ without cutting text off.
     for the identical role. The resolver also fills the 51 cards that rendered
     an entirely empty `.rolecard-sub` but whose region we do hold.
     {% endcomment %}
+    {% comment %}
+    `place.more` rides OUTSIDE `smart_location`: it is copy we wrote, and that
+    filter cases text a careers board wrote, so "+5 more" came back "+5 More".
+    {% endcomment %}
     {% if r.place.text %}<span class="rolecard-loc{% if not r.place.exact %} is-market{% endif %}"
-      {% if r.place.why %}title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}</span>{% endif %}
+      {% if r.place.why %}title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}{% if r.place.more %} +{{ r.place.more }} more{% endif %}</span>{% endif %}
   </div>
 
   {% comment %}
-  One meta row, always present: status then provenance. "First seen"
-  used to ALSO ride as a badge in the top row, so 857 cards stated
+  One meta row, always present: status, then provenance, trailing. "First
+  seen" used to ALSO ride as a badge in the top row, so 857 cards stated
   the same fact twice — once as "First seen 3d ago" and again as
-  "· seen 3d ago". Said once, here, next to the status it
-  qualifies.
+  "· seen 3d ago". Said once, here.
 
   It is deliberately "first seen", not "posted": first_seen is when
   the row entered OUR database. A bulk import once wore "New" on
   794 of 805 roles at once, which is the bug this wording closes.
+
+  It sits at the FAR end of the row now, not beside the deadline it used to
+  lean on: one names provenance, the other names the decision, and a founder
+  review flagged the two competing for the same glance. `margin-left: auto`
+  on `.meta-seen` (see _styles.html) pushes it — and the Read button after
+  it — away from the status, so the row reads as "what to do" (left) then
+  "where this came from, and how to act on it" (right), instead of three
+  equally-weighted facts in a line. The words are unchanged: still visible
+  text a screen reader reads plainly, no title-only caveat needed for a fact
+  this quiet.
   {% endcomment %}
   {% comment %}
   FACT CHIPS — what the posting itself says about applying: sponsorship, pay,
@@ -127,7 +140,20 @@ without cutting text off.
       one of them.{% endcomment %}
       <span class="meta-status meta-undated">No date posted</span>
     {% endif %}
-    {% if r.seen_days is not None %}
+    {% comment %}
+    …and only where nothing better answers the same question. "First seen"
+    measures how long a role has been sitting in front of a student, which is
+    the ONLY time signal an undated role has — 86% of feed cards say "No date
+    posted" and 3% "Rolling", and for those the age is the whole answer to
+    "has this been here a while".
+
+    On a DATED card it is noise wearing the same grey as the countdown: the
+    deadline already answers when to act, better and about the ROLE rather
+    than about our scraper. 288 of 2,599 feed cards were carrying both, so
+    "Closes in 3 days · first seen 35d ago" spent half the meta row arguing
+    with itself. The fact isn't lost — the countdown supersedes it.
+    {% endcomment %}
+    {% if r.seen_days is not None and not r.dated %}
       <span class="meta-seen">· first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>
     {% endif %}
     {% comment %}
@@ -150,5 +176,11 @@ without cutting text off.
   a glance and costs no vertical space, so a dated card and a
   rolling one measure identically.
   {% endcomment %}
-  {% if r.dated %}<span class="rolecard-fuse fuse-{{ r.level }}"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>{% endif %}
+  {% comment %}
+  Gated on `fuse_pct`, not on `dated`. A fuse burns down to a specific
+  afternoon, so `_urgency_item` sets it to None on a date whose precision
+  never named a day ("Sep 2026") — those rows are dated and still get no
+  fuse. Gating on `dated` would have drawn `--fuse: None%`.
+  {% endcomment %}
+  {% if r.fuse_pct is not None %}<span class="rolecard-fuse fuse-{{ r.level }}"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>{% endif %}
 </div>

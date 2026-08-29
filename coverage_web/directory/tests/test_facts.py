@@ -15,7 +15,8 @@ import pytest
 from directory.facts import (extract_assessment, extract_cover_letter,
                              extract_duration, extract_facts, extract_gpa,
                              extract_grad_years, extract_languages,
-                             extract_pay, extract_rolling, extract_study_stage)
+                             extract_pay, extract_rolling, extract_study_stage,
+                             extract_transcript)
 
 
 # --- GPA -------------------------------------------------------------------
@@ -42,6 +43,40 @@ def test_a_gpa_scale_is_not_a_gpa_requirement():
 
 def test_a_number_before_the_word_is_the_cutoff():
     assert extract_gpa("cumulative 3.2 GPA or above")["value"] == "3.2"
+
+
+def test_a_dual_scale_gpa_reads_the_4_0_scale_bar():
+    """Live on HSBC, both open roles that share this template: "a minimum
+    GPA of 4.0/5.0 or 3.2/4.0" states one bar twice, once per grading scale.
+    The forward pattern grabbed the nearest decimal (4.0, the numerator of
+    the 5.0-scale reading) and the chip rendered "GPA 4.0" — a near-perfect
+    bar — for a posting whose 4.0-scale floor (what every other GPA chip on
+    the board assumes, since none ever prints a denominator) is 3.2, the
+    ordinary gap between "top of your class" and "solidly good"."""
+    got = extract_gpa(
+        "Have obtained, or expect to achieve, a minimum GPA of 4.0/5.0 or "
+        "3.2/4.0 (or overseas equivalent, as shown on your official "
+        "university transcript).")
+    assert got["value"] == "3.2"
+
+
+def test_a_dual_scale_gpa_with_the_4_0_reading_first_is_unaffected():
+    """The other order of the same statement: when the 4.0-scale fraction is
+    already the one the forward pattern captured, nothing should move."""
+    got = extract_gpa("a minimum GPA of 3.2/4.0 or 4.0/5.0")
+    assert got["value"] == "3.2"
+
+
+def test_a_single_fraction_gpa_is_not_mistaken_for_a_dual_scale_statement():
+    """"3.0/4.0" with nothing following it is the ordinary single-scale
+    shape `test_a_gpa_scale_is_not_a_gpa_requirement`'s sibling covers
+    elsewhere — the dual-scale check must not fire on it just because a
+    denominator happens to follow the captured number."""
+    got = extract_gpa(
+        "Qualifications and Skills : Minimum cumulative GPA of 3.0/4.0 "
+        "Excellent problem-solving, communication, teamwork, and "
+        "analytical skills 0-1 years.")
+    assert got["value"] == "3.0"
 
 
 def test_a_bare_scale_states_no_requirement():
@@ -288,6 +323,40 @@ def test_a_language_explicitly_not_required_is_not_a_wall():
     )["value"] == "Mandarin"
 
 
+def test_a_contracted_negation_is_still_a_negation():
+    """Regression test for the confirmed PwC Canada defect: every co-op/
+    intern posting on this template runs "We'd love it even more if you're
+    bilingual in English and French, however this isn't a requirement" —
+    the same negation shape `test_a_language_explicitly_not_required_is_
+    not_a_wall` already covers, spelled as a contraction. The old guard
+    only recognised the standalone word "not"; "isn't" contains no such
+    word, so the gate never fired, and a SEPARATE gap meant it would not
+    have mattered anyway — "requirement" (the noun this posting states)
+    does not contain the substring "required" (the adjective the old gate's
+    keyword list held), so the old code needed both gaps closed at once.
+    Confirmed live: 42 of 214 open `language` facts (all PwC Canada) carried
+    this exact false "French" requirement before the fix."""
+    assert extract_languages(
+        "We'd love it even more if you're bilingual in English and French, "
+        "however this isn't a requirement"
+    ) is None
+    # The full family of contractions, not just "isn't".
+    for sentence in (
+        "Fluency in German doesn't matter — it isn't required for this role.",
+        "German isn't essential; English is what we need.",
+        "Fluency in French wasn't essential for this cohort.",
+    ):
+        assert extract_languages(sentence) is None
+
+
+def test_a_genuine_requirement_survives_an_unrelated_contraction():
+    """The widened gate must not swallow a real requirement just because a
+    contraction appears anywhere nearby."""
+    assert extract_languages(
+        "Fluency in Mandarin is required. It isn't optional for this desk."
+    )["value"] == "Mandarin"
+
+
 # --- Programme length --------------------------------------------------
 # Regression test for the confirmed McKinsey id=1946 / Morgan Stanley id=1852
 # defect: the mandatory digit group in `_WEEKS` sat immediately before
@@ -343,6 +412,54 @@ def test_an_optional_cover_letter_is_not_a_requirement():
 
 def test_a_cover_letter_explicitly_not_required_is_not_a_requirement():
     assert extract_cover_letter("A cover letter is not required.") is None
+
+
+def test_a_negation_ahead_of_the_trigger_word_is_still_a_negation():
+    """Closed pre-emptively: `_COVER_NO` only ever looked for a negation
+    AFTER "cover letter" ("cover letter ... not required"); "we do NOT
+    REQUIRE a cover letter" states the same thing with the negation ahead
+    of the trigger word `_COVER_YES` matches on, the identical shape
+    `extract_languages`' `_LANG_NEGATED` was fixed for and confirmed live
+    on 42 PwC Canada rows. No live posting has tripped this one yet, but the
+    same phrasing recurring elsewhere in this module is exactly what that
+    fix taught."""
+    assert extract_cover_letter(
+        "We do not require a cover letter for this role.") is None
+    assert extract_cover_letter(
+        "You are not required to include a cover letter.") is None
+    assert extract_cover_letter(
+        "A cover letter isn't required for this application.") is None
+    # Unaffected: a real requirement stays a requirement.
+    assert extract_cover_letter(
+        "Please submit your CV and cover letter.")["value"] == "Cover letter"
+
+
+# --- Transcript --------------------------------------------------------------
+
+def test_a_required_transcript_is_read():
+    assert extract_transcript(
+        "Please upload an unofficial transcript with your application."
+    )["value"] == "Transcript"
+
+
+def test_an_optional_transcript_is_not_a_requirement():
+    assert extract_transcript("Transcripts are optional at this stage.") is None
+
+
+def test_a_transcript_explicitly_not_required_is_not_a_requirement():
+    assert extract_transcript("A transcript is not required.") is None
+
+
+def test_a_transcript_negation_ahead_of_the_trigger_word_is_not_a_requirement():
+    """Same shape, same fix, as the cover-letter case above."""
+    assert extract_transcript(
+        "We do not require a transcript at this stage of the process.") is None
+    assert extract_transcript(
+        "Please note we do not require you to submit a transcript.") is None
+    # Unaffected: a real requirement stays a requirement.
+    assert extract_transcript(
+        "Please upload an unofficial transcript with your application."
+    )["value"] == "Transcript"
 
 
 # --- Assessments -----------------------------------------------------------

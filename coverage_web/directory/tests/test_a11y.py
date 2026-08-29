@@ -144,7 +144,7 @@ _TEXT_PAIRS = [
     ("ink-2", "paper"), ("ink-2", "surface"),
     ("ink-3", "paper"), ("ink-3", "surface"),
     ("accent", "paper"), ("accent", "surface"),
-    ("on-accent", "accent"),
+    ("on-accent", "accent"), ("on-accent-2", "accent"),
     ("band-cold-t", "band-cold-s"),
     ("conf-unrated-t", "conf-unrated-s"),
     ("fresh-t", "fresh-s"),

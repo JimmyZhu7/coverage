@@ -16,19 +16,17 @@
       <p class="pagehead-eyebrow">Today</p>
       <h1 class="pagehead-title">Autopilot</h1>
       <p class="pagehead-sub">
-        What the AI decided about your inbox, and the exact line each
-        decision stands on. It decides on its own; nothing touches your
-        network until your one tap on Today. Anything it applied, one click
-        below reverses — and once you override it on a person, it never
-        decides about them again.
+        What the AI decided about your inbox, and the line each
+        decision stands on. Nothing touches your network until your one tap
+        on Today. One click below reverses anything it applied, and once you
+        override it on a person it never decides about them again.
       </p>
     </div>
   </header>
 
   {% if not runs %}
     <div class="empty">
-      <p>No runs yet. After a mailbox scan, Autopilot reviews the new cards
-      and its work shows up here.</p>
+      <p>No runs yet. Autopilot reviews new cards after a mailbox scan.</p>
       <p><a href="{% url 'crm:week' %}">Back to Today</a></p>
     </div>
   {% else %}
@@ -69,7 +67,7 @@
                 <span class="arch-meta">
                   {% if d.decision == "accept" %}{% if d.status == "applied" %}Added{% elif d.status == "undone" %}Added, then undone by you{% else %}Would add{% endif %}{% else %}Left for you{% endif %}
                   {% if d.detected_by == "ai" %} · confidence {{ d.confidence|floatformat:2 }}{% endif %}
-                  {% if d.overridden %} · your override — never re-decided{% endif %}
+                  {% if d.overridden %} · your override, never re-decided{% endif %}
                 </span>
               </div>
               <span class="arch-when">
@@ -80,7 +78,7 @@
                 <form method="post" action="{% url 'crm:autopilot_undo' d.pk %}">
                   {% csrf_token %}
                   <button type="submit" class="btn"
-                          title="Reverse exactly what this decision did and put the card back on Today. Autopilot never decides about this person again.">Undo</button>
+                          title="Reverses what this decision did and puts the card back on Today. Autopilot never decides about this person again.">Undo</button>
                 </form>
               {% endif %}
             </div>

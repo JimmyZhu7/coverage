@@ -90,7 +90,33 @@ _PERSON_TRACK_MARKERS: tuple[tuple[str, str], ...] = (
      r"|\becm\b|\bdcm\b", "ib"),
     # "Global Markets Analyst", "Equity Research", "S&T" — markets seats the
     # posting vocabulary spells differently.
-    (r"\bs&t\b|\bglobal markets\b|\bequity research\b|\bhedge fund\b", "st"),
+    #
+    # THE DESK NAMES ARE HERE BECAUSE THE HIDE LIST CONTAINS `\bsales\b`, and
+    # ordering is this module's whole safety mechanism: a keep-signal has to
+    # fire BEFORE `_OFF_TRACK_ROLE_RE` is consulted or the person is hidden.
+    # The docstring below claims "'Equities Sales' keeps on 'equities' before
+    # 'sales' is ever consulted" — true, but only because `role_function`
+    # happens to recognise that one product word, and the protection does not
+    # generalise. Measured against the classifier as it stood: "Credit Sales",
+    # "Prime Brokerage Sales" and "Structured Products Sales" all reached
+    # `_OFF_TRACK_ROLE_RE` and were HIDDEN. Those are sell-side markets seats
+    # on `st`, one of the six tracks Coverage covers — the wrongly-hidden
+    # banker this module's stated asymmetry calls the expensive error, and it
+    # was firing on the track whose people sign their titles with the word the
+    # hide list bans.
+    #
+    # Every entry names a DESK, never a word that merely co-occurs with one:
+    # a product name (`fixed income`, `structured products`, `prime
+    # brokerage`), or a product qualifying `sales` (`credit sales`, `fx
+    # sales`). A bare "Sales" still reaches the hide list and still hides the
+    # verified Amazon row, because a bare "Sales" names no desk.
+    (r"\bs&t\b|\bsales (?:&|and) trading\b|\bglobal markets\b"
+     r"|\bequity research\b|\bhedge fund\b"
+     r"|\bprime brokerage\b|\bstructured products?\b|\bfixed income\b"
+     r"|\bforeign exchange\b|\bderivatives\b|\bcommodities\b"
+     r"|\b(?:credit|rates|fx|equity|equities|securities|institutional|flow"
+     r"|cross[- ]asset|municipal|convertible|emerging markets)\s+sales\b",
+     "st"),
     (r"\bpe\b", "pe"),
     # The study-toward vocabulary: finance-club peers ("Trojan Investing
     # Society", "finance/restructuring interest club", "GIS student investing

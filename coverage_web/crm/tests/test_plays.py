@@ -1,4 +1,8 @@
-"""Today "plays": a dated world fact joined to the student's own people.
+"""The Today board: firm-level facts worth acting on today.
+
+Two kinds, one lane and one card anatomy — a confirmed dated firm event
+joined to the student's own people there, and a tiered firm where they know
+nobody. See `crm.today._board`.
 
 THE MEASURED GAP. The founder's Today page rendered zero cards the week he
 sent ~50 personalised coffee-chat requests — nothing was DUE, and the cadence
@@ -23,8 +27,11 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
-from crm.models import Contact, PlayDismissal
-from crm.today import PLAYS_MAX, _cockpit_context, _plays
+from crm.models import Contact, PlayDismissal, Touch, UserFirm
+from crm.today import (
+    BOARD_COVERAGE_MAX, BOARD_COVERAGE_MAX_BUSY, COVERAGE_DISMISSAL_DATE,
+    COVERAGE_EVENT_KIND, PLAYS_MAX, _cockpit_context, _coverage_cards, _plays,
+)
 from directory.models import Firm, FirmDate
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -39,7 +46,7 @@ def _firm(slug, name=None):
     return Firm.objects.create(slug=slug, name=name or slug.title())
 
 
-def _confirmed(firm, *, today, days, event_kind="app_close", cycle="SA 2028"):
+def _confirmed(firm, *, today, days, event_kind="app_close", cycle="sa2028"):
     return FirmDate.objects.create(
         firm=firm, cycle=cycle, region="us", event_kind=event_kind,
         date=today + timedelta(days=days), confidence=1.0,
@@ -51,6 +58,15 @@ def _contact(user, firm, *, name, warmth="cold", archived=False):
         user=user, firm=firm, name=name, warmth=warmth, archived=archived,
         school_affiliation=True,
     )
+
+
+def _target(user, firm, *, tier):
+    return UserFirm.all_objects.create(user=user, firm=firm, tier=tier)
+
+
+def _login_and_get(client, user) -> str:
+    client.force_login(user)
+    return client.get(reverse("crm:week")).content.decode()
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +239,7 @@ def test_an_unconfirmed_date_never_plays():
     today = timezone.localdate()
     firm = _firm("rumor-bank")
     FirmDate.objects.create(
-        firm=firm, cycle="SA 2028", region="us", event_kind="app_close",
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
         date=today + timedelta(days=3), confidence=0.3,
     )
     _contact(user, firm, name="Someone")
@@ -370,3 +386,255 @@ def test_parked_link_shows_the_people_the_firm_page_hides(client):
     # firm_detail-only one, for a play whose only people are parked.
     cockpit_html = client.get(reverse("crm:week")).content.decode()
     assert f"contacts/archived/?firm={firm.id}" in cockpit_html
+
+
+# ---------------------------------------------------------------------------
+# The board's OTHER half: coverage holes.
+# ---------------------------------------------------------------------------
+# THE MEASURED GAP, part two. Dated facts are as bursty as the cadence queue,
+# because they come off the same calendar the whole market shares: the founder
+# has four confirmed future firm dates in total, and after the last one passes
+# the dated half of this lane is empty for the rest of the cycle. Meanwhile 25
+# of his 54 tiered firms have nobody at them at all — a standing backlog the
+# cadence engine can never surface, because there is nobody there to schedule.
+#
+# Every case below pins one of the three rules that keep it from being filler:
+# no new judgment (it is `crm.coverage.rank_gaps`, the Network board's own
+# ranking), NO_CONTACTS only, and tiered firms only.
+# ---------------------------------------------------------------------------
+def test_a_tier_1_firm_with_nobody_at_it_is_todays_work():
+    user = _user()
+    today = timezone.localdate()
+    _target(user, _firm("centerview", "Centerview"), tier=1)
+
+    cards = _cockpit_context(user)["plays"]
+    assert [(c["firm"].name, c["kind"]) for c in cards] == [
+        ("Centerview", "coverage")]
+    card = cards[0]
+    assert card["label"] == "Tier 1 target"
+    assert card["cta_label"] == "Add someone"
+    assert f"firm={card['firm'].slug}" in card["cta_href"]
+    # No clock it did not earn.
+    assert card["date"] is None
+    assert card["when"] == ""
+    assert card["urgent"] is False
+
+
+def test_the_tier_the_student_set_orders_the_cards():
+    """The user's own tiering is the only statement of priority the product
+    has. `rank_gaps` multiplies by it, so tier 1 leads tier 2 leads tier 3
+    with no tie-break of this module's own invention."""
+    user = _user()
+    _target(user, _firm("t3", "Cee Firm"), tier=3)
+    _target(user, _firm("t1", "Aay Firm"), tier=1)
+    _target(user, _firm("t2", "Bee Firm"), tier=2)
+
+    cards = _coverage_cards(user, timezone.localdate(),
+                            skip_firm_ids=set(), limit=9)
+    assert [c["firm"].name for c in cards] == [
+        "Aay Firm", "Bee Firm", "Cee Firm"]
+
+
+def test_an_untiered_firm_is_never_carded():
+    """No tier is no claim to care. `rank_gaps` skips these outright and this
+    lane is not allowed to invent a priority the student never stated."""
+    user = _user()
+    _target(user, _firm("unranked", "Unranked Bank"), tier=None)
+    assert _coverage_cards(user, timezone.localdate(),
+                           skip_firm_ids=set(), limit=9) == []
+
+
+def test_a_firm_with_contacts_is_the_queues_problem_not_the_boards():
+    """RULE 2, and the one that keeps this from becoming the cold-contact
+    flood. `rank_gaps` also ranks all_cold / no_advocate firms — 22 of the
+    founder's 40 — and every one of those is a firm where somebody already
+    exists for the cadence engine to schedule. Carding them here as well
+    would be the page asking twice about the same person."""
+    user = _user()
+    today = timezone.localdate()
+    firm = _firm("has-people", "Has People")
+    _target(user, firm, tier=1)
+    _contact(user, firm, name="Only Cold One", warmth="cold")
+
+    assert _coverage_cards(user, today, skip_firm_ids=set(), limit=9) == []
+
+
+def test_one_firm_one_card_when_it_has_both_a_date_and_a_hole():
+    """BlackRock on the founder's board: a confirmed close in three days AND
+    nobody there. It gets the dated card, because the date is the stronger
+    fact, and the coverage half must not card it again."""
+    user = _user()
+    today = timezone.localdate()
+    firm = _firm("blackrock", "BlackRock")
+    _target(user, firm, tier=2)
+    _confirmed(firm, today=today, days=3)
+
+    cards = _cockpit_context(user)["plays"]
+    assert [(c["firm"].name, c["kind"]) for c in cards] == [
+        ("BlackRock", "date")]
+    assert cards[0]["sourcing"] is True
+
+
+def test_a_loud_page_gets_one_coverage_card_and_a_quiet_one_gets_two():
+    """The standing backlog is equally true either way; what changes is how
+    much of it belongs in front of somebody who already has a morning's work
+    queued. Nothing here decides whether a firm is empty."""
+    user = _user()
+    for i, name in enumerate(["Aay", "Bee", "Cee", "Dee"]):
+        _target(user, _firm(f"gap{i}", name), tier=1)
+
+    quiet = _cockpit_context(user)
+    assert not quiet["lanes"], "precondition: no cadence work"
+    assert len(quiet["plays"]) == BOARD_COVERAGE_MAX == 2
+
+    # Now give the cadence engine something to plan.
+    other = _firm("otherfirm", "Other Firm")
+    for i in range(6):
+        c = _contact(user, other, name=f"Due {i:02d}")
+        Touch.all_objects.create(
+            user=user, contact=c, kind="outreach", channel="email",
+            ts=timezone.now() - timedelta(days=20),
+        )
+    busy = _cockpit_context(user)
+    assert busy["lanes"], "precondition: this queue has planned work"
+    assert len(busy["plays"]) == BOARD_COVERAGE_MAX_BUSY == 1
+
+
+def test_dismissing_a_coverage_card_is_permanent_for_that_firm(client):
+    """The anti-nag rule, in the shape a gap with no clock needs. A dated
+    play un-dismisses when the date moves because that is a new fact; a
+    coverage hole has no date, so one Dismiss means "stop asking about this
+    firm" and the escape hatch is putting somebody there."""
+    user = _user()
+    keep = _firm("keepme", "Keep Me")
+    drop = _firm("dropme", "Drop Me")
+    _target(user, drop, tier=1)
+    _target(user, keep, tier=1)
+
+    assert len(_cockpit_context(user)["plays"]) == 2
+
+    client.force_login(user)
+    resp = client.post(reverse("crm:play_dismiss"), {
+        "firm": drop.id,
+        "event_kind": COVERAGE_EVENT_KIND,
+        "date": COVERAGE_DISMISSAL_DATE.isoformat(),
+    })
+    assert resp.status_code == 200
+    assert PlayDismissal.all_objects.filter(
+        user=user, firm=drop, event_kind=COVERAGE_EVENT_KIND).count() == 1
+
+    assert [c["firm"].name for c in _cockpit_context(user)["plays"]] == [
+        "Keep Me"]
+
+
+def test_a_dismissed_coverage_card_does_not_eat_a_slot():
+    """Filtered BEFORE the cap, same rule as the dated half. Dismissing the
+    worst gap must promote the next one, not leave a hole where it was."""
+    user = _user()
+    firms = [_firm(f"cap{i}", f"Firm {i}") for i in range(4)]
+    for f in firms:
+        _target(user, f, tier=1)
+    assert len(_cockpit_context(user)["plays"]) == 2
+
+    PlayDismissal.all_objects.create(
+        user=user, firm=firms[0], event_kind=COVERAGE_EVENT_KIND,
+        date=COVERAGE_DISMISSAL_DATE,
+    )
+    after = _cockpit_context(user)
+    assert len(after["plays"]) == 2, (
+        "a dismissed gap must not occupy one of the two slots")
+    assert firms[0].name not in [c["firm"].name for c in after["plays"]]
+
+
+def test_a_covered_board_gets_no_coverage_cards_and_says_so():
+    """THE WHOLE TEST OF THIS WORK. A genuinely empty day is still allowed to
+    be empty: with somebody at every tiered firm the lane renders nothing and
+    the quiet header comes back. The page never manufactures a card."""
+    user = _user()
+    firm = _firm("covered", "Covered Bank")
+    _target(user, firm, tier=1)
+    # Five, so the setup seeds are gated off too (SEED_NETWORK_FLOOR): this
+    # student is running an account, not still building one.
+    for i in range(5):
+        c = _contact(user, firm, name=f"Somebody {i}")
+        Touch.all_objects.create(
+            user=user, contact=c, kind="outreach", channel="email",
+            ts=timezone.now() - timedelta(days=1),
+        )
+
+    ctx = _cockpit_context(user)
+    assert ctx["seeds"] == []
+    assert ctx["plays"] == []
+    assert not ctx["lanes"]
+    assert ctx["quiet"] is True
+    assert ctx["quiet_line"].startswith("Quiet on the cadence.")
+
+
+def test_a_page_with_board_cards_never_also_says_youre_all_caught_up(client):
+    """The founder's own page, this morning: three board cards above a
+    full-width "You're all caught up" panel, because the quiet header's copy
+    of the rule knew about `plays` and the empty states below it did not."""
+    user = _user()
+    _target(user, _firm("contradiction", "Contradiction Bank"), tier=1)
+
+    body = _login_and_get(client, user)
+    assert "Your board" in body
+    assert "You're all caught up." not in body
+    assert "Done for today." not in body
+
+
+def test_coverage_cards_are_scoped_to_their_tenant():
+    mine = _user("mine@example.com")
+    theirs = _user("theirs@example.com")
+    _target(theirs, _firm("theirbank", "Their Bank"), tier=1)
+    assert _cockpit_context(mine)["plays"] == []
+
+
+# ---------------------------------------------------------------------------
+# The second half of the confirmed bar: precision, not just confidence.
+# ---------------------------------------------------------------------------
+def test_an_estimated_date_is_not_a_play_however_confident():
+    """`_next_deadlines` spelled its bar as `confidence=1.0` alone, while
+    `directory.views._firm_date_row` — the page that renders these same rows
+    with their provenance attached — has always required BOTH halves:
+    `confidence >= 0.8 AND precision in ("day", "month", "")`.
+
+    The two halves say different things. `confidence` is how sure we are the
+    firm holds this date; `precision` is how exactly the stored day locates
+    it. `precision="estimated"` means a month-level guess, printed on the firm
+    timeline as "~ Nov 2026" — and printed by this lane as a hard "5d"
+    countdown next to a list of people to email today. `import_firm_dates`
+    reads the two from independent keys of one YAML entry, so a single seed
+    line saying `confidence: confirmed_official` / `precision: estimated`
+    produces exactly this row.
+    """
+    from crm.today import _next_deadlines
+
+    user = _user()
+    firm = _firm("gs", "Goldman Sachs")
+    _target(user, firm, tier=1)
+    _contact(user, firm, name="Ada", warmth="replied")
+    today = timezone.localdate()
+    guess = _confirmed(firm, today=today, days=5)
+    FirmDate.objects.filter(pk=guess.pk).update(precision="estimated")
+
+    assert _next_deadlines(user, today) == []
+    assert _plays(user, today) == []
+
+
+def test_a_month_precision_date_is_still_a_play():
+    """The over-reach guard. "month" is confirmed — the firm timeline calls it
+    confirmed too — and dropping it would silently delete a real date from the
+    board to fix a different one."""
+    from crm.today import _next_deadlines
+
+    user = _user()
+    firm = _firm("ms", "Morgan Stanley")
+    _target(user, firm, tier=1)
+    _contact(user, firm, name="Grace", warmth="replied")
+    today = timezone.localdate()
+    real = _confirmed(firm, today=today, days=5, event_kind="insight_deadline")
+    FirmDate.objects.filter(pk=real.pk).update(precision="month")
+
+    assert len(_next_deadlines(user, today)) == 1
+    assert len(_plays(user, today)) == 1

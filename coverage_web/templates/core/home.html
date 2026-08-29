@@ -118,8 +118,6 @@
   .land-title { font: var(--w-black) clamp(24px, 3vw, 32px)/1.15 var(--font-display);
     letter-spacing: -0.01em; text-align: center; margin: 0 auto var(--s2);
     max-width: 28ch; }
-  .land-lede { color: var(--ink-2); text-align: center; margin: 0 auto;
-    max-width: 58ch; font-size: var(--fs-m); }
 
   /* Firm marquee: tracked firms as tinted chips flowing across the band.
      Two identical groups; the track slides one group-width and loops, so the
@@ -334,12 +332,13 @@
 {% block content %}
 <div class="page">
   {% comment %}
-  Account deletion ends here: delete_account writes its receipt ("Deleted 137
-  contacts, 138 touches, …") with messages.success and redirects to "/", the
-  only page a just-deleted user can still see. base.html now renders every
-  page's messages once, in `<main>`, before this block — so the receipt
-  already appears above; a second copy here rendered the same sentence twice
-  on the one page that had the most reason to get it right.
+  No flash-message loop here. base.html renders `.page-msgs` inside <main>
+  for EVERY page, and this template used to render its own second copy —
+  so the account-deletion receipt ("Deleted 137 contacts, 138 touches, …"),
+  the strongest honesty gesture the product makes, printed TWICE on the one
+  page a just-deleted user can still see. base.html's copy is the canonical
+  one (it also covers every view that redirects somewhere else); this page
+  needs nothing of its own. Pinned by core/tests/test_home_flash_once.py.
   {% endcomment %}
   {% comment %}
   The hero is the product, not a poster of it: copy on the left, a framed mock
@@ -457,7 +456,7 @@
       <div class="feature-copy">
         <p class="feature-kicker">Opportunities</p>
         <h3>Every role, straight from the source.</h3>
-        <p>Pulled from each firm's own careers site and ranked by what closes next.</p>
+        <p>Ranked by what closes next.</p>
         <ul class="feature-points">
           <li>A burning fuse on every real deadline</li>
           <li>Rolling roles show when we last saw them live</li>
@@ -489,7 +488,7 @@
       <div class="feature-copy">
         <p class="feature-kicker">Today</p>
         <h3>Wake up knowing exactly who to reach.</h3>
-        <p>Your cadence becomes one ranked queue: overdue first, then due, each with the angle.</p>
+        <p>Your cadence becomes one ranked queue.</p>
         <ul class="feature-points">
           <li>One-click Sent, Reply, Snooze, Skip</li>
           <li>Every card carries the angle to open with</li>
@@ -519,7 +518,6 @@
         <h3>A board, not a spreadsheet.</h3>
         <p>Drag a contact between warmth lanes and your queue re-ranks itself.</p>
         <ul class="feature-points">
-          <li>Warmth lanes show every relationship's real state</li>
           <li>Tier your firms; the queue works Tier 1 first</li>
           <li>Import your spreadsheet in one CSV</li>
         </ul>
@@ -561,7 +559,6 @@
         <h3>Connect Gmail once. The CRM writes itself.</h3>
         <p>Replies, bounces, and calendar invites log themselves the moment they land. We only read what's needed to log a touch.</p>
         <ul class="feature-points">
-          <li>Zero copy-paste, zero manual logging</li>
           <li>A reply lands and warmth updates itself</li>
           <li>Revoke access any time from your Google account</li>
         </ul>

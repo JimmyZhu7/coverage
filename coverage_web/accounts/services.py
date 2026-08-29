@@ -36,9 +36,8 @@ from dataclasses import dataclass, field
 # exercises both defusedcsv's own set and this one live.
 from defusedcsv import csv
 
-from django.conf import settings
 from django.contrib.sessions.models import Session
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils import timezone
 
 from analytics.events import record_event
@@ -54,7 +53,7 @@ from capture.models import (
 )
 from crm.models import (
     CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact,
-    ContactMerge, PlayDismissal, Task, Touch, UserFirm,
+    BenchDismissal, ContactMerge, PlayDismissal, Task, Touch, UserFirm,
 )
 from directory.models import Firm
 
@@ -134,6 +133,15 @@ def set_target_firms(user, firm_ids, *, tier: int = DEFAULT_FIRM_TIER) -> int:
 _FIELD_ALIASES: dict[str, set[str]] = {
     "name": {"name", "fullname", "contact", "contactname", "person"},
     "email": {"email", "emailaddress", "mail"},
+    # No path in this app ever fetches or guesses a LinkedIn URL — Gmail
+    # capture hands over an address, not a profile link, and sourcing only
+    # ever opens a LinkedIn *search*, never a specific profile (see
+    # crm/sourcing.py). A CSV column is the one bulk alternative to typing
+    # 200 URLs into the edit form one contact at a time, and the alias list
+    # includes the export's own header ("LinkedIn URL" — see
+    # CONTACT_EXPORT_COLUMNS) so a re-import of a student's own export
+    # round-trips this field instead of silently dropping it.
+    "linkedin": {"linkedin", "linkedinurl", "linkedinprofile"},
     "firm": {"firm", "company", "organization", "organisation", "employer", "org"},
     "role": {"role", "title", "position", "jobtitle"},
     "notes": {"notes", "note", "comments", "comment"},
@@ -141,7 +149,7 @@ _FIELD_ALIASES: dict[str, set[str]] = {
 }
 
 # Column order for the downloadable import template.
-IMPORT_TEMPLATE_COLUMNS = ["name", "email", "firm", "role", "notes", "angle"]
+IMPORT_TEMPLATE_COLUMNS = ["name", "email", "linkedin", "firm", "role", "notes", "angle"]
 
 
 def _norm(text: str) -> str:
@@ -436,6 +444,7 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
             firm_text="" if matched_firm else firm_raw[:255],
             role=values.get("role", "")[:255],
             email=email[:254],
+            linkedin=values.get("linkedin", "")[:512],
             notes=values.get("notes", ""),
             angle=values.get("angle", ""),
             source="import",
@@ -554,6 +563,7 @@ def import_template_csv() -> str:
         [
             "Jane Banker",
             "jane.banker@example.com",
+            "https://www.linkedin.com/in/janebanker",
             "Goldman Sachs",
             "Analyst",
             "Met at the spring info session",
@@ -600,6 +610,7 @@ APPLICATION_EXPORT_COLUMNS = [
 ]
 TASK_EXPORT_COLUMNS = ["title", "why", "due", "kind", "firm", "status", "created"]
 PLAY_DISMISSAL_EXPORT_COLUMNS = ["firm", "event_kind", "date", "dismissed_at"]
+BENCH_DISMISSAL_EXPORT_COLUMNS = ["contact", "opening", "dismissed_at"]
 CAMPAIGN_EXPORT_COLUMNS = [
     "label", "kind", "recipients", "first_sent", "last_sent", "classified_at",
 ]
@@ -852,6 +863,30 @@ def play_dismissals_csv(user) -> str:
             [
                 d.firm.name if d.firm_id else "", d.event_kind,
                 d.date.isoformat() if d.date else "", _dt(d.dismissed_at),
+            ]
+            for d in rows
+        ),
+    )
+
+
+def bench_dismissals_csv(user) -> str:
+    """Every bench card the student has waved off — which parked person, and
+    which opening the card was offering them for. Sibling of
+    `play_dismissals_csv` above and the same kind of memory: see
+    `crm.models.BenchDismissal` and `crm.today._opening_bench`.
+
+    `opening_signature` is an internal hash of the opening, not a sentence, so
+    it exports as-is rather than pretending to be prose the student wrote.
+    It is what makes "I already said no to THIS opening for THIS person"
+    answerable, and an export that dropped it would hand back the dismissal
+    without what was dismissed."""
+    rows = BenchDismissal.objects.for_user(user).select_related("contact")
+    return _csv(
+        BENCH_DISMISSAL_EXPORT_COLUMNS,
+        (
+            [
+                d.contact.name if d.contact_id else "",
+                d.opening_signature, _dt(d.created),
             ]
             for d in rows
         ),
@@ -1256,8 +1291,10 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
      "Roles you're tracking, their status, and any interview dates you added."),
     ("tasks.csv", tasks_csv, "Your tasks, open and done."),
     ("play_dismissals.csv", play_dismissals_csv,
-     "Today \"plays\" you dismissed — which firm, which dated fact, and "
-     "when."),
+     "Today \"plays\" you dismissed: which firm, which dated fact, and when."),
+    ("bench_dismissals.csv", bench_dismissals_csv,
+     "Bench cards you waved off: which parked person, and for which "
+     "opening."),
     ("chat_debriefs.csv", chat_debriefs_csv,
      "What each coffee chat taught you, in your own words."),
     ("campaigns.csv", campaigns_csv,
@@ -1302,7 +1339,7 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("credit_ledger.csv", credit_ledger_csv,
      "Every credit grant, spend, purchase, and adjustment on your account."),
     ("product_events.csv", product_events_csv,
-     "Your own usage events — which pages and actions you used."),
+     "Your own usage events: which pages and actions you used."),
     ("pro_waitlist.csv", pro_waitlist_csv,
      "Whether you joined the Pro launch waitlist, and when."),
     ("profile.csv", profile_csv,
@@ -1314,7 +1351,7 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
 # rule D4: "everything" is only written when it is everything.
 EXPORT_EXCLUSIONS: list[str] = [
     "Your password (we only ever store a one-way hash of it).",
-    "Shared directory data — firms, roles, deadlines. It isn't yours; it's "
+    "Shared directory data: firms, roles, deadlines. It isn't yours; it's "
     "the same for every user.",
 ]
 
@@ -1385,6 +1422,11 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     # bearing the way the PROTECT-guarded rows below are — kept alongside
     # `tasks` for readability, as another small standalone Today-page table.
     ("play_dismissals", PlayDismissal),
+    # Same shape and the same reasoning as `play_dismissals` above, for the
+    # bench's own anti-nag memory. It DOES reference `contact` (CASCADE), so
+    # unlike its sibling its position IS load-bearing: it has to precede
+    # `contacts` below, child before parent.
+    ("bench_dismissals", BenchDismissal),
     # References `contact` (CASCADE) — deleted before `contacts` below for the
     # same "children before parents" reason as everything above it.
     ("calendar_events", CalendarEvent),

@@ -37,12 +37,22 @@ logger = logging.getLogger(__name__)
 # alongside it is one more line in the same review, not a separate source of
 # truth silently drifting from a file this code doesn't parse.
 EXPECTED_INTERVALS: dict[str, timedelta] = {
-    "gmail-backfill": timedelta(minutes=15),
+    # render.yaml's cron is */5, not the */15 this said until the tick
+    # budget (gmail_backfill.py's TICK_BUDGET) made a shorter interval safe.
+    "gmail-backfill": timedelta(minutes=5),
     # The Today button's worker (coverage-autopilot, */5). Five minutes,
     # not fifteen, because a student is watching this one — a stalled tick
     # here is a run that never starts, and the strip says "within a few
     # minutes".
     "autopilot": timedelta(minutes=5),
+    # gmail_poll is a long-running worker (render.yaml's coverage-gmail-poll),
+    # not a cron — it wraps every tick in track_job_run("gmail-poll") on a
+    # 120s loop (DEFAULT_INTERVAL in gmail_poll.py). Ten minutes is five
+    # missed ticks' worth of slack: enough that an ordinary GC pause or a
+    # slow Gmail API call never trips this, not so much that a genuinely
+    # dead worker sits unflagged for the length of the old --interval-free
+    # gap this dict used to leave for it entirely.
+    "gmail-poll": timedelta(minutes=10),
     "gmail-watch-renew": timedelta(days=1),
     "scrape": timedelta(hours=6),
     "push-alerts": timedelta(days=1),

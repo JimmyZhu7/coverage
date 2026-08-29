@@ -160,6 +160,29 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
     less visible than never having chatted at all. `advocate` stays out on
     purpose: branch 5 owns advocates and returns before this branch runs.
 
+  - DIVERGENCE from the original (deliberate, 2026-08-27, "C4"): branch 1 no
+    longer prompts for a thank-you when the chat is in the FUTURE. The original
+    could not hit this — it read `datetime.now()` inside the branch, and a
+    stored chat timestamp ahead of the wall clock was not a shape its callers
+    produced. Here `as_of` is caller-supplied, and a `chat` touch dated after
+    it arrives from a calendar-sourced capture, from a hand-logged chat entered
+    with tomorrow's date, and from any caller whose `as_of` clock runs behind
+    the touch's. The branch fired anyway: `hrs` came out negative, `-720 > 168`
+    is False so nothing looked expired, and the queue produced a priority-1
+    `thank_you` reading "chat done -720h ago — send thank-you (within 24h)".
+    TOUCH_TRANSITIONS' own comment in pipeline.py already names this failure
+    and defends it by convention (use `chat_scheduled` for a future chat);
+    this is the same rule enforced rather than requested.
+
+  - DIVERGENCE from the original (deliberate, 2026-08-27, "C5"): the action
+    sort gained a fourth, final key — the contact id — so the returned order is
+    a TOTAL order rather than three keys plus `list.sort`'s stability over
+    whatever sequence the caller iterated. Determinism is this module's
+    headline property (see the note at the end of this docstring) and it was
+    only true up to ties: six contacts tying on (priority, tier, firm_name),
+    shuffled 50 times, produced 48 distinct outputs, and the web layer's fetch
+    carries no ORDER BY. Nothing the ported keys already separated moves.
+
   - `tasks_from_change()`: the backward planner. Fires ONLY on
     `confirmed_official` changes (rumor / reported never spawn a task).
     `app_open` -> advocates-in-place task 14d before; `app_close` ->
@@ -401,7 +424,16 @@ def _firm_meta(firms: Mapping | Iterable[Mapping] | None) -> dict[Any, dict]:
     None-coercion below is required in addition to `dict.get`'s default:
     `f.get("tier", 3)` only substitutes 3 when the key is MISSING, and would
     otherwise hand back a bare `None` that later breaks a `sort()` comparing
-    tiers to ints (see `due_actions`)."""
+    tiers to ints (see `due_actions`).
+
+    `_coerce_tier` generalises that same guard: `None` was the shape that
+    actually shipped a TypeError, but it is not the only non-comparable value
+    this argument can carry. The mapping is caller-built (`crm.today` folds
+    `UserFirm.tier` in by hand), and a tier arriving as the STRING "1" — from a
+    CSV import, a JSON round-trip, an admin edit, a form value that skipped
+    coercion — crashes `due_actions` the same way and with the same message,
+    just one type over. Fixing the reported shape and leaving its siblings is
+    how the same bug ships twice."""
     out: dict[Any, dict] = {}
     if firms is None:
         return out
@@ -410,9 +442,21 @@ def _firm_meta(firms: Mapping | Iterable[Mapping] | None) -> dict[Any, dict]:
     else:
         items = ((f.get("id", f.get("firm_id")), f) for f in firms)
     for fid, f in items:
-        tier = f.get("tier")
-        out[fid] = {"name": f.get("name", fid), "tier": 3 if tier is None else tier}
+        out[fid] = {"name": f.get("name", fid), "tier": _coerce_tier(f.get("tier"))}
     return out
+
+
+def _coerce_tier(tier: Any) -> int | float:
+    """A tier that can be compared against other tiers in `due_actions`' sort.
+
+    `None` (the "Unranked" lane `crm.views.set_firm_tier` writes deliberately)
+    and anything non-numeric fall back to 3, the same default a firm missing
+    from the metadata mapping already gets. `bool` is excluded explicitly
+    because it is an `int` subclass in Python and `True` would otherwise sort
+    as tier 1."""
+    if isinstance(tier, bool) or not isinstance(tier, (int, float)):
+        return 3
+    return tier
 
 
 def _closing_soon(
@@ -544,12 +588,12 @@ def due_actions(
             meta.get(firm_id, {}).get("name") or c.get("firm_text") or firm_id
         )
         firm_name = meta.get(firm_id, {}).get("name") or c.get("firm_text") or firm_id or "No firm listed"
-        # Same None-coercion as _firm_meta (a `.get(..., 3)` default alone
-        # would not catch an explicit `tier=None` from an "Unranked" drag —
-        # that used to raise a TypeError comparing None to int in the
-        # `actions.sort()` below).
-        _tier = meta.get(firm_id, {}).get("tier")
-        tier = 3 if _tier is None else _tier
+        # Same coercion as _firm_meta (a `.get(..., 3)` default alone would not
+        # catch an explicit `tier=None` from an "Unranked" drag — that used to
+        # raise a TypeError comparing None to int in the `actions.sort()`
+        # below). Shared helper rather than a second copy of the rule, so the
+        # two places that must agree about what a tier is cannot drift.
+        tier = _coerce_tier(meta.get(firm_id, {}).get("tier"))
 
         # The idle clock reads the last REAL touch, skipping the audit rows
         # `set_state` writes (C2). `ctouches` is already sorted ascending, so
@@ -600,7 +644,31 @@ def due_actions(
             # and treating it as "not yet expired" made `hrs is None` stay
             # False forever, pinning an immortal daily thank-you prompt.
             expired = chat_dt is None or (hrs is not None and hrs > ty_expiry_days * 24)
-            if not thanked and not expired:
+            # The chat has not happened yet. This module's own TOUCH_TRANSITIONS
+            # comment already names the failure ("a reply that only
+            # confirms/schedules a FUTURE chat must use `chat_scheduled`, or
+            # due_actions will wrongly report a not-yet-happened chat as overdue
+            # for a thank-you") and then defends against it by convention alone.
+            # Convention is not a guard: a `chat` touch dated ahead of `as_of` is
+            # reachable from a calendar-sourced capture, a hand-logged chat
+            # entered with tomorrow's date, and — routinely — from any caller
+            # whose `as_of` is behind the touch's own clock (see the UTC-vs-local
+            # skew the web layer currently has). Measured before this line
+            # existed: a chat 30 days out produced a priority-1 `thank_you`
+            # reading "chat done -720h ago — send thank-you (within 24h)", i.e.
+            # the engine asking a student to thank somebody for a conversation
+            # that has not occurred, and printing a negative age to do it.
+            #
+            # NOT clamped to zero, and the difference matters: clamping would
+            # still fire the prompt, just with an honest-looking "0h ago". The
+            # thank-you is not merely mis-worded here, it is not owed at all, so
+            # the branch says nothing and the contact falls through to the rest
+            # of the cadence exactly as an expired or already-thanked one does.
+            # Nothing downstream then fires either (branch 5b's own clock reads
+            # the same future touch as negative days idle), which is correct:
+            # the chat is tomorrow and there is nothing to do about it today.
+            not_yet = hrs is not None and hrs < 0
+            if not thanked and not expired and not not_yet:
                 overdue = hrs is not None and hrs > ty_hours
                 add(
                     "thank_you",
@@ -776,7 +844,31 @@ def due_actions(
                 )
                 add("advance", reason, 1, business_days=bd)
 
-    actions.sort(key=lambda a: (a["priority"], a["tier"], str(a["firm_name"])))
+    # The ported three-key sort, plus one tiebreak the port did not have and
+    # this module's headline property needs.
+    #
+    # `(priority, tier, firm_name)` is not a total order: two contacts at the
+    # same firm, or at two different firms with the same name and tier, tie on
+    # all three keys and fall through to `list.sort`'s stability — i.e. to the
+    # order the CALLER happened to iterate `contacts` in. Measured: six tied
+    # contacts shuffled 50 times produced 48 distinct output orders. The web
+    # layer's fetch (`crm.today._build_actions`) carries no `ORDER BY`, so that
+    # input order is whatever Postgres returns for an unordered scan — which is
+    # free to change after any UPDATE, and does. The student's queue then
+    # reshuffles between two loads with no data change behind it.
+    #
+    # `str(contact id)` rather than the raw id because ids are only required to
+    # be hashable here (fixtures use ints, live rows use ints, but a caller
+    # keying on a UUID or a string is not doing anything wrong), and mixing
+    # types in a sort key is the exact crash `_coerce_tier` exists to prevent.
+    # It is the LAST key, so it never reorders anything the ported three keys
+    # already separated — it only replaces "whatever order the database felt
+    # like" with a stable one.
+    actions.sort(
+        key=lambda a: (
+            a["priority"], a["tier"], str(a["firm_name"]), str(a["contact"].get("id")),
+        )
+    )
     return actions
 
 
