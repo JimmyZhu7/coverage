@@ -467,7 +467,7 @@ def test_the_agenda_is_never_hidden_by_a_rule_that_outranks_the_breakpoint(clien
 
 
 # ---------------------------------------------------------------------------
-# The grid as a readable surface: uniform cells, intensity, the month rail.
+# The grid as a readable surface: uniform cells, intensity.
 # ---------------------------------------------------------------------------
 
 def test_a_day_is_tinted_by_how_much_is_on_it(client, logged_in):
@@ -493,58 +493,6 @@ def test_intensity_stops_climbing_past_three(client, logged_in):
     assert "load-3" in body
     assert "load-4" not in body and "load-9" not in body
     assert "9 on this day" in body, "the exact count still reaches the tooltip"
-
-
-def test_the_rail_spans_two_years_around_today_and_marks_where_you_are(client, logged_in):
-    today = timezone.localdate()
-    body = client.get(reverse("crm:calendar")).content.decode()
-    assert body.count('class="mrail-m') == 24
-    back = _shift_for_test(today.year, today.month, -6)
-    fwd = _shift_for_test(today.year, today.month, 17)
-    assert f'href="?y={back[0]}&m={back[1]}"' in body
-    assert f'href="?y={fwd[0]}&m={fwd[1]}"' in body
-    assert 'aria-current="page"' in body
-    # Twenty zeroes down the strip is twenty things to read past. An
-    # empty column says "nothing" by being flat; the count still reaches
-    # a screen reader through the link's accessible name.
-    assert 'Feb 2026, 0 items' in body, 'the count stays in the a11y name'
-    assert '<span class="mrail-n" aria-hidden="true"></span>' in body, \
-        'and an empty month prints no visible figure'
-
-
-def test_the_rail_counts_both_your_events_and_confirmed_deadlines(client, logged_in):
-    today = timezone.localdate()
-    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
-                            event_kind="app_close",
-                            date=today.replace(day=15), confidence=1.0)
-    FirmDate.objects.create(firm=firm, cycle="sa2028", region="hk",
-                            event_kind="app_open",
-                            date=today.replace(day=16), confidence=0.3)
-    CalendarEvent.all_objects.create(
-        user=logged_in, title="Superday",
-        starts_at=timezone.localtime(timezone.now()).replace(day=20))
-
-    rail = client.get(reverse("crm:calendar")).context["rail"]
-    now = next(m for m in rail if m["is_now"])
-    assert now["count"] == 2, "one confirmed deadline plus one event; the rumour is not counted"
-    assert now["bar_pct"] == 100, "and it is the busiest month on the rail"
-
-
-def test_a_month_you_are_not_looking_at_is_not_marked_active(client, logged_in):
-    today = timezone.localdate()
-    other_y, other_m = _shift_for_test(today.year, today.month, 3)
-    rail = client.get(reverse("crm:calendar"),
-                      {"y": other_y, "m": other_m}).context["rail"]
-    active = [m for m in rail if m["active"]]
-    assert len(active) == 1 and (active[0]["y"], active[0]["m"]) == (other_y, other_m)
-    now = next(m for m in rail if m["is_now"])
-    assert not now["active"], "today's month is still marked, but as now, not as active"
-
-
-def _shift_for_test(year, month, by):
-    m = month - 1 + by
-    return year + m // 12, m % 12 + 1
 
 
 def test_every_week_lays_out_on_identical_columns(client, logged_in):
@@ -686,8 +634,8 @@ def _tracked_role(user, *, day, title="Summer Analyst", status="", dismissed=Fal
     every-day-of-the-year stability as the default.
 
     It used to be `days`, an offset from today, which reads better and is
-    wrong: the grid and the month rail are both bounded by `_month_bounds`,
-    so in the last week of any month `today + 7 days` files the fixture under
+    wrong: the grid is bounded by `_month_bounds`, so in the last week of
+    any month `today + 7 days` files the fixture under
     NEXT month and the assertion goes looking for it on a page the test never
     asked for. Nothing about these tests is actually relative to today —
     `_tracked_deadlines` has no past/future filter and `is_posting_closed`
@@ -913,9 +861,8 @@ def test_a_curated_firm_name_is_not_recased_by_the_calendar(client, logged_in):
 # Layer 4 — identity duplicates must fold, the same way Browse Openings and
 # My Applications do. _tracked_deadlines() never called fold_duplicates, so
 # a requisition filed under two candidate-pool addresses and tracked under
-# both showed up twice on the grid, twice in the month rail's count, and
-# twice in the .ics feed. See directory/dupes.py and the round-8 dedup
-# finding this fix addresses.
+# both showed up twice on the grid and twice in the .ics feed. See
+# directory/dupes.py and the round-8 dedup finding this fix addresses.
 # ---------------------------------------------------------------------------
 
 def _duplicate_pair(user, *, day, status_a="", status_b=""):
@@ -950,25 +897,6 @@ def test_a_tracked_identity_duplicate_shows_once_on_the_grid(logged_in, client):
                for e in cell["events"] if e["source"] == "tracked"]
     assert len(tracked) == 1
     assert tracked[0]["title"] == "Bank of America · Campus Insight Forum"
-
-
-def test_the_month_rail_count_does_not_double_count_the_duplicate(logged_in, client):
-    """Layer 4's rail count used a raw .annotate()/Count("id") over
-    _tracked_deadlines(), which has no idea two rows are one posting."""
-    opp_a, _ = _duplicate_pair(logged_in, day=15)
-    # A second, genuinely distinct tracked deadline in the same month, so a
-    # fold that swallowed everything (the UserOpportunity trap) would also
-    # be caught by this count, not just an unfolded duplicate.
-    _tracked_role(logged_in, day=16, title="Distinct Analyst Role")
-
-    deadline = opp_a.deadline
-    resp = _grid(client, deadline)
-    # By the deadline's own month rather than `is_now`: near a month end the
-    # two fixtures above land in NEXT month, and the count under test is the
-    # one on the month they are actually in. See `_grid`.
-    month = next(m for m in resp.context["rail"]
-                 if (m["y"], m["m"]) == (deadline.year, deadline.month))
-    assert month["count"] == 2
 
 
 def test_the_ics_feed_carries_the_duplicate_once(client, logged_in):
@@ -1025,8 +953,7 @@ def test_an_applications_open_row_is_not_counted_as_a_deadline(client, logged_in
     assert resp.context["counts"]["deadline"] == 0
     assert resp.context["counts"]["opening"] == 1
     body = resp.content.decode()
-    # A zero count earns no chip at all now — the same rule the month rail
-    # already applied to its own empty months. The deadline key isn't there
+    # A zero count earns no chip at all now. The deadline key isn't there
     # to miscount against; it just isn't there.
     assert 'class="cal-key cal-key-deadline"' not in body
     assert "<b>1</b> Opening" in body and "<b>1</b> Openings" not in body

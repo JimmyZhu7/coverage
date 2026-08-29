@@ -1,20 +1,20 @@
 """The "you are here" month must sit over its own column.
 
-Two surfaces draw twelve or twenty-four months as bars with a label centred
-under each: the cycle band (`directory/_cycle_band.html`, rendered on the feed
-and under Settings' cycle picker) and the calendar's month rail
-(`crm/calendar.html`). Both mark the current month with a dot rather than a
-colour, so "today lives here" and "you are reading this" never have to be told
-apart by hue.
+The cycle band (`directory/_cycle_band.html`, rendered on the feed and under
+Settings' cycle picker) draws twelve months as bars with a label centred
+under each, and marks the current month with a dot rather than a colour, so
+"today lives here" and "you are reading this" never have to be told apart by
+hue.
 
-Both drew that dot as `content: " •"` INSIDE the label. Both centre a
-shrink-to-fit label box over the bar, so the dot could not move the box — it
-could only move the letters inside it. Measured at vw=1280 before the fix:
+It used to draw that dot as `content: " •"` INSIDE the label — sharing the
+same bug the calendar's own month rail once had (removed 2026-08-29, see
+crm/calendar_views.py's history) before either was fixed the same way. The
+label centres a shrink-to-fit box over the bar, so the dot could not move the
+box — it could only move the letters inside it. Measured at vw=1280 before
+the fix:
 
     cycle band  Aug `.cycband-m b` box 32.0px vs 19.2px of text,
                 text-centre minus bar-centre = -6.4px; Sep..Jul all 0
-    month rail  Aug `.mrail-lab` box 32.5px vs 19.5px of text,
-                text-centre minus bar-centre = -6.5px; the other 23 all 0
 
 The one month the marker exists to draw the eye to was the only one whose
 label did not sit over its bar. At 390px the band was worse still: the column
@@ -31,11 +31,10 @@ from __future__ import annotations
 import pathlib
 import re
 
-# Every stylesheet that draws a month rail or a cycle band.
+# Every stylesheet that draws a cycle band.
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 SOURCES = [
     _ROOT / "static" / "css" / "coverage.css",
-    _ROOT / "templates" / "crm" / "calendar.html",
 ]
 
 _RULE_RE = re.compile(r"([^{}@]+)\{([^{}]*)\}")
@@ -57,13 +56,13 @@ def _now_markers() -> list[tuple[pathlib.Path, str, str]]:
     return out
 
 
-def test_both_surfaces_still_mark_the_current_month():
+def test_the_surface_still_marks_the_current_month():
     """Guard against the fix being 'applied' by deleting the marker: the dot
     is the colour-independent signal for where today is."""
     markers = _now_markers()
     files = {p.name for p, _, _ in markers}
-    assert files == {"coverage.css", "calendar.html"}, (
-        f"a surface lost its 'you are here' marker; found {files}"
+    assert files == {"coverage.css"}, (
+        f"the cycle band lost its 'you are here' marker; found {files}"
     )
 
 

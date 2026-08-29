@@ -47,128 +47,6 @@
   .cal-key b { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     color: var(--ink); }
 
-  /* ---- The month rail: a histogram you can click ------------------------
-     Was 24 bordered chips, twenty of which printed a "0". That is twenty
-     boxes of nothing to scan past to find the three months that hold
-     something — the rail cost more attention than the answer was worth.
-
-     Now it is one continuous strip of columns whose HEIGHT is the count.
-     Empty months collapse to a baseline tick and go visually silent; a busy
-     month stands up and is found without reading a digit. Same links, same
-     targets, and the count still reaches a screen reader through each link's
-     accessible name, so height is never the only carrier.
-     -------------------------------------------------------------------- */
-  .mrail-wrap { margin-bottom: var(--s4); }
-  .mrail { display: flex; align-items: flex-end; gap: 1px;
-    padding: 0 0 2px;
-    border-bottom: 1px solid var(--line); }
-  /* 24 x ~46px fits 1120px, so at desktop the whole two years sit on one
-     line and nothing is hidden.
-
-     Below that it WRAPS — it used to be an overflow-x scroller, which on a
-     phone cut DEC in half and put the next fourteen months, and every one
-     of their event counts, off-screen behind a gesture. This file's own
-     argument for the strip is that "a busy month stands up and is found
-     without reading a digit"; a month you cannot see cannot stand up. The
-     Role Type control in the directory made the same call for the same
-     reason: wrapping, never a horizontal scroller, because a scrolled-away
-     segment hides the count that is the whole point.
-
-     Three rows of eight at a phone width. The plot shortens so the block
-     costs ~115px rather than ~150px, and the bars stay comparable because
-     every row shares the one --h scale. */
-  .mrail-m { flex: 1 0 46px; min-width: 40px;
-    display: flex; flex-direction: column; align-items: center; gap: 3px;
-    padding: 4px 0 5px; border-radius: 8px 8px 0 0;
-    color: var(--ink-3); text-decoration: none;
-    transition: background-color var(--t-fast), color var(--t-fast); }
-  .mrail-m:hover { background: var(--accent-soft); color: var(--accent-ink);
-    text-decoration: none; }
-  .mrail-n { font-family: var(--font-mono); font-size: var(--fs-nano); line-height: 1;
-    font-variant-numeric: tabular-nums; height: 11px; font-weight: var(--w-bold);
-    color: var(--ink-2); }
-  .mrail-plot { height: 30px; width: 100%; display: flex; align-items: flex-end;
-    justify-content: center; }
-  /* Two floors, not one. A single `min-height: 2px` made "one deadline" and
-     "no deadlines" the same 2px tick in the same colour once the phone plot
-     dropped to 16px (12% of 16px = 1.92px, under the floor, so the floor
-     won). Eight empty months and two one-deadline months rendered
-     identically — the rail's whole claim is that height IS the count, and at
-     the low end, where most months sit, it wasn't.
-
-     So the empty tick is now its own state at 2px, and a bar that carries a
-     count starts at 5px. 5px is chosen to clear the tick unmistakably while
-     staying under the smallest real step, so 1 vs 2 vs 8 still separate. The
-     sibling `.cycband-bar` reaches the same place with `max(var(--h), 7%)`;
-     an absolute floor is the right unit here because "visible" is a pixel
-     property, and this plot changes height between breakpoints. */
-  .mrail-bar { width: 56%; border-radius: 3px 3px 0 0;
-    background: var(--accent-line);
-    height: max(var(--h), 5px); transform-origin: bottom;
-    animation: mrail-grow 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: calc(var(--i, 0) * 18ms);
-    transition: background-color var(--t-fast); }
-  .mrail-bar.is-empty { height: 2px; }
-  @keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
-  .mrail-m:hover .mrail-bar { background: var(--accent); }
-  .mrail-lab { font-family: var(--font-mono); font-size: 10px; line-height: 1;
-    text-transform: uppercase; letter-spacing: 0.05em; font-weight: var(--w-med); }
-  /* Reserved whether or not a year prints, so a January column is not taller
-     than its eleven neighbours and the labels stay on one baseline. */
-  /* The year tag was 8px at opacity .55 — 2.18:1 against a 4.5 requirement,
-     the least readable text in the product, and the ONLY thing telling this
-     August from next August across a 24-month rail. The opacity was doing
-     the de-emphasis; --ink-3 already does that at a legible 5:1. */
-  .mrail-yr { font-family: var(--font-mono); font-size: var(--fs-nano); line-height: 1;
-    height: 11px; color: var(--ink-3); }
-
-  /* The month you are reading: filled bar, inked label, and a rule under the
-     column. Three signals, so it survives being the only navy thing here. */
-  .mrail-m.is-active { background: var(--accent-soft);
-    box-shadow: inset 0 -2px 0 0 var(--accent); }
-  .mrail-m.is-active .mrail-bar { background: var(--accent); }
-  .mrail-m.is-active .mrail-lab { color: var(--accent-ink); font-weight: var(--w-bold); }
-  .mrail-m.is-active .mrail-n { color: var(--accent-ink); }
-  /* The month TODAY is in, when you have navigated away from it. A dot beside
-     the label rather than a colour, so "today lives here" and "you are
-     reading this" never have to be told apart by hue.
-
-     Absolute, NOT inline. As `content: " •"` inside the label the dot was
-     part of the label's own line box, and .mrail-m centres that shrink-to-fit
-     box over the bar — so the dot widened the box from 19.5px to 32.5px and
-     pushed the month's letters 6.5px left of the bar they name, while the
-     other 23 columns stayed dead centre. The one column the marker exists to
-     draw the eye to was the only misregistered one. Taking it out of flow
-     leaves the label's box the width of its letters, so the letters stay put
-     and only the dot hangs off the side. The sibling .cycband-m marker in
-     coverage.css is fixed the same way for the same reason. */
-  .mrail-m.is-now:not(.is-active) .mrail-lab { position: relative; }
-  .mrail-m.is-now:not(.is-active) .mrail-lab::after { content: "•"; color: var(--accent);
-    position: absolute; left: 100%; top: 0; margin-left: 2px; }
-
-  /* Wrapping rules live BELOW every .mrail-* base rule on purpose: they carry
-     the same specificity, so placed above they lose and silently do nothing —
-     which is exactly what happened on the first pass here (the phone kept the
-     46px basis and the 30px plot). */
-  @media (max-width: 1120px) {
-    .mrail { flex-wrap: wrap; row-gap: 2px; }
-  }
-  /* Three rows of eight on a phone, and a shorter plot so the block costs
-     ~190px instead of ~315px. The bars stay comparable across rows because
-     every one of them is a percentage of the same --h scale.
-
-     24px, not the 16px this first shipped at. A 16px box cannot carry the
-     8:1 range this rail routinely holds: the smallest real step landed at
-     1.92px, below even the empty tick, so the busiest month was the only
-     one with a shape. At 24px one deadline sits on the 5px floor and two
-     stand a pixel clear of it, so the low end reads as a low end rather
-     than as nothing. The extra 8px per row costs ~24px of page. */
-  @media (max-width: 560px) {
-    .mrail-m { flex: 1 0 11.5%; min-width: 0; padding: 2px 0 3px; gap: 2px; }
-    .mrail-plot { height: 24px; }
-    .mrail-lab { font-size: var(--fs-nano); }
-  }
-
   .cal-grid { border: 1px solid var(--line); border-radius: var(--r-panel);
     overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
   /* minmax(0, 1fr), NOT 1fr. Every week is its own grid container, and a bare
@@ -210,9 +88,10 @@
      about which month you are reading. */
   .cal-day.is-out { background: color-mix(in srgb, var(--paper) 60%, transparent); }
   /* No opacity: --ink-3 is already the de-emphasis, and .55 on top of it cut
-     these day numbers to 2.18:1 — the same hidden contrast loss the year tag
-     on the month rail had. The is-out CELL is tinted, which is what carries
-     "not this month"; the number just has to stay readable. */
+     these day numbers to 2.18:1 — the same class of hidden contrast loss a
+     since-removed year tag on this page's own month rail once had. The
+     is-out CELL is tinted, which is what carries "not this month"; the
+     number just has to stay readable. */
   .cal-day.is-out .cal-num { color: var(--ink-3); }
   .cal-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: var(--fs-xs); color: var(--ink-2); align-self: flex-start;
@@ -416,13 +295,12 @@
     a one-off snapshot.{% endcomment %}
     <a class="cal-today-link" title="Live-updating feed for Apple/Google Calendar"
        href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe</a>
-    {% comment %}Same rule the month rail already applies to its own zero
-    months: a colour nothing on the grid uses this month is not worth a key
-    entry, and "0 Events" next to three real counts reads as a fourth fact
-    when it is really the absence of one. Written as a plain {% if %} per
-    span, not a loop over CAL_KINDS, so each key keeps its own label text and
-    the opening/deadline split below stays a comment on the row that needs
-    it.{% endcomment %}
+    {% comment %}A colour nothing on the grid uses this month is not worth a
+    key entry, and "0 Events" next to three real counts reads as a fourth
+    fact when it is really the absence of one. Written as a plain {% if %}
+    per span, not a loop over CAL_KINDS, so each key keeps its own label
+    text and the opening/deadline split below stays a comment on the row
+    that needs it.{% endcomment %}
     <p class="cal-legend">
       {% if counts.chat %}<span class="cal-key cal-key-chat"><b>{{ counts.chat }}</b> Chat{{ counts.chat|pluralize }}</span>{% endif %}
       {% if counts.event %}<span class="cal-key cal-key-event"><b>{{ counts.event }}</b> Event{{ counts.event|pluralize }}</span>{% endif %}
@@ -461,40 +339,6 @@
       </div>
     </form>
   </details>
-
-  {% comment %}The month rail: two years of columns, all of them on screen.
-  It used to be an overflow-x scroller with a script at the foot of this
-  file scrolling the active column into view; the rail wraps instead now
-  (see `.mrail`'s own breakpoints above), so nothing is off-screen and there
-  is no scroll left to set.
-  {% endcomment %}
-  <div class="mrail-wrap">
-    <nav class="mrail" aria-label="Jump to a month">
-      {% for mo in rail %}
-        <a class="mrail-m{% if mo.active %} is-active{% endif %}{% if mo.is_now %} is-now{% endif %}"
-           href="?y={{ mo.y }}&m={{ mo.m }}"
-           {% if mo.active %}aria-current="page"{% endif %}
-           aria-label="{{ mo.label }} {{ mo.year }}, {{ mo.count }} item{{ mo.count|pluralize }}">
-          {% comment %}The figure prints only when there IS one. Twenty zeroes
-          down a strip is twenty things to read past to find the month that
-          matters; an empty column already says "nothing" by being flat.
-          {% endcomment %}
-          <span class="mrail-n" aria-hidden="true">{% if mo.count %}{{ mo.count }}{% endif %}</span>
-          <span class="mrail-plot" aria-hidden="true">
-            {% comment %}is-empty is the "nothing here" tick. It is a class
-            rather than a --h of 0 because the two states need DIFFERENT
-            floors: a month holding one deadline has to clear the tick even
-            when its share of the busiest month rounds to a couple of
-            pixels.{% endcomment %}
-            <span class="mrail-bar{% if not mo.count %} is-empty{% endif %}"
-                  style="--h: {{ mo.bar_pct }}%; --i: {{ forloop.counter0 }}"></span>
-          </span>
-          <span class="mrail-lab">{{ mo.label }}</span>
-          <span class="mrail-yr">{% if mo.show_year %}{{ mo.year }}{% endif %}</span>
-        </a>
-      {% endfor %}
-    </nav>
-  </div>
 
   {# ---- Month grid (>=820px) ---- #}
   <div class="cal-grid">
