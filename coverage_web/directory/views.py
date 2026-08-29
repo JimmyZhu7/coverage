@@ -509,15 +509,16 @@ def _place(opp) -> dict:
 
 
 def _card(opp, *, now, today):
-    """Bundle one opportunity into a template-ready card. Tags are the
-    student-facing trio: firm category, stated class year, sponsorship."""
+    """Bundle one opportunity into a template-ready card. `tags` carries only
+    the stated class year now — firm category dropped off it below."""
     bucket = opp.bucket or OTHER
-    category = FIRM_CATEGORIES.get(opp.firm.slug) or next(
-        (TRACK_LABELS.get(t, "") for t in (opp.firm.tracks or [])), ""
-    )
     tags = []
-    if category:
-        tags.append({"label": category, "css": "tag-cat"})
+    # No firm-category tag here any more. `_card.html` filtered it out on
+    # every render (the firm page's own header already names the firm and
+    # its category, per that template's opening comment), so this was
+    # computing FIRM_CATEGORIES/TRACK_LABELS lookups for a tag that could
+    # never reach the screen. See the template's git history for the filter
+    # this removes the other half of.
     class_tag = _class_tag(opp)
     if class_tag:
         tags.append(class_tag)
@@ -2885,6 +2886,9 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # "Sorted for you" honesty line at _results.html:22 could never render.
         "personalized": personalized,
         "facets": facets,
+        # `role_facet` itself does NOT travel: it exists only to build
+        # `role_count`, which `role_segments`/`role_optin_segment` below
+        # already fold in. No template ever read the raw list.
         # Row 1: the four drawn segments, plus the conditional fifth when an
         # opt-in mode is active. The template renders these; it does not
         # re-derive bucket membership.
