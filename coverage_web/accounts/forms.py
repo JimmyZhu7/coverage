@@ -154,7 +154,7 @@ def timezone_choices() -> list:
     """
     every = sorted(known_timezones())
     return [
-        (AUTO_TIMEZONE, "Detect automatically from this device"),
+        (AUTO_TIMEZONE, "This Device"),
         ("Common", [(code, label) for code, label in TIMEZONE_SHORTLIST]),
         (
             "All timezones",

@@ -200,7 +200,7 @@ class User(AbstractUser):
     # working US hours from abroad, say — would be furious to find the
     # product quietly overruling them on the next page load. So: auto is the
     # default for accounts that never chose, and picking any zone by hand
-    # turns it off. Choosing "Detect automatically" turns it back on.
+    # turns it off. Choosing "This Device" turns it back on.
     timezone_auto = models.BooleanField(default=True)
     assets = models.JSONField(default=dict, blank=True)
     # Read-only key for the ICS calendar feed. Its own token — the retired

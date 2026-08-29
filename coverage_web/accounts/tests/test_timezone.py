@@ -207,7 +207,7 @@ def test_the_select_offers_the_shortlist_and_the_full_list():
     # The first entry is AUTO, not blank: following the device is the default
     # and "not set" stopped being the honest label for it.
     assert choices[0][0] == AUTO_TIMEZONE
-    assert "automatically" in choices[0][1].lower()
+    assert choices[0][1] == "This Device"
     groups = dict(choices[1:])
     assert ("Asia/Hong_Kong", "Hong Kong (HKT)") in groups["Common"]
     every = {code for code, _label in groups["All timezones"]}

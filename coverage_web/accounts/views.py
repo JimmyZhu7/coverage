@@ -782,7 +782,6 @@ def settings_view(request):
             "work_auth_form": section_forms["work_auth"],
             "cadence_form": section_forms["cadence"],
             "pace_form": section_forms["pace"],
-            "default_weekly_goal": WeeklyPaceForm.DEFAULT_GOAL,
             "notifications_form": section_forms["notifications"],
             # Push notifications (deadline alerts). Blank key = the toggle
             # renders as unavailable rather than a button that dead-ends —
