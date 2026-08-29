@@ -418,6 +418,87 @@ class TestOutOfOffice:
         contact.refresh_from_db()
         assert contact.snoozed_until == later
 
+    def test_dismissed_ooo_card_is_not_resurrected_by_a_later_leave(self, student):
+        """Regression: dismissing the no-date OOO card used to only last
+        until the SAME sender's next auto-reply happened to state a return
+        date. `_apply_ooo`'s forward-only update checked only the date, never
+        the fact's own status, so a dismissed row silently flipped back to
+        `applied` and `contact.snoozed_until` got overwritten again with no
+        tap from the user in between. `dismiss`'s own docstring calls every
+        dismissed row a permanent do-not-re-create memory; this pins that
+        for the one capture surface that used to disagree."""
+        contact = Contact.all_objects.create(
+            user=student, name="Peter Foggo", email="pfoggo@allenco.com",
+        )
+        vague = gmail_message(
+            from_header="Peter Foggo <pfoggo@allenco.com>",
+            subject="Automatic reply: out",
+            body="I am currently traveling and will respond when I return.",
+            headers=(("auto-submitted", "auto-replied"),),
+            thread_id="t-ooo-vague",
+        )
+        apply_findings(student, [_classify_message(OWN, vague)])
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_OOO)
+        assert fact.status == MailFact.STATUS_PENDING
+
+        mailfacts.dismiss(fact)
+        fact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_DISMISSED
+
+        dated = gmail_message(
+            from_header="Peter Foggo <pfoggo@allenco.com>",
+            subject="Automatic reply: still out",
+            body=(
+                "I am out of the office and will return on Monday, "
+                "September 7, 2026."
+            ),
+            headers=(("auto-submitted", "auto-replied"),),
+            thread_id="t-ooo-dated",
+        )
+        apply_findings(student, [_classify_message(OWN, dated)])
+
+        fact.refresh_from_db()
+        contact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_DISMISSED
+        assert fact.return_on is None
+        assert contact.snoozed_until is None
+
+    def test_undone_ooo_snooze_is_not_reapplied_by_a_later_leave(self, student):
+        """Same guard, the other terminal state: the user hit Undo on an
+        automated snooze (`mailfacts.undo`), and a later dated auto-reply
+        from the same sender must not put it back."""
+        contact = Contact.all_objects.create(
+            user=student, name="Peter Foggo", email="pfoggo@allenco.com",
+        )
+        apply_findings(student, [_classify_message(OWN, ooo_message())])
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_OOO)
+        assert fact.status == MailFact.STATUS_APPLIED
+        contact.refresh_from_db()
+        assert contact.snoozed_until is not None
+
+        mailfacts.undo(fact)
+        fact.refresh_from_db()
+        contact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_UNDONE
+        assert contact.snoozed_until is None
+
+        later = gmail_message(
+            from_header="Peter Foggo <pfoggo@allenco.com>",
+            subject="Automatic reply: still out",
+            body=(
+                "I am out of the office and will return on Monday, "
+                "September 14, 2026."
+            ),
+            headers=(("auto-submitted", "auto-replied"),),
+            thread_id="t-ooo-later",
+        )
+        apply_findings(student, [_classify_message(OWN, later)])
+
+        fact.refresh_from_db()
+        contact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_UNDONE
+        assert contact.snoozed_until is None
+
     def test_headerless_ooo_subject_is_still_bulk(self, student):
         """An OOO with no RFC 3834 header used to fall through to
         `replied: True` and inflate warmth. The subject prefix now catches

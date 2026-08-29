@@ -808,6 +808,17 @@ def _apply_ooo(
     contact = _contact_for(user, sender)
     existing = _existing_fact(user, sender, MailFact.KIND_OOO)
     if existing is not None:
+        # DISMISSED or UNDONE is the user's own word — "stop touching this"
+        # — and it outranks any later auto-reply, the same way
+        # `address_is_departed` excludes an undone departure and `dismiss`'s
+        # docstring calls every dismissed row a permanent do-not-re-create
+        # memory. Without this check, a card the user waved away (or a
+        # snooze they explicitly undid) came back to life — status flipped
+        # back to `applied` and `contact.snoozed_until` overwritten again —
+        # the moment a later auto-reply from the same sender happened to
+        # state a date, with no tap from the user in between.
+        if existing.status in (MailFact.STATUS_DISMISSED, MailFact.STATUS_UNDONE):
+            return
         # A NEW leave later on updates the one row rather than being blocked
         # forever by the dedup — but only ever forward.
         if (
