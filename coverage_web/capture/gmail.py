@@ -165,6 +165,18 @@ class SyncResult:
     mail_facts_applied: int = 0
     mail_facts_surfaced: int = 0
     referral_proposals: int = 0
+    # Findings whose ENRICHMENT hook raised and was stepped over, leaving the
+    # primary sync (touches, proposals, bounce clears) to finish normally —
+    # see the two `try` blocks in `apply_findings`. These are the only
+    # counters here that are not a description of the mail: they describe
+    # Coverage failing to read it, which is why they are counted at all
+    # rather than logged. Both hooks used to be unguarded, so an exception in
+    # either took the whole mailbox's sync down with it; now it costs one
+    # message and says so. `> 0` is the entire signal — at this deployment's
+    # volume there is nothing statistical worth computing on top, and
+    # /ops/health/capture/ reads them exactly that plainly.
+    mail_facts_errors: int = 0
+    app_events_errors: int = 0
     # Detected, matched, and already at or past the stage the mail claims —
     # the ATS's own reminder about something the board already knows.
     app_events_already: int = 0
@@ -205,6 +217,8 @@ class SyncResult:
             "mail_facts_applied": self.mail_facts_applied,
             "mail_facts_surfaced": self.mail_facts_surfaced,
             "referral_proposals": self.referral_proposals,
+            "mail_facts_errors": self.mail_facts_errors,
+            "app_events_errors": self.app_events_errors,
             "app_events_already": self.app_events_already,
             "skipped_ambiguous": self.skipped_ambiguous,
             "pattern_delivered": self.pattern_delivered,
@@ -1022,17 +1036,32 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # this feature silently skipped. Writes at most one pending
         # `ApplicationEvent` and never touches the pipeline — see
         # capture/appmail.py.
-        outcome = appmail.consider_finding(
-            user, finding, resolver=appmail_resolver, dry_run=dry_run
-        )
-        if outcome.result == appmail.PROPOSED:
-            result.app_events_proposed += 1
-        elif outcome.result == appmail.UNRESOLVED:
-            result.app_events_unresolved += 1
-        elif outcome.result == appmail.ALREADY_AHEAD:
-            result.app_events_already += 1
-        if outcome.detail:
-            result.details.append(outcome.detail)
+        #
+        # WRAPPED, for the reason spelled out at the mail-facts hook below:
+        # an enrichment layer must not be able to take the primary sync down
+        # with it. Guarded on its OWN axis rather than sharing one try block
+        # with mailfacts, so an ATS-parser bug never reports itself as a
+        # mail-facts failure — the counters exist so an operator knows which
+        # layer to go and fix.
+        try:
+            outcome = appmail.consider_finding(
+                user, finding, resolver=appmail_resolver, dry_run=dry_run
+            )
+        except Exception as exc:  # noqa: BLE001 — see the comment above.
+            result.app_events_errors += 1
+            result.details.append(
+                f"{name}: application-mail read failed, skipped (the rest of "
+                f"this sync is unaffected): {exc}"
+            )
+        else:
+            if outcome.result == appmail.PROPOSED:
+                result.app_events_proposed += 1
+            elif outcome.result == appmail.UNRESOLVED:
+                result.app_events_unresolved += 1
+            elif outcome.result == appmail.ALREADY_AHEAD:
+                result.app_events_already += 1
+            if outcome.detail:
+                result.details.append(outcome.detail)
 
         # THE MAIL-FACTS HOOK. Also before contact matching and for EVERY
         # finding, for the same reason the application hook is: whether the
@@ -1044,13 +1073,52 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # routing address), acts only with a verbatim quote, and proposes —
         # never creates — people. See capture/mailfacts.py for the whole
         # contract, including where "act" ends and "propose" begins.
-        facts = mailfacts.consider_finding(
-            user, finding, firm_domains=firm_domains, dry_run=dry_run
-        )
-        result.mail_facts_applied += facts.applied
-        result.mail_facts_surfaced += facts.surfaced
-        result.referral_proposals += facts.referrals
-        result.details.extend(facts.details)
+        #
+        # WRAPPED, AND THE REASON IS THE WHOLE POINT. This call and the
+        # application-mail call above were the only two unguarded hooks left
+        # in this function, and they sit in front of everything: one
+        # malformed auto-reply raising here used to propagate out of
+        # `apply_findings` and kill the ENTIRE sync for that mailbox — the
+        # touches, the outreach notes, the discovery proposals, the bounce
+        # clears, the campaign pass at the bottom — for every finding in the
+        # batch, not just the poisoned one. On a 109-finding rescan (the real
+        # size of the founder's own 2026-08-28 run) that is one bad message
+        # costing a mailbox its whole night of capture.
+        #
+        # Severity is not hypothetical: mailfacts' first real firing in this
+        # product's history was that same run, five rows, all
+        # `detected_by="rules"`. The layer with five rows of history was
+        # standing in front of the layer with the product behind it. The
+        # posture here is the file's own, already stated for
+        # `crm_campaigns.detect` at the bottom of this function and for
+        # `gmail_live.backfill_new_contacts` ("an import must never fail
+        # because enrichment did") — these two hooks were simply missed when
+        # they were added.
+        #
+        # Per FINDING, not per batch, because the hook is per finding: the
+        # catch has to sit inside the loop or one bad message still costs the
+        # remaining ones. And counted rather than silently swallowed —
+        # `backfill_new_contacts` can afford its bare `return None` because
+        # its caller is an HTTP request a human is watching; this path runs
+        # unattended every two minutes, so a hook failing forever with
+        # nothing to show for it is precisely the silence the capture-health
+        # work exists to end. The counter rides out in `as_stats()`, so it
+        # lands in the `Import` ledger rows and on /ops/health/capture/.
+        try:
+            facts = mailfacts.consider_finding(
+                user, finding, firm_domains=firm_domains, dry_run=dry_run
+            )
+        except Exception as exc:  # noqa: BLE001 — see the comment above.
+            result.mail_facts_errors += 1
+            result.details.append(
+                f"{name}: mail-facts read failed, skipped (the rest of this "
+                f"sync is unaffected): {exc}"
+            )
+        else:
+            result.mail_facts_applied += facts.applied
+            result.mail_facts_surfaced += facts.surfaced
+            result.referral_proposals += facts.referrals
+            result.details.extend(facts.details)
 
         try:
             contact = _match_contact(user, finding)
