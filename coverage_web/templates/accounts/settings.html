@@ -323,6 +323,31 @@
     outline-offset: 2px; border-radius: var(--r-ctl); }
   .dec-evidence p { margin: var(--s1) 0 0; color: var(--ink-3);
     font-size: var(--fs-xs); line-height: 1.5; max-width: 60ch; }
+  /* The click-through for already-decided items ("Past sends", "Past
+     merges"). 2026-08-29: a settled campaign or a completed merge is a
+     question already answered, and printing it inline at the same size as
+     one still waiting on a tap was the exact "blatant" clutter the founder
+     asked to remove. <details> again — costs nothing closed, needs no
+     script — but this one carries a whole sublist rather than one sentence,
+     so its summary reads as a compact section header, not a footnote. The
+     ▸ is decoration, not data (unlike .dec-evidence's "Why" text above):
+     the disclosure's own name, not CSS content, is what a screen reader or
+     a broken stylesheet has to fall back on, and "Past sends (2)" already
+     carries that on its own. */
+  .dec-settled { margin-top: var(--s3); }
+  .dec-settled summary { cursor: pointer; color: var(--ink-2);
+    font-size: var(--fs-s); font-weight: var(--w-med); list-style: none;
+    padding: var(--s2) 0; }
+  .dec-settled summary::-webkit-details-marker { display: none; }
+  .dec-settled summary::before { content: "▸"; display: inline-block;
+    margin-right: var(--s2); transition: transform var(--t-fast); }
+  .dec-settled[open] summary::before { transform: rotate(90deg); }
+  .dec-settled summary:hover { color: var(--accent-ink); }
+  .dec-settled summary:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; border-radius: var(--r-ctl); }
+  @media (prefers-reduced-motion: reduce) {
+    .dec-settled summary::before { transition: none; }
+  }
 
   /* The two forms in Pace & Cadence share a card and must not run together.
      The pace form ends with its own inline Save; this hairline under it is
@@ -1480,84 +1505,79 @@
           hat you wear. See crm/campaigns.py for the founder's 201-thread club
           panel mail merge that Coverage read as his recruiting network.
 
-          Three buttons, not a toggle, because there are genuinely three
-          states and one of them is "not answered yet" — same reasoning as the
-          contact form's Recruiting-contact field.
+          2026-08-29: only the ones still asking the question print inline —
+          a classified send is a durable answer you already gave, and a page
+          of them re-asked every time is exactly the "blatant" clutter this
+          pass removes. Answered ones move behind the "Past sends" disclosure
+          below, where "Change" still reaches them.
           {% endcomment %}
           {% if campaigns %}
           <div class="set-group" id="campaigns">
             <h3 class="set-group-h">Bulk Sends</h3>
-            {% comment %}
-            One line, not four. The three sentences this replaces spelled out
-            what marking a send does, what it does NOT do, and a second
-            exception — but each row below already states its own outcome as
-            a pill beside its name, so the paragraph was explaining a
-            consequence the reader meets again, per row, at the moment it
-            applies. Nothing is deleted: it moved to where it is true.
-            {% endcomment %}
-            <p class="set-note">Which of these were your job search? Nothing is deleted either way.</p>
             {% for c in campaigns %}
-            <div class="set-row">
-              <div class="set-row-main">
-                {% comment %}
-                The verdict used to be a bolded clause buried inside the
-                prose paragraph, at the same size and weight as the count it
-                followed — the one fact worth a glance had no more visual
-                weight than the numbers around it. It is a pill beside the
-                name now, the same accent/neutral pairing Credits' plan
-                badge already uses, so "which of these were your job
-                search" has an answer you can read down the whole list
-                without stopping to parse a sentence per row. Unclassified
-                rows carry no pill — nothing has been decided yet, and a
-                third "pending" badge would be a fact the row doesn't have.
-                {% endcomment %}
-                <span class="set-row-label">{{ c.label }}
-                  {% if c.kind == campaign_kind_other %}<span class="pill dec-no">Not your recruiting</span>
-                  {% elif c.kind == campaign_kind_recruiting %}<span class="pill dec-yes">Your recruiting</span>{% endif %}
-                </span>
-                <div class="set-row-desc">
-                  {{ c.recipient_count }} recipient{{ c.recipient_count|pluralize }},
-                  {{ c.first_sent|date:"j M Y" }}.
+              {% if not c.is_classified %}
+              <div class="set-row">
+                <div class="set-row-main">
+                  <span class="set-row-label">{{ c.label }}</span>
+                  <div class="set-row-desc">{{ c.recipient_count }} recipient{{ c.recipient_count|pluralize }}. Your job search?</div>
+                </div>
+                <div class="set-row-control">
                   {% comment %}
-                  The second number is the one that matters and it is stated
-                  plainly rather than folded into the first: a classification
-                  only moves contacts whose relationship with you STARTED in
-                  this send (crm.models.CampaignContact.originates), so "201
-                  recipients" alone would overstate what the answer does.
+                  "Yes"/"No" answer the question the row just asked, printed
+                  a breath above the buttons — minimal on screen, but a
+                  screen reader lands on a button with no question in
+                  earshot, so each carries the full sentence as its name.
                   {% endcomment %}
-                  {{ c.originating_count }} of them first heard from you here.
-                  {% if c.kind == campaign_kind_other %}
-                    Off your daily queue and your network board.
-                  {% elif c.kind == campaign_kind_recruiting %}
-                    In your daily queue.
-                  {% endif %}
+                  <form method="post" action="{% url 'crm:classify_campaign' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="campaign" value="{{ c.id }}">
+                    <input type="hidden" name="kind" value="{{ campaign_kind_recruiting }}">
+                    <button type="submit" class="btn" aria-label="Yes, {{ c.label }} was your job search">Yes</button>
+                  </form>
+                  <form method="post" action="{% url 'crm:classify_campaign' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="campaign" value="{{ c.id }}">
+                    <input type="hidden" name="kind" value="{{ campaign_kind_other }}">
+                    <button type="submit" class="btn" aria-label="No, {{ c.label }} was not your job search">No</button>
+                  </form>
                 </div>
               </div>
-              <div class="set-row-control">
-                {% if c.is_classified %}
+              {% endif %}
+            {% endfor %}
+            {% if campaigns_settled %}
+            {% comment %}
+            The pill still states the verdict at a glance for whoever opens
+            this — same accent/neutral pairing Credits' plan badge uses,
+            reused rather than invented. The count/date/first-heard sentence
+            and the evidence-grade detail stay exactly as they were; only
+            their default visibility changed.
+            {% endcomment %}
+            <details class="dec-settled">
+              <summary>Past sends ({{ campaigns_settled|length }})</summary>
+              {% for c in campaigns_settled %}
+              <div class="set-row">
+                <div class="set-row-main">
+                  <span class="set-row-label">{{ c.label }}
+                    {% if c.kind == campaign_kind_other %}<span class="pill dec-no">Not your recruiting</span>
+                    {% elif c.kind == campaign_kind_recruiting %}<span class="pill dec-yes">Your recruiting</span>{% endif %}
+                  </span>
+                  <div class="set-row-desc">
+                    {{ c.recipient_count }} recipient{{ c.recipient_count|pluralize }},
+                    {{ c.originating_count }} first heard from you here.
+                  </div>
+                </div>
+                <div class="set-row-control">
                   <form method="post" action="{% url 'crm:classify_campaign' %}">
                     {% csrf_token %}
                     <input type="hidden" name="campaign" value="{{ c.id }}">
                     <input type="hidden" name="kind" value="{{ campaign_kind_unclassified }}">
                     <button type="submit" class="btn">Change</button>
                   </form>
-                {% else %}
-                  <form method="post" action="{% url 'crm:classify_campaign' %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="campaign" value="{{ c.id }}">
-                    <input type="hidden" name="kind" value="{{ campaign_kind_recruiting }}">
-                    <button type="submit" class="btn">My recruiting</button>
-                  </form>
-                  <form method="post" action="{% url 'crm:classify_campaign' %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="campaign" value="{{ c.id }}">
-                    <input type="hidden" name="kind" value="{{ campaign_kind_other }}">
-                    <button type="submit" class="btn">Something else</button>
-                  </form>
-                {% endif %}
+                </div>
               </div>
-            </div>
-            {% endfor %}
+              {% endfor %}
+            </details>
+            {% endif %}
           </div>
           {% endif %}
 
@@ -1622,9 +1642,13 @@
           NOTHING HERE ACTS ON ITS OWN. A false merge fuses two people's
           histories and there is no clean undo once later touches land on the
           fused card, so suggestive evidence only ever becomes a row and a
-          tap. The evidence sentence is shown verbatim on both lists: the
-          surface where a decision is made, and the one where it gets
-          reversed, both show what the decision stood on.
+          tap. Only PENDING pairs print inline now (2026-08-29); a merge
+          already done is a durable answer, not a daily question, so it moves
+          behind "Past merges" below — Undo still reaches it there. The
+          evidence sentence still shows verbatim wherever a row does, on
+          either side of the click, one tap away rather than gone: it is WHY
+          Coverage thinks two cards are one person, a trust feature that has
+          to survive being reachable even when it isn't loud.
           {% endcomment %}
           {% if merge_suggestions or recent_merges %}
           <div class="set-group" id="duplicates">
@@ -1634,14 +1658,6 @@
             the rows below actually are.
             {% endcomment %}
             <h3 class="set-group-h">Duplicate Contacts</h3>
-            {% comment %}
-            The mechanism sentence ("folds the duplicate's history into the
-            kept card and archives the spare") went: every row below already
-            spells the specific move out with the two real names in it. What
-            survives is the part no row can say for itself — that this is
-            opt-in and reversible.
-            {% endcomment %}
-            <p class="set-note">Nothing merges without your tap, and every merge can be undone here.</p>
             {% for s in merge_suggestions %}
             <div class="set-row">
               <div class="set-row-main">
@@ -1691,39 +1707,44 @@
               </div>
             </div>
             {% endfor %}
-            {% for m in recent_merges %}
-            <div class="set-row">
-              <div class="set-row-main">
-                {% comment %}
-                This used to read "Ebba Kler &rarr; Ebba Af Klercker" — an
-                arrow with no stated convention for which side survives (it
-                was the RIGHT one). Word order plus weight says it without
-                symbols now: the kept card is the bold subject and the verb
-                is active — "X folded in Y" reads the same direction the
-                merge actually ran — with the absorbed name quieted rather
-                than pretending the two are still peers.
-                {% endcomment %}
-                <span class="set-row-label">{{ m.primary.name|smart_title }}
-                  <span class="dec-sub">folded in {{ m.duplicate.name|smart_title }}</span></span>
-                <div class="set-row-desc">
-                  Merged{% if m.resolved_at %} {{ m.resolved_at|date:"j M Y" }}{% endif %}.
-                  {{ m.moved_touch_ids|length }} touch{{ m.moved_touch_ids|length|pluralize:"es" }} moved.
+            {% if recent_merges %}
+            <details class="dec-settled">
+              <summary>Past merges ({{ recent_merges|length }})</summary>
+              {% for m in recent_merges %}
+              <div class="set-row">
+                <div class="set-row-main">
+                  {% comment %}
+                  This used to read "Ebba Kler &rarr; Ebba Af Klercker" — an
+                  arrow with no stated convention for which side survives
+                  (it was the RIGHT one). Word order plus weight says it
+                  without symbols now: the kept card is the bold subject and
+                  the verb is active — "X folded in Y" reads the same
+                  direction the merge actually ran — with the absorbed name
+                  quieted rather than pretending the two are still peers.
+                  {% endcomment %}
+                  <span class="set-row-label">{{ m.primary.name|smart_title }}
+                    <span class="dec-sub">folded in {{ m.duplicate.name|smart_title }}</span></span>
+                  <div class="set-row-desc">
+                    Merged{% if m.resolved_at %} {{ m.resolved_at|date:"j M Y" }}{% endif %}.
+                    {{ m.moved_touch_ids|length }} touch{{ m.moved_touch_ids|length|pluralize:"es" }} moved.
+                  </div>
+                  {% if m.evidence %}
+                  <details class="dec-evidence">
+                    <summary>Why Coverage flagged this</summary>
+                    <p>{{ m.evidence }}</p>
+                  </details>
+                  {% endif %}
                 </div>
-                {% if m.evidence %}
-                <details class="dec-evidence">
-                  <summary>Why Coverage flagged this</summary>
-                  <p>{{ m.evidence }}</p>
-                </details>
-                {% endif %}
+                <div class="set-row-control">
+                  <form method="post" action="{% url 'crm:contact_merge_undo' m.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn">Undo</button>
+                  </form>
+                </div>
               </div>
-              <div class="set-row-control">
-                <form method="post" action="{% url 'crm:contact_merge_undo' m.id %}">
-                  {% csrf_token %}
-                  <button type="submit" class="btn">Undo</button>
-                </form>
-              </div>
-            </div>
-            {% endfor %}
+              {% endfor %}
+            </details>
+            {% endif %}
           </div>
           {% endif %}
         </div>

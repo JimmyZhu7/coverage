@@ -305,8 +305,13 @@ class TestMergeViews:
         assert resp.status_code == 404
 
     def test_settings_page_shows_the_suggestion(self, client, user, ebba_pair):
+        """"One Person, Two Cards?" was a question that named neither what
+        the group holds nor what it's for (2026-08-29 presentation pass on
+        Settings' Decisions card) — renamed to "Duplicate Contacts", which
+        says what the rows below actually are. The behavior this pins is
+        unchanged: the group renders and shows the duplicate's email."""
         self._login(client, user)
         resp = client.get(reverse("accounts:settings"))
         body = resp.content.decode()
-        assert "One Person, Two Cards?" in body
+        assert "Duplicate Contacts" in body
         assert "ebbakler@amazon.es" in body

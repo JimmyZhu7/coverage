@@ -705,6 +705,13 @@ def settings_view(request):
 
     contacts = Contact.objects.for_user(request.user)
     contact_count = contacts.count()
+    # Split once here rather than in the template: Django templates have no
+    # "any classified" or "filter by attribute" built in, and the settled
+    # half of the list now renders behind a click-through (2026-08-29, "do
+    # not show blatantly in the system") rather than inline with the ones
+    # still asking a question.
+    campaign_cards = crm_campaigns.campaign_cards(request.user)
+    campaigns_settled = [c for c in campaign_cards if c["is_classified"]]
     return render(
         request,
         "accounts/settings.html",
@@ -723,7 +730,8 @@ def settings_view(request):
             # page load: it walks every outbound touch, and a settings render
             # is the wrong place to pay for that. It runs at the end of a
             # capture sync and from `manage.py detect_campaigns`.
-            "campaigns": crm_campaigns.campaign_cards(request.user),
+            "campaigns": campaign_cards,
+            "campaigns_settled": campaigns_settled,
             # People the user dismissed from the "Found in your inbox" lane.
             # THE ONLY PLACE THEY EXIST AFTER THE TAP: dismissal is permanent
             # for the scan (capture.models.ContactProposal), so without a
