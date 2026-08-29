@@ -1964,9 +1964,18 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
             ),
             # Remaining fraction of the fuse (100 = far out, ~0 = closing).
             # None on an inexact date: a fuse is a day-level claim.
+            # `_styles.html`'s `.fuse-fill` renders at `width: var(--fuse)`,
+            # animating DOWN from a full bar to that width — so this number
+            # IS the bar's own remaining length, not "how much has burned".
+            # A stray `1 -` here inverted the mapping: a role closing TODAY
+            # computed to 100 (a full, unburnt-looking bar) and a role 45
+            # days out computed to the floor of 4 (nearly invisible) — the
+            # exact opposite of "the closer the deadline, the shorter the
+            # fuse" the `.fuse-passed` rule two lines below (`fuse_pct: 0`)
+            # already assumes as its other endpoint.
             "fuse_pct": (
                 None if inexact else
-                max(4, round((1 - min(days, _FUSE_HORIZON) / _FUSE_HORIZON) * 100))
+                max(4, round(min(days, _FUSE_HORIZON) / _FUSE_HORIZON * 100))
             ),
         })
     else:
@@ -3230,7 +3239,15 @@ def track_eligible(request):
             continue
         if o.id in touched:
             continue
-        UserOpportunity.all_objects.create(user=request.user, opportunity=o)
+        # get_or_create, not create: `touched` was read once, above, before
+        # this loop started, so a concurrent write for the same (user,
+        # opportunity) pair -- a double-click, two tabs open on the same
+        # offer -- can land in the gap between that read and this line.
+        # UserOpportunity enforces uniqueness on exactly that pair, so a
+        # bare `.create()` there raises IntegrityError and 500s the whole
+        # confirm; `track_opportunity`'s own upsert already takes this same
+        # defence for the identical race.
+        UserOpportunity.all_objects.get_or_create(user=request.user, opportunity=o)
         saved_ids.append(o.id)
     saved = len(saved_ids)
     # The offer is consumed either way: a second POST of the same confirm
