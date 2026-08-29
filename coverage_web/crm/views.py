@@ -20,7 +20,7 @@ from urllib.parse import quote
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count as models_Count, Max as models_Max
+from django.db.models import Count as models_Count, Max as models_Max, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
