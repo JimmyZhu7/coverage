@@ -2,7 +2,7 @@
 {% comment %}
 Social sign-in buttons, driven by core.context_processors.social_providers.
 A provider without credentials renders disabled rather than as a live button
-that would dead-end at the OAuth redirect. `action` is "Sign In" / "Sign Up".
+that would dead-end at the OAuth redirect.
 {% endcomment %}
 <div class="auth-providers">
   {% for p in social_providers %}
