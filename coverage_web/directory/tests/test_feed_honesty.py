@@ -120,6 +120,34 @@ def test_a_future_deadline_is_still_dated_and_a_null_deadline_is_rolling():
 
 
 @pytest.mark.django_db
+def test_fuse_pct_shrinks_as_the_deadline_approaches():
+    """`fuse_pct` feeds `_styles.html`'s `.fuse-fill { width: var(--fuse) }`,
+    which animates DOWN from a full bar to that width — so it is the bar's
+    OWN remaining length: near 100 when the deadline is far off, near the
+    floor of 4 when it is imminent, and exactly 0 once it has passed
+    (`_urgency_item`'s "passed" branch, pinned separately above). A stray
+    `1 -` in the formula inverted this: a role closing TODAY computed to a
+    full 100, and a role at the far edge of `_FUSE_HORIZON` computed to the
+    floor of 4 — a role about to close looking safer than one over a month
+    out."""
+    firm = _firm()
+    closing_today = _urgency_item(
+        _opp(firm, "https://x/today", deadline=TODAY), now=NOW, today=TODAY,
+        my_firm_ids=set(),
+    )
+    far_out = _urgency_item(
+        _opp(firm, "https://x/far", deadline=TODAY + timedelta(days=45)),
+        now=NOW, today=TODAY, my_firm_ids=set(),
+    )
+    assert closing_today["fuse_pct"] < far_out["fuse_pct"], (
+        "a role closing today must show a SHORTER remaining fuse than one "
+        "45 days out, not a longer one"
+    )
+    assert closing_today["fuse_pct"] == 4    # floored, not 0 — still open today
+    assert far_out["fuse_pct"] == 100
+
+
+@pytest.mark.django_db
 def test_a_passed_deadline_never_shows_the_freshness_badge():
     firm = _firm()
     o = _seen(_opp(firm, "https://x/1", deadline=TODAY - timedelta(days=1)), 0)
