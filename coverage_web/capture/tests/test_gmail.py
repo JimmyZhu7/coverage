@@ -426,10 +426,10 @@ def test_appmail_hook_raising_does_not_lose_the_rest_of_the_batch(student, conta
     ]
     result = apply_findings(student, batch)
 
-    assert result.hook_errors == 2  # one per finding in the batch
+    assert result.app_events_errors == 2  # one per finding in the batch
     assert kinds(student, contact) == ["reply_received"]
     assert kinds(student, other) == ["reply_received"]
-    assert any("application-mail check failed" in line for line in result.details)
+    assert any("application-mail read failed" in line for line in result.details)
 
 
 def test_mailfacts_hook_raising_does_not_lose_the_rest_of_the_batch(student, contact, monkeypatch):
@@ -450,10 +450,10 @@ def test_mailfacts_hook_raising_does_not_lose_the_rest_of_the_batch(student, con
     ]
     result = apply_findings(student, batch)
 
-    assert result.hook_errors == 2
+    assert result.mail_facts_errors == 2
     assert kinds(student, contact) == ["reply_received"]
     assert kinds(student, other) == ["reply_received"]
-    assert any("mail-facts check failed" in line for line in result.details)
+    assert any("mail-facts read failed" in line for line in result.details)
 
 
 def test_discovery_hook_raising_does_not_lose_the_rest_of_the_batch(student, contact, monkeypatch):
@@ -474,7 +474,7 @@ def test_discovery_hook_raising_does_not_lose_the_rest_of_the_batch(student, con
     ]
     result = apply_findings(student, batch)
 
-    assert result.hook_errors == 1
+    assert result.discovery_errors == 1
     assert result.skipped_unmatched == 1
     assert Contact.objects.for_user(student).filter(name="Nobody").count() == 0
     assert kinds(student, contact) == ["reply_received"]
