@@ -485,13 +485,25 @@ def test_is_pending_reopens_once_a_named_contact_is_parked(monkeypatch):
     `is_configured` forced True (same reason as
     `test_with_no_client_and_the_api_dark_it_returns_none`): `is_pending`
     gates on it directly and a real key on the test machine must not be what
-    makes this pass or fail."""
+    makes this pass or fail.
+
+    The "parked" queue here is a REAL one that simply no longer contains the
+    named contact, not `[]`. It used to be `[]`, which passed for the wrong
+    reason: an empty list is not "Anant was parked", it is "there is no
+    queue today", and `_is_stale` deliberately stopped treating those as the
+    same thing (see `test_an_empty_queue_does_not_invalidate_a_still_true
+    _brief`). Expressed the way the sibling test at
+    `test_get_cached_hides_a_stale_brief_without_spending_a_call` already
+    does it, this pins the behaviour the name actually claims."""
     monkeypatch.setattr(brief, "is_configured", lambda: True)
     user = _user()
     client = FakeClient(_response("Respond to **Anant Taparia** at Citi."))
     brief.get_or_build(user, _founders_queue_before_parking(), client=client)
 
-    assert brief.is_pending(user, []) is True
+    # Anant parked; the rest of the day's queue is untouched.
+    after_parking = [_action("Priya Nair", "Bain", "Follow up",
+                             "no reply after 9 business days", contact_id=999)]
+    assert brief.is_pending(user, after_parking) is True
     assert brief.is_pending(user, _founders_queue_before_parking()) is False
 
 
@@ -514,3 +526,34 @@ def test_reply_after_park_is_never_treated_as_stale():
 
     assert second == "Respond to **Anant Taparia** at Citi."
     assert client.messages.requests == []
+
+
+def test_an_empty_queue_does_not_invalidate_a_still_true_brief():
+    """FAILS BEFORE THE FIX. `_live_contact_ids([])` is the empty set, so
+    every brief naming anyone failed the subset test the instant the queue
+    emptied — and an empty queue is not evidence that the person named was
+    overruled, it is the absence of anything to check against.
+
+    Measured on the founder's own account, 2026-08-29: queue at zero, that
+    morning's brief named Katy Chen (`chat_done`, i.e. the chat HAPPENED)
+    about a Nomura deadline that had not moved, and Today threw it away.
+    Worse than a wrong sentence, it produced NO sentence: staleness only
+    pays for itself when a better brief can replace the discarded one, and
+    with no actions `get_or_build` has nothing to write from, so the slot
+    renders empty on exactly the day the brief is the only thing on the
+    page.
+
+    Distinct from `..._survives_when_every_named_contact_is_still_in_the
+    _queue` above, which pins a NON-empty queue that still contains
+    everyone. This pins the zero case, which took the opposite branch."""
+    user = _user()
+    client = FakeClient(_response("Respond to **Anant Taparia** at Citi."))
+    brief.get_or_build(user, _founders_queue_before_parking(), client=client)
+
+    # The student cleared their queue. Nothing was parked or excluded;
+    # there is simply no work due today.
+    assert brief.get_cached(user, []) == "Respond to **Anant Taparia** at Citi."
+    # And the Today page must not fall back to the lazy-load placeholder,
+    # which would POST, generate nothing from an empty queue, and leave a
+    # blank where the brief was.
+    assert brief.is_pending(user, []) is False

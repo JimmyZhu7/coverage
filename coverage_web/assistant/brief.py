@@ -144,8 +144,32 @@ def _is_stale(existing: DailyBrief, actions: list[dict]) -> bool:
     An empty `contact_ids` (situation-only brief, or a row written before
     this field existed) can never be stale by this test — there is nothing
     recorded to have gone missing.
+
+    AN EMPTY `actions` IS THE SAME KIND OF NOTHING, and missing that cost
+    the founder the brief on every clear day. `_live_contact_ids([])` is the
+    empty set, so before this guard ANY brief naming ANY contact failed the
+    subset test the moment the queue emptied — which is not "the person I
+    named was overruled", it is "there is no queue today to check against".
+    Measured on the founder's own account, 2026-08-29: queue at zero, the
+    morning's brief named Katy Chen (`chat_done` — the chat HAPPENED, the
+    opposite of a contradiction) about a Nomura deadline that had not moved,
+    and the page threw it away.
+
+    Throwing it away is also strictly worse than keeping it here, because of
+    what staleness is FOR. The check's whole promise is "discard this so
+    `crm.views.daily_brief` writes a better one" — and with no actions there
+    is nothing better to write from, so `get_or_build` returns None and the
+    slot renders empty. The student loses a true sentence and gets silence
+    in exchange, on precisely the day the brief is the only thing on the
+    page. The Anant Taparia / Xinyi Xu case this function exists for is
+    unaffected: it had a live queue, and every case with a live queue still
+    evaluates exactly as before.
     """
-    return bool(existing.contact_ids) and not set(existing.contact_ids) <= _live_contact_ids(actions)
+    return (
+        bool(existing.contact_ids)
+        and bool(actions)
+        and not set(existing.contact_ids) <= _live_contact_ids(actions)
+    )
 
 
 def get_cached(user, actions: list[dict] | None = None) -> str | None:
