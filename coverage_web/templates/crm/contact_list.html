@@ -366,15 +366,16 @@
           <div class="tier-grid">
             {% for fc in section.cards %}
               {% comment %}
-              The card's tooltip used to read "Drag to another tier. Tier
-              drives your action priorities." The second sentence came off:
-              the section heading above and every tier label between it and
-              this card already carry it word for word, so the card's own
-              hover was the third copy inside one screen.
+              "Drag to another tier." named dragging as THE way to change a
+              tier, which is no way at all on a touch screen (see the picker
+              at `.fc-tier` below, added for exactly that reason). The
+              tooltip now names both routes — see
+              crm/tests/test_firm_tier_controls.py's
+              test_the_hints_no_longer_prescribe_a_gesture_touch_cannot_send.
               {% endcomment %}
               <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
                    style="--i:{{ forloop.counter0 }}"
-                   title="Drag to another tier.">
+                   title="Tier drives your action priorities. Pick a tier below, or drag this card to another lane.">
                 {% comment %}
                 The COUNT badges are gone. Asked for directly: take the
                 counts off these cards and leave the progress bar and the
