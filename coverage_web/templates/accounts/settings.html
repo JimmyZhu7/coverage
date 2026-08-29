@@ -280,6 +280,50 @@
      precede it), so it keeps the hairline from the base .set-row rule and the
      note reads as prose above a list rather than as the list's first item. */
 
+  /* ---- Decisions rows: identity, state and evidence at three weights ----
+     Every row in this card used to print its whole story — who it's about,
+     what Coverage decided, and the forensic detail that decision rests on —
+     as one paragraph of .set-row-desc, all the same small grey, so the
+     evidence sentence ("Same mailbox name at two registered domains…") read
+     at the same weight as the fact it was evidence FOR. Three tiers now:
+     .set-row-label stays the identity (unchanged, page-wide); a state PILL
+     rides beside it for the one-glance fact ("Your recruiting", a campaign
+     kept or absorbed); and .dec-evidence holds the reasoning one tap away,
+     the same <details> a reader never has to open to trust the row, exactly
+     like every other progressive disclosure on this page. */
+  /* The pill states this card's two classify-able facts. Same accent/neutral
+     pairing .pill.plan-pro/.plan-free already established for Credits, reused
+     rather than invented so a third color pair isn't added to the theme for
+     what is the same kind of yes/no. */
+  .pill.dec-yes { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
+  .pill.dec-no  { background: var(--surface); color: var(--ink-2); border-color: var(--line-strong); }
+  /* A quiet trailing fact riding on the SAME line as the identity it belongs
+     to — an email address that disambiguates a name, or the other half of a
+     merge pair. Regular weight and .ink-3 against the label's bold .ink, so
+     the eye still lands on the identity first and reads this second. */
+  .dec-sub { font-weight: var(--w-reg); color: var(--ink-3); font-size: var(--fs-s); }
+  /* The evidence a merge suggestion or a completed merge rests on. It is a
+     trust feature — it is WHY Coverage thinks two cards are one person —
+     so it must stay reachable, but it is forensic detail, not the fact the
+     row exists to state, so it does not compete at the row's own size and
+     weight. <details> costs nothing closed and needs no script, the same
+     contract every other disclosure on this page already relies on (see
+     e.g. crm/_contact_live.html's coffee-chat brief). Real text in the
+     summary, not CSS-generated content, for the same reason the segmented
+     knob's "default" marker above is real text: it has to survive a screen
+     reader and a stylesheet that failed to load. */
+  .dec-evidence { margin-top: var(--s2); }
+  .dec-evidence summary { cursor: pointer; color: var(--ink-3);
+    font-size: var(--fs-xs); font-weight: var(--w-med); list-style: none;
+    text-decoration: underline; text-decoration-style: dotted;
+    text-underline-offset: 3px; }
+  .dec-evidence summary::-webkit-details-marker { display: none; }
+  .dec-evidence summary:hover { color: var(--accent-ink); }
+  .dec-evidence summary:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; border-radius: var(--r-ctl); }
+  .dec-evidence p { margin: var(--s1) 0 0; color: var(--ink-3);
+    font-size: var(--fs-xs); line-height: 1.5; max-width: 60ch; }
+
   /* The two forms in Pace & Cadence share a card and must not run together.
      The pace form ends with its own inline Save; this hairline under it is
      what starts the cadence mechanism as a new thought, and it is the same
@@ -556,7 +600,7 @@
   .tf-chips::-webkit-scrollbar { width: 8px; }
   .tf-chips::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
   .tf-chip { flex: none; display: flex; align-items: center;
-    gap: 6px; max-width: 210px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
+    gap: 6px; max-width: 250px; padding: 6px 6px 6px 13px; border: 1px solid var(--line);
     border-radius: 999px; background: var(--paper); cursor: grab;
     font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink);
     box-shadow: var(--shadow-1); animation: chip-check 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -574,15 +618,15 @@
      when someone is actually aiming at it. `appearance: none` for the
      chevron.
 
-     The options are bare numerals. They used to spell the tier out
-     ("Tier 2") on the theory that a screen reader reads the chosen OPTION
-     and not the box's `aria-label` — but that is not how a native select
-     is announced: the accessible name comes first, then the value ("Tier
-     for Barclays, combo box, 1"), so the word was never load-bearing for
-     a11y and was pure repetition on screen. It printed "Tier 1" sixteen
-     times down a single lane whose own heading already said it, and
-     pushed the firm name — the one thing that differs chip to chip — into
-     the ellipsis. Dropping it also gives the pill its width back. */
+     The options spell the tier out ("Tier 2") rather than abbreviating to
+     the numeral, and that IS load-bearing: on a value CHANGE a screen
+     reader announces the newly-chosen option, not the box's accessible
+     name, so a bare "2" would be read with nothing saying what it counts.
+     Briefly cut to numerals here on 2026-08-29 to kill the visual
+     repetition down a lane whose heading already says the tier; reverted
+     the same day when `test_the_picker_names_its_firm_and_spells_the_tier_out`
+     caught it. The repetition is a real cost and it is the one being paid
+     on purpose. */
   .tf-tier { flex: none; width: auto; appearance: none; -webkit-appearance: none;
     border: 1px solid transparent; border-radius: 999px; background: transparent;
     padding: 1px 13px 1px 5px; margin: 0;
@@ -894,7 +938,7 @@
           hint describes; the drag is still bound underneath as the pointer
           shortcut for people who have a pointer.
           {% endcomment %}
-          <p class="field-hint">Tier 1 gets the most attention. Drag a firm, or change its number.</p>
+          <p class="field-hint">Pick a tier, or drag. Higher tiers get more attention from Coverage.</p>
           <div class="tf-board" id="tf-board" data-tf-board>
             {% for col in firm_tiers %}
               <div class="tf-col" data-tier="{{ col.tier }}">
@@ -928,7 +972,7 @@
                       <select class="tf-tier" draggable="false" data-no-csel data-tf-tier-sel
                               aria-label="Tier for {{ f.name|smart_title }}">
                         {% for t in firm_tiers %}
-                          <option value="{{ t.tier }}"{% if t.tier == col.tier %} selected{% endif %}>{{ t.tier }}</option>
+                          <option value="{{ t.tier }}"{% if t.tier == col.tier %} selected{% endif %}>Tier {{ t.tier }}</option>
                         {% endfor %}
                       </select>
                       <button type="button" class="tf-chip-x" data-tf-remove="{{ f.id }}"
@@ -1446,17 +1490,31 @@
             {% comment %}
             One line, not four. The three sentences this replaces spelled out
             what marking a send does, what it does NOT do, and a second
-            exception — but each row below already prints its own outcome in
-            bold ("Not your recruiting. Off your daily queue and your network
-            board."), so the paragraph was explaining a consequence the reader
-            meets again, per row, at the moment it applies. Nothing is
-            deleted: it moved to where it is true.
+            exception — but each row below already states its own outcome as
+            a pill beside its name, so the paragraph was explaining a
+            consequence the reader meets again, per row, at the moment it
+            applies. Nothing is deleted: it moved to where it is true.
             {% endcomment %}
             <p class="set-note">Which of these were your job search? Nothing is deleted either way.</p>
             {% for c in campaigns %}
             <div class="set-row">
               <div class="set-row-main">
-                <span class="set-row-label">{{ c.label }}</span>
+                {% comment %}
+                The verdict used to be a bolded clause buried inside the
+                prose paragraph, at the same size and weight as the count it
+                followed — the one fact worth a glance had no more visual
+                weight than the numbers around it. It is a pill beside the
+                name now, the same accent/neutral pairing Credits' plan
+                badge already uses, so "which of these were your job
+                search" has an answer you can read down the whole list
+                without stopping to parse a sentence per row. Unclassified
+                rows carry no pill — nothing has been decided yet, and a
+                third "pending" badge would be a fact the row doesn't have.
+                {% endcomment %}
+                <span class="set-row-label">{{ c.label }}
+                  {% if c.kind == campaign_kind_other %}<span class="pill dec-no">Not your recruiting</span>
+                  {% elif c.kind == campaign_kind_recruiting %}<span class="pill dec-yes">Your recruiting</span>{% endif %}
+                </span>
                 <div class="set-row-desc">
                   {{ c.recipient_count }} recipient{{ c.recipient_count|pluralize }},
                   {{ c.first_sent|date:"j M Y" }}.
@@ -1469,9 +1527,9 @@
                   {% endcomment %}
                   {{ c.originating_count }} of them first heard from you here.
                   {% if c.kind == campaign_kind_other %}
-                    <br><strong>Not your recruiting</strong>. Off your daily queue and your network board.
+                    Off your daily queue and your network board.
                   {% elif c.kind == campaign_kind_recruiting %}
-                    <br><strong>Your recruiting</strong>. In your daily queue.
+                    In your daily queue.
                   {% endif %}
                 </div>
               </div>
@@ -1570,13 +1628,16 @@
           {% endcomment %}
           {% if merge_suggestions or recent_merges %}
           <div class="set-group" id="duplicates">
-            <h3 class="set-group-h">One Person, Two Cards?</h3>
+            {% comment %}
+            Renamed from "One Person, Two Cards?" — a question that named
+            neither what the group holds nor what it's for. This says what
+            the rows below actually are.
+            {% endcomment %}
+            <h3 class="set-group-h">Duplicate Contacts</h3>
             {% comment %}
             The mechanism sentence ("folds the duplicate's history into the
             kept card and archives the spare") went: every row below already
-            spells the specific move out with the two real names in it
-            ("Keep Ebba Af Klercker, fold in Ebba Kler"), which says the same
-            thing about the people actually in front of the reader. What
+            spells the specific move out with the two real names in it. What
             survives is the part no row can say for itself — that this is
             opt-in and reversible.
             {% endcomment %}
@@ -1584,14 +1645,35 @@
             {% for s in merge_suggestions %}
             <div class="set-row">
               <div class="set-row-main">
-                <span class="set-row-label">
-                  {{ s.primary.name|smart_title }} &middot; {{ s.duplicate.name|smart_title }}
-                </span>
+                {% comment %}
+                The label used to name BOTH people joined by a middot, and
+                the desc sentence right under it repeated the primary's name
+                a second time to say which one survives — the two rows of
+                text told the same fact twice before getting to the one
+                that was new (the duplicate). The label now names only the
+                card that survives; the quiet trailing note says what
+                folds into it, present tense because nothing has happened
+                yet (contrast the past tense below, once it has).
+                {% endcomment %}
+                <span class="set-row-label">{{ s.primary.name|smart_title }}{% if s.primary.email %}<span class="dec-sub"> ({{ s.primary.email }})</span>{% endif %}</span>
                 <div class="set-row-desc">
-                  Keep <strong>{{ s.primary.name|smart_title }}</strong>{% if s.primary.email %} ({{ s.primary.email }}){% endif %},
-                  fold in {{ s.duplicate.name|smart_title }}{% if s.duplicate.email %} ({{ s.duplicate.email }}){% endif %}.
-                  <br>{{ s.evidence }}
+                  <span class="dec-sub">folds in</span>
+                  {{ s.duplicate.name|smart_title }}{% if s.duplicate.email %} ({{ s.duplicate.email }}){% endif %}.
                 </div>
+                {% comment %}
+                The evidence used to run directly under the keep/fold
+                sentence at the same size — the forensic reasoning
+                ("same mailbox name at two registered domains…") reading as
+                loud as the decision it supports. It is a trust feature
+                (it's WHY Coverage thinks these are one person), so it stays
+                reachable, one tap away, rather than gone.
+                {% endcomment %}
+                {% if s.evidence %}
+                <details class="dec-evidence">
+                  <summary>Why Coverage flagged this</summary>
+                  <p>{{ s.evidence }}</p>
+                </details>
+                {% endif %}
               </div>
               <div class="set-row-control">
                 <form method="post" action="{% url 'crm:contact_merge_act' 'merge' %}">
@@ -1612,12 +1694,27 @@
             {% for m in recent_merges %}
             <div class="set-row">
               <div class="set-row-main">
-                <span class="set-row-label">{{ m.duplicate.name|smart_title }} &rarr; {{ m.primary.name|smart_title }}</span>
+                {% comment %}
+                This used to read "Ebba Kler &rarr; Ebba Af Klercker" — an
+                arrow with no stated convention for which side survives (it
+                was the RIGHT one). Word order plus weight says it without
+                symbols now: the kept card is the bold subject and the verb
+                is active — "X folded in Y" reads the same direction the
+                merge actually ran — with the absorbed name quieted rather
+                than pretending the two are still peers.
+                {% endcomment %}
+                <span class="set-row-label">{{ m.primary.name|smart_title }}
+                  <span class="dec-sub">folded in {{ m.duplicate.name|smart_title }}</span></span>
                 <div class="set-row-desc">
                   Merged{% if m.resolved_at %} {{ m.resolved_at|date:"j M Y" }}{% endif %}.
                   {{ m.moved_touch_ids|length }} touch{{ m.moved_touch_ids|length|pluralize:"es" }} moved.
-                  {% if m.evidence %}<br>{{ m.evidence }}{% endif %}
                 </div>
+                {% if m.evidence %}
+                <details class="dec-evidence">
+                  <summary>Why Coverage flagged this</summary>
+                  <p>{{ m.evidence }}</p>
+                </details>
+                {% endif %}
               </div>
               <div class="set-row-control">
                 <form method="post" action="{% url 'crm:contact_merge_undo' m.id %}">
@@ -1662,9 +1759,8 @@
                 {% if credits.trial_days_left %}&middot; Pro trial &middot; {{ credits.trial_days_left }} day{{ credits.trial_days_left|pluralize }} left{% endif %}
               </span>
               <div class="set-row-desc">
-                Powers the advisor chat and Gmail rescans.
-                {{ credits.monthly_grant }} credits refill {{ credits.refill_date|date:"j F" }}.
-                Used {{ credits.month_usage }} so far this month.
+                Powers advisor chat and Gmail rescans.
+                {{ credits.monthly_grant }} refill {{ credits.refill_date|date:"j F" }}, {{ credits.month_usage }} used this month.
               </div>
             </div>
             {% comment %}
@@ -1695,7 +1791,7 @@
                 {% if credits.stripe_configured %}
                   One-time top-ups on top of your monthly refill. Never expire.
                 {% else %}
-                  Top-ups aren't switched on yet. Your monthly refill is unaffected.
+                  Top-ups aren't on yet. Your monthly refill is unaffected.
                 {% endif %}
               </div>
             </div>
@@ -1951,7 +2047,7 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Sign Out Other Devices</span>
-              <div class="set-row-desc">Ends every other signed-in session. This device stays signed in.</div>
+              <div class="set-row-desc">Ends every other session. This one stays signed in.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:signout_all' %}"
@@ -2002,9 +2098,9 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Contacts</span>
-              <div class="set-row-desc">People in your private CRM.
+              <div class="set-row-desc">In your CRM.
                 {% if archived_count or parked_count or campaign_hidden_count or unrelated_count %}
-                  Off the Network board:
+                  Off the board:
                   {% if archived_count %}<a href="{% url 'crm:contact_archived' %}">{{ archived_count }} archived</a>{% endif %}{% if archived_count and parked_count %}, {% endif %}{% if parked_count %}<a href="{% url 'crm:contact_parked' %}">{{ parked_count }} parked</a>{% endif %}{% if campaign_hidden_count and archived_count or campaign_hidden_count and parked_count %}, {% endif %}{% if campaign_hidden_count %}<a href="{% url 'crm:contact_campaign_hidden' %}">{{ campaign_hidden_count }} not recruiting</a>{% endif %}{% if unrelated_count and archived_count or unrelated_count and parked_count or unrelated_count and campaign_hidden_count %}, {% endif %}{% if unrelated_count %}<a href="{% url 'crm:contact_unrelated' %}">{{ unrelated_count }} not recruitment</a>{% endif %}.
                 {% endif %}
               </div>
@@ -2023,9 +2119,9 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Import &amp; Export</span>
-              <div class="set-row-desc">Bring contacts in from a CSV, or download
-                everything Coverage holds as one ZIP: contacts, touches, firms,
-                applications, tasks, debriefs, scores, and your profile.</div>
+              <div class="set-row-desc">Import from a CSV, or export everything as
+                one ZIP: contacts, touches, firms, applications, tasks, debriefs,
+                scores, and your profile.</div>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:import' %}">Import</a>
@@ -2061,9 +2157,8 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Delete Account</span>
-              <div class="set-row-desc">Permanently delete your account and everything in it.
-                This can't be undone. <a href="{% url 'accounts:export' %}">Export your data</a>
-                first if you want it.</div>
+              <div class="set-row-desc">Deletes your account and everything in it, permanently.
+                <a href="{% url 'accounts:export' %}">Export your data</a> first if you want it.</div>
             </div>
             <div class="set-row-control">
               <a class="btn btn-danger" href="{% url 'accounts:delete' %}"
