@@ -364,6 +364,34 @@ def test_failed_run_rows_are_recoverable(student, firm):
     assert report.count("accept") == 1
 
 
+def test_a_non_transport_bug_in_the_decide_loop_still_fails_the_run(student, firm):
+    """Regression: `execute_run`'s docstring promises a claimed run is NEVER
+    left at `running` — every path out is REVIEWED or FAILED. That only
+    held for `AutopilotError` (a transport failure); any OTHER exception —
+    a bug in `_gate`, a malformed decider return, anything not wrapped as
+    AutopilotError — used to propagate straight out of `run_autopilot`
+    uncaught, which on the worker path (`capture_autopilot_worker`) would
+    also have stopped every OTHER user's queued run in that tick from ever
+    being decided. One bad row must cost that run, never the whole pass."""
+    make_proposal(student, firm)
+
+    def buggy(text, *, model=""):
+        raise ValueError("not the AutopilotError transport wrapper")
+
+    report = autopilot.run_autopilot(student, decide=buggy)
+
+    assert not report.ok and report.reason == "failed"
+    run = AutopilotRun.all_objects.get(user=student)
+    assert run.status == AutopilotRun.STATUS_FAILED
+    assert run.failure_reason
+    assert Contact.all_objects.filter(user=student).count() == 0
+
+    # Same recovery contract as the AutopilotError case: the next run
+    # decides the row again rather than being locked out forever.
+    report = autopilot.run_autopilot(student, decide=accepting)
+    assert report.count("accept") == 1
+
+
 # --------------------------------------------------------------------------- #
 # The ceilings
 # --------------------------------------------------------------------------- #

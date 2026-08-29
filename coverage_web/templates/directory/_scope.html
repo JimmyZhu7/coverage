@@ -47,62 +47,45 @@ shape as the contact-proposal strip on Today.
 {% endif %}
 
 {% comment %}
-THE SUBSET SENTENCE, at the top. It used to render at the BOTTOM of this file,
-below 56 firm cards — so the single most important fact about the default view
-("this is not everything") was stated only to people who had already finished
-reading.
+THE SUBSET SENTENCE — removed from here (2026-08-27, "take this thing away").
+It used to be one line naming up to five conditional hides (campus-only
+scope, the eligibility lens, the region filter, your own dismissals, folded
+repeat listings), stacked exactly when the board was narrowed hardest. Gone
+from the header now, same reasoning and shape as the Network board's own meta
+strip (commit 398f0bd, "Take the meta strip off the Network board"): every
+guarantee it made survives, relocated to wherever the fact is actually
+answerable, never restated a second time above the first result.
 
-ONE line now, not four. Each hide used to own a paragraph, and since they are
-all conditional they stacked exactly when the board was narrowed hardest: the
-live account reads two lines by default, four under `?fit=1&region=us`, and a
-fifth once the Year hint is counted. The more precisely you filtered, the more
-grey you read before the first role — backwards, and it buried the one line on
-this page that wants a click.
+  - "Show everything" is now a normal fifth segment ("Everything") in the
+    Role Type control at the top of the filter bar — reachable in one click
+    from this page, same as before, just promoted from a sentence-buried link
+    to an always-visible mode with its own live count. See `role_segments` in
+    `directory.views.opportunities`.
+  - "N you don't qualify for" (`hidden_fit`) needed no new home: the
+    Eligible-only checkbox that causes the hide is right there in the Filters
+    disclosure, and unchecking it is the one-click reversal — the sentence
+    was a second statement of a fact the control's own state already made.
+  - "N with no tracked region" (`hidden_region`) needed no new home either:
+    the Region select already carries an "Unstated (N)" option with its own
+    live count, one click away, and always did.
+  - "N you marked 'not for me'" (`hidden_count`) already has a durable home:
+    My Applications' own "Not for me" section states the count and the way
+    back (`#hidden`), one click from this page's own header nav.
+  - "N repeat listings" (`hidden_dupes`) is the one exception to "every
+    guarantee survives, relocated": it briefly had a real control ("Show
+    repeat listings" beside Eligible only), then that control was cut
+    outright (2026-08-28) when the bar wrapped onto a second row for it
+    alone. Unlike the other three, a folded duplicate is never a role a
+    student was trying to reach — it is the same posting filed twice by the
+    firm — so this is a genuine narrowing, not a relocation. `?dupes=1`
+    still works as a quiet URL fallback; see `opportunities.html` for the
+    fuller argument.
 
-What is NOT collapsed is the undo. Each hide has a different reversal (role
-scope, the eligibility lens, the region filter, your own dismissals) and no
-single "show everything" can honestly stand for all four — dropping someone's
-region filter because they wanted to see unregioned rows would be a different
-promise than the one the link makes. So: one sentence, one link per reason,
-each link naming the count it reveals so it is unambiguous read aloud.
-
-Every querystring is built from the LIVE request in views.py, never hardcoded:
-the bare-`?` version of this bug shipped once already on "Show everything" and
-sent people to the very page that hid what it promised to reveal.
-
-It says what it excludes in plain words: no "premium", no lock icon, no
-"unlock" — the everything mode is free, one click away, and just noisier
-data. It lives INSIDE #cov-results so its numbers refresh with the filters.
+Nothing here silently narrows what the board admits to hiding — each hide
+still states its own count, at the control that causes it, and still offers
+its own one-click reversal. It is just never restated above the first role
+card.
 {% endcomment %}
-{% if hidden_other or hidden_fit or hidden_region or hidden_count or hidden_dupes %}
-  <p class="scope-line scope-hidden">
-    {% comment %}
-    Separators are SPANS with their own padding, not "·" characters leaning on
-    template whitespace. The newline before the link collapsed to nothing
-    rather than to a space, so the line rendered "hidden ·Show everything" —
-    measured at 2.41px narrower than the same markup with a real space. A
-    separator whose spacing depends on where the template happens to wrap is
-    a separator that will lose its space again the next time this is edited.
-    {% endcomment %}
-    {% if hidden_other %}Showing campus roles only<span class="scope-sep">·</span>{{ hidden_other }} experienced role{{ hidden_other|pluralize }} hidden<span class="scope-sep">·</span><a href="{% url 'opportunities' %}?{{ show_all_qs }}">Show everything</a>{% endif %}
-    {% if hidden_fit or hidden_region or hidden_count or hidden_dupes %}
-      {% if hidden_other %}<span class="scope-sep">·</span>Also hidden:{% else %}Hidden:{% endif %}
-      {% if hidden_fit %}<a href="{% url 'opportunities' %}?{{ show_unfit_qs }}"
-        >{{ hidden_fit }} you don't qualify for</a>{% if hidden_region or hidden_count or hidden_dupes %},{% endif %}{% endif %}
-      {% if hidden_region %}<a href="{% url 'opportunities' %}?{{ show_unregioned_qs }}"
-        >{{ hidden_region }} with no tracked region</a>{% if hidden_count or hidden_dupes %},{% endif %}{% endif %}
-      {% if hidden_count %}<a href="{% url 'my_applications' %}#hidden"
-        >{{ hidden_count }} you marked "not for me"</a>{% if hidden_dupes %},{% endif %}{% endif %}
-      {% comment %}Duplicates get the same treatment as every other hide: a
-      count and its own undo. A firm that files one job as two requisitions is
-      showing you one thing to do, but Coverage does not get to decide for you
-      that the second copy is noise — the link says how many were folded and
-      brings every copy back.{% endcomment %}
-      {% if hidden_dupes %}<a href="{% url 'opportunities' %}?{{ show_dupes_qs }}"
-        >{{ hidden_dupes }} repeat listing{{ hidden_dupes|pluralize }}</a>{% endif %}
-    {% endif %}
-  </p>
-{% endif %}
 
 {% comment %}The lens→pipeline bridge, and the only line in this block that
 wants a click. It was styled as one of the disclosures above and sat between

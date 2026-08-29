@@ -111,6 +111,7 @@ from capture import inbound
 from capture.models import ContactProposal, MailFact
 from capture.providers import normalize_email
 from crm.models import Contact
+from directory import ai_extract
 
 # Outcome counters for `apply_findings`' SyncResult.
 @dataclass
@@ -224,10 +225,23 @@ def _grounded(quote: str, source: str) -> bool:
     """Whitespace-normalized verbatim-substring check — the same rule as
     `directory.ai_extract._grounded`, enforced here even for quotes this
     module built itself, so a refactor can never quietly store a sentence
-    the message did not say."""
+    the message did not say.
+
+    Also the same typographic table `directory.ai_extract._grounded` uses:
+    `_detect_ai` below hands this function a quote `extract_mail_fact_ai`
+    already accepted, over the identical subject+snippet text — if this
+    check normalized punctuation any differently than that one, a quote the
+    AI layer just verified as grounded could still be thrown away right
+    here, one call later, for a reason that has nothing to do with whether
+    it is a real citation."""
     if not quote:
         return False
-    norm = lambda s: re.sub(r"\s+", " ", s).strip()
+
+    def norm(s: str) -> str:
+        s = s.translate(ai_extract._TYPOGRAPHIC_EQUIVALENTS)
+        s = ai_extract._DASH_RUN_RE.sub("-", s)
+        return re.sub(r"\s+", " ", s).strip()
+
     return norm(quote) in norm(source)
 
 
@@ -586,8 +600,6 @@ def _detect_ai(text: str, finding: dict) -> list[Detected]:
     """The long tail: ask the model WHICH fact the text states and WHERE,
     then re-run the deterministic extractors over the grounded text for
     every structured datum. The model can point; it cannot dictate."""
-    from directory import ai_extract
-
     subject = (finding.get("subject") or "").strip()
     snippet = html.unescape((finding.get("snippet") or "").strip())
     guess = ai_extract.extract_mail_fact_ai(subject, snippet)
@@ -808,8 +820,32 @@ def _apply_ooo(
     contact = _contact_for(user, sender)
     existing = _existing_fact(user, sender, MailFact.KIND_OOO)
     if existing is not None:
+        # DISMISSED or UNDONE is the user's own word — "stop touching this"
+        # — and it outranks any later auto-reply, the same way
+        # `address_is_departed` excludes an undone departure and `dismiss`'s
+        # docstring calls every dismissed row a permanent do-not-re-create
+        # memory. Without this check, a card the user waved away (or a
+        # snooze they explicitly undid) came back to life — status flipped
+        # back to `applied` and `contact.snoozed_until` overwritten again —
+        # the moment a later auto-reply from the same sender happened to
+        # state a date, with no tap from the user in between.
+        if existing.status in (MailFact.STATUS_DISMISSED, MailFact.STATUS_UNDONE):
+            return
         # A NEW leave later on updates the one row rather than being blocked
-        # forever by the dedup — but only ever forward.
+        # forever by the dedup — but only ever forward, and only while the
+        # row is still LIVE. `dismissed`/`undone` are closed states the
+        # student themselves put this card into — `dismiss()` only accepts
+        # `pending`/`applied` and `undo()` only acts on `applied`, both
+        # refusing to touch a row already in one of those two terminal
+        # states. This update branch is the one path in the module that
+        # skipped that check: a later, perfectly ordinary "still out,
+        # pushed my return back" auto-reply from the same sender would
+        # flip `status` back to `applied` and push `contact.snoozed_until`
+        # forward again — reviving a card the student had explicitly
+        # closed, and moving a CRM field with no new tap behind it. See
+        # `test_mailfacts.TestOooDismissedStaysDismissed`.
+        if existing.status not in (MailFact.STATUS_PENDING, MailFact.STATUS_APPLIED):
+            return
         if (
             return_on is not None
             and (existing.return_on is None or return_on > existing.return_on)

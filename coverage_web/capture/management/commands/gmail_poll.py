@@ -121,6 +121,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections
 from google.auth.exceptions import RefreshError
 
+from analytics.models import Import
 from capture import gmail_live, locks
 from capture.models import GmailConnection
 from ops.tracking import track_job_run
@@ -446,6 +447,7 @@ class Command(BaseCommand):
             return self._handle_refresh_error(connection, exc)
         except Exception as exc:  # noqa: BLE001
             self.stderr.write(f"{address}: sync failed, will retry next pass: {exc}")
+            self._record_error(connection, exc)
             return "failed"
         finally:
             self._unlock(connection.pk)
@@ -464,7 +466,71 @@ class Command(BaseCommand):
         # and could not resolve produced no row, no card, and no line.
         for line in self._sync_details(result):
             self.stdout.write(f"  {line}")
+        self._record_outcome(connection, result)
         return "synced"
+
+    # -- the per-run ledger ------------------------------------------------
+    #
+    # WHY THIS EXISTS. `gmail_backfill` and the "Scan Now" rescan each write
+    # an `Import` row per run carrying the whole `SyncResult.as_stats()`
+    # (kinds "gmail_backfill" / "gmail_rescan"), which is how anyone can ask
+    # "what has capture actually done" as a QUERY. This command — the one
+    # that runs every two minutes, and on a Pub/Sub-free deployment is the
+    # entire live-sync feature — persisted nothing at all. Its whole output
+    # was `self.stdout.write` into a worker's log stream, so a mailbox
+    # failing every pass for a day was a stderr line nobody reads, and the
+    # mail-facts counters this file already prints (`_sync_summary`) died
+    # with the process. Two rows fix that without a new model: the ledger
+    # this app already keeps, one more `kind`.
+    #
+    # ONLY WHEN THERE IS SOMETHING TO SAY. A row per pass would be ~720 a day
+    # per mailbox of `{"findings": 0}` — the ledger would become the noise it
+    # is meant to cut through, and "is it silently failing" would be no
+    # easier to answer for having 720 rows saying nothing happened. So: a
+    # `gmail_poll` row only when the pass actually found messages, and a
+    # `gmail_poll_error` row on every failure (an error is by definition
+    # something to say, and the count of them against the count of successful
+    # polls is the exception-rate canary /ops/health/capture/ reads). The
+    # "poll is alive at all" question is NOT answered here — that is the
+    # `JobRun` row `_loop` now writes per pass, which is a different question
+    # with a different retention story.
+    #
+    # NEVER FATAL, on the same reasoning as rule 1: a poll that found real
+    # mail, logged real touches, and then could not write its own bookkeeping
+    # row must not report itself as a failed sync. The work is already
+    # committed; losing the receipt is strictly better than losing the work.
+
+    def _record_outcome(self, connection: GmailConnection, result) -> None:
+        """One `Import` row for a pass that found something. No row for an
+        empty pass — see the block comment above."""
+        try:
+            stats = dict(result.as_stats())
+        except Exception:  # noqa: BLE001 — no result, or a test double
+            return
+        if not stats.get("findings"):
+            return
+        self._write_import("gmail_poll", connection, stats)
+
+    def _record_error(self, connection: GmailConnection, exc: BaseException) -> None:
+        """One `Import` row per failed pass. `str(exc)` rather than a
+        traceback: this row is read on a health page and in the user's own
+        data export, and the useful part is which mailbox failed how often —
+        the traceback lives in the worker log where a debugger wants it.
+        """
+        self._write_import(
+            "gmail_poll_error", connection, {"error": str(exc)[:500]}
+        )
+
+    def _write_import(self, kind: str, connection: GmailConnection, stats: dict) -> None:
+        try:
+            Import.all_objects.create(
+                user=connection.user,
+                kind=kind,
+                filename=connection.gmail_address,
+                row_stats=stats,
+            )
+        except Exception as exc:  # noqa: BLE001 — see the block comment above.
+            self.stderr.write(f"could not record {kind} row: {exc}")
 
     @staticmethod
     def _sync_summary(result) -> str:

@@ -418,6 +418,87 @@ class TestOutOfOffice:
         contact.refresh_from_db()
         assert contact.snoozed_until == later
 
+    def test_dismissed_ooo_card_is_not_resurrected_by_a_later_leave(self, student):
+        """Regression: dismissing the no-date OOO card used to only last
+        until the SAME sender's next auto-reply happened to state a return
+        date. `_apply_ooo`'s forward-only update checked only the date, never
+        the fact's own status, so a dismissed row silently flipped back to
+        `applied` and `contact.snoozed_until` got overwritten again with no
+        tap from the user in between. `dismiss`'s own docstring calls every
+        dismissed row a permanent do-not-re-create memory; this pins that
+        for the one capture surface that used to disagree."""
+        contact = Contact.all_objects.create(
+            user=student, name="Peter Foggo", email="pfoggo@allenco.com",
+        )
+        vague = gmail_message(
+            from_header="Peter Foggo <pfoggo@allenco.com>",
+            subject="Automatic reply: out",
+            body="I am currently traveling and will respond when I return.",
+            headers=(("auto-submitted", "auto-replied"),),
+            thread_id="t-ooo-vague",
+        )
+        apply_findings(student, [_classify_message(OWN, vague)])
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_OOO)
+        assert fact.status == MailFact.STATUS_PENDING
+
+        mailfacts.dismiss(fact)
+        fact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_DISMISSED
+
+        dated = gmail_message(
+            from_header="Peter Foggo <pfoggo@allenco.com>",
+            subject="Automatic reply: still out",
+            body=(
+                "I am out of the office and will return on Monday, "
+                "September 7, 2026."
+            ),
+            headers=(("auto-submitted", "auto-replied"),),
+            thread_id="t-ooo-dated",
+        )
+        apply_findings(student, [_classify_message(OWN, dated)])
+
+        fact.refresh_from_db()
+        contact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_DISMISSED
+        assert fact.return_on is None
+        assert contact.snoozed_until is None
+
+    def test_undone_ooo_snooze_is_not_reapplied_by_a_later_leave(self, student):
+        """Same guard, the other terminal state: the user hit Undo on an
+        automated snooze (`mailfacts.undo`), and a later dated auto-reply
+        from the same sender must not put it back."""
+        contact = Contact.all_objects.create(
+            user=student, name="Peter Foggo", email="pfoggo@allenco.com",
+        )
+        apply_findings(student, [_classify_message(OWN, ooo_message())])
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_OOO)
+        assert fact.status == MailFact.STATUS_APPLIED
+        contact.refresh_from_db()
+        assert contact.snoozed_until is not None
+
+        mailfacts.undo(fact)
+        fact.refresh_from_db()
+        contact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_UNDONE
+        assert contact.snoozed_until is None
+
+        later = gmail_message(
+            from_header="Peter Foggo <pfoggo@allenco.com>",
+            subject="Automatic reply: still out",
+            body=(
+                "I am out of the office and will return on Monday, "
+                "September 14, 2026."
+            ),
+            headers=(("auto-submitted", "auto-replied"),),
+            thread_id="t-ooo-later",
+        )
+        apply_findings(student, [_classify_message(OWN, later)])
+
+        fact.refresh_from_db()
+        contact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_UNDONE
+        assert contact.snoozed_until is None
+
     def test_headerless_ooo_subject_is_still_bulk(self, student):
         """An OOO with no RFC 3834 header used to fall through to
         `replied: True` and inflate warmth. The subject prefix now catches
@@ -520,3 +601,97 @@ class TestOooUndoRestoresPriorSnooze:
         mailfacts.undo(fact)
         contact.refresh_from_db()
         assert contact.snoozed_until is None
+
+
+# --------------------------------------------------------------------------- #
+# A dismissed or undone fact is a closed card, not a re-arming trigger
+# --------------------------------------------------------------------------- #
+
+def later_ooo_message():
+    """The same person, a second OOO auto-reply naming a LATER return date —
+    the ordinary shape of "still out, pushed my return back", not a
+    contrived input. Different thread (a fresh auto-reply on a new note),
+    same sender."""
+    return gmail_message(
+        from_header="Peter Foggo <pfoggo@allenco.com>",
+        subject="Automatic reply: USC | Stephens | Allen & Company",
+        body=(
+            "I am out of the office with limited access to email. I will "
+            "return on Monday, September 14. For urgent matters, please "
+            "contact my assistant at assistant@allenco.com."
+        ),
+        headers=(("auto-submitted", "auto-replied"),),
+        thread_id="t-ooo-2",
+        internal_date="1789189844000",  # later than the first OOO
+    )
+
+
+class TestOooDismissedStaysDismissed:
+    """`undo()` only acts on an `applied` row and `dismiss()` only accepts
+    `pending`/`applied` — both treat `dismissed`/`undone` as closed states a
+    later automated pass must not reopen. `_apply_ooo`'s "update the
+    existing row" branch is the one path that never checked: a later OOO
+    from the same sender rewrote `status` back to `applied` and pushed
+    `contact.snoozed_until` forward again, with no new tap from the
+    student. That is mail read on the student's behalf directly overwriting
+    a decision the student already made — the propose-then-confirm posture
+    every other write in this module holds itself to."""
+
+    def test_dismissed_ooo_is_not_revived_by_a_later_return_date(self, student, allen):
+        contact = Contact.all_objects.create(
+            user=student, name="Peter Foggo", email="pfoggo@allenco.com", firm=allen
+        )
+        finding = _classify_message(OWN, ooo_message())
+        apply_findings(student, [finding])
+
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_OOO)
+        assert fact.status == MailFact.STATUS_APPLIED
+        mailfacts.dismiss(fact)
+        fact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_DISMISSED
+        contact.refresh_from_db()
+        snoozed_after_dismiss = contact.snoozed_until
+
+        # A second, genuinely later OOO from the same sender — the ordinary
+        # "still out" case, not a duplicate scan of the same message.
+        finding2 = _classify_message(OWN, later_ooo_message())
+        apply_findings(student, [finding2])
+
+        fact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_DISMISSED, (
+            "a dismissed mail fact must stay dismissed — a later automated "
+            "pass may not revive a card the student already closed"
+        )
+        contact.refresh_from_db()
+        assert contact.snoozed_until == snoozed_after_dismiss, (
+            "dismissing the card must stop it from moving the student's "
+            "own follow-up clock on a later sync"
+        )
+
+    def test_undone_ooo_is_not_revived_by_a_later_return_date(self, student, allen):
+        contact = Contact.all_objects.create(
+            user=student, name="Peter Foggo", email="pfoggo@allenco.com", firm=allen
+        )
+        finding = _classify_message(OWN, ooo_message())
+        apply_findings(student, [finding])
+
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_OOO)
+        mailfacts.undo(fact)
+        fact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_UNDONE
+        contact.refresh_from_db()
+        assert contact.snoozed_until is None
+
+        finding2 = _classify_message(OWN, later_ooo_message())
+        apply_findings(student, [finding2])
+
+        fact.refresh_from_db()
+        assert fact.status == MailFact.STATUS_UNDONE, (
+            "an undone mail fact must stay undone — the student's undo said "
+            "the OOO snooze should not stand, and a later sync may not "
+            "silently reapply it"
+        )
+        contact.refresh_from_db()
+        assert contact.snoozed_until is None, (
+            "undo must not be silently reversed by a later automated pass"
+        )

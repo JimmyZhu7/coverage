@@ -52,9 +52,13 @@
     <div class="pagehead-text">
       <p class="pagehead-eyebrow">Chat on {{ touch.ts|date:"N j, Y" }}</p>
       <h1 class="pagehead-title">Debrief</h1>
+      {% comment %}One sentence, not two: the first question of the form
+      below is literally "What did you learn?", so asking it again in the
+      header was the page putting its own opening question twice.
+      {% endcomment %}
       <p class="pagehead-sub">
-        What did your chat with {{ contact.name|smart_title }} actually teach you?
-        Write it down now, while you still have it.
+        Your chat with {{ contact.name|smart_title }}, written down while you
+        still have it.
       </p>
     </div>
   </header>
@@ -128,7 +132,7 @@
 
       <div class="db-q db-radios">
         <span class="db-qlabel">Would they advocate for you?</span>
-        <p class="db-hint">Your read, not a promise. A yes only offers the promotion; you take it or you don't.</p>
+        <p class="db-hint">Your read, not a promise. A yes only offers the promotion.</p>
         {{ form.advocate_answer }}
       </div>
 

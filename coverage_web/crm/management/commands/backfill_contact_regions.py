@@ -144,19 +144,33 @@ class Command(BaseCommand):
         rows = Contact.objects.for_user(user).filter(
             id__in=[int(k) for k in written]
         )
-        reverted = skipped = 0
+        to_revert: list[int] = []
+        skipped = 0
         for c in rows:
             if c.region == written[str(c.id)]:
-                c.region = ""
-                # `update_fields` bypasses nothing here: save()'s firm
-                # inference only refills a blank when the firm is
-                # unambiguous, which is the pre-backfill state we are
-                # restoring on purpose.
-                c.save(update_fields=["region"])
-                reverted += 1
+                to_revert.append(c.id)
             else:
                 # The user changed it after the backfill — their word now.
                 skipped += 1
+        # A plain `.update()`, deliberately, exactly like
+        # `crm.regions.unplace_declared_regions` for the identical reason:
+        # it does not go through `save()`, so `resolve_region()` cannot
+        # immediately re-place a row this call just cleared. A contact whose
+        # firm has an unambiguous single deadline market (the whole reason
+        # `region_inference`'s firm-footprint signal fires) would otherwise
+        # come back from `c.save(update_fields=["region"])` with the SAME
+        # region it was reverted from — the row was never actually blank for
+        # even one query, and "Reverted N contacts to blank" below would be
+        # false for exactly the case this command's firm signal exists for.
+        # `region_source` is cleared alongside `region` for the same reason
+        # `Contact.region_source`'s own comment gives: it is blank exactly
+        # when `region` is blank, never left stale pointing at a value that
+        # no longer exists.
+        reverted = 0
+        if to_revert:
+            reverted = Contact.objects.for_user(user).filter(
+                id__in=to_revert
+            ).update(region="", region_source="")
         self.stdout.write(self.style.SUCCESS(
             f"Reverted {reverted} contacts to blank; "
             f"left {skipped} that were edited since."

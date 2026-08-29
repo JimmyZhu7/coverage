@@ -921,10 +921,24 @@ def _get_firm(user, args) -> dict:
     dates = [
         {
             "event": fd.event_kind,
-            "cycle": fd.cycle,
+            "cycle": fd.cycle or "unstated",
+            # The desk used to ride inside `cycle` as a suffix (`sa2028_ib`);
+            # migration 0014 gave it its own column, so the advisor reads it
+            # from its own key rather than losing it when the cycle was
+            # normalised.
+            "track": fd.track or "unstated",
             "region": fd.region or "unstated",
             "date": _iso(fd.date),
             "confidence": round(fd.confidence or 0.0, 2),
+            # `confidence` alone is not the whole claim: a `precision` of
+            # "estimated" means this date is a month-level GUESS (extrapolated
+            # from past cycles), not a day the firm stated, however high
+            # `confidence` reads — see `crm.utils.firm_date_confidence`'s
+            # identical two-part bar. Without this the advisor could read a
+            # high confidence number alone and tell a student a specific day
+            # is coming, on a row the firm page itself only ever prints as
+            # "~ Sep 2027".
+            "precision": fd.precision or "day",
         }
         for fd in FirmDate.objects.filter(firm_id=firm.id, date__gte=today).order_by("date")[:MAX_ROWS]
     ]

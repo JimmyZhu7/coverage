@@ -17,7 +17,19 @@ buttons in a menu sidestep that entirely — nothing here is a <select>.
 {% endcomment %}
 <div class="as-history-row{% if conversation and c.id == conversation.id %} is-current{% endif %}">
   <a class="as-history-link" href="{% url 'assistant:chat_conversation' c.id %}">
-    <span class="as-history-title">{{ c.title|default:"New chat" }}</span>
+    {% comment %}
+    `title=` carries the full string for the ellipsis case — CSS truncates
+    at the column width (as-history-title's own overflow:hidden), so
+    anything past that would otherwise be unrecoverable without opening the
+    chat. `capfirst` is a display-only, single-character normalization: it
+    fixes a title stored all-lowercase (the pre-network fallback at
+    run_turn/stream_turn stores the student's own first message verbatim,
+    typos and casing included, until/unless _ai_title overwrites it) without
+    rewriting the rest of the string — see agent.py::_ai_title for the
+    generation-time fix (a sentence-case rule in its prompt) that keeps new
+    AI-written titles from needing this in the first place.
+    {% endcomment %}
+    <span class="as-history-title" title="{{ c.title|default:'New chat'|capfirst }}">{{ c.title|default:"New chat"|capfirst }}</span>
     <span class="as-history-date">{{ c.updated|date:"M j" }}</span>
   </a>
 
