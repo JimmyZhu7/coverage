@@ -411,9 +411,16 @@
           </div>
           <div class="tier-grid">
             {% for fc in section.cards %}
+              {% comment %}
+              The card's tooltip used to read "Drag to another tier. Tier
+              drives your action priorities." The second sentence came off:
+              the section heading above and every tier label between it and
+              this card already carry it word for word, so the card's own
+              hover was the third copy inside one screen.
+              {% endcomment %}
               <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
                    style="--i:{{ forloop.counter0 }}"
-                   title="Drag to another tier. Tier drives your action priorities.">
+                   title="Drag to another tier.">
                 {% comment %}
                 The COUNT badges are gone. Asked for directly: take the
                 counts off these cards and leave the progress bar and the
