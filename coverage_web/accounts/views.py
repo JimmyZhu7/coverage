@@ -24,7 +24,6 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from analytics.events import record_event
-from assistant.plans import limits_for as assistant_limits_for
 from billing import credits as billing_credits
 from billing import stripe_gateway as billing_stripe_gateway
 from capture import gmail_live
@@ -595,16 +594,9 @@ def _credits_context(user) -> dict:
     enough to compute on every settings render, same posture as
     `_gmail_live_context` right above it."""
     plan = billing_credits.plan_config(user)
-    # What the plan badge shows (FIX #2a, the walk-in-day bug: the plan
-    # label alone told a just-upgraded student nothing they hadn't already
-    # read on the pricing page). Model name comes from `assistant.plans`,
-    # never hardcoded here — see that module's docstring on why nothing
-    # outside it should read `ASSISTANT_PLANS` directly.
-    limits = assistant_limits_for(user)
     return {
         "balance": billing_credits.balance(user),
         "plan_label": "Pro" if plan["plan"] == billing_credits.PRO else "Free",
-        "plan_model_label": limits.model_short,
         "monthly_grant": plan["monthly_grant"],
         "month_usage": billing_credits.month_usage(user),
         "refill_date": billing_credits.next_refill_date(user),

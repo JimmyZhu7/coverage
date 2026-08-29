@@ -36,9 +36,8 @@ from dataclasses import dataclass, field
 # exercises both defusedcsv's own set and this one live.
 from defusedcsv import csv
 
-from django.conf import settings
 from django.contrib.sessions.models import Session
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils import timezone
 
 from analytics.events import record_event
@@ -1292,10 +1291,9 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
      "Roles you're tracking, their status, and any interview dates you added."),
     ("tasks.csv", tasks_csv, "Your tasks, open and done."),
     ("play_dismissals.csv", play_dismissals_csv,
-     "Today \"plays\" you dismissed — which firm, which dated fact, and "
-     "when."),
+     "Today \"plays\" you dismissed: which firm, which dated fact, and when."),
     ("bench_dismissals.csv", bench_dismissals_csv,
-     "Bench cards you waved off — which parked person, and for which "
+     "Bench cards you waved off: which parked person, and for which "
      "opening."),
     ("chat_debriefs.csv", chat_debriefs_csv,
      "What each coffee chat taught you, in your own words."),
@@ -1341,7 +1339,7 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("credit_ledger.csv", credit_ledger_csv,
      "Every credit grant, spend, purchase, and adjustment on your account."),
     ("product_events.csv", product_events_csv,
-     "Your own usage events — which pages and actions you used."),
+     "Your own usage events: which pages and actions you used."),
     ("pro_waitlist.csv", pro_waitlist_csv,
      "Whether you joined the Pro launch waitlist, and when."),
     ("profile.csv", profile_csv,
@@ -1353,7 +1351,7 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
 # rule D4: "everything" is only written when it is everything.
 EXPORT_EXCLUSIONS: list[str] = [
     "Your password (we only ever store a one-way hash of it).",
-    "Shared directory data — firms, roles, deadlines. It isn't yours; it's "
+    "Shared directory data: firms, roles, deadlines. It isn't yours; it's "
     "the same for every user.",
 ]
 
