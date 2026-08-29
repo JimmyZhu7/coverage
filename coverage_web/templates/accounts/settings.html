@@ -567,11 +567,15 @@
         deadline density for the next twelve months, same band the feed
         shows. A cycle picker over an invisible cycle was a label without a
         referent.{% endcomment %}
-        <div class="set-card kin-reveal" style="--i:1" aria-label="The cycle ahead">
-          <div class="set-head"><h2>The Cycle Ahead</h2>
+        {% comment %}`aria-labelledby` pointing at the visible <h2>, like every
+        other card here — this one carried an `aria-label` retyping the same
+        words, which is a second copy of a heading that is right there.
+        {% endcomment %}
+        <section class="set-card kin-reveal" style="--i:1" aria-labelledby="cycle-h">
+          <div class="set-head"><h2 id="cycle-h">The Cycle Ahead</h2>
             <p>Real Deadlines By Month, From The Live Board</p></div>
           <div class="set-body">{% include "directory/_cycle_band.html" %}</div>
-        </div>
+        </section>
       {% endif %}
 
       {% comment %}
@@ -1124,7 +1128,7 @@
                aria-labelledby="dismissed-proposals-h">
         <div class="set-head">
           <h2 id="dismissed-proposals-h">Dismissed From Your Inbox</h2>
-          <p>People you told Coverage not to propose. Restore any of them.</p>
+          <p>People you told Coverage not to propose.</p>
         </div>
         <div class="set-body">
           <div class="set-row">
