@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load csp %}
 {% load textstyle %}
 
 {% block title %}Calendar · Coverage{% endblock %}
@@ -445,12 +444,14 @@
     </form>
   </details>
 
-  {% comment %}The month rail. Scrolls horizontally through two years, and
-  the active chip is scrolled into view on load by the small script at the
-  foot of this template.
+  {% comment %}The month rail: two years of columns, all of them on screen.
+  It used to be an overflow-x scroller with a script at the foot of this
+  file scrolling the active column into view; the rail wraps instead now
+  (see `.mrail`'s own breakpoints above), so nothing is off-screen and there
+  is no scroll left to set.
   {% endcomment %}
   <div class="mrail-wrap">
-    <nav class="mrail" id="cal-rail" aria-label="Jump to a month">
+    <nav class="mrail" aria-label="Jump to a month">
       {% for mo in rail %}
         <a class="mrail-m{% if mo.active %} is-active{% endif %}{% if mo.is_now %} is-now{% endif %}"
            href="?y={{ mo.y }}&m={{ mo.m }}"
@@ -522,25 +523,14 @@
         </div>
       {% endif %}
     {% endfor %}{% endfor %}
-    {% if not counts.chat and not counts.event and not counts.deadline %}
+    {% comment %}All four counted kinds, not three. `opening` was added to
+    the legend as its own tally and this gate was not updated with it, so a
+    month whose only dated thing was an applications-open date listed that
+    row and then said underneath it that there was nothing on the calendar.
+    {% endcomment %}
+    {% if not counts.chat and not counts.event and not counts.deadline and not counts.opening %}
       <p class="cal-empty">Nothing on the calendar this month.</p>
     {% endif %}
   </div>
 </div>
-
-{% comment %}The rail is 24 months wide and the month you are reading is
-rarely the leftmost, so bring it into view. Everything else on this page
-works without JavaScript and this does too — the rail is a plain row of
-links you can scroll by hand; this only saves the scroll. `instant`, not
-`smooth`: an animation firing on every page load is motion you did not ask
-for, and it fights the browser's own scroll restoration on a back button.
-{% endcomment %}
-{% script %}
-  (function () {
-    var rail = document.getElementById("cal-rail");
-    var active = rail && rail.querySelector(".is-active");
-    if (!active) return;
-    rail.scrollLeft = active.offsetLeft - (rail.clientWidth - active.offsetWidth) / 2;
-  })();
-{% endscript %}
 {% endblock %}
