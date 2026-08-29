@@ -394,3 +394,88 @@ def test_touches_are_tenant_scoped(student, contact, db):
     apply_findings(student, [finding(replied=True)])
     assert Touch.objects.for_user(other).count() == 0
     assert Touch.objects.for_user(student).count() == 1
+
+
+# --------------------------------------------------------------------------- #
+# One malformed finding must never take the whole batch down. Each of the
+# three per-finding hooks (application-mail, mail-facts, discovery) used to
+# run with no guard at all: an exception raised while classifying finding #1
+# propagated straight out of `apply_findings`, so findings #2..#N in the same
+# batch — for other contacts entirely — never got their touch logged, and on
+# the live listener path (`gmail_live.sync_connection`) the mailbox's history
+# cursor never advanced either, since that write happens after the
+# `apply_findings` call returns. The next poll would re-fetch the same
+# messages and raise on the same finding forever.
+# --------------------------------------------------------------------------- #
+
+def test_appmail_hook_raising_does_not_lose_the_rest_of_the_batch(student, contact, monkeypatch):
+    from capture import appmail
+
+    def boom(*_a, **_k):
+        raise ValueError("simulated malformed finding")
+
+    monkeypatch.setattr(appmail, "consider_finding", boom)
+
+    other = Contact.all_objects.create(
+        user=student, name="Second Person", email="second@bank.example", source="manual",
+    )
+    batch = [
+        finding(replied=True),
+        finding(name="Second Person", email="second@bank.example", replied=True,
+                thread_id="t-2"),
+    ]
+    result = apply_findings(student, batch)
+
+    assert result.hook_errors == 2  # one per finding in the batch
+    assert kinds(student, contact) == ["reply_received"]
+    assert kinds(student, other) == ["reply_received"]
+    assert any("application-mail check failed" in line for line in result.details)
+
+
+def test_mailfacts_hook_raising_does_not_lose_the_rest_of_the_batch(student, contact, monkeypatch):
+    from capture import mailfacts
+
+    def boom(*_a, **_k):
+        raise ValueError("simulated malformed finding")
+
+    monkeypatch.setattr(mailfacts, "consider_finding", boom)
+
+    other = Contact.all_objects.create(
+        user=student, name="Second Person", email="second@bank.example", source="manual",
+    )
+    batch = [
+        finding(replied=True),
+        finding(name="Second Person", email="second@bank.example", replied=True,
+                thread_id="t-2"),
+    ]
+    result = apply_findings(student, batch)
+
+    assert result.hook_errors == 2
+    assert kinds(student, contact) == ["reply_received"]
+    assert kinds(student, other) == ["reply_received"]
+    assert any("mail-facts check failed" in line for line in result.details)
+
+
+def test_discovery_hook_raising_does_not_lose_the_rest_of_the_batch(student, contact, monkeypatch):
+    """The discovery hook only ever runs on the UNMATCHED branch, so it needs
+    its own unmatched finding ahead of a normal, matched one to prove the
+    same thing: a blown-up discovery pass costs the unmatched proposal, not
+    the matched contact's touch queued right behind it."""
+    from capture import discovery
+
+    def boom(*_a, **_k):
+        raise ValueError("simulated malformed finding")
+
+    monkeypatch.setattr(discovery, "consider_finding", boom)
+
+    batch = [
+        finding(name="Nobody", email="no@one.example", replied=True, thread_id="t-x"),
+        finding(replied=True),
+    ]
+    result = apply_findings(student, batch)
+
+    assert result.hook_errors == 1
+    assert result.skipped_unmatched == 1
+    assert Contact.objects.for_user(student).filter(name="Nobody").count() == 0
+    assert kinds(student, contact) == ["reply_received"]
+    assert any("contact-discovery check failed" in line for line in result.details)

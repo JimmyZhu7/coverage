@@ -57,6 +57,7 @@ logs/notes" applies to it the same as anywhere else.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -72,6 +73,8 @@ from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import campaigns as crm_campaigns, services as crm_services
 from crm.models import CalendarEvent, Contact, Touch
 from directory.models import EmailPatternStats
+
+logger = logging.getLogger(__name__)
 
 EXTRACTION_VERSION = "gmail-findings-1"
 TOUCH_CHANNEL = "email"  # every finding here comes from a Gmail thread
@@ -182,11 +185,20 @@ class SyncResult:
     pattern_bounced: int = 0
     # Scheduled chats that carried a real datetime and landed on the calendar.
     chats_scheduled: int = 0
+    # A per-finding hook (application-mail, mail-facts, or discovery) raised
+    # on this finding's own data and was caught rather than left to blow up
+    # the batch. See the try/except around each hook call in `apply_findings`:
+    # one malformed finding — an unexpected shape from the search agent, a
+    # regex tripping over a header the founder's real mailbox never sent
+    # before — must cost that finding's proposal, never every OTHER finding
+    # still waiting in the same batch behind it.
+    hook_errors: int = 0
     details: list[str] = field(default_factory=list)
 
     def as_stats(self) -> dict:
         return {
             "findings": self.findings,
+            "hook_errors": self.hook_errors,
             "emails_backfilled": self.emails_backfilled,
             "alternate_emails_noted": self.alternate_emails_noted,
             "outreach_logged": self.outreach_logged,
@@ -771,9 +783,28 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # this feature silently skipped. Writes at most one pending
         # `ApplicationEvent` and never touches the pipeline — see
         # capture/appmail.py.
-        outcome = appmail.consider_finding(
-            user, finding, resolver=appmail_resolver, dry_run=dry_run
-        )
+        #
+        # Caught rather than let propagate: this hook parses whatever the
+        # search agent (or a live Gmail message) handed it, and one finding
+        # shaped in a way nobody has seen yet must not cost every OTHER
+        # finding in the batch its touch — the same trade `crm_campaigns.
+        # detect`'s guard at the bottom of this function already makes, now
+        # made per-finding for the three hooks that run before matching.
+        try:
+            outcome = appmail.consider_finding(
+                user, finding, resolver=appmail_resolver, dry_run=dry_run
+            )
+        except Exception:  # noqa: BLE001 — see the comment above.
+            logger.exception(
+                "apply_findings: application-mail hook raised on a finding "
+                "for %s", name,
+            )
+            result.hook_errors += 1
+            result.details.append(
+                f"{name}: application-mail check failed on this finding — "
+                "skipped, rest of the batch continues"
+            )
+            outcome = appmail.Outcome()
         if outcome.result == appmail.PROPOSED:
             result.app_events_proposed += 1
         elif outcome.result == appmail.UNRESOLVED:
@@ -793,9 +824,21 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # routing address), acts only with a verbatim quote, and proposes —
         # never creates — people. See capture/mailfacts.py for the whole
         # contract, including where "act" ends and "propose" begins.
-        facts = mailfacts.consider_finding(
-            user, finding, firm_domains=firm_domains, dry_run=dry_run
-        )
+        try:
+            facts = mailfacts.consider_finding(
+                user, finding, firm_domains=firm_domains, dry_run=dry_run
+            )
+        except Exception:  # noqa: BLE001 — same trade as the hook above.
+            logger.exception(
+                "apply_findings: mail-facts hook raised on a finding for %s",
+                name,
+            )
+            result.hook_errors += 1
+            result.details.append(
+                f"{name}: mail-facts check failed on this finding — "
+                "skipped, rest of the batch continues"
+            )
+            facts = mailfacts.Outcome()
         result.mail_facts_applied += facts.applied
         result.mail_facts_surfaced += facts.surfaced
         result.referral_proposals += facts.referrals
@@ -821,10 +864,29 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
             # the deterministic judgment chain and writes at most a PROPOSAL
             # (see capture/discovery.py) — this function still never creates
             # a contact, so its contract stands unchanged.
-            outcome = discovery.consider_finding(
-                user, finding, firm_domains=firm_domains, dry_run=dry_run,
-                batch=batch_context,
-            )
+            #
+            # Caught for the same reason the application-mail and mail-facts
+            # hooks above are: an unmatched sender is exactly the finding
+            # whose shape Coverage has seen the least of, so it is the most
+            # likely one to trip a judgment-chain regex on something new —
+            # and that must cost this one proposal, not the rest of the
+            # batch still behind it.
+            try:
+                outcome = discovery.consider_finding(
+                    user, finding, firm_domains=firm_domains, dry_run=dry_run,
+                    batch=batch_context,
+                )
+            except Exception:  # noqa: BLE001 — same trade as the two hooks above.
+                logger.exception(
+                    "apply_findings: discovery hook raised on a finding for %s",
+                    name,
+                )
+                result.hook_errors += 1
+                result.details.append(
+                    f"{name}: contact-discovery check failed on this finding "
+                    "— skipped, rest of the batch continues"
+                )
+                outcome = None
             if outcome == discovery.PROPOSED:
                 result.proposals_created += 1
                 result.details.append(
