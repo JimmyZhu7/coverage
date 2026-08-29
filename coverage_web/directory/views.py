@@ -2754,7 +2754,15 @@ def track_eligible(request):
             continue
         if o.id in touched:
             continue
-        UserOpportunity.all_objects.create(user=request.user, opportunity=o)
+        # get_or_create, not create: `touched` was read once, above, before
+        # this loop started, so a concurrent write for the same (user,
+        # opportunity) pair -- a double-click, two tabs open on the same
+        # offer -- can land in the gap between that read and this line.
+        # UserOpportunity enforces uniqueness on exactly that pair, so a
+        # bare `.create()` there raises IntegrityError and 500s the whole
+        # confirm; `track_opportunity`'s own upsert already takes this same
+        # defence for the identical race.
+        UserOpportunity.all_objects.get_or_create(user=request.user, opportunity=o)
         saved_ids.append(o.id)
     saved = len(saved_ids)
     # The offer is consumed either way: a second POST of the same confirm

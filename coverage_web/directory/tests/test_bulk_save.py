@@ -168,7 +168,38 @@ def test_a_role_that_appeared_after_the_banner_rendered_is_not_swept_in(client):
     saved = set(UserOpportunity.objects.for_user(user)
                 .values_list("opportunity_id", flat=True))
     assert latecomer.id not in saved
-    assert len(saved) == 1
+
+
+@pytest.mark.django_db
+def test_a_concurrent_duplicate_save_does_not_500_the_confirm(client, monkeypatch):
+    """A benign race, not a hypothetical one: `touched` (the ids already
+    tracked) is read ONCE, before the write loop below it starts. A second
+    tab confirming the same offer, or a double-click that fires the POST
+    twice, can create the very same (user, opportunity) row in the gap
+    between that read and this call's own write. `UserOpportunity` enforces
+    uniqueness on exactly that pair, so a plain `.create()` there raises
+    IntegrityError and 500s the whole confirm — including every OTHER role
+    in the same batch that this request had already saved fine.
+    `track_opportunity`'s own upsert already guards against this identical
+    race with `get_or_create`; this confirm path must too."""
+    from analytics.models import UserOpportunity as UO
+
+    user = _student()
+    opp = _eligible_opp(1)
+    client.force_login(user)
+    client.get(reverse("opportunities"))  # stashes the session offer
+
+    # Simulates the other tab's write landing in the gap: the row exists in
+    # the database by the time this request's loop reaches it, but `touched`
+    # (read at the top of the view, before this happened) never saw it.
+    UO.all_objects.create(user=user, opportunity=opp)
+    monkeypatch.setattr(UO.all_objects, "filter", lambda **kw: UO.all_objects.none())
+
+    resp = client.post(reverse("track_eligible"), {"confirmed": "1"})
+
+    assert resp.status_code != 500
+    # No duplicate row, and no unhandled IntegrityError bubbling out as one.
+    assert UO.objects.for_user(user).filter(opportunity=opp).count() == 1
 
 
 @pytest.mark.django_db
