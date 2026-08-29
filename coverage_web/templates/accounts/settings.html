@@ -163,47 +163,49 @@
   .set-default:focus-visible { outline: 2px solid var(--accent);
     outline-offset: 2px; border-radius: var(--r-ctl); }
 
-  /* ---- A two-option segment, for a knob with only two legal values --------
-     Same idea as .theme-pick above (pick one of a few, the chosen one filled),
-     stacked rather than inline because it lives in .set-field's fixed 12rem
-     control track — see that rule's note on why the track is fixed. Two
-     horizontal pills reading "Note only" and "Note + follow-up" do not fit in
-     12rem; two stacked ones do, and they left-align with every number input
-     down the same column.
+  /* ---- A two-option toggle, for a knob with only two legal values --------
+     This used to be two pills STACKED, because the old option text ("Note
+     only", "Note + follow-up") did not fit side by side in .set-field's
+     fixed 12rem control track (see that rule's note on why the track is
+     fixed) — and a control taller than the row beside it, for a binary
+     choice, was the loudest thing on a page of six near-identical spinners.
+     "Once"/"Twice" are two words, not two sentences: they fit side by side
+     with room to spare, so the toggle can finally be sized to its own
+     content (inline-flex, not width: 100%) and sit level with its neighbors
+     instead of stacked above them.
 
      The radio itself is the control and stays a real focusable radio (arrow
      keys, screen reader, the POST); only its default rendering is replaced,
      which is why this is not a checkbox restyle. */
-  .seg-pick { display: flex; flex-direction: column; width: 100%;
+  .seg-pick { display: inline-flex; width: auto;
     border: 1px solid var(--line); border-radius: var(--r-ctl);
     overflow: hidden; background: var(--surface); }
   .seg-opt { display: block; cursor: pointer; }
-  .seg-opt + .seg-opt .seg-face { border-top: 1px solid var(--line); }
+  .seg-opt + .seg-opt .seg-face { border-left: 1px solid var(--line); }
   /* The radio is present and focusable, drawn by the face beside it. */
   .seg-opt input[type="radio"] { position: absolute; width: 1px; height: 1px;
     padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0);
     white-space: nowrap; border: 0; appearance: none; }
-  .seg-face { display: flex; align-items: baseline; gap: var(--s2);
-    padding: 8px 12px; min-height: 40px;
+  .seg-face { display: flex; align-items: center; justify-content: center;
+    padding: 8px 14px; min-height: 40px; white-space: nowrap;
     font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink-2);
     transition: background-color var(--t-fast), color var(--t-fast); }
-  .seg-face > span { flex: 1 1 auto; }
-  /* "default", marked on the option that is the default — the number the old
-     "Default: 2" line printed, moved onto the thing it describes. */
-  .seg-face u { flex: none; text-decoration: none; font-family: var(--font-mono);
-    font-size: var(--fs-nano); text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--ink-3); }
   .seg-opt:hover .seg-face { background: var(--accent-soft); color: var(--accent-ink); }
   .seg-opt input:checked + .seg-face { background: var(--accent); color: var(--on-accent); }
-  .seg-opt input:checked + .seg-face u { color: var(--on-accent); opacity: 0.75; }
   .seg-opt input:focus-visible + .seg-face { outline: 2px solid var(--accent);
     outline-offset: -2px; }
-  /* A segment is two rows tall where a number input is one, so the field's
-     two text rows would stretch to match it and float apart. A third,
-     text-free row takes the slack instead and the label keeps its description
-     directly under it, exactly like every spinner row beside it. */
-  .set-field.is-seg { grid-template-areas: "label control" "desc control"
-    "fill control" "err err"; grid-template-rows: auto auto 1fr auto; }
+  /* The default used to be marked ON the chosen option — small caps
+     shouting a third fact (name, then VALUE, then DEFAULT) into a control
+     that only needed to state one thing at a time. A spinner beside this
+     one states its default the same quiet way regardless of which option
+     is live: a sentence-case line under the description ("Default 6"), not
+     a badge fused to the value. This control now says it there too — see
+     .cad-seg-default below and the row markup — so a toggle and a spinner
+     read as the same kind of fact in the same place, and the toggle itself
+     goes back to showing exactly one thing: which of the two is chosen. */
+  .cad-seg-default { display: block; margin-top: 4px; color: var(--accent-ink);
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-weight: var(--w-med); font-size: var(--fs-xs); }
   /* Two knobs to a row (Cadence only, so far). Seven full-width .set-rows
      put seven near-identical spinners in a 700px column, each one label and
      one number marooned at opposite edges of the card with a rule between —
@@ -1324,11 +1326,11 @@
               {% for row in cadence_form.rows %}
                 <div class="set-field{% if row.segmented %} is-seg{% endif %}">
                   {% comment %}
-                  A SEGMENTED row (row.segmented) has no unit and no default
-                  chip. Its options are the unit — "Note only" and "Note +
-                  follow-up" are the two values, not a count you type — and the
-                  default is marked ON the option that is the default, which is
-                  where a reader looking at the control will find it. See
+                  A SEGMENTED row (row.segmented) has no unit: its options
+                  are the unit — "Once" and "Twice" are the two values, not a
+                  count you type. Its default is stated in the description,
+                  same as a spinner's, rather than on the option itself — see
+                  .cad-seg-default's CSS comment for why that moved. See
                   accounts.forms.CADENCE_SEGMENTS.
 
                   A radiogroup, not a <label for>: the row's label names a set
@@ -1353,20 +1355,22 @@
                         {% for choice in row.field %}
                           <label class="seg-opt">
                             {{ choice.tag }}
-                            <span class="seg-face">
-                              <span>{{ choice.choice_label }}</span>
-                              {% comment %}
-                              Real text in the DOM, not a CSS ::after — the
-                              default is data (hold #3), so it has to survive a
-                              screen reader and a stylesheet that failed to load.
-                              {% endcomment %}
-                              {% if not choice.data.value %}<u>default</u>{% endif %}
-                            </span>
+                            <span class="seg-face">{{ choice.choice_label }}</span>
                           </label>
                         {% endfor %}
                       </div>
                     </div>
-                    <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}</div>
+                    <div class="set-row-desc" id="{{ row.field.auto_id }}-desc">{{ row.description }}
+                      {% comment %}
+                      Real text in the DOM, not a CSS ::after — the default is
+                      data (hold #3), so it has to survive a screen reader and
+                      a stylesheet that failed to load. Same quiet sentence
+                      case a spinner's "Default 6" chip uses, just not a
+                      button: there is no single input for a click-to-reset
+                      handler to act on (two radios share one `name`), and
+                      tapping the named option already IS the reset gesture.
+                      {% endcomment %}
+                      <span class="cad-seg-default">Default {{ row.default_label }}</span></div>
                   {% else %}
                     <label class="set-row-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
                     <div class="set-row-control set-num">
@@ -1737,28 +1741,35 @@
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Status</span>
+              {% comment %}
+              Trimmed to the fact that changes: what the feature DOES stayed
+              useful right up until the moment there's a live connection to
+              report on, at which point it was one more sentence between the
+              reader and the one thing they came to check. The disconnected
+              branch keeps its explanation for exactly that reason -- it's
+              still the first thing a reader needs there.
+              {% endcomment %}
               <div class="set-row-desc">
                 {% if gmail_live.connected %}
-                  Real-time reply and bounce detection from your inbox.
                   {% if gmail_live.status == "revoked" %}
-                    <strong>Access was revoked</strong> — reconnect below.
+                    <strong>Access was revoked.</strong> Reconnect below.
                   {% else %}
-                    Connected as {{ gmail_live.gmail_address }}.
+                    {{ gmail_live.gmail_address }}.
                     {% if gmail_live.is_pro %}
                       {% if gmail_live.last_notification_at %}
                         Last update {{ gmail_live.last_notification_at|timesince }} ago.
                       {% elif gmail_live.watch_active %}
                         No activity seen yet.
                       {% else %}
-                        Real-time sync is queued and will turn on shortly.
+                        Real-time sync queued, on shortly.
                       {% endif %}
                     {% else %}
-                      Real-time sync is off on Free — use Scan Now below.
+                      Real-time sync needs Pro. Use Scan Now below.
                     {% endif %}
                   {% endif %}
                 {% else %}
-                  Not connected. Coverage only reads mail for bounces,
-                  replies, and calendar invites — never stores message bodies.
+                  Not connected. Reads mail for bounces, replies, and
+                  calendar invites only, never message bodies.
                   {% if not gmail_live.trial_days_left and not gmail_live.is_pro %}
                     Real-time sync needs Pro.
                   {% endif %}
@@ -1791,13 +1802,13 @@
               <span class="set-row-label">Past History</span>
               <div class="set-row-desc">
                 {% if gmail_live.backfill_status == "done" %}
-                  Done — {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize }} logged from your existing contacts' history.
+                  {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize:"es" }} logged.
                 {% elif gmail_live.backfill_status == "running" %}
-                  Running — can take a few minutes for a year of mail.
+                  Running. Can take a few minutes.
                 {% elif gmail_live.backfill_status == "failed" %}
-                  Hit a snag — it'll retry automatically.
+                  Hit a snag, retrying automatically.
                 {% else %}
-                  Queued — starts shortly, no action needed.
+                  Queued, starts shortly.
                 {% endif %}
               </div>
             </div>
@@ -1816,20 +1827,20 @@
               <span class="set-row-label">Rescan Gmail</span>
               <div class="set-row-desc">
                 {% if gmail_live.rescan_status == "running" %}
-                  Running — can take a few minutes.
+                  Running. Can take a few minutes.
                 {% elif gmail_live.rescan_status == "pending" %}
-                  Queued — starts shortly.
+                  Queued, starts shortly.
                 {% elif gmail_live.rescan_status == "failed" %}
-                  Last scan hit a snag — it'll retry automatically.
+                  Hit a snag, retrying automatically.
                 {% elif gmail_live.rescan_status == "done" %}
-                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago — {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize }} logged.
+                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago, {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize:"es" }} logged.
                   {% with residue=gmail_live.rescan_stats.residue %}
                     {% if residue.credit_limited %}
-                      {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look; credits covered {{ residue.residue_threads_processed }} of them — the rest stay unclassified until credits refill.
+                      {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look, {{ residue.residue_threads_processed }} covered, rest unclassified until credits refill.
                     {% endif %}
                   {% endwith %}
                 {% else %}
-                  Re-check your Gmail history against all your contacts.
+                  Re-check Gmail against all your contacts.
                 {% endif %}
                 {% comment %}
                 Free's once-per-GMAIL_FREE_RESCAN_INTERVAL_DAYS throttle
