@@ -113,7 +113,12 @@ _welcome_head.html §2); nothing here hardcodes the step count.
       </div>
       <div class="ob-actions">
         <button type="submit" class="btn btn-primary">Continue</button>
-        <a class="ob-skip" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
+        {% comment %}`from=skip` + `skipped` are what make a skip visible in the
+        funnel. Without them this link is an ordinary GET of the next step, so
+        declining a question and answering it both landed as the same row and
+        the wizard could not say which of its questions people refuse. Read and
+        recorded once, on the GET, in accounts/views.onboarding.{% endcomment %}
+        <a class="ob-skip" href="{% url 'accounts:onboarding' %}?step={{ next_step }}&amp;from=skip&amp;skipped={{ step }}">Skip for now</a>
       </div>
     </form>
 
@@ -149,7 +154,12 @@ _welcome_head.html §2); nothing here hardcodes the step count.
       </div>
       <div class="ob-actions">
         <button type="submit" class="btn btn-primary">Continue</button>
-        <a class="ob-skip" href="{% url 'accounts:onboarding' %}?step={{ next_step }}">Skip for now</a>
+        {% comment %}`from=skip` + `skipped` are what make a skip visible in the
+        funnel. Without them this link is an ordinary GET of the next step, so
+        declining a question and answering it both landed as the same row and
+        the wizard could not say which of its questions people refuse. Read and
+        recorded once, on the GET, in accounts/views.onboarding.{% endcomment %}
+        <a class="ob-skip" href="{% url 'accounts:onboarding' %}?step={{ next_step }}&amp;from=skip&amp;skipped={{ step }}">Skip for now</a>
       </div>
     </form>
 

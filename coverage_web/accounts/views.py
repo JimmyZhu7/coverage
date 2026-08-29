@@ -85,6 +85,45 @@ ONBOARDING_STEP_LABELS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Onboarding funnel instrumentation.
+#
+# The wizard was instrumented at its bookends and nowhere else: `signup`
+# (accounts/signals.py) and `onboarded` at the bottom of the last step. Between
+# those two rows sat four steps, two validation refusals and two Skip links,
+# and none of them wrote anything down. So "someone signed up and never
+# finished" was a fact with no location — the event stream could not say
+# whether they stalled on the profile form, bounced off an error they didn't
+# understand, skipped everything, or simply closed the tab on step one. That
+# is exactly the question a pilot has to answer about a stranger, and today it
+# could not be answered at all.
+#
+# Four events close it, and the step travels as a PROP rather than in the event
+# name (`onboarding_step_viewed` + {"step": "firms"}, never
+# `onboarding_firms_viewed`). ONBOARDING_STEPS has already lost a step once and
+# relabelled another; a per-step event name would have left the funnel as a set
+# of unrelated series that silently stop, where a prop leaves it as one series
+# with a value that stops appearing.
+#
+# Each fires only on the thing it names actually happening — `viewed` on a GET
+# that renders a step, `completed` on the branch that really advances, `error`
+# on an `is_valid()` refusal, `skipped` only when the Skip link itself was
+# followed. Nothing here infers one event from another, so an "assumed
+# completed" row can never enter the funnel.
+EV_STEP_VIEWED = "onboarding_step_viewed"
+EV_STEP_COMPLETED = "onboarding_step_completed"
+EV_STEP_ERROR = "onboarding_step_error"
+EV_STEP_SKIPPED = "onboarding_step_skipped"
+
+# The Skip links carry `?from=skip&skipped=<step>` because a skip is otherwise
+# indistinguishable from any other navigation: the link is a plain GET of the
+# NEXT step, so without the marker the only trace is a `viewed` on a step the
+# person could equally have reached by pressing Continue. `skipped` names the
+# step being left behind — the landing step is already in the URL, and the
+# interesting half of "they skipped" is which question they declined.
+_SKIP_MARKER = "skip"
+
+
 def _step_url(step: str) -> str:
     return f"{reverse('accounts:onboarding')}?step={step}"
 
@@ -174,8 +213,16 @@ def onboarding(request):
             form = _bound_profile_form(request)
             if form.is_valid():
                 _apply_profile(request, form)
+                record_event(EV_STEP_COMPLETED, user=request.user, step=step)
                 return redirect(_step_url(_next_step(step)))
-            # invalid → fall through and re-render this step with errors
+            # invalid → fall through and re-render this step with errors.
+            # Field NAMES only, never the submitted values: the point is to
+            # see which control a stranger got stuck on, and the values are
+            # someone's name, school and photo.
+            record_event(
+                EV_STEP_ERROR, user=request.user, step=step,
+                fields=sorted(form.errors),
+            )
         elif step == "work_auth":
             # Both reuse the settings-page section forms, so onboarding and
             # Settings can never disagree about what's valid. Every field on
@@ -185,15 +232,30 @@ def onboarding(request):
             section_form = SECTION_FORMS[step](request.POST)
             if section_form.is_valid():
                 section_form.apply_to(request.user)
+                record_event(EV_STEP_COMPLETED, user=request.user, step=step)
                 return redirect(_step_url(_next_step(step)))
             # invalid → re-render this step with errors
+            record_event(
+                EV_STEP_ERROR, user=request.user, step=step,
+                fields=sorted(section_form.errors),
+            )
         elif step == "firms":
-            services.set_target_firms(request.user, request.POST.getlist("firms"))
+            picked = request.POST.getlist("firms")
+            services.set_target_firms(request.user, picked)
+            # The count, not the firm ids. "Continue with nothing ticked" and
+            # "Continue with eleven firms" are the same event today and read
+            # as the same thing in the funnel, which is the difference between
+            # a step that worked and a step that was walked past.
+            record_event(
+                EV_STEP_COMPLETED, user=request.user, step=step,
+                firms=len(picked),
+            )
             return redirect(_step_url(_next_step(step)))
         elif step == "import":
             # Last step — finishes onboarding. The CSV upload itself posts to
             # the separate import_contacts view; this step's own Continue
             # just closes the wizard out.
+            record_event(EV_STEP_COMPLETED, user=request.user, step=step)
             if request.user.onboarded_at is None:
                 request.user.onboarded_at = timezone.now()
                 request.user.save(update_fields=["onboarded_at"])
@@ -201,6 +263,18 @@ def onboarding(request):
             messages.success(request, "You're all set. Welcome to Coverage.")
             # Land on Today — the working surface — not back in Settings.
             return redirect("/app/")
+
+    if request.method == "GET":
+        # GET only. The render below is shared with a fallen-through invalid
+        # POST, and recording a `viewed` there would count every validation
+        # error as a fresh page view — the one thing that would make the
+        # stuck-user signal look like engagement.
+        skipped = request.GET.get("skipped")
+        if request.GET.get("from") == _SKIP_MARKER and skipped in ONBOARDING_STEPS:
+            record_event(
+                EV_STEP_SKIPPED, user=request.user, step=skipped, landed_on=step
+            )
+        record_event(EV_STEP_VIEWED, user=request.user, step=step)
 
     if form is None:
         form = ProfileForm.from_user(request.user)
