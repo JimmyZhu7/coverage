@@ -687,11 +687,29 @@
     .tf-tier { border-color: var(--line); background-color: var(--surface);
       color: var(--ink-2); }
   }
+  /* Same "quiet at rest, arrives on aim" contract .tf-tier documents above,
+     applied to the second control every chip carries. A select AND a
+     remove button, both fully rendered, on every one of 50-odd chips was
+     the actual weight in this board — not the chip itself, which is just a
+     name. Opacity rather than `visibility`/`display: none`: the button
+     still occupies its box and still reaches Tab in source order, so a
+     keyboard user finds it exactly where a mouse user's hover reveals it,
+     and its own :focus-visible forces it back to full opacity independent
+     of whether the pointer happens to be over the chip. Same `@media
+     (hover: none)` escape hatch as `.tf-tier`, for the same reason: a touch
+     device has no hover to reveal it with, and removing a firm has no
+     other route than this button. */
   .tf-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center;
     width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
     color: var(--ink-3); font-size: 14px; line-height: 1; cursor: pointer;
-    transition: background-color var(--t-fast), color var(--t-fast); }
+    opacity: 0.4;
+    transition: background-color var(--t-fast), color var(--t-fast), opacity var(--t-fast); }
+  .tf-chip:hover .tf-chip-x, .tf-chip:focus-within .tf-chip-x { opacity: 1; }
   .tf-chip-x:hover { background: var(--danger-soft); color: var(--danger); }
+  .tf-chip-x:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+  @media (hover: none) {
+    .tf-chip-x { opacity: 1; }
+  }
   .tf-empty { margin: 0; color: var(--ink-3); font-size: var(--fs-xs); font-style: italic; }
 
   .tf-add label { display: block; margin: 0 0 var(--s2); }
