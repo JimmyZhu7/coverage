@@ -36,9 +36,8 @@ from dataclasses import dataclass, field
 # exercises both defusedcsv's own set and this one live.
 from defusedcsv import csv
 
-from django.conf import settings
 from django.contrib.sessions.models import Session
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils import timezone
 
 from analytics.events import record_event
