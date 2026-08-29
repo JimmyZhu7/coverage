@@ -532,14 +532,10 @@
       {% if campaigns %}<a href="#campaigns">Campaigns</a>{% endif %}
       {% if dismissed_proposals %}<a href="#dismissed-proposals">Dismissed</a>{% endif %}
       {% if merge_suggestions or recent_merges %}<a href="#duplicates">Duplicates</a>{% endif %}
-      <p class="settings-nav-group">Notifications</p>
+      <p class="settings-nav-group">Notifications &amp; Billing</p>
       <a href="#notifications">Notifications</a>
-      <p class="settings-nav-group">Plan &amp; Credits</p>
       <a href="#credits">Credits</a>
-      {% if gmail_live.available %}
-      <p class="settings-nav-group">Gmail Live</p>
-      <a href="#gmail-live">Gmail Live</a>
-      {% endif %}
+      {% if gmail_live.available %}<a href="#gmail-live">Gmail Live</a>{% endif %}
       <p class="settings-nav-group">Account</p>
       <a href="#security">Sign-In &amp; Security</a>
       <a href="#data">Your Data</a>
@@ -1709,16 +1705,13 @@
         <div class="set-body">
           <div class="set-row">
             <div class="set-row-main">
-              <span class="set-row-label">Privacy Policy</span>
-              <div class="set-row-desc">What we collect and why.</div>
+              <span class="set-row-label">Privacy &amp; Terms</span>
+              <div class="set-row-desc">What we collect and why, and the terms you agreed to.</div>
             </div>
-            <div class="set-row-control"><a class="btn" href="{% url 'accounts:privacy' %}">Read</a></div>
-          </div>
-          <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">Terms of Service</span>
+            <div class="set-row-control">
+              <a class="btn" href="{% url 'accounts:privacy' %}">Privacy</a>
+              <a class="btn" href="{% url 'accounts:terms' %}">Terms</a>
             </div>
-            <div class="set-row-control"><a class="btn" href="{% url 'accounts:terms' %}">Read</a></div>
           </div>
         </div>
       </section>
