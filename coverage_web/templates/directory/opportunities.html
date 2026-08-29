@@ -383,35 +383,6 @@ else is htmx and the platform.
     mq.addEventListener("change", apply);
   })();
 
-  // Re-settle each filter <select> after an htmx swap has refreshed its
-  // options with live counts. Two distinct repairs, both observed failing:
-  //
-  // 1. SELECTEDNESS. A <select>'s runtime selection ("selectedness") is a
-  //    different thing from its `selected` ATTRIBUTE, and once the element has
-  //    been rendered the attribute stops governing. htmx swaps innerHTML by
-  //    inserting the new options alongside the old ones and then removing the
-  //    old — and the HTML reset algorithm that runs during that dance leaves
-  //    selectedness on the LAST option. Measured, not theorised: after typing
-  //    in Search, #f-region had `selected` correctly on "Any Region (150)" and
-  //    a live value of "none" — the page would then have filtered to unstated
-  //    regions on the user's next keystroke. The server's rendered attribute
-  //    is the source of truth for what this request selected, so restore from
-  //    it. (Every counted facet guarantees the current selection is present as
-  //    an option, precisely so this always has something to restore from.)
-  //
-  // 2. THE ENHANCED LABEL. base.html wraps every <select> in a styled listbox
-  //    whose button text is a COPY of the selected option's text, taken when
-  //    that option was last read. Without a nudge the hidden native select
-  //    would be correct while the button the user actually reads still showed
-  //    page-load numbers — this redesign's own stale-count bug, one layer up.
-  //
-  // `new Event("change")` DOES NOT BUBBLE by default, and that is load-bearing.
-  // The enhancer's listener is attached directly to the <select>, so it fires;
-  // the form's hx-trigger="change" is attached to the FORM and needs the event
-  // to bubble up to it, so it does not. A bubbling event here would make every
-  // swap trigger another request — an endless loop of the page filtering
-  // itself. Setting `selectedIndex` does not fire `change` on its own.
-
   // The filter bar's stuck-state skin. A passive scroll listener rather
   // than an IntersectionObserver: the observer's callbacks are deferrable
   // (background tabs, embedded panes) in a way that leaves the bar stuck
@@ -507,6 +478,34 @@ else is htmx and the platform.
     });
   })();
 
+  // Re-settle each filter <select> after an htmx swap has refreshed its
+  // options with live counts. Two distinct repairs, both observed failing:
+  //
+  // 1. SELECTEDNESS. A <select>'s runtime selection ("selectedness") is a
+  //    different thing from its `selected` ATTRIBUTE, and once the element has
+  //    been rendered the attribute stops governing. htmx swaps innerHTML by
+  //    inserting the new options alongside the old ones and then removing the
+  //    old — and the HTML reset algorithm that runs during that dance leaves
+  //    selectedness on the LAST option. Measured, not theorised: after typing
+  //    in Search, #f-region had `selected` correctly on "Any Region (150)" and
+  //    a live value of "none" — the page would then have filtered to unstated
+  //    regions on the user's next keystroke. The server's rendered attribute
+  //    is the source of truth for what this request selected, so restore from
+  //    it. (Every counted facet guarantees the current selection is present as
+  //    an option, precisely so this always has something to restore from.)
+  //
+  // 2. THE ENHANCED LABEL. base.html wraps every <select> in a styled listbox
+  //    whose button text is a COPY of the selected option's text, taken when
+  //    that option was last read. Without a nudge the hidden native select
+  //    would be correct while the button the user actually reads still showed
+  //    page-load numbers — this redesign's own stale-count bug, one layer up.
+  //
+  // `new Event("change")` DOES NOT BUBBLE by default, and that is load-bearing.
+  // The enhancer's listener is attached directly to the <select>, so it fires;
+  // the form's hx-trigger="change" is attached to the FORM and needs the event
+  // to bubble up to it, so it does not. A bubbling event here would make every
+  // swap trigger another request — an endless loop of the page filtering
+  // itself. Setting `selectedIndex` does not fire `change` on its own.
   document.body.addEventListener("htmx:afterSettle", function () {
     document.querySelectorAll(".filters select").forEach(function (sel) {
       var i = Array.prototype.findIndex.call(sel.options, function (o) {

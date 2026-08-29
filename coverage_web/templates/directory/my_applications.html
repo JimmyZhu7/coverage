@@ -186,7 +186,7 @@
   /* ---- Stage sections --------------------------------------------------- */
   .apps-stage { margin-top: var(--s6); scroll-margin-top: var(--s5); }
   .apps-stage > h2 { font-size: var(--fs-l); margin: 0 0 var(--s3);
-    display: flex; align-items: baseline; gap: var(--s2); }
+    display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
   .apps-stage > h2 .scrub-count { font-family: var(--font-mono); font-size: var(--fs-s);
     font-variant-numeric: tabular-nums; color: var(--ink-3); }
   .apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
@@ -237,8 +237,9 @@
      banner (`.scope-confirm` in directory/_styles.html): a `<details>` whose
      visible control only opens a stated count and a second, explicit button.
      Danger-toned like `.apps-remove` above, because unlike the undo strip
-     this one IS a warning — it is about to delete rows. */
-  .apps-stage > h2 { flex-wrap: wrap; }
+     this one IS a warning — it is about to delete rows. The stage heading
+     wraps (see `.apps-stage > h2` above) so this control can drop to its own
+     line rather than squeeze the label beside it. */
   .apps-clear-confirm { display: inline-flex; margin-left: auto; }
   .apps-clear-confirm > summary { list-style: none; }
   .apps-clear-confirm > summary::-webkit-details-marker { display: none; }
