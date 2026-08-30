@@ -36,9 +36,16 @@ OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
   - Minimum age is stated as 16, matching the Privacy page. Signup does not
     enforce it today. Either add an age gate or accept that this is a
     representation, not a control.
-  - Paid plans: the pricing page shows Pro/Team/Enterprise as TBD and no
-    payment processing exists in the codebase. The "Plans and payment" section
-    below says the product is free today. Rewrite it the moment billing ships.
+  - Paid plans: the pricing page now shows real prices for Pro ($69/cycle),
+    Team ($299/yr), and Enterprise (custom), all still badged "In the works"
+    with a waitlist, not a checkout button. Payment processing code DOES
+    exist now (billing/stripe_gateway.py, a real Stripe Checkout + webhook
+    path), but it is dormant: `is_configured()` is false until
+    STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET are set on the deployment, and
+    today they are not, so no button reaches it and no payment detail is
+    ever taken. The "Plans and payment" section below is accurate for as
+    long as that stays true. Rewrite it the moment Stripe is actually
+    configured, not just the moment code for it exists.
   - Scraped opportunity data: the IP section claims the compiled board as
     Coverage's. That claim is normal for a database of facts, but the
     underlying postings belong to the firms. Worth a look from counsel if the

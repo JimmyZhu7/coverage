@@ -28,10 +28,17 @@ from django.utils.html import strip_tags
 
 pytestmark = pytest.mark.django_db
 
-# Google's required wording. The subject may name the app; the rest is theirs.
+# Google's required wording. The subject may name the app; the rest is
+# theirs. "and transfer to any other app of" is not optional filler -- it is
+# part of the mandated sentence (Google's own published wording, verified
+# 2026-08-30 against Google for Developers' Limited Use disclosure guidance
+# and matched verbatim by every third-party Google-API disclosure page
+# checked). A prior version of both this page and this constant dropped that
+# clause, which is exactly the kind of silent trim a copy pass makes without
+# realizing the sentence is not ours to shorten.
 LIMITED_USE = (
-    "use of information received from Google APIs will adhere to the "
-    "Google API Services User Data Policy"
+    "use and transfer to any other app of information received from Google "
+    "APIs will adhere to the Google API Services User Data Policy"
 )
 
 
@@ -68,8 +75,11 @@ def test_the_policy_says_gmail_subjects_and_snippets_go_to_anthropic(page):
 
 
 def test_the_ai_sharing_section_counts_scan_now_among_the_triggers(page):
-    """The section used to list three AI triggers and there were four. The
-    list and the code have to stay in step."""
+    """The section used to list three AI triggers, then four (2026-08-30:
+    Autopilot, capture/autopilot.py, makes it five -- it is a real,
+    user-triggered Anthropic call the founder's own account has 53 decisions
+    from, and it was missing from this list entirely). The list and the code
+    have to stay in step."""
     section = page.split("Who we share data with", 1)[1]
     section = section.split("Cookies and sessions", 1)[0]
     for trigger in (
@@ -77,8 +87,20 @@ def test_the_ai_sharing_section_counts_scan_now_among_the_triggers(page):
         "coffee-chat brief",
         "relationship summary",
         "Scan Now",
+        "Autopilot",
     ):
         assert trigger in section, f"{trigger} is an AI trigger and must be listed"
+
+
+def test_the_ai_sharing_section_discloses_autopilot_sends_the_email_address(page):
+    """Autopilot's evidence_text() sends `PERSON: {name} <{email}>` to
+    Anthropic (capture/autopilot.py) -- unlike the advisor, which is told
+    only whether a contact has an email on file. The blanket "email
+    addresses are deliberately excluded" line only covers the advisor's
+    three triggers; Autopilot needs its own, separate, honest sentence."""
+    section = page.split("Who we share data with", 1)[1]
+    section = section.split("Cookies and sessions", 1)[0]
+    assert "Autopilot" in section and "email address" in section
 
 
 def test_the_page_is_still_marked_a_draft():
