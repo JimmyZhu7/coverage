@@ -19,7 +19,14 @@ PLACEHOLDERS TO FILL IN BEFORE THIS IS A REAL POLICY
 OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
   - Effective date below says 19 August 2026. Update it on every publish.
   - Breach notification: the stated 72-hour window is a commitment, not a
-    legal finding. Confirm it is one you can actually meet before shipping.
+    legal finding. One real gap is closed (2026-08-30): sentry-sdk is now
+    a declared dependency, so settings/production.py's SENTRY_DSN check
+    actually activates a client instead of silently no-op'ing on the
+    missing-package branch it was written to degrade into. What's still
+    outstanding, and yours to confirm, not code's: whether a real Sentry
+    project exists and SENTRY_DSN is actually set on the live deployment.
+    Without that, this promise still rests on nothing watching for a
+    breach to confirm in the first place.
   - Minimum age is stated as 16. Under-13 users would pull COPPA into scope
     and under-16 in parts of the EU needs a guardian basis. Confirm 16 is the
     number you want. Signup deliberately does not gate on it (2026-08-30
