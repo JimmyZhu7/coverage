@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load textstyle %}
+{% load csp textstyle %}
 
 {% block title %}Calendar · Coverage{% endblock %}
 
@@ -98,6 +98,10 @@
   .cal-day.is-today .cal-num { background: var(--accent); color: var(--on-accent);
     font-weight: var(--w-bold); animation: chip-check 320ms cubic-bezier(0.22,1,0.36,1); }
   .cal-day.is-today { box-shadow: inset 0 0 0 1.5px var(--accent-line); }
+  /* Replayed by clicking Today while already on the current month (see that
+     link's own comment) -- same animation .is-today already plays once on
+     page load, just re-triggered on demand so the click has an answer. */
+  .cal-day.is-today-pulse .cal-num { animation: chip-check 320ms cubic-bezier(0.22,1,0.36,1); }
 
   /* The scroll container. `min-height: 0` is load-bearing: a flex child
      defaults to min-height:auto and refuses to shrink below its content, so
@@ -267,6 +271,9 @@
     margin: 0 0 var(--s2); }
   .cal-agenda-day.is-today .cal-agenda-date { color: var(--accent);
     font-weight: var(--w-bold); }
+  /* Phone equivalent of .cal-day.is-today-pulse -- same reason, this view's
+     own today-marker (see the Today link's own comment on the grid). */
+  .cal-agenda-day.is-today-pulse { animation: chip-check 320ms cubic-bezier(0.22,1,0.36,1); }
   .cal-agenda-list { display: flex; flex-direction: column; gap: 6px; }
   .cal-empty { padding: var(--s6) var(--s4); text-align: center; color: var(--ink-3);
     font-size: var(--fs-s); }
@@ -289,7 +296,17 @@
       <a class="btn" href="?y={{ prev_y }}&m={{ prev_m }}" aria-label="Previous month" rel="prev">‹</a>
       <a class="btn" href="?y={{ next_y }}&m={{ next_m }}" aria-label="Next month" rel="next">›</a>
     </div>
-    <a class="btn" href="{% url 'crm:calendar' %}">Today</a>
+    {% comment %}
+    Reported live: clicking Today while already viewing the current month
+    did a full page reload to render the exact same content -- the link's
+    target (crm:calendar with no ?y=&m=) IS correct, but a click with zero
+    visible result reads as a broken button, not a working one. Only wired
+    with data-already-today when that's actually the case; any other month
+    still gets the real navigation, which is its own visible feedback (the
+    grid changes).
+    {% endcomment %}
+    <a class="btn" href="{% url 'crm:calendar' %}" data-today-link
+       {% if year == today.year and month == today.month %}data-already-today{% endif %}>Today</a>
     {% comment %}Feed URL for the calendar app the user already lives in.
     webcal:// so Calendar.app opens a subscribe dialog instead of downloading
     a one-off snapshot.{% endcomment %}
@@ -395,4 +412,37 @@
     {% endif %}
   </div>
 </div>
+{% comment %}
+Reported live: "Today" appeared to do nothing when clicked while already
+viewing the current month. The link's target was always correct -- there
+was just no visible result to prove it, since the page it navigates to
+IS the page already on screen. Rather than reload for zero visible change,
+scroll today's own cell into view and replay the same highlight animation
+it already plays once on load. Whichever of the two today-markers is
+actually rendered (the >=820px grid cell or the phone agenda row -- see
+.cal-agenda-day.is-today, mutually exclusive by media query) is scrolled;
+if neither exists (should not happen if data-already-today is set at all,
+but a live DOM can always surprise you), the link falls through to its
+real href instead of silently doing nothing a second way.
+{% endcomment %}
+{% script %}
+  document.querySelectorAll("[data-today-link][data-already-today]").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      // NOT `a || b`: that picks whichever selector matches an element
+      // that EXISTS, not one that's actually visible, and both markers
+      // exist in the DOM at once (only one is shown per breakpoint --
+      // see the comment above). Check the grid cell's own visibility
+      // before falling through, or a narrow viewport grabs the hidden
+      // desktop cell and never tries the agenda row at all.
+      var cell = document.querySelector(".cal-day.is-today");
+      if (!cell || !cell.offsetParent) cell = document.querySelector(".cal-agenda-day.is-today");
+      if (!cell || !cell.offsetParent) return;
+      e.preventDefault();
+      cell.scrollIntoView({ behavior: "smooth", block: "center" });
+      cell.classList.remove("is-today-pulse");
+      void cell.offsetWidth;
+      cell.classList.add("is-today-pulse");
+    });
+  });
+{% endscript %}
 {% endblock %}
