@@ -533,6 +533,109 @@ class FirmDate(models.Model):
         return f"{self.firm.name} {self.cycle} {self.event_kind}"
 
 
+class FirmCycleObservation(models.Model):
+    """A MEASURED distribution of when a firm's postings opened and closed
+    for one (firm, region), rebuilt from `OpportunityChange` + `ScrapeRun` —
+    never a single curated date, and never hand-edited.
+
+    This is NOT a second `FirmDate`. `FirmDate` stores one asserted date per
+    (firm, cycle, track, region, event_kind) with a confidence band, because
+    someone READ a claim somewhere and is vouching for it. What this table
+    holds is the opposite shape of fact: N postings, each with its own
+    first-seen or closed-at timestamp, and the honest answer is the spread of
+    those timestamps, not a single date standing in for all of them.
+    Collapsing "14 postings opened between Aug 3 and Aug 12" down to one
+    `FirmDate` row would have to either pick one of the 14 dates and discard
+    the other 13, or invent a summary date ("Aug 7ish") nobody actually
+    observed — both destroy exactly the count-and-spread that make this
+    evidence credible instead of a rumor with an official-looking column
+    next to it. Two tables, two provenances: a reader who sees a `FirmDate`
+    row knows a human found a claim; a reader who sees a row here knows the
+    scraper watched it happen. Merging them would erase that distinction for
+    every consumer downstream, permanently.
+
+    Every close counted here has already passed `directory.cycle_trust`'s
+    TRUSTED check — a close attributed to a board the same pass reported as
+    failed, or to a run that wiped out most of a firm's open postings in one
+    shot, is excluded rather than averaged in, because a distribution built
+    from a mix of real closes and connector failures would look identical to
+    one built from real closes alone; there is no statistical tell that
+    would let a consumer discount the noise later. `opened_at` facts carry
+    no such filter: `Opportunity.first_seen` is stamped once, by the row's
+    own creation, and a board fetch that fails or goes dark can only cause a
+    posting to go MISSING from a pass, never to spuriously appear in one —
+    so there is no failure mode here to guard against, and inventing one
+    would be inventing an asymmetry the code doesn't have.
+
+    A firm's very first scrape batch is deliberately excluded from
+    `opened_count`/`open_window_*`: `first_seen` on those rows means "this
+    posting already existed the day Coverage started watching this firm's
+    board," not "we watched it open" — the two are easy to conflate and only
+    the second is evidence a recruiting cycle actually started on that day.
+    See `build_cycle_observations`'s `_onboarding_cutoff` for how the
+    cutoff is found. A firm with no evidence on one side (nothing observed
+    to open, or every close excluded as suspect) gets that side left at its
+    zero/blank default rather than a fabricated value — see the field
+    comments below and the module's constraint against ever implying a
+    prediction: there has not yet been an observed October, and this table
+    must never look like there has.
+    """
+
+    firm = models.ForeignKey(Firm, on_delete=models.CASCADE, related_name="cycle_observations")
+    # Not TRACKED_REGIONS-restricted on purpose: "" (the posting's location
+    # didn't resolve to a known market) and "global"/"other" are all real,
+    # observed values on live rows, and dropping them would silently shrink
+    # the population every count below is measured against.
+    region = models.CharField(max_length=64, blank=True, default="")
+
+    # Scoped to `classify.TARGET_BUCKETS` only (insight/internship/
+    # entry_level) — this table exists to describe RECRUITING cycles, and a
+    # firm's non-campus volume (retail-branch hiring, IT support reqs) would
+    # otherwise swamp the very sparse campus signal it is meant to surface.
+    # See `build_cycle_observations` for the query this mirrors.
+    opened_count = models.PositiveIntegerField(default=0)
+    open_window_first = models.DateField(null=True, blank=True)
+    open_window_last = models.DateField(null=True, blank=True)
+
+    # TRUSTED closes only (see class docstring). `excluded_suspect_closes`
+    # is not a footnote — it is the number a consumer needs to judge whether
+    # a THIN close window is thin because few postings have closed, or thin
+    # because most of the evidence was thrown out as unreliable, which read
+    # identically in `closed_count` alone.
+    closed_count = models.PositiveIntegerField(default=0)
+    close_window_first = models.DateField(null=True, blank=True)
+    close_window_last = models.DateField(null=True, blank=True)
+    excluded_suspect_closes = models.PositiveIntegerField(default=0)
+
+    # A live snapshot at compute time, NOT an observation-window fact —
+    # deliberately kept separate from `opened_count`/`closed_count` so a
+    # reader never mistakes "how many are open right now" for "how many we
+    # watched open." Lets a consumer sanity-check the other two columns
+    # against the board's current shape without re-querying `Opportunity`.
+    currently_open_count = models.PositiveIntegerField(default=0)
+
+    # The excluded onboarding day itself (see class docstring), kept for
+    # transparency rather than silently discarded — a firm whose entire
+    # visible history is one onboarding batch has `onboarded_at` set and
+    # `opened_count == 0`, which is a materially different, and much more
+    # honest, state than "no data" with no explanation on offer.
+    onboarded_at = models.DateField(null=True, blank=True)
+
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "firm_cycle_observations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["firm", "region"], name="uniq_firm_cycle_observation_firm_region"
+            ),
+        ]
+        ordering = ["firm_id", "region"]
+
+    def __str__(self) -> str:
+        return f"{self.firm.name} ({self.region or 'unstated region'}) cycle observation"
+
+
 class EmailPatternStats(models.Model):
     """Aggregate-only, shared deliberately (§2): "Every user's bounces
     improve pattern confidence for everyone ... Raw bounce events stay
