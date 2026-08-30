@@ -36,6 +36,8 @@ overtaken by something the student did on their own screen.
 
 from __future__ import annotations
 
+import hashlib
+
 from django.utils import timezone
 
 from .client import get_client, is_configured
@@ -45,6 +47,32 @@ BRIEF_MODEL = "claude-haiku-4-5-20251001"
 MAX_TOKENS = 150
 MAX_ACTIONS_SUMMARIZED = 8
 MAX_BRIEF_CHARS = 600
+
+# A genuinely empty queue and situation list is still a day the student
+# opens Today, and the card used to just not exist on it — see the ONE
+# HABIT LOOP module docstring above: that is precisely the day this feature
+# exists to still show up on. No model call needed (there is nothing to
+# summarize), so this fires whether or not ANTHROPIC_API_KEY is set,
+# through the exact same once-a-day cache as a real brief.
+#
+# Several lines, chosen deterministically per (user, date) rather than one
+# fixed line or a random one: the same sentence every quiet day forever
+# reads as a template the first time someone hits it twice, and a random
+# choice would make two requests for the SAME quiet day (a double tab, the
+# exact race `_cache_text` below already guards the row against) able to
+# render two different sentences on screen before the winner settles.
+_QUIET_DAY_MESSAGES = (
+    "Nothing needs you today. Good day to add a target firm or two.",
+    "Queue's clear, nothing changed overnight. Worth a look at new openings anyway.",
+    "All quiet right now. A slow day is still a good one to write up a chat you've been putting off.",
+    "Nothing urgent today. Use the lull to widen your target list.",
+)
+
+
+def _quiet_day_message(user, today) -> str:
+    key = f"{user.pk}:{today.isoformat()}"
+    idx = int(hashlib.sha256(key.encode()).hexdigest(), 16) % len(_QUIET_DAY_MESSAGES)
+    return _QUIET_DAY_MESSAGES[idx]
 
 
 def _summarize_actions(actions: list[dict]) -> str:
@@ -118,6 +146,36 @@ def _live_contact_ids(actions: list[dict]) -> set[int]:
         cid for a in actions
         if (cid := (a.get("contact") or {}).get("id")) is not None
     }
+
+
+def _cache_text(user, today, text: str, contact_ids: list[int], *, stale: bool) -> str:
+    """Write today's brief text and return it — the one write path both
+    a real generation and the quiet-day fallback share, so the race/staleness
+    handling below only has to be gotten right once.
+
+    `stale` picks the write shape: a plain UPDATE when a row already exists
+    (that is what made it stale — no create-race to guard, only a rewrite of
+    a sentence the queue has since disowned) versus get_or_create when there
+    is no row yet, which is reachable twice for the same student/day (a
+    double-load of Today, two tabs, a client-side retry) — Django's
+    get_or_create retries its own `get()` when the nested create hits
+    `uniq_daily_brief_user_date`'s UniqueConstraint(user, date), so the loser
+    of that race quietly returns whichever text actually won it instead of
+    raising.
+
+    `.objects.for_user(user).get_or_create(user=user, ...)`, deliberately
+    not the unscoped escape-hatch manager: assistant/tests/test_isolation.py
+    bans that name outright anywhere in this package.
+    """
+    if stale:
+        DailyBrief.objects.for_user(user).filter(date=today).update(
+            text=text, contact_ids=contact_ids,
+        )
+        return text
+    row, _created = DailyBrief.objects.for_user(user).get_or_create(
+        user=user, date=today, defaults={"text": text, "contact_ids": contact_ids},
+    )
+    return row.text
 
 
 def _is_stale(existing: DailyBrief, actions: list[dict]) -> bool:
@@ -218,11 +276,14 @@ def is_pending(user, actions: list[dict] | None = None) -> bool:
 
 
 def get_or_build(user, actions: list[dict], situation: list[dict] | None = None, *, client=None) -> str | None:
-    """Today's brief. Returns None — never raises, never shows an error —
-    if the feature is dark, there is nothing worth saying today, or
-    generation fails for any reason; the Today page simply omits the card
-    on a day this doesn't work, the same graceful-dark posture every other
-    optional integration in this app already has.
+    """Today's brief. A quiet day (nothing in the queue, nothing in the
+    situation feed) still gets a real, cached sentence — see
+    `_QUIET_DAY_MESSAGES` — because the Today page opens every day, not just
+    the busy ones. Returns None — never raises, never shows an error — only
+    when the feature is genuinely dark (no API key) or generation itself
+    fails; the Today page omits the card on a day this doesn't work, the
+    same graceful-dark posture every other optional integration in this app
+    already has.
 
     `situation` is the flat event list from `assistant.situation.
     build_situation` (optional — callers that don't have one, or tests
@@ -255,7 +316,11 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     queue_summary = _summarize_actions(actions)
     situation_summary = _summarize_situation(situation or [])
     if not queue_summary and not situation_summary:
-        return None  # nothing to say — don't spend a call to say so
+        # Quiet day, not a dark one: the feature is live (the is_configured
+        # check above already passed), there is just nothing to summarize.
+        # Still cached, still once per day, still no model call — see
+        # _QUIET_DAY_MESSAGES.
+        return _cache_text(user, today, _quiet_day_message(user, today), [], stale=stale)
 
     prompt = (
         f"Today's date is {today.isoformat()}. Any deadline below is a "
@@ -302,39 +367,4 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     # same way — this is the staleness fingerprint `_is_stale` compares
     # against tomorrow (or later today), not a display field.
     contact_ids = sorted(_live_contact_ids(actions[:MAX_ACTIONS_SUMMARIZED]))
-
-    if stale:
-        # A plain UPDATE, deliberately not get_or_create: the row already
-        # exists (that is what made `stale` true), so there is no create-race
-        # to guard against here, only a rewrite of a sentence the queue has
-        # since disowned. Two refresh attempts landing at once just overwrite
-        # each other with two freshly-true answers — an ordinary cache
-        # overwrite, not the first-generation race the branch below handles.
-        DailyBrief.objects.for_user(user).filter(date=today).update(
-            text=text, contact_ids=contact_ids,
-        )
-        return text
-
-    # get_or_create, not a plain save(): this endpoint is reachable twice for
-    # the same student/day (a double-load of Today, two tabs, a client-side
-    # retry against a slow response) and both requests can pass the
-    # `existing is None` check above before either has written its row.
-    # `uniq_daily_brief_user_date` is exactly the guard against two rows for
-    # one day, but a bare `.save()` on the loser meant the DB constraint threw
-    # an uncaught IntegrityError instead of the graceful "no card" this
-    # module promises everywhere else — Django's get_or_create retries its
-    # own `get()` when the nested create hits that constraint, so the loser
-    # quietly returns whichever text actually won the race.
-    #
-    # `.objects.for_user(user).get_or_create(user=user, ...)`, deliberately
-    # not the unscoped escape-hatch manager: assistant/tests/test_isolation.py
-    # bans that name outright anywhere in this package — this module has no
-    # legitimate cross-tenant reason to reach for it. `.for_user(user)`
-    # already scopes the `get()` half; `user=user` in the kwargs is what the
-    # `create()` half needs, since get_or_create builds the new row from its
-    # own kwargs/defaults, not from whatever filters happen to already be on
-    # the queryset.
-    row, _created = DailyBrief.objects.for_user(user).get_or_create(
-        user=user, date=today, defaults={"text": text, "contact_ids": contact_ids},
-    )
-    return row.text
+    return _cache_text(user, today, text, contact_ids, stale=stale)

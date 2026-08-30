@@ -190,9 +190,10 @@ def daily_brief(request: HttpRequest) -> HttpResponse:
     caps itself at one model call per student per calendar day, so even a
     replayed POST costs nothing after the first.
 
-    Renders the same partial the page does. Returns it EMPTY (not an error)
-    when the feature is dark or there was nothing worth saying — the card
-    simply never appears, which is the behaviour this has always had.
+    Renders the same partial the page does. A quiet day still gets a real
+    sentence from `get_or_build` (see assistant.brief._QUIET_DAY_MESSAGES).
+    Only returns it EMPTY (not an error) when the feature is dark — the
+    card simply never appears on a deployment with no key set.
     """
     from assistant.brief import get_or_build
     from assistant.situation import build_situation

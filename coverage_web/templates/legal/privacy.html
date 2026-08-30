@@ -19,17 +19,22 @@ PLACEHOLDERS TO FILL IN BEFORE THIS IS A REAL POLICY
 OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
   - Effective date below says 19 August 2026. Update it on every publish.
   - Breach notification: the stated 72-hour window is a commitment, not a
-    legal finding. Confirm it is one you can actually meet before shipping.
+    legal finding. One real gap is closed (2026-08-30): sentry-sdk is now
+    a declared dependency, so settings/production.py's SENTRY_DSN check
+    actually activates a client instead of silently no-op'ing on the
+    missing-package branch it was written to degrade into. What's still
+    outstanding, and yours to confirm, not code's: whether a real Sentry
+    project exists and SENTRY_DSN is actually set on the live deployment.
+    Without that, this promise still rests on nothing watching for a
+    breach to confirm in the first place.
   - Minimum age is stated as 16. Under-13 users would pull COPPA into scope
     and under-16 in parts of the EU needs a guardian basis. Confirm 16 is the
-    number you want, and that signup actually enforces it (it does not today).
-  - Hosting region: render.yaml pins no `region:`, so the services land in
-    Render's default region. Confirm the real region in the Render dashboard
-    and correct "Where your data lives" if it is not the US.
-  - The export ZIP does not currently include Talk to Coverage conversations,
-    advisor memories, or calendar events. "Your rights" says so plainly rather
-    than overclaiming, but the honest fix is to add them to
-    accounts/services.py EXPORT_FILES.
+    number you want. Signup deliberately does not gate on it (2026-08-30
+    call): the product's real audience is university students, an active
+    age gate would be real signup friction against a threat this audience
+    doesn't present, and "we do not knowingly collect... if we learn we
+    have, we delete" below is the standard reactive posture for exactly
+    this shape of product. Revisit only if the audience ever changes.
 
 DO NOT REWORD: the "Google API Limited Use" section
   The first sentence of that section is Google's own required representation,
@@ -125,7 +130,7 @@ DO NOT REWORD: the "Google API Limited Use" section
   <h2>Your rights</h2>
   <p>You do not have to file a request to exercise most of these. The tools are in the product.</p>
   <ul>
-    <li><strong>Access and portability.</strong> <a href="{% url 'accounts:export' %}">Export everything</a> as one ZIP of CSVs, one file per table. The export page lists every file it contains and names what it leaves out, so you can check the claim rather than trust it. Two things are not in the ZIP today: your Talk to Coverage conversations and your calendar events. Ask us and we will send them to you.</li>
+    <li><strong>Access and portability.</strong> <a href="{% url 'accounts:export' %}">Export everything</a> as one ZIP of CSVs, one file per table, including your Talk to Coverage conversations, advisor memories, and calendar events. The export page lists every file it contains, so you can check the claim rather than trust it.</li>
     <li><strong>Correction.</strong> Every field you can see, you can edit, in Settings or on the record itself.</li>
     <li><strong>Deletion.</strong> <a href="{% url 'accounts:delete' %}">Delete your account and all of its data</a> yourself, immediately. No email to support, no waiting period, no cooling-off window during which we quietly keep it.</li>
     <li><strong>Objection and restriction.</strong> Write to [PRIVACY CONTACT EMAIL]. If you would rather not use a feature, every optional data flow on this page has an off switch, and the off switch is the default.</li>

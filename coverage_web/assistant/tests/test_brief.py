@@ -108,15 +108,33 @@ def test_a_cached_brief_is_returned_without_calling_the_model():
     assert client.messages.requests == []
 
 
-def test_an_empty_queue_returns_none_and_spends_no_call():
+def test_an_empty_queue_still_returns_a_cached_quiet_day_line():
+    """A quiet day is still a day Today gets opened — see
+    assistant.brief._QUIET_DAY_MESSAGES. No model call, but the card must
+    not just disappear."""
     user = _user()
     client = FakeClient(_response("unused"))
 
     text = brief.get_or_build(user, [], client=client)
 
-    assert text is None
+    assert text in brief._QUIET_DAY_MESSAGES
     assert client.messages.requests == []
-    assert not DailyBrief.objects.for_user(user).exists()
+    row = DailyBrief.objects.for_user(user).get()
+    assert row.text == text
+    assert row.contact_ids == []
+
+
+def test_the_quiet_day_line_is_the_same_for_two_requests_the_same_day():
+    """Deterministic per (user, date), not random — two tabs open on a
+    quiet Today must not each render a different sentence before the
+    cached row settles."""
+    user = _user()
+
+    first = brief.get_or_build(user, [], client=FakeClient(_response("unused")))
+    DailyBrief.objects.for_user(user).delete()
+    second = brief.get_or_build(user, [], client=FakeClient(_response("unused")))
+
+    assert first == second
 
 
 def test_a_successful_generation_is_cached_for_the_day():
@@ -318,7 +336,7 @@ def test_an_empty_queue_and_no_situation_events_still_spends_no_call():
 
     text = brief.get_or_build(user, [], [], client=client)
 
-    assert text is None
+    assert text in brief._QUIET_DAY_MESSAGES
     assert client.messages.requests == []
 
 

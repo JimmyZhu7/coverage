@@ -278,3 +278,38 @@ def test_discovery_refuses_disqualified_role_hint_and_keeps_banker():
         user, _threaded_finding("kim@acme-widgets.com", "Kim Lee"),
     )
     assert silent == discovery.PROPOSED
+
+
+# ---------------------------------------------------------------------------
+# HIDE-WORD COLLISIONS WITH REAL FINANCE TITLES. `residential` entered the
+# campus vocabulary to catch USC's housing-office titles and was never checked
+# against a finance title. "Analyst, Residential Mortgage-Backed Securities"
+# is a real S&T seat and the bare word hid it as campus staff — the same
+# ordering discipline already locked in for "Equities Sales", applied to the
+# word that had not been tested.
+
+
+@pytest.mark.parametrize("role", [
+    "Analyst, Residential Mortgage-Backed Securities",
+    "Associate, Residential Real Estate",
+    "VP, Residential Credit",
+    "Residential Mortgage Trading Analyst",
+])
+def test_a_residential_finance_seat_is_not_campus_staff(role):
+    verdict = recruitment.classify_person(role=role, notes="")
+    assert verdict.code != "campus", (
+        f"{role!r} is a track seat; hiding it as campus staff loses a banker"
+    )
+
+
+@pytest.mark.parametrize("role", [
+    "Residential Advisor",
+    "Resident Assistant",
+    "Residential Life Coordinator",
+    "Residential College Advisor",
+])
+def test_campus_housing_staff_are_still_campus(role):
+    """The guard: narrowing `residential` must not reopen the hole it closed.
+    These are the USC housing titles the word was added for."""
+    verdict = recruitment.classify_person(role=role, notes="")
+    assert verdict.code == "campus", f"{role!r} is campus housing staff"

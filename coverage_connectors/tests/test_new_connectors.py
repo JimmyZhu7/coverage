@@ -57,15 +57,22 @@ def test_oracle_fetch_dedupes_across_keywords(monkeypatch):
 
     def fake_fetch_json(url, **kw):
         calls.append(url)
-        return _ORACLE_PAYLOAD  # same two reqs for every keyword
+        return _ORACLE_PAYLOAD  # same two reqs for every keyword, for every endpoint
 
     monkeypatch.setattr(oracle_mod, "fetch_json", fake_fetch_json)
     result = fetch(JPM)
     assert result.ok
-    assert len(calls) == 2                       # one search per keyword
+    # 2 searches (one per keyword) + 2 DETAILS requests (one per unique
+    # requisition discovered — J.P. Morgan is in `_EXTERNAL_DEADLINE_HOSTS`,
+    # see the scope tests below). The second keyword's reqs are already in
+    # `seen`, so it triggers no further DETAILS calls.
+    assert len(calls) == 4
     assert len(result.opportunities) == 2        # deduped by requisition Id
     first = result.opportunities[0]
     assert first.title == "2027 Global Banking Summer Analyst Program"
+    # This fixture's DETAILS response (same payload, no ExternalPostedEndDate
+    # key) carries no override, so this still falls back to the old
+    # PostingEndDate field — proving the fallback path is unchanged.
     assert first.deadline == "2026-09-15"        # PostingEndDate is a real deadline
     assert first.posted_at == "2026-07-01"
     assert first.url == ("https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
@@ -145,6 +152,125 @@ def test_oracle_verify_does_not_close_on_a_malformed_envelope(monkeypatch):
     url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210658163"
     v = verify(url)
     assert v.result == "needs-verification"
+
+
+# ---------------------------------- oracle: DETAILS-endpoint deadline scope
+
+def _oracle_search_payload(rid: int, posting_end_date: str | None = None) -> dict:
+    return {"items": [{"requisitionList": [
+        {"Id": rid, "Title": "Some Role", "PrimaryLocation": "New York, NY, United States",
+         "PostedDate": "2026-08-01", "PostingEndDate": posting_end_date},
+    ]}]}
+
+
+def _oracle_details_payload(rid: int, external_posted_end_date: str) -> dict:
+    return {"items": [{"requisitionList": [
+        {"Id": rid, "ExternalPostedEndDate": external_posted_end_date},
+    ]}]}
+
+
+def test_oracle_fetch_extracts_jpm_deadline_from_details_endpoint(monkeypatch):
+    """THE CONFIRMED FIX: `PostingEndDate` off the SEARCH endpoint
+    (`recruitingCEJobRequisitions`) is always null — verified live against
+    Oracle's own API for two real J.P. Morgan requisitions (210778140,
+    210747420). The real "Apply Before" date lives on the DETAILS endpoint
+    (`recruitingCEJobRequisitionDetails`) under `ExternalPostedEndDate`. This
+    is in scope for J.P. Morgan (host `jpmc.fa.oraclecloud.com`) only — see
+    `_EXTERNAL_DEADLINE_HOSTS`."""
+    calls = []
+
+    def fake_fetch_json(url, **kw):
+        calls.append(url)
+        if "recruitingCEJobRequisitionDetails" in url:
+            return _oracle_details_payload(210778140, "2026-09-07T15:59:00+00:00")
+        return _oracle_search_payload(210778140, posting_end_date=None)
+
+    monkeypatch.setattr(oracle_mod, "fetch_json", fake_fetch_json)
+    result = fetch(JPM)
+    assert result.ok
+    assert len(result.opportunities) == 1
+    opp = result.opportunities[0]
+    # Day precision, same [:10] slicing convention greenhouse.py's
+    # application_deadline uses — ingest.py stamps deadline_precision="day"
+    # and confidence=1.0 off nothing more than `opp.deadline` being set, so
+    # matching that convention here is just: populate the field correctly.
+    assert opp.deadline == "2026-09-07"
+    assert any("recruitingCEJobRequisitionDetails" in c for c in calls), (
+        "fetch() must make the extra DETAILS request for an in-scope firm"
+    )
+
+
+def test_oracle_fetch_extracts_deadline_for_lazard_and_schroders(monkeypatch):
+    """FOUNDER-ACCEPTED-RISK PIN: a human check of Lazard's and Schroders'
+    live posting pages (2026-08-29) found `ExternalPostedEndDate` populated
+    but never shown to candidates there — it reads as internal, not the
+    confirmed-candidate-facing bar J.P. Morgan cleared. The founder was told
+    this plainly and chose to extract it anyway (2026-08-30): more coverage
+    over the risk some of these are wrong. This pins THAT decision — both
+    firms must get the DETAILS-endpoint deadline like J.P. Morgan does, not
+    the JPM-only scoping that predates it."""
+    calls = []
+
+    def fake_fetch_json(url, **kw):
+        calls.append(url)
+        if "recruitingCEJobRequisitionDetails" in url:
+            return _oracle_details_payload(999111, "2026-10-01T15:59:00+00:00")
+        return _oracle_search_payload(999111, posting_end_date=None)
+
+    monkeypatch.setattr(oracle_mod, "fetch_json", fake_fetch_json)
+    lazard = OracleBoard(firm="Lazard", host="icbpjb.fa.ocs.oraclecloud.com",
+                          site_number="CX_1", keywords=("intern",))
+    result = fetch(lazard)
+    assert result.ok
+    assert len(result.opportunities) == 1
+    assert result.opportunities[0].deadline == "2026-10-01"
+    assert any("recruitingCEJobRequisitionDetails" in c for c in calls)
+
+    schroders = OracleBoard(firm="Schroders", host="ekbq.fa.em2.oraclecloud.com",
+                             site_number="CX_2", keywords=("intern",))
+    calls.clear()
+    result = fetch(schroders)
+    assert result.opportunities[0].deadline == "2026-10-01"
+    assert any("recruitingCEJobRequisitionDetails" in c for c in calls)
+
+
+def test_oracle_verify_extracts_jpm_deadline_from_details_endpoint(monkeypatch):
+    """`verify()` shares the same DETAILS-endpoint fix as `fetch()` — without
+    it, a reverify pass could never self-heal a row whose deadline was
+    ingested null before this fix landed."""
+    def fake_fetch_json(url, **kw):
+        if "recruitingCEJobRequisitionDetails" in url:
+            return _oracle_details_payload(210778140, "2026-09-07T15:59:00+00:00")
+        return _oracle_search_payload(210778140, posting_end_date=None)
+
+    monkeypatch.setattr(oracle_mod, "fetch_json", fake_fetch_json)
+    url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210778140"
+    v = verify(url)
+    assert v.result == "verified-open"
+    assert v.deadline_dates == ["2026-09-07"]
+    assert "ExternalPostedEndDate=2026-09-07" in v.evidence
+
+
+def test_oracle_verify_extracts_deadline_for_lazard(monkeypatch):
+    """Same founder-accepted-risk proof as the fetch()-side test, through
+    verify() — a reverify pass must self-heal a Lazard row the same way it
+    does a J.P. Morgan one."""
+    calls = []
+
+    def fake_fetch_json(url, **kw):
+        calls.append(url)
+        if "recruitingCEJobRequisitionDetails" in url:
+            return _oracle_details_payload(999111, "2026-10-01T15:59:00+00:00")
+        return _oracle_search_payload(999111, posting_end_date=None)
+
+    monkeypatch.setattr(oracle_mod, "fetch_json", fake_fetch_json)
+    url = ("https://icbpjb.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+           "CX_1/job/999111")
+    v = verify(url)
+    assert v.result == "verified-open"
+    assert v.deadline_dates == ["2026-10-01"]
+    assert "ExternalPostedEndDate=2026-10-01" in v.evidence
+    assert any("recruitingCEJobRequisitionDetails" in c for c in calls)
 
 
 # --------------------------------------------------------------------- talnet

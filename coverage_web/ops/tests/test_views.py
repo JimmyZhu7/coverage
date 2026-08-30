@@ -1,9 +1,9 @@
-"""/ops/health/cron/ — staff-only JSON reader over JobRun rows.
+"""/ops/health/cron/ and /ops/health/gmail/ — staff-only JSON readers.
 
-Each test writes JobRun rows directly (not through track_job_run — that
-wrapper is tested on its own in test_tracking.py) so a run's age can be
-pinned to an exact offset from "now" instead of depending on real wall-clock
-time between the write and the request.
+Each test writes JobRun/GmailConnection rows directly (not through
+track_job_run or connect_gmail, which are tested on their own) so a row's
+age can be pinned to an exact offset from "now" instead of depending on
+real wall-clock time between the write and the request.
 """
 
 from __future__ import annotations
@@ -15,12 +15,15 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
+from capture.models import GmailConnection
 from ops.models import JobRun
 from ops.tracking import EXPECTED_INTERVALS
+from ops.views import GMAIL_STALE_WARNING_AFTER
 
 pytestmark = pytest.mark.django_db
 
 URL = "/ops/health/cron/"
+GMAIL_URL = "/ops/health/gmail/"
 
 User = get_user_model()
 
@@ -126,3 +129,113 @@ def test_a_currently_running_job_does_not_mask_the_last_real_success(client):
 def test_reverses_by_name(client):
     _staff_client(client)
     assert reverse("ops:health-cron") == URL
+
+
+def _make_gmail_connection(*, status, connected_at, email="student@example.com"):
+    """`connected_at` is auto_now_add=True, so create() can't set it
+    directly — the value passed at construction is silently overridden on
+    first save. Backdate it with a raw .update() afterward instead, the
+    same way any test touching an auto_now_add field has to."""
+    user = User.objects.create_user(email=email, password="x" * 14)
+    conn = GmailConnection.all_objects.create(
+        user=user,
+        gmail_address=email,
+        refresh_token_encrypted="ciphertext",
+        status=status,
+    )
+    GmailConnection.all_objects.filter(pk=conn.pk).update(connected_at=connected_at)
+    return conn
+
+
+def test_gmail_health_requires_staff_login(client):
+    resp = client.get(GMAIL_URL)
+    assert resp.status_code in (302, 403)
+
+
+def test_gmail_health_reverses_by_name(client):
+    _staff_client(client)
+    assert reverse("ops:health-gmail") == GMAIL_URL
+
+
+def test_a_revoked_connection_is_surfaced(client):
+    _staff_client(client)
+    now = timezone.now()
+    _make_gmail_connection(
+        status="revoked", connected_at=now - timedelta(days=10),
+        email="revoked-student@example.com",
+    )
+
+    resp = client.get(GMAIL_URL)
+    body = resp.json()
+    assert body["healthy"] is False
+    assert len(body["revoked"]) == 1
+    entry = body["revoked"][0]
+    assert entry["user_email"] == "revoked-student@example.com"
+    assert entry["gmail_address"] == "revoked-student@example.com"
+    assert "connected_at" in entry
+    # The approximation caveat must travel with the data, not live only in
+    # a comment a reader of the raw JSON would never see.
+    assert "does not update on reconnect" in entry["connected_at_note"]
+
+
+def test_an_active_connection_does_not_appear_in_revoked(client):
+    _staff_client(client)
+    now = timezone.now()
+    _make_gmail_connection(
+        status="active", connected_at=now - timedelta(days=10),
+        email="active-student@example.com",
+    )
+
+    resp = client.get(GMAIL_URL)
+    body = resp.json()
+    assert body["healthy"] is True
+    assert body["revoked"] == []
+
+
+def test_an_active_connection_older_than_the_warning_window_is_stale(client):
+    _staff_client(client)
+    now = timezone.now()
+    _make_gmail_connection(
+        status="active",
+        connected_at=now - GMAIL_STALE_WARNING_AFTER - timedelta(hours=1),
+        email="stale-student@example.com",
+    )
+
+    resp = client.get(GMAIL_URL)
+    body = resp.json()
+    # A warning-window entry is a heads-up, not a failure — it must not
+    # flip `healthy` the way an actual `revoked` row does.
+    assert body["healthy"] is True
+    assert len(body["stale_active"]) == 1
+    entry = body["stale_active"][0]
+    assert entry["user_email"] == "stale-student@example.com"
+    assert "inaccurate for any reconnected mailbox" in entry["note"]
+
+
+def test_an_active_connection_within_the_warning_window_is_not_stale(client):
+    _staff_client(client)
+    now = timezone.now()
+    _make_gmail_connection(
+        status="active",
+        connected_at=now - GMAIL_STALE_WARNING_AFTER + timedelta(hours=1),
+        email="fresh-student@example.com",
+    )
+
+    resp = client.get(GMAIL_URL)
+    assert resp.json()["stale_active"] == []
+
+
+def test_a_revoked_connection_never_appears_in_stale_active(client):
+    """stale_active is specifically an early-warning list for connections
+    that have not revoked yet — a connection that already flipped to
+    revoked belongs only in the `revoked` list, not double-counted here."""
+    _staff_client(client)
+    now = timezone.now()
+    _make_gmail_connection(
+        status="revoked",
+        connected_at=now - GMAIL_STALE_WARNING_AFTER - timedelta(days=5),
+        email="long-revoked@example.com",
+    )
+
+    resp = client.get(GMAIL_URL)
+    assert resp.json()["stale_active"] == []
