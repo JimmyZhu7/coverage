@@ -98,5 +98,8 @@ buttons in a menu sidestep that entirely — nothing here is a <select>.
          form="as-hist-{{ c.id }}" data-rename-input
          hx-post="{% url 'assistant:rename' %}" hx-include="#as-hist-{{ c.id }}"
          hx-target="#as-history" hx-swap="outerHTML"
-         hx-trigger="blur changed, keyup[key=='Enter'] changed">
+         {% comment %}Enter blurs the field via chat.html's wireInlineControl,
+         which re-enters this same trigger -- no keyup[key=='Enter'] filter,
+         since that needs 'unsafe-eval' this CSP does not grant.{% endcomment %}
+         hx-trigger="blur changed">
 </div>

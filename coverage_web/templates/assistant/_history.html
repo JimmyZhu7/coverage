@@ -64,7 +64,10 @@ delete — so a rename's new position (ChatConversation.Meta.ordering =
              form="as-folder-{{ group.folder.id }}" data-rename-folder-input
              hx-post="{% url 'assistant:folder_rename' %}" hx-include="#as-folder-{{ group.folder.id }}"
              hx-target="#as-history" hx-swap="outerHTML"
-             hx-trigger="blur changed, keyup[key=='Enter'] changed">
+                 {% comment %}Enter blurs the field via chat.html's wireInlineControl,
+             which re-enters this same trigger -- no keyup[key=='Enter'] filter,
+             since that needs 'unsafe-eval' this CSP does not grant.{% endcomment %}
+             hx-trigger="blur changed">
 
       <div class="as-folder-body">
         {% for c in group.conversations %}

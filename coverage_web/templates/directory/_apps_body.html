@@ -306,7 +306,17 @@ survives even if it was in the batch.
                       hx-target="#apps-body" hx-swap="outerHTML">
                   {% csrf_token %}
                   <input type="hidden" name="next" value="{% url 'my_applications' %}">
-                  <select name="status" onchange="this.form.requestSubmit()" aria-label="Stage">
+                  {% comment %}
+                  `onchange="this.form.requestSubmit()"` is CSP-blocked: script-src
+                  is `'self' 'nonce-...'`, which covers a real <script> tag, not an
+                  inline handler attribute. `data-stage-select` is wired from the
+                  page-level script in my_applications.html instead -- delegated
+                  from `document`, not this element, because `hx-swap="outerHTML"`
+                  replaces this whole partial (including this <select>) on every
+                  stage change, and a listener bound to the swapped-out node would
+                  not survive its own first use.
+                  {% endcomment %}
+                  <select name="status" data-stage-select aria-label="Stage">
                     <option value="saved"{% if stage.key == 'saved' %} selected{% endif %}>Saved</option>
                     <option value="submitted"{% if stage.key == 'submitted' %} selected{% endif %}>Applied</option>
                     <option value="interview"{% if stage.key == 'interview' %} selected{% endif %}>Interviewing</option>

@@ -159,7 +159,7 @@ select on.
               icon in the nav.
               {% endcomment %}
               <img class="site-user-avatar" src="{{ user.avatar.url }}" alt=""
-                   onerror="this.hidden=true; this.nextElementSibling.hidden=false;">
+                   data-nav-avatar>
               <span class="site-user-avatar site-user-avatar-fallback" hidden>{{ user.name|default:user.email|first|upper }}</span>
             {% else %}
               <span class="site-user-avatar site-user-avatar-fallback">{{ user.name|default:user.email|first|upper }}</span>
@@ -231,6 +231,23 @@ select on.
             });
           }
         })();
+      {% endscript %}
+      {% comment %}
+      Replaces the `onerror="this.hidden=true; ..."` attribute the avatar
+      <img> used to carry: script-src is `'self' 'nonce-...'`, not
+      'unsafe-inline', so an inline event-handler ATTRIBUTE is CSP-blocked
+      the same as an inline <script> would be -- the nonce only covers a
+      real <script> tag. Delegated from `document` in the CAPTURE phase
+      because `error` on an <img> does not bubble, so a listener on any
+      ancestor only ever sees it during capture.
+      {% endcomment %}
+      {% script %}
+        document.addEventListener("error", function (e) {
+          if (e.target && e.target.matches && e.target.matches("[data-nav-avatar]")) {
+            e.target.hidden = true;
+            if (e.target.nextElementSibling) e.target.nextElementSibling.hidden = false;
+          }
+        }, true);
       {% endscript %}
     </div>
   </header>

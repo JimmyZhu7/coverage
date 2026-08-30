@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load textstyle %}
+{% load csp textstyle %}
 
 {% block title %}My Applications · Coverage{% endblock %}
 
@@ -289,6 +289,23 @@
   </nav>
 
   {% include "directory/_apps_body.html" %}
+
+  {% comment %}
+  Delegated from `document`, not the <select> itself, and bound once here
+  in the page shell rather than inside _apps_body.html: that partial gets
+  replaced wholesale on every stage change (`hx-swap="outerHTML"` on
+  #apps-body), and an injected <script> from an htmx swap does not
+  auto-execute, so a listener declared inside the swapped fragment would
+  work exactly once and then be gone along with the node it was bound to.
+  A page-level delegated listener survives every swap for free.
+  {% endcomment %}
+  {% script %}
+    document.addEventListener("change", function (e) {
+      if (e.target && e.target.matches && e.target.matches("[data-stage-select]")) {
+        e.target.form.requestSubmit();
+      }
+    });
+  {% endscript %}
 
   {% comment %}Dismissed roles. Kept reachable and reversible — hiding is a
   judgement, and judgements about a cycle you have not started change.

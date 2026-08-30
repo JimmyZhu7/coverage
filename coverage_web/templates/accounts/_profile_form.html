@@ -19,12 +19,13 @@ replacement for one.
   <span class="avatar-preview-wrap">
     {% if user.avatar %}
       {% comment %}
-      `onerror` covers a 404'd file behind a DB row that still names one —
-      same gap as the nav avatar (base.html), same fix: swap to the
-      initials fallback instead of showing a broken image.
+      A 404'd file behind a DB row that still names one -- same gap as the
+      nav avatar (base.html), same fix: swap to the initials fallback
+      instead of showing a broken image. Wired from the script below, not
+      an inline `onerror` attribute: script-src is `'self' 'nonce-...'`,
+      which does not cover inline handler attributes.
       {% endcomment %}
-      <img class="avatar-preview" data-avatar-img src="{{ user.avatar.url }}" alt="Your profile photo"
-           onerror="this.hidden=true; this.nextElementSibling.hidden=false;">
+      <img class="avatar-preview" data-avatar-img src="{{ user.avatar.url }}" alt="Your profile photo">
       <span class="avatar-preview avatar-preview-fallback" data-avatar-fallback hidden>{{ user.name|default:user.email|first|upper }}</span>
     {% else %}
       <img class="avatar-preview" data-avatar-img alt="Your profile photo" hidden>
@@ -239,6 +240,18 @@ would be re-bound on every in-place save, stacking duplicates.
     }
     show(f, file);
   });
+
+  // Replaces the `onerror="this.hidden=true; ..."` attribute the preview
+  // <img> used to carry -- script-src is `'self' 'nonce-...'`, not
+  // 'unsafe-inline', so an inline handler ATTRIBUTE is CSP-blocked exactly
+  // like an inline <script> would be. Capture phase because `error` on an
+  // <img> does not bubble.
+  document.addEventListener("error", function (e) {
+    if (e.target && e.target.matches && e.target.matches("[data-avatar-img]")) {
+      e.target.hidden = true;
+      if (e.target.nextElementSibling) e.target.nextElementSibling.hidden = false;
+    }
+  }, true);
 })();
 {% endscript %}
 

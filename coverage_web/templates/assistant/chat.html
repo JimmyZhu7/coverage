@@ -689,7 +689,15 @@ materials.
                class="as-folder-create-input" id="as-folder-create-input"
                hx-post="{% url 'assistant:folder_new' %}" hx-include="closest form"
                hx-target="#as-history" hx-swap="outerHTML"
-               hx-trigger="keyup[key=='Enter'] changed">
+               {% comment %}
+               A custom event name, not a real DOM event: htmx's bracket
+               filters (`keyup[key=='Enter']`) compile to `new Function(...)`,
+               which needs 'unsafe-eval' in script-src and this CSP does not
+               grant it. htmx triggers on ANY named event, so the plain
+               keydown listener below (which already exists, for Escape)
+               dispatches this one on Enter instead -- same outcome, no eval.
+               {% endcomment %}
+               hx-trigger="submit-on-enter changed">
       </form>
       {% include "assistant/_history.html" %}
     </aside>
@@ -916,8 +924,18 @@ element by the next turn.
         if (control.select) control.select();
       });
       document.addEventListener("keydown", function (e) {
-        if (e.target && e.target.matches(controlSel) && e.key === "Escape") {
+        if (!e.target || !e.target.matches(controlSel)) return;
+        if (e.key === "Escape") {
           e.target.value = e.target.defaultValue;
+          e.target.blur();
+        } else if (e.key === "Enter") {
+          // Replaces the field's own `hx-trigger="... keyup[key=='Enter']
+          // changed"`: htmx compiles a bracket filter with `new Function(...)`,
+          // which needs 'unsafe-eval' in script-src and this CSP does not grant
+          // it. Blurring re-enters through the trigger's OTHER clause
+          // (`blur changed`), so Enter still saves -- it is one less code path,
+          // not a different one, and needs no eval at all.
+          e.preventDefault();
           e.target.blur();
         }
       });
@@ -992,6 +1010,10 @@ element by the next turn.
       });
       folderCreateInput.addEventListener("keydown", function (e) {
         if (e.key === "Escape") { folderCreateInput.value = ""; folderCreateForm.hidden = true; }
+        // Dispatches the custom event the input's own hx-trigger listens
+        // for -- see that attribute's comment for why it is a named event
+        // and not htmx's `keyup[key=='Enter']` bracket filter.
+        else if (e.key === "Enter") { folderCreateInput.dispatchEvent(new Event("submit-on-enter", { bubbles: true })); }
       });
       folderCreateInput.addEventListener("blur", function () {
         if (!folderCreateInput.value.trim()) folderCreateForm.hidden = true;
