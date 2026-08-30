@@ -9,9 +9,32 @@ finder expression, no auth, no cookies.
 Fetch contract: one search per configured keyword (Oracle's finder has no
 OR-of-terms syntax that reliably widens results — the career site's own
 search box behaves the same way), deduplicated by requisition Id across
-searches. `PostingEndDate` is a GENUINE deadline when present — the only
-one of the ported providers besides Greenhouse that exposes one — and
-`PostedDate` is evidence-only.
+searches.
+
+CONFIRMED DEFECT, fixed here for J.P. Morgan only (2026-08-29): `PostingEndDate`
+off the SEARCH endpoint (`recruitingCEJobRequisitions`) is documented above (in
+the original module docstring) as "a GENUINE deadline when present" — that was
+wrong. It is ALWAYS null. Verified live against Oracle's own API for two J.P.
+Morgan requisitions:
+
+    210778140: search PostingEndDate=null | details ExternalPostedEndDate=
+               2026-09-07T15:59:00+00:00 — matches the live posting page's
+               "Apply Before 09/07/2026, 08:59 AM" exactly (tz offset
+               accounted for)
+    210747420: details ExternalPostedEndDate=2026-09-30T15:59:00+00:00 —
+               matches the live page's "Apply Before 09/30/2026" exactly
+
+The real "Apply Before" date lives on the DETAILS endpoint
+(`recruitingCEJobRequisitionDetails`) under `ExternalPostedEndDate`. This
+connector now makes one extra per-requisition DETAILS request to read it —
+but ONLY for firms in `_EXTERNAL_DEADLINE_HOSTS` below. For every other
+Oracle firm (Lazard, Schroders as of this writing), Oracle's API populates
+`ExternalPostedEndDate` too, but a human check of each firm's own live
+posting page found no deadline shown to candidates there — the field reads
+as internal/administrative for those two, not a real application deadline.
+See `_EXTERNAL_DEADLINE_HOSTS` for the full reasoning; do not extend that set
+without the same live-page confirmation. `PostedDate` remains evidence-only
+everywhere.
 """
 
 from __future__ import annotations
@@ -29,7 +52,35 @@ _SEARCH_URL = (
     "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
     "?onlyData=true&expand=requisitionList&finder=findReqs;siteNumber={site},limit=25,keyword={kw}"
 )
+_DETAILS_URL = (
+    "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
+    "?onlyData=true&expand=requisitionList&finder=ById;Id=%22{rid}%22,siteNumber={site}"
+)
 _JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{rid}"
+
+# Oracle tenant hosts confirmed BY A HUMAN, on the firm's own live candidate
+# posting page, to actually display `ExternalPostedEndDate` (read off the
+# DETAILS endpoint) as the "Apply Before" deadline. Oracle's API returns this
+# field for Lazard ("icbpjb.fa.ocs.oraclecloud.com") and Schroders
+# ("ekbq.fa.em2.oraclecloud.com") too, but a human check of both firms' live
+# posting pages found NO deadline displayed to candidates there — the field
+# reads as internal/administrative for those two, not a real application
+# deadline. Putting an unverified, possibly-internal date on a card as "the
+# deadline" would be worse than showing no deadline at all (this is a trust
+# product).
+#
+# Each host below belongs to exactly one firm (see directory/boards.py's own
+# board registrations), so gating on host is equivalent to gating on firm —
+# and it is the only firm-identifying signal `verify()` has, since it takes a
+# bare URL rather than a `board.firm` (`fetch()` gates the identical set the
+# same way, off `board.host`, so the two entry points can never drift apart).
+#
+# DO NOT add another host here "because it's obviously the same field" — the
+# field being populated in Oracle's API is NOT sufficient evidence that it's
+# candidate-facing. Extend this set only after a human has confirmed, on
+# that firm's own live posting page, that `ExternalPostedEndDate` is
+# genuinely shown to candidates as a deadline there.
+_EXTERNAL_DEADLINE_HOSTS = {"jpmc.fa.oraclecloud.com"}  # J.P. Morgan only
 
 # Same shape as the radar's oracle _URL_RES arm: candidate-facing job URLs.
 _URL_RE = re.compile(
@@ -57,9 +108,34 @@ def _search(host: str, site: str, keyword: str) -> tuple[list[dict], int | None]
     return block.get("requisitionList", []), (total if isinstance(total, int) else None)
 
 
+def _fetch_details(host: str, site: str, rid: str) -> dict | None:
+    """Best-effort fetch of one requisition's DETAILS payload — the only
+    place `ExternalPostedEndDate` (the real candidate-facing "Apply Before"
+    date) lives; the SEARCH endpoint's own `PostingEndDate` is always null.
+    Returns None on any fetch/parse failure or a shape `_search` would also
+    treat as "can't tell" — a missing deadline enrichment is never worth
+    failing the whole board fetch or verify call over, so callers use this
+    as a pure add-on, never a signal of anything else."""
+    url = _DETAILS_URL.format(host=host, site=site, rid=urllib.parse.quote(str(rid)))
+    try:
+        data = fetch_json(url)
+    except Exception:  # noqa: BLE001 — best-effort deadline enrichment only
+        return None
+    items = data.get("items", [])
+    if not items:
+        return None
+    reqs = items[0].get("requisitionList", [])
+    return reqs[0] if reqs else None
+
+
 def _normalize(req: dict, board: OracleBoard) -> Opportunity:
     rid = str(req.get("Id") or "")
-    deadline = req.get("PostingEndDate") or None
+    # `_details_deadline` is stashed onto `req` by `fetch()`, only for hosts
+    # in `_EXTERNAL_DEADLINE_HOSTS`, from the DETAILS endpoint's
+    # `ExternalPostedEndDate` — the field `PostingEndDate` (below) never
+    # actually carries (see module docstring). Everywhere else this key is
+    # absent and behavior is exactly what it was before this fix.
+    deadline = req.get("_details_deadline") or req.get("PostingEndDate") or None
     posted = req.get("PostedDate") or None
     return Opportunity(
         firm=board.firm,
@@ -104,6 +180,15 @@ def fetch(board: OracleBoard) -> FetchResult:
             if not rid or rid in seen:
                 continue
             seen.add(rid)
+            if board.host in _EXTERNAL_DEADLINE_HOSTS:
+                # One extra request per requisition — paid only for the
+                # single firm this has been human-confirmed for (see
+                # `_EXTERNAL_DEADLINE_HOSTS`). `_fetch_details` swallows its
+                # own errors, so a transient failure here costs this one row
+                # its deadline, never the whole board fetch.
+                details = _fetch_details(board.host, board.site_number, rid)
+                if details and details.get("ExternalPostedEndDate"):
+                    req = {**req, "_details_deadline": details["ExternalPostedEndDate"]}
             reqs.append(req)
     try:
         # Kept in its own try, separate from the per-keyword network try
@@ -162,12 +247,28 @@ def verify(url: str) -> VerificationResult:
         )
     title = match.get("Title", "")
     posted = (match.get("PostedDate") or "")[:10]
+    # PostingEndDate off the SEARCH result is always null (see module
+    # docstring) — kept as the fallback field name/label so behavior for
+    # every firm outside `_EXTERNAL_DEADLINE_HOSTS` is byte-for-byte
+    # unchanged. Only for a host in that set do we pay for the extra
+    # DETAILS request and prefer its `ExternalPostedEndDate` instead; this
+    # is the same reverify path, so without this gate applying here too, a
+    # reverify pass could never self-heal a previously-null deadline.
+    end_field = "PostingEndDate"
     end = (match.get("PostingEndDate") or "")[:10]
+    if host in _EXTERNAL_DEADLINE_HOSTS:
+        details = _fetch_details(host, site, job_id)
+        if details:
+            details_end = (details.get("ExternalPostedEndDate") or "")[:10]
+            if details_end:
+                end = details_end
+                end_field = "ExternalPostedEndDate"
     # PostedDate is a POSTED date, never a deadline — evidence-only.
-    # PostingEndDate IS a genuine deadline and feeds deadline_dates.
+    # end (PostingEndDate, or ExternalPostedEndDate where in-scope) IS a
+    # genuine deadline and feeds deadline_dates.
     return VerificationResult(
         "oracle", url, "verified-open",
-        f'title="{title}" PostedDate={posted or "unstated"} PostingEndDate={end or "unstated"}',
+        f'title="{title}" PostedDate={posted or "unstated"} {end_field}={end or "unstated"}',
         [end] if end else [],
         posted_date=posted or None,
     )
