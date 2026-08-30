@@ -278,7 +278,7 @@ MIDDLEWARE = [
 # Stripe.js (billing/stripe_gateway.py drives Checkout server-side via a
 # redirect, never Stripe Elements in the browser), confirmed by grepping
 # every template for an `https://` resource reference. That makes `'self'`
-# sufficient nearly everywhere; the two exceptions below are both real,
+# sufficient nearly everywhere; the exceptions below are all real,
 # checked needs rather than a defensive widening:
 #   - `img-src` adds `data:` — a few templates inline a `data:image/...`
 #     source (e.g. accounts/_welcome_head.html, core/pricing.html).
@@ -289,6 +289,18 @@ MIDDLEWARE = [
 #     nonce-ing every inline style attribute across that many templates is
 #     out of scope for this pass; tracked as a follow-up tightening, not
 #     silently accepted forever.
+#   - `form-action` adds Google's OAuth authorize origin. The original audit
+#     only checked resource-loading origins (script/style/img/font) and
+#     missed this one because it isn't a resource load: `_auth_providers.html`
+#     posts to this app's own `/accounts/google/login/` (same-origin, so
+#     `'self'` alone looked sufficient), and that view redirects to Google to
+#     actually run the OAuth handshake. CSP3's `form-action` restricts not
+#     just a form's immediate target but every URL a form submission is
+#     redirected to — reproduced directly: Chrome's console reported "Sending
+#     form data to '.../accounts/google/login/' violates ... form-action
+#     'self'" and silently dropped the click, no error shown to the user, no
+#     network request even attempted. Add another provider's origin here the
+#     day its "Setup Needed" gap in _auth_providers.html actually closes.
 #
 # `script-src` uses a per-request NONCE instead of `'unsafe-inline'`: every
 # inline `<script>` in templates/ was converted to django-csp's `{% script
@@ -305,7 +317,7 @@ CONTENT_SECURITY_POLICY = {
         "connect-src": [SELF],
         "object-src": [NONE],
         "base-uri": [SELF],
-        "form-action": [SELF],
+        "form-action": [SELF, "https://accounts.google.com"],
         # Superset of XFrameOptionsMiddleware's DENY (still enabled below)
         # in browsers that support this directive — Coverage is never meant
         # to be framed by anyone, including itself.
