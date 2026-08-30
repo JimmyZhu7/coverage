@@ -268,14 +268,48 @@ select on.
 
     role="alert" interrupts, role="status" waits its turn. An error the user
     must act on earns the interruption; "Saved." does not.
+
+    2026-08-30: moved from an inline banner at the top of the page to a
+    fixed bottom-right stack, reported as "ugly" and, on Settings, doubled
+    (that page had its OWN second copy of this exact loop -- see
+    accounts/settings.html's own comment on why it was deleted rather than
+    kept in sync). A toast needs a way to leave on its own terms: `data-msg`
+    marks each one for the script below, which wires the dismiss button and
+    auto-clears anything that ISN'T role="alert" -- an error is exactly the
+    case that must not vanish on a timer before the user has acted on it.
     {% endcomment %}
     {% if messages %}
-      <div class="page-msgs">
+      <div class="page-msgs" aria-live="polite">
         {% for m in messages %}
-          <p class="msg {% if m.tags %}{{ m.tags }}{% endif %}"
-             role="{% if 'error' in m.tags %}alert{% else %}status{% endif %}">{{ m }}</p>
+          <p class="msg {% if m.tags %}{{ m.tags }}{% endif %}" data-msg
+             role="{% if 'error' in m.tags %}alert{% else %}status{% endif %}">
+            <span>{{ m }}</span>
+            <button type="button" class="msg-x" aria-label="Dismiss">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"
+                fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </p>
         {% endfor %}
       </div>
+      {% comment %}
+      No dataset-guard against double-binding: this block only ever exists
+      for the messages a single response actually carried, so it cannot be
+      re-triggered by an htmx swap the way a persistent widget could -- each
+      render is a fresh `.msg` list with a fresh listener, and the old ones
+      leave with the DOM nodes they were bound to.
+      {% endcomment %}
+      {% script %}
+        document.querySelectorAll("[data-msg]").forEach(function (m) {
+          function dismiss() {
+            m.classList.add("is-leaving");
+            m.addEventListener("animationend", function () { m.remove(); }, { once: true });
+          }
+          m.querySelector(".msg-x").addEventListener("click", dismiss);
+          if (m.getAttribute("role") !== "alert") {
+            setTimeout(dismiss, 6000);
+          }
+        });
+      {% endscript %}
     {% endif %}
     {% block content %}{% endblock %}
   </main>

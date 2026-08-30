@@ -421,12 +421,13 @@
     .set-field.is-seg > .set-row-control { justify-self: stretch; }
     /* A phone gives the track about 200px, and three labels reading name AND
        number do not fit in 200px — they overlapped each other outright. The
-       number is the part to drop: the live sentence directly under the rail
-       states every one of them in full, so nothing is lost, while the names
-       are what make the dots mean anything. */
+       number is the part to drop: the sentence carries every one of them in
+       full for anyone using a screen reader (see .cad-sentence's own
+       comment -- it is visually hidden now, not on the page for a sighted
+       phone user to fall back on either way), while the names are what make
+       the dots mean anything. */
     .cad-rail { margin-left: 26px; margin-right: 26px; }
     .cad-lab u { display: none; }
-    .cad-sentence { margin-left: 0; margin-right: 0; }
     /* Stack label above control: at 375px a select or number input beside a
        long label gets crushed to unusable width. */
     .set-row { flex-direction: column; align-items: stretch; gap: var(--s3); }
@@ -556,8 +557,14 @@
   /* When the only follow-up is turned off (max cold touches = 1) its marker
      dims rather than vanishes: the rail should show what you gave up. */
   .cad-mark.is-off { opacity: 0.35; filter: grayscale(1); }
-  .cad-sentence { margin: 0 44px; font-size: var(--fs-xs); color: var(--ink-2);
-    line-height: 1.55; }
+  /* Not deleted: the rail above it is aria-hidden (the dots/lines are
+     decoration, not data a screen reader can parse), so this sentence is
+     the ONLY accessible description of what the rail shows. Hidden the
+     same way .set-sr is -- visually gone, still in the page for anyone
+     using a screen reader. */
+  .cad-sentence { position: absolute; width: 1px; height: 1px; padding: 0;
+    margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+    border: 0; }
   @media (prefers-reduced-motion: reduce) {
     .cad-mark, .cad-fill, .cad-lab { transition: none; }
     .cad-fill::before { animation: none; opacity: 0; }
@@ -767,20 +774,29 @@
 {% endblock %}
 
 {% block content %}
-<div class="page">
+{% comment %}
+hx-boost, not per-form hx-post/hx-target: every action on this page except
+Profile (which already has its own hx-post/hx-target and is untouched by
+this) was a plain <form method="post">, so saving Cadence or restoring a
+dismissed contact did a full browser navigation -- a white-flash reload
+that reset scroll position and, combined with base.html ALSO rendering
+`messages` globally (see below), showed the flash message twice: once from
+this page's own render, once from base.html's. Boosting intercepts every
+plain <form>/<a> under this element and turns it into the same request,
+same response, same redirect-following behaviour, just fetched over AJAX
+and swapped into <body> instead of a hard navigation -- no view on either
+app had to change. An element with its OWN hx-* attributes (Profile's
+form) is untouched by an ancestor's hx-boost; htmx only boosts elements
+that don't already declare explicit htmx behaviour.
+{% endcomment %}
+<div class="page" hx-boost="true">
   {% include "_pagehead.html" with eyebrow="Your account" title="Settings" sub="Your profile, your targets, and how hard Coverage pushes you." %}
-  {% if messages %}
-    <div class="settings-msgs">
-      {% for m in messages %}
-        {% comment %}
-        role="alert" interrupts, role="status" waits its turn. An error the
-        user needs to act on earns the interruption; "Saved." does not.
-        {% endcomment %}
-        <p class="msg {% if m.tags %}{{ m.tags }}{% endif %}"
-           role="{% if 'error' in m.tags %}alert{% else %}status{% endif %}">{{ m }}</p>
-      {% endfor %}
-    </div>
-  {% endif %}
+  {% comment %}
+  Messages render ONCE, here, not a second time on this page -- see
+  base.html's own {% templatetag openblock %} if messages {% templatetag closeblock %}
+  block for why duplicating that loop here showed every flash message
+  twice.
+  {% endcomment %}
 
   <div class="settings-wrap">
     {% comment %}
