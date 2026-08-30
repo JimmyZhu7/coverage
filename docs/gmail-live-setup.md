@@ -191,6 +191,70 @@ below just no-op.
      without writing anything — worth doing once against your own mailbox
      before trusting it against a student's.
 
+## 9. The 7-day token expiry — resolve this before any pilot, not after
+
+Step 4 above covers *your own account* staying in the free Testing tier
+(under 100 test users, no review, no cost). It does not cover a fact that
+only matters once someone other than you is a test user: Google's own
+documentation states that a refresh token issued to a **test user** on an
+app in **Testing** publishing status expires **7 days after consent**, not
+on a plan or verification event, on a clock. When it expires, the next sync
+attempt fails with an `invalid_grant`-shaped error, `capture/gmail_live.py`
+already catches this and flips the connection to `status="revoked"`, and
+that student's automatic capture goes silent until they reconnect.
+
+This means Coverage's core differentiator, capture that runs without the
+student doing anything, cannot survive a multi-week pilot in plain Testing
+mode. Nobody has to remember to reconnect if nothing tells them to, and
+nothing does yet (see `ops/views.py` for whatever visibility exists as of
+whenever you're reading this).
+
+**One open question decides the whole path, and it is a half-day, no-cost
+experiment, not a research question:**
+
+Google's docs are unclear on whether flipping the OAuth consent screen from
+"Testing" to "In production" **without** submitting for verification removes
+the 7-day expiry while keeping the 100-user cap (just a scarier unverified-app
+warning screen), or whether it does nothing for the expiry at all. Nobody has
+run this experiment. To run it:
+
+1. In the same OAuth consent screen from step 4, find the button to move the
+   app from **Testing** to **In production** (not "submit for verification",
+   just the publishing-status toggle — these are separate actions in the
+   Console). Do this on the test client, not whatever's live for real users.
+2. Connect a test Gmail account through the normal flow (`connect_gmail`,
+   Settings → Connect Gmail).
+3. Wait 8 days (or, faster: manually adjust `GmailConnection.connected_at`
+   in the DB to 8 days ago and force a sync — `python manage.py gmail_poll`
+   or trigger `sync_connection()` directly — to see if it still fails; this
+   is a heuristic shortcut, not proof, since `connected_at` isn't updated on
+   token issuance either, see the caveat below).
+4. If the sync still succeeds past day 7: "In production, unverified" is the
+   path. Pilot proceeds on this setting, capped at 100 users, no CASA, no
+   verification cost, just the scarier consent screen every student clicks
+   through once.
+5. If it still expires at day 7: full CASA verification is the only fix for
+   reliable multi-week capture. Budget $1,500-$8,000 and 2-3 months elapsed
+   (third-party CASA assessor pricing, Google itself publishes no price
+   list) — meaning submission needs to happen by **early November 2026** to
+   clear before a February 2027 pilot.
+
+**Caveat carried over from the code:** `GmailConnection.connected_at` is
+`auto_now_add=True` and is NOT updated on a reconnect
+(`connect_gmail`'s `update_or_create` doesn't include it in `defaults`), so
+it is not a reliable "when was the current token issued" timestamp for any
+mailbox that has ever been reconnected. Don't build anything that trusts it
+as precise; it's a rough proxy at best, accurate only for a connection's
+first-ever consent.
+
+**Also gates on this, independent of which path wins:**
+`templates/legal/privacy.html` is still marked `DRAFT. NOT REVIEWED BY A
+LAWYER.` at the top of the file. Both the Testing path (a reviewer never
+looks, but you're still asking real students to trust a draft policy) and
+the CASA path (a reviewer explicitly checks this page for the Limited Use
+language per step 4 above) need this off DRAFT before real students connect
+Gmail. This is on you and counsel, not something to script around.
+
 ## What this does and doesn't cover
 
 Real-time detection covers: bounces, replies, outreach-sent, and any
