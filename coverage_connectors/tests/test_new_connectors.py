@@ -200,24 +200,20 @@ def test_oracle_fetch_extracts_jpm_deadline_from_details_endpoint(monkeypatch):
     )
 
 
-def test_oracle_fetch_does_not_extend_details_deadline_to_lazard_or_schroders(monkeypatch):
-    """SCOPE-OUT PIN: Oracle's API populates `ExternalPostedEndDate` for
-    Lazard and Schroders too, but a human check of each firm's own live
-    posting page found no deadline shown to candidates there. This must
-    stay scoped to J.P. Morgan only until a human confirms candidate-facing
-    status for another firm — if someone later widens
-    `_EXTERNAL_DEADLINE_HOSTS` (or removes the gate) "because it's obviously
-    the same field", this test catches it: Lazard's requisition would start
-    carrying a deadline it should not, and this fixture makes that
-    unambiguous by having the DETAILS payload genuinely carry the field."""
+def test_oracle_fetch_extracts_deadline_for_lazard_and_schroders(monkeypatch):
+    """FOUNDER-ACCEPTED-RISK PIN: a human check of Lazard's and Schroders'
+    live posting pages (2026-08-29) found `ExternalPostedEndDate` populated
+    but never shown to candidates there — it reads as internal, not the
+    confirmed-candidate-facing bar J.P. Morgan cleared. The founder was told
+    this plainly and chose to extract it anyway (2026-08-30): more coverage
+    over the risk some of these are wrong. This pins THAT decision — both
+    firms must get the DETAILS-endpoint deadline like J.P. Morgan does, not
+    the JPM-only scoping that predates it."""
     calls = []
 
     def fake_fetch_json(url, **kw):
         calls.append(url)
         if "recruitingCEJobRequisitionDetails" in url:
-            # Oracle's API DOES populate this for Lazard — presence in the
-            # API is not evidence of being candidate-facing; that's the
-            # entire point of the scope.
             return _oracle_details_payload(999111, "2026-10-01T15:59:00+00:00")
         return _oracle_search_payload(999111, posting_end_date=None)
 
@@ -227,17 +223,15 @@ def test_oracle_fetch_does_not_extend_details_deadline_to_lazard_or_schroders(mo
     result = fetch(lazard)
     assert result.ok
     assert len(result.opportunities) == 1
-    assert result.opportunities[0].deadline is None
-    # No DETAILS request should even be made for an out-of-scope firm — the
-    # gate must skip the extra call entirely, not just discard its result.
-    assert not any("recruitingCEJobRequisitionDetails" in c for c in calls)
+    assert result.opportunities[0].deadline == "2026-10-01"
+    assert any("recruitingCEJobRequisitionDetails" in c for c in calls)
 
     schroders = OracleBoard(firm="Schroders", host="ekbq.fa.em2.oraclecloud.com",
                              site_number="CX_2", keywords=("intern",))
     calls.clear()
     result = fetch(schroders)
-    assert result.opportunities[0].deadline is None
-    assert not any("recruitingCEJobRequisitionDetails" in c for c in calls)
+    assert result.opportunities[0].deadline == "2026-10-01"
+    assert any("recruitingCEJobRequisitionDetails" in c for c in calls)
 
 
 def test_oracle_verify_extracts_jpm_deadline_from_details_endpoint(monkeypatch):
@@ -257,8 +251,10 @@ def test_oracle_verify_extracts_jpm_deadline_from_details_endpoint(monkeypatch):
     assert "ExternalPostedEndDate=2026-09-07" in v.evidence
 
 
-def test_oracle_verify_does_not_extend_details_deadline_to_lazard(monkeypatch):
-    """Same scope-out proof as the fetch()-side test, through verify()."""
+def test_oracle_verify_extracts_deadline_for_lazard(monkeypatch):
+    """Same founder-accepted-risk proof as the fetch()-side test, through
+    verify() — a reverify pass must self-heal a Lazard row the same way it
+    does a J.P. Morgan one."""
     calls = []
 
     def fake_fetch_json(url, **kw):
@@ -272,8 +268,9 @@ def test_oracle_verify_does_not_extend_details_deadline_to_lazard(monkeypatch):
            "CX_1/job/999111")
     v = verify(url)
     assert v.result == "verified-open"
-    assert v.deadline_dates == []
-    assert not any("recruitingCEJobRequisitionDetails" in c for c in calls)
+    assert v.deadline_dates == ["2026-10-01"]
+    assert "ExternalPostedEndDate=2026-10-01" in v.evidence
+    assert any("recruitingCEJobRequisitionDetails" in c for c in calls)
 
 
 # --------------------------------------------------------------------- talnet

@@ -11,11 +11,12 @@ OR-of-terms syntax that reliably widens results — the career site's own
 search box behaves the same way), deduplicated by requisition Id across
 searches.
 
-CONFIRMED DEFECT, fixed here for J.P. Morgan only (2026-08-29): `PostingEndDate`
-off the SEARCH endpoint (`recruitingCEJobRequisitions`) is documented above (in
-the original module docstring) as "a GENUINE deadline when present" — that was
-wrong. It is ALWAYS null. Verified live against Oracle's own API for two J.P.
-Morgan requisitions:
+CONFIRMED DEFECT, fixed here 2026-08-29 (J.P. Morgan), extended 2026-08-30
+(Lazard, Schroders): `PostingEndDate` off the SEARCH endpoint
+(`recruitingCEJobRequisitions`) is documented above (in the original module
+docstring) as "a GENUINE deadline when present" — that was wrong. It is
+ALWAYS null. Verified live against Oracle's own API for two J.P. Morgan
+requisitions:
 
     210778140: search PostingEndDate=null | details ExternalPostedEndDate=
                2026-09-07T15:59:00+00:00 — matches the live posting page's
@@ -26,15 +27,22 @@ Morgan requisitions:
 
 The real "Apply Before" date lives on the DETAILS endpoint
 (`recruitingCEJobRequisitionDetails`) under `ExternalPostedEndDate`. This
-connector now makes one extra per-requisition DETAILS request to read it —
-but ONLY for firms in `_EXTERNAL_DEADLINE_HOSTS` below. For every other
-Oracle firm (Lazard, Schroders as of this writing), Oracle's API populates
-`ExternalPostedEndDate` too, but a human check of each firm's own live
-posting page found no deadline shown to candidates there — the field reads
-as internal/administrative for those two, not a real application deadline.
-See `_EXTERNAL_DEADLINE_HOSTS` for the full reasoning; do not extend that set
-without the same live-page confirmation. `PostedDate` remains evidence-only
-everywhere.
+connector now makes one extra per-requisition DETAILS request to read it,
+for every firm in `_EXTERNAL_DEADLINE_HOSTS` below. `PostedDate` remains
+evidence-only everywhere.
+
+Two different bars stand behind that set, and `_EXTERNAL_DEADLINE_HOSTS`
+names which applies to each host: J.P. Morgan's is a live-page-confirmed
+real deadline, matched byte-for-byte against candidate-facing text. Lazard's
+and Schroders' are not — a human check of both firms' own posting pages
+(2026-08-29) found `ExternalPostedEndDate` populated but never shown to
+candidates there, reading as an internal/administrative field. The founder
+was told this explicitly and, weighing "some fraction of these may be wrong"
+against "no deadline shown at all," chose to extract it anyway (2026-08-30):
+more coverage over caution here, specifically. That is a judgment call
+about an already-disclosed risk, not a claim the field is confirmed
+candidate-facing for those two — see `_EXTERNAL_DEADLINE_HOSTS` for which
+bar a future addition needs to clear.
 """
 
 from __future__ import annotations
@@ -58,16 +66,25 @@ _DETAILS_URL = (
 )
 _JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{rid}"
 
-# Oracle tenant hosts confirmed BY A HUMAN, on the firm's own live candidate
-# posting page, to actually display `ExternalPostedEndDate` (read off the
-# DETAILS endpoint) as the "Apply Before" deadline. Oracle's API returns this
-# field for Lazard ("icbpjb.fa.ocs.oraclecloud.com") and Schroders
-# ("ekbq.fa.em2.oraclecloud.com") too, but a human check of both firms' live
-# posting pages found NO deadline displayed to candidates there — the field
-# reads as internal/administrative for those two, not a real application
-# deadline. Putting an unverified, possibly-internal date on a card as "the
-# deadline" would be worse than showing no deadline at all (this is a trust
-# product).
+# Oracle tenant hosts this connector extracts `ExternalPostedEndDate` for
+# (read off the DETAILS endpoint). Two different bars, per host:
+#
+#   "jpmc.fa.oraclecloud.com"      J.P. Morgan — CONFIRMED candidate-facing.
+#                                  A human matched the field byte-for-byte
+#                                  against "Apply Before" text on the firm's
+#                                  own live posting page (2026-08-29).
+#   "icbpjb.fa.ocs.oraclecloud.com" Lazard — NOT confirmed candidate-facing.
+#   "ekbq.fa.em2.oraclecloud.com"   Schroders — NOT confirmed candidate-facing.
+#                                  A human checked both firms' live posting
+#                                  pages (2026-08-29) and found the field
+#                                  populated but never displayed to
+#                                  candidates — it reads as internal. Kept in
+#                                  this set anyway: the founder was told this
+#                                  plainly and chose more deadline coverage
+#                                  over the risk that some of these are wrong
+#                                  (2026-08-30), a considered call about an
+#                                  already-disclosed tradeoff, not new
+#                                  evidence the field is real for these two.
 #
 # Each host below belongs to exactly one firm (see directory/boards.py's own
 # board registrations), so gating on host is equivalent to gating on firm —
@@ -75,12 +92,17 @@ _JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{rid}"
 # bare URL rather than a `board.firm` (`fetch()` gates the identical set the
 # same way, off `board.host`, so the two entry points can never drift apart).
 #
-# DO NOT add another host here "because it's obviously the same field" — the
-# field being populated in Oracle's API is NOT sufficient evidence that it's
-# candidate-facing. Extend this set only after a human has confirmed, on
-# that firm's own live posting page, that `ExternalPostedEndDate` is
-# genuinely shown to candidates as a deadline there.
-_EXTERNAL_DEADLINE_HOSTS = {"jpmc.fa.oraclecloud.com"}  # J.P. Morgan only
+# DO NOT add another host here "because it's obviously the same field." A
+# new addition needs ONE of: a human confirming the field is candidate-facing
+# on that firm's own live posting page (the J.P. Morgan bar), or an explicit,
+# informed founder call accepting the same disclosed risk this comment
+# describes for Lazard/Schroders (do not make that call yourself — it is
+# the founder's risk tolerance to set, not a default to assume).
+_EXTERNAL_DEADLINE_HOSTS = {
+    "jpmc.fa.oraclecloud.com",       # J.P. Morgan — confirmed
+    "icbpjb.fa.ocs.oraclecloud.com",  # Lazard — founder-accepted risk
+    "ekbq.fa.em2.oraclecloud.com",    # Schroders — founder-accepted risk
+}
 
 # Same shape as the radar's oracle _URL_RES arm: candidate-facing job URLs.
 _URL_RE = re.compile(
@@ -181,11 +203,11 @@ def fetch(board: OracleBoard) -> FetchResult:
                 continue
             seen.add(rid)
             if board.host in _EXTERNAL_DEADLINE_HOSTS:
-                # One extra request per requisition — paid only for the
-                # single firm this has been human-confirmed for (see
-                # `_EXTERNAL_DEADLINE_HOSTS`). `_fetch_details` swallows its
-                # own errors, so a transient failure here costs this one row
-                # its deadline, never the whole board fetch.
+                # One extra request per requisition — paid only for firms in
+                # `_EXTERNAL_DEADLINE_HOSTS` (see that constant for which bar
+                # each one cleared). `_fetch_details` swallows its own
+                # errors, so a transient failure here costs this one row its
+                # deadline, never the whole board fetch.
                 details = _fetch_details(board.host, board.site_number, rid)
                 if details and details.get("ExternalPostedEndDate"):
                     req = {**req, "_details_deadline": details["ExternalPostedEndDate"]}
