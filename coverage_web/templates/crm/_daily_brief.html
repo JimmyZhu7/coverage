@@ -10,8 +10,9 @@ The daily brief card, rendered by BOTH paths so they cannot drift:
 Generated at most once per calendar day (assistant.brief.get_or_build) — the
 one habit loop Talk to Coverage otherwise lacks: everything else about it
 requires remembering to go open it, and this is already on the page opened
-every morning. Silent when it's dark (no key set) or there was nothing worth
-saying today — never an empty card, never an error.
+every morning. A quiet day still gets a real sentence (see
+assistant.brief._QUIET_DAY_MESSAGES) — this only stays silent when the
+feature itself is dark (no key set). Never an empty card, never an error.
 {% endcomment %}
 {% if daily_brief %}
   <div class="daily-brief kin-reveal">
