@@ -81,6 +81,17 @@ dependencies = [
     "django-csp>=4.0",
     "django-permissions-policy>=4.33.0",
     "requests>=2.34.2",
+    # Error monitoring (settings/production.py's optional SENTRY_DSN). The
+    # import there was already written to degrade gracefully — a set DSN
+    # with the package missing warns and skips rather than crashing boot —
+    # but that comment was true because the package genuinely wasn't
+    # declared anywhere, not by design: a set DSN in production today would
+    # silently do nothing, the same "declare it, don't discover it" gap
+    # redis-py closes above. The privacy policy's 72-hour breach-notification
+    # commitment depends on actually knowing about an incident promptly;
+    # an undeclared, never-installed monitoring package is a real gap in
+    # meeting that, not a hypothetical one.
+    "sentry-sdk>=2.18",
 ]
 
 # Application, not a library anyone imports — don't build/install it as a
