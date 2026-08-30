@@ -171,7 +171,14 @@ _CAMPUS_ROLE_RE = re.compile(
     r"|\bteaching assistant\b"
     r"|\b(?:on-campus|campus|university) staff\b"
     r"|\bacademic advis\w*\b|\bstudent affairs\b|\bregistrar\b"
-    r"|\badmissions\b|\bresidential\b",
+    r"|\badmissions\b"
+    # `residential` was once a bare word, added to catch USC's housing-office
+    # titles ("Residential Advisor"). It also swallowed "Analyst, Residential
+    # Mortgage-Backed Securities" — a real S&T seat — and hid the banker as
+    # campus staff. The word only names campus housing when it is bound to a
+    # housing noun, so bind it: RMBS, residential real estate and residential
+    # credit all keep the word and none of them reach this.
+    r"|\bresident(?:ial)? (?:advisor|adviser|assistant|life|college|housing)\b",
     re.IGNORECASE,
 )
 # OFF-TRACK FUNCTION — a corporate seat outside all six tracks. Verified

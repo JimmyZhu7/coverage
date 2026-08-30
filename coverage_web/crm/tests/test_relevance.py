@@ -974,3 +974,45 @@ def test_a_day_precise_firm_date_is_still_a_confirmed_opening():
 
     assert firm.id in openings
     assert openings[firm.id]["kind"] == rel.OPENING_FIRM_DATE
+
+
+# ---------------------------------------------------------------------------
+# NON-ENGLISH ROLE TEXT. Every fixture above this line is one of the founder's
+# own live rows, all of them English, all US/HK. The first agency channel
+# serves Chinese international students, so a recruiter who signs their mail
+# in Chinese is the cohort rather than an edge case — and `\b` cannot find a
+# seam inside CJK text, so the English marker list silently reported False for
+# every one of them. That is the module's own failure mode inverted: the
+# gatekeeper reads as an ordinary contact and gets proposed a coffee chat.
+
+
+@pytest.mark.parametrize("role", [
+    "招聘经理",              # Recruiting Manager
+    "校园招聘经理",          # Campus Recruiting Manager
+    "校园招聘专员, 高盛",    # Campus Recruiting Specialist, Goldman Sachs
+    "校招负责人",            # Campus recruiting lead
+    "猎头顾问",              # Headhunter / search consultant
+    "招募专员",              # Recruiting specialist
+    "Campus Recruiting Manager (北京)",   # mixed script, English carries it
+])
+def test_a_recruiter_who_writes_their_title_in_chinese_is_still_a_recruiter(role):
+    assert rel.is_recruiting_role(role) is True, (
+        f"{role!r} names the recruiting function; missing it proposes a "
+        "coffee chat to the gatekeeper the module exists to protect"
+    )
+
+
+@pytest.mark.parametrize("role", [
+    "投资银行分析师",        # Investment Banking Analyst
+    "股票研究员",            # Equity Research Analyst
+    "私募股权投资经理",      # Private Equity Investment Manager
+    "交易员",                # Trader
+    "管理咨询顾问",          # Management consultant
+])
+def test_a_chinese_finance_title_is_not_mistaken_for_a_recruiter(role):
+    """The guard on the rule above: the CJK markers must not swallow the
+    bankers they sit next to. 顾问 (consultant) appears in 猎头顾问 and in
+    管理咨询顾问, so the marker is 猎头 and never the bare 顾问."""
+    assert rel.is_recruiting_role(role) is False, (
+        f"{role!r} names a track seat, not the recruiting function"
+    )

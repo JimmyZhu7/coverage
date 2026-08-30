@@ -234,6 +234,32 @@ _RECRUITING_ROLE_RE = re.compile(
     r"\b(?:" + "|".join(_RECRUITING_ROLE_MARKERS) + r")\b", re.IGNORECASE
 )
 
+# The same function, written in Chinese. Every marker above is an English
+# word bounded by `\b`, and `\b` cannot find a seam inside CJK text: Python
+# treats every han character as a word character, so "校园招聘经理" (Campus
+# Recruiting Manager) has no boundary around 招聘 and the English pattern
+# reports False. That is the module's own failure mode, inverted — a
+# recruiter who signs their mail in Chinese reads as an ordinary contact and
+# `CHAT_PROPOSING_ACTIONS` proposes a coffee chat to the gatekeeper.
+#
+# It matters here specifically: the first agency channel serves Chinese
+# international students, so this is the cohort, not an edge case.
+#
+# Substring matching, no boundaries, because CJK does not delimit words.
+# The set stays deliberately narrow and mirrors the English doctrine above:
+# 招聘 (recruitment) is the stem inside 校园招聘 / 招聘经理 / 招聘专员, 校招 is
+# its campus abbreviation, 猎头 is a headhunter, 招募 is to recruit. Bare
+# 人力资源 (HR) is left OUT on purpose, exactly as bare "hr" is above — the
+# doctrine holds that an HR professional is a normal networking contact and
+# only "hr coordinator" names the recruiting function.
+_RECRUITING_ROLE_CJK_MARKERS: tuple[str, ...] = (
+    "招聘",
+    "校招",
+    "猎头",
+    "招募",
+)
+_RECRUITING_ROLE_CJK_RE = re.compile("|".join(_RECRUITING_ROLE_CJK_MARKERS))
+
 # The one exception to the bare-"recruiting" rejection above, and it is
 # deliberately narrower than the thing that was rejected. The rejection was
 # about SUBSTRINGS: "IB Analyst, campus recruiting captain" contains the word
@@ -265,6 +291,8 @@ def is_recruiting_role(role: str | None) -> bool:
     if not role:
         return False
     if _WHOLE_ROLE_RECRUITING_RE.match(role):
+        return True
+    if _RECRUITING_ROLE_CJK_RE.search(role):
         return True
     return bool(_RECRUITING_ROLE_RE.search(role))
 
