@@ -147,6 +147,83 @@ def test_fuse_pct_shrinks_as_the_deadline_approaches():
     assert far_out["fuse_pct"] == 100
 
 
+# ---------------------------------------------------------------------------
+# `elapsed_pct` — the rolling card's own footer signal, the weaker cousin of
+# `fuse_pct` that fills the slot a rolling card's fuse never renders in (see
+# `_urgency_item`'s comment and `_rolecard.html`/`_styles.html`'s
+# `.rolecard-observed`). Unlike the fuse it GROWS, never colours by urgency,
+# and never animates — a measured elapsed time must not wear a real
+# deadline's own visual language.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_elapsed_pct_grows_with_time_and_caps_at_the_horizon():
+    firm = _firm()
+    fresh = _urgency_item(
+        _seen(_opp(firm, "https://x/fresh", deadline=None), 0),
+        now=NOW, today=TODAY, my_firm_ids=set(),
+    )
+    mid = _urgency_item(
+        _seen(_opp(firm, "https://x/mid", deadline=None), 20),
+        now=NOW, today=TODAY, my_firm_ids=set(),
+    )
+    old = _urgency_item(
+        _seen(_opp(firm, "https://x/old", deadline=None), 90),
+        now=NOW, today=TODAY, my_firm_ids=set(),
+    )
+    assert fresh["elapsed_pct"] == 0        # just posted: nothing observed yet
+    assert 0 < mid["elapsed_pct"] < old["elapsed_pct"]
+    assert old["elapsed_pct"] == 100        # capped, not "104% open"
+
+
+@pytest.mark.django_db
+def test_elapsed_pct_is_absent_for_any_dated_role():
+    """A dated role — closing, upcoming, or already passed — must never
+    carry `elapsed_pct`: the footer slot belongs to exactly one of `fuse_pct`
+    or `elapsed_pct`, never both, and never neither on a rolling card."""
+    firm = _firm()
+    passed = _urgency_item(
+        _opp(firm, "https://x/passed", deadline=TODAY - timedelta(days=5)),
+        now=NOW, today=TODAY, my_firm_ids=set(),
+    )
+    upcoming = _urgency_item(
+        _opp(firm, "https://x/upcoming", deadline=TODAY + timedelta(days=10)),
+        now=NOW, today=TODAY, my_firm_ids=set(),
+    )
+    assert passed.get("elapsed_pct") is None
+    assert upcoming.get("elapsed_pct") is None
+    rolling = _urgency_item(
+        _opp(firm, "https://x/rolling", deadline=None),
+        now=NOW, today=TODAY, my_firm_ids=set(),
+    )
+    assert rolling.get("fuse_pct") is None
+    assert rolling["elapsed_pct"] is not None
+
+
+@pytest.mark.django_db
+def test_rolling_card_renders_the_observed_footer_not_the_fuse(client):
+    """Rendered-HTML check, the same posture the fuse's own tests take
+    (`test_styles_block.py`): a rolling card must show `.rolecard-observed`
+    and never `.rolecard-fuse`, and a dated card the exact opposite — the
+    two footers are mutually exclusive on every card."""
+    # Two different firms, not one: `directory.dupes.fold_duplicates` folds
+    # same-firm, same-title postings into one card, and both `_opp` calls
+    # below share the helper's hardcoded title — same firm would leave only
+    # one of the two cards on the page to assert against.
+    rolling_firm = _firm(slug="evercore", name="Evercore")
+    dated_firm = _firm(slug="jefferies", name="Jefferies")
+    _seen(_opp(rolling_firm, "https://x/rolling", deadline=None), 15)
+    _opp(dated_firm, "https://x/dated", deadline=TODAY + timedelta(days=10))
+    body = _STYLE_RE.sub("", client.get(reverse("opportunities")).content.decode())
+
+    assert body.count("rolecard-observed") >= 1
+    assert body.count("rolecard-fuse") >= 1
+    # Never both signals on the same card: one rolling, one dated, so each
+    # marker's count matches the count of its own kind of card exactly once.
+    assert "fuse-fill" in body
+    assert "observed-fill" in body
+
+
 @pytest.mark.django_db
 def test_a_passed_deadline_never_shows_the_freshness_badge():
     firm = _firm()

@@ -1106,6 +1106,22 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rolecard-fuse .fuse-fill { display: block; height: 100%; width: var(--fuse);
     border-radius: 0;
     animation: fuse-burn 900ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+
+  /* The rolling card's own footer bar — same slot as .rolecard-fuse, on the
+     cards the fuse never renders on, so a dated and a rolling card fill the
+     same fixed height with something rather than one of them leaving a bare
+     edge. Everything about it is deliberately quieter than the fuse: no
+     colour ramp (one flat muted tone, not danger/soon/upcoming), no burn or
+     pulse animation, and it GROWS with elapsed time instead of depleting
+     toward a deadline — the opposite motion, so it cannot be misread as a
+     countdown at a glance. `views.py`'s `elapsed_pct` comment is the reason
+     this is a separate rule block rather than `.rolecard-fuse` with a grey
+     modifier: a measured elapsed time is a weaker claim than a real
+     deadline and must never wear the stronger claim's own visual language. */
+  .rolecard-observed { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+    background: var(--line); overflow: hidden; }
+  .observed-fill { display: block; height: 100%; width: var(--observed);
+    border-radius: 0; background: var(--ink-3); }
   /* Stated class year. Rare by design (only postings that literally say
      "Class of YYYY"), so it reads as a quiet fact chip rather than competing
      with the role pill or the fuse. `flex: none` is load-bearing: the chip
@@ -1143,6 +1159,18 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .tl-event { flex: 1; font-size: var(--fs-m); }
   .tl-scope { color: var(--ink-3); font-size: var(--fs-micro);
     text-transform: uppercase; letter-spacing: 0.05em; margin-left: var(--s2); }
+
+  /* Observed activity (FirmCycleObservation) — measured, not asserted, so it
+     deliberately does NOT reuse .tl-row's confirmed/rumored border language.
+     A solid, quieter border says "this is a count", not "this is a claim
+     someone is vouching for". */
+  .cyc-obs { list-style: none; padding: 0; margin: var(--s2) 0 0; display: grid; gap: var(--s2); }
+  .cyc-obs-row { display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap;
+    border: 1px solid var(--line); border-radius: var(--r-panel);
+    padding: var(--s2) var(--s3); background: var(--surface); font-size: var(--fs-s); }
+  .cyc-obs-region { color: var(--ink-3); font-size: var(--fs-micro);
+    text-transform: uppercase; letter-spacing: 0.05em; min-width: 6rem; }
+  .cyc-obs-fact { color: var(--ink-2); }
   @media (max-width: 640px) {
     .filters select, .filters input[type="search"] { min-width: 0; width: 100%; }
     .filters label { flex: 1 1 46%; }

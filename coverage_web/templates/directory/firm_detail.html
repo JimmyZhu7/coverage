@@ -68,6 +68,33 @@
     {% include "directory/_timeline.html" %}
   </section>
 
+  {% if cycle_observed %}
+    {% comment %}
+    Measured, not asserted. `timeline` above is what a human read and vouched
+    for (a `FirmDate`, with a confidence band); this is what Coverage's own
+    scraper has watched happen on this firm's own boards since it started
+    watching (`FirmCycleObservation` — see its docstring). No prediction, no
+    "typically" or "usually": history starts 2026-07-23 and every number and
+    date below is one this specific firm's board actually produced. A firm
+    with too little measured activity to say anything real (see views.py's
+    `CYCLE_OBSERVATION_MIN_SAMPLE`) gets no section here at all rather than a
+    hedged one-liner — silence over a thin claim.
+    {% endcomment %}
+    <section class="section">
+      <h2>Observed Activity</h2>
+      <p class="lede">What Coverage's own scraper has watched this firm's boards do. Not a forecast.</p>
+      <ul class="cyc-obs">
+        {% for row in cycle_observed %}
+          <li class="cyc-obs-row">
+            {% if row.region_label %}<span class="cyc-obs-region">{{ row.region_label }}</span>{% endif %}
+            {% if row.opened_text %}<span class="cyc-obs-fact">{{ row.opened_text }}</span>{% endif %}
+            {% if row.closed_text %}<span class="cyc-obs-fact">{{ row.closed_text }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
   <section class="section">
     <h2>Open Roles <span class="scrub-count">{{ total }}</span></h2>
     {% comment %}

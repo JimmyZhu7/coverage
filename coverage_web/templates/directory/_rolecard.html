@@ -182,5 +182,15 @@ without cutting text off.
   never named a day ("Sep 2026") — those rows are dated and still get no
   fuse. Gating on `dated` would have drawn `--fuse: None%`.
   {% endcomment %}
-  {% if r.fuse_pct is not None %}<span class="rolecard-fuse fuse-{{ r.level }}"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>{% endif %}
+  {% if r.fuse_pct is not None %}<span class="rolecard-fuse fuse-{{ r.level }}"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>
+  {% elif r.elapsed_pct is not None %}
+    {% comment %}
+    The rolling card's own footer signal, in the same slot the fuse leaves
+    empty on these cards. Deliberately NOT `.rolecard-fuse`: no colour ramp,
+    no burn animation, no urgency band in its class name — see views.py's
+    `elapsed_pct` comment for why an elapsed-time fact must never wear the
+    same visual weight as a real deadline's countdown.
+    {% endcomment %}
+    <span class="rolecard-observed"><span class="observed-fill" style="--observed: {{ r.elapsed_pct }}%"></span></span>
+  {% endif %}
 </div>

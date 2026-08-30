@@ -1082,6 +1082,92 @@ def _timeline(firm, *, today, user=None):
 
 
 # ---------------------------------------------------------------------------
+# Observed activity — `FirmCycleObservation` surfaced on the firm page. See
+# that model's docstring for what it is and isn't: a MEASURED distribution
+# of when this firm's own postings opened and closed, never a curated date
+# and never a prediction. Nothing here may say more than the model actually
+# counted.
+# ---------------------------------------------------------------------------
+
+# A single close (or open) is not a window: `open_window_first ==
+# open_window_last` by construction when `opened_count == 1`, so the "window"
+# is really just the one date something happened to be seen on, no spread at
+# all. Two is barely better — a min/max over two postings is still easily
+# just which two postings this firm happened to run, not a shape. Three is
+# the smallest sample where the spread starts to describe something rather
+# than restate an anecdote — the same magnitude `cycle_trust
+# .MASS_CLOSE_MIN_OPEN` uses for the identical reason (a count "not yet
+# distinguishable from ordinary churn"). Below this, the honesty rule this
+# feature exists to uphold is served by rendering nothing, not by hedging.
+CYCLE_OBSERVATION_MIN_SAMPLE = 3
+
+
+def _window_text(first, last) -> str:
+    """`Aug 9 to Aug 29`, or `Aug 9` when the window is a single day. Words,
+    not a dash: the rest of this page's copy avoids em dashes in
+    user-facing text, and a plain "to" reads unambiguously either way."""
+    if first is None or last is None:
+        return ""
+    if first == last:
+        return f"{first:%b} {first.day}"
+    return f"{first:%b} {first.day} to {last:%b} {last.day}"
+
+
+def _cycle_observed(firm) -> list[dict]:
+    """Per-region measured posting activity for the firm page, one dict per
+    `FirmCycleObservation` row that clears `CYCLE_OBSERVATION_MIN_SAMPLE` on
+    at least one side (opens or closes independently — the model gates them
+    with different trust filters, see its docstring, so a firm can clear one
+    side and not the other).
+
+    A row that clears neither — every onboarding-only "honest zero" row
+    (`opened_count == closed_count == 0`) included — contributes nothing:
+    not an empty entry, not a "no data yet" sentence, nothing. That is the
+    silence the honesty rules call for, and it is enforced here rather than
+    in the template so the template never has the option to render a
+    below-threshold number by accident.
+    """
+    out = []
+    for row in firm.cycle_observations.all().order_by("region"):
+        opened_text = ""
+        if row.opened_count >= CYCLE_OBSERVATION_MIN_SAMPLE:
+            opened_text = (
+                f"Opened {row.opened_count} posting"
+                f"{'s' if row.opened_count != 1 else ''}, "
+                f"{_window_text(row.open_window_first, row.open_window_last)}."
+            )
+        closed_text = ""
+        if row.closed_count >= CYCLE_OBSERVATION_MIN_SAMPLE:
+            closed_text = (
+                f"Closed {row.closed_count}, "
+                f"{_window_text(row.close_window_first, row.close_window_last)}."
+            )
+            # Not a footnote (see FirmCycleObservation's docstring): shown
+            # only alongside a close claim that already cleared the sample
+            # gate, so it can only ever ADD context to a real number, never
+            # stand in for one that got suppressed.
+            if row.excluded_suspect_closes:
+                n = row.excluded_suspect_closes
+                closed_text += (
+                    f" ({n} more close{'s' if n != 1 else ''} excluded as unreliable.)"
+                )
+        if not opened_text and not closed_text:
+            continue  # neither side clears the sample gate — say nothing
+        out.append({
+            # "" (unstated), "other" and "global" all render through the same
+            # map classify.REGION_LABELS already uses for the Region filter,
+            # never as a raw code — see the model's region field comment.
+            # "" has no entry in REGION_LABELS by design (classify.py), which
+            # is exactly the case where the qualifier should drop out rather
+            # than print anything.
+            "region_label": REGION_LABELS.get(row.region, ""),
+            "opened_text": opened_text,
+            "closed_text": closed_text,
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Region filter (?region=). Region is one of the target markets a role's own
 # LOCATION resolves to (classify.py), not a claim in its title.
 #
@@ -1480,6 +1566,12 @@ def _year_facet(qs, selected=""):
 # Horizon (days) over which a real deadline drives the "fuse" bar — beyond
 # this a dated role isn't meaningfully more urgent than a rolling one.
 _FUSE_HORIZON = 45
+# Same horizon, reused deliberately for the rolling card's elapsed-time
+# footer bar (see `_urgency_item`'s `elapsed_pct`): a rolling card and a
+# dated card that both read "about half a bar" then mean the same order of
+# magnitude of time, which is the only reason the two bars can sit in the
+# same visual slot without one implicitly out-arguing the other.
+_ELAPSED_HORIZON = _FUSE_HORIZON
 # How recently a rolling posting must have first been seen to count as "fresh".
 _FRESH_DAYS = 10
 # How many rolling cards the feed shows before deferring to browse-by-firm.
@@ -1909,6 +2001,24 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
                      "rolling_stated": stated,
                      "rolling_why": (((o.raw or {}).get("facts") or {})
                                      .get("rolling", {}).get("phrase", ""))})
+        # The card's own weaker cousin of `fuse_pct`: a real deadline earns a
+        # bar that BURNS DOWN toward a claimed date, but there is no claimed
+        # date here to burn down toward — only a fact this row's `meta-seen`
+        # text already states in words ("first seen 18d ago"). This is that
+        # same fact again, in the footer slot the fuse would otherwise leave
+        # visually empty on this card, so a dated and a rolling card don't
+        # read as two different levels of finish. Growing rather than
+        # burning (it fills as MORE time passes, the fuse empties as LESS
+        # remains), uncoloured, and never animated — see `_rolecard.html`
+        # and `_styles.html`'s `.rolecard-observed` for why that difference
+        # in motion and colour is load-bearing, not decorative: a measured
+        # elapsed time is a weaker claim than a real deadline and must never
+        # look like a stronger one. `None` only if `first_seen` is somehow
+        # unset, which `auto_now_add` should make impossible in practice.
+        item["elapsed_pct"] = (
+            None if seen_days is None else
+            max(0, min(100, round(min(seen_days, _ELAPSED_HORIZON) / _ELAPSED_HORIZON * 100)))
+        )
     # An inexact date keeps its exact `days_left` and loses its day-level
     # VOICE. The two are different jobs and only one of them can lie.
     #
@@ -4154,6 +4264,10 @@ def firm_detail(request, slug):
         # gets no marker, which is the honest answer: there is no stated
         # cycle to match against.
         "timeline": _timeline(firm, today=today, user=request.user),
+        # Measured, not asserted (see `_cycle_observed`) — a firm can have
+        # this and nothing in `timeline`, or vice versa; the two sections
+        # answer different questions and neither implies the other.
+        "cycle_observed": _cycle_observed(firm),
         # Still the full in-scope count, never the printed count. The heading
         # answers "how many are open here", and every other surface (contacts
         # board, feed) answers it with this same number — the 925-vs-13 bug in
