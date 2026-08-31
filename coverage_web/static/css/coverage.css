@@ -984,11 +984,6 @@ main { flex: 1 0 auto; }
    dimmed ink it takes — ink-3 on the capsule surface and on the hover tint,
    on-accent-2 on the selected navy — and every one of those pairs is a
    measured token pair. */
-.scope-count {
-  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 0.85em; color: var(--ink-3); margin-left: 2px;
-}
-.subnav.scope-tabs a[aria-current="page"] .scope-count { color: var(--on-accent-2); }
 /* The three off-board escape hatches (Archived / Not recruiting / Not
    recruitment), demoted from the segmented pill above into one quiet line —
    plain breadcrumb links, not a second capsule, so the row reads as a

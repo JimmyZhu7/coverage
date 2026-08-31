@@ -22,13 +22,14 @@
   something deliberately hidden (Archived, campaign-hidden, recruitment-
   hidden) and one was a chore queue (Unplaced), not a way of looking at the
   network. Both kinds moved OUT of this pill, below — nothing became
-  unreachable, see the comments at their new spots. Every tab left in the
-  pill now shows its own size (`.scope-count`), so it's judgeable before
-  you click it — the counts come off the exact same list `_scoped` filters
-  with, so a tab can't show a number the board disagrees with.
+  unreachable, see the comments at their new spots.
+
+  The per-tab counts (`.scope-count`) are gone (2026-08-31, the founder's
+  direct call) -- the label alone is what you click, and the count is
+  still available a click away on whichever board it names.
   {% endcomment %}
   <nav class="subnav scope-tabs standalone">
-    <a href="{% url 'crm:contact_list' %}"{% if not scope %} aria-current="page"{% endif %}>All <span class="scope-count">{{ all_total }}</span></a>
+    <a href="{% url 'crm:contact_list' %}"{% if not scope %} aria-current="page"{% endif %}>All</a>
     {% comment %}
     Narrowed to Settings > Profile's "Regions of Interest" (crm/views.py's
     `region_scopes`) — a student recruiting only HK/US doesn't carry
@@ -48,10 +49,10 @@
       not make the tab you're looking at disappear out from under you.
       {% endcomment %}
       {% if r.code != "other" or r.count or scope == r.code %}
-        <a href="?scope={{ r.code }}"{% if scope == r.code %} aria-current="page"{% endif %}>{{ r.label }} <span class="scope-count">{{ r.count }}</span></a>
+        <a href="?scope={{ r.code }}"{% if scope == r.code %} aria-current="page"{% endif %}>{{ r.label }}</a>
       {% endif %}
     {% endfor %}
-    <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School <span class="scope-count">{{ school_total }}</span></a>
+    <a href="?scope=school"{% if scope == 'school' %} aria-current="page"{% endif %}>School</a>
   </nav>
 
   {% comment %}
