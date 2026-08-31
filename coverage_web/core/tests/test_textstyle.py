@@ -286,6 +286,12 @@ ROLE_CASES = [
         "USC on-campus staff",
     ),
     ("IB Associate - M&A", "IB Associate"),
+    ("Investment Banking", "IB"),
+    ("Private Equity Associate", "PE Associate"),
+    ("Technology IB Associate", "Tech IB Associate"),
+    ("Asset Management Analyst", "AM Analyst"),
+    ("Sales & Trading Analyst", "S&T Analyst"),
+    ("Sales and Trading", "S&T"),
     (
         "BCG contact via USC International Consulting Club alumni panel outreach",
         "BCG contact via USC",

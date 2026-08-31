@@ -516,3 +516,36 @@ def test_the_per_kind_lists_are_not_pruned_by_the_merge():
 
     assert len(result["role_closed"]) == 2
     assert len(result["events"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# _display_location: a "new role" card must never repeat itself.
+# ---------------------------------------------------------------------------
+LOCATION_CASES = [
+    # Title already names the city -- suppress the whole clause rather
+    # than repeat it (a real posting on the founder's own board: "...
+    # Summer Associate - Houston" followed by "Houston, Texas, ...").
+    (
+        "2027 Capital Markets, Global Investment Banking Summer Associate - Houston",
+        "Houston, Texas, United States of America",
+        "",
+    ),
+    # The location field repeats a segment against itself under two
+    # spellings (also real: Hong Kong postings emit "HONG KONG, Hong
+    # Kong"). Collapsed by casefolded comparison, not a hardcoded name.
+    (
+        "Global Markets Trainee - FX & Rates Macro Financial Institution Sales",
+        "HONG KONG, Hong Kong",
+        "HONG KONG",
+    ),
+    # No location at all: stays empty, never invented.
+    ("Private Capital Markets - Internship - New York", "", ""),
+    # Neither duplication applies: passes through untouched.
+    ("Some Title", "Singapore, Singapore", "Singapore"),
+    ("Some Title", "London, United Kingdom", "London, United Kingdom"),
+]
+
+
+@pytest.mark.parametrize("title,location,expected", LOCATION_CASES)
+def test_display_location_never_repeats_itself(title, location, expected):
+    assert situation._display_location(title, location) == expected

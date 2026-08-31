@@ -252,11 +252,28 @@ def _case_word_location(word: str, *, codes: set[str], shouting: bool,
 # hyphen in them, not two clauses.
 _ROLE_CLAUSE_RE = re.compile(r"\s*[,(]|\s+[—–]\s*|\s+-\s+")
 
+# Long-form -> the abbreviation this product already uses natively
+# elsewhere for the same concept. Not invented: `ib`/`st`/`pe`/`am` are
+# directory.classify.TRACK_LABELS' own track codes, and "IB"/"PE"/"DCM"/
+# "TMT"/"VP"/"FX" already appear unabbreviated nowhere else in the real
+# role data — students who typed a role themselves already default to the
+# short form; only the odd one out spelled it out. Word-boundary matched,
+# case-sensitive on the written form, applied BEFORE the clause/word cap
+# so an abbreviation can free up room for the words that follow it.
+_ROLE_ABBREVIATIONS = [
+    (re.compile(r"\bInvestment Banking\b"), "IB"),
+    (re.compile(r"\bPrivate Equity\b"), "PE"),
+    (re.compile(r"\bAsset Management\b"), "AM"),
+    (re.compile(r"\bSales (?:&|and) Trading\b"), "S&T"),
+    (re.compile(r"\bTechnology\b"), "Tech"),
+]
+
 
 @register.filter(name="smart_role")
 def smart_role(value, max_words=4):
     """Compress a contact's freeform `role` field to the first clause,
-    capped at a few words.
+    capped at a few words, with the product's own standard abbreviations
+    applied.
 
     The field is typed by a student about a real person and ranges from
     already-clean ("IB Analyst") to a full sentence ("Campus recruiter
@@ -266,7 +283,10 @@ def smart_role(value, max_words=4):
     before the first clause boundary and capping the remainder at four
     words never fabricates a title, since it is always a strict prefix
     of what the student actually wrote — it just stops reading once the
-    role itself has been said and the elaboration starts.
+    role itself has been said and the elaboration starts. Abbreviating
+    "Investment Banking" to "IB" is the one exception to strict-prefix:
+    it is a substitution, not a cut, and only ever swaps in a form the
+    same student already used unprompted elsewhere on the same board.
 
     Never adds an ellipsis: a short, complete-looking phrase reads as a
     real label; "Campus recruiter..." reads as broken. The unclamped
@@ -279,6 +299,8 @@ def smart_role(value, max_words=4):
     text = str(value).strip()
     m = _ROLE_CLAUSE_RE.search(text)
     clause = text[: m.start()] if m else text
+    for pattern, short in _ROLE_ABBREVIATIONS:
+        clause = pattern.sub(short, clause)
     words = clause.split()
     if len(words) > max_words:
         words = words[:max_words]

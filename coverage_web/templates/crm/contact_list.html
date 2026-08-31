@@ -371,7 +371,6 @@
           {% endcomment %}
           <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a card here to change its tier (or use Settings > Target Firms on mobile).">
             <span>{{ section.label }}</span>
-            <span class="scrub-count">{{ section.cards|length }}</span>
           </div>
           <div class="tier-grid">
             {% for fc in section.cards %}
@@ -615,9 +614,18 @@
           what this conditional guards against. Both cold halves wear the
           cold dot and the cold row-tint: `no_reply` and `not_contacted`
           are the same warmth split by whether anything was ever
-          sent.{% endcomment %}
+          sent.
+
+          All collapsed on load now (2026-08-31, the founder's direct
+          call) — the warm sections used to open by default so the page
+          landed on the most actionable people, but on a board with real
+          size that meant the page arrived already several screens tall,
+          contacts spilling out before a student had chosen to look. One
+          click opens whichever bucket matters; nothing forces every
+          section's cards into the DOM's visible flow before that.
+          {% endcomment %}
           <details class="warmth-row warmth-row--{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"
-                   data-group{% if section.key != "no_reply" and section.key != "not_contacted" %} open{% endif %}>
+                   data-group>
             <summary style="--share: {% widthratio section.cards|length contact_total 100 %}%">
               <i class="dot dot-{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"></i>
               <span class="warmth-row-label">{{ section.label }}</span>
@@ -946,10 +954,13 @@
       grid.classList.add("is-capped");
       grid.setAttribute("tabindex", "0");
       grid.setAttribute("role", "region");
-      // Read the two spans separately rather than flattening the label's
-      // textContent: run together it announces as "Tier 1 20 firms", which
-      // is two numbers with nothing between them and no way to hear which
-      // is the tier. Sighted readers get the separation from layout.
+      // The label used to carry a second span (a firm count, removed
+      // 2026-08-31) that this deliberately read separately rather than
+      // flattening -- run together it announced as "Tier 1 20 firms",
+      // two numbers with no way to hear which was the tier. One span now,
+      // but this still reads it by element rather than raw textContent
+      // so a label never silently regains that ambiguity if a count is
+      // ever added back.
       var label = grid.parentElement.querySelector(".tier-label");
       var tierName = label && label.firstElementChild
         ? label.firstElementChild.textContent.trim() : "Tier";
@@ -997,19 +1008,14 @@
       }).then(function (resp) {
         if (!resp.ok) return false;
         section.querySelector(".tier-grid").appendChild(card);
-        // Re-sync every tier's empty-state placeholder AND its count. The
-        // count was left behind by the original drop handler, so a board
-        // that had just been rearranged read "TIER 1 14" over thirteen
-        // cards until the next page load — the one number on the lane label
-        // whose whole job is to say how much is in there. Settings' board
-        // has always done both together (`syncEmpty`); this is that same
-        // pair.
+        // Re-sync every tier's empty-state placeholder. Used to also
+        // patch a count span here (2026-08-31: the count is gone from
+        // the label entirely, per the founder's call, so there is
+        // nothing left to keep in sync but the placeholder).
         document.querySelectorAll(".tier-section").forEach(function (s) {
           var cards = s.querySelector(".tier-grid").children.length;
           var empty = s.querySelector(".tier-empty");
           if (empty) empty.hidden = cards > 0;
-          var count = s.querySelector(".tier-label .scrub-count");
-          if (count) count.textContent = cards;
         });
         // The card just moved tiers, so both the old and new grid's row
         // count changed — recompute every cap rather than track which

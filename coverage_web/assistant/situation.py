@@ -200,6 +200,45 @@ def _role_closed_events(tracked_ids: list[int], since, limit: int) -> list[dict]
     return events
 
 
+def _display_location(title: str, location: str) -> str:
+    """The location a "new role" event card should actually print.
+
+    Two real duplications, both seen live on the founder's own board:
+
+    1. `location` repeating a segment against ITSELF -- the Hong Kong
+       board emits the same place twice under two spellings, "HONG KONG,
+       Hong Kong". Collapsed here by comparing casefolded segments, not
+       by hardcoding "Hong Kong" as a special case, so the same fix covers
+       any board that does this.
+    2. `location` repeating the TITLE -- a posting titled "...Summer
+       Associate - Houston" then followed by a card that also prints
+       "Houston, Texas, United States of America" says the city twice in
+       one sentence. The title is scraped evidence and is never rewritten
+       (this product's own rule), so the fix is on the card's side: if the
+       title already names the location's city, the card does not repeat
+       it.
+
+    Returns "" (falsy, so the template's existing `{% if e.location %}`
+    already suppresses the whole clause) when there is nothing left worth
+    printing.
+    """
+    if not location:
+        return ""
+    seen: set[str] = set()
+    segments = []
+    for part in location.split(","):
+        part = part.strip()
+        key = part.casefold()
+        if part and key not in seen:
+            seen.add(key)
+            segments.append(part)
+    if not segments:
+        return ""
+    if segments[0].casefold() in title.casefold():
+        return ""
+    return ", ".join(segments)
+
+
 def _new_role_events(user, since, limit: int) -> list[dict]:
     """Fresh open postings at a firm the student already has a foothold at.
 
@@ -324,7 +363,7 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
             "title": o.title,
             "firm": o.firm.name,
             "url": o.url,
-            "location": o.location,
+            "location": _display_location(o.title, o.location),
             "first_seen": o.first_seen,
         })
         if len(events) >= limit:

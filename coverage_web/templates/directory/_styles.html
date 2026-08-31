@@ -15,6 +15,27 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      design, and the field's best boards reach content in ~150px.
      ====================================================================== */
 
+  /* WIDTH AND TOP CHROME, widened/tightened 2026-08-31 -- the founder's own
+     complaint, measured against a real wide monitor rather than guessed:
+     `.page--full`'s shared 1440px cap (coverage.css) sits centered on
+     anything wider, so a 2000px+ window painted ~280px of plain background
+     on EACH side of a page whose whole point is a dense, information-heavy
+     grid -- exactly the surface that benefits most from the width a wide
+     display actually has. `.page--full` is scoped to THIS page only among
+     the ones sharing this stylesheet (my_applications.html and
+     firm_detail.html both render bare `.page`, not `.page--full`), so
+     widening it here cannot touch either of them.
+
+     Measured top chrome before this pass: 48px page padding + 66px
+     pagehead + 24px margin + 104px filter bar + 16px margin = 258px before
+     a single role was on screen -- against this file's OWN stated ~150px
+     target two paragraphs up. Trimmed the two largest contributors (page
+     padding, pagehead margin) rather than the filter bar, which already
+     carries the tab/search/select controls a wide top-chrome cut cannot
+     shrink without hiding a filter. */
+  .page--full { max-width: 1800px; padding-top: var(--s5); }
+  .page--full > .pagehead { margin-bottom: var(--s3); }
+
   /* Filter bar — v5: one left-aligned band. Search leads (it is first in the
      DOM too), the selects follow, and the pills sit on their own row above. */
   /* align-items: flex-start, not flex-end: every label is [caption, control],
