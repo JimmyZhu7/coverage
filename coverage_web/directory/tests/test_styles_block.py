@@ -569,17 +569,31 @@ def test_every_label_the_product_can_build_fits_the_chip_cap():
         f"{budget:.2f}ch of label. Labels: {labels}")
 
 
-def test_the_feed_row_shrinks_its_chips_instead_of_slicing_them():
-    """The pill chips this rule used to bound (`.rolecard-facts .fact-chip`)
-    are gone from the feed row — facts are now plain text spans on the one
-    `.rr-meta` line (see `_rolecard.html`'s header comment), and `.rr-fact`
-    is what carries the same shrink-before-slice contract there: the line is
-    one row, `overflow: hidden`, and if a fact cannot shrink that overflow
-    does the cutting — mid-glyph, with no ellipsis, which reads as a
-    rendering fault rather than as truncation."""
+def test_the_feed_row_has_exactly_one_truncation_point():
+    """A first pass gave `.rr-fact` AND `.rr-loc` their own independent
+    `flex-shrink: 1`, which meant a packed meta line — verdict, two facts,
+    a market qualifier, the role type — showed as many as four separate
+    mid-word ellipses, each fact reduced to a handful of characters. Live
+    on the founder's own feed this read as scrambled, not truncated.
+
+    The corrected contract: every named part of the line (`.rr-firm`,
+    `.rr-vd`, `.rr-fact`, `.rr-loc`, `.rr-kind`, `.rr-cls`) holds its own
+    width — `flex: none` — and only the ACTUAL last child on the line
+    gives way. `_rolecard.html` already orders the line by decisiveness
+    (verdict first, descriptive facts last), so `:last-child` always
+    resolves to the least important thing THIS row rendered, which is the
+    tail giving way rather than the head."""
     css = _feed_css()
-    rule = _rule(css, ".rr-fact")
-    assert "flex-shrink: 1" in rule, rule
-    assert "min-width: 0" in rule, (
+    for cls in (".rr-firm", ".rr-vd", ".rr-fact", ".rr-loc", ".rr-kind", ".rr-cls"):
+        rule = _rule(css, cls)
+        assert "flex: none" in rule, (
+            f"{cls} must hold its own width — a fixed-width part that "
+            f"can still shrink reopens the multi-ellipsis bug")
+
+    tail = _rule(css, ".rr-meta > *:last-child")
+    assert "flex-shrink: 1" in tail, tail
+    assert "min-width: 0" in tail, (
         "a flex item's automatic minimum size is its content, so without "
-        "min-width: 0 the facts refuse to shrink and the meta line overflows")
+        "min-width: 0 the last child refuses to shrink and the line overflows")
+    assert "text-overflow: ellipsis" in tail, (
+        "the one part of the line allowed to shrink must say so when it does")

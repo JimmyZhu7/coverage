@@ -669,8 +669,18 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      keeps the deadline "fuse" (dated) or live rolling pulse. Firms are
      ordered by the survey (target firms and matching tracks first).
      ====================================================================== */
-  .firmcols { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  /* Three per row, not auto-fill's four. At the page's own 1440px cap this
+     was `auto-fill, minmax(330px, 1fr))`, which fits four 336px columns and
+     is the reason a role's title had 70px to work with before the compact
+     row (_rolecard.html) fixed the fact-ordering side of that problem. Four
+     never had room to be anything but cramped; three gives each column
+     ~453px, enough for a title to read as a sentence instead of a fragment. */
+  .firmcols { display: grid; grid-template-columns: repeat(3, 1fr);
     gap: var(--s4); align-items: start; }
+  /* Tablet: two per row rather than three squeezed under 453px. 1000px is
+     where three columns would drop under ~300px each -- back to the width
+     that motivated this change in the first place. */
+  @media (max-width: 1000px) { .firmcols { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 720px) { .firmcols { grid-template-columns: 1fr; } }
 
   /* ---- Firm-page role rows: the ledger form again. One row per role,
@@ -1002,6 +1012,19 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     font-size: var(--fs-xs); font-weight: var(--w-med);
     font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
     white-space: nowrap; line-height: 1.35; }
+  /* Urgency colour, restored. Both `.rolerow.urg-{level}` and
+     `.rr-due-n.meta-{level}` were carried over from the old card's naming
+     but the color rules that gave them meaning were not -- every deadline
+     from "Today" to three weeks out rendered as identical black text.
+     Verified live: `getComputedStyle` returned rgb(25,27,22), plain ink,
+     for meta-today/meta-soon/meta-upcoming alike. On a page whose only
+     real signal is a deadline column, an inert urgency colour is most of
+     why the row reads as flat. Same three values the old card's fuse bar
+     used, so this is restoring the product's own established palette, not
+     inventing a new one. */
+  .rr-due-n.meta-today { color: var(--danger); font-weight: var(--w-med); }
+  .rr-due-n.meta-soon { color: var(--w-chatted-bar); }
+  .rr-due-n.meta-upcoming { color: var(--accent-ink); }
   .rr-due-none { color: var(--line-strong); }
   .rr-due-rolling { display: inline-flex; align-items: center; }
   /* Same dotted mark the card used for a deadline read out of prose rather
@@ -1032,7 +1055,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rr-meta > * + *::before { content: "·"; color: var(--line-strong);
     margin-right: 5px; }
   .rr-firm { font-weight: var(--w-med); color: var(--ink-2); flex: none; }
-  .rr-loc { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .rr-loc { flex: none; }
   .rr-kind { flex: none; }
   /* Both keep their full width and let the location absorb the shortfall:
      a half-rendered year reads as a rendering fault, a truncated city does
@@ -1042,12 +1065,32 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* The one fact about the READER rather than about the posting, and so
      the only one that keeps colour now that the pills are gone. */
   .rr-vd { flex: none; font-weight: var(--w-med); }
-  /* The descriptive tail gives way before the decisive head does — see the
-     ordering note in _rolecard.html. */
-  .rr-kind, .rr-cls { flex-shrink: 0; }
   .rr-vd.vd-year_ok, .rr-vd.vd-year_likely { color: var(--ok); }
   .rr-vd.vd-year_out, .rr-vd.vd-visa_out { color: var(--ink-3); }
-  .rr-fact { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .rr-fact { flex: none; }
+  /* Same meaning the old pill era gave these classes, restored as text
+     colour instead of a bordered chip -- a wall (no sponsorship, a
+     language requirement) in the danger tint, an accommodating fact in
+     the ok tint, pay in the accent, since it is the one fact nobody else
+     on a campus board shows. Was dropped silently in the pill-to-row
+     rewrite: `f.css` kept flowing from the view but nothing here read it,
+     so every fact -- a hard blocker or a plain detail -- rendered in the
+     same flat grey as the rest of the line. */
+  .rr-fact.fact-wall { color: var(--danger); }
+  .rr-fact.fact-ok { color: var(--ok); }
+  .rr-fact.fact-pay { color: var(--accent-ink); font-weight: var(--w-med); }
+  /* ONE truncation point, not four. Every part above holds its own full
+     width; only the actual last child on the line gives way. A first pass
+     let `.rr-fact` and `.rr-loc` each shrink independently, which meant a
+     packed row -- verdict, two facts, a market qualifier, the role type --
+     showed FOUR separate mid-word ellipses instead of one clean cut, each
+     fact reduced to a handful of unreadable characters. `:last-child`
+     always resolves to whatever _rolecard.html actually rendered last for
+     THIS row (kind, class year, a fact, or even the verdict on a bare
+     row) -- the ordering there already puts the least decisive fact last,
+     so this is the tail giving way, not the head. */
+  .rr-meta > *:last-child { flex-shrink: 1; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; }
 
   /* Controls, not chips: --r-ctl is what this product's own token comment
      reserves for a thing you press ("status chips keep the pill; controls
