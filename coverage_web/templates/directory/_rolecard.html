@@ -1,196 +1,115 @@
 {% load textstyle %}
 {% comment %}
-STANDARDISED CARD. Every slot below is height-reserved and its
-content clamped, so all 879 cards are the same height whatever the
-scraped vocabulary throws at them. Before this the cards took SEVEN
-distinct heights spanning 122-205px, because the title ran one line
-or two and 87 roles carry no location at all, so the row collapsed.
+COMPACT ROW (2026-08-30). Was a 168px card; is now a ~62px two-line row.
 
-Reserving is what makes a fixed height safe here. The earlier
-fixed-height version clipped (190px of content in a 120px box)
-precisely because it fixed the BOX without bounding the CONTENT;
-this fixes both, which is the only combination that standardises
-without cutting text off.
+WHY. The feed rendered 771 cards into ~2.0 MB and 32k tags, and a founder
+review plus the product's first outside user both landed on the same
+defect from opposite ends: "everything competes at the same level" and
+"it looks AI-generated". The three things producing that were a
+colour-tinted left rail on a rounded card, up to seven 999px pills per
+card (role type, Save, class year, three facts, Read), and 771 identical
+fixed-height boxes down the page.
+
+The stylesheet already names the identity — a ledger — and a ledger is
+ruled rows and aligned figures, not boxes with badges in them. This is
+that: the deadline in a fixed left column so the figures stack and the
+eye scans one axis, the title and its facts as text, and hairlines
+instead of card borders.
+
+WHAT DID NOT CHANGE, deliberately (see the design contract):
+  - every honesty marker. `is-unconfirmed` on the link, `is-reported`'s
+    dotted underline on a prose-read deadline, the literal words "No date
+    posted" for a role that states nothing, and the .vh spans that carry
+    each of those to a screen reader rather than leaving them in a title.
+  - the fact ORDER. views.py::_FACT_CHIP_ORDER sorts by what can end the
+    decision soonest and the verdict leads it, so when the meta line runs
+    out of room the tail that ellipsises is the least decisive fact. That
+    was already true of the chip row; it is why truncation here is safe.
+  - the Save/track control and Read, unchanged behaviour.
+
+Row height is a FLOOR (min-height), not a fixed height. The old card
+fixed the box to standardise it; here the two lines are each clamped, so
+the row is already uniform without pinning it, and a fixed height would
+only reintroduce the clipping bug this file's history is full of.
 {% endcomment %}
-<div class="rolecard urg-{{ r.level }}">
-  <div class="rolecard-top">
-    {% comment %}
-    The year beside the role type is the PROGRAMME year (a 2027
-    summer intake), not a graduation year — the title attribute
-    says so on hover, and the class-year chip below is the only
-    place a graduation year ever appears.
-    {% endcomment %}
-    <span class="role-mini role-{{ r.bucket }}"{% if r.cohort %} title="{{ r.cohort }} programme year"{% endif %}>{{ r.bucket_label }}{% if r.cohort %} · {{ r.cohort }}{% endif %}</span>
-    <span class="rolecard-top-right">
-      {% if request.user.is_authenticated %}{% include "directory/_track_control.html" %}{% endif %}
-    </span>
-  </div>
-
-  {% comment %}h3, not h4: the page's only h1 is its title and the firm
-  column headers are h2-level, so h4 skipped a level — the heading outline a
-  screen-reader user navigates by should read 1→2→3, not 1→4.{% endcomment %}
+<div class="rolerow urg-{{ r.level }}">
   {% comment %}
-  This link is where a student actually leaves Coverage — the fixed-height
-  card has no spare row to spend on a caution, so the mark rides on the
-  element it qualifies instead of costing new layout: a dotted underline
-  (same visual device `is-reported` already uses below) plus a `title` for
-  sighted hover, and — because `title` alone is not an accessible carrier,
-  the same rule the deadline mark states two rows down — a `.vh` span that
-  costs zero visible width. See `_unconfirmed_note` in views.py.
+  The deadline, in its own fixed column so the figures form a real column
+  down the page — tabular-nums in the stylesheet is what makes them line
+  up. Undated rows print a dash HERE and the words "No date posted" in the
+  meta line below: the dash alone would be an invented fact, and the words
+  are what a screen reader and a stylesheet-less render get.
   {% endcomment %}
-  <h3 class="rolecard-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener"
-      {% if r.unconfirmed %}class="is-unconfirmed" title="{{ r.unconfirmed.why }}"{% endif %}
-      >{{ r.title|smart_title }}{% if r.unconfirmed %}<span class="vh"> ({{ r.unconfirmed.label }})</span>{% endif %}</a></h3>
-
-  {% comment %}
-  Always rendered, even when empty, so the meta row below sits at
-  the same y on every card. The stated class year (never derived
-  from the programme year above) holds its width; the location
-  ellipsises, because a half-rendered year would be worse than a
-  truncated city.
-  {% endcomment %}
-  <div class="rolecard-sub">
-    {% comment %}
-    The firm name rides in this slot ONLY in the Picked column, where the
-    cards come from several firms and the column header can no longer name
-    the firm for them. Everywhere else the column header already said it,
-    and repeating it on every card would be the "first seen twice" bug in a
-    new costume. `show_firm` is set per-copy in views.py, never on the item
-    the firm's own column renders.
-    {% endcomment %}
-    {% if r.show_firm %}<span class="rolecard-firm">{{ r.firm_name|smart_title }}</span>{% endif %}
-    {% if r.class_year %}<span class="class-chip" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
-    {% comment %}
-    `r.place`, not `r.location` — views._place, shared with the firm page's
-    row. This card was the silent half of a disagreement: it dropped the span
-    for a blank location while /firms/<slug>/ printed "Location not listed"
-    for the identical role. The resolver also fills the 51 cards that rendered
-    an entirely empty `.rolecard-sub` but whose region we do hold.
-    {% endcomment %}
-    {% comment %}
-    `place.more` rides OUTSIDE `smart_location`: it is copy we wrote, and that
-    filter cases text a careers board wrote, so "+5 more" came back "+5 More".
-    {% endcomment %}
-    {% if r.place.text %}<span class="rolecard-loc{% if not r.place.exact %} is-market{% endif %}"
-      {% if r.place.why %}title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}{% if r.place.more %} +{{ r.place.more }} more{% endif %}</span>{% endif %}
-  </div>
-
-  {% comment %}
-  One meta row, always present: status, then provenance, trailing. "First
-  seen" used to ALSO ride as a badge in the top row, so 857 cards stated
-  the same fact twice — once as "First seen 3d ago" and again as
-  "· seen 3d ago". Said once, here.
-
-  It is deliberately "first seen", not "posted": first_seen is when
-  the row entered OUR database. A bulk import once wore "New" on
-  794 of 805 roles at once, which is the bug this wording closes.
-
-  It sits at the FAR end of the row now, not beside the deadline it used to
-  lean on: one names provenance, the other names the decision, and a founder
-  review flagged the two competing for the same glance. `margin-left: auto`
-  on `.meta-seen` (see _styles.html) pushes it — and the Read button after
-  it — away from the status, so the row reads as "what to do" (left) then
-  "where this came from, and how to act on it" (right), instead of three
-  equally-weighted facts in a line. The words are unchanged: still visible
-  text a screen reader reads plainly, no title-only caveat needed for a fact
-  this quiet.
-  {% endcomment %}
-  {% comment %}
-  FACT CHIPS — what the posting itself says about applying: sponsorship, pay,
-  a language wall, the graduation years it accepts, a GPA bar, a cover letter,
-  a named assessment. At most three, ordered by what can end the decision
-  soonest (see `_FACT_CHIP_ORDER` in views.py).
-
-  The row is rendered whether or not it holds anything, because these cards
-  are a fixed height and a slot that only sometimes exists is the bug this
-  file's opening comment is about. Every chip's `title` is the sentence it was
-  extracted from — a chip that cannot show its own evidence does not ship.
-  {% endcomment %}
-  <div class="rolecard-facts">
-    {% comment %}The verdict leads: it is the one chip about YOU rather than
-    about the posting, computed only where both sides stated (see
-    _eligibility in views.py). Green names your year; a blocking verdict
-    (wrong stated year, refuses your visa) is the quiet grey of a door that
-    is closed rather than the red of an alarm.{% endcomment %}
-    {% if r.verdict %}<span class="fact-chip verdict-{{ r.verdict.kind }}" title="{{ r.verdict.why }}">{{ r.verdict.label }}</span>{% endif %}
-    {% for f in r.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
-  </div>
-
-  <div class="rolecard-meta">
+  <span class="rr-due">
     {% if r.dated %}
-      {% comment %}
-      A deadline we READ out of the posting's prose is marked; one the board
-      published as a field is not. 92 of 121 dated open roles are the first
-      kind, and rendering both identically claimed a precision only 29 of them
-      have. The dotted underline is the visual mark, the title says why, and
-      the visually-hidden word is what a screen reader gets — `title` alone is
-      not an accessible carrier, and this is exactly the sort of caveat that
-      must not be sighted-only.
-      {% endcomment %}
-      <span class="meta-status meta-{{ r.level }}{% if r.reported %} is-reported{% endif %}"
-            {% if r.reported %}title="{{ r.reported.why }}"{% endif %}>{{ r.countdown }}{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
+      <span class="rr-due-n meta-{{ r.level }}{% if r.reported %} is-reported{% endif %}"
+            {% if r.reported %}title="{{ r.reported.why }}"{% endif %}>{{ r.countdown_short|default:r.countdown }}{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
     {% elif r.rolling_stated %}
-      {% comment %}The posting's own words say rolling review, so the word is
-      earned and its evidence hangs on the title.{% endcomment %}
-      <span class="meta-status meta-rolling" title="{{ r.rolling_why }}"><span class="rolling-dot"></span>Rolling</span>
+      <span class="rr-due-n rr-due-rolling" title="{{ r.rolling_why }}"><span class="rolling-dot"></span></span>
     {% else %}
-      {% comment %}No deadline anywhere in the data. It used to say "Rolling",
-      which is a different and unearned claim: ~600 open roles never state how
-      they close, and calling that rolling review invented a fact about every
-      one of them.{% endcomment %}
-      <span class="meta-status meta-undated">No date posted</span>
+      <span class="rr-due-n rr-due-none" aria-hidden="true">&mdash;</span>
     {% endif %}
-    {% comment %}
-    …and only where nothing better answers the same question. "First seen"
-    measures how long a role has been sitting in front of a student, which is
-    the ONLY time signal an undated role has — 86% of feed cards say "No date
-    posted" and 3% "Rolling", and for those the age is the whole answer to
-    "has this been here a while".
+  </span>
 
-    On a DATED card it is noise wearing the same grey as the countdown: the
-    deadline already answers when to act, better and about the ROLE rather
-    than about our scraper. 288 of 2,599 feed cards were carrying both, so
-    "Closes in 3 days · first seen 35d ago" spent half the meta row arguing
-    with itself. The fact isn't lost — the countdown supersedes it.
-    {% endcomment %}
-    {% if r.seen_days is not None and not r.dated %}
-      <span class="meta-seen">· first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}</span>
-    {% endif %}
-    {% comment %}
-    Read, only where there is something to read. The description was fetched
-    once already and sits in the database; the firm's own page renders it
-    client-side and takes seconds. The button is rendered only when we hold
-    the text (`r.has_text`) — offering to show something we do not have is the
-    same lie as an empty drawer, one step earlier.
-    {% endcomment %}
-    {% if r.has_text %}
-      <button type="button" class="meta-read" data-role-read data-role-id="{{ r.id }}"
-              hx-get="{% url 'role_description' r.id %}"
-              hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>
-    {% endif %}
+  <div class="rr-main">
+    {% comment %}h3 keeps the 1→2→3 outline the firm column headers set.{% endcomment %}
+    <h3 class="rr-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener"
+        {% if r.unconfirmed %}class="is-unconfirmed" title="{{ r.unconfirmed.why }}"{% endif %}
+        >{{ r.title|smart_title }}{% if r.unconfirmed %}<span class="vh"> ({{ r.unconfirmed.label }})</span>{% endif %}</a></h3>
+
+    <div class="rr-line">
+      <div class="rr-meta">
+      {% comment %}
+      One line, ordered by how decisive each part is, so the ellipsis eats
+      the least decisive tail first. The firm name leads only in the Picked
+      column, where the column header no longer names it (same `show_firm`
+      rule the card used).
+      {% endcomment %}
+      {% comment %}
+      ORDER IS THE TRUNCATION POLICY. This line is one row of ~165px on a
+      302px column, so the tail is what disappears — which means whatever
+      sits last is what a student never reads. Measured on the live feed,
+      a first pass put location and role type ahead of the verdict and cut
+      the line at "Entry-Le…", losing the visa and year answers entirely.
+
+      So: the verdict leads (the one fact about the READER, and the one
+      that can end the decision outright), then the posting's own facts in
+      views.py::_FACT_CHIP_ORDER's decisiveness order, and only then the
+      descriptive parts. The firm name is the exception and stays first,
+      but only in the Picked column, where nothing else names the firm.
+      {% endcomment %}
+      {% if r.show_firm %}<span class="rr-firm">{{ r.firm_name|smart_title }}</span>{% endif %}
+      {% if r.verdict %}<span class="rr-vd vd-{{ r.verdict.kind }}" title="{{ r.verdict.why }}">{{ r.verdict.label }}</span>{% endif %}
+      {% for f in r.facts %}<span class="rr-fact {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
+      {% if r.place.text %}<span class="rr-loc{% if not r.place.exact %} is-market{% endif %}"
+        {% if r.place.why %}title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}{% if r.place.more %} +{{ r.place.more }}{% endif %}</span>{% endif %}
+      <span class="rr-kind"{% if r.cohort %} title="{{ r.cohort }} programme year"{% endif %}>{{ r.bucket_label }}{% if r.cohort %} {{ r.cohort }}{% endif %}</span>
+      {% if r.class_year %}<span class="rr-cls" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
+      {% comment %}
+      "first seen", never "posted": this is when the row entered OUR
+      database, and a bulk import once wore "New" on 794 of 805 roles at
+      once. Shortening it to "seen" in a first pass lost exactly that
+      distinction, which is why the wording is pinned by a test.
+      {% endcomment %}
+      {% if not r.dated %}
+        <span class="rr-undated">{% if r.rolling_stated %}Rolling{% else %}No date posted{% endif %}{% if r.seen_days is not None %}, first seen {% if r.seen_days == 0 %}today{% elif r.seen_days == 1 %}1d ago{% else %}{{ r.seen_days }}d ago{% endif %}{% endif %}</span>
+      {% endif %}
+      </div>
+      {% comment %}
+      Actions ride the SECOND line, not a third grid column. Measured at
+      302px (the real column width): as a column they took 160px and left
+      the title 70px — about twelve characters — which inverted the row's
+      whole hierarchy. On this line they take their width from the meta
+      instead, which is the part that can afford to ellipsise.
+      {% endcomment %}
+      <div class="rr-act">
+        {% if request.user.is_authenticated %}{% include "directory/_track_control.html" %}{% endif %}
+        {% if r.has_text %}
+          <button type="button" class="meta-read" data-role-read data-role-id="{{ r.id }}"
+                  hx-get="{% url 'role_description' r.id %}"
+                  hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>
+        {% endif %}
+      </div>
+    </div>
   </div>
-
-  {% comment %}
-  The fuse is now a hairline on the card's bottom edge rather than a
-  track competing for the meta row's width — it reads as urgency at
-  a glance and costs no vertical space, so a dated card and a
-  rolling one measure identically.
-  {% endcomment %}
-  {% comment %}
-  Gated on `fuse_pct`, not on `dated`. A fuse burns down to a specific
-  afternoon, so `_urgency_item` sets it to None on a date whose precision
-  never named a day ("Sep 2026") — those rows are dated and still get no
-  fuse. Gating on `dated` would have drawn `--fuse: None%`.
-  {% endcomment %}
-  {% if r.fuse_pct is not None %}<span class="rolecard-fuse fuse-{{ r.level }}"><span class="fuse-fill" style="--fuse: {{ r.fuse_pct }}%"></span></span>
-  {% elif r.elapsed_pct is not None %}
-    {% comment %}
-    The rolling card's own footer signal, in the same slot the fuse leaves
-    empty on these cards. Deliberately NOT `.rolecard-fuse`: no colour ramp,
-    no burn animation, no urgency band in its class name — see views.py's
-    `elapsed_pct` comment for why an elapsed-time fact must never wear the
-    same visual weight as a real deadline's countdown.
-    {% endcomment %}
-    <span class="rolecard-observed"><span class="observed-fill" style="--observed: {{ r.elapsed_pct }}%"></span></span>
-  {% endif %}
 </div>

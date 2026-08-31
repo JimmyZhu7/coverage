@@ -481,7 +481,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .variant-fold[open] > summary { color: var(--accent-ink); }
   .variant-fold[open] { border-left: 2px solid var(--accent-line);
     padding-left: 6px; }
-  .variant-fold .rolecard { margin-top: 6px; }
+  .variant-fold .rolerow { margin-top: 6px; }
 
   .filters-clear { font-size: var(--fs-s); align-self: center; padding: 6px 14px;
     border-radius: 999px; }
@@ -713,7 +713,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      affordance .is-reported uses for a fact whose provenance is in its title,
      so a market-level place is distinguishable from a stated one without
      hovering, and the reason is one hover away. */
-  .frow-meta.is-market, .rolecard-loc.is-market {
+  .frow-meta.is-market, .rr-loc.is-market {
     text-decoration: underline dotted currentColor;
     text-underline-offset: 2px; cursor: help; }
   .frow-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
@@ -766,7 +766,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* The cards keep the neutral surface: tinting them too would drop the
      contrast the standardised card relies on, and the column's own tint
      already carries the signal. */
-  .firmcol--picked .rolecard { background: var(--surface); }
+  .firmcol--picked .rolerow { background: var(--surface); }
   /* "N more hidden by your filters" — this column obeys the filters, so it
      owns up to what they removed. */
   .firmcol-hidden { display: block; font-size: var(--fs-micro); color: var(--ink-3);
@@ -783,14 +783,13 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .firmcol--picked.is-empty { height: auto; }
   .firmcol--picked.is-empty .firmcol-head { border-bottom: 0; min-height: 0; }
 
-  /* The firm name on a Picked card. Only this column renders it — see
-     _rolecard.html — and it shares the sub row with the location, so it
-     takes the space it needs and lets the location ellipsise. */
-  .rolecard-firm { font-weight: var(--w-bold); color: var(--ink-2);
-    font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.04em;
-    white-space: nowrap; flex: none; }
-  .rolecard-firm + .rolecard-loc::before { content: "·"; margin-right: 4px;
-    color: var(--ink-3); }
+  /* The firm name on a Picked row. Only this column renders it — see
+     _rolecard.html — and it shares the meta line with the location, so it
+     takes the space it needs and lets the location ellipsise. The middot
+     that used to be drawn here now comes from `.rr-meta > * + *::before`,
+     which separates every part of that line uniformly. */
+  .rolerow .rr-firm { text-transform: uppercase; letter-spacing: 0.04em;
+    font-size: var(--fs-micro); }
 
 
   /* Fixed header height so every firm card's header aligns, regardless of how
@@ -928,31 +927,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      text off. If a slot is ever added here, give it a reserved height and
      re-do the arithmetic above — do not simply let the box grow.
      ====================================================================== */
-  .rolecard { position: relative; background: var(--paper);
-    border: 1px solid var(--line); border-left: 3px solid var(--line);
-    border-radius: var(--r-panel); overflow: hidden;
-    padding: var(--s3) var(--s4); flex: none; height: 168px;
-    display: flex; flex-direction: column; gap: 5px;
-    transition: border-color var(--t-fast), box-shadow var(--t-med), transform var(--t-med);
-    /* This page renders every open role — ~1,500 cards on live data, 1.27MB
-       of HTML — and nearly all of them sit outside both the viewport and
-       their cluster's scroll window. Skip layout and paint for the offscreen
-       ones; the height is already fixed at 146px, so the placeholder is
-       exact and the scrollbars cannot jump. Same remedy as the Network
-       page's contact grid, at ten times the card count. */
-    content-visibility: auto; contain-intrinsic-size: auto 168px; }
-  .rolecard:hover { box-shadow: var(--shadow-1); transform: translateX(2px); }
-  .rolecard.urg-today { border-left-color: var(--danger); }
-  .rolecard.urg-soon { border-left-color: var(--w-chatted-bar); }
-  .rolecard.urg-upcoming { border-left-color: var(--accent); }
-  .rolecard.urg-rolling { border-left-color: var(--ok-line); }
-  /* Reserved slot 1 — the top row. The fixed height is what makes the title
-     start at the same y whether or not the user is signed in, since the Save
-     control only renders when authenticated. */
-  .rolecard-top { display: flex; align-items: center; justify-content: space-between;
-    gap: var(--s2); height: 22px; flex: none; }
-  .rolecard-top-right { display: inline-flex; align-items: center; gap: var(--s2); flex: none; }
-
   /* Track control: a one-click Save star on the feed; funnel stages show as a
      read-only chip that links to My Applications. The gap is load-bearing:
      Save and "Not for me" are opposite verbs and were zero-gap siblings, so
@@ -977,151 +951,144 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* Done is terminal — it recedes instead of competing with the live stages. */
   .track-chip.track-closed { background: var(--paper); color: var(--ink-3);
     border: 1px solid var(--line); }
-  /* Reserved slot 2 — the title. EXACTLY two lines' worth, always: `height`
-     (not max-height) is what stops a one-line title from shortening the card.
-     A scraped job title is unbounded, so the clamp is doing real work here —
-     "2027 Blackstone Strategic Partners Private Equity Secondaries Summer
-     Analyst, London" is a real row. */
-  /* The h2 exists for the heading outline only — the anchor inside it keeps
-     every visual property, so the wrapper must add nothing. */
-  .firmcol-h { margin: 0; font: inherit; display: contents; }
-  .rolecard-title { margin: 0; height: 40px; flex: none;
-    font-size: var(--fs-m); line-height: 1.3; font-weight: var(--w-med); }
-  .rolecard-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
+
+  /* ======================================================================
+     THE COMPACT ROW — replaced the 168px card, 2026-08-30.
+
+     The card carried a colour-tinted left rail, up to seven 999px pills,
+     and a fixed height repeated 771 times; a founder review and the
+     product's first outside user independently read that as "everything
+     competes at the same level" and "it looks AI-generated". The
+     stylesheet's own identity note calls this product a ledger, and a
+     ledger is ruled rows and aligned figures, not boxes with badges in
+     them. This is the row that closes that gap.
+
+     min-height, NOT height. The card fixed its box to standardise seven
+     different heights; here both lines are independently clamped, so the
+     rows are already uniform without pinning them — and a fixed height is
+     what produced the clipping this file's history keeps returning to.
+     ====================================================================== */
+  .rolerow { display: grid; grid-template-columns: 44px minmax(0, 1fr);
+    column-gap: var(--s3); align-items: baseline;
+    position: relative;
+    padding: var(--s3) 2px;
+    border-top: 1px solid var(--line);
+    /* `flex: none` is load-bearing, inherited from the card this replaced:
+       .firmcol-scroll is a FIXED-height flex column, so a child left at the
+       default `flex-shrink: 1` is compressed below its own content and the
+       meta line — location and the visa verdict — is clipped off every row.
+       Dropping it in the first pass did exactly that. */
+    flex: none;
+    transition: background-color var(--t-fast); }
+  .rolerow:first-child { border-top: 0; }
+  .rolerow:hover { background: var(--paper); }
+  /* Offscreen rows still skip layout and paint, as the card did — the
+     saving is bigger here because there are more rows per column.
+     `auto` is load-bearing in the intrinsic size: the row's height now
+     VARIES (a one-line title against a two-line one), so a bare number is
+     a guess that gets applied as a real height to anything not yet
+     rendered. A first pass here guessed 56px against ~88px of real
+     content and silently clipped the meta line — location and the visa
+     verdict — off every row on the page. With `auto` the browser
+     substitutes each row's last real size once it has rendered one. */
+  .rolerow { content-visibility: auto; contain-intrinsic-size: auto 57px; }
+
+  /* The deadline column. `tabular-nums` is the whole point: the figures
+     line up into a real column down the page, which is what lets the eye
+     scan one axis instead of hunting inside each row. Right-aligned for
+     the same reason. Urgency lives in this colour now — the card's tinted
+     left rail is gone. */
+  .rr-due { justify-self: end; font-family: var(--font-mono);
+    font-size: var(--fs-xs); font-weight: var(--w-med);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+    white-space: nowrap; line-height: 1.35; }
+  .rr-due-none { color: var(--line-strong); }
+  .rr-due-rolling { display: inline-flex; align-items: center; }
+  /* Same dotted mark the card used for a deadline read out of prose rather
+     than published as a field — the claim is about provenance, so it keeps
+     the urgency colour and only wears the rule. */
+  .rr-due-n.is-reported { text-decoration: underline dotted currentColor;
+    text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+  .rr-main { min-width: 0; }
+  .rr-title { margin: 0; font-size: var(--fs-s); line-height: 1.35;
+    font-weight: var(--w-med); }
+  .rr-title a { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2;
     -webkit-box-orient: vertical; overflow: hidden;
     transition: color var(--t-fast); }
-  .rolecard-title a:hover { color: var(--accent-ink); }
-  /* Our last check of this URL couldn't reconfirm it's live (see
-     `_unconfirmed_note` in views.py) — the same dotted-underline device
-     `.meta-status.is-reported` uses for "read from prose, not a field",
-     reused here for "we can't currently vouch for this link". Costs no
-     layout: it rides the title link the card already reserves height for,
-     rather than a new row a fixed-height card has no room for. */
-  .rolecard-title a.is-unconfirmed { color: var(--stale-t);
+  .rr-title a:hover { color: var(--accent-ink); }
+  .rr-title a.is-unconfirmed { color: var(--stale-t);
     text-decoration: underline dotted currentColor; text-underline-offset: 3px; }
-  .rolecard-title a.is-unconfirmed:hover { color: var(--stale-t); }
-  /* Reserved slot 3 — class year (when stated) + location on one line. The row
-     renders even when BOTH are absent (87 of 879 roles have no location at
-     all), because an empty-but-reserved row is what keeps the meta row below
-     it on the same baseline across every card. */
-  .rolecard-sub { display: flex; align-items: center; gap: 6px;
-    height: 18px; flex: none; min-width: 0; }
-  .rolecard-loc { font-size: var(--fs-xs); color: var(--ink-3);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .rr-title a.is-unconfirmed:hover { color: var(--stale-t); }
 
-  /* Reserved slot 4 — the fact chips. Reserved whether or not the posting
-     said anything: ~640 of 894 open roles state none of these, and a row that
-     only sometimes exists is exactly the bug the block comment above is
-     about. `overflow: hidden` on a nowrap row is the clamp of last resort;
-     the real bound is `_FACT_CHIPS_MAX` in views.py, which is two because a
-     302px card leaves 266px here and a chip measures ~97px. Hiding overflow is
-     not the same as choosing what to show: CSS would silently cut whichever
-     chip happened to be last, while the cap drops the least decisive one. */
-  .rolecard-facts { display: flex; align-items: center; gap: 4px;
-    height: 17px; flex: none; min-width: 0; overflow: hidden;
-    white-space: nowrap; }
-  /* The chips themselves now live in static/css/coverage.css: the firm page
-     renders the same ones, and a shared component defined in one page's
-     inline <style> is a component the other page silently loses. Only the
-     feed-specific SLOT stays here. */
+  /* One line of facts, ordered by decisiveness upstream
+     (views.py::_FACT_CHIP_ORDER, verdict first), so the tail this
+     ellipsises is always the least decisive thing on the row. That
+     ordering is what makes truncation safe here; without it CSS would be
+     choosing which fact to drop. */
+  .rr-meta { display: flex; align-items: baseline; gap: 5px;
+    flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
+    font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.4; }
+  .rr-meta > * + *::before { content: "·"; color: var(--line-strong);
+    margin-right: 5px; }
+  .rr-firm { font-weight: var(--w-med); color: var(--ink-2); flex: none; }
+  .rr-loc { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .rr-kind { flex: none; }
+  /* Both keep their full width and let the location absorb the shortfall:
+     a half-rendered year reads as a rendering fault, a truncated city does
+     not. Same call the card's `.class-chip { flex: none }` made. */
+  .rr-cls { flex: none; }
+  .rr-undated { flex: none; }
+  /* The one fact about the READER rather than about the posting, and so
+     the only one that keeps colour now that the pills are gone. */
+  .rr-vd { flex: none; font-weight: var(--w-med); }
+  /* The descriptive tail gives way before the decisive head does — see the
+     ordering note in _rolecard.html. */
+  .rr-kind, .rr-cls { flex-shrink: 0; }
+  .rr-vd.vd-year_ok, .rr-vd.vd-year_likely { color: var(--ok); }
+  .rr-vd.vd-year_out, .rr-vd.vd-visa_out { color: var(--ink-3); }
+  .rr-fact { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-  /* …and this row is the ONE place a chip has a neighbour competing for its
-     width. Everywhere else chips sit in a wrapping row and a long label just
-     takes a second line; here the slot is a fixed 330px on desktop and 281px
-     on a phone, one line, `overflow: hidden`. That is why the chip's own
-     `max-width` used to be set to a third of this row (108px ≈ (330-8)/3) and
-     why it truncated 138 chips on the default feed — a row-shaped bound
-     wearing a chip-shaped rule, charged to every surface including the ones
-     with all the room in the world.
-     The bound belongs here, and flex already knows how to apply it: let the
-     chips shrink and the row hands each one a share of the shortfall
-     proportional to what it asked for. Measured on the live feed at 1280:
-     132 of 162 chip rows fit outright — the visa refusal and the year match
-     now render whole — and the 30 that do not are short by a median 9px,
-     which comes off the longest label first and shows an ellipsis where it
-     went. Without this, the row's `overflow: hidden` does the cutting
-     instead, and that cut has no ellipsis: it slices mid-glyph at the row
-     edge and reads as a rendering fault rather than as truncation. */
-  .rolecard-facts .fact-chip { flex-shrink: 1; min-width: 0; }
+  /* Controls, not chips: --r-ctl is what this product's own token comment
+     reserves for a thing you press ("status chips keep the pill; controls
+     don't"). The card spent the badge pill on Save and Read, which is the
+     rule it was breaking. Quiet until the row is hovered or focused, so a
+     column of rows reads as content rather than as a wall of buttons. */
+  .rr-line { display: flex; align-items: center; gap: var(--s2);
+    margin-top: 2px; min-width: 0; }
 
-  /* Reserved slot 5 — the meta row: status, then provenance. `margin-top:auto`
-     pins it to the bottom edge, which also absorbs any sub-pixel rounding in
-     the slots above rather than letting it push the card taller. */
-  .rolecard-meta { display: flex; align-items: center; gap: 5px;
-    height: 20px; flex: none; margin-top: auto; min-width: 0;
-    font-size: var(--fs-xs); }
-  .meta-status { display: inline-flex; align-items: center; gap: 5px;
-    flex: none; font-weight: var(--w-med); white-space: nowrap; }
-  .meta-rolling { color: var(--ink-2); }
-  /* No deadline anywhere in the data — stated plainly, and quieter than the
-     rolling label it replaced on ~600 cards. Grey because it is an absence of
-     information, not a status. */
-  .meta-undated { color: var(--ink-3); }
-  /* A deadline read out of the posting's prose rather than published as a
-     field. A dotted rule under the countdown, in its own colour: the date is
-     what the posting says, so it keeps its urgency tint and its fuse — the
-     mark is about where we got it, not about doubting it. */
-  .meta-status.is-reported { text-decoration: underline dotted currentColor;
-    text-underline-offset: 3px; text-decoration-thickness: 1px; }
-  .meta-today { color: var(--danger); }
-  /* Was a literal #a8501f — 3.31:1 on dark paper. --stale-t carries the
-     same 'closing' warmth and is re-stated per theme. */
-  .meta-soon { color: var(--stale-t); }
-  .meta-upcoming { color: var(--accent-ink); }
-  .meta-passed { color: var(--ink-3); }
-  /* Provenance, trailing. It used to sit directly beside the deadline status
-     with the same visual weight, so the row read as two competing facts
-     ("Closes today" · "first seen 35d ago") rather than one decision and
-     one footnote. `margin-left: auto` claims the row's slack space ahead of
-     it — pushing `.meta-seen` (and `.meta-read` after it, which already
-     carries its own `margin-left: auto`) to the row's trailing end, so the
-     status alone owns the leading position.
-     Font size is UNCHANGED on purpose — still `--fs-xs`, the same size the
-     row already used — rather than a size down: a smaller size here would
-     have been a new, thirteenth type treatment on this card family for a
-     single element, working against "fewer distinct type treatments"
-     rather than for it. Position and colour (`--ink-3`, already the
-     quietest ink token in the row) do the de-emphasis instead.
-     Truncates before the status does — a clipped "Closes in 6 d" would be
-     worse than a clipped "first seen 3d…", because one is the reason to act
-     today and the other is provenance. */
-  .meta-seen { color: var(--ink-3); white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: auto; }
-  /* `.meta-read` (coverage.css) carries its OWN `margin-left: auto`, for the
-     card that has no `.meta-seen` to push it — a dated-but-unfetched role,
-     say. Stack that with `.meta-seen`'s auto margin just above and a flex
-     row with TWO auto margins splits the free space between them, opening a
-     second gap between "first seen…" and Read that nothing asked for. This
-     collapses that second gap on the one card shape where both render: Read
-     rides flush after the provenance text, and `.meta-seen`'s single auto
-     margin does all the pushing away from the deadline status. */
-  .rolecard-meta .meta-seen + .meta-read { margin-left: 0; }
+  /* Controls, not chips: --r-ctl is what this product's own token comment
+     reserves for a thing you press ("status chips keep the pill; controls
+     don't"), and the card it replaced spent the badge pill on Save and Read.
 
-  /* The fuse, as a hairline on the card's bottom edge. It used to be an inline
-     track competing with the countdown for the meta row's width; on the edge it
-     reads as urgency at a glance and costs zero vertical space, so a dated card
-     and a rolling one measure identically. */
-  .rolecard-fuse { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
-    background: var(--line); overflow: hidden; }
-  .rolecard-fuse .fuse-fill { display: block; height: 100%; width: var(--fuse);
-    border-radius: 0;
-    animation: fuse-burn 900ms cubic-bezier(0.4, 0, 0.2, 1) both; }
-
-  /* The rolling card's own footer bar — same slot as .rolecard-fuse, on the
-     cards the fuse never renders on, so a dated and a rolling card fill the
-     same fixed height with something rather than one of them leaving a bare
-     edge. Everything about it is deliberately quieter than the fuse: no
-     colour ramp (one flat muted tone, not danger/soon/upcoming), no burn or
-     pulse animation, and it GROWS with elapsed time instead of depleting
-     toward a deadline — the opposite motion, so it cannot be misread as a
-     countdown at a glance. `views.py`'s `elapsed_pct` comment is the reason
-     this is a separate rule block rather than `.rolecard-fuse` with a grey
-     modifier: a measured elapsed time is a weaker claim than a real
-     deadline and must never wear the stronger claim's own visual language. */
-  .rolecard-observed { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
-    background: var(--line); overflow: hidden; }
-  .observed-fill { display: block; height: 100%; width: var(--observed);
-    border-radius: 0; background: var(--ink-3); }
+     OUT OF FLOW on a pointer device, and that is the whole reason this
+     works at 302px. In flow they measured 175px of a 242px line — Save,
+     "Not for me" and Read — leaving the meta 59px against the 83px its
+     verdict alone needed, so the visa and year answers were never on
+     screen. `.track-hide` is already invisible until the row is hovered,
+     but opacity frees no layout, so it was reserving ~85px permanently to
+     draw nothing. Lifting the group out of flow hands the meta the whole
+     line, and the controls come back over the row's trailing end on hover,
+     where the reader has stopped reading it. */
+  .rr-act { position: absolute; right: 2px; bottom: var(--s3);
+    display: inline-flex; align-items: center; gap: 6px;
+    padding-left: var(--s4); background: var(--paper);
+    opacity: 0; pointer-events: none; transition: opacity var(--t-fast); }
+  .rolerow:hover .rr-act, .rolerow:focus-within .rr-act {
+    opacity: 1; pointer-events: auto; }
+  /* A coarse pointer has no hover to reveal them with, so they are always
+     drawn — but NOT in the meta's line. Measured at 390px: in flow they
+     took 199px of a 332px row and left the meta 65px, which put the visa
+     and year verdict off screen on the device a student is most likely
+     reading this on. They wrap to their own line instead and the meta
+     keeps the full width; the row costs one more line, which a phone has
+     and the verdict cannot do without. */
+  @media (hover: none) {
+    .rr-line { flex-wrap: wrap; }
+    .rr-meta { flex-basis: 100%; }
+    .rr-act { position: static; padding-left: 0; background: none;
+      opacity: 1; pointer-events: auto; margin-left: auto; flex: none; }
+  }
   /* Stated class year. Rare by design (only postings that literally say
      "Class of YYYY"), so it reads as a quiet fact chip rather than competing
      with the role pill or the fuse. `flex: none` is load-bearing: the chip
@@ -1250,21 +1217,20 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      works today stops working. */
   @media (hover: hover) {
     .track-hide { opacity: 0; pointer-events: none; }
-    .rolecard:hover .track-hide,
+    .rolerow:hover .track-hide,
     .track-hide:focus-visible { opacity: 1; pointer-events: auto; }
   }
   .track-hide:hover { color: var(--danger); }
 
-  /* WHAT A DISMISSED CARD TURNS INTO. Keeps `.rolecard`'s box — same fixed
-     height, same border radius, same grid slot — so a column does not reflow
-     around a stub that is on screen for four seconds. Quieter than a live
-     card in every channel: no accent, no fuse, dashed border, muted ground.
-     It is a receipt, not a role. */
-  .rolecard-dismissed { justify-content: center; gap: 3px;
-    border-style: dashed; border-left-color: var(--line);
+  /* WHAT A DISMISSED ROW TURNS INTO. Keeps `.rolerow`'s own grid slot — same
+     column position, same class list — so the column does not reflow around
+     a stub that is on screen for four seconds. Quieter than a live row in
+     every channel: no urgency colour, no due figure, dashed border, muted
+     ground. It is a receipt, not a role. */
+  .rolerow-dismissed { display: flex; flex-direction: column; justify-content: center;
+    gap: 3px; border-top: 1px dashed var(--line-strong);
     background: var(--surface); }
-  .rolecard-dismissed:hover { border-color: var(--line); box-shadow: none;
-    transform: none; }
+  .rolerow-dismissed:hover { background: var(--surface); }
   .rcd-said { margin: 0; font-size: var(--fs-s); font-weight: var(--w-med);
     color: var(--ink-2); }
   /* WHICH role, said out loud. A stub that only said "Not for me" would be
@@ -1321,22 +1287,23 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      that needs the room is the finger, not the narrow screen: a touchscreen
      tablet at 1024px needs it and a 380px-wide desktop window does not.
 
-     THE CARD ARITHMETIC IS RE-DERIVED, NOT STRETCHED. `.rolecard` is a fixed
-     168px with `overflow: hidden`, so growing a control inside a reserved
-     22px row would have clipped it — the exact failure the block comment
-     above the card warns about. Touch gets its own total:
-
-       12 top padding + 44 top row + 5 + 40 title + 5 + 18 sub + 5 + 17 facts
-       + 5 + 44 meta row + 12 bottom padding + 3 fuse + 2 borders
-       + 2 rounding = 214.
-
-     That is +46px a card, roughly one card per column of scroll. The cards
-     still all measure the same, which is the invariant that matters.
+     NO ARITHMETIC TO RE-DERIVE ANY MORE. The card was a fixed 168px with
+     `overflow: hidden`, so a 44px control inside a reserved 22px row
+     clipped, and touch needed its own hand-computed total (214px). The row
+     that replaced it has a min-height and no clipping, so a taller control
+     simply grows the row it sits in — the reason the height became a floor
+     in the first place. What is left here is the controls themselves.
      ====================================================================== */
   @media (pointer: coarse) {
-    .rolecard { height: 214px; contain-intrinsic-size: auto 214px; }
-    .rolecard-top { height: 44px; }
-    .rolecard-meta { height: 44px; }
+    /* The floor rises with the controls rather than being recomputed: 44px
+       of button plus the row's own 12px padding pair. */
+    /* Touch: the 44px controls set the second line's height, so the row
+       grows with them instead of needing its own recomputed total.
+       The controls wrap to their own line here (see .rr-act above), so the
+       content box is 35 title + 2 + 17 meta + 2 + 44 controls = 100. An
+       earlier 81 was measured before that wrap existed and clipped 26 of
+       the first 80 rows at 390px. */
+    .rolerow { contain-intrinsic-size: auto 100px; }
     /* 6px between two opposite verbs is a hover-era gap. It grows with the
        targets it separates — not far, because the row has no width to spare
        (see the chip note below), but the dead band is now wider than the

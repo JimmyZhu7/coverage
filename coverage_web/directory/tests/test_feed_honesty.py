@@ -203,9 +203,15 @@ def test_elapsed_pct_is_absent_for_any_dated_role():
 @pytest.mark.django_db
 def test_rolling_card_renders_the_observed_footer_not_the_fuse(client):
     """Rendered-HTML check, the same posture the fuse's own tests take
-    (`test_styles_block.py`): a rolling card must show `.rolecard-observed`
-    and never `.rolecard-fuse`, and a dated card the exact opposite — the
-    two footers are mutually exclusive on every card."""
+    (`test_styles_block.py`). The row (`_rolecard.html`) has no fuse bar or
+    observed bar any more — urgency moved into the colour of the deadline
+    figure in `.rr-due`, and an undated role states its elapsed time in
+    words on the meta line instead of a growing bar (see the row's own
+    header comment). The invariant those two footers used to pin still
+    holds in the new vocabulary: a rolling/undated row must show the
+    "first seen" wording and never a real countdown figure, and a dated
+    row must show its countdown figure and never the "first seen" wording
+    — the two are still mutually exclusive on every row."""
     # Two different firms, not one: `directory.dupes.fold_duplicates` folds
     # same-firm, same-title postings into one card, and both `_opp` calls
     # below share the helper's hardcoded title — same firm would leave only
@@ -216,12 +222,16 @@ def test_rolling_card_renders_the_observed_footer_not_the_fuse(client):
     _opp(dated_firm, "https://x/dated", deadline=TODAY + timedelta(days=10))
     body = _STYLE_RE.sub("", client.get(reverse("opportunities")).content.decode())
 
-    assert body.count("rolecard-observed") >= 1
-    assert body.count("rolecard-fuse") >= 1
-    # Never both signals on the same card: one rolling, one dated, so each
-    # marker's count matches the count of its own kind of card exactly once.
-    assert "fuse-fill" in body
-    assert "observed-fill" in body
+    # The undated row: no date posted, elapsed time stated in words, and its
+    # due column carries the honest dash — never a countdown figure.
+    assert "No date posted, first seen 15d ago" in body
+    assert "rr-due-none" in body
+    # The dated row: a real countdown figure, coloured by its urgency level
+    # (10 days out is "upcoming" — see `_urgency_item`'s level bands).
+    assert "rr-due-n meta-upcoming" in body
+    # Neither wording leaks onto the other row's kind of card.
+    assert body.count("first seen") == 1
+    assert body.count("rr-due-n meta-upcoming") == 1
 
 
 @pytest.mark.django_db

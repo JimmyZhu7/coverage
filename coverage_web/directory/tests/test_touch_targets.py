@@ -236,37 +236,45 @@ def test_a_card_control_clears_the_touch_floor_where_the_pointer_is_a_finger(cls
 
 
 def test_growing_the_controls_re_derived_the_card_instead_of_stretching_it():
-    """`.rolecard` is a fixed height with `overflow: hidden`, so a taller
-    control inside a reserved row does not push the card out — it gets cut
-    off. Whatever the touch rows gain, the card total has to gain too."""
+    """`.rolecard` was a fixed height with `overflow: hidden`, so a taller
+    control inside a reserved row did not push the card out — it got cut
+    off, and whatever the touch rows gained, the card total had to gain too
+    by hand. `.rolerow` (2026-08-30) retired that arithmetic on purpose: it
+    has no fixed height for a control to overflow, only a `min-height`
+    floor, so a 44px control simply grows the row it sits in (see
+    `_styles.html`'s own "NO ARITHMETIC TO RE-DERIVE ANY MORE" comment on
+    this rule) — the class of bug this test used to catch cannot happen the
+    same way any more.
+
+    What still needs pinning, in the row's own vocabulary: the controls
+    themselves still clear the 44px touch floor (covered by
+    `test_a_card_control_clears_the_touch_floor_where_the_pointer_is_a_finger`
+    above), and the `content-visibility` placeholder that stands in for an
+    unrendered row still has to grow to fit the extra line those 44px
+    controls wrap onto under `(pointer: coarse)` — a placeholder that did
+    not grow is the same "guessed too small, clipped the content" bug in
+    the row's new vocabulary instead of the card's."""
     css = _all_feed_css()
     base, coarse = _rules(css), _coarse_rules(css)
 
-    grown = 0.0
-    for row in (".rolecard-top", ".rolecard-meta"):
-        was, now = _declared_px(base, row, "height"), _declared_px(coarse, row, "height")
-        assert was is not None, f"{row} no longer reserves a height"
-        assert now is not None and now >= TOUCH_FLOOR, (
-            f"{row} holds a {TOUCH_FLOOR}px control on touch but still reserves "
-            f"{now}px. The card clips the overflow."
-        )
-        grown += now - was
-
-    was = _declared_px(base, ".rolecard", "height")
-    now = _declared_px(coarse, ".rolecard", "height")
-    assert was is not None, "the role card no longer pins a height"
-    assert now is not None, (
-        "the touch rows grew but `.rolecard` kept its cursor-sized height, so "
-        "the bottom of every card is cut off."
+    base_px = _declared_px(base, ".rolerow", "contain-intrinsic-size")
+    coarse_px = _declared_px(coarse, ".rolerow", "contain-intrinsic-size")
+    assert base_px is not None, "`.rolerow` no longer reserves an intrinsic size"
+    assert coarse_px is not None, (
+        "`.rolerow` no longer reserves a touch-scaled intrinsic size inside "
+        "`(pointer: coarse)`"
     )
-    assert now - was >= grown, (
-        f"the touch rows gained {grown}px and the card gained only {now - was}px."
+    # The controls wrap onto their own line on a coarse pointer (see
+    # `.rr-act`'s comment), which costs the row a whole extra ~44px line —
+    # so the touch placeholder must be taller than the base one, not merely
+    # equal to it.
+    assert coarse_px > base_px, (
+        f"the touch placeholder ({coarse_px}px) is not taller than the base "
+        f"one ({base_px}px), but the wrapped controls need an extra line."
     )
-    intrinsic = _declared_px(coarse, ".rolecard", "contain-intrinsic-size")
-    assert intrinsic == now, (
-        "`contain-intrinsic-size` is the placeholder for the ~1,500 cards "
-        f"skipped by `content-visibility: auto`; it says {intrinsic}px while "
-        f"the card is {now}px, so the scrollbar jumps as cards paint."
+    assert coarse_px >= TOUCH_FLOOR, (
+        f"the touch placeholder reserves only {coarse_px}px, under the "
+        f"{TOUCH_FLOOR}px the controls it must fit need on their own."
     )
 
 

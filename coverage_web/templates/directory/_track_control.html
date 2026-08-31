@@ -10,7 +10,7 @@ column (see _results.html), so this partial can render twice for the same
 `r.id` on one page load. `id="track-{{ r.id }}"` is therefore NOT unique in
 the DOM — kept only as a labeling hook, never as an htmx target. Both
 Save/Saved buttons below target `closest .track` (self-scoped, like the
-"Not for me" button's `closest .rolecard`) so a click always swaps the card
+"Not for me" button's `closest .rolerow`) so a click always swaps the card
 it was actually clicked on, not whichever same-id copy happens to be first
 in document order.
 {% endcomment %}
@@ -49,7 +49,7 @@ in document order.
             hx-post="{% url 'track_opportunity' r.id %}"
             hx-vals='{"status": "dismiss", "from": "card", "show_firm": "{% if r.show_firm %}1{% else %}0{% endif %}"}'
             hx-include=".filters"
-            hx-target="closest .rolecard" hx-swap="outerHTML swap:120ms"
+            hx-target="closest .rolerow" hx-swap="outerHTML swap:120ms"
             title="Won't suggest this role again">Not for me</button>
   {% elif r.track_status == "saved" %}
     <button type="button" class="track-btn is-saved"

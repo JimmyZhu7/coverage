@@ -52,10 +52,12 @@ def _firm_row_meta(client, firm):
 
 
 def _feed_sub(client):
-    """Each feed card's sub-line, as a reader sees it."""
+    """Each feed row's place text, as a reader sees it. The card's own
+    `.rolecard-sub` line is gone (see `_rolecard.html`); the compact row
+    prints the same fact as a plain `.rr-loc` span on its one meta line."""
     body = client.get("/opportunities/").content.decode()
     return [" ".join(html.unescape(re.sub(r"<[^>]+>", "", m)).split())
-            for m in re.findall(r'<div class="rolecard-sub">(.*?)</div>', body, re.S)]
+            for m in re.findall(r'<span class="rr-loc[^"]*"[^>]*>(.*?)</span>', body, re.S)]
 
 
 # ---------------------------------------------------------------------------

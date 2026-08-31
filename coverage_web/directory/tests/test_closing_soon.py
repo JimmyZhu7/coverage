@@ -13,7 +13,7 @@ the day someone edits one and not the other, this fails instead of shipping.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from django.urls import reverse
@@ -272,22 +272,34 @@ def test_lens_rows_show_the_stage_they_are_counted_in(client, board, tracked):
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    "precision,expected_countdown",
-    [("month", "closes in 2 months"), ("estimated", "estimated in 2 months")],
+    "precision,expected_countdown,expected_short",
+    [
+        ("month", "closes in 2 months", "2mo"),
+        ("estimated", "estimated in 2 months", "2mo"),
+    ],
 )
 def test_an_inexact_deadline_gets_no_day_countdown_on_the_feed(
-    precision, expected_countdown
+    precision, expected_countdown, expected_short
 ):
     from directory.views import _urgency_item
 
     today = timezone.localdate()
-    firm = Firm.objects.create(slug="inexact-co", name="Inexact Co")
+    # Two full calendar months out, built with month arithmetic rather than
+    # `timedelta(days=62)`: a day-count offset drifts across a different
+    # number of month boundaries depending on where in the current month
+    # `today` happens to fall (the fixture used to assume it always landed
+    # 2 months out — it does not, e.g. from the 29th onward it's 3), so it
+    # must be built in the same month-level unit `_month_distance` measures.
+    month_index = today.month - 1 + 2
+    deadline = date(today.year + month_index // 12, month_index % 12 + 1,
+                     min(today.day, 28))
+
+    firm = Firm.objects.create(slug=f"inexact-co-{precision}", name="Inexact Co")
     opp = Opportunity.objects.create(
         firm=firm, title="Summer Analyst", status="open",
         bucket=next(iter(TARGET_BUCKETS)),
-        url="https://inexact.example/1",
-        # ~62 days out, so a day-level reading would say "Closes in 62 days".
-        deadline=today + timedelta(days=62),
+        url=f"https://inexact.example/{precision}",
+        deadline=deadline,
         deadline_precision=precision,
     )
 
@@ -296,17 +308,23 @@ def test_an_inexact_deadline_gets_no_day_countdown_on_the_feed(
     )
 
     assert item["countdown"] == expected_countdown
-    assert "62 days" not in item["countdown"]
+    # No day-level reading leaks through the long form.
+    assert "day" not in item["countdown"]
     # The fuse burns down to a specific afternoon, so an inexact date gets
     # none — and the template gates on this being None, not on `dated`.
     assert item["fuse_pct"] is None
     # ...while `days_left` keeps the true day count, because the feed sort,
     # the firm cluster's `next_days`, the cluster role sort and the
     # closing-this-week count all read it and each breaks on a coarser value.
-    assert item["days_left"] == 62
+    assert item["days_left"] == (deadline - today).days
     assert item["dated"] is True
     # A month-level date cannot earn a day-level urgency band.
     assert item["level"] == "upcoming"
+    # The compact feed row's fixed-width deadline column reads
+    # `countdown_short`, not `countdown` — a bare "58d" here would assert a
+    # day the posting never stated, so the short form must stay in the same
+    # month unit as the long one.
+    assert item["countdown_short"] == expected_short
 
 
 @pytest.mark.django_db

@@ -2049,6 +2049,20 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
                 "Closes tomorrow" if days == 1 else
                 f"Closes in {days} days"
             ),
+            # The same fact at column width, for the compact row's fixed
+            # deadline column (_rolecard.html) — "Closes in 12 days" does not
+            # fit 44px and the full sentence stays the accessible name.
+            #
+            # An INEXACT date gets a month, never a day count: `days` exists
+            # for these rows but nothing ever said which day of the month, so
+            # "18d" would assert a day the row does not hold. That is the same
+            # reason `fuse_pct` is None here — see its comment below.
+            "countdown_short": (
+                f"{_month_distance(o.deadline, today)}mo" if inexact else
+                "Today" if days == 0 else
+                "1d" if days == 1 else
+                f"{days}d" if days > 0 else "Past"
+            ),
             "level": (
                 "upcoming" if inexact else
                 "today" if days <= 2 else "soon" if days <= 7 else "upcoming"

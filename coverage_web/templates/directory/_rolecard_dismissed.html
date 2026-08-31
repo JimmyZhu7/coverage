@@ -14,15 +14,17 @@ the peek IS at the top. A student who clicked a card 600 rows down would never
 see it. So this occupies the card's own grid slot — the column does not jump,
 and the reversal is under the cursor that caused it.
 
-It keeps `.rolecard` in its class list on purpose: the column's grid sizes its
-children, and a differently-shaped element here would reflow every card below
-it for as long as the stub is on screen.
+It keeps `.rolerow` in its class list on purpose, and for two reasons: the
+column sizes its children, so a differently-shaped element here would reflow
+every row below it while the stub is on screen — and `closest .rolerow` is
+what both the dismiss button and this Undo target, so the class IS the
+selector contract, not decoration.
 
 `r` is `_dismiss_undo_offer`'s dict (id, firm_name, title). The undo POSTs
 `undismiss`, which deletes the row outright, and comes back as the real card
 again via `_one_rolecard` — untracked, which is what it was before the click.
 {% endcomment %}
-<div class="rolecard rolecard-dismissed" role="status">
+<div class="rolerow rolerow-dismissed" role="status">
   <p class="rcd-said">Not for me.</p>
   <p class="rcd-what">{% if show_firm %}{{ r.firm_name|smart_title }} &mdash; {% endif %}{{ r.title|smart_title }}</p>
   <p class="rcd-note">Won't be suggested again. All of them are on
@@ -31,5 +33,5 @@ again via `_one_rolecard` — untracked, which is what it was before the click.
           hx-post="{% url 'track_opportunity' r.id %}"
           hx-vals='{"status": "undismiss", "from": "card", "show_firm": "{% if show_firm %}1{% else %}0{% endif %}"}'
           hx-include=".filters"
-          hx-target="closest .rolecard" hx-swap="outerHTML">Undo</button>
+          hx-target="closest .rolerow" hx-swap="outerHTML">Undo</button>
 </div>

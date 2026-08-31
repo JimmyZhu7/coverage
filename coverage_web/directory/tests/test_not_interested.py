@@ -229,7 +229,7 @@ def test_a_card_dismissal_swaps_the_card_for_an_undo_in_place(client):
     _offer(client)
     after = _dismiss(client, opp, origin="card").content.decode()
 
-    assert "rolecard-dismissed" in after
+    assert "rolerow-dismissed" in after
     assert "Markets Summer Analyst" in after
     assert '"status": "undismiss", "from": "card"' in after
 
@@ -265,8 +265,8 @@ def test_undo_on_the_card_brings_the_real_card_back_untracked(client):
     _dismiss(client, opp, origin="card")
     after = _undismiss(client, opp, origin="card").content.decode()
 
-    assert 'class="rolecard' in after
-    assert "rolecard-dismissed" not in after
+    assert 'class="rolerow' in after
+    assert "rolerow-dismissed" not in after
     assert "Sales And Trading Analyst" in after
     # Untracked, which is what it was before the click — the Save star is
     # back, not a "Saved" chip.

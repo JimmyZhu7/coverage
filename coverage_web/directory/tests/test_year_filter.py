@@ -155,12 +155,12 @@ def test_year_filter_does_not_imply_a_class_year(client, feed):
         for r in cl["roles"]:
             assert r["cohort"] == "2027"
             assert r["class_year"] == ""
-    # No class-year chip is rendered for any of them. (Matching the chip's
-    # element rather than the bare words: the inline stylesheet's own comment
+    # No class-year mark is rendered for any of them. (Matching the element
+    # rather than the bare words: the inline stylesheet's own comment
     # legitimately contains "Class of".)
-    assert 'class="class-chip"' not in resp.content.decode()
-    # …while the row that DID state one still gets its chip.
-    assert 'class="class-chip"' in _get(client, year="2028").content.decode()
+    assert 'class="rr-cls"' not in resp.content.decode()
+    # …while the row that DID state one still gets its mark.
+    assert 'class="rr-cls"' in _get(client, year="2028").content.decode()
 
     # The control itself is labelled for the programme year, never "Class".
     # (The old explainer sentence under the control — "Intake year in the

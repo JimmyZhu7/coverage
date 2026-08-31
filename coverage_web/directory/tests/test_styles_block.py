@@ -64,27 +64,39 @@ def test_style_block_braces_balance(path):
 def test_the_feeds_core_layout_rules_survive_rendering():
     """The specific rules whose loss produced the incident. They live late in
     the file, so they are the first casualties of any early parse break —
-    which makes them the canary worth naming explicitly."""
+    which makes them the canary worth naming explicitly.
+
+    `.rolecard` was the canary before the 2026-08-30 row redesign retired
+    it; `.rolerow` is the rule that replaced it and lives in the same late
+    part of the file, so it keeps the same canary job."""
     blocks = _style_blocks("/opportunities/")
     assert blocks, "the feed should render its own <style> block"
     css = "\n".join(blocks)
-    for selector in (".rolecard {", ".firmcols", ".fuse-passed", ".recbar"):
+    for selector in (".rolerow {", ".firmcols", ".fuse-passed", ".recbar"):
         assert selector in css, f"{selector} missing from the feed's rendered CSS"
 
 
 # ---------------------------------------------------------------------------
-# Role-card standardisation.
+# Role-row sizing.
 # ---------------------------------------------------------------------------
-# The feed's cards have now been through three states: a fixed height that
-# CLIPPED (190px of content in a 120px box), a min-height that stopped the
-# clipping but let them take SEVEN distinct heights from 122px to 205px, and
-# the current fixed height with every slot reserved and clamped. Only the third
-# both standardises and never cuts text off.
+# The feed's cards went through three states before the 2026-08-30 redesign:
+# a fixed height that CLIPPED (190px of content in a 120px box), a min-height
+# that stopped the clipping but let them take SEVEN distinct heights, and a
+# fixed height with every slot reserved and clamped. That third state is what
+# `.rolecard` was, and the two tests it needed — "the box is fixed" and
+# "every variable slot inside it is bounded" — no longer describe anything:
+# `.rolerow` is a FLOOR (min-height, not height), see this file's own header
+# comment and `_rolecard.html`'s. There is no fixed box left to clip against,
+# so a slot can no longer overflow a box that does not exist — the whole
+# category of bug these two tests existed to catch.
 #
-# These assert the CSS contract that makes the third state hold. They are
-# deliberately about the stylesheet rather than a headless layout pass: the
-# rule "the box is fixed AND every slot inside it is bounded" is the invariant,
-# and it is checkable without a browser.
+# What replaced it is below: the row still must not silently reintroduce a
+# fixed box (that is how the old clipping bug came back), and the
+# `content-visibility` placeholder that stands in for an unrendered row
+# still must not under-guess the row's real height — that exact mistake
+# shipped twice during this file's own history (see the comments on
+# `.rolerow`'s `content-visibility` rule and its `(pointer: coarse)` block)
+# and clipped the meta line off every offscreen row both times.
 
 
 def _feed_css() -> str:
@@ -108,31 +120,99 @@ def _rule(css: str, selector: str) -> str:
     return m.group(1)
 
 
-def test_the_role_card_pins_a_single_height():
-    """A fixed `height`, not `min-height` — min-height is what let the cards
-    take seven different heights and read as ragged."""
-    css = _feed_css()
-    rule = _rule(css, ".rolecard")
-    assert "height: 168px" in rule, rule
-    assert "min-height" not in rule, "min-height reintroduces the ragged heights"
+def _rule_all(css: str, selector: str) -> str:
+    """Every rule literally selecting `selector` (not a compound or pseudo
+    selector built on it), concatenated in source order. `.rolerow` gets two
+    separate rules in the file — the layout declaration and, later, the
+    `content-visibility` one — and the cascade applies both, so a single-match
+    `_rule` would silently miss whichever properties live in the second."""
+    bodies = [m.group(1) for m in re.finditer(
+        r"^\s*" + re.escape(selector) + r"\s*\{(.*?)\}", css, re.S | re.M)]
+    assert bodies, f"no rule found for {selector}"
+    return "\n".join(bodies)
 
 
-def test_every_variable_slot_inside_the_card_is_height_bounded():
-    """The other half of the contract. A fixed box with unbounded content is
-    the ORIGINAL clipping bug, so each slot that holds scraped text must
-    reserve its own height."""
+def _coarse_block(css: str) -> str:
+    """The body of the feed's `@media (pointer: coarse) { ... }` block,
+    brace-counted so a nested rule inside it does not truncate the match."""
+    m = re.search(r"@media\s*\(\s*pointer:\s*coarse\s*\)\s*\{", css)
+    assert m, "no (pointer: coarse) block in the feed's rendered CSS"
+    depth, i = 1, m.end()
+    while depth and i < len(css):
+        depth += (css[i] == "{") - (css[i] == "}")
+        i += 1
+    return css[m.end():i - 1]
+
+
+def test_the_role_row_never_pins_a_fixed_height():
+    """The opposite contract from the card's. A fixed `height` is exactly
+    what clipped the card's content twice; the row's whole design is to
+    stay a natural, `min-height`-at-most box so nothing it holds can ever
+    be cut off by its own container. `.rolerow` itself declares neither —
+    row height falls out of its content — but this also guards against the
+    fixed-height bug being reintroduced by a future edit."""
     css = _feed_css()
-    for selector in (".rolecard-top", ".rolecard-title", ".rolecard-sub",
-                     ".rolecard-facts", ".rolecard-meta"):
-        rule = _rule(css, selector)
-        assert "height:" in rule, f"{selector} must reserve a height, got: {rule.strip()}"
+    rule = _rule_all(css, ".rolerow") + "\n" + _rule(_coarse_block(css), ".rolerow")
+    assert not re.search(r"(?<!min-)(?<!-)height:\s*\d", rule), (
+        f"`.rolerow` declares a fixed height somewhere ({rule.strip()!r}), "
+        "which is the exact defect this row replaced the card to fix — a "
+        "taller control or a two-line title now has nothing to overflow into."
+    )
+    # Load-bearing per the rule's own comment: `.firmcol-scroll` is a fixed-
+    # height flex column, and a row left at the default `flex-shrink: 1` is
+    # compressed below its own content — clipping the meta line (location,
+    # the visa verdict) off every row. Dropping this in a first pass did
+    # exactly that.
+    assert "flex: none" in rule, (
+        "`.rolerow` no longer declares `flex: none`, so its fixed-height "
+        "flex-column parent can compress it below its own content again."
+    )
+
+
+def test_the_offscreen_placeholder_never_guesses_a_bare_number():
+    """The row's `content-visibility: auto` placeholder — `contain-intrinsic-
+    size` — stands in for every unrendered row until it has painted once. A
+    BARE guessed number here is the bug that shipped twice on this exact
+    rule: 56px against ~88px of real content in the base case, then 81px
+    against 100px once touch wrapped the controls onto their own line — both
+    times it silently clipped the meta line off the page. `auto` is what
+    stops that: it tells the browser to substitute the row's own last real
+    size once one has rendered, rather than trusting the guess forever."""
+    css = _feed_css()
+    base_rule = _rule_all(css, ".rolerow")
+    coarse_rule = _rule(_coarse_block(css), ".rolerow")
+    for rule, label in ((base_rule, ".rolerow"),
+                        (coarse_rule, "the (pointer: coarse) block")):
+        m = re.search(r"contain-intrinsic-size:\s*([^;]+);", rule)
+        assert m, f"{label} declares no contain-intrinsic-size"
+        assert m.group(1).strip().startswith("auto "), (
+            f"contain-intrinsic-size is {m.group(1).strip()!r}, a bare "
+            "number with no `auto` fallback — this is the exact regression "
+            "that clipped every offscreen row's meta line."
+        )
+    # The touch placeholder must be at least as tall as the base one: the
+    # controls wrap onto their own line under `(pointer: coarse)` (see
+    # `.rr-act`'s comment), which costs the row a whole extra line, so a
+    # placeholder that did not grow to match would clip that line again.
+    base_px = float(re.search(r"auto\s+(\d+(?:\.\d+)?)px",
+                              re.search(r"contain-intrinsic-size:\s*([^;]+);",
+                                        base_rule).group(1)).group(1))
+    coarse_px = float(re.search(r"auto\s+(\d+(?:\.\d+)?)px",
+                                re.search(r"contain-intrinsic-size:\s*([^;]+);",
+                                          coarse_rule).group(1)).group(1))
+    assert coarse_px >= base_px, (
+        f"the touch placeholder ({coarse_px}px) is shorter than the base "
+        f"one ({base_px}px), but touch controls take an extra line, not less."
+    )
 
 
 def test_the_title_is_clamped_to_two_lines():
-    """A scraped job title is unbounded. Without the clamp, a long one pushes
-    past the reserved 40px and the fixed box clips it."""
+    """A scraped job title is unbounded. The row has no fixed box left for
+    it to overflow, but an unclamped title could still grow to any length
+    and dominate the row — the clamp is what keeps title height predictable
+    regardless of how long the scraped text is."""
     css = _feed_css()
-    rule = _rule(css, ".rolecard-title a")
+    rule = _rule(css, ".rr-title a")
     assert "-webkit-line-clamp: 2" in rule
     assert "overflow: hidden" in rule
 
@@ -189,17 +269,20 @@ def test_first_seen_is_stated_once_and_only_where_it_is_the_answer(
     grey, competing."""
     html = _markup(client)
 
-    cards = html.count('class="rolecard ')
-    assert cards == 2, f"fixture should render two cards, got {cards}"
+    rows = html.count('class="rolerow ')
+    assert rows == 2, f"fixture should render two rows, got {rows}"
 
     # Retired duplicates, gone from markup AND stylesheet.
     assert "fresh-badge" not in html, "the retired duplicate badge is back"
     assert "rolling-tag" not in html, "the retired duplicate tag is back"
 
-    # One meta row per card; the age on the undated one only, and once.
-    assert html.count("rolecard-meta") == cards
+    # One meta line per row; the age on the undated one only, and once.
+    assert html.count('class="rr-meta"') == rows
     assert html.count("first seen") == 1
-    assert html.count("rolecard-fuse") == 1, "one dated card in the fixture"
+    # The dated row's due column carries a real countdown figure instead of
+    # the retired fuse bar — see `_rolecard.html`'s header comment on why
+    # urgency moved into that figure's colour.
+    assert html.count("rr-due-n meta-") == 1, "one dated card in the fixture"
 
 
 def test_the_card_carries_every_fact_the_feed_promises(client, two_roles):
@@ -207,16 +290,20 @@ def test_the_card_carries_every_fact_the_feed_promises(client, two_roles):
     but not the rolling one."""
     html = _markup(client)
 
-    assert "role-mini" in html, "role type + programme year pill"
-    assert "· 2027" in html, "the programme year rides in the pill"
+    # Role type + programme year: no longer a pill (`.role-mini` retired with
+    # the card), now plain text in `.rr-kind` — see `_rolecard.html`'s header
+    # comment on the pills being gone.
+    assert re.search(r'<span class="rr-kind"[^>]*>[^<]*2027', html), (
+        "the programme year should ride in the row's kind label"
+    )
     assert "New York" in html and "London" in html, "location"
     assert "first seen" in html, "provenance"
     # NOT "Rolling": that word is now reserved for postings whose own text
     # states rolling review. A role with no deadline in the data says the
     # true thing instead, because nobody posted a date.
     assert "No date posted" in html, "the undated role says what is known"
-    # The countdown hairline belongs to the dated role only.
-    assert html.count("rolecard-fuse") == 1
+    # The countdown figure belongs to the dated role only.
+    assert html.count("rr-due-n meta-") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -483,13 +570,16 @@ def test_every_label_the_product_can_build_fits_the_chip_cap():
 
 
 def test_the_feed_row_shrinks_its_chips_instead_of_slicing_them():
-    """The one row where chips compete for width: a fixed 330px, one line,
-    `overflow: hidden`. If the chips cannot shrink, that overflow does the
-    cutting — and it cuts mid-glyph with no ellipsis, which reads as a
+    """The pill chips this rule used to bound (`.rolecard-facts .fact-chip`)
+    are gone from the feed row — facts are now plain text spans on the one
+    `.rr-meta` line (see `_rolecard.html`'s header comment), and `.rr-fact`
+    is what carries the same shrink-before-slice contract there: the line is
+    one row, `overflow: hidden`, and if a fact cannot shrink that overflow
+    does the cutting — mid-glyph, with no ellipsis, which reads as a
     rendering fault rather than as truncation."""
     css = _feed_css()
-    rule = _rule(css, ".rolecard-facts .fact-chip")
+    rule = _rule(css, ".rr-fact")
     assert "flex-shrink: 1" in rule, rule
     assert "min-width: 0" in rule, (
         "a flex item's automatic minimum size is its content, so without "
-        "min-width: 0 the chips refuse to shrink and the row overflows")
+        "min-width: 0 the facts refuse to shrink and the meta line overflows")

@@ -630,7 +630,7 @@ def test_only_the_picked_column_names_the_firm_on_its_cards(client, live_board):
         assert not any(r.get("show_firm") for r in cluster["roles"])
 
     body = _markup(resp)
-    assert body.count("rolecard-firm") == resp.context["pick_cluster"]["open_count"]
+    assert body.count("rr-firm") == resp.context["pick_cluster"]["open_count"]
 
 
 # ---------------------------------------------------------------------------
