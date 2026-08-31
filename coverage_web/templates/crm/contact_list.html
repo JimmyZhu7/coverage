@@ -106,7 +106,7 @@
   {% endcomment %}
   {% if gaps %}
   <section class="gap-strip">
-    <h2 class="strip-title" title="Ranked by exposure: tier weight × how far this firm is from your advocate target, plus a bonus if its deadline is close. Hover a card for the exact math.">Coverage Gaps <span class="scrub-count">worst {{ gaps|length }}</span></h2>
+    <h2 class="strip-title strip-title-lg" title="Ranked by exposure: tier weight × how far this firm is from your advocate target, plus a bonus if its deadline is close. Hover a card for the exact math.">Coverage Gaps</h2>
     <div class="gap-row">
       {% for g in gaps %}
         <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"
@@ -209,7 +209,7 @@
             </details>
           {% endif %}
           {% if g.lever %}
-            <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Work {{ g.lever.name|smart_title }}</a>
+            <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Talk to {{ g.lever.name|smart_title }}</a>
           {% else %}
             {% comment %}Visible text trimmed to "Add" — six of these sit in
             a row and "+ Add a contact" repeated six times was the row's
@@ -319,7 +319,7 @@
     (the actual drag target). A third copy on this header explained nothing
     those two don't already cover before you reach a single tier section.
     {% endcomment %}
-    <h2 class="strip-title">Firm Coverage <span class="scrub-count">{{ firm_total }}</span></h2>
+    <h2 class="strip-title strip-title-lg">Firm Coverage</h2>
       <div class="net-panel">
       {% comment %}
       THE LEGEND that used to open this panel is gone. Four warmth dots and
@@ -500,7 +500,7 @@
                   {% if fc.gap_label %}
                     {% if fc.lever %}
                       <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
-                         href="{% url 'crm:contact_detail' fc.lever.id %}">Work {{ fc.lever.name|smart_title }}</a>
+                         href="{% url 'crm:contact_detail' fc.lever.id %}">Talk to {{ fc.lever.name|smart_title }}</a>
                     {% else %}
                       <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
                          href="{% url 'crm:contact_new' %}?firm={{ fc.firm.slug }}">＋ Add a contact</a>

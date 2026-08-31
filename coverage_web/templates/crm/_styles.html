@@ -76,8 +76,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      the pagehead's drawn dash continued into the page body, which is why the
      segment is the same 18px. Static on purpose — the rail cards already
      rise in, and a signature that animates everywhere stops being one. */
-  /* .strip-title: the shared section label (coverage.css §6b). Nothing to
-     add here — it needs no page-specific behaviour. */
+  /* .strip-title: the shared section label (coverage.css §6b), 11px
+     uppercase -- correct for "Unplaced"/"Contacts", which sit right above
+     the rows they label. Coverage Gaps and Firm Coverage are the page's two
+     major strips, each with its own visual block below, and read as
+     afterthoughts at caption size. `-lg` is a page-scoped ADDITION to the
+     shared class, not an edit to it: coverage.css's `.strip-title` is used
+     by rail titles, Settings' nav and other pages that must not move. */
+  .strip-title-lg { font-size: var(--fs-l); font-weight: var(--w-bold);
+    color: var(--ink); text-transform: none; letter-spacing: -0.01em; }
 
   /* Sits under a region tab's Contacts header: quiet, but it has to be read
      before the list below is trusted, so it keeps the title's top margin. */
@@ -211,19 +218,24 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     .seed-btn { grid-column: 1 / -1; width: 100%; min-height: 44px; }
   }
 
-  /* Plays (crm/_cockpit.html, crm.today._plays): a dated world fact joined
-     to the student's own people at that firm. Its own shape, distinct from
-     both act-card and the seed lane above — a play is not a due action with
-     write buttons behind it (there is nothing to attest to), and unlike a
-     seed it is anchored to a REAL confirmed date rather than a first-move
-     suggestion, so it gets a SOLID left edge rather than the seed lane's
-     dashed one. Danger tint only when the date itself is urgent — the same
-     bar the deadlines rail and the cadence engine hold, so a colour here
-     never disagrees with the same firm's colour there. */
+  /* Firms with no contacts yet (crm/_cockpit.html, crm.today._coverage_cards):
+     a tiered firm the student knows nobody at. Its own shape, distinct from
+     both act-card and the seed lane above — not a due action with write
+     buttons behind it (there is nothing to attest to), and unlike a seed it
+     names a firm the student already prioritised rather than offering a
+     first-move suggestion, so it gets a SOLID left edge rather than the seed
+     lane's dashed one.
+
+     Until 2026-08-31 this same card anatomy also carried a confirmed dated
+     event — a countdown chip, a danger tint when that date was urgent — as
+     the other half of a mixed "Your board" lane. The board was removed
+     (not practically useful, per the founder); every card in this lane now
+     carries exactly one shape, so the countdown/urgency rules that only
+     ever served the dated half went with it. */
   /* THE CARD IS A ROW, NOT A COLUMN — measured, 2026-08-28, demo account at
-     a 1440px viewport. The board lane is full-width in `cockpit-main`, so
-     every card was a 1048 x 140px rectangle holding four SHORT single lines
-     of text. `space-between` on the head and the foot then pushed their
+     a 1440px viewport. The lane is full-width in `cockpit-main`, so every
+     card was a 1048 x 140px rectangle holding three SHORT single lines of
+     text. `space-between` on the head and the foot then pushed their
      right-hand element the entire width of the card away from its own
      sibling: 918px of nothing between "J.P. Morgan" and its "2d" chip, and
      844px between "View contacts" and "Dismiss". Stacking the button row
@@ -242,7 +254,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
      This is `e9bd00b`'s rule on a different widget: a card's height is what
      it holds, never a reserved gap. */
-  .lane-plays { margin-bottom: var(--s6); }
+  .lane-coverage { margin-bottom: var(--s6); }
   .play-list { list-style: none; margin: 0; padding: 0;
     display: flex; flex-direction: column; gap: var(--s2); }
   .play-card { background: var(--surface); border: 1px solid var(--line);
@@ -253,15 +265,9 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     grid-template-areas: "head   foot"
                          "fact   foot"
                          "people foot"; }
-  .play-card.is-urgent { border-left-color: var(--danger); }
-  /* flex-start, not space-between: the countdown belongs to the name it is
-     counting down for, and reads as a pair only when it sits beside it. */
   .play-head { grid-area: head; display: flex; align-items: baseline;
     justify-content: flex-start; gap: var(--s2); min-width: 0; }
   .play-firm { font-weight: var(--w-med); color: var(--ink); }
-  .play-when { font-family: var(--font-mono); font-size: var(--fs-xs);
-    color: var(--ink-3); white-space: nowrap; }
-  .play-when.is-urgent { color: var(--danger); font-weight: var(--w-med); }
   .play-fact { grid-area: fact; margin: 2px 0 0; font-size: var(--fs-s);
     color: var(--ink-2); min-width: 0; }
   /* --s1 between two lines that now sit inside one tight block; --s2 was
@@ -414,6 +420,24 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     text-transform: none; letter-spacing: 0; color: var(--ink-3);
     font-weight: var(--w-med); }
   .rail-more:hover { color: var(--accent-ink); }
+
+  /* Getting started: the setup checklist, gone the moment it's done (see
+     crm.today._getting_started_checklist). A plain list, not act-cards —
+     there is nothing to attest to, only a destination to visit — so each
+     row is a mark plus a label, nothing else. */
+  .getting-started-list { list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: var(--s2); }
+  .getting-started-row { display: flex; align-items: baseline;
+    gap: var(--s2); font-size: var(--fs-s); }
+  .getting-started-mark { flex: none; width: 1.2em; font-family: var(--font-mono);
+    color: var(--ok); }
+  .getting-started-label { color: var(--ink); font-weight: var(--w-med);
+    text-decoration: none; }
+  a.getting-started-label:hover { color: var(--accent-ink); text-decoration: underline; }
+  /* Done rows read as a plain sentence, not a link, because there is
+     nowhere left to send the student for a step they already finished. */
+  .getting-started-row.is-done .getting-started-label { color: var(--ink-3);
+    font-weight: var(--w-reg); }
 
   /* Below 1024 the rail stacks under the queue, pace ring first. Cards flow
      in a row while they fit and wrap rather than shrinking. */
@@ -729,72 +753,22 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   /* ---- Waiting on reply: the page's one no-action block ----
      Deliberately the quietest thing in the main column — no card chrome, no
-     buttons, one line of chips. It answers "did I drop anything?" and then
+     buttons, one line of text. It answers "did I drop anything?" and then
      gets out of the way. Giving it actions would turn reassurance back into
-     a queue, which is the state the cadence cap exists to prevent. */
+     a queue, which is the state the cadence cap exists to prevent.
+
+     UNTIL 2026-08-31 this rendered up to 12 name chips (`.waiting-chip`)
+     plus a "+N more" overflow marker (`.waiting-more`). At 52 names the wall
+     of chips was louder than the one sentence it was reassuring the student
+     with, so it collapsed to that sentence — see crm.today._waiting_on_reply
+     and the "Waiting on reply" comment in _cockpit.html. */
   .waiting { margin-bottom: var(--s6); padding-top: var(--s4);
     border-top: 1px solid var(--line); }
-  .waiting-title { display: flex; align-items: center; gap: var(--s2);
-    font-size: var(--fs-s); font-weight: var(--w-bold); margin: 0 0 var(--s3);
-    color: var(--ink-2); }
+  .waiting-line { display: flex; align-items: baseline; gap: var(--s2);
+    font-size: var(--fs-s); color: var(--ink-2); margin: 0; }
+  .waiting-count { font-weight: var(--w-bold); }
   .waiting-note { font-size: var(--fs-xs); color: var(--ink-3);
     font-weight: var(--w-reg); }
-  .waiting-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .waiting-chip { display: inline-flex; align-items: baseline; gap: 6px;
-    padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--surface); color: var(--ink); font-size: var(--fs-xs);
-    font-weight: var(--w-med); text-decoration: none;
-    transition: border-color var(--t-fast), color var(--t-fast),
-      transform var(--t-fast); }
-  .waiting-chip:hover { border-color: var(--accent-line); color: var(--accent-ink);
-    text-decoration: none; transform: translateY(-1px); }
-  .waiting-firm { color: var(--ink-3); font-weight: var(--w-reg);
-    font-size: var(--fs-micro); }
-  .waiting-more { align-self: center; font-family: var(--font-mono);
-    font-size: var(--fs-micro); color: var(--ink-3); }
-
-  /* ---- New at your firms: the board's changelog, at the page's foot -----
-     Two columns of one-line rows. It shares the waiting strip's header so
-     the two quiet sections at the bottom of the page read as a pair. */
-  .newat { margin-bottom: var(--s5); padding-top: var(--s4);
-    border-top: 1px solid var(--line); }
-  .newat-all { text-decoration: none; }
-  .newat-all:hover { color: var(--accent-ink); text-decoration: none; }
-  .newat-list { list-style: none; margin: 0; padding: 0;
-    columns: 2; column-gap: var(--s6); }
-  .newat-row { display: flex; align-items: baseline; gap: 8px;
-    padding: 5px 0; break-inside: avoid; font-size: var(--fs-xs);
-    border-bottom: 1px solid var(--line); }
-  .newat-row:last-child { border-bottom: 0; }
-  .newat-firm { font-weight: var(--w-med); color: var(--ink);
-    text-decoration: none; white-space: nowrap; }
-  .newat-firm:hover { color: var(--accent-ink); }
-  .newat-role { color: var(--ink-2); min-width: 0; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; }
-  {% comment %}
-  Two rows at the same firm with the same title (a London req and a
-  Birmingham req both landing in the same batch) read as an exact,
-  unlabelled duplicate without this — `flex: none` so the city never
-  loses the truncation fight to a long title; the role above already
-  gives ground via `min-width: 0`, so the city is what survives.
-  {% endcomment %}
-  /* `flex: none` keeps location full-width when the role beside it has
-     something to give up (see the comment above) — but a role that's
-     BLANK leaves no buffer at all, and a scraped listing with several
-     locations joined by semicolons ("Newport Beach, CA USA, United States
-     of America; Austin, TX USA, United States of America") then had
-     nothing stopping it from running straight off the card. Its own cap
-     and ellipsis make it degrade the same way the role does, independent
-     of whether the role exists. */
-  .newat-loc { flex: none; max-width: 55%; color: var(--ink-3);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .newat-loc::before { content: "·"; margin-right: 8px; }
-  @media (max-width: 700px) { .newat-list { columns: 1; } }
-  /* The honest-empty line: things moved at the student's firms and none of
-     them named their track. Deliberately typeset as quiet body copy rather
-     than as a row — it is an answer, not a listing, and styling it like a
-     listing would invite the eye to look for the link that isn't there. */
-  .newat-empty { margin: 0; color: var(--ink-3); font-size: var(--fs-xs); }
 
   /* ---- Coverage Gaps strip: where you are least covered, worst first ---- */
   /* Positioned and lifted so an open "Who to find" panel (absolutely
@@ -1178,9 +1152,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .tier-section { margin-bottom: var(--s4); padding: var(--s2);
     border-radius: var(--r-panel); transition: background-color var(--t-fast); }
   .tier-section.drop-hot { background: var(--accent-soft); outline: 2px dashed var(--accent-line); }
-  .tier-label { font-size: var(--fs-micro); font-weight: var(--w-med); color: var(--ink-3);
-    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s3);
+  /* Bumped from --fs-micro (11px, this page's default eyebrow size) --
+     three tier lanes are the page's primary structure, not a caption, and
+     read as an afterthought at the same size as a hover tooltip. Case and
+     tracking stay (still a label, not running text); only the size and
+     weight change. */
+  .tier-label { font-size: var(--fs-m); font-weight: var(--w-bold); color: var(--ink);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--s3);
     display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
+  .tier-label .scrub-count { color: var(--ink-3); font-weight: var(--w-med); }
   .tier-empty { margin: var(--s2) 0; text-align: left; }
   /* The 92px floor was the height of a card carrying a badge row, and there
      is no badge row any more. A card's own height now depends on how much of
@@ -1402,7 +1382,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        one real number this widget has to show it with — count over
        `contact_total`, the same total the header above already states —
        so "Emailed, No Reply" (79% of a 174-contact board) reads as a
-       visibly longer fill than "Advocates" (1%) without a second badge
+       visibly longer fill than "Advocate" (1%) without a second badge
        claiming a percentage nobody asked for. Painted as the summary's
        own background rather than a separate element, so it sits behind
        the text with no z-index or extra markup. */

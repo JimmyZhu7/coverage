@@ -710,10 +710,16 @@ def app_event_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 # 2. Contact list + detail.
 # ---------------------------------------------------------------------------
 # Contact-card sections below the coverage board, in display order.
+# Every label states the SAME fact: what you sent, and what came back --
+# "Emailed, No Reply" and "Emailed, Replied" are the same pair with only
+# the outcome swapped, rather than a bare "Replied" that never says what
+# it was a reply TO. "Advocates" was the one plural noun in a list of
+# past-tense verbs -- a status the contact is IN, spelled differently
+# from the four statuses next to it -- singularized to match.
 _WARMTH_SECTIONS = [
-    ("replied", "Replied"),
+    ("replied", "Emailed, Replied"),
     ("chatted", "Chatted"),
-    ("advocate", "Advocates"),
+    ("advocate", "Advocate"),
     ("no_reply", "Emailed, No Reply"),
     # FOUND WHILE AUDITING THE BOARD'S COUNTS (2026-08-25), and it is the same
     # class of bug as the one that audit was for: `no_reply` is cold AND
@@ -1214,8 +1220,8 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         # dozens of tracks that mostly had no colour to decode at all. This
         # says the SAME thing the dots said, but on the one card it is
         # actually true of, with real counts instead of a swatch. Nothing
-        # is lost: the identical warmth labels ("Replied", "Chatted",
-        # "Emailed, No Reply", "Advocates") are still spelled out, with the
+        # is lost: the identical warmth labels ("Emailed, Replied", "Chatted",
+        # "Emailed, No Reply", "Advocate") are still spelled out, with the
         # same colour dots, as the section headers of the Contacts list
         # further down this same page (crm/views.py::_WARMTH_SECTIONS) —
         # this was never the only place that vocabulary lived, just the

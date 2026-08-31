@@ -356,7 +356,7 @@
     <div class="desk-copy">
       <p class="desk-eyebrow">
         <span class="live-dot"></span>
-        Reading {{ open_count|default:"0" }} live roles right now
+        Watching {{ open_count|default:"0" }} live roles right now
       </p>
       <h1 class="desk-title">Your recruiting desk, running in the background.</h1>
       <p class="desk-sub">Coverage watches every listing and every reply, and hands you one
@@ -366,7 +366,7 @@
         {% if user.is_authenticated %}
           <a class="btn" href="/app/">Open Today</a>
         {% else %}
-          <a class="btn" href="/accounts/signup/">Create Account</a>
+          <a class="btn" href="/accounts/signup/">Build My Queue</a>
         {% endif %}
       </div>
       <div class="desk-stats">
@@ -449,8 +449,8 @@
   {% endif %}
 
   <section class="land-section">
-    <p class="land-eyebrow">The whole workflow</p>
-    <h2 class="land-title">The deadline and the person behind it. One place.</h2>
+    <p class="land-eyebrow">How Coverage works</p>
+    <h2 class="land-title">The deadline. The person behind it. One place.</h2>
 
     <div class="feature-row">
       <div class="feature-copy">
@@ -525,10 +525,10 @@
       <div class="vig kin-reveal">
         <p class="vig-label">Network · warmth board</p>
         {% comment %}
-        Column headers read straight off the real board's own legend
-        (crm/templates/crm/contact_list.html's `.net-legend` — "Emailed, No
-        Reply / Replied / Chatted / Advocate") rather than the marketing
-        shorthand this vignette used to invent ("Cold / In touch / Warm").
+        Column headers read straight off the real board's own vocabulary
+        (crm.views._WARMTH_SECTIONS — "Emailed, No Reply / Emailed, Replied /
+        Chatted / Advocate") rather than the marketing shorthand this
+        vignette used to invent ("Cold / In touch / Warm").
         Three columns still stand in for the real board's four lanes — this
         is a preview, not the board — but every word on it is now a word a
         new user will see again on Network, not a fourth vocabulary that
@@ -541,7 +541,7 @@
             <div class="v-card">Ana Sousa · S&amp;T</div>
           </div>
           <div class="v-col">
-            <span class="v-col-h">Replied</span>
+            <span class="v-col-h">Emailed, Replied</span>
             <div class="v-card lift">Marcus Ito · IBD</div>
             <div class="v-card">Priya Nair · AM</div>
           </div>
@@ -555,7 +555,7 @@
 
     <div class="feature-row flip">
       <div class="feature-copy">
-        <p class="feature-kicker">Gmail Live</p>
+        <p class="feature-kicker">Gmail Live · Pro</p>
         <h3>Connect Gmail once. The CRM writes itself.</h3>
         <p>Replies, bounces, and calendar invites log themselves the moment they land. We only read what's needed to log a touch.</p>
         <ul class="feature-points">
@@ -564,7 +564,7 @@
         </ul>
       </div>
       <div class="vig kin-reveal">
-        <p class="vig-label">Gmail Live · automatic logging</p>
+        <p class="vig-label">Gmail Live · in the works</p>
         <div class="v-mail">
           <div class="hd">
             <span>From: sarah.lin@bank.com</span>
@@ -598,14 +598,14 @@
 
   <section class="cta-band">
     <h2>Start with the feed. Win with the follow-up.</h2>
-    <p>The queue, the board, and capture are one account away.</p>
+    <p>The queue and the board are one account away.</p>
     <div class="actions">
       {% if user.is_authenticated %}
         <a class="btn btn-primary" href="/app/">Open Today</a>
       {% else %}
-        <a class="btn btn-primary" href="/accounts/signup/">Create Account</a>
+        <a class="btn btn-primary" href="/accounts/signup/">Build My Queue</a>
       {% endif %}
-      <a class="btn" href="{% url 'core:pricing' %}">Explore Pricing</a>
+      <a class="btn" href="{% url 'core:pricing' %}">See Pricing</a>
     </div>
   </section>
 </div>

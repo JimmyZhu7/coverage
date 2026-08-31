@@ -126,7 +126,7 @@ def test_the_progress_bar_and_the_suggestion_are_what_stayed(client, student):
     board = _board(client, student)
 
     assert 'class="firm-bar"' in board, "the warmth progress bar is gone"
-    assert "Work Nick Tehle" in board, (
+    assert "Talk to Nick Tehle" in board, (
         "the reach-out suggestion is gone — with the badges removed it is the "
         "only thing on the card telling a student what to do next."
     )
@@ -261,7 +261,7 @@ def test_the_coverage_gaps_card_dropped_its_open_count_too(client, student):
     # <style> block names "Firm Coverage" in a CSS comment ABOVE this
     # section (see crm/_styles.html), and an unbounded search would find
     # that occurrence first and return an empty slice.
-    strip_start = body.index('<h2 class="strip-title" title="Ranked by exposure')
+    strip_start = body.index('<h2 class="strip-title strip-title-lg" title="Ranked by exposure')
     strip = body[strip_start : body.index("Firm Coverage", strip_start)]
 
     assert "Busy Co" in strip, "the seeded firm is not on the gaps strip at all"

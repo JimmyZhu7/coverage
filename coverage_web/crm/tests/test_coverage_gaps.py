@@ -41,7 +41,7 @@ def _gap_strip(body: str) -> str:
     Sliced up to "Firm Coverage" — the next `<h2>` on the board — rather
     than the "Contacts Needing Action" panel this used to end at: that panel
     duplicated Today's own queue and is gone (crm/views.py::contact_list)."""
-    start = body.index('<h2 class="strip-title" title="Ranked by exposure')
+    start = body.index('<h2 class="strip-title strip-title-lg" title="Ranked by exposure')
     return body[start : body.index("Firm Coverage", start)]
 
 
@@ -282,7 +282,7 @@ def test_a_firm_ranked_outside_the_strip_still_gets_its_own_lever(client):
     gap_block = _gap_strip(body)
     assert "Seventh Co" not in gap_block  # confirms it's outside the strip
     # And yet its OWN card, further down the page, still carries the lever.
-    assert "Work Warm One" in body
+    assert "Talk to Warm One" in body
     assert reverse("crm:contact_new") + "?firm=seventh-co" not in body  # has a lever, not the empty-firm CTA
 
 
@@ -304,7 +304,7 @@ def test_an_unranked_firm_still_gets_the_add_contact_cta(client):
     # ("Coverage Gaps strip: where...") contains it too, in <head>, on
     # every page regardless of whether the section renders. The rendered
     # heading is a different, more specific string.
-    assert '<h2 class="strip-title" title="Ranked by exposure' not in body
+    assert '<h2 class="strip-title strip-title-lg" title="Ranked by exposure' not in body
     assert reverse("crm:contact_new") + "?firm=wildcard-co" in body
 
 
