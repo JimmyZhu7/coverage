@@ -854,8 +854,11 @@ def tasks_csv(user) -> str:
 def play_dismissals_csv(user) -> str:
     """Every Today "play" the student has dismissed — the fact (firm, event
     kind, date) they said "not now" to, and when. See `crm.models.
-    PlayDismissal` and `crm.today._plays`: this is the anti-nag memory, and a
-    student asking for their data back gets it like everything else here."""
+    PlayDismissal` and `crm.today._coverage_cards` (its dated sibling
+    `_plays` was retired 2026-08-31, but rows it wrote are still real
+    historical dismissals and still export): this is the anti-nag memory,
+    and a student asking for their data back gets it like everything else
+    here."""
     rows = PlayDismissal.objects.for_user(user).select_related("firm")
     return _csv(
         PLAY_DISMISSAL_EXPORT_COLUMNS,

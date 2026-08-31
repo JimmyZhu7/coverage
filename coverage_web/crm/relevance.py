@@ -58,7 +58,7 @@ THE THREE JOBS, and the founder dogfood that forced each:
 
 TENANCY. Every query here is `.for_user(user)`-scoped on the private models.
 `directory.Opportunity` / `FirmDate` are shared-zone by design (the whole
-board, same as `assistant/situation.py` and `crm.today._new_at_your_firms`),
+board, same as `assistant/situation.py`),
 but they are only ever reached through firm ids that came out of this
 student's own tenant-scoped rows.
 
@@ -325,9 +325,10 @@ CHAT_PROPOSING_ACTIONS = frozenset({"advance", "keep_warm", "maintain"})
 # past which a student can do nothing about a date yet.
 OPENING_HORIZON_DAYS = 45
 
-# "New" means the same seven days `crm.today._new_at_your_firms` and
-# `assistant.situation.RECENT_DAYS` already mean by it. A student reading two
-# cards on one page must never be told two definitions of recent.
+# "New" means the same seven days `assistant.situation.RECENT_DAYS` means
+# by it (the sibling surface that replaced `crm.today._new_at_your_firms`,
+# retired 2026-08-31) — a student reading two cards on one page must never
+# be told two definitions of recent.
 OPENING_NEW_DAYS = 7
 
 # Opening kinds, strongest first. A confirmed firm date is the firm itself
@@ -453,8 +454,8 @@ def _relevant_to_student(user, rows):
     deadline first.
 
     Borrowed wholesale from `directory` rather than re-derived: these are the
-    exact four filters `crm.today._new_at_your_firms` and
-    `assistant.situation._new_role_events` already run, and a fifth opinion
+    exact four filters `assistant.situation._new_role_events` already
+    runs, and a fifth opinion
     about what counts as "a role for me" is how two pages start disagreeing.
     All four run in memory over rows already loaded, so they cost no query.
     """

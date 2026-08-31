@@ -78,10 +78,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      rise in, and a signature that animates everywhere stops being one. */
   /* .strip-title: the shared section label (coverage.css §6b), 11px
      uppercase -- correct for "Unplaced"/"Contacts", which sit right above
-     the rows they label. Coverage Gaps and Firm Coverage are the page's two
-     major strips, each with its own visual block below, and read as
-     afterthoughts at caption size. `-lg` is a page-scoped ADDITION to the
-     shared class, not an edit to it: coverage.css's `.strip-title` is used
+     the rows they label. Coverage Gaps and Covered Firms (renamed
+     2026-08-31 from "Firm Coverage") are the page's two major strips, each
+     with its own visual block below, and read as afterthoughts at caption
+     size. `-lg` is a page-scoped ADDITION to the shared class, not an edit
+     to it: coverage.css's `.strip-title` is used
      by rail titles, Settings' nav and other pages that must not move. */
   .strip-title-lg { font-size: var(--fs-l); font-weight: var(--w-bold);
     color: var(--ink); text-transform: none; letter-spacing: -0.01em; }
@@ -751,24 +752,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .lane-prep .act-card:only-child { grid-column: span 2; }
   @media (max-width: 560px) { .lane-prep .act-card:only-child { grid-column: auto; } }
 
-  /* ---- Waiting on reply: the page's one no-action block ----
-     Deliberately the quietest thing in the main column — no card chrome, no
-     buttons, one line of text. It answers "did I drop anything?" and then
-     gets out of the way. Giving it actions would turn reassurance back into
-     a queue, which is the state the cadence cap exists to prevent.
-
-     UNTIL 2026-08-31 this rendered up to 12 name chips (`.waiting-chip`)
-     plus a "+N more" overflow marker (`.waiting-more`). At 52 names the wall
-     of chips was louder than the one sentence it was reassuring the student
-     with, so it collapsed to that sentence — see crm.today._waiting_on_reply
-     and the "Waiting on reply" comment in _cockpit.html. */
-  .waiting { margin-bottom: var(--s6); padding-top: var(--s4);
-    border-top: 1px solid var(--line); }
-  .waiting-line { display: flex; align-items: baseline; gap: var(--s2);
-    font-size: var(--fs-s); color: var(--ink-2); margin: 0; }
-  .waiting-count { font-weight: var(--w-bold); }
-  .waiting-note { font-size: var(--fs-xs); color: var(--ink-3);
-    font-weight: var(--w-reg); }
+  /* ---- Waiting on reply: gone (2026-08-31) ----
+     Was the page's one no-action block, then a single reassurance line
+     ("N waiting on reply, nothing due yet"), then removed outright at the
+     founder's direct call. `.waiting`/`.waiting-line`/`.waiting-count`/
+     `.waiting-note` and the `.waiting-chip`/`.waiting-more` roster that
+     preceded them are all retired; nothing in `_cockpit.html` references
+     this class family any more. */
 
   /* ---- Coverage Gaps strip: where you are least covered, worst first ---- */
   /* Positioned and lifted so an open "Who to find" panel (absolutely
@@ -1133,13 +1123,21 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border: 3px solid var(--paper); background-clip: padding-box; }
 
   /* `.net-legend` (the four warmth dots + the SP swatch, once pinned above
-     this grid) is gone — reported directly as decoration explaining colour
-     that most of 54 cards don't even show. `.dot`/`.dot-cold` etc. stay:
-     `.net-group-head` below (the Contacts list's own warmth section
-     headers) still draws them, and that is now the one place on this page
-     the colour-to-word mapping is spelled out permanently — see the
-     comment on `.net-panel`'s markup in contact_list.html for where "SP"
-     and the warmth words each live instead. */
+     the Covered Firms grid) was pulled when most cards drew an empty bar
+     and the row explained colour that mostly was not there. Every card
+     draws a bar now, so it is back as `.net-legend-mini` — one quiet line
+     inside the same `.net-panel` box it explains, reusing `.dot`/
+     `.dot-cold` rather than a second colour system: `.net-group-head`
+     below (the Contacts list's own warmth section headers) draws the
+     same classes, so the two can never drift apart on what a colour
+     means. The rule sits above `.tier-section` in the box, so it reads
+     as the panel's footer rather than crowding Tier 3's last row. */
+  .net-legend-mini { display: flex; flex-wrap: wrap; align-items: center;
+    gap: var(--s4); margin: var(--s4) 0 0; padding-top: var(--s3);
+    border-top: 1px solid var(--line); font-size: var(--fs-micro);
+    color: var(--ink-3); }
+  .net-legend-mini span { display: inline-flex; align-items: center; gap: 4px; }
+  .net-legend-mini .pill.fc-spon { margin-right: 2px; pointer-events: none; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     margin-right: 4px; }
   .dot-cold { background: var(--w-cold-bar); }
@@ -1386,9 +1384,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        claiming a percentage nobody asked for. Painted as the summary's
        own background rather than a separate element, so it sits behind
        the text with no z-index or extra markup. */
+    /* Softened 2026-08-31 -- the two stops used to sit at the SAME
+       `--share` point, which is a correct way to draw a bar chart and a
+       harsh one to draw a row background: the tint stopped dead against
+       plain surface with no transition, an abrupt vertical line through
+       the middle of "Emailed, Replied" or "Chatted". A fade zone after
+       the share point keeps the same information (how far the tint
+       reaches still says the same share) without the cut. Weaker tint
+       too -- 13% read as a distinct coloured block; 8% reads as a wash. */
     background: linear-gradient(to right,
-      color-mix(in srgb, var(--row-tint, var(--accent)) 13%, var(--surface)) var(--share, 0%),
-      var(--surface) var(--share, 0%));
+      color-mix(in srgb, var(--row-tint, var(--accent)) 8%, var(--surface)) 0%,
+      color-mix(in srgb, var(--row-tint, var(--accent)) 8%, var(--surface)) var(--share, 0%),
+      var(--surface) calc(var(--share, 0%) + 64px));
     transition: background-color var(--t-fast); }
   .warmth-row > summary::-webkit-details-marker { display: none; }
   .warmth-row > summary:hover { background-color: var(--paper); }
@@ -1470,7 +1477,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   /* Capped and internally scrollable, matching .net-panel's own pattern two
      sections up: a warmth group holding 93 cards ("Emailed, No Reply") used
-     to push the whole page to match its length, burying Firm Coverage and
+     to push the whole page to match its length, burying Covered Firms and
      everything below it a full screen down. 416px = three .contact-card
      rows (128px floor × 3) plus two gaps — redone for the simplified card
      below and MEASURED against it (a one-line name + one-line firm renders
@@ -1732,18 +1739,23 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      quieter than the sentence above them. */
   .situation-strip { display: flex; flex-wrap: wrap; gap: var(--s3);
     margin-bottom: var(--s4); }
+  /* The whole card is the link now (2026-08-31, replacing a two-link
+     footer row) -- one destination left once "Talk about it" was cut, so
+     there is nothing left to disambiguate a card-wide click against. */
   .situation-card { flex: 1 1 260px; min-width: 220px;
-    display: flex; flex-direction: column; gap: var(--s2);
+    display: flex; align-items: center; gap: var(--s3);
     padding: var(--s3) var(--s4);
     border: 1px solid var(--line); border-radius: var(--r-panel);
-    background: var(--surface); }
-  .situation-card-text p { margin: 0; color: var(--ink-2);
+    background: var(--surface); color: inherit; text-decoration: none;
+    transition: border-color var(--t-fast), background var(--t-fast); }
+  .situation-card:hover { border-color: var(--accent-line);
+    background: var(--accent-soft); }
+  .situation-card-text { flex: 1; min-width: 0; color: var(--ink-2);
     font-size: var(--fs-xs); line-height: 1.5; }
   .situation-card-text b { color: var(--ink); font-weight: var(--w-med); }
-  .situation-card-actions { display: flex; gap: var(--s3); }
-  .situation-card-link { font-size: var(--fs-micro); font-weight: var(--w-med);
-    color: var(--accent-ink); text-decoration: none; }
-  .situation-card-link:hover { text-decoration: underline; }
+  .situation-card-arrow { flex: none; color: var(--accent-ink);
+    font-size: var(--fs-m); transition: transform var(--t-fast); }
+  .situation-card:hover .situation-card-arrow { transform: translateX(2px); }
 
   /* The staleness ring — a conic sweep around the avatar that fills as the
      contact's keep-warm clock runs down (--stale is 0-100, from views.py).

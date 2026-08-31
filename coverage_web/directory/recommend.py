@@ -879,10 +879,11 @@ def role_matches_tracks(title: str, tracks) -> bool:
     """Whether a role's OWN TITLE **states** one of the tracks a student is
     recruiting for. An ALLOWLIST, not a blocklist — the role has to say it.
 
-    Exists because the two "what's new at your firms" surfaces — Today's card
-    (`crm.today._new_at_your_firms`) and the advisor's situation snapshot
-    (`assistant.situation._new_role_events`) — select purely on the FIRM.
-    That is right for the firm axis and wrong for everything on top of it: a
+    Exists because "what's new at your firms" surfaces — the advisor's
+    situation snapshot (`assistant.situation._new_role_events`), and until
+    2026-08-31 also Today's own now-retired card
+    (`crm.today._new_at_your_firms`) — select purely on the FIRM. That is
+    right for the firm axis and wrong for everything on top of it: a
     student who tiers a universal bank is tiering its investment bank, and
     the same firm also posts branch, audit and helpdesk reqs. So the day-one
     brief could open by telling a US/IB student to apply to a retail branch
@@ -938,7 +939,8 @@ def role_matches_tracks(title: str, tracks) -> bool:
       title names nothing at all      -> False  (the role has not earned
                                                  "relevant"; the caller says
                                                  so out loud — see
-                                                 `_new_at_your_firms`)
+                                                 `assistant.situation.
+                                                 _new_role_events`)
       student stated no tracks        -> True   (nothing to filter to)
     """
     wanted = set(tracks or ())

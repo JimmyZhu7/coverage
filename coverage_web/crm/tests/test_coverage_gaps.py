@@ -38,11 +38,12 @@ def _gap_strip(body: str) -> str:
     just extra haystack — but silently broke the first assertion to COUNT
     occurrences, since CSS text landed inside the slice too.
 
-    Sliced up to "Firm Coverage" — the next `<h2>` on the board — rather
-    than the "Contacts Needing Action" panel this used to end at: that panel
-    duplicated Today's own queue and is gone (crm/views.py::contact_list)."""
+    Sliced up to "Covered Firms" — the next `<h2>` on the board (renamed
+    2026-08-31 from "Firm Coverage") — rather than the "Contacts Needing
+    Action" panel this used to end at: that panel duplicated Today's own
+    queue and is gone (crm/views.py::contact_list)."""
     start = body.index('<h2 class="strip-title strip-title-lg" title="Ranked by exposure')
-    return body[start : body.index("Firm Coverage", start)]
+    return body[start : body.index("Covered Firms", start)]
 
 
 def _firm(name, tier, warmths, app_close=None, firm_id=None):

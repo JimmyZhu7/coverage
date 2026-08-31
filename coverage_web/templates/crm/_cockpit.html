@@ -5,8 +5,9 @@ capped to what a student with ~6 hours a week can actually do, ordered by
 relationship momentum rather than firm alphabet, split into three semantic
 lanes. Everything the cap held back is one click away under "Up next", with
 the exact count and the policy holding it. Right: the weekly pace ring, the
-chats already on the calendar, and a recent-activity feed. Re-rendered whole
-on every quick action so all of it stays in sync.
+chats already on the calendar, a getting-started checklist while setup is
+unfinished, and a recent-activity feed. Re-rendered whole on every quick
+action so all of it stays in sync.
 
 
 WHAT LEADS THIS COLUMN, AND WHY. Read this before moving a section.
@@ -19,12 +20,11 @@ advertisement to reach it.
 
 THE RULE IS THE PAGE'S OWN, ONE LEVEL UP. `crm/today.py` already ranks
 individual actions by whose clock is running: `CLASS_CRITICAL` is defined
-there as "a real clock the world produced", `_stale_critical` splits a live
-deadline (a clock that "belongs to the world, not to how long the student has
-been ignoring us") from a question that merely went unanswered, and `_board`
-says a confirmed date "always leads" while a coverage hole "is true today and
-will still be true tomorrow". Sections are ranked by that same question, not
-by a second opinion about what matters:
+there as "a real clock the world produced", and `_stale_critical` splits a
+live deadline (a clock that "belongs to the world, not to how long the
+student has been ignoring us") from a question that merely went unanswered.
+Sections are ranked by that same question, not by a second opinion about
+what matters:
 
   1. a clock owned by the world that runs out TODAY and cannot be re-run
   2. work due against such a clock
@@ -35,17 +35,14 @@ by a second opinion about what matters:
   7. standing backlog — as true tomorrow as today
   8. anything that is not information about this student's pipeline at all
 
-TWO TIE-BREAKS THIS ORDER LEANS ON.
-
-  * A MIXED SECTION RANKS BY THE MOST TIME-CRITICAL FACT IT CAN CARRY. "Your
-    board" holds both a confirmed close in three days (rung 4) and a firm
-    where the student knows nobody (rung 7), in one lane by design. It is
-    placed at rung 4, because burying a date that passes costs an opportunity
-    outright while promoting a backlog card costs a few hundred pixels. Rank
-    a mixed lane by what it would be worst to hide.
-  * A DISCLOSURE TRAVELS WITH THE THING IT DISCLOSES. "Up next" is not a
-    section of work, it is the footnote that explains the "2 of 29 today" in
-    the lane heading above it. It is not ranked; it follows the plan.
+THE ONE TIE-BREAK THIS ORDER STILL LEANS ON. A DISCLOSURE TRAVELS WITH THE
+THING IT DISCLOSES. "Up next" is not a section of work, it is the footnote
+that explains the "2 of 29 today" in the lane heading above it. It is not
+ranked; it follows the plan. (Until 2026-08-31 a second tie-break lived here
+for "Your board", a lane that mixed a dated fact — rung 4 — with a coverage
+gap — rung 7 — and was ranked by the more time-critical of the two. That
+lane is gone; see the note below the render order for where its pieces went
+and why the tie-break went with it.)
 
 WHAT THIS ORDER DELIBERATELY DOES NOT DO. It does not move a section by how
 old its contents are. The page has exactly one age-driven mechanism —
@@ -64,45 +61,65 @@ THE ORDER, with the rung each section is claiming:
                              its criticals first WITHIN it, so the section
                              needs no "is one of these critical" flag to
                              earn this slot — it is always claiming rung 2.
-   3. Up next ............ -  the plan's own disclosure. Travels with it.
-   4. Your board ......... 4  dated firm facts, then coverage holes. See the
-                             mixed-section rule above.
-   5. Found in your inbox   6 real, waiting on a yes or no, on no clock. The
+   3. Found in your inbox   6 real, waiting on a yes or no, on no clock. The
                              whole family: undo strip, the four narration
                              phases, reviewed batch, contact proposals, what
                              your mail said, application updates.
-   6. Empty states ....... -  the page's headline when there is no plan.
-                             Mutually exclusive with BOTH the plan and the
-                             board (every branch tests `not plays`), so its
-                             position among them is never observable.
-   7. Start here ......... -  introduced by the headline directly above it;
+   4. Empty states ....... -  the page's headline when there is no plan.
+   5. Start here ......... -  introduced by the headline directly above it;
                              that adjacency is why it sits here and not by
                              rung. Gated in Python to a queue with nothing
                              in it, so it never competes with real work.
-   8. Still open ......... 3  criticals that aged out of the exemption. The
+   6. Still open ......... 3  criticals that aged out of the exemption. The
                              plan has stopped budgeting for them and there
                              is no morning on which they arrive.
-   9. Log what you learned  5 an unwritten debrief decays; nothing closes.
+   7. Up next ............ -  the plan's own disclosure, right below the
+                             lane it explains rather than by numeric rung.
+   8. Log what you learned  5 an unwritten debrief decays; nothing closes.
+   9. Firms with no contacts
+                          . 7 tiered firms the student knows nobody at —
+                             standing backlog, as true tomorrow as today.
   10. Run Autopilot ...... 8  the pitch, and only the pitch. Below the cards
                              it is an offer about. See its own note.
-  11. Waiting / bench / park / new at your firms — reassurance, second looks
-      and exits. Unchanged, and correctly last: none of it is work.
+  11. Waiting / worth a second look / gone quiet — reassurance, second
+      looks and exits. Unchanged, and correctly last: none of it is work.
 
-WHY 5 MOVED UP, 2026-08-29. "Found in your inbox" and the application-update
-lane rendered NINTH, below the debrief lane and the still-open lane, which on
-an ordinary day put them under enough content that the founder reported them
-as missing from the page entirely. That is the real cost of ranking a section
-purely by "is a clock running on it": a thing with no deadline still has to be
-FINDABLE, and a review queue nobody scrolls to is a review queue that does not
-exist. It now sits directly under the board, above the empty states, so the
-two AI-fed lanes (what the mailbox proposed, what your applications did) are
-on screen without a scroll. The autopilot OFFER still lands at rung 8 at the
-foot of the family it is an offer about — only the cards moved, not the pitch.
+WHY 3 (FOUND IN YOUR INBOX) MOVED UP, 2026-08-29. It used to render ninth,
+below the debrief lane and the still-open lane, which on an ordinary day put
+it under enough content that the founder reported it as missing from the
+page entirely. That is the real cost of ranking a section purely by "is a
+clock running on it": a thing with no deadline still has to be FINDABLE, and
+a review queue nobody scrolls to is a review queue that does not exist. It
+now sits directly under the plan, above the empty states, so the two AI-fed
+lanes (what the mailbox proposed, what your applications did) are on screen
+without a scroll.
 
-Rungs 3 and 8 land out of numeric order on purpose. "Still open" sits below
-the empty-state headline because that headline names it ("N questions are
-still open below") and is the page's opening sentence on a day with no plan.
-Ordering is a compromise with copy exactly once, and this is the once.
+WHAT USED TO BE "YOUR BOARD", REMOVED 2026-08-31. This lane mixed a
+confirmed dated firm event (`_plays`) with a coverage-gap card
+(`_coverage_cards`) and sat at rung 4 — forced there by the tie-break above,
+because its dated half could carry the same time-critical fact as the plan's
+own critical lane. The founder judged the lane not practically useful (his
+own words: "just take away the board i dont think its practically useful")
+and it was removed whole, heading and markup and dismiss buttons and all.
+
+Nothing about a confirmed firm date was lost: the rail's Deadlines card
+(below, in `.cockpit-rail`) already named the identical facts on its own,
+and it now shows its full natural set again instead of the overflow-only
+slice it was cut down to while the two lanes were arguing about the same
+rows. The coverage-gap half — tiered firms the student knows nobody at — DID
+need a new home: it is the only reachable version of "add someone at an
+empty firm" for an account above `SEED_NETWORK_FLOOR` (see
+`crm.today._coverage_cards`'s and `_starter_seeds`' own notes), so deleting
+it with the rest of the board would have been a real regression wearing the
+costume of cleanup. It renders now under a plain heading, at its own honest
+rung — 7, standing backlog, not the borrowed rung 4 the mixed lane forced on
+it.
+
+Render position 6 ("Still open") lands out of rung order on purpose, same as
+before the board's removal: it sits below the empty-state headline because
+that headline names it ("N questions are still open below") and is the
+page's opening sentence on a day with no plan. Ordering is a compromise with
+copy exactly once, and this is the once.
 {% endcomment %}
 <div class="cockpit">
   <div class="cockpit-main">
@@ -193,89 +210,7 @@ Ordering is a compromise with copy exactly once, and this is the once.
       </section>
     {% endfor %}
 
-    {% comment %}
-    Your board — the firm-level half of Today. See crm.today._board.
-
-    Two kinds of fact, ONE card anatomy: firm, the fact, the people, one
-    verb, dismiss. Which verb and where it goes is decided in Python
-    (`cta_label` / `cta_href`) so this template branches on the FACT only
-    and every card in the lane reads the same way.
-
-      * a confirmed, dated firm event joined to the student's own contacts
-        there (crm.today._plays), and
-      * a firm on their board, at a tier they set, where they know nobody
-        (crm.today._coverage_cards).
-
-    Deliberately OUTSIDE the zero-state gates just below: the gap this closes
-    is a week the cadence queue had nothing due while a bank closed in three
-    days and six of his own contacts sat there unmentioned. The board renders
-    on a day the queue is empty — that is the whole point of it — which is
-    also why those gates ask `not plays`: a page with board cards on it is not
-    a page with nothing on it, and used to say both at once.
-
-    RUNG 4, below the plan, by the mixed-section rule in this file's leading
-    comment. Two reasons it does not lead:
-
-      * Its dated half and the plan's critical lane frequently name the SAME
-        clock — `cadence._closing_soon` builds a re-ping off the very
-        FirmDate a board card prints. When they do, one is the action and the
-        other is the notice about it, and the action leads.
-      * a005530 built this lane as the backstop for a trough: something true
-        to say on a day the cadence queue is empty. Backstop content is by
-        construction subordinate to the queue having something to say. On the
-        day it matters most the plan is empty and renders nothing, so this
-        lane leads the page by itself, with no conditional needed — and it is
-        capped at two rather than one on exactly that day.
-
-    Dismissal is per-FACT (firm + event kind + date, crm.models.PlayDismissal)
-    rather than per-card: dismissing this exact close date never suppresses a
-    later, different date at the same firm. A coverage card has no date of its
-    own, so it dismisses on a sentinel and means "stop asking about this firm".
-    {% endcomment %}
-    {% if plays %}
-      <section class="lane lane-plays" aria-labelledby="plays-lane-h">
-        <h2 class="lane-title" id="plays-lane-h">Your board</h2>
-        <ul class="play-list">
-          {% for p in plays %}
-            <li class="play-card{% if p.urgent %} is-urgent{% endif %}">
-              <div class="play-head">
-                <a class="play-firm" href="{% url 'directory:firm_detail' p.firm.slug %}">{{ p.firm.name|smart_title }}</a>
-                {% if p.when %}<span class="play-when{% if p.urgent %} is-urgent{% endif %}">{{ p.when }}</span>{% endif %}
-              </div>
-              <p class="play-fact">{{ p.label }}{% if p.date %} · {{ p.date|date:"M j" }}{% endif %}</p>
-              {% if p.people_line %}
-                <p class="play-people">{{ p.people_line }}</p>
-              {% elif p.sourcing %}
-                <p class="play-people">You have nobody here yet.</p>
-              {% else %}
-                {% comment %}
-                A "parked" count in this line names people the firm page's
-                own network section will not show (it excludes archived
-                contacts, same as the Network board) — so that count gets
-                its own link to where they actually live, rather than
-                riding along under the card's one button as a promise the
-                destination can't keep. See crm.today._plays' `live_total`.
-                {% endcomment %}
-                <p class="play-people">
-                  {{ p.total }} contact{{ p.total|pluralize }} here:
-                  {% for row in p.breakdown %}{% if row.key == "parked" %}<a class="play-parked-link" href="{% url 'crm:contact_archived' %}?firm={{ p.firm.id }}">{{ row.count }} {{ row.label }}</a>{% else %}{{ row.count }} {{ row.label }}{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}
-                </p>
-              {% endif %}
-              <div class="play-foot">
-                <a class="btn play-cta" href="{{ p.cta_href }}">{{ p.cta_label }}</a>
-                <button type="button" class="btn play-dismiss"
-                        aria-label="Dismiss {{ p.firm.name }} {{ p.label }}"
-                        hx-post="{% url 'crm:play_dismiss' %}"
-                        hx-vals='{"firm": "{{ p.firm.id }}", "event_kind": "{{ p.event_kind }}", "date": "{{ p.dismiss_date|date:"Y-m-d" }}"}'
-                        title="{% if p.kind == 'coverage' %}Stop asking about this firm{% else %}Never show this exact date again{% endif %}">Dismiss</button>
-              </div>
-            </li>
-          {% endfor %}
-        </ul>
-      </section>
-    {% endif %}
-
-    {% comment %}
+{% comment %}
     Found in your inbox. People the mailbox scan judged worth tracking —
     proposals, not contacts. Nothing is in the CRM until Add is tapped
     (capture/discovery.py), and Dismiss is remembered forever by the SCAN —
@@ -628,8 +563,8 @@ Ordering is a compromise with copy exactly once, and this is the once.
     {% endcomment %}
     {% comment %}
     The quiet-day header. `quiet` (crm/today.py's `_cockpit_context`) is
-    true only when there is nothing else on the page — no plan, no board
-    card, no bench card, no chat prep, no debrief, nothing pacing out, no
+    true only when there is nothing else on the page — no plan, no coverage
+    gap card, no bench card, no chat prep, no debrief, nothing pacing out, no
     stuck prompt, no park backlog, no batch waiting for a tap, and (thin
     network) no starter seeds — AND `_next_wave` found a concrete future
     date to name. A queue that is empty for some OTHER reason (everything
@@ -643,7 +578,7 @@ Ordering is a compromise with copy exactly once, and this is the once.
     `would_be_quiet` and this asks one question. The split version is what
     let the founder's own page render three board cards above a full-width
     "You're all caught up" panel: the header's copy of the rule knew about
-    `plays` and the two `{% elif %}` branches below it did not.
+    the board and the two `{% elif %}` branches below it did not.
 
     What "quiet" now MEANS is stricter, and better for it: nothing is due
     AND the board has no holes. With 25 empty target firms that is a
@@ -657,7 +592,7 @@ Ordering is a compromise with copy exactly once, and this is the once.
       <div class="empty empty--quiet">
         <p class="quiet-line">{{ quiet_line }}</p>
       </div>
-    {% elif not queue_total and not plays and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
+    {% elif not queue_total and not coverage_gaps and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
       <div class="empty">
         {% if contact_count %}
           {% comment %}
@@ -690,7 +625,7 @@ Ordering is a compromise with copy exactly once, and this is the once.
         {% endcomment %}
         {% if not seeds %}<a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>{% endif %}
       </div>
-    {% elif not lanes and not plays and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
+    {% elif not lanes and not coverage_gaps and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
       {% comment %}
       The plan is clear but the queue is not. This is the product working, so
       it is styled as a win — and it names what's left rather than implying
@@ -859,6 +794,60 @@ Ordering is a compromise with copy exactly once, and this is the once.
       </section>
     {% endif %}
 
+    {% comment %}
+    Firms with no contacts yet — tiered firms the student set a priority on
+    where they know nobody. See crm.today._coverage_cards.
+
+    Until 2026-08-31 this was half of a mixed "Your board" lane, forced up to
+    rung 4 because its OTHER half carried a confirmed dated event that could
+    be as time-critical as the plan's own critical lane. The founder judged
+    that lane not practically useful and it was removed whole. This half
+    survived under its own plain heading, at its own honest rung, because it
+    is the only reachable version of "add someone at an empty tiered firm"
+    for an account past SEED_NETWORK_FLOOR contacts — see
+    crm.today._coverage_cards's and _starter_seeds' own notes for why
+    deleting it with the rest of the board would have been a regression, not
+    cleanup. The dated half needed no such rescue: the rail's Deadlines card
+    already named the identical facts on its own.
+
+    RUNG 7, standing backlog: true today, still true tomorrow, no clock on
+    it. Capped at one card when the plan already has real work queued and
+    two when it doesn't (crm.today._cockpit_context) — a wall of thin firms
+    is the same bug as a wall of cold contacts, just arriving by a different
+    door.
+
+    Dismissal is per-firm (crm.models.PlayDismissal, keyed on a fixed
+    sentinel date — a coverage gap has no date of its own) and means "stop
+    asking about this firm". Same endpoint the retired dated cards used to
+    share; the FACT tuple it dismisses just never has a real date in it here.
+    {% endcomment %}
+    {% if coverage_gaps %}
+      <section class="lane lane-coverage" aria-labelledby="coverage-lane-h">
+        <h2 class="lane-title" id="coverage-lane-h">
+          Firms with no contacts yet
+          <span class="lane-count" aria-live="polite">{{ coverage_gaps|length }}</span>
+        </h2>
+        <ul class="play-list">
+          {% for p in coverage_gaps %}
+            <li class="play-card">
+              <div class="play-head">
+                <a class="play-firm" href="{% url 'directory:firm_detail' p.firm.slug %}">{{ p.firm.name|smart_title }}</a>
+              </div>
+              <p class="play-fact">{{ p.label }}</p>
+              <p class="play-people">{{ p.people_line }}</p>
+              <div class="play-foot">
+                <a class="btn play-cta" href="{{ p.cta_href }}">{{ p.cta_label }}</a>
+                <button type="button" class="btn play-dismiss"
+                        aria-label="Dismiss {{ p.firm.name }} {{ p.label }}"
+                        hx-post="{% url 'crm:play_dismiss' %}"
+                        hx-vals='{"firm": "{{ p.firm.id }}", "event_kind": "{{ p.event_kind }}", "date": "{{ p.dismiss_date|date:"Y-m-d" }}"}'
+                        title="Stop asking about this firm">Dismiss</button>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
 
     {% comment %}
     Run Autopilot — the offer, at the FOOT of the cards it is an offer about.
@@ -896,29 +885,14 @@ Ordering is a compromise with copy exactly once, and this is the once.
     {% endif %}
 
     {% comment %}
-    Waiting on reply. The page's quiet bucket: people who owe YOU an answer
-    and about whom the cadence engine is correctly silent, because the
-    follow-up is not due yet. Names, no buttons — this exists to answer "did
-    I drop anything?", and giving it actions would turn reassurance back into
-    a queue. Anyone already on this page is excluded upstream.
+    "Waiting on reply" (the quiet-bucket reassurance line: people who owe
+    YOU an answer and about whom the cadence engine is correctly silent)
+    is gone entirely (2026-08-31, the founder's direct call after it had
+    already been collapsed from a 12-chip roster to one sentence). One
+    less thing telling a student "nothing to do here" on a page whose job
+    is to say what to do. `crm.today._waiting_on_reply` and the `busy_ids`
+    set built solely to feed it are both gone with it.
     {% endcomment %}
-    {% if waiting.total %}
-      <section class="waiting">
-        <h2 class="waiting-title">
-          Waiting on reply <span class="lane-count">{{ waiting.total }}</span>
-          <span class="waiting-note">nothing due yet</span>
-        </h2>
-        <div class="waiting-chips">
-          {% for c in waiting.people %}
-            <a class="waiting-chip" href="{% url 'crm:contact_detail' c.id %}">
-              {{ c.name|smart_title }}
-              <span class="waiting-firm">{% if c.firm %}{{ c.firm.name|smart_title }}{% else %}{{ c.firm_text|smart_title }}{% endif %}</span>
-            </a>
-          {% endfor %}
-          {% if waiting.more %}<span class="waiting-more">+{{ waiting.more }} more</span>{% endif %}
-        </div>
-      </section>
-    {% endif %}
 
     {% comment %}
     The bench (Phase 1 bench design, 2026-08-27, crm.today._opening_bench).
@@ -1002,78 +976,46 @@ Ordering is a compromise with copy exactly once, and this is the once.
       </section>
     {% endif %}
 
-    {% comment %}
-    What appeared at YOUR firms this week, from first_seen (Coverage's own
-    clock; the wording matches the feed's cards). Board debuts are excluded
-    in the view: a firm that just joined Coverage makes every posting "new to
-    us", which is a changelog about Coverage, not about the firm. No targets
-    or nothing new -> no strip, not an empty one.
-
-    Down here at full width rather than in the rail, where it was the card
-    that made the rail 1108px against a 581px queue — the ledger rows gave
-    the queue back its vertical, and the rail spent it on a scrollbar that
-    cut a posting in half. Two columns of one-line rows read faster than a
-    narrow stack, and the columns now end within a hundred pixels of each
-    other.
-    {% endcomment %}
-    {% if new_at_firms.count %}
-      <section class="newat">
-        <h2 class="waiting-title">
-          New at your firms <span class="lane-count">{{ new_at_firms.count }}</span>
-          <a class="waiting-note newat-all" href="{% url 'opportunities' %}">this week · see all</a>
-        </h2>
-        <ul class="newat-list">
-          {% for r in new_at_firms.roles %}
-            <li class="newat-row">
-              <span class="activity-dot in"></span>
-              <a class="newat-firm" href="{% url 'directory:firm_detail' r.slug %}">{{ r.firm|smart_title }}</a>
-              {% comment %}
-              120, not 52: the CSS already truncates this responsively
-              (.newat-role's own text-overflow: ellipsis, sized to the
-              actual column), so the character cap only needs to guard
-              against a pathologically long scraped title, not do the real
-              truncation itself. At 52 it was cutting BEFORE the part that
-              tells two roles apart — "2026 Find Your Fit – Early Career
-              Programs in China" is itself ~52 characters, so a Shanghai
-              Jiao Tong posting and a Fudan posting (two real, distinct
-              JPMorgan requisitions, different URLs) both landed at the
-              exact same truncated string and read as one row repeated.
-              {% endcomment %}
-              <span class="newat-role">{{ r.title|smart_title|truncatechars:120 }}</span>
-              {% if r.location %}<span class="newat-loc">{{ r.location|smart_location }}</span>{% endif %}
-            </li>
-          {% endfor %}
-        </ul>
-      </section>
-    {% elif new_at_firms.total_new %}
-      {% comment %}
-      Things moved at the student's firms this week and NONE of them named
-      the track they recruit for. Saying so is the point: the roles are
-      filtered by an allowlist (see directory.recommend.role_matches_tracks),
-      which is a hard bar that will often leave nothing, and a strip that
-      silently disappears on those weeks reads as a broken card rather than
-      an answer. The alternative — padding the list with the Engineering and
-      Controllers reqs that survived the firm query — is the exact bug the
-      allowlist exists to kill.
-
-      "see all" goes to the same feed the populated strip links to, so the
-      student can go and judge the other 31 for themselves. Coverage declines
-      to call them news; it does not hide them.
-      {% endcomment %}
-      <section class="newat newat-none">
-        <h2 class="waiting-title">
-          New at your firms <span class="lane-count">0</span>
-          <a class="waiting-note newat-all" href="{% url 'opportunities' %}">this week · see all</a>
-        </h2>
-        <p class="newat-empty">
-          {{ new_at_firms.total_new }} new role{{ new_at_firms.total_new|pluralize }} at your firms
-          this week{% if new_at_firms.track_label %}, none in {{ new_at_firms.track_label }}{% else %}, none naming a track you recruit for{% endif %}.
-        </p>
-      </section>
-    {% endif %}
   </div>
 
   <aside class="cockpit-rail">
+    {% comment %}
+    Getting started. See crm.today._getting_started_checklist's own module
+    note for why these three items and no others (each gates real
+    functionality elsewhere in the product) and why Gmail is deliberately
+    not one of them (Pro-gated, not purchasable — an item most Free accounts
+    could never complete would mean this card never disappears for them).
+
+    DISAPPEARS ENTIRELY ONCE DONE, same "no targets means no card, not an
+    empty card" convention the rest of this page holds to — `getting_started`
+    is `None` the moment all three are true, not a "3 of 3" success state
+    that spends a rail slot congratulating a finished setup. Computed fresh
+    on every render; nothing here is stored or dismissible.
+
+    FIRST IN THE RAIL, deliberately, while it exists at all: setup is what
+    unblocks everything else Today can say to this student, so while any of
+    it is unfinished it outranks even the pace ring. The moment it is
+    finished it removes itself and the ring reclaims the top slot without
+    this template having to know that happened.
+    {% endcomment %}
+    {% if getting_started %}
+      <div class="rail-card getting-started-card">
+        <h3 class="rail-title">Getting started</h3>
+        <ul class="getting-started-list">
+          {% for item in getting_started %}
+            <li class="getting-started-row{% if item.done %} is-done{% endif %}">
+              <span class="getting-started-mark" aria-hidden="true">{% if item.done %}&#10003;{% endif %}</span>
+              {% if item.done %}
+                <span class="getting-started-label">{{ item.label }}</span>
+              {% else %}
+                <a class="getting-started-label" href="{{ item.href }}">{{ item.label }}</a>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
     {% comment %}
     Pace, laid out sideways. The ring used to be 120px tall with the figure
     inside it and a caption underneath — a third of the rail's height for one
@@ -1159,17 +1101,17 @@ Ordering is a compromise with copy exactly once, and this is the once.
     {% endif %}
 
     {% comment %}
-    Deadlines the board hasn't already named. The ribbon at the foot of the
-    page counts these; a count creates a click and a name creates an action.
-    Confirmed dates only — the same bar the cadence engine acts on.
+    Deadlines. The ribbon at the foot of the page counts these; a count
+    creates a click and a name creates an action. Confirmed dates only — the
+    same bar the cadence engine acts on.
 
-    OVERFLOW, since 2026-08-27. This card and the board lane were printing
-    the same rows off the same query: measured on the founder's account its
-    four rows were the three board cards verbatim plus one the board's
-    one-card-per-firm rule folds away. The view now hands over only the dates
-    no board card is showing (crm.today._cockpit_context, "deadlines"), so
-    most days this renders nothing — which is the correct amount of card for
-    "no dates you haven't already been told about".
+    NATURAL SET again, since 2026-08-31. From 2026-08-27 to 2026-08-31 this
+    card printed only the OVERFLOW a "Your board" lane hadn't already shown,
+    because the two were reading the same rows off the same query and
+    printing most of them twice. The board is gone (see the leading comment
+    of this file), so there is nothing left to exclude against —
+    `crm.today._cockpit_context`'s "deadlines" is `_next_deadlines`' own
+    output again, unfiltered.
     {% endcomment %}
     {% if deadlines %}
       <div class="rail-card">

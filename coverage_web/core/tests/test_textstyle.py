@@ -4,7 +4,7 @@ to standardize."""
 
 import pytest
 
-from core.templatetags.textstyle import smart_location, smart_title
+from core.templatetags.textstyle import smart_location, smart_role, smart_title
 
 
 CASES = [
@@ -256,3 +256,64 @@ def test_the_ordinal_guard_does_not_swallow_ordinary_words():
     # A digit glued to letters that are NOT an ordinal suffix still recaps.
     assert smart_title("3m company") == "3M Company"
     assert smart_location("500 startup lane") == "500 Startup Lane"
+
+
+# Every distinct pattern found on the founder's real board (2026-08-31),
+# reduced to its shape rather than kept as 85 near-duplicates: already-clean
+# titles must pass through untouched, a "Title, Department" pattern keeps
+# the title and drops the department, a parenthetical aside is dropped
+# whole, an em-dash elaboration is dropped whole, and a runaway sentence
+# with none of those boundaries still gets capped so it never reaches the
+# page as a full sentence.
+ROLE_CASES = [
+    ("IB Analyst", "IB Analyst"),
+    ("PE Associate", "PE Associate"),
+    ("Recruiting", "Recruiting"),
+    ("Manager, Talent Acquisition", "Manager"),
+    ("Account Manager, AWS", "Account Manager"),
+    ("Senior Analyst, Commodities & Global Markets", "Senior Analyst"),
+    ("Associate Director, Credit Analyst, C&IB", "Associate Director"),
+    ("Professor (USC Dornsife, WRIT 150)", "Professor"),
+    ("USC junior/senior peer (coffee-chat contact)", "USC junior/senior peer"),
+    (
+        "Campus recruiter (PwC) — self-described 'the campus recruiter and "
+        "primary point of contact' for USC students",
+        "Campus recruiter",
+    ),
+    (
+        "USC on-campus staff — Assistant Director, Dornsife First-Year "
+        "Advising (academic advising, not career services)",
+        "USC on-campus staff",
+    ),
+    ("IB Associate - M&A", "IB Associate"),
+    (
+        "BCG contact via USC International Consulting Club alumni panel outreach",
+        "BCG contact via USC",
+    ),
+    ("", ""),
+    (None, None),
+]
+
+
+@pytest.mark.parametrize("raw,expected", ROLE_CASES)
+def test_smart_role_compresses_to_the_first_clean_clause(raw, expected):
+    assert smart_role(raw) == expected
+
+
+def test_smart_role_never_invents_a_word_that_was_not_typed():
+    """The whole safety property: every possible output is a strict PREFIX
+    of the input, so it can shorten what a student wrote and can never
+    assert something they did not."""
+    cases = [
+        "USC alum, finance professional",
+        "Campus recruiting manager (Deloitte, national) — made the "
+        "introduction to USC's specific recruiter",
+        "Director, TMT Investment Banking",
+    ]
+    for raw in cases:
+        out = smart_role(raw)
+        assert raw.startswith(out), (raw, out)
+
+
+def test_smart_role_respects_a_lower_word_cap():
+    assert smart_role("One Two Three Four Five Six", max_words=3) == "One Two Three"

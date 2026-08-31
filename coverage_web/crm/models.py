@@ -911,11 +911,16 @@ class ContactMerge(PrivateModel):
 
 
 class PlayDismissal(PrivateModel):
-    """One dismissed Today "play" — see `crm.today._plays`.
+    """One dismissed Today "play" — see `crm.today._coverage_cards`.
 
-    A play is a dated world fact (a confirmed `FirmDate`) joined to the
-    student's own people at that firm. Dismissal is remembered against the
-    FACT — the tuple `(firm, event_kind, date)` — and never against the
+    Until 2026-08-31 a play could also be a dated world fact (a confirmed
+    `FirmDate`) joined to the student's own people at that firm
+    (`crm.today._plays`, retired with the "Your board" lane it rendered
+    in); rows written by that half are still valid historical dismissals,
+    just no longer producible by anything current. Every live play today is
+    a coverage gap — a tiered firm with nobody there — and dismissal is
+    remembered against the FACT — the tuple `(firm, event_kind, date)`, a
+    fixed sentinel date for the coverage case — and never against the
     card's rendered shape or a row id. This is deliberate and load-bearing:
     the founder bulk-parked 113 contacts because an earlier surface asked too
     much, and a play that keeps coming back after being dismissed is exactly

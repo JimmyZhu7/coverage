@@ -741,10 +741,11 @@ def test_role_function_reads_the_job_not_the_employer(title, expected):
     ("Internal Audit Summer Analyst", None, True),
 ])
 def test_role_matches_tracks_filters_the_job_not_the_firm(title, tracks, expected):
-    """The yes/no rule the two "new at your firms" surfaces filter on —
-    `crm.today._new_at_your_firms` and
-    `assistant.situation._new_role_events`. Both select purely on the FIRM,
-    which is right for the firm axis and blind to the job: a student tiering
+    """The yes/no rule "new at your firms" surfaces filter on —
+    `assistant.situation._new_role_events`, and until 2026-08-31 also the
+    now-retired `crm.today._new_at_your_firms`. Both select purely on the
+    FIRM, which is right for the firm axis and blind to the job: a student
+    tiering
     a universal bank is tiering its investment bank, and the same firm also
     posts branch, audit and helpdesk reqs.
 

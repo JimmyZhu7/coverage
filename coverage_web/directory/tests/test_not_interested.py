@@ -19,8 +19,9 @@ Pinned here:
   * APPLIED OUTRANKS DISMISSED. A role the student turns out to have applied
     to (detected by the mail parser, or set by hand) comes back — the
     dismissal must not fight a fact.
-  * The Today surfaces that were still arguing with a dismissal:
-    `_new_at_your_firms` and the ribbon's "at your firms" count.
+  * The Today surfaces that were still arguing with a dismissal: the
+    now-retired `_new_at_your_firms` (see the "Today" section below for
+    where that invariant lives now) and the ribbon's "at your firms" count.
 """
 
 from __future__ import annotations
@@ -460,36 +461,17 @@ def test_saving_a_dismissed_role_by_hand_also_clears_the_flag(client):
 # ---------------------------------------------------------------------------
 # Today
 # ---------------------------------------------------------------------------
-
-@pytest.mark.django_db
-def test_today_stops_calling_a_dismissed_role_news(client):
-    """`_new_at_your_firms` was the last surface still arguing: a role
-    dismissed in the feed on Monday came back on Tuesday as news from the
-    firm."""
-    from crm.today import _new_at_your_firms
-
-    user = _student()
-    user.tracks = ["ib"]
-    user.regions = []
-    user.save(update_fields=["tracks", "regions"])
-    firm = Firm.objects.create(name="North Bank", slug="north-bank")
-    # An older row so the firm is not read as a board DEBUT.
-    Opportunity.objects.create(
-        firm=firm, url="https://x/old", title="Old Role", bucket="internship",
-        status="closed",
-    )
-    Opportunity.objects.filter(url="https://x/old").update(
-        first_seen="2020-01-01T00:00:00Z"
-    )
-    opp = _eligible_opp(9, firm=firm,
-                        title="2027 Investment Banking Summer Analyst")
-    UserFirm.all_objects.create(user=user, firm=firm)
-
-    assert [r["id"] for r in _new_at_your_firms(user)["roles"]] == [opp.id]
-
-    UserOpportunity.all_objects.create(user=user, opportunity=opp, dismissed=True)
-
-    assert _new_at_your_firms(user)["roles"] == []
+# `crm.today._new_at_your_firms` — "New at your firms" on the Today cockpit
+# — was retired whole 2026-08-31: it duplicated the situation strip
+# (`assistant.situation.build_situation`) without that strip's track/
+# region/level/eligibility filtering, and measured on the founder's real
+# account the two surfaced the identical firms. Its "don't call a dismissed
+# role news" test lived here rather than in assistant/tests/test_situation.py
+# because this file owns the not-interested feature end to end; that
+# invariant has a live successor there —
+# assistant/tests/test_situation.py::test_a_dismissed_role_is_not_reported_as_new
+# — which pins the identical behaviour for the surface that replaced it, so
+# nothing about "a dismissed role must not come back as news" went untested.
 
 
 @pytest.mark.django_db

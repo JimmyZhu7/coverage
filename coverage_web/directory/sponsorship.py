@@ -55,8 +55,8 @@ def _resolve_firm_fact(sponsors, region: str) -> str:
     and 3 (Morgan Stanley, J.P. Morgan, the two largest on the board) carry a
     blanket `true` from an older seed shape, which crashed every caller here
     with `AttributeError: 'bool' object has no attribute 'get'`. That took
-    down the whole Today page (`_new_at_your_firms` -> `_eligibility`) and
-    the feed's sponsorship filter (`firm_policy_map`).
+    down the whole Today page (the retired `_new_at_your_firms` -> `_eligibility`,
+    2026-08-27) and the feed's sponsorship filter (`firm_policy_map`).
 
     "unknown" is the right answer for that shape, not "yes". A bare `true`
     says the firm sponsors SOMEWHERE; it does not say it sponsors in the

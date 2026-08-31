@@ -19,14 +19,18 @@ The rules pinned here:
      it disappears the moment its job is done. Nothing to dismiss.
   4. Nothing is offered that this deploy cannot actually do.
 
-THE FIRM SEEDS ARE NOT HERE ANY MORE (2026-08-27). "Add N people at X" moved
-to the board lane's coverage cards (`crm.today._coverage_cards`), because
-this lane could never show it to the account with the most of that work to
-do: seeds only run below SEED_NETWORK_FLOOR live contacts, and the founder
-has 182 of them over 25 empty target firms. The tests that pinned that
-behaviour moved with it and now assert against the board. What is left in
-this file is SETUP — firms picked, mailbox connected, list imported, track
-set — which is the honest scope for a lane headed "Start here".
+THE FIRM SEEDS ARE NOT HERE ANY MORE. "Add N people at X" moved to
+`crm.today._coverage_cards` on 2026-08-27, because this lane could never
+show it to the account with the most of that work to do: seeds only run
+below SEED_NETWORK_FLOOR live contacts, and the founder has 182 of them
+over 25 empty target firms. Those tests moved with it and now assert against
+`_cockpit_context`'s "coverage_gaps" key (see test_plays.py). "Pick your
+target firms" followed it out on 2026-08-31: the getting-started rail
+checklist (`crm.today._getting_started_checklist`) now owns that message
+persistently instead of only on a silent-queue render, so the two stopped
+telling the student the same thing in two registers at once. What is left in
+this file is the rest of SETUP — mailbox connected, list imported, track
+set — which is the honest remaining scope for a lane headed "Start here".
 
 Its own module rather than an append to `test_today.py`: this is a distinct
 feature with a distinct premise, and the file it would otherwise land in is
@@ -81,16 +85,16 @@ def _seed_keys(user) -> list[str]:
 # ---------------------------------------------------------------------------
 def test_an_empty_network_gets_named_first_moves_not_an_empty_page(client):
     """"Add the people you're networking with" is advice. A firm the student
-    themselves tiered, named, is an instruction — and it now comes from the
-    board rather than from this lane, so it reaches every account and not
-    just the ones under SEED_NETWORK_FLOOR."""
+    themselves tiered, named, is an instruction — and it comes from
+    `_coverage_cards` rather than from this lane, so it reaches every
+    account and not just the ones under SEED_NETWORK_FLOOR."""
     user = _user()
     gs = Firm.objects.create(name="Goldman Sachs", slug="goldman-sachs")
     UserFirm.all_objects.create(user=user, firm=gs, tier=1)
 
     body = _login_and_get(client, user)
-    assert "Start here" in body            # the setup seeds
-    assert "Your board" in body            # and the firm itself
+    assert "Start here" in body                    # the setup seeds
+    assert "Firms with no contacts yet" in body     # and the firm itself
     assert "Goldman Sachs" in body
     assert "Nobody there yet." in body
     # A real destination that already exists, with the firm pre-chosen.
@@ -113,12 +117,12 @@ def test_one_contact_just_touched_is_never_called_caught_up(client):
     assert "You're all caught up." not in body
     assert "Nothing due today." in body
     assert "Start here" in body
-    # And the board says nothing about Goldman: one contact is not a
-    # coverage hole. Somebody is at that firm and the cadence engine owns
+    # And the coverage lane says nothing about Goldman: one contact is not
+    # a coverage hole. Somebody is at that firm and the cadence engine owns
     # deciding when to speak about them, so carding it here as well would
     # be the page asking twice about the same person.
     ctx = _cockpit_context(user)
-    assert [p["firm"].name for p in ctx["plays"]] == []
+    assert [p["firm"].name for p in ctx["coverage_gaps"]] == []
 
 
 def test_a_queue_of_nothing_but_parks_still_gets_seeds(client):
@@ -215,7 +219,7 @@ def test_the_same_silence_over_an_unbuilt_network_does_get_seeds(client):
         "four people, none of them at the firm they tiered first, is a start "
         "and not a network to be caught up on"
     )
-    assert [p["firm"].name for p in ctx["plays"]] == ["Goldman Sachs"]
+    assert [p["firm"].name for p in ctx["coverage_gaps"]] == ["Goldman Sachs"]
     body = _login_and_get(client, user)
     assert "You're all caught up." not in body
     assert "Nobody there yet." in body
@@ -248,20 +252,19 @@ def test_seeds_stay_silent_while_the_cap_is_still_pacing_work_out():
 # 3. Derived, never stored: each one ends when its job does.
 # ---------------------------------------------------------------------------
 def test_a_coverage_card_disappears_the_moment_the_firm_has_anybody():
-    """Derived, never stored — the board card ends the render after the
+    """Derived, never stored — the coverage card ends the render after the
     condition that justified it stops being true. ONE person is enough: from
     that moment the cadence engine has somebody to schedule at this firm and
-    owns the question, which is the line between the two halves of the page.
-    """
+    owns the question."""
     user = _user()
     gs = Firm.objects.create(name="Goldman Sachs", slug="goldman-sachs")
     UserFirm.all_objects.create(user=user, firm=gs, tier=1)
-    assert [p["firm"].name for p in _cockpit_context(user)["plays"]] == [
+    assert [p["firm"].name for p in _cockpit_context(user)["coverage_gaps"]] == [
         "Goldman Sachs"]
 
     c = Contact.all_objects.create(user=user, name="GS 0", firm=gs)
     _touch(user, c, "outreach", days_ago=0)
-    assert [p["firm"].name for p in _cockpit_context(user)["plays"]] == []
+    assert [p["firm"].name for p in _cockpit_context(user)["coverage_gaps"]] == []
 
 
 def test_an_archived_contact_does_not_close_a_coverage_gap():
@@ -273,7 +276,7 @@ def test_an_archived_contact_does_not_close_a_coverage_gap():
     for i in range(3):
         Contact.all_objects.create(
             user=user, name=f"GS {i}", firm=gs, archived=True)
-    assert [p["firm"].name for p in _cockpit_context(user)["plays"]] == [
+    assert [p["firm"].name for p in _cockpit_context(user)["coverage_gaps"]] == [
         "Goldman Sachs"]
 
 
@@ -292,27 +295,33 @@ def test_the_track_seed_goes_away_once_a_track_is_set():
     assert "track" not in _seed_keys(user)
 
 
-def test_the_firms_seed_does_not_repeat_the_unfinished_setup_banner():
-    """week.html already renders a banner saying exactly this, with the same
-    link, whenever onboarding is unfinished. Two copies of one instruction on
-    one screen reads as a bug — so this seed speaks only for the account that
-    FINISHED the wizard and still has no firms."""
+def test_the_firms_seed_no_longer_exists_the_rail_checklist_owns_it():
+    """"Pick your target firms" used to be a `_starter_seeds` entry, gated to
+    an account that finished onboarding and still had no firms (the
+    unfinished-onboarding banner in week.html already covers the
+    not-finished case). Retired 2026-08-31: the getting-started rail
+    checklist (`crm.today._getting_started_checklist`) now says this
+    persistently, on every render, rather than only when the queue happens
+    to be silent — so it must never come back as a seed key, finished
+    onboarding or not."""
     user = _user()
-    assert user.onboarded_at is None
     assert "firms" not in _seed_keys(user)
 
     user.onboarded_at = timezone.now()
     user.save(update_fields=["onboarded_at"])
-    assert "firms" in _seed_keys(user)
+    assert "firms" not in _seed_keys(user)
 
 
 # ---------------------------------------------------------------------------
 # 4. Honest reasons, honest offers.
 # ---------------------------------------------------------------------------
-def test_a_confirmed_deadline_leads_the_card_for_an_empty_firm(client):
-    """The because-line is the student's own data, not a slogan. An empty
-    firm with a CONFIRMED date gets the dated card, not the coverage one —
-    one firm, one card, and the date is the stronger of the two facts."""
+def test_a_confirmed_deadline_names_the_rail_and_the_gap_still_shows(client):
+    """Until 2026-08-31 an empty firm with a CONFIRMED date got a dated
+    "Your board" card instead of a coverage one — one firm, one card, and
+    the date was the stronger of the two facts. With the board removed
+    there is no dated card at all: the date lives on the rail's Deadlines
+    card on its own, and the firm's coverage gap (it still has nobody
+    there) gets its own honest card."""
     user = _user()
     gs = Firm.objects.create(name="Goldman Sachs", slug="goldman-sachs")
     UserFirm.all_objects.create(user=user, firm=gs, tier=1)
@@ -321,18 +330,22 @@ def test_a_confirmed_deadline_leads_the_card_for_an_empty_firm(client):
         firm=gs, cycle="sa2028", region="us", event_kind="app_close",
         date=close, confidence=1.0,
     )
-    plays = _cockpit_context(user)["plays"]
-    assert [(p["firm"].name, p["kind"]) for p in plays] == [
-        ("Goldman Sachs", "date")]
+    ctx = _cockpit_context(user)
+    assert [(d["firm"].name, d["label"]) for d in ctx["deadlines"]] == [
+        ("Goldman Sachs", "Applications close")]
+    gaps = ctx["coverage_gaps"]
+    assert [(p["firm"].name, p["kind"]) for p in gaps] == [
+        ("Goldman Sachs", "coverage")]
     body = _login_and_get(client, user)
-    assert f"Applications close · {close:%b %-d}" in body
-    assert "You have nobody here yet." in body
+    assert "Applications close" in body
+    assert "Nobody there yet." in body
 
 
-def test_a_rumoured_date_never_becomes_a_countdown():
+def test_a_rumoured_date_never_reaches_the_rail_but_the_gap_still_shows():
     """A calendar countdown built on a rumour is worse than no countdown —
     the same confidence bar the cadence engine and the Deadlines rail hold.
-    The firm still gets its coverage card; it just gets no clock."""
+    The coverage card does not care either way: it has no clock of its own
+    to get wrong, confirmed or not."""
     user = _user()
     gs = Firm.objects.create(name="Goldman Sachs", slug="goldman-sachs")
     UserFirm.all_objects.create(user=user, firm=gs, tier=1)
@@ -340,12 +353,14 @@ def test_a_rumoured_date_never_becomes_a_countdown():
         firm=gs, cycle="sa2028", region="us", event_kind="app_close",
         date=timezone.localdate() + timedelta(days=26), confidence=0.5,
     )
-    plays = _cockpit_context(user)["plays"]
-    assert [(p["firm"].name, p["kind"]) for p in plays] == [
+    ctx = _cockpit_context(user)
+    assert ctx["deadlines"] == []
+    gaps = ctx["coverage_gaps"]
+    assert [(p["firm"].name, p["kind"]) for p in gaps] == [
         ("Goldman Sachs", "coverage")]
-    assert plays[0]["date"] is None
-    assert plays[0]["when"] == ""
-    assert "Nobody there yet." in plays[0]["people_line"]
+    assert gaps[0]["date"] is None
+    assert gaps[0]["when"] == ""
+    assert "Nobody there yet." in gaps[0]["people_line"]
 
 
 def test_the_gmail_seed_is_dark_when_gmail_live_is_not_configured(settings):
@@ -434,8 +449,9 @@ def test_seeds_are_capped_so_the_page_stays_a_nudge_not_a_curriculum(settings):
 
     seeds = _cockpit_context(user)["seeds"]
     assert len(seeds) == SEED_MAX == 3
-    # And never a firm: naming firms is the board's job now, so nine tiered
-    # firms cannot crowd the setup steps out of their own lane.
+    # And never a firm: naming firms is `_coverage_cards`' and the
+    # getting-started checklist's job now, so nine tiered firms cannot crowd
+    # the setup steps out of their own lane.
     assert not any(s["key"].startswith("firm-") for s in seeds)
 
 
@@ -466,15 +482,15 @@ def _silent_today_query_count(client, user, n_firms: int) -> int:
 
 def test_a_silent_today_does_not_grow_its_query_count_with_target_firms(client):
     """Every firm-shaped lookup on a silent Today — the seeds' own, the
-    board's dated half, the board's coverage half — is a bulk read. A count
-    that climbs with the firm list means somebody put a loop back.
+    getting-started checklist's, `_coverage_cards`', the Deadlines rail's —
+    is a bulk read. A count that climbs with the firm list means somebody
+    put a loop back.
 
-    TWO LARGE COUNTS, not 2 against 40. At two target firms both of them
-    carry a confirmed date, the dated cards take every board slot, and
-    `_coverage_cards` returns after one query with nothing left to rank — a
-    short-circuit, not a saving, and comparing against it measured the
-    short-circuit rather than the loop. Twenty and forty both exercise every
-    query on the page, so a difference between them can only be per-firm.
+    TWENTY AND FORTY, not some small count against a large one: both sizes
+    exercise every query on the page (`_coverage_cards` ranks the whole
+    firm list before capping to the two-or-one it renders, and every firm
+    here also carries a confirmed date for the Deadlines rail to read), so
+    a difference between them can only be per-firm.
     """
     small = _silent_today_query_count(
         client, _user("seed-q-small@example.com"), 20)

@@ -45,8 +45,8 @@ this module owes the Today page is identical: a bug here must degrade to
 NOT CACHED. Recomputed on every full-page Today load, deliberately — see
 the caller in `crm/today.py`. Every query here is bounded by the student's
 own tenant-scoped row counts (their tracked roles, their contacts, their
-tiered firms), the same cost shape as `crm.today._new_at_your_firms` and
-`_next_deadlines`, which already run uncached on every render. Caching
+tiered firms), the same cost shape as `_next_deadlines` (crm/today.py),
+which already runs uncached on every render. Caching
 would buy nothing but a day-old snapshot on a page whose whole point is
 "what's true right now", for a query cheap enough that dogfood is the
 right way to find out if that judgement call was wrong.
@@ -68,12 +68,19 @@ from directory.models import Opportunity, OpportunityChange
 from directory.recommend import role_matches_level, role_matches_regions, role_matches_tracks
 from directory.views import _eligibility, _eligibility_profile
 
-# How far back counts as "recent". Matches `crm.today._new_at_your_firms`'s
-# own window (`since = timezone.now() - timedelta(days=7)`) — that function
-# already answers the exact same "what's new since last look" question for
-# a different slice of the same data, and a student reading both should
+# How far back counts as "recent". Until 2026-08-31 this matched Today's
+# own now-retired `crm.today._new_at_your_firms` window (`since =
+# timezone.now() - timedelta(days=7)`) — that surface answered the exact
+# same "what's new since last look" question for a different slice of the
+# same data, and a student reading both should
 # never be told two different definitions of "recent" on one page.
 RECENT_DAYS = 7
+
+# How many newest rows the new-role scan reads before filtering. Wide on
+# purpose: everything that narrows this list (track, region, level,
+# eligibility, one-per-firm) runs in Python underneath, so a slice sized
+# to the CAP starves them. See the note at the fold below.
+_CANDIDATE_ROWS = 400
 
 # Per-event-type cap. A student tracking hundreds of roles must never run
 # an effectively-unbounded query here; five of any one kind is already more
@@ -218,8 +225,8 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
     # Exclude board DEBUTS: a firm whose oldest posting is itself inside the
     # window just joined Coverage's board, and every role it has would read
     # as "new" for a reason that has nothing to do with the firm actually
-    # opening anything. Same fix `crm.today._new_at_your_firms` already
-    # made for the identical trap.
+    # opening anything. Same fix the retired `crm.today._new_at_your_firms`
+    # used to make for the identical trap.
     debut_ids = {
         row["firm_id"]
         for row in Opportunity.objects.filter(firm_id__in=firm_ids)
@@ -247,14 +254,22 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
 
     # Same repeat-listing problem the Opportunities feed already solves: a
     # board scraped twice in one week posts the same requisition twice.
-    # Folded before capping, over a slice much wider than `limit` — `* 8`,
-    # not `* 4` — because the per-firm dedup below needs enough ROWS to
-    # find `limit` DISTINCT firms even when one firm's own posting batch
-    # (a single campus recruiting push can be a dozen reqs) fills the front
-    # of the newest-first ordering. A narrower slice would let one firm's
-    # batch crowd every other firm's news out of the window before dedup
-    # ever gets a chance to run.
-    rows, _folded = fold_duplicates(list(qs[: limit * 8]))
+    #
+    # THE SLICE HAS TO CLEAR THE RELEVANCE FILTERS, NOT THE RAW ROWS. This
+    # was `qs[: limit * 8]` — 24 rows — sized when the only thing between
+    # here and the cap was the per-firm dedup below. The track, region,
+    # level and eligibility filters were added underneath it later, and
+    # they are the ones that actually decide the count: on the founder's
+    # own account the window held 224 matching rows of which 11 were
+    # relevant, but the 24 NEWEST happened to be entirely off-track, so
+    # the strip rendered nothing at all and had been dark for weeks. A
+    # newest-first slice taken before the filters is a lottery on what a
+    # scraper happened to post last.
+    #
+    # `_CANDIDATE_ROWS` is a bounded read (ids + titles already needed in
+    # memory) that is wide enough for the filters to have something to
+    # work with, and the cap still happens after all of them.
+    rows, _folded = fold_duplicates(list(qs[:_CANDIDATE_ROWS]))
 
     # RELEVANT TO WHAT THEY RECRUIT FOR. Everything above this line selects on
     # the FIRM, which is right for the firm axis and blind to the job: the

@@ -686,37 +686,6 @@ def test_a_campaign_contact_never_carries_a_reping():
     assert "Re-ping" not in a["reason"]
 
 
-def test_waiting_on_reply_does_not_hold_campaign_contacts_forever():
-    """On the founder's real account the ICC merge alone would fill the
-    "Waiting on reply" strip with 190-odd club recipients, drowning every
-    genuine recruiting wait. Once the send is classified `other`, its
-    originating contacts leave that strip along with the queue — and come
-    back the moment the answer is changed."""
-    from crm.today import _cockpit_context
-
-    user = _user()
-    # No firm on purpose: at a non-target employer these contacts never had a
-    # queue card (the relevance gate drops them), so "Waiting on reply" was
-    # the ONE surface still holding them — which is exactly the leak.
-    people = _merge(user, n=10, days_ago=20)
-    for c in people:
-        c.thread_state = "no_reply"
-        c.save(update_fields=["thread_state"])
-    campaign = camp.detect(user)[0]
-
-    names = {p.name for p in people}
-    waiting = {c.name for c in _cockpit_context(user)["waiting"]["people"]}
-    assert names & waiting  # unclassified: status quo, they are listed
-
-    camp.classify(user, campaign.id, Campaign.KIND_OTHER)
-    waiting = {c.name for c in _cockpit_context(user)["waiting"]["people"]}
-    assert not (names & waiting)
-
-    camp.classify(user, campaign.id, Campaign.KIND_RECRUITING)
-    waiting = {c.name for c in _cockpit_context(user)["waiting"]["people"]}
-    assert names & waiting
-
-
 def test_classify_message_counts_only_this_campaign(client):
     """WATCHED LIVE (audit 2026-08-23): with a 9-recipient merge already
     classified `other`, answering an 8-recipient send flashed "17 contacts

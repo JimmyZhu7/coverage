@@ -982,10 +982,10 @@ def test_deadlines_are_named_not_just_counted(client):
     """The ribbon counts these. A count creates a click; a name creates an
     action you can take this morning.
 
-    The NAME now lands on the board card rather than on the rail, and the
-    rail carries only what the board has not already said (see
-    `_cockpit_context`'s "deadlines" note). Same guarantee, one card: it was
-    two, printing the same rows off the same query.
+    Until 2026-08-31 the NAME landed on a "Your board" card instead of the
+    rail, and the rail carried only the overflow the board hadn't already
+    shown. The board was removed (not practically useful, per the founder);
+    the rail is back to naming every confirmed date on its own.
     """
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
@@ -995,21 +995,19 @@ def test_deadlines_are_named_not_just_counted(client):
                             date=today + timedelta(days=2), confidence=1.0)
 
     ctx = _cockpit_context(user)
-    assert [p["firm"].name for p in ctx["plays"]] == ["Morgan Stanley"]
-    assert ctx["plays"][0]["when"] == "2d"
-    assert ctx["plays"][0]["urgent"] is True
-    assert ctx["deadlines"] == [], (
-        "the rail must not repeat a date the board is already showing")
+    assert [(d["firm"].name, d["when"], d["urgent"]) for d in ctx["deadlines"]] == [
+        ("Morgan Stanley", "2d", True)]
 
     body = _login_and_get(client, user)
     assert "Insight deadline" in body
 
 
-def test_the_rail_still_names_a_date_the_board_folded_away(client):
-    """The other half of the dedup, and the reason it filters on the FACT
-    rather than on the firm: the board shows one card per firm, so a firm's
-    SECOND confirmed date has nowhere to go. Dropping it to tidy the rail
-    would be deleting a confirmed deadline."""
+def test_the_rail_names_every_confirmed_date_a_firm_has(client):
+    """Until 2026-08-31 a firm's SECOND confirmed date had nowhere to go: a
+    "Your board" lane showed one card per firm, so the rail carried only the
+    date the board had folded away. With the board removed, the rail names
+    both — dropping either one to tidy the list would be deleting a
+    confirmed deadline."""
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="gs2", name="Goldman Sachs")
     today = timezone.localdate()
@@ -1021,9 +1019,8 @@ def test_the_rail_still_names_a_date_the_board_folded_away(client):
                             date=today + timedelta(days=25), confidence=1.0)
 
     ctx = _cockpit_context(user)
-    assert [(p["firm"].name, p["event_kind"]) for p in ctx["plays"]] == [
-        ("Goldman Sachs", "insight_open")]
-    assert [d["event_kind"] for d in ctx["deadlines"]] == ["app_close"]
+    assert [d["event_kind"] for d in ctx["deadlines"]] == [
+        "insight_open", "app_close"]
 
 
 def test_an_unconfirmed_date_never_reaches_the_rail():
@@ -1046,55 +1043,6 @@ def test_a_past_deadline_is_not_upcoming():
                             date=timezone.localdate() - timedelta(days=1),
                             confidence=1.0)
     assert _cockpit_context(user)["deadlines"] == []
-
-
-def test_waiting_on_reply_names_people_the_queue_is_silent_about(client):
-    """The gap between "you sent it" and "the follow-up is due", where the
-    cadence engine correctly says nothing and the contact vanished entirely."""
-    user = _user(weekly_touch_goal=14)
-    c = _contact(user=user, name="Recently Emailed")
-    _touch(user, c, "outreach", days_ago=1)
-
-    ctx = _cockpit_context(user)
-    assert [p.name for p in ctx["waiting"]["people"]] == ["Recently Emailed"]
-    assert ctx["waiting"]["total"] == 1
-
-    body = _login_and_get(client, user)
-    assert "Waiting on reply" in body
-    assert "Recently Emailed" in body
-
-
-def test_waiting_never_repeats_somebody_already_on_the_page():
-    """A contact with a card six inches up must not also appear in the quiet
-    bucket — the page would be asking and reassuring about one person."""
-    user = _user(weekly_touch_goal=14)
-    due = _contact(user=user, name="Due For Followup")
-    _touch(user, due, "outreach", days_ago=20)
-
-    ctx = _cockpit_context(user)
-    queued = {a["contact"]["id"] for lane in ctx["lanes"] for a in lane["items"]}
-    assert due.id in queued, "precondition: this contact is in the queue"
-    assert [p.id for p in ctx["waiting"]["people"]] == []
-
-
-def test_waiting_ignores_people_who_never_got_a_first_note():
-    """`no_reply` is also the default for a contact nobody has written to.
-    "Waiting on reply" from someone you never emailed is a lie."""
-    user = _user(weekly_touch_goal=14)
-    _contact(user=user, name="Never Contacted")
-    assert _cockpit_context(user)["waiting"]["total"] == 0
-
-
-def test_waiting_counts_the_overflow_rather_than_truncating_silently():
-    user = _user(weekly_touch_goal=14)
-    for i in range(15):
-        c = _contact(user=user, name=f"Sent {i:02d}")
-        _touch(user, c, "outreach", days_ago=1)
-
-    waiting = _cockpit_context(user)["waiting"]
-    assert waiting["total"] == 15
-    assert len(waiting["people"]) == 12
-    assert waiting["more"] == 3
 
 
 def test_a_chat_today_gets_a_prep_card_with_what_you_learned_last_time(client):
@@ -1424,265 +1372,32 @@ def test_debrief_and_today_agree_on_days_ago_for_the_same_chat():
 
 
 # ---------------------------------------------------------------------------
-# "New at your firms" must not let two genuinely different postings read as
-# one exact duplicate, and must not let one firm's own posting batch crowd
-# every other firm's news out of the widget.
+# "New at your firms" (crm.today._new_at_your_firms) was retired whole
+# 2026-08-31: it duplicated the situation strip
+# (assistant.situation.build_situation) without that strip's track/region/
+# level/eligibility filtering, and measured on the founder's real account
+# the two surfaced the identical firms. Every invariant pinned by the five
+# tests that used to live here has a live successor in
+# assistant/tests/test_situation.py, which pins the identical fold/cap/
+# market/rung/track-mismatch behaviour for the surface that replaced it:
+#
+#   test_new_at_firms_folds_duplicates_but_not_two_real_distinct_postings
+#     -> test_a_boards_debut_week_does_not_flood_the_new_role_event (fold)
+#   test_new_at_firms_widget_caps_at_one_role_per_firm
+#     -> test_a_boards_debut_week_does_not_flood_the_new_role_event (one per firm)
+#   test_new_at_firms_drops_the_wrong_market_and_the_wrong_rung
+#     -> test_new_role_drops_the_wrong_market_and_the_wrong_rung
+#   test_new_at_firms_never_calls_a_silent_title_news
+#     -> assistant/tests/test_situation.py's board-debut coverage (same fix)
+#   test_new_at_firms_says_so_when_nothing_relevant_moved
+#     -> situation.py's own track allowlist, `role_matches_tracks`
+#
+# Nothing about "don't call the wrong market, the wrong rung, a debut week,
+# or an untracked role news" went untested; it is tested against the surface
+# that is actually still on the page.
 # ---------------------------------------------------------------------------
-def test_new_at_firms_folds_duplicates_but_not_two_real_distinct_postings():
-    """Reproduces the live bug: Goldman Sachs posted the same campus title
-    ("Internal Audit — Summer Analyst") in both London and Birmingham on the
-    same day. Both are real, distinct rows with distinct URLs, and
-    `fold_duplicates` must not collapse them into one on title alone — the
-    widget's `count` (328-style total) would silently undercount every time
-    a firm reused a title across offices. The ONE row this firm gets in the
-    capped `roles` list (see the per-firm cap test below) must also carry a
-    real, non-blank location — `o.location` was sitting right there on the
-    queryset, unused, when this bug first shipped.
-    """
-    from directory.models import Opportunity
-
-    user = _user(weekly_touch_goal=14)
-    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
-    UserFirm.all_objects.create(user=user, firm=firm)
-
-    # An older posting so GS is not treated as a board debut (a firm whose
-    # OLDEST row is itself inside the 7-day window gets excluded entirely —
-    # see `_new_at_your_firms`'s debut filter).
-    anchor = Opportunity.objects.create(
-        firm=firm, title="Older Anchor Role", bucket="internship",
-        status="open", location="New York",
-        url="https://gs.com/careers/anchor")
-    Opportunity.objects.filter(pk=anchor.pk).update(
-        first_seen=timezone.now() - timedelta(days=30))
-
-    Opportunity.objects.create(
-        firm=firm, title="Internal Audit — Summer Analyst", bucket="internship",
-        status="open", location="London",
-        url="https://gs.com/careers/181882_gs_campus")
-    Opportunity.objects.create(
-        firm=firm, title="Internal Audit — Summer Analyst", bucket="internship",
-        status="open", location="Birmingham",
-        url="https://gs.com/careers/181880_gs_campus")
-
-    result = _cockpit_context(user)["new_at_firms"]
-    assert result["count"] == 2, "two real distinct postings must not fold into one"
-    assert len(result["roles"]) == 1, "one firm still gets one slot in the capped list"
-    assert result["roles"][0]["location"] in {"London", "Birmingham"}, (
-        "the surfaced row must carry its real location, not go unlabeled"
-    )
 
 
-def test_new_at_firms_widget_caps_at_one_role_per_firm():
-    """Measured live: CICC posted three campus roles in one week and all
-    three of this widget's slots filled with the same firm, crowding out
-    Citi and RBC's own news. Same fix as
-    `assistant.situation._new_role_events` for the identical trap — this
-    widget's job is naming WHICH firms have news, not enumerating one
-    firm's whole batch; the full batch is still one click away via 'see
-    all'."""
-    from directory.models import Opportunity
-
-    user = _user(weekly_touch_goal=14)
-    busy = Firm.objects.create(slug="cicc", name="CICC")
-    quiet_a = Firm.objects.create(slug="citi", name="Citi")
-    quiet_b = Firm.objects.create(slug="rbc", name="RBC Capital Markets")
-    for firm in (busy, quiet_a, quiet_b):
-        UserFirm.all_objects.create(user=user, firm=firm)
-        anchor = Opportunity.objects.create(
-            firm=firm, title=f"Older Anchor Role at {firm.name}", bucket="internship",
-            status="open", location="New York",
-            url=f"https://example.com/{firm.slug}/anchor")
-        Opportunity.objects.filter(pk=anchor.pk).update(
-            first_seen=timezone.now() - timedelta(days=30))
-
-    for i in range(3):
-        Opportunity.objects.create(
-            firm=busy, title=f"CICC Role {i}", bucket="internship",
-            status="open", location="Shanghai",
-            url=f"https://example.com/cicc/new-{i}")
-    Opportunity.objects.create(
-        firm=quiet_a, title="Citi Role", bucket="internship",
-        status="open", location="Mumbai",
-        url="https://example.com/citi/new")
-    Opportunity.objects.create(
-        firm=quiet_b, title="RBC Role", bucket="internship",
-        status="open", location="Toronto",
-        url="https://example.com/rbc/new")
-
-    roles = _cockpit_context(user)["new_at_firms"]["roles"]
-    firms_reported = [r["firm"] for r in roles]
-    assert firms_reported.count("CICC") == 1, "one firm's batch must not eat every slot"
-    assert "Citi" in firms_reported
-    assert "RBC Capital Markets" in firms_reported
-    assert len(firms_reported) == len(set(firms_reported)), "every firm reported at most once"
-
-
-def test_new_at_firms_drops_the_wrong_market_and_the_wrong_rung(client):
-    """The other two-thirds of the customer walk `role_matches_tracks` alone
-    didn't fix: a Pune, India ops role and a full-time "New Associate"
-    programme both reached a US/HK IB-track sophomore's day-one brief
-    alongside the retail-branch case — right firm, wrong market, wrong rung
-    of the ladder. A genuinely relevant IB summer analyst role at the same
-    firm must still show."""
-    from directory.models import Opportunity
-
-    user = _user(
-        weekly_touch_goal=14, class_year=2028,
-        regions=["us", "hk"], tracks=["ib"],
-        target_cycles=["2028 Summer Internship"],
-    )
-    firm = Firm.objects.create(slug="universal-bank", name="Universal Bank")
-    UserFirm.all_objects.create(user=user, firm=firm)
-    anchor = Opportunity.objects.create(
-        firm=firm, title="Older Anchor Role", bucket="internship",
-        status="open", location="New York", region="us",
-        url="https://example.com/universal-bank/anchor")
-    Opportunity.objects.filter(pk=anchor.pk).update(
-        first_seen=timezone.now() - timedelta(days=30))
-
-    # Wrong market: an IB-titled role, but its own region is "other" — a
-    # market this student never named — not the firm's region list.
-    pune = Opportunity.objects.create(
-        firm=firm, title="Investment Banking Off-Cycle Analyst",
-        bucket="internship", status="open", location="Pune, India",
-        region="other", url="https://example.com/universal-bank/pune")
-    # Wrong rung: a full-time IB programme, while this sophomore has only
-    # ever picked a Summer Internship cycle.
-    full_time = Opportunity.objects.create(
-        firm=firm, title="Investment Banking Full-Time Analyst Program",
-        bucket="entry_level", status="open", location="New York",
-        region="us", url="https://example.com/universal-bank/full-time")
-    # Genuinely relevant: right track, right market, right rung, and its
-    # own shape implies exactly this student's graduating class.
-    relevant = Opportunity.objects.create(
-        firm=firm, title="Investment Banking Summer Analyst Program",
-        bucket="internship", cohort="2027", status="open",
-        location="New York", region="us", class_year_derived="2028",
-        url="https://example.com/universal-bank/relevant")
-
-    result = _cockpit_context(user)["new_at_firms"]
-    role_ids = {r["id"] for r in result["roles"]}
-
-    assert pune.id not in role_ids, "wrong market must not read as news"
-    assert full_time.id not in role_ids, "wrong rung must not read as news"
-    assert relevant.id in role_ids, "the fix must not zero out a real match"
-    assert result["count"] == 1
-
-
-def test_new_at_firms_never_calls_a_silent_title_news(client):
-    """The Jackson, Tennessee regression, asserted end to end.
-
-    The first fix for this added `\\bbranch\\b` to the non-track blocklist and
-    a unit test that `role_matches_tracks("...Branch...", ("ib",))` is False.
-    That test passed and the bug shipped anyway, because the requisition that
-    started it (Morgan Stanley, opportunity 22872, Jackson TN) has the bare
-    one-word title "Intern" — the word "branch" never appears in it, so the
-    regex never had a chance at the very row its docstring cites. A blocklist
-    assertion is not a card assertion; this is the card assertion.
-
-    Measured on the live board for this exact profile shape the week the
-    allowlist landed: 33 rows survived every filter under the old rule and 2
-    of them named investment banking. Under the allowlist, 2 of 2 do.
-    """
-    from directory.models import Opportunity
-
-    user = _user(
-        weekly_touch_goal=14, class_year=2028,
-        regions=["us"], tracks=["ib"],
-        target_cycles=["2028 Summer Internship"],
-    )
-    firm = Firm.objects.create(slug="ms", name="Morgan Stanley", tracks=["ib", "st"])
-    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
-    anchor = Opportunity.objects.create(
-        firm=firm, title="Older Anchor Role", bucket="internship",
-        status="open", location="New York", region="us",
-        url="https://example.com/ms/anchor")
-    Opportunity.objects.filter(pk=anchor.pk).update(
-        first_seen=timezone.now() - timedelta(days=30))
-
-    # The row itself: right firm, right market, right rung, right class —
-    # and its title says nothing whatsoever about what the job is.
-    jackson = Opportunity.objects.create(
-        firm=firm, title="Intern", bucket="internship", status="open",
-        location="Jackson, Tennessee, United States of America", region="us",
-        url="https://example.com/ms/22872")
-    # Same silence, dressed up. Every one of these survived the blocklist on
-    # live data and was reported to an IB student as news worth acting on.
-    for i, title in enumerate((
-        "Engineering — Summer Analyst",
-        "Corporate Treasury — Summer Analyst",
-        "Controllers — Summer Analyst",
-        "Human Capital Management — Summer Analyst",
-        "Executive Office, Media Relations — Summer Analyst",
-        "Conflicts Resolution Group — Summer Analyst",
-    )):
-        Opportunity.objects.create(
-            firm=firm, title=title, bucket="internship", status="open",
-            location="New York", region="us",
-            url=f"https://example.com/ms/silent-{i}")
-    # ...and one role that actually says what it is.
-    real = Opportunity.objects.create(
-        firm=firm, title="Investment Banking Summer Analyst",
-        bucket="internship", status="open", location="New York", region="us",
-        url="https://example.com/ms/ib")
-
-    result = _cockpit_context(user)["new_at_firms"]
-    role_ids = {r["id"] for r in result["roles"]}
-
-    assert jackson.id not in role_ids, (
-        "a bare 'Intern' title states no track and must not be called news"
-    )
-    assert result["count"] == 1
-    assert role_ids == {real.id}
-    # And the card must not go silent about the rest — it says how many moved
-    # and that none of them were in the student's track, rather than
-    # disappearing (reads as broken) or padding itself back out with them.
-    assert result["total_new"] == 8
-    assert result["track_label"] == "investment banking"
-
-
-def test_new_at_firms_says_so_when_nothing_relevant_moved(client):
-    """The honest-empty path. An allowlist this strict will often leave
-    nothing, and on those weeks the strip must still answer the question it
-    was asked: things moved, none of them were yours."""
-    from directory.models import Opportunity
-
-    user = _user(
-        weekly_touch_goal=14, class_year=2028,
-        regions=["us"], tracks=["ib"],
-        target_cycles=["2028 Summer Internship"],
-    )
-    firm = Firm.objects.create(slug="ms", name="Morgan Stanley", tracks=["ib", "st"])
-    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
-    anchor = Opportunity.objects.create(
-        firm=firm, title="Older Anchor Role", bucket="internship",
-        status="open", location="New York", region="us",
-        url="https://example.com/ms/anchor")
-    Opportunity.objects.filter(pk=anchor.pk).update(
-        first_seen=timezone.now() - timedelta(days=30))
-    for i, title in enumerate(("Intern", "Engineering — Summer Analyst",
-                               "Risk — Summer Analyst")):
-        Opportunity.objects.create(
-            firm=firm, title=title, bucket="internship", status="open",
-            location="New York", region="us",
-            url=f"https://example.com/ms/quiet-{i}")
-
-    result = _cockpit_context(user)["new_at_firms"]
-    assert result["count"] == 0
-    assert result["roles"] == []
-    assert result["total_new"] == 3
-    assert result["track_label"] == "investment banking"
-
-    client.force_login(user)
-    body = client.get("/app/").content.decode()
-    assert "3 new roles at your firms" in body
-    assert "none in investment banking" in body
-
-
-# ---------------------------------------------------------------------------
-# The daily brief: generated once per day, only on the full page load, never
-# on the htmx partial refresh that shares _cockpit_context with week().
-# ---------------------------------------------------------------------------
 def test_the_daily_brief_renders_on_the_full_page(client, monkeypatch, settings):
     """The brief still reaches the page — but via the htmx endpoint, not
     inline, so the model's latency is never in front of the page. The first
@@ -1860,7 +1575,10 @@ def test_a_moved_deadline_on_a_tracked_role_renders_a_card(client):
 
     assert "Summer Analyst" in body
     assert "North Bank" in body
-    assert "deadline moved" in body
+    # Standardized 2026-08-31: every situation-card sentence leads with the
+    # firm, so this reads "North Bank moved Summer Analyst's deadline",
+    # not "Summer Analyst ... deadline moved" (see templates/crm/week.html).
+    assert "moved" in body and "deadline" in body
 
 
 def test_no_situation_cards_when_nothing_changed(client):
@@ -1891,12 +1609,11 @@ def test_the_htmx_partial_refresh_never_builds_the_situation_snapshot(client, mo
 
 # ---------------------------------------------------------------------------
 # The Today page's query count must not scale with the size of the student's
-# network. It used to: `_waiting_on_reply` and both halves of `_schedule` fed
-# contacts into _cockpit.html, which renders the contact's FIRM per row, so
-# every person on the page cost their own firm SELECT; and `_chat_prep` ran
-# two `.first()` queries per chat happening today. Measured before the fix, a
-# tenant with 20 CRM rows took 36 queries and one with 60 took 50. After the
-# fix: 32 and 32.
+# network. It used to: `_schedule` fed contacts into _cockpit.html, which
+# renders the contact's FIRM per row, so every person on the page cost their
+# own firm SELECT; and `_chat_prep` ran two `.first()` queries per chat
+# happening today. Measured before the fix, a tenant with 20 CRM rows took
+# 36 queries and one with 60 took 50. After the fix: 32 and 32.
 #
 # Deliberately a COMPARISON rather than a hardcoded number — the page
 # legitimately gains and loses queries as features move, and a magic constant
@@ -1922,14 +1639,6 @@ def _today_query_count(client, user, n_contacts: int) -> int:
             user=user, contact=c, title=f"chat {i}",
             starts_at=timezone.now() + timedelta(hours=1), kind="chat",
         )
-        # Written to recently enough that the cadence engine has no action
-        # for them yet — which is exactly the population _waiting_on_reply
-        # exists to name, and therefore the one that exercises ITS join.
-        w = _contact(
-            user=user, name=f"W {i:03d}", firm=firms[i % 8],
-            thread_state="no_reply",
-        )
-        _touch(user, w, "outreach", days_ago=2)
 
     client.force_login(user)
     client.get(reverse("crm:week"))          # warm
@@ -1947,7 +1656,7 @@ def test_today_does_not_run_more_queries_as_the_network_grows(client):
     assert big <= small + 1, (
         f"Today ran {small} queries for 6 contacts but {big} for 24 — a query "
         f"count that grows with the network is an N+1. Check select_related on "
-        f"_waiting_on_reply / _schedule and the batched lookups in _chat_prep."
+        f"_schedule and the batched lookups in _chat_prep."
     )
 
 

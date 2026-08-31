@@ -1226,7 +1226,11 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         # further down this same page (crm/views.py::_WARMTH_SECTIONS) —
         # this was never the only place that vocabulary lived, just the
         # only place it cost a permanent row to repeat it.
-        bar_title = None
+        # The bar renders for every card now (2026-08-31, see the template),
+        # including a firm with no contacts -- which still needs an honest
+        # title rather than the empty string a bare `None` would leave on
+        # its `title=` attribute.
+        bar_title = "No contacts yet"
         if cs:
             labels = {
                 "cold": "emailed, no reply", "replied": "replied",
@@ -1817,13 +1821,17 @@ def contact_archived(request: HttpRequest) -> HttpResponse:
     practice rather than only in principle. Deliberately plain: this is a
     recovery surface, not a second Network board.
 
-    `?firm=<id>` scopes the ledger to one firm — the destination Today's
-    play cards link a "N parked" count to (crm.today._plays' `live_total`
-    note): `directory:firm_detail`'s own network section excludes archived
-    contacts, so a card that counts parked people needs somewhere that
-    actually shows them, at the SAME firm the card was about. An
-    unrecognised or missing value is the existing unscoped behaviour, not
-    an error — every other entry point into this page (Settings, the
+    `?firm=<id>` scopes the ledger to one firm. Until 2026-08-31 Today's
+    dated play cards linked a "N parked" count here (the retired
+    `crm.today._plays`' `live_total` note): `directory:firm_detail`'s own
+    network section excludes archived contacts, so a card that counted
+    parked people needed somewhere that actually showed them, at the SAME
+    firm the card was about. That card type is gone with the "Your board"
+    lane it rendered in, but the scoping stays — a firm-scoped archived
+    view is a reasonable destination on its own, and nothing else in this
+    view depends on who links to it. An unrecognised or missing value is
+    the existing unscoped behaviour, not an error — every other entry
+    point into this page (Settings, the
     archive confirmation message) has no firm in mind at all.
     """
     firm = None

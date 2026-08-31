@@ -196,31 +196,38 @@
     to see, so the sentence above never leads with a change nobody has a
     card for.
     {% endcomment %}
+    {% comment %}
+    Standardized 2026-08-31, one shape for all three kinds: FIRM leads
+    every sentence (matches the Opportunities feed's own decisiveness
+    ordering — the anchor fact comes first), one verb, the title bolded,
+    an optional trailing clause, nothing else. Before this, the three
+    kinds read as three different sentences — subject-first here,
+    firm-first there, one with a colon nobody else used — so a reader had
+    to re-parse the shape on every card instead of scanning three the
+    same way.
+
+    "Talk about it" is gone: with one destination left, an arrow at the
+    edge says the whole card leads somewhere, and the card itself is the
+    link — no second control to disambiguate against, no `?about=role:`
+    composer prefill to maintain.
+    {% endcomment %}
     <div class="situation-strip">
       {% for e in situation_events %}
-        <div class="situation-card kin-reveal" style="--i: {{ forloop.counter0 }}">
-          <div class="situation-card-text">
+        <a class="situation-card kin-reveal" style="--i: {{ forloop.counter0 }}"
+           href="{{ e.url }}" target="_blank" rel="nofollow noopener">
+          <span class="situation-card-text">
             {% if e.kind == "deadline_moved" %}
-              <p><b>{{ e.title|smart_title }}</b> at {{ e.firm|smart_title }}: deadline moved
-                {% if e.old_date %}from {{ e.old_date|date:"M j" }} {% elif e.old_value %}from {{ e.old_value }} {% endif %}to
-                {% if e.new_date %}{{ e.new_date|date:"M j" }}{% else %}{{ e.new_value|default:"no date" }}{% endif %}.</p>
+              {{ e.firm|smart_title }} moved <b>{{ e.title|smart_title }}</b>'s deadline
+              {% if e.old_date %}from {{ e.old_date|date:"M j" }} {% elif e.old_value %}from {{ e.old_value }} {% endif %}to
+              {% if e.new_date %}{{ e.new_date|date:"M j" }}{% else %}{{ e.new_value|default:"no date" }}{% endif %}.
             {% elif e.kind == "role_closed" %}
-              <p><b>{{ e.title|smart_title }}</b> at {{ e.firm|smart_title }} closed. Not accepting applications anymore.</p>
+              {{ e.firm|smart_title }} closed <b>{{ e.title|smart_title }}</b>.
             {% elif e.kind == "new_role_at_known_firm" %}
-              <p>{{ e.firm|smart_title }} just opened <b>{{ e.title|smart_title }}</b>{% if e.location %} · {{ e.location|smart_location }}{% endif %}.</p>
+              {{ e.firm|smart_title }} opened <b>{{ e.title|smart_title }}</b>{% if e.location %} · {{ e.location|smart_location }}{% endif %}.
             {% endif %}
-          </div>
-          <div class="situation-card-actions">
-            <a class="situation-card-link" href="{{ e.url }}" target="_blank" rel="nofollow noopener">View role</a>
-            {% comment %}
-            `?about=role:<id>` — assistant.views._about_prefill resolves this
-            to a real Opportunity and prefills the composer with a sentence
-            naming it, instead of the advisor opening on a blank box with no
-            idea which role the student just read about.
-            {% endcomment %}
-            <a class="situation-card-link" href="{% url 'assistant:chat' %}?about=role:{{ e.opportunity_id }}">Talk about it</a>
-          </div>
-        </div>
+          </span>
+          <span class="situation-card-arrow" aria-hidden="true">&rarr;</span>
+        </a>
       {% endfor %}
     </div>
   {% endif %}

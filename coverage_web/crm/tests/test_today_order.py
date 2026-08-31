@@ -66,7 +66,7 @@ def _at(body, marker):
 
 
 # Markers: a substring unique to one section of the cockpit.
-BOARD = 'class="lane lane-plays"'
+COVERAGE = 'class="lane lane-coverage"'
 PREP = 'class="lane lane-prep"'
 DEBRIEF = 'class="lane lane-debrief"'
 PROPOSALS = 'class="lane lane-proposals"'
@@ -81,9 +81,10 @@ def loud(client):
     """A page with something in every section that competes for the top.
 
     This is the shape the reorder was for. It is deliberately not a shape any
-    real account hits often — on the founder's own live account (2026-08-28)
-    only the plan, the board and "waiting on reply" render at all, which is
-    why the bad order survived so long unnoticed.
+    real account hits often — on the founder's own live account (2026-08-28,
+    before the board was removed) only the plan, the board and "waiting on
+    reply" render at all, which is why the bad order survived so long
+    unnoticed.
     """
     user = _user("order-loud@example.com")
     today = timezone.localdate()
@@ -94,8 +95,8 @@ def loud(client):
         firm=firm, cycle="sa2028", region="us", event_kind="app_close",
         date=today + timedelta(days=3), confidence=1.0,
     )
-    # A second tiered firm with nobody at it, so the board also carries a
-    # coverage card and the lane is the mixed one the ranking rule is about.
+    # A second tiered firm with nobody at it, so `_coverage_cards` has a
+    # gap to card and the "Firms with no contacts yet" lane renders too.
     UserFirm.all_objects.create(
         user=user,
         firm=Firm.objects.create(name="Order Empty", slug="order-empty"),
@@ -150,25 +151,23 @@ def test_the_plan_leads_everything_except_a_chat_happening_today(loud):
     the one clock on this page that cannot be re-run."""
     plan = _at(loud, CRITICAL)
     assert _at(loud, PREP) < plan, "a chat today still leads; that is rung 1"
-    for later in (BOARD, DEBRIEF, PROPOSALS):
+    for later in (COVERAGE, DEBRIEF, PROPOSALS):
         assert plan < _at(loud, later), f"{later} must not outrank the plan"
 
 
-def test_the_board_sits_below_the_plan_and_above_the_rest(loud):
-    """Rung 4. Its dated half is a real clock — often the SAME clock the
-    plan's critical card is acting on — so it stays above everything with no
-    clock at all. But a notice about a deadline does not outrank the action
-    against it, and the board is by design the backstop for a day the queue
-    is empty. On that day the plan renders nothing and the board leads by
-    itself, which needs no rule."""
-    board = _at(loud, BOARD)
-    assert _at(loud, CRITICAL) < board
-    # Above BOTH of the clockless families, asserted separately rather than
-    # as one chain: this test's subject is the board's own rung, and the
-    # debrief-vs-proposals relationship below it is pinned on its own in
-    # `test_the_inbox_family_is_reachable_without_a_scroll`.
-    assert board < _at(loud, DEBRIEF)
-    assert board < _at(loud, PROPOSALS)
+def test_the_coverage_lane_sits_at_the_foot_not_rung_4(loud):
+    """Until 2026-08-31 this lane was half of "Your board", forced up to
+    rung 4 because its OTHER half carried a confirmed dated event that could
+    be as time-critical as the plan's own critical lane. The board was
+    removed (not practically useful, per the founder) and this half kept
+    its own honest rung — 7, standing backlog — instead of the borrowed
+    rung 4: it renders below the plan AND below the inbox family AND below
+    the debrief lane, not directly under the plan the way the mixed lane
+    used to."""
+    coverage = _at(loud, COVERAGE)
+    assert _at(loud, CRITICAL) < coverage
+    assert _at(loud, PROPOSALS) < coverage
+    assert _at(loud, DEBRIEF) < coverage
 
 
 def test_the_inbox_family_is_reachable_without_a_scroll(loud):

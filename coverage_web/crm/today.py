@@ -1469,147 +1469,6 @@ def _daybar(schedule, now) -> dict:
     }
 
 
-def _new_at_your_firms(user, limit=5) -> dict:
-    """Open campus roles that appeared at the user's TARGET firms this week.
-
-    The "what changed" question, answered from data the product already
-    records: `first_seen` is Coverage's own clock (when the row entered our
-    database — the honest wording the feed's cards already use), and the
-    target list is the survey's UserFirm rows. No targets means no card, not
-    an empty card: a rail slot with nothing to say should not spend the
-    pixels saying it.
-    """
-    from crm.models import UserFirm
-    from directory.classify import TARGET_BUCKETS, TRACK_LABELS
-    from directory.models import Opportunity
-    from directory.recommend import (
-        role_matches_level,
-        role_matches_regions,
-        role_matches_tracks,
-    )
-    from directory.views import _eligibility, _eligibility_profile
-
-    firm_ids = list(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
-    if not firm_ids:
-        return {"count": 0, "roles": [], "total_new": 0, "track_label": ""}
-    since = timezone.now() - timedelta(days=7)
-
-    # Exclude board DEBUTS: when a firm's oldest row is itself inside the
-    # window, the firm just joined Coverage — every posting it has is "new
-    # to us" and none of it is news about the FIRM. Measured the day this
-    # card was built: two connectors wired that week made the count 242,
-    # which is a changelog about Coverage wearing the clothes of a changelog
-    # about the market. Same trap as the feed's bulk-import "New" badge, and
-    # the same cure: first_seen is our clock, so say things it can honestly
-    # support.
-    from django.db.models import Min
-
-    debut = {
-        row["firm_id"]
-        for row in Opportunity.objects.filter(firm_id__in=firm_ids)
-        .values("firm_id").annotate(oldest=Min("first_seen"))
-        if row["oldest"] and row["oldest"] >= since
-    }
-    # NOT A ROLE THE STUDENT ALREADY WAVED AWAY. "Not for me" is a decision
-    # about the role, not about the surface it was shown on, and this card
-    # was the last one still arguing with it: a role dismissed in the feed on
-    # Monday came back on Tuesday as news from the firm. Same exclusion its
-    # sibling `assistant.situation._new_role_events` already applies to the
-    # identical question.
-    dismissed_ids = set(
-        UserOpportunity.objects.for_user(user)
-        .filter(dismissed=True)
-        .values_list("opportunity_id", flat=True)
-    )
-    qs = (Opportunity.objects
-          .filter(status="open", bucket__in=TARGET_BUCKETS,
-                  firm_id__in=[f for f in firm_ids if f not in debut],
-                  first_seen__gte=since)
-          .select_related("firm").order_by("-first_seen"))
-    if dismissed_ids:
-        qs = qs.exclude(id__in=dismissed_ids)
-    # The same repeat-listing problem the Opportunities feed already solves
-    # (directory.dupes.fold_duplicates): a board scraped twice in one week
-    # posts the same requisition twice, and this card showed both — J.P.
-    # Morgan's Shanghai "Find Your Fit" appearing back to back in a 5-role
-    # list is a copy, not two roles. Folded before counting too, so "321"
-    # isn't itself inflated by the same duplicates the list then hides.
-    rows, _folded = fold_duplicates(qs)
-
-    # RELEVANT TO WHERE, AND WHEN. Two axes the FIRM-only query is blind to:
-    # a Pune, India ops role and a full-time "New Associate" programme both
-    # reached a US/HK IB-track sophomore's day-one brief this way — right
-    # firm, wrong market, wrong rung of the ladder. Both run in memory over
-    # the same already-loaded rows, so they cost no query.
-    rows = [o for o in rows if role_matches_regions(o.region, user.regions)]
-    rows = [
-        o for o in rows
-        if role_matches_level(o.bucket, o.class_year_derived,
-                               user.target_cycles, user.class_year)
-    ]
-    # And never a role the student's own stated facts rule OUT entirely (a
-    # wrong stated class year, a market that won't sponsor them) — the same
-    # blocking verdict `directory.views._eligibility` already issues for
-    # Picked-for-you, applied here rather than duplicated.
-    elig_profile = _eligibility_profile(user)
-    if elig_profile:
-        rows = [
-            o for o in rows
-            if not (lambda v: v and v["blocking"])(_eligibility(o, elig_profile))
-        ]
-
-    # RELEVANT TO WHAT THEY RECRUIT FOR — applied LAST, on purpose, so the
-    # count either side of it is a fact worth stating.
-    #
-    # `role_matches_tracks` is an allowlist: a role has to NAME one of the
-    # student's tracks to be called news. That is a deliberately hard bar and
-    # it will often leave nothing (see the function's own docstring for the
-    # 2-of-33 measurement that forced it). The temptation at that point is to
-    # loosen the filter until the card has something in it. The honest move is
-    # the opposite: keep the bar and say what happened.
-    #
-    # So the card gets BOTH numbers. `total_new` is everything that is genuinely
-    # new at the student's firms, in their market, at their rung, that they are
-    # eligible for — the whole truth about what moved this week. `count` is the
-    # subset that names their track. When they differ and `count` is zero, the
-    # template says "31 new roles at your firms, none in investment banking",
-    # which is a real answer; silently rendering nothing would read as a broken
-    # card, and padding it with Engineering roles would be the original bug.
-    relevant = [o for o in rows if role_matches_tracks(o.title, user.tracks)]
-    total_new = len(rows)
-    rows = relevant
-
-    # ONE PER FIRM in the displayed list — `count` stays the true total.
-    # A firm's own campus recruiting team routinely posts a whole batch of
-    # reqs the same week (CICC alone posted three in one run), and without
-    # this the batch fills every slot the card has, reading as "CICC, CICC,
-    # CICC" instead of naming the breadth of what's actually moving. Same
-    # fix as `assistant.situation._new_role_events` for the identical trap.
-    seen_firms: set[int] = set()
-    roles = []
-    for o in rows:
-        if o.firm_id in seen_firms:
-            continue
-        seen_firms.add(o.firm_id)
-        roles.append({"title": o.title, "firm": o.firm.name, "id": o.id,
-                      "slug": o.firm.slug, "location": o.location})
-        if len(roles) >= limit:
-            break
-
-    # `track_label` is the one the student would recognise from Settings, not
-    # the chip abbreviation — "none in investment banking" reads; "none in IB"
-    # reads like a filter state. Only ever set when there is exactly one thing
-    # to name; with two or more tracks the template says "none in the tracks
-    # you recruit for" rather than listing them.
-    tracks = [t for t in (user.tracks or []) if t in TRACK_LABELS]
-    return {
-        "count": len(rows),
-        "roles": roles,
-        "total_new": total_new,
-        "track_label": TRACK_LABELS[tracks[0]].lower() if len(tracks) == 1 else "",
-    }
-
-
 def _next_deadlines(user, today, limit=4) -> list[dict]:
     """The next confirmed firm dates, NAMED.
 
@@ -1637,10 +1496,9 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
             "firm": fd.firm,
             "label": _FIRM_DATE_LABELS.get(
                 fd.event_kind, fd.event_kind.replace("_", " ")),
-            # The raw kind, alongside the human `label` above. `_plays` keys
-            # its dismissal tuple on this (plus firm + date) rather than on
-            # the label, so a copy-editing pass on `_FIRM_DATE_LABELS` can
-            # never resurrect or re-dismiss a fact it didn't touch.
+            # The raw kind, alongside the human `label` above — a stable key
+            # a copy-editing pass on `_FIRM_DATE_LABELS` can't silently
+            # change the identity of.
             "event_kind": fd.event_kind,
             "date": fd.date,
             "days": days,
@@ -1653,195 +1511,67 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# The board: firm-level facts worth acting on today. Two kinds, one lane.
+# Coverage gaps: tiered firms where the student knows nobody, worst first.
 # ---------------------------------------------------------------------------
-# THE GAP THIS CLOSES. The founder's Today page rendered zero cards the week
-# he sent ~50 personalised coffee-chat requests: nothing was DUE, and the
-# cadence queue is the page's only content source. Meanwhile the page already
-# knew J.P. Morgan closes in 3 days and he has 6 people there, and Goldman's
-# insight programme opens Sep 1 with 5 of his new batch at Goldman. The
-# ingredients existed on two different rails — `_next_deadlines`'s dated
-# facts, and the student's own contacts — and never met. This is the join,
-# and only the join: no prose, no model call, nothing rendered that isn't
-# read off a row.
+# WHAT USED TO BE HERE. Until 2026-08-31 this section built a mixed lane
+# ("Your board") joining two kinds of fact: a confirmed dated firm event
+# joined to the student's own contacts there (`_plays`, off `_next_deadlines`),
+# and this coverage-gap half. The founder judged the lane not practically
+# useful and it was removed whole. The dated half needed no replacement — the
+# rail's Deadlines card (`_next_deadlines`, in `_cockpit_context`) already
+# named the identical facts on its own, and now shows its full natural set
+# again instead of the overflow the two lanes used to argue about. This half
+# did need one: see the note below.
 #
-# Confirmed dates only, unchanged from `_next_deadlines`'s own bar — a
-# rumoured date is not a play, it is the countdown bug this codebase already
-# refused to ship once.
+# THE ONE THING THE CADENCE ENGINE STRUCTURALLY CANNOT SAY. The engine
+# schedules CONTACTS. A firm with no contacts produces no actions, forever,
+# however much the student cares about it — so the gap is invisible on Today
+# no matter how long it stands open. That is the asymmetry this exploits:
+# "who is due a follow-up" is bursty (the founder sent 106 touches on Aug 10
+# and 1-3 a day for the eight days after), while "where is my network thin"
+# is a standing fact that does not empty for months.
 #
-# WHY THE DATED HALF IS NOT ENOUGH, measured on the founder's own account
-# (2026-08-27, 182 live contacts). He has exactly FOUR confirmed future firm
-# dates, three of which render. After Sep 22 the dated half of this lane is
-# empty for the rest of the cycle. Dated facts are as bursty as the cadence
-# queue is, because they come from the same calendar the whole market shares.
+# WHY THIS SURVIVED THE BOARD'S DELETION WHEN `_plays` DID NOT. Measured on
+# the founder's account (2026-08-27): 25 of his 54 tiered firms had nobody at
+# them, 18 of them tier 1 or 2. `_starter_seeds`' own "add people at X" seed
+# only ever ran below `SEED_NETWORK_FLOOR` live contacts — with 182 contacts
+# he could never see it. Moving the prompt here (then, into the board; now,
+# into its own unconditional call in `_cockpit_context`) is what made it
+# reachable at all, and that fix does not stop being true just because the
+# lane it was rendered in also carried a jargon heading nobody asked for.
+# Deleting this function with the board would have silently deleted the
+# prompt too, for every account past the floor — a regression dressed as
+# cleanup.
 #
-# So the lane carries a second kind of fact that is NOT bursty: a firm on the
-# student's own board, at a tier they themselves set, where they know NOBODY.
-# Same measurement: 25 of his 54 tiered firms, 18 of them tier 1 or 2. That
-# backlog does not empty in a week, is not a guess, is not a score, and is
-# not something the cadence engine can ever surface — the engine schedules
-# contacts, and there are no contacts at these firms to schedule. See
-# `_coverage_cards` for the three rules that keep it from becoming filler.
-PLAYS_MAX = 3
-# How many of the soonest confirmed dates to pull before dismissal/one-per-
-# firm narrowing. Wider than PLAYS_MAX so a dismissed fact or two still
-# leaves a full three to show; `_next_deadlines` is one indexed query so the
-# extra rows cost nothing extra to fetch.
-_PLAYS_CANDIDATE_POOL = 20
-
-# The contact-state groups a play's breakdown may name, warm-to-cold. Read
-# off `Contact.warmth` for NON-archived contacts only — `parked` (below) is
-# the archived count and is reported separately so a person's warmth at the
-# moment they were parked never gets counted twice.
-_PLAY_WARMTH_GROUPS = ("replied", "chatted", "advocate", "cold")
-_PLAY_WARMTH_LABELS = {
-    "replied": "replied", "chatted": "chatted", "advocate": "advocate",
-    "cold": "cold",
-}
-
-
-def _plays(user, today) -> list[dict]:
-    """At most `PLAYS_MAX` cards: a confirmed, dated fact about a firm, joined
-    to a plain count of this student's own contacts there.
-
-    JOIN, NOT RE-DERIVE. The fact side is exactly `_next_deadlines`'s own
-    output — this function adds no opinion about what counts as confirmed or
-    upcoming. The people side is a straight `Contact` count by firm and
-    warmth/archived state. Nothing here computes relevance, ranks a
-    relationship, or writes a sentence a human didn't already establish by
-    filling in a row.
-    """
-    candidates = _next_deadlines(user, today, limit=_PLAYS_CANDIDATE_POOL)
-    if not candidates:
-        return []
-
-    dismissed = set(
-        PlayDismissal.objects.for_user(user)
-        .values_list("firm_id", "event_kind", "date")
-    )
-
-    # One play per firm. `_next_deadlines` is already sorted soonest-date
-    # first, so the first row seen per firm is that firm's nearest confirmed
-    # date — the same "earliest wins" rule the deadlines rail itself applies.
-    seen_firms: set[int] = set()
-    facts = []
-    for d in candidates:
-        firm_id = d["firm"].id
-        if firm_id in seen_firms:
-            continue
-        seen_firms.add(firm_id)
-        # THE ANTI-NAG GATE. Filtered out here, before the cap, so a
-        # dismissed fact never occupies one of the at-most-3 slots and never
-        # blocks a real one behind it.
-        if (firm_id, d["event_kind"], d["date"]) in dismissed:
-            continue
-        facts.append(d)
-        if len(facts) >= PLAYS_MAX:
-            break
-    if not facts:
-        return []
-
-    firm_ids = [d["firm"].id for d in facts]
-    by_firm: dict[int, list] = {fid: [] for fid in firm_ids}
-    for c in (
-        Contact.objects.for_user(user)
-        .filter(firm_id__in=firm_ids)
-        .only("id", "firm_id", "warmth", "archived")
-    ):
-        by_firm[c.firm_id].append(c)
-
-    plays = []
-    for d in facts:
-        firm = d["firm"]
-        cs = by_firm.get(firm.id, [])
-        live = [c for c in cs if not c.archived]
-        parked = [c for c in cs if c.archived]
-
-        breakdown = []
-        accounted = 0
-        for w in _PLAY_WARMTH_GROUPS:
-            n = sum(1 for c in live if c.warmth == w)
-            if n:
-                breakdown.append(
-                    {"key": w, "label": _PLAY_WARMTH_LABELS[w], "count": n}
-                )
-                accounted += n
-        # `warmth` is a plain, unconstrained column (see Contact.warmth) — a
-        # value outside the known ladder still has to be counted somewhere,
-        # or the card's own arithmetic would drift from the roster behind
-        # it, which is rule 4: counts must equal what renders.
-        other = len(live) - accounted
-        if other:
-            breakdown.append({"key": "other", "label": "other", "count": other})
-        if parked:
-            breakdown.append(
-                {"key": "parked", "label": "parked", "count": len(parked)}
-            )
-
-        plays.append({
-            "firm": firm,
-            "label": d["label"],
-            "event_kind": d["event_kind"],
-            "date": d["date"],
-            "when": d["when"],
-            "urgent": d["urgent"],
-            "breakdown": breakdown,
-            # The single source both the card and this function's own tests
-            # read — never resummed from `breakdown` a second time.
-            "total": len(cs),
-            # WHAT THE "View contacts" LINK CAN ACTUALLY SHOW. That button
-            # points at `directory:firm_detail`, whose "My Network here"
-            # section excludes archived contacts (directory.views.
-            # _my_network_at) — the same exclusion the Network board itself
-            # applies. `total` above counts parked people INTO the card's
-            # headline sentence on purpose (a parked relationship is still a
-            # relationship you have at this firm, worth knowing about), but
-            # a sentence that says "3 contacts here" over a button that
-            # shows 0 is the counts-must-equal-what-renders bug this repo
-            # has now shipped five times. `live_total` is what the button's
-            # destination will actually display, so the template can choose
-            # the right destination instead of the one destination this
-            # lane always used to offer. The parked count itself gets its
-            # own link in `_cockpit.html` — to `crm:contact_archived`,
-            # scoped to this firm — rather than being folded silently into
-            # a number the firm page cannot back up.
-            "live_total": len(live),
-            # A firm with a live date and nobody there is still a play: the
-            # card reads as a sourcing prompt rather than a roster.
-            "sourcing": not cs,
-            # Which of the two facts this card carries. The dated half.
-            "kind": "date",
-            # What a Dismiss tap writes. Identical to `date` here; the
-            # coverage half below has no date of its own and uses the
-            # sentinel, so the template can post one field either way.
-            "dismiss_date": d["date"],
-            # ONE FOOTER, decided here rather than by three `{% if %}`s in the
-            # template. Every card in this lane now has exactly the same
-            # anatomy — firm, fact, people, one verb, dismiss — and the
-            # branch that picks the verb sits next to the counts that justify
-            # it. The two non-obvious destinations keep their reasons:
-            # nobody here yet goes to the add form with the firm prefilled,
-            # and everybody here parked goes where parked people actually
-            # render rather than to a firm page that would show none of them.
-            **(
-                {"cta_label": "Source contacts",
-                 "cta_href": f"{reverse('crm:contact_new')}?firm={firm.slug}&quick=1"}
-                if not cs else
-                {"cta_label": "View parked contacts",
-                 "cta_href": f"{reverse('crm:contact_archived')}?firm={firm.id}"}
-                if not live else
-                {"cta_label": "View contacts",
-                 "cta_href": reverse('directory:firm_detail', args=[firm.slug])}
-            ),
-        })
-    return plays
-
-
-# How many coverage cards may sit under the dated ones. Two numbers, because
-# the backlog is standing and the page is not: when the cadence queue has
-# planned work, the student already has a first thing to do this morning and
-# coverage is the background job, so it gets one slot. When the plan is empty
-# — the day this whole lane exists for — it gets two.
+# THREE RULES KEEP IT FROM BEING FILLER, and they are the whole design:
+#
+# 1. NO NEW JUDGMENT. The ranking is `crm.coverage.rank_gaps` — the exact
+#    function, with the exact inputs, that the Network board's Coverage
+#    Gaps strip already runs. It is pure, fixture-tested, and its arithmetic
+#    is a small integer the student can redo by hand off the card. Today
+#    does not get a second opinion about coverage; it renders the one the
+#    product already has, on the page where work happens.
+#
+# 2. `NO_CONTACTS` ONLY. `rank_gaps` also returns `all_cold`, `no_advocate`
+#    and `below_target` firms — 22 of the founder's 40 ranked gaps. Every one
+#    of those is a firm where he already HAS people, which means the cadence
+#    engine is already deciding when to speak about them. Carding them here
+#    would be the page asking twice for the same person, which is the
+#    cold-contact flood this repo already shipped and reverted. A firm with
+#    nobody at it is the only gap the queue cannot cover.
+#
+# 3. TIERED FIRMS ONLY, and the tier does the ordering. `rank_gaps` skips
+#    untiered rows outright: a tier is the only statement of priority the
+#    student has ever made, and without one there is nothing to rank on but
+#    the alphabet. Measured on the founder's board this puts the two tier-1
+#    holes (Centerview, RBC) above sixteen tier-2 ones and seven tier-3
+#    ones — his Nvidia and Apple rows sit at the bottom of a 25-deep queue
+#    and will not surface for months, which is correct.
+#
+# How many cards may render. Two numbers, because the backlog is standing
+# and the page is not: when the cadence queue has planned work, the student
+# already has a first thing to do this morning and coverage is the
+# background job, so it gets one slot. When the plan is empty it gets two.
 #
 # TWO, not five, and not "however many gaps there are". It is the number the
 # retired firm seeds used, for their own stated reason: at most two firm
@@ -1850,8 +1580,8 @@ def _plays(user, today) -> list[dict]:
 # that once already (the 29-cold flood) and reverted it. The founder has 25
 # open holes on his board; two of them is a morning, and twenty-five of them
 # is a page nobody reads twice.
-BOARD_COVERAGE_MAX = 2
-BOARD_COVERAGE_MAX_BUSY = 1
+COVERAGE_CARD_MAX = 2
+COVERAGE_CARD_MAX_BUSY = 1
 
 # The date stored on a coverage card's `PlayDismissal`. A coverage gap has no
 # date of its own — it is true until the student puts somebody at the firm —
@@ -1865,7 +1595,7 @@ COVERAGE_DISMISSAL_DATE = date(1970, 1, 1)
 COVERAGE_EVENT_KIND = "coverage"
 
 
-def _coverage_cards(user, today, *, skip_firm_ids: set[int], limit: int) -> list[dict]:
+def _coverage_cards(user, today, *, limit: int) -> list[dict]:
     """Firms on the student's own board where they know nobody, worst first.
 
     THE ONE THING THE CADENCE ENGINE STRUCTURALLY CANNOT SAY. The engine
@@ -1875,37 +1605,15 @@ def _coverage_cards(user, today, *, skip_firm_ids: set[int], limit: int) -> list
     exploits: "who is due a follow-up" is bursty (the founder sent 106
     touches on Aug 10 and 1-3 a day for the eight days after), while "where
     is my network thin" is a standing fact that does not empty for months.
+    See the module note above for the three rules that keep it from being
+    filler, and for why this survived the board it used to render inside.
 
-    THREE RULES KEEP IT FROM BEING FILLER, and they are the whole design:
+    Dismissals are filtered BEFORE the cap, so a dismissed firm never
+    occupies a slot.
 
-    1. NO NEW JUDGMENT. The ranking is `crm.coverage.rank_gaps` — the exact
-       function, with the exact inputs, that the Network board's Coverage
-       Gaps strip already runs. It is pure, fixture-tested, and its arithmetic
-       is a small integer the student can redo by hand off the card. Today
-       does not get a second opinion about coverage; it renders the one the
-       product already has, on the page where work happens.
-
-    2. `NO_CONTACTS` ONLY. `rank_gaps` also returns `all_cold`, `no_advocate`
-       and `below_target` firms — 22 of the founder's 40 ranked gaps. Every
-       one of those is a firm where he already HAS people, which means the
-       cadence engine is already deciding when to speak about them. Carding
-       them here would be the page asking twice for the same person, which
-       is the cold-contact flood this repo already shipped and reverted. A
-       firm with nobody at it is the only gap the queue cannot cover.
-
-    3. TIERED FIRMS ONLY, and the tier does the ordering. `rank_gaps` skips
-       untiered rows outright: a tier is the only statement of priority the
-       student has ever made, and without one there is nothing to rank on but
-       the alphabet. Measured on the founder's board this puts the two tier-1
-       holes (Centerview, RBC) above sixteen tier-2 ones and seven tier-3
-       ones — his Nvidia and Apple rows sit at the bottom of a 25-deep queue
-       and will not surface for months, which is correct.
-
-    `skip_firm_ids` is every firm already carrying a dated card in this lane:
-    one firm, one card. Dismissals are filtered BEFORE the cap, same rule as
-    `_plays`, so a dismissed firm never occupies a slot.
-
-    Returns play-shaped dicts so the lane has one card anatomy, not two.
+    Returns play-shaped dicts (the anatomy `PlayDismissal` and the dismiss
+    endpoint already know how to key on: firm, fact, dismiss) even though
+    there is now only ever one kind of card in play.
     """
     if limit < 1:
         return []
@@ -1915,7 +1623,7 @@ def _coverage_cards(user, today, *, skip_firm_ids: set[int], limit: int) -> list
             .exclude(firm_id=None)
             .select_related("firm")
         )
-        if uf.firm_id not in skip_firm_ids and uf.tier in coverage.TIER_WEIGHT
+        if uf.tier in coverage.TIER_WEIGHT
     ]
     if not user_firms:
         return []
@@ -1935,10 +1643,7 @@ def _coverage_cards(user, today, *, skip_firm_ids: set[int], limit: int) -> list
     # and it is the right one here for the reason the retired firm seed
     # already held: archiving somebody is not the same as knowing them. A
     # firm whose only three contacts are all parked has no live way in and is
-    # a coverage hole. (The dated half of this lane counts parked people INTO
-    # its headline — a different card answering a different question, "who do
-    # I have at this firm before its deadline", where a parked relationship
-    # is still worth naming. See `_plays`' `live_total` note.)
+    # a coverage hole.
     warmths: dict[int, list[str]] = {}
     for c in (
         Contact.objects.for_user(user)
@@ -2010,78 +1715,18 @@ def _coverage_cards(user, today, *, skip_firm_ids: set[int], limit: int) -> list
             "kind": "coverage",
             "dismiss_date": COVERAGE_DISMISSAL_DATE,
             "tier": g["tier"],
-            # The seeds' own line, kept word for word. It was written for
-            # this exact card and tested against it; the only thing that
-            # changed is that a student with 182 contacts can now see it.
-            "people_line": ("Nobody there yet. Three is where a firm starts "
-                            "to know you."),
+            # "Nobody there yet." — never the retired seed line that followed
+            # it ("Three is where a firm starts to know you"). That sentence
+            # asserted a specific number as fact with nothing behind it; cut
+            # 2026-08-31 rather than reworded, because there is no version of
+            # "three" this module's data can actually support.
+            "people_line": "Nobody there yet.",
             "cta_label": "Add someone",
             "cta_href": f"{reverse('crm:contact_new')}?firm={firm.slug}&quick=1",
         })
         if len(cards) >= limit:
             break
     return cards
-
-
-def _board(user, today, *, coverage_limit: int) -> list[dict]:
-    """The whole board lane: dated facts first, then coverage holes.
-
-    Order is not a ranking contest between the two kinds. A confirmed date is
-    a clock the world put on the student and always leads; a coverage hole is
-    true today and will still be true tomorrow, so it fills what is left.
-    """
-    dated = _plays(user, today)
-    return dated + _coverage_cards(
-        user, today,
-        skip_firm_ids={p["firm"].id for p in dated},
-        limit=coverage_limit,
-    )
-
-
-def _waiting_on_reply(user, busy_ids: set[int], limit=12) -> dict:
-    """People you have written to who owe you an answer, and who the queue is
-    deliberately silent about.
-
-    The gap this fills: between "you sent it" and "the follow-up is due" the
-    cadence engine says nothing — correctly, there is no action yet — so those
-    contacts vanish from Today entirely. That silence reads as "did I drop
-    something?", which is the anxiety a networking tool exists to remove. This
-    is reassurance, not work: names only, no buttons, and it never occupies a
-    plan slot.
-
-    `busy_ids` is every contact the queue is already talking about, so nobody
-    appears twice on one page.
-    """
-    rows = (
-        Contact.objects.for_user(user)
-        .filter(archived=False, thread_state="no_reply")
-        .exclude(id__in=busy_ids)
-        # _cockpit.html's waiting list renders `{% if c.firm %}{{ c.firm.name }}`
-        # per person, so without this each of the `limit` rows cost its own
-        # firm SELECT — the single largest N+1 on the Today page.
-        .select_related("firm")
-        .annotate(
-            last_ts=models_Max(
-                "touches__ts",
-                # The engine's own clock-silent set (manual_override AND
-                # bulk_received) — a blast must not refresh this clock
-                # any more than it resets the cadence's. See the
-                # `last_real` loop in `_build_actions`.
-                filter=~Q(touches__kind__in=list(cadence._CLOCK_SILENT_KINDS)),
-            )
-        )
-        .filter(last_ts__isnull=False)
-        .order_by("-last_ts")
-    )
-    people = list(rows[:limit])
-    total = rows.count()
-    return {
-        "people": people,
-        "total": total,
-        # Named, or counted honestly — never a truncated list passed off as
-        # the whole set.
-        "more": max(0, total - len(people)),
-    }
 
 
 def _chat_prep(user, today, schedule) -> list[dict]:
@@ -2204,9 +1849,8 @@ def _starter_seeds(user, today) -> list[dict]:
     Only ever called for a queue with nothing to say AND a network still
     being built (see the gate in `_cockpit_context`), so an account that is
     merely quiet today pays none of these queries at all. Ordered by what
-    unblocks what: no target firms means nothing else can be computed, so it
-    goes first; Gmail and import are the accelerants, in that order (see the
-    note on the Gmail block); the track seed is the quietest because a wrong
+    unblocks what: Gmail and import are the accelerants, in that order (see
+    the note on the Gmail block); the track seed is last because a wrong
     track only mis-sorts a feed. Capped at SEED_MAX.
 
     Each entry is `{key, title, why, cta, href}` — a real destination that
@@ -2215,40 +1859,26 @@ def _starter_seeds(user, today) -> list[dict]:
     seeds: list[dict] = []
     live = Contact.objects.for_user(user).filter(archived=False)
 
-    targets = list(
-        UserFirm.objects.for_user(user)
-        .exclude(firm_id=None)
-        .select_related("firm")
-    )
-
-    if not targets:
-        # The unfinished-onboarding banner (week.html) already says exactly
-        # this, with the same link, whenever `onboarded_at` is NULL. Two
-        # copies of one instruction on one screen reads as a bug, so this
-        # seed only speaks for the account that FINISHED the wizard and
-        # still has no firms — the case nothing else on the page covers.
-        if user.onboarded_at is not None:
-            seeds.append({
-                "key": "firms",
-                "title": "Pick your target firms",
-                "why": "Coverage builds the queue from the firms you're chasing. "
-                       "It doesn't know any yet.",
-                "cta": "Pick firms",
-                "href": f"{reverse('accounts:settings')}#firms",
-            })
-    # THE "ADD PEOPLE AT X" SEEDS USED TO LIVE HERE, and they are now the
-    # board lane's coverage cards (`_coverage_cards`). Same idea, same
-    # ordering rule (tier, then emptiest, then name), one implementation
-    # instead of two — and reachable, which this one was not: seeds only run
-    # for an account under SEED_NETWORK_FLOOR live contacts, so the founder,
-    # with 182 contacts and 25 empty target firms, could never see them. The
-    # board has no such gate. A brand-new account still gets the prompt,
-    # because a board of firms with nobody at them is exactly what
-    # `_coverage_cards` ranks.
+    # THE "PICK YOUR TARGET FIRMS" SEED USED TO LIVE HERE, gated to the
+    # account that finished onboarding and still had no firms (the
+    # unfinished-onboarding banner in week.html already covers the
+    # not-finished case). Removed 2026-08-31 when the getting-started rail
+    # checklist (`_getting_started_checklist`) took over this exact message
+    # — persistently, not just on a silent-queue render — to avoid the two
+    # of them telling the student the same thing in two registers at once.
+    # See that function's own module note for the full reasoning.
+    #
+    # THE "ADD PEOPLE AT X" SEEDS USED TO LIVE HERE TOO, and they are now
+    # `_coverage_cards`, called unconditionally from `_cockpit_context`. Same
+    # idea, same ordering rule (tier, then emptiest, then name), one
+    # implementation instead of two — and reachable, which this one was not:
+    # seeds only run for an account under SEED_NETWORK_FLOOR live contacts,
+    # so the founder, with 182 contacts and 25 empty target firms, could
+    # never see them. `_coverage_cards` has no such gate.
     #
     # What is left here is SETUP, which is the honest scope for a lane
-    # headed "Start here": the things that have to be true before the board
-    # and the queue can say anything at all.
+    # headed "Start here": the things that have to be true before the queue
+    # can say anything at all.
 
     # AHEAD OF THE CSV SEED, and that order is the point (2026-08-27). This
     # block used to sit last, below `track` — with `SEED_MAX` at 3 and a
@@ -2318,6 +1948,71 @@ def _starter_seeds(user, today) -> list[dict]:
         })
 
     return seeds[:SEED_MAX]
+
+
+# ---------------------------------------------------------------------------
+# Getting started — a rail checklist that vanishes once it's done.
+# ---------------------------------------------------------------------------
+# THREE ITEMS, 2026-08-31, each gating real functionality elsewhere in the
+# product rather than picked as generic onboarding busywork:
+#
+#   * tracks, regions and class year gate EVERY relevance filter in the app
+#     (`directory.recommend.role_matches_tracks/_regions/_level`,
+#     `directory.views._eligibility`) — without them nothing on Opportunities
+#     or the situation strip can tell a matching role from a mismatched one.
+#   * target firms is the exact same check `_starter_seeds`' retired "firms"
+#     seed used to make (`UserFirm.objects.for_user(user).exclude(firm_id=
+#     None)`). This widget now owns that message PERSISTENTLY, on every rail,
+#     rather than only on a render where the queue happens to be silent — see
+#     the note in `_starter_seeds` for why that seed was retired rather than
+#     kept alongside this one: two surfaces telling a student to pick firms
+#     in two different registers is the exact duplicate-widget bug this
+#     session spent itself finding elsewhere (New at your firms vs. the
+#     situation strip; the board vs. the Deadlines rail).
+#   * a first contact is what gives the cadence engine anything to schedule.
+#
+# NO GMAIL ITEM. Gmail Live is Pro-gated and not purchasable at the time this
+# was written — a checklist item most Free accounts could never complete
+# would mean the widget never disappears for them, which breaks the one rule
+# that makes it honest (below).
+#
+# DISAPPEARS ENTIRELY ONCE DONE — not even a "3 of 3" success state. Same
+# convention the retired `_new_at_your_firms` stated for itself ("no targets
+# means no card, not an empty card"): a rail slot congratulating a finished
+# setup is a rail slot spent on nothing. Computed FRESH on every render,
+# nothing stored, no dismiss button, no "hide this forever" flag — state can
+# change from Settings without a page load here, so a cached verdict would
+# go stale the moment it did.
+def _getting_started_checklist(user) -> list[dict] | None:
+    """The three things load-bearing enough to earn a persistent rail
+    checklist, or `None` once every one of them is true (see the module
+    note above for why the widget vanishes rather than declaring victory)."""
+    items = [
+        {
+            "key": "profile",
+            "label": "Set your recruiting profile",
+            "done": bool(user.tracks) and bool(user.regions)
+                    and bool(user.class_year),
+            "href": f"{reverse('accounts:settings')}#profile",
+        },
+        {
+            "key": "firms",
+            "label": "Pick your target firms",
+            "done": UserFirm.objects.for_user(user)
+                    .exclude(firm_id=None).exists(),
+            "href": f"{reverse('accounts:settings')}#firms",
+        },
+        {
+            "key": "contact",
+            "label": "Add your first contact",
+            "done": Contact.objects.for_user(user)
+                    .filter(archived=False).exists(),
+            "href": reverse("crm:contact_new"),
+        },
+    ]
+    if all(i["done"] for i in items):
+        return None
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -2716,27 +2411,28 @@ def _cockpit_context(user) -> dict:
     schedule = _schedule(user, today)
     chat_prep = _chat_prep(user, today, schedule)
 
-    # THE BOARD (see `_board` and the module note above `PLAYS_MAX`): the
-    # firm-level half of the page. Dated facts, then the holes in the
-    # student's own coverage.
+    # COVERAGE GAPS (see `_coverage_cards` and its module note): tiered
+    # firms where the student knows nobody. Used to be half of a mixed
+    # "Your board" lane with `_plays`' dated facts; the board was removed
+    # 2026-08-31 (not practically useful, per the founder) and the dated
+    # half went with it — the rail's Deadlines card already named the same
+    # facts on its own. This half stayed, because it is the only reachable
+    # version of "add someone at an empty tiered firm" for an account past
+    # `SEED_NETWORK_FLOOR` (see `_starter_seeds`).
     #
-    # HOW MANY COVERAGE CARDS DEPENDS ON HOW LOUD THE REST OF THE PAGE IS,
-    # and this is the one place the two halves of Today talk to each other.
-    # The gaps are equally true either way — nothing here decides whether a
-    # firm is empty, only how much of a standing backlog to put in front of
-    # somebody who already has a morning's work queued. A student with a
-    # plan gets one; a student with an empty plan gets two, because on that
-    # day this lane IS the work.
+    # HOW MANY CARDS DEPENDS ON HOW LOUD THE REST OF THE PAGE IS. The gaps
+    # are equally true either way — nothing here decides whether a firm is
+    # empty, only how much of a standing backlog to put in front of somebody
+    # who already has a morning's work queued. A student with a plan gets
+    # one; a student with an empty plan gets two, because on that day this
+    # lane IS the work.
     #
     # Computed HERE rather than in the return dict because the quiet gate
-    # below has to know about it — a page with board cards on it is not a
-    # quiet page, and used to say so twice (the founder's own account, this
-    # morning: three play cards followed by a full-width "You're all caught
-    # up" panel).
-    plays = _board(
+    # below has to know about it — a page with coverage cards on it is not a
+    # quiet page.
+    coverage_gaps = _coverage_cards(
         user, today,
-        coverage_limit=(BOARD_COVERAGE_MAX_BUSY if planned
-                        else BOARD_COVERAGE_MAX),
+        limit=(COVERAGE_CARD_MAX_BUSY if planned else COVERAGE_CARD_MAX),
     )
 
     # THE GATE. Both halves, because an empty queue means two opposite things
@@ -2793,19 +2489,20 @@ def _cockpit_context(user) -> dict:
     # it, which is the more honest sentence when there is truly nothing to
     # predict.
     #
-    # `plays` and `bench` USED TO BE ANDed in by `_cockpit.html` instead of
-    # here, because they were sibling sections landing from separate work and
-    # this function could not name variables that did not exist yet. They
-    # both exist now, so the test lives in one place — the template asks
-    # `{% if quiet %}` and nothing else. Two copies of one rule is how the
-    # founder's own page ended up rendering three board cards above a
-    # full-width "You're all caught up" panel: the template's copy of the
-    # rule knew about `plays` and the empty states below it did not.
+    # `coverage_gaps` and `bench` USED TO BE ANDed in by `_cockpit.html`
+    # instead of here, because they were sibling sections landing from
+    # separate work and this function could not name variables that did not
+    # exist yet. They both exist now, so the test lives in one place — the
+    # template asks `{% if quiet %}` and nothing else. Two copies of one rule
+    # is how the founder's own page once ended up rendering three board
+    # cards above a full-width "You're all caught up" panel: the template's
+    # copy of the rule knew about the board and the empty states below it
+    # did not.
     #
-    # A board card is work, so it makes the page not-quiet exactly like a
-    # queue card does. That is also what makes the quiet header rare and
-    # therefore honest: it now means "nothing is due AND your board has no
-    # holes in it", which for the founder is a sentence he has to earn by
+    # A coverage-gap card is work, so it makes the page not-quiet exactly
+    # like a queue card does. That is also what makes the quiet header rare
+    # and therefore honest: it now means "nothing is due AND your board has
+    # no holes in it", which for the founder is a sentence he has to earn by
     # putting somebody at eighteen firms.
     would_be_quiet = (
         len(contacts) > 0
@@ -2820,7 +2517,7 @@ def _cockpit_context(user) -> dict:
         and not app_events
         and not mail_facts
         and not autopilot_review
-        and not plays
+        and not coverage_gaps
         and not bench
     )
     # The one query this feature costs is gated behind everything above,
@@ -2829,29 +2526,6 @@ def _cockpit_context(user) -> dict:
     wave = _next_wave(user, today) if would_be_quiet else None
     quiet = would_be_quiet and wave is not None
     quiet_line = _quiet_line(wave) if quiet else ""
-
-    # Every contact the queue is already speaking about. "Waiting on reply" is
-    # the page's silent bucket, so it must not re-list somebody who has a card
-    # six inches above it.
-    busy_ids = {a["contact"]["id"] for a in planned + held + park + still_open}
-    busy_ids |= debrief_contact_ids
-    busy_ids |= {r["contact"].id for r in schedule if r["contact"]}
-    # Campaign-excluded contacts are excluded here too. "Waiting on reply" is
-    # a daily anxiety surface ("did I drop anything?"), and a reply to a club
-    # panel invitation was never owed in the recruiting sense. Measured on the
-    # audit account: classifying the ICC merge "not my recruiting" emptied the
-    # queue and left all 16 unanswered panelists sitting under "Waiting on
-    # reply, nothing due yet" forever — on the founder's real account that is
-    # 190-odd club recipients drowning every genuine recruiting wait. They
-    # keep the contact book, search, history and every export, same as the
-    # queue rule (`crm/campaigns.py`). The Network board hides them and says
-    # so; nothing anywhere deletes them.
-    busy_ids |= campaigns.excluded_contact_ids(user)
-    # And the recruitment-hidden, for the identical reason: a reply the WRIT
-    # 150 professor never sent was never owed in the recruiting sense, and
-    # "Waiting on reply" listing them forever would be the queue rule
-    # (`crm/recruitment.py`) disagreeing with its own board.
-    busy_ids |= recruitment.hidden_contact_ids(user)
 
     return {
         "lanes": lanes,
@@ -2898,45 +2572,45 @@ def _cockpit_context(user) -> dict:
         "seeds": seeds,
         # The board (computed above, because the quiet gate depends on it):
         # dated world facts joined to the student's own people at that firm,
-        # then the tiered firms where they know nobody. Independent of the
-        # queue/cap machinery above — the whole point is that it renders on a
-        # day the cadence queue is completely empty.
-        "plays": plays,
+        # The tiered firms where the student knows nobody. This USED to be
+        # half of a mixed "Your board" lane that also carried confirmed
+        # dated events (`_plays`); the founder judged that lane not
+        # practically useful and it was removed whole, 2026-08-31 (see
+        # `_cockpit.html`'s lane-coverage comment). The dated half had a
+        # second, independent home already — the rail's Deadlines card,
+        # below — so nothing about a firm's confirmed date is lost. This
+        # half did not: it is the only reachable prompt for "add someone at
+        # a tiered firm you know nobody at" for an account past
+        # SEED_NETWORK_FLOOR (see `_starter_seeds`' own note on why it no
+        # longer carries this), so `_coverage_cards` stays, renamed from
+        # "plays" to what it now actually is.
+        "coverage_gaps": coverage_gaps,
         # The quiet-day header (see the `quiet` computation above): `line`
         # is only meaningful when `quiet` is true, but it's cheap enough
         # (empty string otherwise) to hand over unconditionally rather than
         # make the template guard two keys instead of one.
         "quiet": quiet,
         "quiet_line": quiet_line,
-        # OVERFLOW, NOT A SECOND COPY. This rail card and the board lane were
-        # reading the same rows: `_plays` calls `_next_deadlines` and renders
-        # a superset of what the rail then printed again six inches to the
-        # right. Measured on the founder's account (2026-08-27) the rail's
-        # four rows were J.P. Morgan Aug 30, BlackRock Aug 31, Goldman Sep 1
-        # — byte-for-byte the three board cards — plus one row the board's
-        # one-card-per-firm rule folds away (Goldman's Sep 22 close, behind
-        # its Sep 1 insight opening).
-        #
-        # So the card keeps exactly that fourth row and drops the three
-        # duplicates: every confirmed date the board is NOT already showing.
-        # Filtered on the FACT tuple rather than on the firm, so a firm's
-        # second, different date still gets named — dropping it would be
-        # deleting a confirmed deadline to tidy a rail. Most days this
-        # renders nothing at all, and nothing is the correct amount of card
-        # for "no dates the board hasn't already told you about".
-        "deadlines": [
-            d for d in _next_deadlines(user, today)
-            if (d["firm"].id, d["event_kind"], d["date"]) not in {
-                (p["firm"].id, p["event_kind"], p["date"]) for p in plays
-            }
-        ],
-        "new_at_firms": _new_at_your_firms(user),
-        "waiting": _waiting_on_reply(user, busy_ids),
+        # The next confirmed firm dates, named. Until 2026-08-31 this list
+        # excluded any date "Your board" already printed, because that lane
+        # and this card were reading the same rows and showing them twice.
+        # The board is gone (see the `coverage_gaps` note above), so there
+        # is nothing left to exclude against — this is `_next_deadlines`'
+        # own natural output again, unfiltered.
+        "deadlines": _next_deadlines(user, today),
         "activity": activity,
         "contact_count": len(contacts),
         # The bench: parked contacts are not gone. At most one card — see
         # `_opening_bench` and `BENCH_PLAN_MAX`.
         "bench": bench,
+        # The rail's getting-started checklist (see `_getting_started_
+        # checklist`'s own module note): unconditional, unlike every other
+        # key above this line — it does not participate in the silence gate
+        # or the quiet header, because it answers a different question
+        # ("is this account set up") than the rest of the page ("is
+        # anything due"). `None` once all three items are done, which the
+        # template reads as "render nothing".
+        "getting_started": _getting_started_checklist(user),
         # The raw, uncapped queue — carried through only so week() (the full
         # page view, below) can hand it to the daily brief. Deliberately NOT
         # used by _cockpit.html itself: that template is also rendered by
@@ -3096,7 +2770,9 @@ def play_dismiss(request: HttpRequest) -> HttpResponse:
     IN PLACE, so keying on its id would keep suppressing a fact whose date has
     since moved. Storing the date as a value means a later, DIFFERENT date is
     a different tuple and the play returns on its own — no undo needed,
-    nothing to expire. See `crm.models.PlayDismissal` and `_plays`.
+    nothing to expire. Coverage cards use the same endpoint with the fixed
+    `COVERAGE_DISMISSAL_DATE` sentinel — see `crm.models.PlayDismissal` and
+    `_coverage_cards`.
     """
     try:
         firm_id = int(request.POST.get("firm", ""))

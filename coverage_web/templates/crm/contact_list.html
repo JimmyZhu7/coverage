@@ -11,7 +11,7 @@
   {% url 'crm:contact_new' as add_contact_url %}
   {% comment %}
   "and who's next" came off this line: the queue it named moved to Today
-  (see the note above Firm Coverage below), so the board was promising a
+  (see the note above Covered Firms below), so the board was promising a
   panel it no longer has.
   {% endcomment %}
   {% include "_pagehead.html" with eyebrow="Your relationships" title="Network" sub="Everyone you know at each firm, and how warm they are." action_url=add_contact_url action_label="＋ Add Contact" %}
@@ -168,9 +168,10 @@
           <div class="gap-state" title="{{ g.advocates }} of {{ g.target }} advocate{{ g.target|pluralize }} toward your target for this firm. Set in Settings &gt; Cadence.">{{ g.label }}</div>
           {% comment %}
           "Who to find": the other half of the card. Everything above it
-          says how exposed this firm is; the button below it says "Add",
-          which is the app asking the student for the one thing it can't
-          supply — a name. This panel is the cheapest honest help short of
+          says how exposed this firm is; the button below it says "Add
+          Contact", which is the app asking the student for the one thing
+          it can't supply — a name. This panel is the cheapest honest help
+          short of
           an import: three role archetypes picked off the student's own
           tracks (crm/sourcing.py), each with a prefilled LinkedIn people
           search. We hand over the query, not the person, and the panel
@@ -211,13 +212,13 @@
           {% if g.lever %}
             <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Talk to {{ g.lever.name|smart_title }}</a>
           {% else %}
-            {% comment %}Visible text trimmed to "Add" — six of these sit in
-            a row and "+ Add a contact" repeated six times was the row's
-            only sentence. `aria-label` keeps the firm name for anyone
-            tabbing through, since the card's own name is no longer part
-            of what the link itself says.{% endcomment %}
+            {% comment %}Visible text is "Add Contact", not "+ Add a contact"
+            (2026-08-31) — six of these sit in a row and the full sentence
+            repeated six times was the row's only sentence. `aria-label`
+            still keeps the firm name for anyone tabbing through, since the
+            card's own name is not part of what the link itself says.{% endcomment %}
             <a class="btn gap-act" href="{% url 'crm:contact_new' %}?firm={{ g.slug }}"
-               aria-label="Add a contact at {{ g.name|smart_title }}">Add</a>
+               aria-label="Add a contact at {{ g.name|smart_title }}">Add Contact</a>
           {% endif %}
         </div>
       {% endfor %}
@@ -319,7 +320,7 @@
     (the actual drag target). A third copy on this header explained nothing
     those two don't already cover before you reach a single tier section.
     {% endcomment %}
-    <h2 class="strip-title strip-title-lg">Firm Coverage</h2>
+    <h2 class="strip-title strip-title-lg">Covered Firms</h2>
       <div class="net-panel">
       {% comment %}
       THE LEGEND that used to open this panel is gone. Four warmth dots and
@@ -344,11 +345,14 @@
           lane's own heading so it reaches an EMPTY lane too. A "TIER 1"
           header over a bare placeholder had nothing on it to hover; the
           lane label is the one element in that state that's always there.
-          Neither sentence names dragging as THE method any more: HTML5
-          drag-and-drop never fires on a touchscreen, so on a phone a hint
-          reading "drag a card here" described a gesture the page could not
-          receive. Every card carries a tier picker now (`.fc-tier`); the
-          drag stayed as the pointer shortcut.
+          HTML5 drag-and-drop never fires on a touchscreen — this lane's
+          only in-page route is a mouse drag, again, since the per-card
+          picker (`.fc-tier`) that used to cover touch and keyboard was
+          removed 2026-08-31 at the founder's call. Settings > Target
+          Firms carries the same tier picker independently (`.tf-tier`)
+          and is unaffected, so this is a gap on THIS page, not a gap in
+          the product — the hint below says so rather than promising a
+          gesture this page cannot receive.
           {% endcomment %}
           {% comment %}
           The firm count next to the label is the one affordance that costs
@@ -358,30 +362,28 @@
           in _styles.html for the other half of the fix). "Tier 1  14" says
           plainly that there is more than a glance's worth here, the same
           job `scrub-count` already does for every other section on this
-          page ("Firm Coverage 54", "Contacts 80"). This is a plain count,
+          page ("Contacts 80", "Unplaced N"). This is a plain count,
           not the tier-cost sentence ("2 firms x 2 = 4 advocates...") that
           was pulled from under every tier label as clutter (see
           crm/tests/test_coverage_gaps.py::test_network_page_shows_gaps_and_advocate_fractions)
           — that was a computed stat nobody asked for; this is the same
           single number `scrub-count` already shows everywhere else.
           {% endcomment %}
-          <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Pick this tier on a card, or drag the card here.">
+          <div class="tier-label" title="Tier drives your action priorities: the queue works Tier 1 firms first. Drag a card here to change its tier (or use Settings > Target Firms on mobile).">
             <span>{{ section.label }}</span>
             <span class="scrub-count">{{ section.cards|length }}</span>
           </div>
           <div class="tier-grid">
             {% for fc in section.cards %}
               {% comment %}
-              "Drag to another tier." named dragging as THE way to change a
-              tier, which is no way at all on a touch screen (see the picker
-              at `.fc-tier` below, added for exactly that reason). The
-              tooltip now names both routes — see
-              crm/tests/test_firm_tier_controls.py's
-              test_the_hints_no_longer_prescribe_a_gesture_touch_cannot_send.
+              Drag is this page's only in-page route again (the per-card
+              picker was removed 2026-08-31) — the tooltip names it plainly
+              and points to Settings' own picker for touch, rather than
+              telling a phone to do a gesture it cannot receive.
               {% endcomment %}
               <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
                    style="--i:{{ forloop.counter0 }}"
-                   title="Tier drives your action priorities. Pick a tier below, or drag this card to another lane.">
+                   title="Tier drives your action priorities. Drag this card to another lane to change its tier (or use Settings > Target Firms on mobile).">
                 {% comment %}
                 The COUNT badges are gone. Asked for directly: take the
                 counts off these cards and leave the progress bar and the
@@ -427,17 +429,22 @@
                   {% endif %}
                 </div>
                 {% comment %}
-                The whole foot row — bar and sockets both — is gone for a
-                firm with zero contacts. An empty grey track next to two
-                empty dots was the loudest piece of "identical decoration on
-                nearly every card" of everything on this board: a firm
-                nobody has been added to has nothing for a warmth bar to
-                plot, and the suggestion line below ("＋ Add a contact")
-                already says the one true thing about it. Nothing is lost —
-                zero contacts trivially means zero advocates too, the exact
-                fraction the sockets would have shown.
+                The bar now renders for every card, including zero
+                contacts (2026-08-31): the founder wants one consistent
+                shape across the grid rather than some cards ending in a
+                bar and some ending bare. An untouched firm gets a flat
+                grey track — `.firm-bar`'s own background IS the cold
+                colour, so an empty `{% for %}` loop below already draws
+                exactly that with no extra markup. `bar_title` says "No
+                contacts yet" for this case rather than rendering empty
+                (`firm_card` in views.py), so the one thing every other
+                bar states in words is still stated here.
+
+                Sockets stay gated on `fc.advocates`: zero contacts is
+                zero advocates, and two empty dots next to a flat grey
+                bar was real decoration with nothing to plot, which the
+                bar itself no longer is.
                 {% endcomment %}
-                {% if fc.contact_count %}
                 <div class="firm-card-foot">
                   <div class="firm-bar" title="{{ fc.bar_title }}">
                     {% for seg in fc.segments %}{% if seg.pct %}<i class="seg seg-{{ seg.warmth }}" style="width: {{ seg.pct }}%"></i>{% endif %}{% endfor %}
@@ -467,7 +474,6 @@
                   </span>
                   {% endif %}
                 </div>
-                {% endif %}
                 {% comment %}
                 What the Coverage Gaps strip above already gives its worst 6
                 firms, extended to all of them: a status is not a task, and
@@ -506,21 +512,6 @@
                          href="{% url 'crm:contact_new' %}?firm={{ fc.firm.slug }}">＋ Add a contact</a>
                     {% endif %}
                   {% endif %}
-                  {% comment %}
-                  A native <select> and not a hand-rolled menu: `.tier-grid`
-                  becomes `overflow-y: auto` once capped, which would clip
-                  any popup drawn inside a card. The browser floats a native
-                  list above that, and hands us touch, keyboard and screen
-                  reader support at the same time. `draggable="false"` for
-                  the same reason `.fc-act-link` carries it: the gesture
-                  belongs to the control, not the card behind it.
-                  {% endcomment %}
-                  <select class="fc-tier" draggable="false" data-no-csel data-fc-tier
-                          aria-label="Tier for {{ fc.firm.name|smart_title }}">
-                    {% for opt in tier_sections %}
-                      <option value="{{ opt.tier|default_if_none:'' }}"{% if opt.tier == section.tier %} selected{% endif %}>{{ opt.label }}</option>
-                    {% endfor %}
-                  </select>
                 </div>
               </div>
             {% endfor %}
@@ -529,12 +520,37 @@
           <p class="net-none tier-empty"{% if section.cards %} hidden{% endif %}>No firms on this tier.</p>
         </div>
       {% endfor %}
+      {% comment %}
+      A key, back (2026-08-31) -- reused, not reinvented: `.dot`/`.dot-cold`
+      etc. never left (`.net-group-head` below still draws them), and the
+      labels are `_WARMTH_SECTIONS` verbatim, so this cannot say something
+      the Contacts list beneath it disagrees with. It was pulled once
+      because most of 54 cards drew an empty bar and a fixed row asked
+      every reader to hold "colour = meaning" in their head for colour
+      that mostly was not there. Every card draws a bar now (the
+      founder's call, same day) -- the premise that removed it no longer
+      holds, so it is back, one line, inside the same panel it explains.
+
+      A permanent "SP -> Sponsors visas" swatch here means
+      `crm/tests/test_firm_card_badges.py::_tier_board` can no longer
+      stop at the panel's own `</section>` to isolate the CARDS from this
+      key -- "no firm on this board sponsors" would be indistinguishable
+      from "the legend always shows one anyway". That helper now stops at
+      THIS element's own opening tag instead; see its docstring.
+      {% endcomment %}
+      <p class="net-legend-mini">
+        <span><i class="dot dot-cold"></i>Emailed, no reply</span>
+        <span><i class="dot dot-replied"></i>Emailed, replied</span>
+        <span><i class="dot dot-chatted"></i>Chatted</span>
+        <span><i class="dot dot-advocate"></i>Advocate</span>
+        <span><span class="pill fc-spon" aria-hidden="true">SP</span>Sponsors visas</span>
+      </p>
       </div>
   </section>
 
   {# ---- Full contact cards, by warmth ---- #}
   <section class="net-contacts" id="net-contacts">
-    <h2 class="strip-title">Contacts <span class="scrub-count">{{ contact_total }}</span></h2>
+    <h2 class="strip-title strip-title-lg">Contacts</h2>
     {% if unconfirmed_total %}
       {# Never let a region tab pass off a guess as a confirmed match. The #}
       {# link is the ENTIRE nag budget for the unplaced pool — a sentence #}
@@ -648,9 +664,18 @@
                     below — same "one hover away" doctrine `.net-mini-firm`
                     states for its own truncation.
                     {% endcomment %}
+                    {% comment %}
+                    Role is `smart_role`-compressed, not `smart_title`-only
+                    (2026-08-31): it is freeform text a student typed about
+                    a real person, and ranges from "IB Analyst" to a full
+                    sentence with a parenthetical and a quoted aside. The
+                    `title=` attribute keeps the untouched original --
+                    still `smart_title`-cased, never compressed -- one
+                    hover away, same doctrine as the truncation case above.
+                    {% endcomment %}
                     <span class="cc-firm"
                           title="{% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}">
-                      {% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}
+                      {% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_role|smart_title }}{% endif %}
                     </span>
                   </div>
                 </div>
@@ -956,15 +981,11 @@
       if (!document.hidden) capAllGrids();
     });
 
-    // ---- Re-tier a firm. Two gestures, one write.
+    // ---- Re-tier a firm by dragging it to another lane.
     //
-    // The drag came first and was for a long time the only route, which
-    // made the whole board read-only on a phone: HTML5 drag-and-drop does
-    // not fire on touch, and it has no keyboard equivalent either. The
-    // per-card <select> is the route that always works; the drag stays as
-    // the pointer shortcut. Both call `setTier` so the two can never learn
-    // to disagree about what a tier change means, the same contract this
-    // board already keeps with Settings' board through the shared endpoint.
+    // Mouse-only again: the per-card <select> that also covered touch and
+    // keyboard was removed 2026-08-31. Settings > Target Firms carries its
+    // own independent picker (`.tf-tier`) for a device that can't drag.
     function setTier(card, tier, section) {
       if (!section) return Promise.resolve(false);
       var body = new URLSearchParams({ firm: card.dataset.firm, tier: tier });
@@ -976,7 +997,6 @@
       }).then(function (resp) {
         if (!resp.ok) return false;
         section.querySelector(".tier-grid").appendChild(card);
-        syncTierSelect(card);
         // Re-sync every tier's empty-state placeholder AND its count. The
         // count was left behind by the original drop handler, so a board
         // that had just been rearranged read "TIER 1 14" over thirteen
@@ -998,40 +1018,11 @@
         return true;
       }, function () { return false; });
     }
-    // A refused or failed write leaves the card in its old lane, so the
-    // picker has to be walked back to match — otherwise it goes on showing
-    // a tier the server never accepted.
-    function syncTierSelect(card) {
-      var sel = card.querySelector("[data-fc-tier]");
-      if (sel) sel.value = card.closest(".tier-section").dataset.tier;
-    }
 
     var dragged = null;
     document.querySelectorAll(".firm-card").forEach(function (card) {
       card.addEventListener("dragstart", function () { dragged = card; card.classList.add("dragging"); });
       card.addEventListener("dragend", function () { card.classList.remove("dragging"); });
-      var sel = card.querySelector("[data-fc-tier]");
-      if (!sel) return;
-      sel.addEventListener("change", function () {
-        var target = null;
-        document.querySelectorAll(".tier-section").forEach(function (s) {
-          if (s.dataset.tier === sel.value) target = s;
-        });
-        // No lane for that value should be impossible — the options are
-        // rendered from the lanes themselves — but a picker left showing a
-        // tier the card is not on is the one outcome worth ruling out.
-        if (!target) { syncTierSelect(card); return; }
-        if (target === card.closest(".tier-section")) return;
-        setTier(card, sel.value, target).then(function (ok) {
-          if (!ok) syncTierSelect(card);
-        });
-      });
-      // A `draggable` ancestor swallows the press that should open a native
-      // select, so the card stands down for as long as the picker has the
-      // pointer or the focus, then takes the gesture back. `focusout`
-      // covers both dismissing the list and choosing from it.
-      sel.addEventListener("pointerdown", function () { card.draggable = false; });
-      sel.addEventListener("focusout", function () { card.draggable = true; });
     });
     document.querySelectorAll(".tier-section").forEach(function (section) {
       section.addEventListener("dragover", function (e) { e.preventDefault(); section.classList.add("drop-hot"); });

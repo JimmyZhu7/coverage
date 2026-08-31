@@ -40,10 +40,15 @@ pytestmark = pytest.mark.django_db
 def _tier_board(body: str) -> str:
     """Just the tier cards, not the board around them. The Coverage Gaps
     strip above it names the same firms and legitimately still carries an
-    "N Open" badge. Starting at the first tier lane skips it and leaves only
-    the cards."""
+    "N Open" badge. Starting at the first tier lane skips it and leaves
+    only the cards.
+
+    Ends at `.net-legend-mini`, not `</section>` (2026-08-31): the legend
+    sits INSIDE the same panel now, carrying a permanent "SP -> Sponsors
+    visas" swatch that would make "no firm here sponsors" indistinguishable
+    from "the legend always shows one anyway" if it were left in scope."""
     start = body.index('<div class="tier-section"')
-    return body[start : body.index("</section>", start)]
+    return body[start : body.index('<p class="net-legend-mini"', start)]
 
 
 @pytest.fixture
@@ -164,12 +169,18 @@ def test_sockets_return_once_a_firm_has_an_advocate(client, student):
     )
 
 
-def test_a_firm_with_nobody_added_shows_no_bar_or_sockets(client, student):
-    """The furniture question, answered: an empty-coverage firm does NOT
-    render the same bar-and-sockets row a covered one does. A 0-of-everything
-    bar next to two empty sockets said nothing an untouched firm's own
-    "＋ Add a contact" line doesn't already say — zero contacts trivially
-    means zero advocates too."""
+def test_a_firm_with_nobody_added_shows_a_bar_but_no_sockets(client, student):
+    """The furniture question, reversed 2026-08-31: every card draws a bar
+    now, including an untouched one -- the founder's call, for one
+    consistent shape across the grid instead of some cards ending in a bar
+    and some ending bare. `.firm-bar`'s own background IS the cold colour,
+    so an empty firm's bar renders as a flat grey track with nothing drawn
+    inside it -- no markup change needed to make "no contacts" look
+    different from "all cold contacts".
+
+    Sockets are the one piece that stays gone: two empty dots next to a
+    flat bar would be decoration with nothing to plot, since zero contacts
+    trivially means zero advocates too."""
     quiet = Firm.objects.create(slug="untouched-co", name="Untouched Co", regions=["us"])
     UserFirm.all_objects.create(user=student, firm=quiet, tier=1)
     board = _board(client, student)
@@ -177,7 +188,9 @@ def test_a_firm_with_nobody_added_shows_no_bar_or_sockets(client, student):
     assert "Untouched Co" in board
     card_start = board.index("Untouched Co")
     card = board[card_start : card_start + 600]
-    assert 'class="firm-bar"' not in card, "an untouched firm still draws an empty bar"
+    assert 'class="firm-bar" title="No contacts yet"' in card, (
+        "an untouched firm should still draw its bar, honestly titled"
+    )
     assert "adv-socket" not in card, "an untouched firm still draws empty sockets"
     assert "＋ Add a contact" in card, "the one verb a bare card owes a student is gone"
 
@@ -254,15 +267,16 @@ def test_the_coverage_gaps_card_dropped_its_open_count_too(client, student):
     _busy_firm(student)
     client.force_login(student)
     body = client.get(reverse("crm:contact_list")).content.decode()
-    # Sliced up to "Firm Coverage" — the next <h2> on the board — since the
-    # "Contacts Needing Action" panel this used to end at is gone (it
-    # duplicated Today's own queue; see crm/views.py::contact_list).
-    # `start` bounds the second `.index()` too: the page's own inlined
-    # <style> block names "Firm Coverage" in a CSS comment ABOVE this
-    # section (see crm/_styles.html), and an unbounded search would find
-    # that occurrence first and return an empty slice.
+    # Sliced up to "Covered Firms" — the next <h2> on the board, renamed
+    # 2026-08-31 from "Firm Coverage" — since the "Contacts Needing Action"
+    # panel this used to end at is gone (it duplicated Today's own queue;
+    # see crm/views.py::contact_list). `start` bounds the second `.index()`
+    # too: the page's own inlined <style> block still names the section by
+    # its old name in a CSS comment ABOVE this heading (see
+    # crm/_styles.html), and an unbounded search would find that first and
+    # return an empty slice.
     strip_start = body.index('<h2 class="strip-title strip-title-lg" title="Ranked by exposure')
-    strip = body[strip_start : body.index("Firm Coverage", strip_start)]
+    strip = body[strip_start : body.index("Covered Firms", strip_start)]
 
     assert "Busy Co" in strip, "the seeded firm is not on the gaps strip at all"
     assert "gap-badges" not in strip and "pill fc-open" not in strip, (

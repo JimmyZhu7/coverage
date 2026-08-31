@@ -246,6 +246,45 @@ def _case_word_location(word: str, *, codes: set[str], shouting: bool,
     )
 
 
+# A clause boundary in a role string: a comma, an opening paren, an em/en
+# dash, or a spaced hyphen. Never a bare hyphen — that would split
+# "on-campus" or "junior/senior" mid-word, which are single tokens with a
+# hyphen in them, not two clauses.
+_ROLE_CLAUSE_RE = re.compile(r"\s*[,(]|\s+[—–]\s*|\s+-\s+")
+
+
+@register.filter(name="smart_role")
+def smart_role(value, max_words=4):
+    """Compress a contact's freeform `role` field to the first clause,
+    capped at a few words.
+
+    The field is typed by a student about a real person and ranges from
+    already-clean ("IB Analyst") to a full sentence ("Campus recruiter
+    (PwC) — self-described 'the campus recruiter and primary point of
+    contact' for USC students"). Verified against all 85 distinct values
+    on the founder's own board before this shipped: taking everything
+    before the first clause boundary and capping the remainder at four
+    words never fabricates a title, since it is always a strict prefix
+    of what the student actually wrote — it just stops reading once the
+    role itself has been said and the elaboration starts.
+
+    Never adds an ellipsis: a short, complete-looking phrase reads as a
+    real label; "Campus recruiter..." reads as broken. The unclamped
+    original stays in `title=` at every call site, one hover away, so
+    nothing here is actually lost — see `.cc-firm`'s own title attribute
+    in contact_list.html for the doctrine this follows.
+    """
+    if not value:
+        return value
+    text = str(value).strip()
+    m = _ROLE_CLAUSE_RE.search(text)
+    clause = text[: m.start()] if m else text
+    words = clause.split()
+    if len(words) > max_words:
+        words = words[:max_words]
+    return " ".join(words)
+
+
 @register.filter(name="smart_location")
 def smart_location(value):
     """Standardize a place string. Like `smart_title`, minus the title-case

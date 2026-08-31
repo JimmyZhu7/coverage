@@ -350,8 +350,9 @@ def test_new_role_drops_the_wrong_market_and_the_wrong_rung():
 def test_a_boards_debut_week_does_not_flood_the_new_role_event():
     """A firm whose FIRST posting is itself inside the window just joined
     Coverage — every role it has would read as "new" for a reason that has
-    nothing to do with the firm actually opening anything. Same fix
-    crm.today._new_at_your_firms already made for the identical trap."""
+    nothing to do with the firm actually opening anything. Same fix the
+    retired crm.today._new_at_your_firms used to make for the identical
+    trap."""
     user = _user()
     firm = _firm()
     Contact(user=user, firm=firm, name="A Banker").save()
