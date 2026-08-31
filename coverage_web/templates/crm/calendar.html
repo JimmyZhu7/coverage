@@ -213,6 +213,102 @@
   .cal-ev-auto::after { content: "↻"; flex: none; color: var(--ink-3);
     font-size: 10px; }
 
+  /* ---- The view switcher ------------------------------------------------
+     `.subnav.scope-tabs` from coverage.css does the work: the bordered
+     capsule, the solid navy on the selected segment, the sideways scroll on
+     a narrow screen. What is left here is only what a BAR item needs and a
+     standalone strip does not — `.subnav` carries a top margin for a strip
+     that sits above a page title, and segments sized to head a page are too
+     tall to stand beside a 36px arrow button. */
+  .cal-views { margin: 0; flex: none; }
+  .cal-views a { padding: 7px 14px; font-size: var(--fs-xs); }
+
+  /* ---- Week: the month's own cell, given the room ----------------------
+     Every other property comes from `.cal-day` above, deliberately: same
+     tint steps, same today ring, same hover, same scroller, same entry
+     cards. The HEIGHT is the whole difference, and it is the whole point.
+     132px is what makes a busy day scroll inside a postage stamp in the
+     month grid; one row of seven columns has the page's full height to
+     spend instead of a fifth of it.
+
+     `min-height`, not `height`: a day with fifteen things on it should grow
+     the row rather than scroll again at a taller size, and there is only one
+     row to grow. */
+  .cal-week.is-week .cal-day { height: auto; min-height: 420px;
+    padding: var(--s3) var(--s2); }
+  .cal-week.is-week .cal-day-list { gap: 4px; }
+  /* And the entries WRAP here, which they deliberately never do in the month
+     grid. That rule (see `.cal-ev`) exists because six week-rows of cards
+     stacked down a page only read as a grid when every card is the same
+     22px; a week is ONE row, so there is nothing below it to line up with,
+     and the constraint stops being vertical and becomes horizontal. A column
+     roughly 150px wide ellipses most real titles at the firm name — which is
+     the one thing a month cell can already tell you. Letting them wrap is
+     what the extra height is FOR. */
+  .cal-week.is-week .cal-ev { height: auto; min-height: 22px;
+    align-items: flex-start; padding: 4px 6px; line-height: 1.35; }
+  .cal-week.is-week .cal-ev-title { white-space: normal; }
+  .cal-week.is-week .cal-ev-time { padding-top: 1px; }
+  .cal-wnum { display: flex; align-items: center; gap: 6px; }
+  /* Which month the column is in, on the days a bare number cannot say.
+     Same mono-and-uppercase treatment as the weekday header above it, one
+     step quieter, because it is an annotation on the number and not a
+     second heading. */
+  .cal-wmon { font-family: var(--font-mono); font-size: var(--fs-nano);
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+
+  /* ---- Day: one date on an hour rail ------------------------------------
+     Same panel as `.cal-grid` — one border, one radius, one shadow — so the
+     three views read as three arrangements of one surface rather than three
+     pages. */
+  .cal-dayv { border: 1px solid var(--line); border-radius: var(--r-panel);
+    overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
+  .cal-dayv-head { display: flex; align-items: center; gap: var(--s3);
+    flex-wrap: wrap; padding: var(--s3) var(--s4); background: var(--paper);
+    border-bottom: 1px solid var(--line-strong); }
+  .cal-dayv-date { margin: 0; font-size: var(--fs-s); color: var(--ink-2); }
+  .cal-dayv-add { margin-left: auto; }
+  /* The same today marker the grid cells wear, on this view's own header,
+     so the Today control has something to land on and highlight here too. */
+  .cal-dayv.is-today .cal-num { background: var(--accent); color: var(--on-accent);
+    font-weight: var(--w-bold); animation: chip-check 320ms cubic-bezier(0.22,1,0.36,1); }
+  .cal-dayv.is-today .cal-dayv-date { color: var(--accent-ink);
+    font-weight: var(--w-med); }
+  .cal-dayv.is-today-pulse .cal-num {
+    animation: chip-check 320ms cubic-bezier(0.22,1,0.36,1); }
+  .cal-dayv .cal-empty { border-bottom: 1px solid var(--line); }
+
+  /* One row per hour: a mono label in a fixed gutter, the entries in a lane
+     beside it. The gutter is a fixed width so the labels stack into a real
+     axis instead of a ragged column, and each row's own top rule IS the hour
+     line — no separate ruling to keep in step with the rows. */
+  .cal-dayv-row { display: grid; grid-template-columns: 76px minmax(0, 1fr);
+    gap: var(--s3); align-items: start; min-height: 34px;
+    padding: 6px var(--s4) 6px var(--s3); border-top: 1px solid var(--line); }
+  .cal-dayv-row:first-of-type { border-top: 0; }
+  .cal-dayv-row.is-allday { background: var(--paper); }
+  /* An hour with something in it, at the lightest step the month grid's own
+     intensity scale uses. The rail is mostly empty by construction, so the
+     tint is what makes the used hours findable without reading every label. */
+  .cal-dayv-row.has-events {
+    background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+  .cal-dayv-hour { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: var(--fs-xs); color: var(--ink-3); text-align: right;
+    padding-top: 4px; }
+  .cal-dayv-lane { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  @media (max-width: 560px) {
+    /* The gutter is the first thing to give: "12:30pm" still fits, and the
+       lane needs every pixel it can get on a phone. */
+    .cal-dayv-row { grid-template-columns: 52px minmax(0, 1fr); gap: var(--s2);
+      padding-left: var(--s2); padding-right: var(--s2); }
+    .cal-dayv-head { padding: var(--s3); }
+    /* The date and the button stop fighting over one line at this width and
+       take one each: `margin-left: auto` inside a wrapped flex row pushes the
+       button onto its own line already, and this is what stops it hanging off
+       the right edge when it gets there. */
+    .cal-dayv-add { margin-left: 0; }
+  }
+
   /* ---- Add-event panel --------------------------------------------------
      A <details> so it costs nothing when closed and needs no JS. Open state
      is server-rendered when a submission failed, so the typed values and the
@@ -291,11 +387,26 @@
   {% include "_pagehead.html" with eyebrow="Your dates" title="Calendar" sub="Chats from your inbox, touches you logged, and the deadlines you track." %}
 
   <div class="cal-bar">
-    <h2 class="cal-month">{{ month_label }}</h2>
+    <h2 class="cal-month">{{ period_label }}</h2>
     <div class="cal-nav">
-      <a class="btn" href="?y={{ prev_y }}&m={{ prev_m }}" aria-label="Previous month" rel="prev">‹</a>
-      <a class="btn" href="?y={{ next_y }}&m={{ next_m }}" aria-label="Next month" rel="next">›</a>
+      <a class="btn" href="{{ prev_url }}" aria-label="Previous {{ period_noun }}" rel="prev">‹</a>
+      <a class="btn" href="{{ next_url }}" aria-label="Next {{ period_noun }}" rel="next">›</a>
     </div>
+    {% comment %}The product's own segmented control (.subnav.scope-tabs in
+    coverage.css, the same component the Network and Opportunities filters
+    use) rather than a fourth button shape on a bar that already carries
+    three.
+
+    Every tab carries the SAME anchor date, which is the whole point: from 15
+    March in the month grid, Week lands on the week containing the 15th and
+    Day on the 15th itself. A switcher that reset to today would make the
+    other two views unreachable for any date you were actually looking at.
+    {% endcomment %}
+    <nav class="subnav scope-tabs cal-views" aria-label="Calendar view">
+      <a href="{{ month_url }}"{% if view == 'month' %} aria-current="page"{% endif %}>Month</a>
+      <a href="{{ week_url }}"{% if view == 'week' %} aria-current="page"{% endif %}>Week</a>
+      <a href="{{ day_url }}"{% if view == 'day' %} aria-current="page"{% endif %}>Day</a>
+    </nav>
     {% comment %}
     Reported live: clicking Today while already viewing the current month
     did a full page reload to render the exact same content -- the link's
@@ -304,9 +415,15 @@
     with data-already-today when that's actually the case; any other month
     still gets the real navigation, which is its own visible feedback (the
     grid changes).
+
+    `?view=` and nothing else: the anchor is deliberately absent so the URL
+    resolves to today, and the view is kept so Today means "this week" in
+    week view and "this day" in day view rather than dumping you back on the
+    month grid. `today_in_range` is the same question the month comparison
+    asked, asked once for all three views (see `_period_context`).
     {% endcomment %}
-    <a class="btn" href="{% url 'crm:calendar' %}" data-today-link
-       {% if year == today.year and month == today.month %}data-already-today{% endif %}>Today</a>
+    <a class="btn" href="{% url 'crm:calendar' %}?view={{ view }}" data-today-link
+       {% if today_in_range %}data-already-today{% endif %}>Today</a>
     {% comment %}Feed URL for the calendar app the user already lives in.
     webcal:// so Calendar.app opens a subscribe dialog instead of downloading
     a one-off snapshot.{% endcomment %}
@@ -320,8 +437,13 @@
       <summary class="btn">Add to the calendar</summary>
       <form class="cal-form" method="post" action="{% url 'crm:calendar_add' %}">
         {% csrf_token %}
+        {% comment %}The view and anchor travel with the submission so a
+        successful add returns to the week or day you added from, and a failed
+        one re-renders it.{% endcomment %}
+        <input type="hidden" name="view" value="{{ view }}">
         <input type="hidden" name="y" value="{{ year }}">
         <input type="hidden" name="m" value="{{ month }}">
+        <input type="hidden" name="d" value="{{ anchor.day }}">
         {% if form.non_field_errors %}<div class="errorlist">{{ form.non_field_errors }}</div>{% endif %}
         <div class="cal-form-grid">
           <label class="cal-wide">Title{{ form.title }}{{ form.title.errors }}</label>
@@ -357,60 +479,72 @@
     </p>
   </div>
 
-  {# ---- Month grid (>=820px) ---- #}
-  <div class="cal-grid">
-    <div class="cal-dow" aria-hidden="true">
-      {% for d in weekday_names %}<span>{{ d }}</span>{% endfor %}
+  {% if view == 'day' %}
+    {% include "crm/_calendar_day.html" %}
+  {% else %}
+    {# ---- Month or week grid (>=820px) ---- #}
+    <div class="cal-grid">
+      <div class="cal-dow" aria-hidden="true">
+        {% for d in weekday_names %}<span>{{ d }}</span>{% endfor %}
+      </div>
+      {% if view == 'week' %}
+        {% include "crm/_calendar_week.html" %}
+      {% else %}
+        {% for week in weeks %}
+          <div class="cal-week">
+            {% for day in week %}
+              <div class="cal-day load-{{ day.load }}{% if not day.in_month %} is-out{% endif %}{% if day.is_today %} is-today{% endif %}"
+                   {% if day.load_label %}title="{{ day.load_label }}"{% endif %}>
+                <span class="cal-num">{{ day.date.day }}</span>
+                {% if day.in_month %}
+                  {% comment %}Adds on THIS day: prefills the date and opens the
+                  panel, so you never retype a date you are already looking at.
+                  Hidden until the cell is hovered or the link is focused, which
+                  keeps the grid quiet without putting it out of keyboard reach.
+                  {% endcomment %}
+                  <a class="cal-day-add" href="{{ day.add_url }}"
+                     aria-label="Add something on {{ day.date|date:'j F' }}">+</a>
+                {% endif %}
+                <div class="cal-day-list">
+                  {% for ev in day.events %}
+                    {% include "crm/_calendar_event.html" %}
+                  {% endfor %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      {% endif %}
     </div>
-    {% for week in weeks %}
-      <div class="cal-week">
-        {% for day in week %}
-          <div class="cal-day load-{{ day.load }}{% if not day.in_month %} is-out{% endif %}{% if day.is_today %} is-today{% endif %}"
-               {% if day.load_label %}title="{{ day.load_label }}"{% endif %}>
-            <span class="cal-num">{{ day.date.day }}</span>
-            {% if day.in_month %}
-              {% comment %}Adds on THIS day: prefills the date and opens the
-              panel, so you never retype a date you are already looking at.
-              Hidden until the cell is hovered or the link is focused, which
-              keeps the grid quiet without putting it out of keyboard reach.
-              {% endcomment %}
-              <a class="cal-day-add" href="?y={{ year }}&m={{ month }}&day={{ day.date.day }}#add"
-                 aria-label="Add something on {{ day.date|date:'j F' }}">+</a>
-            {% endif %}
-            <div class="cal-day-list">
+
+    {# ---- Agenda (<820px): only days that have something ---- #}
+    {% comment %}One flat `agenda_days` list rather than a walk over the month
+    grid, so the week view hands it seven days and the month view the days
+    that are in the month, through the same loop. The day view needs none of
+    this: it is a single column that already reads on a phone.{% endcomment %}
+    <div class="cal-agenda">
+      {% for day in agenda_days %}
+        {% if day.events %}
+          <div class="cal-agenda-day{% if day.is_today %} is-today{% endif %}">
+            <p class="cal-agenda-date">{{ day.date|date:"D j F" }}{% if day.is_today %} · today{% endif %}</p>
+            <div class="cal-agenda-list">
               {% for ev in day.events %}
                 {% include "crm/_calendar_event.html" %}
               {% endfor %}
             </div>
           </div>
-        {% endfor %}
-      </div>
-    {% endfor %}
-  </div>
-
-  {# ---- Agenda (<820px): only days that have something ---- #}
-  <div class="cal-agenda">
-    {% for week in weeks %}{% for day in week %}
-      {% if day.in_month and day.events %}
-        <div class="cal-agenda-day{% if day.is_today %} is-today{% endif %}">
-          <p class="cal-agenda-date">{{ day.date|date:"D j F" }}{% if day.is_today %} · today{% endif %}</p>
-          <div class="cal-agenda-list">
-            {% for ev in day.events %}
-              {% include "crm/_calendar_event.html" %}
-            {% endfor %}
-          </div>
-        </div>
+        {% endif %}
+      {% endfor %}
+      {% comment %}All four counted kinds, not three. `opening` was added to
+      the legend as its own tally and this gate was not updated with it, so a
+      month whose only dated thing was an applications-open date listed that
+      row and then said underneath it that there was nothing on the calendar.
+      {% endcomment %}
+      {% if not counts.chat and not counts.event and not counts.deadline and not counts.opening %}
+        <p class="cal-empty">{{ empty_note }}</p>
       {% endif %}
-    {% endfor %}{% endfor %}
-    {% comment %}All four counted kinds, not three. `opening` was added to
-    the legend as its own tally and this gate was not updated with it, so a
-    month whose only dated thing was an applications-open date listed that
-    row and then said underneath it that there was nothing on the calendar.
-    {% endcomment %}
-    {% if not counts.chat and not counts.event and not counts.deadline and not counts.opening %}
-      <p class="cal-empty">Nothing on the calendar this month.</p>
-    {% endif %}
-  </div>
+    </div>
+  {% endif %}
 </div>
 {% comment %}
 Reported live: "Today" appeared to do nothing when clicked while already
@@ -418,25 +552,33 @@ viewing the current month. The link's target was always correct -- there
 was just no visible result to prove it, since the page it navigates to
 IS the page already on screen. Rather than reload for zero visible change,
 scroll today's own cell into view and replay the same highlight animation
-it already plays once on load. Whichever of the two today-markers is
-actually rendered (the >=820px grid cell or the phone agenda row -- see
-.cal-agenda-day.is-today, mutually exclusive by media query) is scrolled;
-if neither exists (should not happen if data-already-today is set at all,
-but a live DOM can always surprise you), the link falls through to its
-real href instead of silently doing nothing a second way.
+it already plays once on load.
+
+Three markers now, one per place today can be drawn: the >=820px grid cell
+(month AND week -- the week view reuses .cal-day, so it needs no case of its
+own), the day view's own header, and the phone agenda row. Only one of them
+is ever visible; the loop below is what decides which. If none is (should
+not happen when data-already-today is set at all, but a live DOM can always
+surprise you), the link falls through to its real href instead of silently
+doing nothing a second way.
 {% endcomment %}
 {% script %}
   document.querySelectorAll("[data-today-link][data-already-today]").forEach(function (a) {
     a.addEventListener("click", function (e) {
-      // NOT `a || b`: that picks whichever selector matches an element
-      // that EXISTS, not one that's actually visible, and both markers
-      // exist in the DOM at once (only one is shown per breakpoint --
-      // see the comment above). Check the grid cell's own visibility
-      // before falling through, or a narrow viewport grabs the hidden
-      // desktop cell and never tries the agenda row at all.
-      var cell = document.querySelector(".cal-day.is-today");
-      if (!cell || !cell.offsetParent) cell = document.querySelector(".cal-agenda-day.is-today");
-      if (!cell || !cell.offsetParent) return;
+      // Visibility, not existence. Several of these markers are in the DOM
+      // at once -- the grid cell and the agenda row are mutually exclusive
+      // by media query, not by rendering -- so `querySelector` on the first
+      // match would grab the hidden desktop cell on a narrow viewport and
+      // never try the agenda row at all. `offsetParent` is the check that
+      // separates "in the document" from "on the screen".
+      var cell = null;
+      [".cal-day.is-today", ".cal-dayv.is-today", ".cal-agenda-day.is-today"]
+        .some(function (sel) {
+          var el = document.querySelector(sel);
+          if (el && el.offsetParent) { cell = el; return true; }
+          return false;
+        });
+      if (!cell) return;
       e.preventDefault();
       cell.scrollIntoView({ behavior: "smooth", block: "center" });
       cell.classList.remove("is-today-pulse");

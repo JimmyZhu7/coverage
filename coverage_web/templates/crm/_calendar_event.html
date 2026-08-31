@@ -26,7 +26,11 @@ Two shapes, decided by `ev.editable`:
   appearing — that page answers "what is happening", not "what happened". The
   "Cancelled: " prefix is already in `ev.title` (it is stored on the row, so
   the .ics feed carries it to a phone too) and must not be repeated here.{% endcomment %}
-  <details class="cal-ev-wrap">
+  {% comment %}`ev_open` is passed by the DAY view and by nothing else. That
+  view shows one date on a full-width rail, so there is room to read where,
+  who and the notes without a click; the month and week grids are seven
+  columns wide, where the same body would bury the rest of the day.{% endcomment %}
+  <details class="cal-ev-wrap"{% if ev_open %} open{% endif %}>
     <summary class="cal-ev cal-ev-{{ ev.kind }}{% if ev.source == 'capture' %} cal-ev-auto{% endif %}{% if ev.cancelled %} is-cancelled{% endif %}">
       {% if ev.at_label %}<span class="cal-ev-time">{{ ev.at_label }}</span>{% endif %}
       <span class="cal-ev-title">{{ ev.title }}</span>
@@ -48,8 +52,13 @@ Two shapes, decided by `ev.editable`:
       {% endif %}
       <form method="post" action="{% url 'crm:calendar_delete' ev.id %}">
         {% csrf_token %}
+        {% comment %}Where to put you back after the row is gone: the view and
+        the anchor, not just the month. Removing something from the week of 9
+        March used to return the March grid.{% endcomment %}
+        <input type="hidden" name="view" value="{{ view }}">
         <input type="hidden" name="y" value="{{ year }}">
         <input type="hidden" name="m" value="{{ month }}">
+        <input type="hidden" name="d" value="{{ anchor.day }}">
         <button type="submit" class="cal-ev-del">Remove</button>
       </form>
     </div>

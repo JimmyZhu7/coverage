@@ -1,0 +1,61 @@
+{% comment %}
+One day, on a clock.
+
+WHY THIS VIEW HAS A TIME AXIS AND THE OTHER TWO DO NOT. Two of the four
+layers carry a real time: a chat captured off an invite has the DTSTART the
+organiser sent, and a hand-added event has whatever was typed into the Time
+field. The other two never can. A confirmed firm date and a tracked role's
+closing date are DATES, stored and shown as all-day, and inventing 9am for
+them would put a fake appointment on the page.
+
+So the day is drawn in two parts rather than one. Everything without a time
+sits in an "All day" band at the top, said plainly. Everything with a time
+sits on the hour rail below it, in the hour it starts. Nothing is placed by
+guess.
+
+The rail spans 8am to 9pm and widens to whatever the day actually holds (see
+`_hour_rail`), so an empty evening costs a few thin rules and a 7am flight is
+still on the axis rather than off the end of it.
+
+Entries open expanded here (`ev_open`), which they do in no other view: this
+is one date across the full page width, so where, who and the notes fit
+without a click. In a seven-column grid the same body would bury the rest of
+the day.
+
+No narrow-screen agenda for this view. It is already a single column of rows
+and reads on a phone as-is; the month and week grids are the ones that have
+to hand off to `.cal-agenda` below 820px.
+{% endcomment %}
+<section class="cal-dayv{% if day_cell.is_today %} is-today{% endif %}">
+  <header class="cal-dayv-head">
+    <span class="cal-num">{{ anchor.day }}</span>
+    <p class="cal-dayv-date">{{ anchor|date:"l j F Y" }}{% if day_cell.is_today %} · today{% endif %}</p>
+    <a class="btn cal-dayv-add" href="{{ day_cell.add_url }}">Add on this day</a>
+  </header>
+
+  {% if not day_cell.events %}
+    <p class="cal-empty">{{ empty_note }}</p>
+  {% endif %}
+
+  {% if all_day_events %}
+    <div class="cal-dayv-row is-allday">
+      <span class="cal-dayv-hour">All day</span>
+      <div class="cal-dayv-lane">
+        {% for ev in all_day_events %}
+          {% include "crm/_calendar_event.html" with ev_open=1 %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% for hour in hours %}
+    <div class="cal-dayv-row{% if hour.events %} has-events{% endif %}">
+      <span class="cal-dayv-hour">{{ hour.label }}</span>
+      <div class="cal-dayv-lane">
+        {% for ev in hour.events %}
+          {% include "crm/_calendar_event.html" with ev_open=1 %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+</section>

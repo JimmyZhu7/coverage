@@ -1,4 +1,4 @@
-"""The Calendar: everything with a date on it, in one month grid.
+"""The Calendar: everything with a date on it, in a month, week or day view.
 
 FOUR LAYERS, ONE TIMELINE, EACH HONESTLY LABELLED:
 
@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import calendar as calmod
 from datetime import date, datetime, timedelta, timezone as dt_timezone
+from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
@@ -76,6 +77,24 @@ def _firm_date_kind(event_kind: str) -> str:
     return "opening" if event_kind in _OPENING_EVENTS else "deadline"
 
 
+# Three ways to read the same dates, month first because that is the one the
+# page shipped with and the one an unparameterised URL still lands on. Week
+# and day exist because a month cell is 132px tall and scrolls its contents:
+# a day with six things on it is legible in the month grid only by scrolling
+# inside a box the size of a postage stamp.
+CAL_VIEWS = ("month", "week", "day")
+
+# The clock the day view rails against when the day itself does not widen it.
+# Not 00:00-23:59: twenty-four rows for a surface whose entries cluster in
+# office hours is mostly empty rule, and the rail exists to place the entries,
+# not to draw a whole day.
+_DAY_RAIL = (8, 21)
+
+
+def _resolve_view(v) -> str:
+    return v if v in CAL_VIEWS else "month"
+
+
 def _month_bounds(year: int, month: int):
     first = date(year, month, 1)
     last = date(year, month, calmod.monthrange(year, month)[1])
@@ -99,8 +118,18 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
     # Layers 1 + 2 — the user's own events. `starts_at` is a datetime, so the
     # window is widened by a day at each end before filtering to be sure a
     # local-midnight event at either edge is caught.
-    window_start = timezone.make_aware(datetime.combine(first - timedelta(days=1), datetime.min.time()))
-    window_end = timezone.make_aware(datetime.combine(last + timedelta(days=2), datetime.min.time()))
+    #
+    # Widened through `_step`, which is a no-op at the ends of the range
+    # `date` can represent. `?y=1&m=1` reaches here with `first` on 1 January
+    # of year 1, and a bare `- timedelta(days=1)` raised OverflowError from
+    # inside the view: a 500 on a hand-edited querystring, the same failure
+    # `_resolve_month`'s year-10000 check guards at the other end. Losing the
+    # widening in that one case costs nothing — there are no events in year 1
+    # — and the range filter below is inclusive either way.
+    window_start = timezone.make_aware(
+        datetime.combine(_step(first, -1), datetime.min.time()))
+    window_end = timezone.make_aware(
+        datetime.combine(_step(last, 2), datetime.min.time()))
     for ev in (CalendarEvent.objects.for_user(user)
                .filter(starts_at__gte=window_start, starts_at__lt=window_end)
                .select_related("contact")):
@@ -313,24 +342,160 @@ def _resolve_month(y, m, today: date) -> tuple[int, int]:
         return today.year, today.month
 
 
-def _month_context(user, year: int, month: int, today: date) -> dict:
-    """Everything the template needs to draw one month.
+def _resolve_anchor(y, m, d, today: date) -> date:
+    """The single date the page is pointed at, from untrusted input.
+
+    `?d=` IS NOT `?day=`. The anchor moves the view (which month, which week,
+    which day is on screen); `?day=` prefills the add form and opens it. Two
+    day-shaped parameters on one page is confusable enough to be worth saying
+    out loud, and merging them was the shorter option and the wrong one — a
+    week-to-week click would then open the add panel every time you paged.
+
+    Year and month go through `_resolve_month`, which already rejects the
+    values that would 500 the grid. The day is CLAMPED rather than rejected,
+    on the same reasoning `?day=` is ignored rather than rejected: a
+    hand-edited anchor should still leave a usable page. Clamping is also
+    what carries the day-of-month across a month step, so paging from 31
+    March lands on 30 April rather than nowhere.
+
+    With no `?d=` at all the anchor is today when today falls in the month on
+    screen, and the 1st when it does not. That is what makes the switcher
+    land where you are looking: opening the calendar cold and clicking Week
+    gives this week, not the week of the 1st.
+    """
+    year, month = _resolve_month(y, m, today)
+    last = calmod.monthrange(year, month)[1]
+    try:
+        day = int(d)
+    except (TypeError, ValueError):
+        day = today.day if (year, month) == (today.year, today.month) else 1
+    return date(year, month, min(max(day, 1), last))
+
+
+def _step(anchor: date, days: int) -> date:
+    """The anchor moved by whole days, or the anchor itself at the ends of the
+    range `date` can represent. Only reachable by hand-editing the querystring
+    to year 1, where drawing a "previous week" link raises OverflowError from
+    inside the template context — i.e. a 500 on a URL nobody legitimately
+    visits. Same shape of guard as `_resolve_month`'s year-10000 check."""
+    try:
+        return anchor + timedelta(days=days)
+    except OverflowError:
+        return anchor
+
+
+def _view_range(view: str, anchor: date) -> tuple[date, date]:
+    """The dates a view actually SHOWS, inclusive.
+
+    The month is the month itself, not the grid's leading and trailing
+    overhang. Those cells stay deliberately empty: a neighbouring month's
+    deadline drawn in this month's grid would also land in this month's
+    tally, and the legend counts what the range holds.
+    """
+    if view == "day":
+        return anchor, anchor
+    if view == "week":
+        # Monday-first, matching `_CAL` and the cadence engine's business-day
+        # maths. `date(1, 1, 1)` is itself a Monday, so this subtraction can
+        # never step below MINYEAR however the querystring is edited.
+        start = anchor - timedelta(days=anchor.weekday())
+        return start, _step(start, 6)
+    return _month_bounds(anchor.year, anchor.month)
+
+
+def _period_label(view: str, first: date, last: date) -> str:
+    """What the heading says. A week is the one case that has to name two
+    months or two years, because a week that straddles either is otherwise
+    two unlabelled numbers with no year on them."""
+    if view == "day":
+        return f"{first:%A} {first.day} {first:%B %Y}"
+    if view == "month":
+        return first.strftime("%B %Y")
+    if first.year != last.year:
+        return f"{first.day} {first:%B %Y} to {last.day} {last:%B %Y}"
+    if first.month != last.month:
+        return f"{first.day} {first:%B} to {last.day} {last:%B %Y}"
+    return f"{first.day} to {last.day} {first:%B %Y}"
+
+
+def _qs(view: str, anchor: date, **extra) -> str:
+    """A link back to this page carrying BOTH the view and the anchor, which
+    is what makes any of these three URLs survive a reload or a paste into
+    someone else's browser."""
+    params = {"view": view, "y": anchor.year, "m": anchor.month, "d": anchor.day}
+    params.update(extra)
+    return "?" + urlencode(params)
+
+
+def _nav_urls(view: str, anchor: date) -> tuple[str, str]:
+    """Previous and next, one period at a time, in every view.
+
+    The month steps by (year, month) rather than by days on purpose: January's
+    "previous" has always been year 0 month 12, a link whose follow-up request
+    falls back to today rather than 500ing. Building a `date` here to carry the
+    anchor would raise before the link is even drawn.
+    """
+    if view in ("day", "week"):
+        by = 1 if view == "day" else 7
+        return _qs(view, _step(anchor, -by)), _qs(view, _step(anchor, by))
+    out = []
+    for by in (-1, 1):
+        y, m = _shift(anchor.year, anchor.month, by)
+        out.append("?" + urlencode(
+            {"view": "month", "y": y, "m": m, "d": anchor.day}))
+    return out[0], out[1]
+
+
+def _hour_label(hour: int) -> str:
+    return f"{hour % 12 or 12}{'am' if hour < 12 else 'pm'}"
+
+
+def _hour_rail(events: list[dict]) -> list[dict]:
+    """The day view's time axis: one row per hour, entries in the hour they
+    start.
+
+    Placement is by hour row rather than by proportional offset, and entries
+    that share an hour stack rather than sitting side by side. Both are
+    deliberate. Only two of the four layers carry a time at all, and one of
+    those two (`CalendarEvent.ends_at`) is nullable and usually null — so a
+    proportional layout would be drawing most blocks at an invented length,
+    and side-by-side overlap resolution would be geometry in service of a
+    collision this data cannot currently express.
+
+    The window widens to whatever the day actually holds, so a 7am flight and
+    an 11pm call are on the rail rather than off the end of it.
+    """
+    timed = [e for e in events if not e["all_day"] and e["at"]]
+    hours = [e["at"].hour for e in timed]
+    lo = min([_DAY_RAIL[0], *hours])
+    hi = max([_DAY_RAIL[1], *hours])
+    return [{"label": _hour_label(h),
+             "events": [e for e in timed if e["at"].hour == h]}
+            for h in range(lo, hi + 1)]
+
+
+def _period_context(user, view: str, anchor: date, today: date) -> dict:
+    """Everything the template needs to draw one period, whichever it is.
 
     Shared by the normal render and the invalid-submission re-render. It used
     to be duplicated, and the copies had already drifted: the error path
     passed hard-coded zero counts, so mistyping a date made the month's real
     deadline tally read "0 deadlines" — the page contradicting itself at the
     exact moment the user is being told they got something wrong.
+
+    ONE query per render whatever the view: `_events_by_day` takes a date
+    range, so month, week and day differ in the range they ask for and in
+    nothing else. The three views cannot disagree about what is on a day.
     """
-    first, last = _month_bounds(year, month)
+    first, last = _view_range(view, anchor)
     buckets = _events_by_day(user, first, last)
-    prev_y, prev_m = _shift(year, month, -1)
-    next_y, next_m = _shift(year, month, 1)
-    def cell(d: date) -> dict:
+    prev_url, next_url = _nav_urls(view, anchor)
+
+    def cell(d: date, in_range: bool = True) -> dict:
         events = buckets.get(d, [])
         return {
             "date": d,
-            "in_month": d.month == month,
+            "in_month": in_range,
             "is_today": d == today,
             "events": events,
             # Intensity, capped at 3. A day with nine things on it is not
@@ -340,30 +505,66 @@ def _month_context(user, year: int, month: int, today: date) -> dict:
             # thing that can signal a heavy day at a glance.
             "load": min(len(events), 3),
             "load_label": f"{len(events)} on this day" if events else "",
+            # The cell's OWN date, not the anchor's month. A week cell can be
+            # in the next month, and "+ on the 1st" has to prefill the 1st of
+            # that month rather than of the month the anchor happens to sit in.
+            "add_url": _qs(view, d, day=d.day) + "#add",
+            # A bare "1" in a week that straddles two months says nothing.
+            # Month view never renders this: its own header row and the
+            # is-out tint already answer the question.
+            "month_tag": d.strftime("%b") if (d == first or d.day == 1) else "",
         }
 
-    return {
-        "weeks": [[cell(d) for d in week]
-                  for week in _CAL.monthdatescalendar(year, month)],
-        "month_label": first.strftime("%B %Y"),
-        "year": year, "month": month,
-        "prev_y": prev_y, "prev_m": prev_m,
-        "next_y": next_y, "next_m": next_m,
+    ctx = {
+        "view": view,
+        "anchor": anchor,
+        "period_label": _period_label(view, first, last),
+        "period_noun": view,
+        "year": anchor.year, "month": anchor.month,
+        "prev_url": prev_url, "next_url": next_url,
+        "month_url": _qs("month", anchor),
+        "week_url": _qs("week", anchor),
+        "day_url": _qs("day", anchor),
         "today": today,
+        # Whether the Today control has anywhere to go. In month view this
+        # used to be spelled out in the template as a year+month comparison;
+        # it is the same question in all three views, asked once.
+        "today_in_range": first <= today <= last,
         "counts": {
             kind: sum(1 for evs in buckets.values() for e in evs if e["kind"] == kind)
             for kind in CAL_KINDS
         },
         "weekday_names": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "empty_note": f"Nothing on the calendar this {view}.",
     }
+    if view == "month":
+        weeks = [[cell(d, in_range=d.month == anchor.month) for d in week]
+                 for week in _CAL.monthdatescalendar(anchor.year, anchor.month)]
+        ctx["weeks"] = weeks
+        # The narrow-screen agenda reads a flat list rather than walking the
+        # grid, so week view can hand it seven days and month view the days
+        # that are actually in the month, through one template loop.
+        ctx["agenda_days"] = [c for week in weeks for c in week if c["in_month"]]
+    elif view == "week":
+        days = [cell(_step(first, i)) for i in range(7)]
+        ctx["days"] = days
+        ctx["agenda_days"] = days
+    else:
+        cur = cell(anchor)
+        ctx["day_cell"] = cur
+        ctx["all_day_events"] = [e for e in cur["events"] if e["all_day"]]
+        ctx["hours"] = _hour_rail(cur["events"])
+    return ctx
 
 
 @login_required
 def calendar(request: HttpRequest) -> HttpResponse:
     today = timezone.localdate()
-    year, month = _resolve_month(request.GET.get("y", today.year),
-                                 request.GET.get("m", today.month), today)
-    ctx = _month_context(request.user, year, month, today)
+    view = _resolve_view(request.GET.get("view"))
+    anchor = _resolve_anchor(request.GET.get("y", today.year),
+                             request.GET.get("m", today.month),
+                             request.GET.get("d"), today)
+    ctx = _period_context(request.user, view, anchor, today)
 
     # `?day=` — the per-day "+" in the grid. It prefills the date and opens
     # the panel, so adding something to the 14th is one click from the 14th
@@ -373,9 +574,9 @@ def calendar(request: HttpRequest) -> HttpResponse:
     initial = {}
     try:
         picked = int(request.GET["day"])
-        _, last = _month_bounds(year, month)
+        _, last = _month_bounds(anchor.year, anchor.month)
         if 1 <= picked <= last.day:
-            initial["day"] = date(year, month, picked)
+            initial["day"] = date(anchor.year, anchor.month, picked)
     except (KeyError, TypeError, ValueError):
         pass
 
@@ -391,18 +592,23 @@ def calendar_add(request: HttpRequest) -> HttpResponse:
     the message survive — a form that clears itself on a bad date is a form
     people stop using."""
     form = CalendarEventForm(request.POST, user=request.user)
-    y = request.POST.get("y") or timezone.localdate().year
-    m = request.POST.get("m") or timezone.localdate().month
+    today = timezone.localdate()
+    # The view and anchor ride on the form as hidden fields, so adding
+    # something from the week of 9 March returns to the week of 9 March
+    # rather than dropping back to this month's grid.
+    view = _resolve_view(request.POST.get("view"))
+    anchor = _resolve_anchor(request.POST.get("y") or today.year,
+                             request.POST.get("m") or today.month,
+                             request.POST.get("d"), today)
     if form.is_valid():
         ev = form.save(commit=False)
         ev.user = request.user
         ev.source = CalendarEvent.SOURCE_MANUAL
         ev.save()
-        return redirect(f"{request.path.rsplit('/add/', 1)[0]}/?y={y}&m={m}")
+        return redirect(
+            f"{request.path.rsplit('/add/', 1)[0]}/{_qs(view, anchor)}")
 
-    today = timezone.localdate()
-    year, month = _resolve_month(y, m, today)
-    ctx = _month_context(request.user, year, month, today)
+    ctx = _period_context(request.user, view, anchor, today)
     ctx["form"] = form
     ctx["form_open"] = True
     return render(request, "crm/calendar.html", ctx, status=400)
@@ -413,10 +619,13 @@ def calendar_add(request: HttpRequest) -> HttpResponse:
 def calendar_delete(request: HttpRequest, pk: int) -> HttpResponse:
     """Remove one of the user's own events. Scoped through `for_user`, so a
     hand-crafted pk for someone else's row simply finds nothing."""
-    y = request.POST.get("y") or timezone.localdate().year
-    m = request.POST.get("m") or timezone.localdate().month
+    today = timezone.localdate()
+    view = _resolve_view(request.POST.get("view"))
+    anchor = _resolve_anchor(request.POST.get("y") or today.year,
+                             request.POST.get("m") or today.month,
+                             request.POST.get("d"), today)
     CalendarEvent.objects.for_user(request.user).filter(pk=pk).delete()
-    return redirect(f"/app/calendar/?y={y}&m={m}")
+    return redirect(f"/app/calendar/{_qs(view, anchor)}")
 
 
 def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:

@@ -1,0 +1,42 @@
+{% comment %}
+One week, as the same seven columns the month grid draws.
+
+DELIBERATELY THE SAME COMPONENTS. `.cal-week` is the month's own row
+container, `.cal-day` its own cell, `.cal-day-list` its own scroller, and the
+entries come from the shared `_calendar_event.html`. The only thing this view
+changes is the cell HEIGHT (see `.cal-week.is-week` in calendar.html): a
+month cell is 132px and scrolls what it cannot fit, which is exactly the
+problem a week view exists to solve. Seven columns and one row means the same
+horizontal space carries five times the vertical room, so a day with six
+things on it lists all six.
+
+Reusing `.cal-day` also keeps the Today control working with no special case:
+the script at the bottom of calendar.html scrolls to `.cal-day.is-today`,
+which is the same element here as in the month.
+
+No `is-out` tint. In the month grid a neighbouring month's day is context you
+did not ask for; in a week that straddles two months both are equally the week
+you are looking at, and the heading names them both.
+{% endcomment %}
+<div class="cal-week is-week">
+  {% for day in days %}
+    <div class="cal-day load-{{ day.load }}{% if day.is_today %} is-today{% endif %}"
+         {% if day.load_label %}title="{{ day.load_label }}"{% endif %}>
+      <div class="cal-wnum">
+        <span class="cal-num">{{ day.date.day }}</span>
+        {% comment %}Which month this column is in, on the days where a bare
+        number cannot say: the first column, and any 1st. A week reading "30
+        31 1 2" is otherwise four numbers with no month between them.
+        {% endcomment %}
+        {% if day.month_tag %}<span class="cal-wmon">{{ day.month_tag }}</span>{% endif %}
+      </div>
+      <a class="cal-day-add" href="{{ day.add_url }}"
+         aria-label="Add something on {{ day.date|date:'j F' }}">+</a>
+      <div class="cal-day-list">
+        {% for ev in day.events %}
+          {% include "crm/_calendar_event.html" %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
