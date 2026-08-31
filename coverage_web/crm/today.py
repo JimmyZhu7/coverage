@@ -1510,225 +1510,6 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Coverage gaps: tiered firms where the student knows nobody, worst first.
-# ---------------------------------------------------------------------------
-# WHAT USED TO BE HERE. Until 2026-08-31 this section built a mixed lane
-# ("Your board") joining two kinds of fact: a confirmed dated firm event
-# joined to the student's own contacts there (`_plays`, off `_next_deadlines`),
-# and this coverage-gap half. The founder judged the lane not practically
-# useful and it was removed whole. The dated half needed no replacement — the
-# rail's Deadlines card (`_next_deadlines`, in `_cockpit_context`) already
-# named the identical facts on its own, and now shows its full natural set
-# again instead of the overflow the two lanes used to argue about. This half
-# did need one: see the note below.
-#
-# THE ONE THING THE CADENCE ENGINE STRUCTURALLY CANNOT SAY. The engine
-# schedules CONTACTS. A firm with no contacts produces no actions, forever,
-# however much the student cares about it — so the gap is invisible on Today
-# no matter how long it stands open. That is the asymmetry this exploits:
-# "who is due a follow-up" is bursty (the founder sent 106 touches on Aug 10
-# and 1-3 a day for the eight days after), while "where is my network thin"
-# is a standing fact that does not empty for months.
-#
-# WHY THIS SURVIVED THE BOARD'S DELETION WHEN `_plays` DID NOT. Measured on
-# the founder's account (2026-08-27): 25 of his 54 tiered firms had nobody at
-# them, 18 of them tier 1 or 2. `_starter_seeds`' own "add people at X" seed
-# only ever ran below `SEED_NETWORK_FLOOR` live contacts — with 182 contacts
-# he could never see it. Moving the prompt here (then, into the board; now,
-# into its own unconditional call in `_cockpit_context`) is what made it
-# reachable at all, and that fix does not stop being true just because the
-# lane it was rendered in also carried a jargon heading nobody asked for.
-# Deleting this function with the board would have silently deleted the
-# prompt too, for every account past the floor — a regression dressed as
-# cleanup.
-#
-# THREE RULES KEEP IT FROM BEING FILLER, and they are the whole design:
-#
-# 1. NO NEW JUDGMENT. The ranking is `crm.coverage.rank_gaps` — the exact
-#    function, with the exact inputs, that the Network board's Coverage
-#    Gaps strip already runs. It is pure, fixture-tested, and its arithmetic
-#    is a small integer the student can redo by hand off the card. Today
-#    does not get a second opinion about coverage; it renders the one the
-#    product already has, on the page where work happens.
-#
-# 2. `NO_CONTACTS` ONLY. `rank_gaps` also returns `all_cold`, `no_advocate`
-#    and `below_target` firms — 22 of the founder's 40 ranked gaps. Every one
-#    of those is a firm where he already HAS people, which means the cadence
-#    engine is already deciding when to speak about them. Carding them here
-#    would be the page asking twice for the same person, which is the
-#    cold-contact flood this repo already shipped and reverted. A firm with
-#    nobody at it is the only gap the queue cannot cover.
-#
-# 3. TIERED FIRMS ONLY, and the tier does the ordering. `rank_gaps` skips
-#    untiered rows outright: a tier is the only statement of priority the
-#    student has ever made, and without one there is nothing to rank on but
-#    the alphabet. Measured on the founder's board this puts the two tier-1
-#    holes (Centerview, RBC) above sixteen tier-2 ones and seven tier-3
-#    ones — his Nvidia and Apple rows sit at the bottom of a 25-deep queue
-#    and will not surface for months, which is correct.
-#
-# How many cards may render. Two numbers, because the backlog is standing
-# and the page is not: when the cadence queue has planned work, the student
-# already has a first thing to do this morning and coverage is the
-# background job, so it gets one slot. When the plan is empty it gets two.
-#
-# TWO, not five, and not "however many gaps there are". It is the number the
-# retired firm seeds used, for their own stated reason: at most two firm
-# prompts "so the list isn't one note". A wall of thin firms is the same bug
-# as a wall of cold contacts arriving by a different door — this repo shipped
-# that once already (the 29-cold flood) and reverted it. The founder has 25
-# open holes on his board; two of them is a morning, and twenty-five of them
-# is a page nobody reads twice.
-COVERAGE_CARD_MAX = 2
-COVERAGE_CARD_MAX_BUSY = 1
-
-# The date stored on a coverage card's `PlayDismissal`. A coverage gap has no
-# date of its own — it is true until the student puts somebody at the firm —
-# but `PlayDismissal` keys on the value tuple `(firm, event_kind, date)` and
-# `date` is NOT NULL. A fixed sentinel makes the tuple mean exactly "this
-# firm's coverage prompt", so one Dismiss is permanent for that firm rather
-# than something that silently resurrects on a date change. Deliberately a
-# real, obviously-not-a-deadline date rather than `date.min`: it shows up in
-# the analytics event and in the admin as what it is.
-COVERAGE_DISMISSAL_DATE = date(1970, 1, 1)
-COVERAGE_EVENT_KIND = "coverage"
-
-
-def _coverage_cards(user, today, *, limit: int) -> list[dict]:
-    """Firms on the student's own board where they know nobody, worst first.
-
-    THE ONE THING THE CADENCE ENGINE STRUCTURALLY CANNOT SAY. The engine
-    schedules CONTACTS. A firm with no contacts produces no actions, forever,
-    however much the student cares about it — so the gap is invisible on
-    Today no matter how long it stands open. That is the asymmetry this
-    exploits: "who is due a follow-up" is bursty (the founder sent 106
-    touches on Aug 10 and 1-3 a day for the eight days after), while "where
-    is my network thin" is a standing fact that does not empty for months.
-    See the module note above for the three rules that keep it from being
-    filler, and for why this survived the board it used to render inside.
-
-    Dismissals are filtered BEFORE the cap, so a dismissed firm never
-    occupies a slot.
-
-    Returns play-shaped dicts (the anatomy `PlayDismissal` and the dismiss
-    endpoint already know how to key on: firm, fact, dismiss) even though
-    there is now only ever one kind of card in play.
-    """
-    if limit < 1:
-        return []
-    user_firms = [
-        uf for uf in (
-            UserFirm.objects.for_user(user)
-            .exclude(firm_id=None)
-            .select_related("firm")
-        )
-        if uf.tier in coverage.TIER_WEIGHT
-    ]
-    if not user_firms:
-        return []
-
-    dismissed = set(
-        PlayDismissal.objects.for_user(user)
-        .filter(event_kind=COVERAGE_EVENT_KIND, date=COVERAGE_DISMISSAL_DATE)
-        .values_list("firm_id", flat=True)
-    )
-    user_firms = [uf for uf in user_firms if uf.firm_id not in dismissed]
-    if not user_firms:
-        return []
-
-    firm_ids = [uf.firm_id for uf in user_firms]
-    # One query for the warmth lists `rank_gaps` ranks on. NON-ARCHIVED only,
-    # which is the same population the Network board's own gap strip counts,
-    # and it is the right one here for the reason the retired firm seed
-    # already held: archiving somebody is not the same as knowing them. A
-    # firm whose only three contacts are all parked has no live way in and is
-    # a coverage hole.
-    warmths: dict[int, list[str]] = {}
-    for c in (
-        Contact.objects.for_user(user)
-        .filter(archived=False, firm_id__in=firm_ids)
-        .only("firm_id", "warmth")
-    ):
-        warmths.setdefault(c.firm_id, []).append(c.warmth)
-    # Confirmed close dates only — `rank_gaps`' `app_close` input does no
-    # confidence filtering of its own by design (its docstring: "the caller
-    # does the confidence filtering, exactly as the cadence engine's caller
-    # does"). Same bar as `_next_deadlines`, through the same helper — this
-    # date drives `coverage.deadline_bonus`, which adds up to 3 exposure
-    # points and can reorder the whole strip, so it must not be a guess.
-    closes: dict[int, date] = {}
-    for fd in (
-        confirmed_firm_dates()
-        .filter(firm_id__in=firm_ids, event_kind="app_close", date__gte=today)
-        .order_by("-date")
-    ):
-        closes[fd.firm_id] = fd.date
-
-    gaps = coverage.rank_gaps(
-        [
-            {
-                "firm_id": uf.firm_id,
-                "name": uf.firm.name,
-                "tier": uf.tier,
-                "warmths": warmths.get(uf.firm_id, []),
-                "app_close": closes.get(uf.firm_id),
-            }
-            for uf in user_firms
-        ],
-        today=today,
-        target=coverage.advocate_target(user),
-        # Wide enough that the NO_CONTACTS filter below still has candidates
-        # after the warmer gap states take the top of the ranking, narrow
-        # enough that this stays a slice and not a report.
-        limit=len(user_firms),
-    )
-    firms_by_id = {uf.firm_id: uf.firm for uf in user_firms}
-
-    cards = []
-    for g in gaps:
-        if g["state"] != coverage.NO_CONTACTS:
-            continue
-        firm = firms_by_id.get(g["firm_id"])
-        if firm is None:
-            continue
-        cards.append({
-            "firm": firm,
-            # The fact line. The student's own tier, said back to them —
-            # never a score, never "high priority", never a number this
-            # module invented. `rank_gaps` computes an `exposure` integer and
-            # it is deliberately NOT shown: it decides the ORDER of these
-            # cards and nothing else, the same discipline the Network board
-            # settled on when it stopped printing its tie-breaker.
-            "label": f"Tier {g['tier']} target",
-            "event_kind": COVERAGE_EVENT_KIND,
-            "date": None,
-            # No clock, so no countdown chip and no urgency colour. Borrowing
-            # the deadline red for a firm with no date would be inventing the
-            # urgency this lane exists to avoid inventing.
-            "when": "",
-            "urgent": False,
-            "breakdown": [],
-            "total": 0,
-            "live_total": 0,
-            "sourcing": True,
-            "kind": "coverage",
-            "dismiss_date": COVERAGE_DISMISSAL_DATE,
-            "tier": g["tier"],
-            # "Nobody there yet." — never the retired seed line that followed
-            # it ("Three is where a firm starts to know you"). That sentence
-            # asserted a specific number as fact with nothing behind it; cut
-            # 2026-08-31 rather than reworded, because there is no version of
-            # "three" this module's data can actually support.
-            "people_line": "Nobody there yet.",
-            "cta_label": "Add someone",
-            "cta_href": f"{reverse('crm:contact_new')}?firm={firm.slug}&quick=1",
-        })
-        if len(cards) >= limit:
-            break
-    return cards
-
-
 def _chat_prep(user, today, schedule) -> list[dict]:
     """Chats happening TODAY, with what you knew last time already pulled up.
 
@@ -1830,11 +1611,12 @@ def _chat_prep(user, today, schedule) -> list[dict]:
 # pointed the other way. So the network size is half the rule and the silence
 # is the other half; neither alone is honest.
 #
-# SETUP ONLY, since 2026-08-27. The "Add N people at X" seeds moved to the
-# board lane's coverage cards (`_coverage_cards`), where they are no longer
-# gated behind SEED_NETWORK_FLOOR and can therefore reach the accounts that
-# have the most of that work to do. What is left here is the four things that
-# have to be TRUE before either the board or the queue can say anything:
+# SETUP ONLY. The "Add N people at X" seeds moved out to their own
+# coverage-gap lane on 2026-08-27, reachable past SEED_NETWORK_FLOOR in a way
+# this gate never was, and that lane was deleted outright on 2026-08-31 — the
+# founder judged its one-card render on his own account useless. See
+# `_starter_seeds`' own note below for the full history. What is left here is
+# the four things that have to be TRUE before the queue can say anything:
 # firms picked, mailbox connected, list imported, track set.
 SEED_MAX = 3               # never more: this is a nudge, not a curriculum
 # Live contacts below which an account is still being BUILT rather than run.
@@ -1868,13 +1650,17 @@ def _starter_seeds(user, today) -> list[dict]:
     # of them telling the student the same thing in two registers at once.
     # See that function's own module note for the full reasoning.
     #
-    # THE "ADD PEOPLE AT X" SEEDS USED TO LIVE HERE TOO, and they are now
-    # `_coverage_cards`, called unconditionally from `_cockpit_context`. Same
-    # idea, same ordering rule (tier, then emptiest, then name), one
-    # implementation instead of two — and reachable, which this one was not:
-    # seeds only run for an account under SEED_NETWORK_FLOOR live contacts,
-    # so the founder, with 182 contacts and 25 empty target firms, could
-    # never see them. `_coverage_cards` has no such gate.
+    # THE "ADD PEOPLE AT X" SEEDS USED TO LIVE HERE TOO, then moved out to
+    # their own unconditional coverage-gap lane (`_coverage_cards`), reachable
+    # past SEED_NETWORK_FLOOR in a way this gate never was — seeds only run
+    # for an account under that floor, so the founder, with 182 contacts and
+    # 25 empty target firms, could never see them here. That lane is gone now
+    # too, deleted 2026-08-31 the same day it was rendered on the founder's
+    # own account and judged useless (one card: "BlackRock, Tier 2 target,
+    # Nobody there yet"). There is no reachable version of "add someone at an
+    # empty tiered firm" left on Today — an account past the floor gets no
+    # nudge for this at all, an honest gap rather than a silently reinvented
+    # one.
     #
     # What is left here is SETUP, which is the honest scope for a lane
     # headed "Start here": the things that have to be true before the queue
@@ -2411,30 +2197,6 @@ def _cockpit_context(user) -> dict:
     schedule = _schedule(user, today)
     chat_prep = _chat_prep(user, today, schedule)
 
-    # COVERAGE GAPS (see `_coverage_cards` and its module note): tiered
-    # firms where the student knows nobody. Used to be half of a mixed
-    # "Your board" lane with `_plays`' dated facts; the board was removed
-    # 2026-08-31 (not practically useful, per the founder) and the dated
-    # half went with it — the rail's Deadlines card already named the same
-    # facts on its own. This half stayed, because it is the only reachable
-    # version of "add someone at an empty tiered firm" for an account past
-    # `SEED_NETWORK_FLOOR` (see `_starter_seeds`).
-    #
-    # HOW MANY CARDS DEPENDS ON HOW LOUD THE REST OF THE PAGE IS. The gaps
-    # are equally true either way — nothing here decides whether a firm is
-    # empty, only how much of a standing backlog to put in front of somebody
-    # who already has a morning's work queued. A student with a plan gets
-    # one; a student with an empty plan gets two, because on that day this
-    # lane IS the work.
-    #
-    # Computed HERE rather than in the return dict because the quiet gate
-    # below has to know about it — a page with coverage cards on it is not a
-    # quiet page.
-    coverage_gaps = _coverage_cards(
-        user, today,
-        limit=(COVERAGE_CARD_MAX_BUSY if planned else COVERAGE_CARD_MAX),
-    )
-
     # THE GATE. Both halves, because an empty queue means two opposite things
     # (see the seeds header above) and only the pair tells them apart.
     #
@@ -2489,21 +2251,18 @@ def _cockpit_context(user) -> dict:
     # it, which is the more honest sentence when there is truly nothing to
     # predict.
     #
-    # `coverage_gaps` and `bench` USED TO BE ANDed in by `_cockpit.html`
-    # instead of here, because they were sibling sections landing from
-    # separate work and this function could not name variables that did not
-    # exist yet. They both exist now, so the test lives in one place — the
-    # template asks `{% if quiet %}` and nothing else. Two copies of one rule
-    # is how the founder's own page once ended up rendering three board
-    # cards above a full-width "You're all caught up" panel: the template's
-    # copy of the rule knew about the board and the empty states below it
-    # did not.
-    #
-    # A coverage-gap card is work, so it makes the page not-quiet exactly
-    # like a queue card does. That is also what makes the quiet header rare
-    # and therefore honest: it now means "nothing is due AND your board has
-    # no holes in it", which for the founder is a sentence he has to earn by
-    # putting somebody at eighteen firms.
+    # `bench` USED TO BE ANDed in by `_cockpit.html` instead of here, because
+    # it was a sibling section landing from separate work and this function
+    # could not name a variable that did not exist yet. It exists now, so the
+    # test lives in one place — the template asks `{% if quiet %}` and
+    # nothing else. Two copies of one rule is how the founder's own page once
+    # ended up rendering three board cards above a full-width "You're all
+    # caught up" panel: the template's copy of the rule knew about the board
+    # and the empty states below it did not. (The board itself, and the
+    # coverage-gap lane that survived its first deletion, are both gone now —
+    # see the retirement note in `_starter_seeds`' own module comment — so
+    # `bench` is what is left of "a sibling section this rule has to know
+    # about".)
     would_be_quiet = (
         len(contacts) > 0
         and not seeds
@@ -2517,7 +2276,6 @@ def _cockpit_context(user) -> dict:
         and not app_events
         and not mail_facts
         and not autopilot_review
-        and not coverage_gaps
         and not bench
     )
     # The one query this feature costs is gated behind everything above,
@@ -2570,21 +2328,6 @@ def _cockpit_context(user) -> dict:
         # render, never stored. Empty for any account whose queue has work
         # in it. See `_starter_seeds`.
         "seeds": seeds,
-        # The board (computed above, because the quiet gate depends on it):
-        # dated world facts joined to the student's own people at that firm,
-        # The tiered firms where the student knows nobody. This USED to be
-        # half of a mixed "Your board" lane that also carried confirmed
-        # dated events (`_plays`); the founder judged that lane not
-        # practically useful and it was removed whole, 2026-08-31 (see
-        # `_cockpit.html`'s lane-coverage comment). The dated half had a
-        # second, independent home already — the rail's Deadlines card,
-        # below — so nothing about a firm's confirmed date is lost. This
-        # half did not: it is the only reachable prompt for "add someone at
-        # a tiered firm you know nobody at" for an account past
-        # SEED_NETWORK_FLOOR (see `_starter_seeds`' own note on why it no
-        # longer carries this), so `_coverage_cards` stays, renamed from
-        # "plays" to what it now actually is.
-        "coverage_gaps": coverage_gaps,
         # The quiet-day header (see the `quiet` computation above): `line`
         # is only meaningful when `quiet` is true, but it's cheap enough
         # (empty string otherwise) to hand over unconditionally rather than
@@ -2594,9 +2337,8 @@ def _cockpit_context(user) -> dict:
         # The next confirmed firm dates, named. Until 2026-08-31 this list
         # excluded any date "Your board" already printed, because that lane
         # and this card were reading the same rows and showing them twice.
-        # The board is gone (see the `coverage_gaps` note above), so there
-        # is nothing left to exclude against — this is `_next_deadlines`'
-        # own natural output again, unfiltered.
+        # The board is gone, so there is nothing left to exclude against —
+        # this is `_next_deadlines`' own natural output again, unfiltered.
         "deadlines": _next_deadlines(user, today),
         "activity": activity,
         "contact_count": len(contacts),
@@ -2770,9 +2512,16 @@ def play_dismiss(request: HttpRequest) -> HttpResponse:
     IN PLACE, so keying on its id would keep suppressing a fact whose date has
     since moved. Storing the date as a value means a later, DIFFERENT date is
     a different tuple and the play returns on its own — no undo needed,
-    nothing to expire. Coverage cards use the same endpoint with the fixed
-    `COVERAGE_DISMISSAL_DATE` sentinel — see `crm.models.PlayDismissal` and
-    `_coverage_cards`.
+    nothing to expire.
+
+    NO CURRENT CALLER, as of 2026-08-31. This endpoint served two card kinds
+    over its life — the dated "Your board" plays, then the coverage-gap
+    lane's fixed `COVERAGE_DISMISSAL_DATE` sentinel — and the founder has now
+    retired both (see `crm.models.PlayDismissal`'s own docstring for the
+    history). The view, the model, and `PlayDismissal`'s CSV export all stay:
+    a dismissal is a fact about a past decision, not tied to whether the UI
+    that produced it still exists, and a future play kind can key on the same
+    `(firm, event_kind, date)` tuple without new machinery.
     """
     try:
         firm_id = int(request.POST.get("firm", ""))

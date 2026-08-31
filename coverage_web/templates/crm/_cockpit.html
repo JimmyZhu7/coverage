@@ -41,8 +41,8 @@ that explains the "2 of 29 today" in the lane heading above it. It is not
 ranked; it follows the plan. (Until 2026-08-31 a second tie-break lived here
 for "Your board", a lane that mixed a dated fact — rung 4 — with a coverage
 gap — rung 7 — and was ranked by the more time-critical of the two. That
-lane is gone; see the note below the render order for where its pieces went
-and why the tie-break went with it.)
+lane is gone, and so is the coverage-gap lane that briefly survived it under
+its own heading; see the note below the render order for the full history.)
 
 WHAT THIS ORDER DELIBERATELY DOES NOT DO. It does not move a section by how
 old its contents are. The page has exactly one age-driven mechanism —
@@ -76,12 +76,9 @@ THE ORDER, with the rung each section is claiming:
    7. Up next ............ -  the plan's own disclosure, right below the
                              lane it explains rather than by numeric rung.
    8. Log what you learned  5 an unwritten debrief decays; nothing closes.
-   9. Firms with no contacts
-                          . 7 tiered firms the student knows nobody at —
-                             standing backlog, as true tomorrow as today.
-  10. Run Autopilot ...... 8  the pitch, and only the pitch. Below the cards
+   9. Run Autopilot ...... 8  the pitch, and only the pitch. Below the cards
                              it is an offer about. See its own note.
-  11. Waiting / worth a second look / gone quiet — reassurance, second
+  10. Waiting / worth a second look / gone quiet — reassurance, second
       looks and exits. Unchanged, and correctly last: none of it is work.
 
 WHY 3 (FOUND IN YOUR INBOX) MOVED UP, 2026-08-29. It used to render ninth,
@@ -106,14 +103,23 @@ Nothing about a confirmed firm date was lost: the rail's Deadlines card
 (below, in `.cockpit-rail`) already named the identical facts on its own,
 and it now shows its full natural set again instead of the overflow-only
 slice it was cut down to while the two lanes were arguing about the same
-rows. The coverage-gap half — tiered firms the student knows nobody at — DID
-need a new home: it is the only reachable version of "add someone at an
-empty firm" for an account above `SEED_NETWORK_FLOOR` (see
-`crm.today._coverage_cards`'s and `_starter_seeds`' own notes), so deleting
-it with the rest of the board would have been a real regression wearing the
-costume of cleanup. It renders now under a plain heading, at its own honest
-rung — 7, standing backlog, not the borrowed rung 4 the mixed lane forced on
-it.
+rows. The coverage-gap half — tiered firms the student knows nobody at — got
+a new home that same pass: it was the only reachable version of "add
+someone at an empty firm" for an account above `SEED_NETWORK_FLOOR`, so
+deleting it with the rest of the board would have been a real regression
+wearing the costume of cleanup. It rendered for a few hours under its own
+plain heading, "Firms with no contacts yet", at its own honest rung — 7,
+standing backlog, not the borrowed rung 4 the mixed lane forced on it.
+
+THAT LANE IS ALSO GONE NOW, deleted later the same day. The founder looked
+at its actual rendered output on his own account — one card, "BlackRock,
+Tier 2 target, Nobody there yet" — and said "this look useless": a direct,
+informed reaction to the feature working as designed, not a hypothetical
+objection to the idea of it. Being the only reachable version of a real gap
+does not make a card worth showing if nobody reading it agrees. There is no
+replacement: an account past `SEED_NETWORK_FLOOR` gets no nudge for an empty
+tiered firm at all, which is an honest silence rather than a feature kept
+alive past its own evidence.
 
 Render position 6 ("Still open") lands out of rung order on purpose, same as
 before the board's removal: it sits below the empty-state headline because
@@ -592,7 +598,7 @@ copy exactly once, and this is the once.
       <div class="empty empty--quiet">
         <p class="quiet-line">{{ quiet_line }}</p>
       </div>
-    {% elif not queue_total and not coverage_gaps and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
+    {% elif not queue_total and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
       <div class="empty">
         {% if contact_count %}
           {% comment %}
@@ -625,7 +631,7 @@ copy exactly once, and this is the once.
         {% endcomment %}
         {% if not seeds %}<a class="btn" href="{% url 'crm:contact_list' %}">Go to Network</a>{% endif %}
       </div>
-    {% elif not lanes and not coverage_gaps and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
+    {% elif not lanes and not bench and not debriefs and not proposals and not app_events and not mail_facts %}
       {% comment %}
       The plan is clear but the queue is not. This is the product working, so
       it is styled as a win — and it names what's left rather than implying
@@ -791,61 +797,6 @@ copy exactly once, and this is the once.
             </article>
           {% endfor %}
         </div>
-      </section>
-    {% endif %}
-
-    {% comment %}
-    Firms with no contacts yet — tiered firms the student set a priority on
-    where they know nobody. See crm.today._coverage_cards.
-
-    Until 2026-08-31 this was half of a mixed "Your board" lane, forced up to
-    rung 4 because its OTHER half carried a confirmed dated event that could
-    be as time-critical as the plan's own critical lane. The founder judged
-    that lane not practically useful and it was removed whole. This half
-    survived under its own plain heading, at its own honest rung, because it
-    is the only reachable version of "add someone at an empty tiered firm"
-    for an account past SEED_NETWORK_FLOOR contacts — see
-    crm.today._coverage_cards's and _starter_seeds' own notes for why
-    deleting it with the rest of the board would have been a regression, not
-    cleanup. The dated half needed no such rescue: the rail's Deadlines card
-    already named the identical facts on its own.
-
-    RUNG 7, standing backlog: true today, still true tomorrow, no clock on
-    it. Capped at one card when the plan already has real work queued and
-    two when it doesn't (crm.today._cockpit_context) — a wall of thin firms
-    is the same bug as a wall of cold contacts, just arriving by a different
-    door.
-
-    Dismissal is per-firm (crm.models.PlayDismissal, keyed on a fixed
-    sentinel date — a coverage gap has no date of its own) and means "stop
-    asking about this firm". Same endpoint the retired dated cards used to
-    share; the FACT tuple it dismisses just never has a real date in it here.
-    {% endcomment %}
-    {% if coverage_gaps %}
-      <section class="lane lane-coverage" aria-labelledby="coverage-lane-h">
-        <h2 class="lane-title" id="coverage-lane-h">
-          Firms with no contacts yet
-          <span class="lane-count" aria-live="polite">{{ coverage_gaps|length }}</span>
-        </h2>
-        <ul class="play-list">
-          {% for p in coverage_gaps %}
-            <li class="play-card">
-              <div class="play-head">
-                <a class="play-firm" href="{% url 'directory:firm_detail' p.firm.slug %}">{{ p.firm.name|smart_title }}</a>
-              </div>
-              <p class="play-fact">{{ p.label }}</p>
-              <p class="play-people">{{ p.people_line }}</p>
-              <div class="play-foot">
-                <a class="btn play-cta" href="{{ p.cta_href }}">{{ p.cta_label }}</a>
-                <button type="button" class="btn play-dismiss"
-                        aria-label="Dismiss {{ p.firm.name }} {{ p.label }}"
-                        hx-post="{% url 'crm:play_dismiss' %}"
-                        hx-vals='{"firm": "{{ p.firm.id }}", "event_kind": "{{ p.event_kind }}", "date": "{{ p.dismiss_date|date:"Y-m-d" }}"}'
-                        title="Stop asking about this firm">Dismiss</button>
-              </div>
-            </li>
-          {% endfor %}
-        </ul>
       </section>
     {% endif %}
 

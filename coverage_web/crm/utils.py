@@ -218,7 +218,7 @@ FIRM_DATE_LABELS = {
 
 
 # ---------------------------------------------------------------------------
-# What "confirmed" means for a firm date. ONE definition, six call sites.
+# What "confirmed" means for a firm date. ONE definition, five call sites.
 # ---------------------------------------------------------------------------
 # `directory.views._firm_date_row` — the firm timeline, the page that shows
 # these rows with their provenance attached — has always required TWO things
@@ -228,9 +228,11 @@ FIRM_DATE_LABELS = {
 #
 # Every one of the CRM's own confirmed-date readers re-spelled that bar as
 # `confidence=1.0` alone and dropped the second half: Today's deadlines rail
-# and plays (`crm.today._next_deadlines`), the Coverage-Gaps exposure input
-# (`_coverage_cards` and `crm.views.contact_list`), the chat-prep card
-# (`_chat_prep`), and the calendar's layer 3 plus its .ics feed. The two
+# (`crm.today._next_deadlines`), the Network board's own Coverage-Gaps
+# exposure input (`crm.views.contact_list`), the chat-prep card
+# (`_chat_prep`), and the calendar's layer 3 plus its .ics feed. (Today's own
+# coverage-gap lane, `crm.today._coverage_cards`, was a sixth call site until
+# it was retired 2026-08-31.) The two
 # halves are not redundant: `confidence` says how sure we are the firm holds
 # this date, `precision` says how exactly the stored day locates it.
 # `precision="estimated"` means the date is a MONTH-level guess, which the

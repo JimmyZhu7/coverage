@@ -854,11 +854,13 @@ def tasks_csv(user) -> str:
 def play_dismissals_csv(user) -> str:
     """Every Today "play" the student has dismissed — the fact (firm, event
     kind, date) they said "not now" to, and when. See `crm.models.
-    PlayDismissal` and `crm.today._coverage_cards` (its dated sibling
-    `_plays` was retired 2026-08-31, but rows it wrote are still real
-    historical dismissals and still export): this is the anti-nag memory,
-    and a student asking for their data back gets it like everything else
-    here."""
+    PlayDismissal`: both play kinds that ever wrote here — the dated
+    `crm.today._plays`, retired 2026-08-31 with the "Your board" lane it
+    rendered in, and the coverage-gap `_coverage_cards` that outlived it
+    before being retired itself the same day — are gone now, but rows either
+    one wrote are still real historical dismissals and still export: this is
+    the anti-nag memory, and a student asking for their data back gets it
+    like everything else here."""
     rows = PlayDismissal.objects.for_user(user).select_related("firm")
     return _csv(
         PLAY_DISMISSAL_EXPORT_COLUMNS,

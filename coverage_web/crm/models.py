@@ -911,14 +911,21 @@ class ContactMerge(PrivateModel):
 
 
 class PlayDismissal(PrivateModel):
-    """One dismissed Today "play" — see `crm.today._coverage_cards`.
+    """One dismissed Today "play" — a record of "stop asking about this
+    firm", kept even though no current feature produces new rows.
 
-    Until 2026-08-31 a play could also be a dated world fact (a confirmed
-    `FirmDate`) joined to the student's own people at that firm
-    (`crm.today._plays`, retired with the "Your board" lane it rendered
-    in); rows written by that half are still valid historical dismissals,
-    just no longer producible by anything current. Every live play today is
-    a coverage gap — a tiered firm with nobody there — and dismissal is
+    Two play kinds wrote here over this table's life, and both are retired
+    now: a dated world fact (a confirmed `FirmDate`) joined to the student's
+    own people at that firm (`crm.today._plays`, retired with the "Your
+    board" lane it rendered in), and a coverage gap — a tiered firm with
+    nobody there (`crm.today._coverage_cards`, which survived the board's
+    deletion under its own heading before being retired itself, 2026-08-31,
+    once the founder saw its one-card render on his own account and judged
+    it useless). Rows written by either half are still valid historical
+    dismissals, just no longer producible by anything current: a dismissal
+    is a fact about a past decision, not tied to whether the UI that
+    produced it still exists, and it stays exportable (see
+    `accounts.services.play_dismissals_csv`) on that basis. Dismissal is
     remembered against the FACT — the tuple `(firm, event_kind, date)`, a
     fixed sentinel date for the coverage case — and never against the
     card's rendered shape or a row id. This is deliberate and load-bearing:

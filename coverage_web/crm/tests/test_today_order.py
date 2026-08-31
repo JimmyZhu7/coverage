@@ -12,7 +12,7 @@ and no render; it just quietly buries the work again. These tests fail when it
 happens.
 
 Every assertion here is about ORDER ONLY. Whether a section renders at all is
-each section's own business and is pinned by test_today.py / test_plays.py /
+each section's own business and is pinned by test_today.py /
 test_today_seeds.py; nothing here asserts a render condition, and nothing here
 should be relaxed to make a section appear or disappear.
 """
@@ -66,7 +66,6 @@ def _at(body, marker):
 
 
 # Markers: a substring unique to one section of the cockpit.
-COVERAGE = 'class="lane lane-coverage"'
 PREP = 'class="lane lane-prep"'
 DEBRIEF = 'class="lane lane-debrief"'
 PROPOSALS = 'class="lane lane-proposals"'
@@ -94,13 +93,6 @@ def loud(client):
     FirmDate.objects.create(
         firm=firm, cycle="sa2028", region="us", event_kind="app_close",
         date=today + timedelta(days=3), confidence=1.0,
-    )
-    # A second tiered firm with nobody at it, so `_coverage_cards` has a
-    # gap to card and the "Firms with no contacts yet" lane renders too.
-    UserFirm.all_objects.create(
-        user=user,
-        firm=Firm.objects.create(name="Order Empty", slug="order-empty"),
-        tier=1,
     )
 
     # A CLASS_CRITICAL action: they replied, nothing since.
@@ -151,23 +143,8 @@ def test_the_plan_leads_everything_except_a_chat_happening_today(loud):
     the one clock on this page that cannot be re-run."""
     plan = _at(loud, CRITICAL)
     assert _at(loud, PREP) < plan, "a chat today still leads; that is rung 1"
-    for later in (COVERAGE, DEBRIEF, PROPOSALS):
+    for later in (DEBRIEF, PROPOSALS):
         assert plan < _at(loud, later), f"{later} must not outrank the plan"
-
-
-def test_the_coverage_lane_sits_at_the_foot_not_rung_4(loud):
-    """Until 2026-08-31 this lane was half of "Your board", forced up to
-    rung 4 because its OTHER half carried a confirmed dated event that could
-    be as time-critical as the plan's own critical lane. The board was
-    removed (not practically useful, per the founder) and this half kept
-    its own honest rung — 7, standing backlog — instead of the borrowed
-    rung 4: it renders below the plan AND below the inbox family AND below
-    the debrief lane, not directly under the plan the way the mixed lane
-    used to."""
-    coverage = _at(loud, COVERAGE)
-    assert _at(loud, CRITICAL) < coverage
-    assert _at(loud, PROPOSALS) < coverage
-    assert _at(loud, DEBRIEF) < coverage
 
 
 def test_the_inbox_family_is_reachable_without_a_scroll(loud):

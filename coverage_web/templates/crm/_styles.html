@@ -219,77 +219,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     .seed-btn { grid-column: 1 / -1; width: 100%; min-height: 44px; }
   }
 
-  /* Firms with no contacts yet (crm/_cockpit.html, crm.today._coverage_cards):
-     a tiered firm the student knows nobody at. Its own shape, distinct from
-     both act-card and the seed lane above — not a due action with write
-     buttons behind it (there is nothing to attest to), and unlike a seed it
-     names a firm the student already prioritised rather than offering a
-     first-move suggestion, so it gets a SOLID left edge rather than the seed
-     lane's dashed one.
-
-     Until 2026-08-31 this same card anatomy also carried a confirmed dated
-     event — a countdown chip, a danger tint when that date was urgent — as
-     the other half of a mixed "Your board" lane. The board was removed
-     (not practically useful, per the founder); every card in this lane now
-     carries exactly one shape, so the countdown/urgency rules that only
-     ever served the dated half went with it. */
-  /* THE CARD IS A ROW, NOT A COLUMN — measured, 2026-08-28, demo account at
-     a 1440px viewport. The lane is full-width in `cockpit-main`, so every
-     card was a 1048 x 140px rectangle holding three SHORT single lines of
-     text. `space-between` on the head and the foot then pushed their
-     right-hand element the entire width of the card away from its own
-     sibling: 918px of nothing between "J.P. Morgan" and its "2d" chip, and
-     844px between "View contacts" and "Dismiss". Stacking the button row
-     UNDER text that occupied a fifth of the available width cost another
-     40px of height on top of that. Same on all four card states — the two
-     voids are structural to the card, not something a longer people-line
-     ever fills.
-
-     So: two columns. Everything the card SAYS runs down the left at its
-     natural width, everything the card OFFERS clusters at the right, and
-     the height is now the taller of the two rather than their sum. Nothing
-     is removed and no markup changed — `.play-foot` simply moves beside the
-     text instead of below it. Measured after: 140.4px -> 92.4px a card,
-     561px -> 370px for the founder's four-card lane, and both horizontal
-     voids gone (`flex-start` / `flex-end` in place of `space-between`).
-
-     This is `e9bd00b`'s rule on a different widget: a card's height is what
-     it holds, never a reserved gap. */
-  .lane-coverage { margin-bottom: var(--s6); }
-  .play-list { list-style: none; margin: 0; padding: 0;
-    display: flex; flex-direction: column; gap: var(--s2); }
-  .play-card { background: var(--surface); border: 1px solid var(--line);
-    border-left: 3px solid var(--accent-line);
-    border-radius: var(--r-panel); padding: var(--s3) var(--s4);
-    display: grid; align-items: center; column-gap: var(--s4);
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "head   foot"
-                         "fact   foot"
-                         "people foot"; }
-  .play-head { grid-area: head; display: flex; align-items: baseline;
-    justify-content: flex-start; gap: var(--s2); min-width: 0; }
-  .play-firm { font-weight: var(--w-med); color: var(--ink); }
-  .play-fact { grid-area: fact; margin: 2px 0 0; font-size: var(--fs-s);
-    color: var(--ink-2); min-width: 0; }
-  /* --s1 between two lines that now sit inside one tight block; --s2 was
-     spacing them as if the foot were still going to land underneath. */
-  .play-people { grid-area: people; margin: var(--s1) 0 0;
-    font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; }
-  .play-foot { grid-area: foot; display: flex; align-items: center;
-    justify-content: flex-end; gap: var(--s2); }
-  .play-cta { padding: 6px 12px; font-size: var(--fs-xs); white-space: nowrap; }
-  .play-dismiss { background: transparent; border-color: transparent;
-    color: var(--ink-3); padding: 3px 8px; font-size: var(--fs-xs); }
-  .play-dismiss:hover { background: var(--paper); border-color: var(--line); color: var(--ink-2); }
-  /* Narrow: there is no width to put a second column in, so the card goes
-     back to one and the buttons return below the text they act on. */
-  @media (max-width: 560px) {
-    .play-card { grid-template-columns: minmax(0, 1fr);
-      grid-template-areas: "head" "fact" "people" "foot"; }
-    .play-foot { flex-wrap: wrap; justify-content: flex-start;
-      margin-top: var(--s3); }
-  }
-
   /* Up next: the held-back remainder. Collapsed by default, exact count in
      the summary, complete list inside — the cap paces, it never filters. */
   .upnext { margin-bottom: var(--s6); background: var(--surface);
@@ -1158,7 +1087,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .tier-label { font-size: var(--fs-m); font-weight: var(--w-bold); color: var(--ink);
     text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--s3);
     display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
-  .tier-label .scrub-count { color: var(--ink-3); font-weight: var(--w-med); }
   .tier-empty { margin: var(--s2) 0; text-align: left; }
   /* The 92px floor was the height of a card carrying a badge row, and there
      is no badge row any more. A card's own height now depends on how much of

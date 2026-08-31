@@ -1045,6 +1045,57 @@ def test_a_past_deadline_is_not_upcoming():
     assert _cockpit_context(user)["deadlines"] == []
 
 
+def test_an_estimated_date_never_reaches_the_rail_however_confident():
+    """`_next_deadlines` spelled its bar as `confidence=1.0` alone, while
+    `directory.views._firm_date_row` — the page that renders these same rows
+    with their provenance attached — has always required BOTH halves:
+    `confidence >= 0.8 AND precision in ("day", "month", "")`.
+
+    The two halves say different things. `confidence` is how sure we are the
+    firm holds this date; `precision` is how exactly the stored day locates
+    it. `precision="estimated"` means a month-level guess, printed on the firm
+    timeline as "~ Nov 2026" — and printed by the rail as a hard "5d"
+    countdown. `import_firm_dates` reads the two from independent keys of one
+    YAML entry, so a single seed line saying `confidence: confirmed_official`
+    / `precision: estimated` produces exactly this row.
+
+    (Moved here from test_plays.py, 2026-08-31, when that module's own
+    subject — the coverage-gap lane — was retired; this pins the Deadlines
+    rail's own confidence bar, which survives the lane it was originally
+    fixtured alongside.)
+    """
+    from crm.today import _next_deadlines
+
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    today = timezone.localdate()
+    guess = FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="us", event_kind="app_close",
+        date=today + timedelta(days=5), confidence=1.0,
+    )
+    FirmDate.objects.filter(pk=guess.pk).update(precision="estimated")
+
+    assert _next_deadlines(user, today) == []
+
+
+def test_a_month_precision_date_still_reaches_the_rail():
+    """The over-reach guard. "month" is confirmed — the firm timeline calls it
+    confirmed too — and dropping it would silently delete a real date from
+    the rail to fix a different one."""
+    from crm.today import _next_deadlines
+
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
+    today = timezone.localdate()
+    real = FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="us", event_kind="insight_deadline",
+        date=today + timedelta(days=5), confidence=1.0,
+    )
+    FirmDate.objects.filter(pk=real.pk).update(precision="month")
+
+    assert len(_next_deadlines(user, today)) == 1
+
+
 def test_a_chat_today_gets_a_prep_card_with_what_you_learned_last_time(client):
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
