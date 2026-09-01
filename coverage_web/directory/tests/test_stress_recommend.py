@@ -46,8 +46,13 @@ ALL_REGIONS = ("", "us", "eu", "hk", "sg", "jp", "cn", "other", "global")
 
 
 def cand(cid, **kw):
+    # `region="other"`, not blank (2026-09-01): a stated market outside the
+    # profile's scores zero on the region axis, which is what a blank scored
+    # before `W_REGION_UNKNOWN`. The invariants here move one input at a
+    # time; the blank's own new behaviour is tested where `ALL_REGIONS` is
+    # iterated explicitly and in test_picks_personalization.py.
     base = dict(id=cid, firm_id=1, firm_name="Acme Partners", firm_slug="acme",
-                title="Summer Analyst", url=f"https://x/{cid}")
+                title="Summer Analyst", url=f"https://x/{cid}", region="other")
     base.update(kw)
     return R.Candidate(**base)
 
@@ -214,14 +219,34 @@ def test_a_stated_class_mismatch_is_never_returned_however_much_else_stacks():
 
 
 def test_the_veto_fires_only_on_STATED_words_never_on_the_intake_year():
-    """Silence never hides. A programme year that merely IMPLIES a different
-    class is inference, and inference must not exclude anything — it scores
-    zero on the class axis and the role still shows."""
+    """Silence never hides, and an ADJACENT intake year still shows.
+
+    REWRITTEN 2026-09-01. This pinned every intake from 2024 to 2030 as a
+    pick for a 2029 student, on the argument that an implied class is
+    inference and inference must not exclude. Two years off and more is
+    now excluded by `role_matches_level` inside `recommend()` — the exact
+    ladder `_class_fit` already scored (0 match, 1 near, 2+ nothing) and
+    the exact rule the advisor's snapshot and the digest already filtered
+    on, so the picks stop being the one surface that disagreed. What the
+    old test was really protecting survives in three parts: a role with
+    NO intake year shows; an adjacent year shows (labelled); and a posting
+    whose own STATED words name the student's class shows however far off
+    its intake year reads, because stated words outrank the inference."""
     p = profile(class_year=2029, tracks=("ib",), firm_tiers={1: 1})
-    for cohort in ("2024", "2025", "2026", "2027", "2028", "2029", "2030"):
-        c = cand(1, cohort=cohort, bucket="internship", region="us",
-                 title="Investment Banking Summer Analyst", firm_tracks=("ib",))
-        assert [r.candidate.id for r in R.recommend(p, [c], today=TODAY)] == [1], cohort
+
+    def picked(**kw):
+        c = cand(1, bucket="internship", region="us", firm_tracks=("ib",),
+                 title="Investment Banking Summer Analyst", **kw)
+        return [r.candidate.id for r in R.recommend(p, [c], today=TODAY)] == [1]
+
+    assert picked(cohort="")                       # silence never hides
+    for cohort in ("2027", "2028", "2029"):        # implied 2028/2029/2030
+        assert picked(cohort=cohort), cohort       # exact or one off: shows
+    for cohort in ("2024", "2025", "2026", "2030"):
+        assert not picked(cohort=cohort), cohort   # two or more off: out
+        # ...unless the posting states the student's class in so many words.
+        assert picked(cohort=cohort, class_year="2029"), cohort
+        assert picked(cohort=cohort, grad_years=("2028", "2029")), cohort
 
 
 def test_stated_class_mismatch_agrees_with_the_class_axis_sign():

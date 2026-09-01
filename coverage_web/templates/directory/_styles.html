@@ -1137,6 +1137,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      the urgency colour and only wears the rule. */
   .rr-due-n.is-reported { text-decoration: underline dotted currentColor;
     text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  /* The same provenance, in a word, under the figure -- Picked column only
+     (see _rolecard.html). Its own line inside the 44px due column, in the
+     faint ink and the smallest size the token scale has, wearing the
+     dotted rule the figure above it wears so the two read as one claim. No
+     mono: eight monospaced characters do not fit 44px, and this is a word,
+     not a figure to align. */
+  .rr-due-prov { display: block; font-family: inherit; font-size: 10px;
+    font-weight: var(--w-reg); letter-spacing: 0; line-height: 1.3;
+    color: var(--ink-3); text-align: right;
+    text-decoration: underline dotted currentColor;
+    text-underline-offset: 2px; text-decoration-thickness: 1px; cursor: help; }
 
   .rr-main { min-width: 0; }
   .rr-title { margin: 0; font-size: var(--fs-s); line-height: 1.35;
@@ -1302,6 +1313,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      column of rows reads as content rather than as a wall of buttons. */
   .rr-line { display: flex; align-items: center; gap: var(--s2);
     margin-top: 2px; min-width: 0; }
+  /* The pick's own "why" -- Picked column only, one line, the meta's size
+     and colour so it reads as part of the row's small print and not as a
+     second title. THE ONE OTHER TRUNCATION POINT besides `.rr-loc`, and a
+     different kind: `.rr-loc` cuts one part of a wrapping line, this cuts a
+     whole line that never wraps, at the row's edge, with the full sentences
+     in its `title`. It does not wrap because its parts are reasons, not
+     facts -- a reader who wants the third one hovers; a reader who wants
+     the visa answer must never have to. */
+  .rr-why { margin-top: 2px; font-size: var(--fs-xs); color: var(--ink-3);
+    line-height: 1.4; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; min-width: 0; }
 
   /* Controls, not chips: --r-ctl is what this product's own token comment
      reserves for a thing you press ("status chips keep the pill; controls

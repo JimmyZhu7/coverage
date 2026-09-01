@@ -633,12 +633,26 @@ def test_the_feed_row_has_exactly_one_truncation_point():
     # Exactly one rule in the row's meta line may truncate, and it is the
     # location. Asserted by counting, so adding a second one anywhere in the
     # block fails here rather than shipping four ellipses again.
+    #
+    # REWRITTEN 2026-09-01 to admit ONE more, by name: `.rr-why`, the
+    # Picked column's per-card "why" line. It is not a part of the meta
+    # line — it is a whole line of its own beneath it, `white-space:
+    # nowrap`, cut once at the row's edge with the full sentences in its
+    # `title` — so it cannot produce the four-ellipsis scramble this test
+    # exists to prevent: a single nowrap line has exactly one place to
+    # cut. The meta line's own contract (one part, the location) is
+    # unchanged and still pinned below.
     truncators = sorted(
         sel for sel, body in _rules(css)
         if sel.startswith(".rr-") and "text-overflow" in body)
-    assert truncators == [".rr-loc"], (
-        f"the meta line must have exactly one truncation point and it must "
-        f"be the location; found {truncators}")
+    assert truncators == [".rr-loc", ".rr-why"], (
+        f"the meta line must have exactly one truncation point (the "
+        f"location) and the row exactly one more (the whole why line); "
+        f"found {truncators}")
+    why = _rule(css, ".rr-why")
+    assert "white-space: nowrap" in why, (
+        ".rr-why is a whole line, not a part of one: it truncates as a "
+        "single line or not at all")
 
     loc = _rule(css, ".rr-loc")
     assert "max-width" in loc, (

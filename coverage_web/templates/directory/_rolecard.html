@@ -62,7 +62,19 @@ only reintroduce the clipping bug this file's history is full of.
       the rendered pixels changes.
       {% endcomment %}
       <span class="rr-due-n meta-{{ r.level }}{% if r.reported %} is-reported{% endif %}"
-            {% if r.reported %}title="{{ r.reported.why }}"{% endif %}><span aria-hidden="true">{{ r.countdown_short|default:r.countdown }}</span><span class="vh">{{ r.countdown }}</span>{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
+            {% if r.reported %}title="{{ r.reported.why }}"{% endif %}><span aria-hidden="true">{{ r.countdown_short|default:r.countdown }}</span><span class="vh">{{ r.countdown }}</span>{% if r.reported and not r.show_firm %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
+      {% comment %}
+      IN WORDS ON THE PICKED COLUMN. The dotted underline above carries the
+      provenance of a prose-read date to a pointer that hovers; the Picked
+      column is where a student reads a countdown and acts on it without
+      hovering anything, because the product has just said "this one". So
+      there, and only there, the word is printed under the figure: same
+      dotted rule, the same `title`, and it REPLACES the `.vh` copy rather
+      than joining it, so a screen reader hears "reported" once. Firm
+      columns keep the hidden copy: printing it on 790 rows would make the
+      one column that needs it indistinguishable from the ones that don't.
+      {% endcomment %}
+      {% if r.reported and r.show_firm %}<span class="rr-due-prov" title="{{ r.reported.why }}">{{ r.reported.label }}</span>{% endif %}
     {% elif r.rolling_stated %}
       <span class="rr-due-n rr-due-rolling" title="{{ r.rolling_why }}"><span class="rolling-dot"></span></span>
     {% else %}
@@ -176,5 +188,23 @@ only reintroduce the clipping bug this file's history is full of.
         {% endif %}
       </div>
     </div>
+    {% comment %}
+    WHY THIS ONE, on the Picked column only (`pick_why` is set on the copies
+    that column makes, never on the firm columns' rows). ONE quiet line, in
+    the meta line's own size and colour, ellipsised at the row's edge with
+    every full sentence in the `title` — the same one-line-not-pills call
+    the column header makes for the shared reasons (_results.html), and for
+    the same reason: a pile of chips wrapped and staggered the column.
+
+    The header prints what every pick shares; this prints what is left for
+    this pick — the firm's tier, the track the title states, the intake
+    year. It is the scorer's own chip texts joined the way `Recommendation.
+    why` joins them, so a caveat chip ("2027 intake, a year early for you")
+    reads as the caveat it is, here and in the digest email that prints the
+    same string. Until 2026-09-01 the header was the only place any reason
+    rendered, and on the founder's own rail it was empty: six picks, no
+    reason common to all six, six cards with no justification at all.
+    {% endcomment %}
+    {% if r.pick_why %}<div class="rr-why" title="{{ r.pick_why_title }}">{{ r.pick_why }}</div>{% endif %}
   </div>
 </div>
