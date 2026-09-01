@@ -2100,14 +2100,29 @@ def _eligibility(o, profile):
                 "why": (f"The posting states it is for the Class of "
                         f"{stated_year}, not your {cy}.")}
     grad = ((o.raw or {}).get("facts") or {}).get("grad")
-    if cy and grad and grad.get("years"):
-        years = [int(y) for y in grad["years"]]
-        if min(years) <= cy <= max(years):
+    years = [int(y) for y in (grad or {}).get("years") or () if str(y).isdigit()]
+    if cy and years:
+        lo, hi = min(years), max(years)
+        # An open-ended window -- "graduating in 2028 or later", "December
+        # 2028 onwards", "graduation no earlier than June 2026" -- names a
+        # floor and no ceiling. The extractor (facts.extract_grad_years)
+        # marks it `open_high` and enumerates the years up to its own
+        # horizon; the FLAG is what says "and everyone after", so the
+        # ceiling is lifted to wherever this student is rather than trusted
+        # as the posting's. Before the flag existed the same sentence was
+        # stored as the closed window [2028, 2028] and blocked every later
+        # class: 34 open campus rows told a 2029 student a role that includes
+        # them was not for them. A row written before the flag carries none
+        # and still reads closed, exactly as it did.
+        if grad.get("open_high"):
+            hi = max(hi, cy)
+        if lo <= cy <= hi:
             return {"kind": "year_ok", "blocking": False,
                     "label": f"Your year ({cy})",
                     "why": grad.get("phrase", "")}
+        label = grad.get("value") or (str(lo) if lo == hi else f"{lo}–{hi}")
         return {"kind": "year_out", "blocking": True,
-                "label": f"For {grad['value']} grads",
+                "label": f"For {label} grads",
                 "why": grad.get("phrase", "")}
     # The convention-derived year, and only ever as a POSITIVE, non-blocking
     # signal. A summer 2027 internship conventionally hires the 2028 class,

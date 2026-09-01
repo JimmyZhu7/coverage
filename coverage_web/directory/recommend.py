@@ -626,14 +626,31 @@ def _stated_grad_window(profile: Profile, c: Candidate) -> tuple[int, int] | Non
     Factored out of `_class_fit` so `stated_class_mismatch` below cannot drift
     from the scoring that produced it — the two ARE the same question, and two
     features reading the same fact and disagreeing about it is precisely what
-    the `grad_years` field was added to stop."""
+    the `grad_years` field was added to stop.
+
+    An OPEN-ended window — "graduating in 2028 or later", "December 2028
+    onwards" — names a floor and no ceiling. It arrives here as its years
+    enumerated up to the extractor's own horizon (`directory.facts.
+    GRAD_YEAR_MAX`), because `Candidate` carries the years alone and not the
+    `open_high` flag the extractor stores beside them. A window that reaches
+    that horizon is the posting saying "and everyone after": the ceiling is
+    the product's, not the firm's, so `hi` is lifted to wherever this student
+    is rather than trusted. Before the extractor knew an open bound existed,
+    the same sentence was stored as [2028, 2028] and this function vetoed a
+    2029 student on a sentence that includes them."""
     if not profile.class_year:
         return None
     stated = _int_or_none(c.class_year)
     if stated is not None:
         return (stated, stated)
     ys = sorted(int(y) for y in c.grad_years if str(y).isdigit())
-    return (ys[0], ys[-1]) if ys else None
+    if not ys:
+        return None
+    from directory.facts import GRAD_YEAR_MAX  # the extractor's own ceiling
+    lo, hi = ys[0], ys[-1]
+    if hi >= GRAD_YEAR_MAX:
+        hi = max(hi, profile.class_year)
+    return (lo, hi)
 
 
 def stated_class_mismatch(profile: Profile, c: Candidate) -> bool:

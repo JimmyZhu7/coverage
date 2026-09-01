@@ -291,37 +291,127 @@ _GRAD = re.compile(
     # dead-ended one character in. Confirmed live on SIG id=9171, whose
     # extractor read the programme's OWN start year (2026) off this sentence
     # as if it were the applicant's stated graduation year.
-    r"(?:graduat\w*\b(?![\s:;,\-–—]*(?:\w+\s+){0,2}(?:programme|program|scheme)\b)"
+    #
+    # The second alternative is the body's own "Class of 2028". The TITLE's
+    # "Class of" is `classify.extract_class_year`'s job and lands in
+    # `Opportunity.class_year`; this is the same statement made in prose,
+    # which that extractor never sees. Measured live: 32 open campus rows say
+    # "Class of 20XX" in the body and 17 of them carried neither a title year
+    # nor a grad fact -- Oliver Wyman's "Eligibility : Class of 2028 grads
+    # only", SIG's "Class of 2027 or 2028 :", Apollo's "Pursuing a BA or BS
+    # (Class of 2028)" -- so the verdict and the scorer were blind to a
+    # sentence that says exactly who the role is for. The lookbehinds refuse
+    # a programme noun directly before "Class": Houlihan Lokey writes "The
+    # position is for a Summer Analyst Class of 2027 (i.e. Graduate Class of
+    # 2028 Financial Analyst)", where the first "Class of" names the INTAKE
+    # cohort and only the second names the graduating class.
+    r"(?:(?:graduat\w*\b(?![\s:;,\-–—]*(?:\w+\s+){0,2}(?:programme|program|scheme)\b)"
     r"|degree completion)[^.\n]{0,%d}?((?:19|20)\d{2})"
-    r"(?:\s*(?:-|–|—|to|and|through|or)\s*"
-    r"(?:[\w']+\s+){0,3}?((?:19|20)\d{2}))?" % _NEAR, re.IGNORECASE)
+    r"|(?<![\w-])(?<!analyst\s)(?<!associate\s)(?<!intern\s)(?<!interns\s)"
+    r"class\s+of\s+((?:19|20)\d{2}))" % _NEAR, re.IGNORECASE)
+
+# Every further year the same statement names, read from the end of the
+# previous one: "between December 2027 and June 2028" is one connector and
+# one more year; Jefferies' "Expected graduation between December 2027 – June
+# 2028 and December 2028 – June 2029" is three. Anchored with `.match` at the
+# exact end of the last year so it can only ever continue the statement it
+# is already inside, never wander into the next sentence.
+_GRAD_MORE = re.compile(
+    r"\s*(?:-|–|—|to|and|through|or|,|/)\s*"
+    r"(?:[\w'/]+\s+){0,3}?((?:19|20)\d{2})", re.IGNORECASE)
+
+# An OPEN upper bound. A firm that writes "graduating in 2028 or later" has
+# named a floor and no ceiling, and storing that as the closed window [2028,
+# 2028] told every later class the role was not for them -- measured live,
+# 34 open campus rows (Optiver, Baird, Bank of America, Wells Fargo, PJT,
+# Deutsche Bank, Société Générale, Morgan Stanley) blocked a 2029 student
+# on a sentence that includes them. The cue sits in one of two
+# places: AFTER the last year ("2028 or later", "December 2028 onwards",
+# "2028 and beyond", "2028 or subsequent years") or BEFORE a year, as the
+# gap that leads into it ("graduating in 2028 or AFTER 2027 September" --
+# Optiver's OR-list, where "after 2027 September" is the open half;
+# PJT's "graduation NO EARLIER THAN June 2026"). "later"/"after" need their
+# conjunction so that "graduate in 2027 after completing a four-year degree"
+# is not read as a window; "no later than" is a ceiling, not a floor, and
+# neither pattern matches it.
+_OPEN_HIGH_AFTER = re.compile(
+    r"\s*(?:(?:or|and)\s+(?:later|after|beyond|subsequent|thereafter)"
+    r"|(?:(?:or|and)\s+)?onwards?)\b", re.IGNORECASE)
+_OPEN_HIGH_BEFORE = re.compile(
+    r"\b(?:after|(?:no|not)\s+earlier\s+than|no\s+sooner\s+than)\s+"
+    r"(?:[\w'/]+\s+){0,2}$", re.IGNORECASE)
+
+# The plausible graduation-year window. A posting talking about graduation
+# in 2019 is describing its own history, and a year past the ceiling is a
+# requisition number, not a class. Same window `classify._YEAR` draws for
+# titles. GRAD_YEAR_MAX is also the horizon an OPEN window is enumerated up
+# to -- see `extract_grad_years`.
+GRAD_YEAR_MIN, GRAD_YEAR_MAX = 2024, 2035
 
 
 def extract_grad_years(text: str) -> dict | None:
+    """The graduation window a description states, or None.
+
+    {"value": "2027–2028", "years": ["2027", "2028"], "phrase": ...}
+
+    `years` is every year the statement names, sorted and de-duplicated, so
+    `min`/`max` are the window's bounds and two windows in one sentence
+    (Jefferies' "December 2027 – June 2028 and December 2028 – June 2029")
+    come back as their union. An open-ended statement ("2028 or later")
+    additionally carries `open_high: True`, its `value` reads "2028+", and
+    `years` runs from the floor to GRAD_YEAR_MAX: the horizon is the
+    product's, not the posting's, and the flag is what says so. It is
+    enumerated rather than left at the floor alone because the ranking
+    module reads the years and nothing else (`recommend.Candidate.
+    grad_years`), and a window that stops at its floor reads there as a
+    single year -- which is precisely the closed-window reading this flag
+    exists to retract.
+    """
     # Every match, not just the first: when a description mentions a year
     # outside the plausible window early ("our graduate scheme, running since
     # 2019...") the REAL statement is usually still ahead, and returning None
     # on the first miss threw it away.
     for m in _GRAD.finditer(text):
-        years = [y for y in (m.group(1), m.group(2)) if y]
-        # A posting talking about graduation in 2019 is describing its own
-        # history.
-        years = [y for y in years if 2024 <= int(y) <= 2035]
+        year_group = 1 if m.group(1) else 2
+        # (year, start-of-gap-before-it, end) for each year the statement
+        # names. The gap is what an open-bound cue sits in when it leads into
+        # a year rather than trailing the last one.
+        captured = [(m.group(year_group), m.start(), m.end(year_group))]
+        end = m.end(year_group)
+        while True:
+            more = _GRAD_MORE.match(text, end)
+            if not more:
+                break
+            captured.append((more.group(1), end, more.end(1)))
+            end = more.end(1)
+        # `$` in the BEFORE pattern binds to `endpos`, the year's own start,
+        # so the cue has to lead straight into the year it opens.
+        open_high = any(_OPEN_HIGH_BEFORE.search(text, gap_start, y_end - len(y))
+                        for y, gap_start, y_end in captured)
+        trailing = _OPEN_HIGH_AFTER.match(text, end)
+        if trailing:
+            open_high, end = True, trailing.end()
+        years = sorted({y for y, _, _ in captured
+                        if GRAD_YEAR_MIN <= int(y) <= GRAD_YEAR_MAX}, key=int)
         if not years:
             continue
         # Sorted before the label is built, not just taken in the order the
         # regex captured them: "or" joins an OR-list as often as it joins a
-        # range ("graduating in 2028 or after 2027 September"; RBC's
-        # "graduating in Spring 2028 or December 2027"), and the connector
-        # regex above matches "or" identically to "-"/"to"/"and", so a
-        # later-year-first OR-list produced years=['2028','2027'] and a
+        # range (RBC's "graduating in Spring 2028 or December 2027"), and the
+        # connector regex above matches "or" identically to "-"/"to"/"and",
+        # so a later-year-first OR-list produced years=['2028','2027'] and a
         # rendered chip reading "Grad 2028–2027" -- a backwards range for
         # what is actually "2028, or already graduated by Dec 2027".
         # Confirmed live on 6 rows across Optiver and RBC Capital Markets.
-        ordered = sorted(years, key=int)
-        label = ordered[0] if len(ordered) == 1 else f"{ordered[0]}–{ordered[-1]}"
-        return {"value": label, "years": years,
-                "phrase": _sentence(text, m.start(), m.end())}
+        fact = {"phrase": _sentence(text, m.start(), end)}
+        if open_high:
+            lo = int(years[0])
+            fact.update(value=f"{lo}+", open_high=True,
+                        years=[str(y) for y in range(lo, GRAD_YEAR_MAX + 1)])
+        else:
+            fact.update(value=years[0] if len(years) == 1 else f"{years[0]}–{years[-1]}",
+                        years=years)
+        return fact
     return None
 
 
