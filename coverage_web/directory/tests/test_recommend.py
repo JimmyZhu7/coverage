@@ -47,9 +47,16 @@ JIMMY = Profile(
 
 
 def _cand(cid, **kw):
+    # `region="other"` and not the blank it used to be (2026-09-01). A STATED
+    # market outside the profile's scores exactly zero on the region axis,
+    # which is what a blank scored before `W_REGION_UNKNOWN` existed; a blank
+    # now costs a profiled student 8 points, and every test here that moves
+    # ONE axis and watches the ranking must not have a second axis moving
+    # underneath it. The tests about the blank itself set it explicitly.
     base = dict(
         id=cid, firm_id=99, firm_name=f"Firm {cid}", firm_slug=f"firm{cid}",
         title="Summer Analyst", url=f"https://x/{cid}", bucket="internship",
+        region="other",
     )
     base.update(kw)
     return Candidate(**base)
@@ -173,10 +180,24 @@ def test_the_grad_window_differs_by_bucket():
 
 
 def test_an_adjacent_year_scores_but_only_just():
-    exact = _score(JIMMY, cohort="2028")
-    near = _score(JIMMY, cohort="2027")
-    far = _score(JIMMY, cohort="2024")
+    """REWRITTEN 2026-09-01. It pinned `exact > near > far == 0` for JIMMY,
+    whose profile names "SA 2028" — and for a student who has named the
+    2028 intake, a 2027 intake of the same programme is the one he told us
+    he is NOT in, so it no longer earns `W_CLASS_DERIVED_NEAR` (the four
+    year-off Hong Kong internships on the founder's live rail were each
+    collecting those 6 points). The ladder the old test described survives
+    for a student who named no cycle, where "adjacent" is genuinely the
+    closest thing known; for JIMMY the near miss now scores as the far
+    miss does, and says so in its chip."""
+    unnamed = replace(JIMMY, target_cycles=())
+    exact = _score(unnamed, cohort="2028")
+    near = _score(unnamed, cohort="2027")
+    far = _score(unnamed, cohort="2024")
     assert exact > near > far == 0
+
+    # Named cycle: the adjacent intake is not a reason for this student.
+    assert _score(JIMMY, cohort="2027") == _score(JIMMY, cohort="2024") == 0
+    assert _score(JIMMY, cohort="2028") > 0
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -316,9 +337,16 @@ def test_region_tooltips_read_as_english():
 
 
 def test_class_fit_moves_the_ranking():
+    """REWRITTEN 2026-09-01. A 2024 intake implies 2025 graduates, four
+    years off a 2029 student: it used to rank LAST, and now it is not
+    ranked at all — `recommend()` applies `role_matches_level`, the same
+    "two or more years off is out" rule the advisor's snapshot and the
+    digest already apply. The axis still moves the ranking among the roles
+    that survive it: the exact intake above the adjacent one."""
     fits = _cand(1, cohort="2028")
-    doesnt = _cand(2, cohort="2024")
-    assert _order(JIMMY, [doesnt, fits]) == [1, 2]
+    near = _cand(2, cohort="2027")
+    doesnt = _cand(3, cohort="2024")
+    assert _order(JIMMY, [doesnt, near, fits]) == [1, 2]
 
 
 def test_every_axis_is_independent():
@@ -1162,11 +1190,16 @@ def test_the_derived_chip_quotes_classifys_own_sentence():
 
 def test_an_adjacent_derived_year_still_says_it_is_not_a_fit():
     """The near-miss chip is a reason to look, explicitly not a reason to
-    apply, and it still has to admit the year was inferred."""
+    apply, and it still has to admit the year was inferred.
+
+    REWRITTEN 2026-09-01: the chip TEXT carries the caveat now, not only
+    the tooltip. It read "2027 intake", which `Recommendation.why` joins
+    into a string the digest email prints with no tooltip to hover, so a
+    reason AGAINST the role was typeset as a reason for it."""
     _, reasons = score_candidate(
         replace(JIMMY, target_cycles=()), _cand(1, cohort="2027"))
     r = next(r for r in reasons if r.kind == "class")
-    assert r.text == "2027 intake"
+    assert r.text == "2027 intake, a year early for you"
     assert "inferred" in r.detail
     assert "not a fit" in r.detail
 

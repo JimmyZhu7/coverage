@@ -99,6 +99,14 @@ exactly the moment it had something to say.
             card in this column 30px below the row it is trying to join. One
             line, ellipsised past the edge, with every full sentence in the
             tooltip — nothing lost, nothing staggered.
+
+            ONLY what every pick shares. It is routinely empty — six picks
+            from three firms share no reason, because "Tier 1" carries a
+            different sentence per firm — and until 2026-09-01 an empty line
+            here meant NO reason rendered anywhere on the column. The rest
+            now prints per card, as each row's own `.rr-why` line (see
+            _rolecard.html); this line and those lines partition the
+            scorer's reasons between them, nothing printed twice.
             {% endcomment %}
             <div class="firmcol-stats">
               {% if pick_cluster.reasons %}<span class="firmcol-why" title="{% for r in pick_cluster.reasons %}{{ r.detail }}{% if not forloop.last %} {% endif %}{% endfor %}">{% for r in pick_cluster.reasons %}{% if forloop.first %}<strong>{{ r.text }}</strong>{% else %}<span class="fc-stat">{{ r.text }}</span>{% endif %}{% endfor %}</span>{% endif %}

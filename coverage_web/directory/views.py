@@ -670,7 +670,24 @@ def _cycle_not_open_note(profile, open_qs) -> str:
 
     A student can name more than one cycle now (see `Profile.target_cycles`),
     so this only fires when EVERY parseable one is closed — the moment any
-    one of them has live postings, there's nothing to warn about."""
+    one of them has live postings, there's nothing to warn about.
+
+    "LIVE POSTINGS" MEANS POSTINGS THIS STUDENT COULD BE LOOKING FOR. The
+    first cut asked the board `bucket=internship, cohort=2028` and took any
+    row as proof the cycle was open. Measured 2026-09-01 on the founder's
+    board (HK/US, IB/S&T, target "2028 Summer Internship"): exactly four
+    rows answered — two Evercore "Intro to Evercore" campus info sessions
+    with no region at all, and two PwC Canadian CPA co-ops in Québec and
+    Edmonton — and those four silenced the note, so he saw four Hong Kong
+    2027 internships with nothing in the header saying his own cycle had
+    not opened. So the check is scoped two ways: to the regions the
+    student named (a blank region is not "in your regions", the same rule
+    `role_matches_regions` argues out), and to titles that do not name a
+    function outside the track vocabulary (`role_function(title) !=
+    "none"` — a CPA co-op is not the summer-internship cycle a finance
+    student named). A silent title still counts, on purpose: "2028 Summer
+    Analyst" states no track and IS the cycle. A student who named no
+    regions gets the board-wide check, as before."""
     parsed = [
         (raw.strip(), parse_target_cycle(raw))
         for raw in getattr(profile, "target_cycles", None) or []
@@ -678,9 +695,22 @@ def _cycle_not_open_note(profile, open_qs) -> str:
     parsed = [(label, cycle) for label, cycle in parsed if cycle is not None]
     if not parsed:
         return ""
+    regions = [r.lower() for r in (getattr(profile, "regions", None) or ())]
+
+    def _open(bucket, year) -> bool:
+        qs = open_qs.filter(bucket=bucket, cohort=str(year))
+        if regions:
+            qs = qs.filter(region__in=regions)
+        # Python, not SQL, and only over the handful of rows a cohort
+        # match returns: `role_function` is a regex classifier (see
+        # `_role_function` below for the cache and the cost argument).
+        return any(
+            _role_function(title or "") != "none"
+            for title in qs.values_list("title", flat=True)
+        )
+
     closed_labels = [
-        label for label, (bucket, year) in parsed
-        if not open_qs.filter(bucket=bucket, cohort=str(year)).exists()
+        label for label, (bucket, year) in parsed if not _open(bucket, year)
     ]
     if len(closed_labels) < len(parsed):
         return ""
@@ -691,8 +721,11 @@ def _cycle_not_open_note(profile, open_qs) -> str:
     else:
         names = ", ".join(closed_labels[:-1]) + f", and {closed_labels[-1]}"
     # No em dash: house copy style. Two short sentences read cleaner here
-    # anyway.
-    return (f"{names} postings haven't opened yet. "
+    # anyway. "In your regions" only when the check was scoped to them —
+    # the board may hold the cycle somewhere the student is not looking,
+    # and the sentence must not claim more than the query asked.
+    where = " in your regions" if regions else ""
+    return (f"{names} postings haven't opened{where} yet. "
             f"These are today's closest fits.")
 
 
@@ -716,15 +749,19 @@ def _group_picks(cards):
       * firm level — identical on every role at that one firm
       * role level — whatever is left, i.e. the genuinely distinguishing bits
 
-    WHAT THE PAGE CURRENTLY USES. Only `shared` is rendered — as the chips in
-    the pinned Picked column's header. The firm- and role-level tiers are
-    still computed and still correct, but nothing displays them since the
-    long-form disclosure was removed; `blocks` survives as the recommend
-    bar's "are there picks?" guard. This docstring used to promise that every
-    reason the scorer produced is printed exactly once somewhere, which is no
-    longer true, and saying so here is cheaper than letting the next reader
-    trust it. The tiering is kept rather than deleted because it is the thing
-    a per-card "why" would be rebuilt from.
+    WHAT THE PAGE USES. `shared` renders as the one line in the pinned Picked
+    column's header. Everything below it — the firm-level reasons of a block
+    PLUS the role-level reasons of each row — renders as that row's own
+    quiet "why" line on its card (`pick_why`, built where the column is
+    assembled in `opportunities`). So every reason the scorer produced
+    prints exactly once on the page again: once in the header if every pick
+    carries it, otherwise once on the card it belongs to. This docstring
+    spent a year admitting the opposite: the tiers were computed and
+    nothing rendered them, and measured 2026-09-01 the founder's six picks
+    shared NO reason at all (three firms, three different tier sentences),
+    so the header was empty and six cards stood with zero visible
+    justification — including four whose only class chip said, in a
+    tooltip nobody hovers, "a year off ... not a fit".
 
     Returns `(shared, blocks)`.
     """
@@ -2892,12 +2929,30 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
                 # it. Each role card carries its own answer via `_fact_chips`.
                 "is_mine": o.firm_id in tier_by_firm,
                 "tier": tier_by_firm.get(o.firm_id),
-                "match": bool(user_regions & {r.lower() for r in (o.firm.regions or [])})
-                or bool(user_tracks & set(o.firm.tracks or [])),
+                # OR-ed in per ROW below, never read off the firm. It was
+                # `Firm.regions` overlapping the student's OR `Firm.tracks`
+                # overlapping theirs, which is a claim about the employer:
+                # measured 2026-09-01 on the founder's board (HK/US, IB/S&T),
+                # 68 of 82 clusters matched and 24 of those had no row in his
+                # regions naming one of his tracks at row level — the firm
+                # record said "hk" or "ib" somewhere, and the column sorted
+                # level with firms whose rows actually were what he asked
+                # for. Row level is `_row_tracks` (a silent title still
+                # inherits the firm's coverage, so this cannot delete the
+                # 49% of rows that state no function) AND the row's own
+                # region, both against what the student stated — and a
+                # student who stated neither matches everything, which
+                # sorts the same as matching nothing.
+                "match": False,
                 "closing_count": 0,
                 "next_days": None,
                 "roles": [],
             }
+        cl["match"] = cl["match"] or (
+            (not user_regions or (o.region or "").lower() in user_regions)
+            and (not user_tracks
+                 or bool(user_tracks & set(_row_tracks(o.firm.tracks, o.title))))
+        )
         item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
                              profile=elig_profile, cutoffs=cutoffs)
         cl.setdefault("_opps", []).append(o)
@@ -3037,8 +3092,25 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # firm on every card (its cards come from several firms), and setting
         # that flag on the shared item would print the firm name on the firm's
         # own column too.
+        # Each card's OWN reasons — everything `_group_picks` did not lift
+        # into the header: the block's firm-level reasons (the "Tier 1"
+        # that differs in sentence per firm) plus the role's own. Read off
+        # `pick_blocks` rather than the pick dicts, because `_group_picks`
+        # strips the pick dicts down to role level in place. Printed as ONE
+        # quiet line per card, chip texts joined the way `Recommendation.
+        # why` joins them, with every full sentence in the title.
+        why_by_id = {
+            role["id"]: [*b["reasons"], *role["reasons"]]
+            for b in pick_blocks for role in b["roles"]
+        }
         visible = [
-            {**pick_items[p["id"]], "show_firm": True}
+            {
+                **pick_items[p["id"]],
+                "show_firm": True,
+                "pick_reasons": why_by_id.get(p["id"], []),
+                "pick_why": " · ".join(r.text for r in why_by_id.get(p["id"], [])),
+                "pick_why_title": " ".join(r.detail for r in why_by_id.get(p["id"], [])),
+            }
             for p in picks if p["id"] in pick_items
         ]
         # Built even when the filter hid EVERY pick. A column that silently

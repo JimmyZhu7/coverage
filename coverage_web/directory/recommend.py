@@ -23,9 +23,11 @@ the app refuses them:
   PROGRAMME/intake year, which is a much weaker signal about who is eligible.
   Both feed the score, at very different weights, and a match derived from a
   programme year is labelled "likely" in the UI. See `_class_fit`.
-- It never guesses a region it cannot justify. An unknown school or an
-  unlocated role scores zero on that axis rather than being penalised or
-  optimistically matched.
+- It never guesses a region it cannot justify. An unknown school scores zero
+  on that axis rather than being optimistically matched; an unlocated role
+  scores zero for a student who named no regions and a small, labelled
+  penalty for one who did — a charge against the product's own ignorance,
+  never a claim that the role is in the wrong place (see `W_REGION_UNKNOWN`).
 
 Entry points: `Profile`, `Candidate`, `score_candidate`, `recommend`. None of
 them touch a request, a session, or the ORM, so the whole ranking is testable
@@ -63,6 +65,21 @@ W_CLASS_STATED_MISMATCH = -25
 W_CLASS_DERIVED = 18
 #: The implied year is adjacent to the student's (one year early or late).
 #: Worth something — students do apply a year out — but only just.
+#:
+#: ZERO, NOT 6, WHEN THE STUDENT HAS NAMED THE SAME PROGRAMME IN A DIFFERENT
+#: YEAR. Measured 2026-09-01 on the founder's live rail (class 2029, target
+#: "2028 Summer Internship"): four of his six picks were 2027 summer
+#: internships, each collecting these 6 points and a chip reading "2027
+#: intake" as if it were a reason FOR the role. A student who has typed "2028
+#: Summer Internship" into Settings has said which intake he is recruiting
+#: for, and a 2027 intake of the same programme is by his own words the one
+#: he is NOT recruiting for — it is a year early, and he cannot hold a 2027
+#: summer seat while graduating in 2029. The chip still prints (as a caveat,
+#: see `_class_fit`), because "a year off" is worth knowing; it just no longer
+#: scores. The 6 points survive only for a student who named NO cycle for
+#: this bucket, where "adjacent" is genuinely the closest thing we know.
+#: What would restore the points: evidence that students who named a cycle
+#: apply to the prior year's intake of it at any real rate.
 W_CLASS_DERIVED_NEAR = 6
 #: The role is the exact programme the student named as their target cycle.
 W_CYCLE = 15
@@ -73,6 +90,28 @@ W_CYCLE = 15
 W_REGION_SCHOOL = 20
 #: The role sits in a market the student explicitly named in their profile.
 W_REGION_TARGET = 16
+#: THE ROW'S REGION IS BLANK and the student HAS named regions. A penalty for
+#: the product's own ignorance, not for the role: the location string did not
+#: parse (126 of 2,723 open campus rows, 4.6%, on 2026-09-01), so the product
+#: cannot say whether this role is in one of the student's markets or in
+#: none of them. Until this weight existed an unlocated row scored ZERO on
+#: this axis while its located neighbours scored 16-20, which sounds like a
+#: penalty already and is not: the founder's #1 pick was Nomura's "2027
+#: Discover Nomura Programme" with `region=""` and the words "Location:
+#: London" sitting in its own detail text, ranked above every Hong Kong and
+#: US role on his board because tier, track and a stated class year made
+#: up the 16 it never had to earn. Half of `W_REGION_TARGET` on purpose:
+#: enough that an unlocated row can never tie an otherwise-identical row
+#: the student's own regions vouch for, small enough that a role with two
+#: statements behind it (tier 1 + a stated track = 52) still clears
+#: `MIN_SCORE` by a wide margin — "we could not place it" must not hide it,
+#: only stop it winning. Applied ONLY when `profile.regions` is non-empty: a
+#: student who named no regions has no market for the blank to be wrong
+#: about. What would change it: parsing locations out of `detail_text` at
+#: ingest (deliberately out of scope here) driving the blank rate under ~1%,
+#: at which point this should go back to 0; or blank rows still reaching #1
+#: at -8, at which point it should grow.
+W_REGION_UNKNOWN = -8
 
 # 3. Industry preference.
 #: First overlap between the student's tracks and the firm's.
@@ -500,10 +539,23 @@ class Profile:
     #: "warm" (chatted/advocate) or "replied". Unarchived contacts only —
     #: the caller queries and collapses; this module never touches the ORM.
     warm_firms: Mapping[int, str] = field(default_factory=dict)
+    #: The rung of the ladder the student is on, as THEY stated it:
+    #: "undergrad", "mba" or "phd" — or "" when the account has not said
+    #: (the `User.study_level` column is being added alongside this; until
+    #: it lands every profile reads ""). Read through `level`, never
+    #: directly: `level` is where the default for a blank value lives.
+    study_level: str = ""
 
     @property
     def school_region(self) -> str:
         return school_region(self.school)
+
+    @property
+    def level(self) -> str:
+        """The level scoring compares a role's rung against — see
+        `student_level` for the one rule that turns a blank `study_level`
+        into "undergrad" and when it refuses to."""
+        return student_level(self.study_level, self.target_cycles)
 
     @property
     def is_empty(self) -> bool:
@@ -530,6 +582,10 @@ class Profile:
             tracks=tuple(getattr(user, "tracks", None) or []),
             firm_tiers=dict(firm_tiers or {}),
             warm_firms=dict(warm_firms or {}),
+            # `getattr` with a default on purpose: the column is being added
+            # concurrently and may not exist on this User yet. A missing
+            # attribute must read as "not stated", never raise.
+            study_level=str(getattr(user, "study_level", "") or ""),
         )
 
 
@@ -644,6 +700,20 @@ def stated_class_mismatch(profile: Profile, c: Candidate) -> bool:
     return window is not None and not (window[0] <= profile.class_year <= window[1])
 
 
+def _names_same_bucket_other_year(profile: Profile, bucket: str, cohort: int) -> bool:
+    """True when one of the student's own target cycles names THIS programme
+    bucket in a year other than `cohort` — "2028 Summer Internship" against a
+    2027 internship. That is the student saying, in their own words, which
+    intake they are in, so the adjacent one is not a reason for them (see
+    `W_CLASS_DERIVED_NEAR`). A student who named no cycle for this bucket
+    has said nothing about it and the adjacent-year points still apply."""
+    for raw in profile.target_cycles:
+        cycle = parse_target_cycle(raw)
+        if cycle is not None and cycle[0] == bucket and cycle[1] != cohort:
+            return True
+    return False
+
+
 def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     """Class / cycle fit — the axis where the cohort-vs-class-year distinction
     is load-bearing.
@@ -716,13 +786,26 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
                     f"likely Class of {implied}", note, "class",
                 ))
             elif gap == 1:
-                points += W_CLASS_DERIVED_NEAR
+                # A NEAR MISS, and the chip must say so in its own text —
+                # not only in the tooltip. `Recommendation.why` joins chip
+                # texts alone, and `crm.digest` prints that string verbatim
+                # in an email with no tooltip to hover, so "2027 intake" on
+                # its own read as a reason FOR the role. "A year early/late
+                # for you" is the caveat, in the chip, everywhere it prints.
+                early = implied < profile.class_year
                 reasons.append(Reason(
-                    f"{cohort} intake",
+                    f"{cohort} intake, a year {'early' if early else 'late'} for you",
                     f"{note} That is a year off from your "
                     f"{profile.class_year}, so worth a look but not a fit.",
                     "class",
                 ))
+                # The 6 points survive only when the student has NOT named
+                # this programme in another year — see `W_CLASS_DERIVED_NEAR`.
+                # "2027 Summer Internship" is not a reason for a student who
+                # typed "2028 Summer Internship" into Settings; it is the
+                # intake he told us he is not in.
+                if not _names_same_bucket_other_year(profile, c.bucket, cohort):
+                    points += W_CLASS_DERIVED_NEAR
 
     # Bonus applies ONCE even when several of the student's selected cycles
     # would match (recruiting for both an Insight week and next year's SA
@@ -753,10 +836,24 @@ def _region_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     or they named it as a target. The first scores higher; if both are true the
     student gets the higher score once, not both.
 
-    A role with no resolved region scores zero rather than being penalised —
-    board data leaves `region` blank often, and "we couldn't tell" must not
-    read as "wrong place"."""
+    A role with no resolved region is not scored as a wrong place — but it
+    is no longer scored as a free pass either. Zero here used to mean the
+    blank row sat 16-20 points behind its located neighbours on THIS axis
+    and then made the whole gap back on the others, and an unlocated Nomura
+    programme ranked #1 for a HK/US student. So when the student has named
+    regions, a blank costs `W_REGION_UNKNOWN`, with a chip that says the
+    product could not place it — a penalty for our own ignorance, never a
+    claim about the role. A student who named no regions has no market for
+    the blank to be wrong about, and it still scores zero for them."""
     if not c.region:
+        if profile.regions:
+            return W_REGION_UNKNOWN, [Reason(
+                "Location not read",
+                "Coverage could not tell which market this role is in — "
+                "the posting's location did not parse — so it cannot say "
+                "whether it is in one of your regions. Check the posting.",
+                "region",
+            )]
         return 0, []
     home = profile.school_region
     targets = set(profile.regions)
@@ -788,7 +885,23 @@ _ROLE_FUNCTION: tuple[tuple[re.Pattern[str], str], ...] = tuple(
          r"|\bleveraged finance\b|\bcapital markets?\b|\bcoverage bank(er|ing)\b", "ib"),
         (r"\bsales (and|&) trading\b|\btrading\b|\btrader\b|\bmarkets? division\b"
          r"|\bequities?\b|\bfixed income\b|\bfx\b|\bcommodities\b|\bstructuring\b"
-         r"|\bquantitative (analysis|research|trading|strateg)", "st"),
+         r"|\bquantitative (analysis|research|trading|strateg)"
+         # The S&T division under the name the banks give it: "Global
+         # Markets" (BofA, HSBC, Barclays, Deutsche, SocGen), and a bare
+         # "Markets" when it is attached to a programme word ("Markets
+         # Summer Analyst Program" at J.P. Morgan and Citi, "APAC Markets
+         # Summer Analyst"). Measured on the whole open board, 2026-09-01:
+         # 36 rows carried one of these and stated no track at all, so they
+         # inherited their bank's ib+st coverage instead of saying st; 12 of
+         # J.P. Morgan's were reading as IB off the division prefix (see
+         # `_DIVISION_PREFIX`). The lookbehinds keep the phrases that belong
+         # to OTHER tracks out — "Capital Markets" is IB (and checked first
+         # anyway), "Private Markets" is PE, "Public Markets" and "Growth
+         # Markets" are asset management — and "markets analyst" is left out
+         # entirely because "Growth Markets Analyst" is a wealth role.
+         r"|\bglobal markets\b"
+         r"|(?<!capital\s)(?<!private\s)(?<!public\s)(?<!growth\s)"
+         r"\bmarkets\s+(?:summer|program(?:me)?|intern(?:ship)?|placement)s?\b", "st"),
         (r"\bprivate equity\b|\bbuyout\b|\bgrowth equity\b|\bprivate capital\b"
          r"|\bprivate markets?\b|\binfrastructure investing\b", "pe"),
         (r"\basset management\b|\bwealth management\b|\bportfolio management\b"
@@ -904,7 +1017,15 @@ _NON_TRACK_FUNCTION = re.compile(
     # dated Morgan Stanley and HSBC internship on the board, for a division
     # whose own event description says "these are the teams that power and
     # support our business every day."
-    r"|\bcorporate treasury\b|\bcorporate planning\b|\bcorporate infrastructure\b",
+    r"|\bcorporate treasury\b|\bcorporate planning\b|\bcorporate infrastructure\b"
+    # Custody and payments: the bank's post-trade and transaction-banking
+    # plumbing, filed under the investment bank's roof and not a track. Both
+    # surfaced on the founder's live rail chipped "IB role" — J.P. Morgan's
+    # "Securities Services Leadership Program" and "Global Payments Summer
+    # Analyst" — purely because the division prefix in front of them said
+    # "Investment Bank" (see `_DIVISION_PREFIX`). 11 rows board-wide carry
+    # one of the two phrases; none of them also states a track.
+    r"|\bsecurities services\b|\bglobal payments\b",
     re.I)
 
 
@@ -925,6 +1046,23 @@ _NON_TRACK_FUNCTION = re.compile(
 _HIRING_PROCESS = re.compile(
     r"\b(campus|graduate|early[\s-]careers?)\s+recruit(ing|ment)\b"
     r"|\brecruit(ing|ment)\s+(event|day)s?\b",
+    re.I)
+
+#: A DIVISION name that only says where the job sits, stripped before the
+#: title is read for what the job IS. J.P. Morgan files every campus posting
+#: as "2027 Commercial & Investment Bank - <programme> - <city>", and the
+#: ib pattern's `\binvestment bank(ing)?\b` matched the division on all of
+#: them: 21 open campus rows on 2026-09-01, 20 answering "ib" — twelve of
+#: them Markets (S&T) programmes, plus "Securities Services Leadership
+#: Program" and "Global Payments Summer Analyst" both chipped "IB role" on
+#: the founder's own rail. Same technique as `_HIRING_PROCESS`: remove the
+#: words that are not about the job, then read what is left. Anchored to
+#: the START of the title, with an optional intake year in front, because
+#: that is the only place the board uses it as a prefix; "Investment Bank"
+#: anywhere else in a title is still read as the job.
+_DIVISION_PREFIX = re.compile(
+    r"^\s*(?:20\d\d\s*)?[-–—:|]?\s*commercial\s*(?:&|and)\s*investment\s*bank(?:ing)?\b"
+    r"\s*[-–—:|]?\s*",
     re.I)
 
 
@@ -989,8 +1127,14 @@ def role_function(title: str) -> str:
     only names the hiring process (`_HIRING_PROCESS`). The second is exempted
     only when the title separately names a track outright — a title made of
     hiring-process words alone ("Campus Recruiting Coordinator") still answers
-    "none", because there is nothing else in it to be the job."""
-    text = title or ""
+    "none", because there is nothing else in it to be the job.
+
+    A third thing that is not a claim about the function, handled first
+    because it sits in front of everything else: a DIVISION prefix
+    (`_DIVISION_PREFIX`). "2027 Commercial & Investment Bank - Markets
+    Summer Analyst Program" is a Markets role that happens to be filed under
+    the investment bank, and reading the prefix made it an IB one."""
+    text = _DIVISION_PREFIX.sub("", title or "")
     track = _stated_track(text)
     if not _names_non_track(text):
         return track
@@ -1122,16 +1266,145 @@ def role_matches_regions(region: str, regions) -> bool:
     return bool(region) and region in wanted
 
 
+# ---------------------------------------------------------------------------
+# The RUNG of the ladder a role is on, read off its own title. Exists because
+# the scorer was blind to it: measured 2026-09-01 on the founder's live board
+# (a sophomore, class of 2029), 60 internship-bucket rows titled Associate /
+# MBA / PhD passed every filter, 45 cleared `MIN_SCORE`, and 6 sat in his top
+# 30 — RBC's and Guggenheim's "Investment Banking Summer Associate", PIMCO's
+# "PhD Summer Intern", Barclays' "Banking Associate Summer Internship" whose
+# own body says "must be pursuing an MBA". Every one of them named IB or
+# quant research outright and sat in his region, so on the four axes the
+# scorer had, they were excellent matches. They are for a different student.
+#
+# Two kinds of evidence, and the DEGREE kind wins. A degree word (PhD, MBA,
+# undergraduate, BSc) is the posting stating who it is for; a rung word
+# (Summer Associate, Analyst) is the industry's convention for the same
+# thing, one step removed — a "PhD Summer Intern – Quantitative Research
+# Analyst" is a PhD internship, not an analyst-level one, and only reading
+# degrees first gets that right. Either kind answers "" the moment a title
+# names two different levels ("BSc/MSc/PhD ... Internship", "Summer Analyst /
+# Associate Program"): the posting admits more than one rung, and the honest
+# answer is to decline rather than pick one.
+#
+# What is deliberately NOT here. Bare "Associate" is not a level: at PwC and
+# Deloitte it is the undergraduate entry title ("Consulting - Associate -
+# Strategy & Operations"), at McKinsey an MBA one, at Bridgewater an
+# undergraduate internship ("Investment Associate Intern"). Only the shapes
+# the banks reserve for the advanced-degree rung count — "Summer Associate",
+# "Off-cycle Associate", "Associate Summer/Off-cycle Internship", and
+# "Associate ... Graduate Program" (Barclays' MBA-entry programmes). "Senior"
+# is left out too: SocGen's "Summer Senior Research Associate (Campus)" is a
+# campus role. On the live campus buckets no title carries "experienced",
+# "VP" or "vice president" at all; those patterns exist for the `other`
+# bucket and for the next board that files them under campus.
+# ---------------------------------------------------------------------------
+_LEVEL_DEGREE: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(rx, re.I), level) for rx, level in (
+        (r"\bph\.?\s?d\b|\bpost-?docs?\b|\bdoctoral\b", "phd"),
+        (r"\bmba\b", "mba"),
+        (r"\bundergrad(?:uate)?s?\b|\bbachelor'?s?\b|\bbsc\b"
+         r"|\bsophomores?\b|\bfreshm[ae]n\b", "undergrad"),
+    )
+)
+_LEVEL_RUNG: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(rx, re.I), level) for rx, level in (
+        (r"\bexperienced\b|\bvice[\s-]president\b|\bvp\b", "experienced"),
+        (r"\bsummer\s+associates?\b|\boff[\s-]?cycle\s+associates?\b"
+         r"|\bassociates?\s+(?:summer|off[\s-]?cycle)\s+intern(?:ship)?s?\b"
+         r"|\bassociates?\b[^|]*\bgraduate\s+program(?:me)?s?\b", "mba"),
+        (r"\banalysts?\b", "undergrad"),
+    )
+)
+
+
+def role_level(title: str) -> str:
+    """The rung a role's own title names: "undergrad", "mba", "phd",
+    "experienced", or "" when it names none — or more than one. See the
+    block comment above for what counts and what deliberately does not."""
+    text = title or ""
+    for table in (_LEVEL_DEGREE, _LEVEL_RUNG):
+        found = {level for rx, level in table if rx.search(text)}
+        if len(found) == 1:
+            return found.pop()
+        if found:
+            return ""
+    return ""
+
+
+#: Spellings `User.study_level` may arrive in, folded to this module's four
+#: values. The column is being added concurrently and its vocabulary is not
+#: pinned here, so the fold is generous about spelling and strict about
+#: meaning: a value it cannot read ("masters", say) is a stated level this
+#: module has no rung for, and answers "" rather than guessing.
+_STUDY_LEVEL_ALIASES: Mapping[str, str] = {
+    "undergrad": "undergrad", "undergraduate": "undergrad", "ug": "undergrad",
+    "bachelor": "undergrad", "bachelors": "undergrad", "bsc": "undergrad",
+    "mba": "mba",
+    "phd": "phd", "doctoral": "phd", "doctorate": "phd",
+}
+
+
+def student_level(study_level: str, target_cycles) -> str:
+    """The rung the student is on, or "" when it cannot be known.
+
+    Stated wins: a `study_level` this module can read is the answer. When
+    it is blank, ONE default and only one: a student whose every parseable
+    target cycle is an internship or an insight week is read as an
+    undergraduate — those are undergraduate programmes, and a student who
+    named only them has described an undergraduate's plan. A student with
+    no cycles, or with any full-time cycle, or a `study_level` in a
+    vocabulary this cannot read, gets "" — and "" filters nothing, which is
+    today's behaviour exactly."""
+    key = re.sub(r"[^a-z]", "", (study_level or "").lower())
+    if key:
+        return _STUDY_LEVEL_ALIASES.get(key, "")
+    buckets = set()
+    for raw in target_cycles or ():
+        parsed = parse_target_cycle(raw)
+        if parsed is not None:
+            buckets.add(parsed[0])
+    if buckets and buckets <= {INTERNSHIP, INSIGHT}:
+        return "undergrad"
+    return ""
+
+
+#: (student level, role level) pairs that are NOT a mismatch. Equality, plus
+#: one asymmetry the industry itself makes: the banks' "Summer Associate"
+#: rung is the advanced-degree internship (MBA, PhD and JD alike — Goldman's
+#: "Quantitative Strats — Summer Associate" is written for PhDs), so a PhD
+#: student is not mismatched by an MBA-rung role. The reverse is not true: a
+#: "PhD Summer Intern" is for PhDs.
+_LEVEL_COMPATIBLE: frozenset[tuple[str, str]] = frozenset({
+    ("undergrad", "undergrad"), ("mba", "mba"), ("phd", "phd"), ("phd", "mba"),
+})
+
+
+def level_mismatch(student: str, role: str) -> bool:
+    """True only when BOTH rungs are known and the pair is not compatible.
+    Either side unknown -> False: nothing stated means nothing filtered."""
+    return bool(student and role) and (student, role) not in _LEVEL_COMPATIBLE
+
+
 def role_matches_level(
     bucket: str,
     class_year_derived: str,
     target_cycles,
     profile_class_year: int | None,
+    *,
+    title: str = "",
+    study_level: str = "",
 ) -> bool:
-    """Whether a role's own LEVEL — its programme bucket, and the class year
-    its shape implies — is compatible with the level a student is actually
-    recruiting at. Same posture as the other two filters: nothing stated
-    (by either side) means nothing is filtered.
+    """Whether a role's own LEVEL — its programme bucket, the class year
+    its shape implies, and the rung its title names — is compatible with
+    the level a student is actually recruiting at. Same posture as the
+    other two filters: nothing stated (by either side) means nothing is
+    filtered.
+
+    `title` and `study_level` are keyword-only and default to "", which
+    turns the third check OFF: the two callers that predate it
+    (`assistant.situation`, `crm.relevance`) keep exactly the behaviour
+    they had until they choose to pass a title.
 
     Exists for the failure the track and region filters do not cover: a
     role can name the student's exact track, sit in one of their regions,
@@ -1160,12 +1433,19 @@ def role_matches_level(
        makes the same judgement into "and don't call it news" for a card
        that exists to say "you should look at this right now."
 
+    3. The RUNG the title names (`role_level`) against the rung the student
+       is on (`student_level`) — a "Summer Associate" or "PhD Summer
+       Intern" for an undergraduate, a "Summer Analyst" for an MBA. The
+       posting's own words this time, which is why the mismatch is a hard
+       fail here and not a subtraction: the title said who it was for.
+       Either side unknown, nothing happens — see `level_mismatch`.
+
     Deliberately does NOT duplicate `directory.views._eligibility`'s
     BLOCKING verdict (a stated class year or extracted grad-window that
     excludes this student outright) — that is a harder, title/body-STATED
     fact and the caller applies it separately, the same verdict
-    `Candidate.blocked` already reads elsewhere. This function only ever
-    acts on the softer, INFERRED signals a role's shape carries, and never
+    `Candidate.blocked` already reads elsewhere. Checks 1 and 2 only ever
+    act on the softer, INFERRED signals a role's shape carries, and never
     on nothing: a role with no derivable year and a student with cycles
     this can't place both pass.
     """
@@ -1181,6 +1461,9 @@ def role_matches_level(
         derived = _int_or_none(class_year_derived)
         if derived is not None and abs(derived - profile_class_year) >= 2:
             return False
+    if title and level_mismatch(student_level(study_level, target_cycles),
+                                role_level(title)):
+        return False
     return True
 
 
@@ -1363,9 +1646,54 @@ def recommend(
         # that scores without one, not a change of behaviour.
         #
         # A veto, deliberately, and only ever on the posting's STATED words —
-        # a programme year that merely implies a class still scores, still
-        # says "likely", and still shows. Silence never hides.
+        # a programme year that merely implies an ADJACENT class still
+        # scores (as a labelled near miss), still says so, and still shows.
+        # Silence never hides. A year two or more off is the rung filter's
+        # call, next.
         if stated_class_mismatch(profile, c):
+            continue
+        # Nor the wrong RUNG of the ladder — `role_matches_level`, the same
+        # yes/no the advisor's situation snapshot and the digest's relevance
+        # filter already apply, which `recommend()` alone had never called.
+        # Measured 2026-09-01 on the founder's live rail (class 2029, target
+        # "2028 Summer Internship"): his #5 pick was Barclays' "Electronic
+        # Trading Associate Graduate Program 2027" — a full-time programme
+        # (he named only internships) whose intake implies 2027 graduates
+        # (two years off his own) at the MBA rung (he is a sophomore). Three
+        # separate reasons it is not for him, and the scorer had no axis
+        # for any of them, so tier, track, region and a warm contact carried
+        # it to 86 points.
+        #
+        # A skip rather than a subtraction, for the same reason the vetoes
+        # above are: the bucket check acts on the student's own stated plan,
+        # the rung check on the posting's own title, and a gap-2 intake is
+        # one `_class_fit` already refuses to score — none of them is a
+        # thing more tier or warmth should be able to buy back (a -40 would
+        # still leave that Barclays row at 46, on the bar). The honest state
+        # when nothing survives is an empty column, not the least-wrong six.
+        #
+        # EXCEPT where the posting has STATED this student's class. Its own
+        # words outrank what its bucket or intake year would imply — the
+        # rule this whole module runs on — so an insight programme that
+        # says "for 2029 graduates" reaches a 2029 student who named only
+        # Summer Internship cycles, and a 2029 entry-level programme that
+        # states his class is not hidden by a plan he wrote before it opened.
+        # Only the rung the title names (a "Summer Associate" for an
+        # undergraduate) can still argue with a stated class, because that
+        # is the posting's own words too. Without the exemption, the audit's
+        # own regression case — a stated-class insight programme losing to a
+        # prior-cycle near miss — would have flipped from "outranked" to
+        # "gone". The derived year is computed live, as `_class_fit` does,
+        # because the stored column lags the board (see the block comment
+        # above `_CYCLE_BUCKETS`).
+        if _stated_grad_window(profile, c) is None:
+            derived, _note = derive_class_year(c.bucket, c.title, c.cohort)
+            if not role_matches_level(
+                c.bucket, derived, profile.target_cycles, profile.class_year,
+                title=c.title, study_level=profile.study_level,
+            ):
+                continue
+        elif level_mismatch(profile.level, role_level(c.title)):
             continue
         # Nor anything whose deadline has already passed. A listing may
         # honestly stay on the board after its date — the firm still lists it,
