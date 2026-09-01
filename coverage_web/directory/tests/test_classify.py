@@ -85,6 +85,157 @@ CASES = [
 ]
 
 
+# US early-identification programmes. The vocabulary is entirely different from
+# the UK early-careers language the original rules were built around (insight
+# day, spring week, open day, taster, pre-internship), and until it was added
+# 17 of 24 real US programme names classified as something other than insight.
+#
+# Every title below is a real row from a live board unless marked otherwise.
+# The NEGATIVE half is the load-bearing half: each `OTHER`/`ENTRY_LEVEL`/
+# `INTERNSHIP` case below is a live posting that shares a word with the rule
+# directly above it, and is the reason that rule is qualified rather than bare.
+EARLY_ID_CASES = [
+    # ---- "insight" qualified by an event noun the original list missed ----
+    ("2026 Bank of America Campus Insight Forum: The Power to Lead", INSIGHT),
+    ("Bank of America Campus Insight Forum: The Power to Lead - Fall 2026", INSIGHT),
+    ("Women Who Lead: Investment Banking Insight's Workshop (Madrid)", INSIGHT),
+    ("2026 Inclusion by Insight Virtual 2 Day Summit", INSIGHT),
+    ("Citi Singapore - Insight to Services", INSIGHT),          # "to", not "into"
+    ("Career Insights: Meet the Business – Investment Banking (Asia Session)", INSIGHT),
+    ("Career Insights: Meet our recruiters (Asia Session)", INSIGHT),  # beats the HR veto
+    # …and the jobs that share the word. Two carry a seniority token, but
+    # "Insight & Design Lead" carries none — it survives only because
+    # "insight" is still qualified.
+    ("Insight & Design Lead", OTHER),
+    ("Insight and Automation – VP", OTHER),
+    ("Market Insights Analyst", OTHER),
+    ("Senior Specialist - Data Analytics & Insight Analyst", OTHER),
+    # ---- Early ID / externship / case competition ----
+    ("Early ID Program - Banking (Investment Banking), Fall 2025 - New York City",
+     INSIGHT),
+    ("2026-2027 Wells Fargo Corporate Risk Externship Program (Masters) – "
+     "Early Careers", INSIGHT),                 # externship beats "early careers"
+    ("Crowe National Case Competition", INSIGHT),
+    ("2026 Point72 Academy National Case Competition - US", INSIGHT),
+    ("Research Associate - Competition", OTHER),        # antitrust, not a contest
+    ("2026 Research Analyst - Competition", OTHER),
+    # ---- Discover / Explore <firm or division> ----
+    ("Discover Citadel", INSIGHT),
+    ("Discover Protiviti", INSIGHT),
+    ("Morgan Stanley | 2026 Discover Sales & Trading Copenhagen", INSIGHT),
+    ("2026 Morgan Stanley | Paris - Discover our Institutional Securities Group",
+     INSIGHT),
+    ("Explore Global Corporate Banking Financial Institutions Group at Bank "
+     "of America (Paris)", INSIGHT),
+    ("2027 - Explore Nomura - SEO Programme - London", INSIGHT),
+    ("Vanguard Virtual Business Development 2025 EXPLORE Day", INSIGHT),
+    ("First Year Discovery Event: October 2026", INSIGHT),
+    ("PhD Discovery Summit (On-site)", INSIGHT),
+    # …and the six live "eDiscovery" rows plus one unqualified "Discovery",
+    # which is why `\b` and the qualifier list both stay.
+    ("Digital Forensics & eDiscovery", OTHER),
+    ("eDiscovery Case Lead – Insider Risk Management (Hybrid)", OTHER),
+    ("Consultant Tech Lead - Service Now Discovery Infra Administrator", OTHER),
+    # ---- Future / Emerging Leaders ----
+    ("2026 Blackstone US Future Leaders Program", INSIGHT),
+    ("Growing Future Leaders", INSIGHT),
+    ("Bank of America Hedge Fund Future Leaders Forum", INSIGHT),
+    ("Emerging Leaders Series", INSIGHT),
+    # "Leadership Program" is a HIRE, not an event — deliberately not a rule.
+    ("US Graduate Leadership Program- Commercial Banking", ENTRY_LEVEL),
+    ("Technology Leadership Program - Application Development (PA)", OTHER),
+    # ---- Fellowship, but only as a named programme ----
+    ("JPMorganChase Fellowship Program", INSIGHT),
+    ("2027 Investment Fellowship Program", INSIGHT),
+    ("Return to Work Fellowship 2026", OTHER),          # a returnship for experienced hires
+    ("Fundamental Research Fellow, Canvas", OTHER),
+    ("Faculty Fellow", OTHER),
+    # ---- Series, qualified ----
+    ("Goldman Sachs Possibilities Series", INSIGHT),
+    ("2026 Insider Series - Investment Banking", INSIGHT),
+    ("Registered Client Service Associate - Series 7 & 63 required", OTHER),
+    ("2026 Machine Learning Center of Excellence Summer Associate – Time "
+     "Series & Reinforcement Learning Internship – (6 months)", INTERNSHIP),
+    # ---- Named event formats ----
+    ("2028卒向け 投資銀行部門セミナー / Investment Banking Seminar (Class of 2028)",
+     INSIGHT),                                   # seminar beats "class of 2028"
+    ("Point72 Academy Coffee Chats — Class of 2029 (US)", INSIGHT),
+    ("2026 Coffee Chats with Morgan Stanley Wealth Management at NYU", INSIGHT),
+    ("Virtual Career Information Session - 2027 Corporate Summer Analyst "
+     "Program", INSIGHT),                        # an event ABOUT an internship
+    ("Make A Play x Bank of America 5-Star Combine (Recruiting Event)", INSIGHT),
+    ("Strategy& - Recruiting Event 2026", INSIGHT),
+    ("Aarhus Networking event | IMC Trading", INSIGHT),
+    ("Global Markets Recruitment Dinner", INSIGHT),     # beats the HR veto
+    ("QRT Dinner Reception - Singapore", INSIGHT),
+    ("2026 Evercore MBA Darden Corporate Presentation & Networking Reception",
+     INSIGHT),
+    ("Morgan Stanley Firmwide Presentation - September 9th, 2026", INSIGHT),
+    ("2027 Meet our Analysts – Company Divisions (London)", INSIGHT),
+    ("The Exchange - early talent summer evening", INSIGHT),
+    ("Citi Liberal Arts Mentorship Program (Virtual)", INSIGHT),
+    ("Career Kickstarter - Trading 2026", INSIGHT),
+    ("M&A Workshop with Citi Investment Banking at Frankfurt School of "
+     "Finance and Management", INSIGHT),
+    ("2027 - Women’s Immersion Programme - Global Markets & Investment "
+     "Banking - London", INSIGHT),
+    ("Akuna Capital’s 2026 Virtual Quant Trading Challenge", INSIGHT),
+    ("Quant Arb Challenge in partnership with Amplify Trading", INSIGHT),
+    # …and the jobs those event words also appear in.
+    ("Windows Networking Engineer", OTHER),
+    ("Lead Systems Engineer – Networking", OTHER),
+    ("Equity Research Associate - Connectivity Semiconductors & Networking", OTHER),
+    ("Oliver Wyman - Presentation Designer - Warsaw", OTHER),
+    ("Presentation Specialist", OTHER),
+    ("Conference Services Event Planner - Temporary", OTHER),   # "conference" is not a rule
+    ("Career Start in Audit – Banking – Herbst 2026", OTHER),   # not "Career Kickstarter"
+    ("Local Job Fair, My Place in Centre-Sud - September 25 - Future "
+     "Opportunities - Customer Experience Associate", OTHER),   # a branch hiring fair
+    # ---- Affinity, broadened past "women in" ----
+    ("Connecting & Resourcing Empowered Women (CREW)", INSIGHT),
+    ("2026 Women Who Lead: Sales & Trading (Milan)", INSIGHT),
+    ("2026 Women Networking: RESUME WORKSHOP, TIPS & MORE (Mexico City)", INSIGHT),
+    ("Women's Winternship", INTERNSHIP),         # a winter internship, not an event
+    ("Intern - Springboard Women Internship Program", INTERNSHIP),
+    ("Oliver Wyman - Inclusion & Culture Generalist - London", OTHER),  # a real job
+    # ---- words left OUT on purpose, each with its live counter-example ----
+    ("AI Instructor, Point72 Academy", OTHER),                         # "academy"
+    ("2027 Cubist Quant Academy – Developers", OTHER),                 # "academy"
+    ("Advanced Polytechnic Graduate Pathway Program - General Assurance "
+     "Assistant Associate (July 2026 Intake)", ENTRY_LEVEL),           # "pathway"
+    ("Relationship Manager, Premium Edge - Bilingual", OTHER),         # "edge"
+    # entry_level on the live board, but only via the campus-board hint —
+    # from the title alone the answer is `other`, and never `insight`.
+    ("Deals Edge - Corporate Finance Associate Jan 2027 Intake", OTHER),
+    ("Senior Project Manager, Specialty Finance Operations (Fund Launch & "
+     "Platform Enablement)", OTHER),                                   # "launch"
+    ("KPMG Intern Opportunities - Embark", INTERNSHIP),                # "embark"
+]
+
+
+@pytest.mark.parametrize("title,expected", EARLY_ID_CASES)
+def test_classify_role_us_early_identification(title, expected):
+    assert classify_role(title) == expected
+
+
+def test_early_id_rules_sit_behind_the_seniority_and_entry_level_vetoes():
+    """Rule order, restated as an assertion.
+
+    `_EARLY_ID`'s words also appear in real hires, which is the whole reason
+    it is checked at step 5 rather than folded into `_INSIGHT` at step 1. If
+    anyone moves it earlier, these three fail before the live boards notice.
+    """
+    # Seniority veto (step 3) beats an early-ID word.
+    assert classify_role("Managing Director, Future Leaders Program") == OTHER
+    assert classify_role("Head of Discover Programme") == OTHER
+    # Entry-level (step 4) beats one too: a graduate leadership programme is a
+    # hire that happens to be named like an event.
+    assert classify_role("Graduate Future Leaders Programme 2027") == ENTRY_LEVEL
+    # But `_INSIGHT`'s step-1 words still outrank both, by design.
+    assert classify_role("Campus Insight Forum") == INSIGHT
+    assert classify_role("Pre-Internship Programme") == INSIGHT
+
+
 @pytest.mark.parametrize("title,expected", CASES)
 def test_classify_role(title, expected):
     assert classify_role(title) == expected
