@@ -86,13 +86,221 @@ def assemble_digest(user, *, today: date | None = None) -> dict | None:
     if not closing and not actions:
         return None
 
+    picks, picks_note = _new_for_you(user, today=today)
     return {
         "today": today,
+        # THE ONE LINE AT THE TOP. Advocates in place and firms with nobody
+        # at all are the two numbers that predict whether this student gets
+        # an interview, and the digest used to open on this week's
+        # deadlines instead. See `_coverage_summary`.
+        "coverage": _coverage_summary(user, today=today),
         "closing": closing,
         "actions": actions,
         "actions_overflow": actions_overflow,
-        "picks": _new_for_you(user, today=today),
+        "picks": picks,
+        # One honest sentence when every pick is for a cycle the student is
+        # NOT recruiting for, else "". See `_cycle_note`.
+        "picks_note": picks_note,
+        # Section-level provenance flags for the templates' "(reported)"
+        # key, which prints ONCE per digest: under Closing if any closing
+        # row is prose-read, else under New for you if any pick is. The
+        # dict is `deadline_provenance`'s own (label + why), so the words
+        # come from one place.
+        "closing_reported": next((i["reported"] for i in closing if i.get("reported")), None),
+        "picks_reported": next((p["reported"] for p in picks if p.get("reported")), None),
     }
+
+
+def _join(names: list[str]) -> str:
+    """"A", "A and B", "A, B and C". No em dash, no Oxford comma — house
+    copy style, same as `send_weekly_digest._subject`."""
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _coverage_summary(user, *, today: date) -> dict:
+    """"N advocates across M target firms · K firms with no contact yet,
+    starting with A, B and C" — the metric that predicts outcomes, computed
+    from exactly what the Network board's Coverage Gaps strip and the
+    advisor's `get_my_firms` already count, through `crm.coverage.rank_gaps`
+    so the three firms named are the same three the strip would put first
+    (tier 1 before tier 2, more open roles before fewer, then name).
+
+    {} when the student has tiered nothing — there is no coverage to
+    measure and the templates print no line. `app_close` is passed as None
+    on purpose: the deadline bonus would need `confirmed_firm_dates` for
+    every firm, and it decides ORDER among gaps, not whether a firm is a
+    zero-contact gap at all, which is the only thing this line names.
+
+    Campaign-hidden contacts (`crm.campaigns`) are excluded the same way
+    `get_my_firms` and the firm page exclude them: nine club alumni at one
+    bank would count it as covered when the student has no recruiting
+    relationship there at all."""
+    from django.db.models import Count
+
+    from crm import campaigns, coverage
+    from crm.models import Contact, UserFirm
+    from directory.classify import TARGET_BUCKETS
+    from directory.models import Opportunity
+
+    rows = list(
+        UserFirm.objects.for_user(user)
+        .filter(tier__isnull=False)
+        .select_related("firm")
+    )
+    if not rows:
+        return {}
+    firm_ids = [uf.firm_id for uf in rows]
+    hidden = campaigns.excluded_contact_ids(user)
+    warmths: dict[int, list[str]] = {}
+    for fid, warmth in (
+        Contact.objects.for_user(user)
+        .filter(archived=False, firm_id__in=firm_ids)
+        .exclude(id__in=hidden)
+        .values_list("firm_id", "warmth")
+    ):
+        warmths.setdefault(fid, []).append(warmth)
+    # Advocates who are NOT at a target firm — an alum at the student's own
+    # school, a contact whose firm was typed rather than linked. The metric
+    # is advocates AT target firms (that is what predicts an interview), but
+    # a student who knows they have two advocates and reads "0 advocates"
+    # reads a bug, not a gap. Measured on the founder's own account: both of
+    # his advocates carry `firm_text="usc"` and no firm, so the line said 0.
+    advocates_total = (
+        Contact.objects.for_user(user)
+        .filter(archived=False, warmth="advocate")
+        .exclude(id__in=hidden)
+        .count()
+    )
+    open_by_firm = dict(
+        Opportunity.objects
+        .filter(firm_id__in=firm_ids, status="open", bucket__in=TARGET_BUCKETS)
+        .values_list("firm_id").annotate(n=Count("id")).values_list("firm_id", "n")
+    )
+    target = coverage.advocate_target(user)
+    gaps = coverage.rank_gaps(
+        [
+            {
+                "firm_id": uf.firm_id,
+                "name": uf.firm.name,
+                "tier": uf.tier,
+                "warmths": warmths.get(uf.firm_id, []),
+                "app_close": None,
+                "open": open_by_firm.get(uf.firm_id, 0),
+            }
+            for uf in rows
+        ],
+        today=today,
+        target=target,
+        limit=len(rows),
+    )
+    no_contact = [g for g in gaps if g["state"] == coverage.NO_CONTACTS]
+    advocates = sum(1 for ws in warmths.values() for w in ws if w == "advocate")
+    elsewhere = max(0, advocates_total - advocates)
+    named = [g["name"] for g in no_contact[:3]]
+
+    line = f"{_plural(advocates, 'advocate')} across {_plural(len(rows), 'target firm')}"
+    if elsewhere:
+        line += f" ({elsewhere} elsewhere)"
+    if not no_contact:
+        line += " · a contact at every one"
+    elif len(no_contact) <= len(named):
+        line += f" · {_plural(len(no_contact), 'firm')} with no contact yet: {_join(named)}"
+    else:
+        line += (
+            f" · {_plural(len(no_contact), 'firm')} with no contact yet, "
+            f"starting with {_join(named)}"
+        )
+    return {
+        "advocates": advocates,
+        "advocates_elsewhere": elsewhere,
+        "firms": len(rows),
+        "no_contact": len(no_contact),
+        "named": named,
+        "line": line,
+    }
+
+
+def _int_or_none(value) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _cycle_note(user, recs) -> str:
+    """One sentence for the top of "New for you" when NOT ONE pick is for a
+    cycle the student declared — "Nothing yet for your 2028 Summer
+    Internship cycle; these are a year early" — else "".
+
+    Derived from each pick's own bucket and intake year against
+    `User.target_cycles`, through the same `parse_target_cycle` the scorer's
+    cycle bonus uses, NOT from the chip text: `Recommendation.why` is a
+    display string another surface owns, and the founder's four picks all
+    carried a "2027 intake" chip whose tooltip said "not a fit" — printed in
+    the digest as if it were a reason to apply. The chip is being reworded
+    where it is made; this is the digest saying the one thing the chips
+    could not, in a place that cannot drift with their wording.
+
+    The timing suffix is only claimed about picks in the SAME programme
+    bucket as a declared cycle, and only when every one of them states an
+    intake year: "a year early" when each is exactly one year before the
+    declared cycle of its bucket, "earlier intakes" when all are before it,
+    "other intakes" otherwise. Picks in another bucket — an insight week
+    beside a summer-internship cycle — are not judged: a 2027 insight
+    programme is not "a year early" for a 2028 internship cycle, it is a
+    different programme, so when the picks are mixed the suffix names the
+    ones it is about ("the summer internship roles here are a year
+    early"). A pick with no intake year gets the bare sentence — nothing
+    about its timing is known to say."""
+    from directory.recommend import CYCLE_LABELS, parse_target_cycle
+
+    labels = [
+        str(v).strip() for v in (getattr(user, "target_cycles", None) or []) if str(v).strip()
+    ]
+    targets = [(label, parse_target_cycle(label)) for label in labels]
+    targets = [(label, cycle) for label, cycle in targets if cycle is not None]
+    if not targets or not recs:
+        return ""
+
+    def _matches(c) -> bool:
+        cohort = _int_or_none(c.cohort)
+        return any(c.bucket == bucket and cohort == year for _, (bucket, year) in targets)
+
+    if any(_matches(r.candidate) for r in recs):
+        return ""
+    note = (
+        f"Nothing yet for your {_join([label for label, _ in targets])} "
+        f"cycle{'' if len(targets) == 1 else 's'}"
+    )
+
+    target_buckets = {bucket for _, (bucket, _) in targets}
+    judged = [r.candidate for r in recs if r.candidate.bucket in target_buckets]
+    cohorts = [_int_or_none(c.cohort) for c in judged]
+    if not judged or any(c is None for c in cohorts):
+        return note
+
+    def _years_for(bucket: str) -> set[int]:
+        return {year for _, (b, year) in targets if b == bucket}
+
+    if len(judged) == len(recs):
+        subject = "these"
+    else:
+        names = sorted({CYCLE_LABELS.get(c.bucket, c.bucket).lower() for c in judged})
+        subject = f"the {_join(names)} roles here"
+    if all(any(cohort == y - 1 for y in _years_for(c.bucket)) for c, cohort in zip(judged, cohorts)):
+        note += f"; {subject} are a year early"
+    elif all(cohort < min(_years_for(c.bucket)) for c, cohort in zip(judged, cohorts)):
+        note += f"; {subject} are earlier intakes"
+    else:
+        note += f"; {subject} are other intakes"
+    return note
 
 
 def _closing_this_week(user, *, today: date) -> list[dict]:
@@ -167,18 +375,27 @@ def _who_to_ping(user) -> tuple[list[dict], int]:
     return shown, overflow
 
 
-def _new_for_you(user, *, today: date) -> list[dict]:
-    """Up to `MAX_PICKS` open roles from `directory.recommend.recommend`,
-    scored against the same survey-derived profile and firm/warmth signals
-    Opportunities' Picked-for-you rail builds, over the same open campus
-    board minus whatever the student has already tracked or dismissed — a
-    role already on their board is not news, however well it would have
-    scored.
+def _new_for_you(user, *, today: date) -> tuple[list[dict], str]:
+    """`(picks, note)`: up to `MAX_PICKS` open roles from
+    `directory.recommend.recommend`, scored against the same survey-derived
+    profile and firm/warmth signals Opportunities' Picked-for-you rail
+    builds, over the same open campus board minus whatever the student has
+    already tracked or dismissed — a role already on their board is not
+    news, however well it would have scored — plus `_cycle_note`'s one
+    sentence ("" when the picks include the student's own cycle).
 
-    Returns [] whenever `recommend()` would: an empty survey profile, or
-    nothing clearing its score bar. Blocked roles (the posting's own text
-    excludes this student) are passed through to `recommend()` rather than
-    filtered here, so the exclusion rule lives in exactly one place."""
+    Returns `([], "")` whenever `recommend()` would return nothing: an empty
+    survey profile, or nothing clearing its score bar. Blocked roles (the
+    posting's own text excludes this student) are passed through to
+    `recommend()` rather than filtered here, so the exclusion rule lives in
+    exactly one place.
+
+    Every pick carries its deadline WITH provenance — `deadline_marker`'s
+    countdown and `deadline_provenance`'s "(reported)" dict, the exact pair
+    `_lens_item` gives a closing row — or the templates print no date at
+    all. `_pick_card`'s bare `deadline` field is kept for the Opportunities
+    page but never printed here: 96% of dated open campus rows are
+    Coverage's own reading, and an email cannot underline."""
     from analytics.models import UserOpportunity
     from crm import campaigns
     from crm.models import Contact, UserFirm
@@ -186,7 +403,10 @@ def _new_for_you(user, *, today: date) -> list[dict]:
     from directory.dupes import fold_duplicates
     from directory.models import Opportunity
     from directory.recommend import Candidate, Profile, recommend
-    from directory.views import _eligibility, _eligibility_profile, _pick_card
+    from directory.views import (
+        _eligibility, _eligibility_profile, _pick_card, deadline_marker,
+        deadline_provenance,
+    )
 
     tier_by_firm: dict[int, int | None] = dict(
         UserFirm.objects.for_user(user).values_list("firm_id", "tier")
@@ -214,7 +434,7 @@ def _new_for_you(user, *, today: date) -> list[dict]:
 
     profile = Profile.from_user(user, tier_by_firm, warm_firms=warm_by_firm)
     if profile.is_empty:
-        return []
+        return [], ""
 
     elig_profile = _eligibility_profile(user)
     touched = set(
@@ -227,12 +447,14 @@ def _new_for_you(user, *, today: date) -> list[dict]:
         .exclude(id__in=touched)
         .select_related("firm")
     )
+    folded = fold_duplicates(list(open_qs))[0]
+    by_id = {o.id: o for o in folded}
     candidates = [
         Candidate.from_opportunity(
             o,
             blocked=bool((lambda v: v and v["blocking"])(_eligibility(o, elig_profile))),
         )
-        for o in fold_duplicates(list(open_qs))[0]
+        for o in folded
     ]
     recs = recommend(profile, candidates, limit=MAX_PICKS, today=today)
     picks = []
@@ -244,5 +466,11 @@ def _new_for_you(user, *, today: date) -> list[dict]:
         # that string, computed once, here, rather than re-joined in the
         # template.
         card["why"] = r.why
+        o = by_id.get(r.candidate.id)
+        card["deadline_marker"] = deadline_marker(
+            o.deadline if o else None, getattr(o, "deadline_precision", "") if o else "",
+            today=today,
+        )
+        card["reported"] = deadline_provenance(o) if o else None
         picks.append(card)
-    return picks
+    return picks, _cycle_note(user, recs)

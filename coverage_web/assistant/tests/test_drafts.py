@@ -451,3 +451,163 @@ def test_two_drafts_to_different_people_in_one_reply_are_logged_separately(
     # Sam's draft is untouched and still offers its own button.
     assert "Log touch · Sam Okafor · Email" in body
     assert "Log touch · Yumna Rahman · Email" not in body
+
+
+# ---------------------------------------------------------------------------
+# 3. The template guard
+#
+# A card promises "paste this and send it". A bracketed placeholder or a body
+# past its word cap makes that promise false, and the page can see both
+# without a model: the block is rendered as prose — every word still there,
+# no Copy button. `flag_reason`, `WORD_CAPS` and `_PLACEHOLDER_RE` are the
+# rule; chat.html's JS mirror carries the same three (see the last test).
+# ---------------------------------------------------------------------------
+def _words(n: int) -> str:
+    return " ".join(f"w{i}" for i in range(n))
+
+
+def test_a_draft_with_a_bracketed_placeholder_is_prose_not_a_card():
+    text = (
+        "Here's a first approach.\n\n"
+        + _draft_block(
+            "contact=482 channel=email kind=outreach",
+            "Subject: Intro from a sophomore\n\nHi [Name],\n\nI study at [School].\n\nBest,\nJimmy",
+        )
+        + "\n\nSend it Tuesday."
+    )
+
+    segments = drafts.split(text)
+
+    assert [s["type"] for s in segments] == ["prose"]
+    prose = segments[0]["text"]
+    # Every word survives, the fence markers do not.
+    assert "Subject: Intro from a sophomore" in prose
+    assert "Hi [Name]," in prose
+    assert "Send it Tuesday." in prose
+    assert "```" not in prose
+
+
+def test_a_curly_brace_placeholder_is_caught_too():
+    text = _draft_block("contact=1 channel=email kind=outreach", "Hi {first_name},\n\nBest,\nJimmy")
+
+    segments = drafts.split(text)
+
+    assert [s["type"] for s in segments] == ["prose"]
+    assert "{first_name}" in segments[0]["text"]
+
+
+def test_a_follow_up_over_eighty_words_is_prose_not_a_card():
+    long_body = "Subject: Following up\n\nHi Yumna,\n\n" + _words(85) + "\n\nBest,\nJimmy"
+    text = _draft_block("contact=1 channel=email kind=follow_up", long_body)
+
+    segments = drafts.split(text)
+
+    assert [s["type"] for s in segments] == ["prose"]
+    assert "w84" in segments[0]["text"]
+
+
+def test_a_follow_up_under_the_cap_is_still_a_card():
+    body = "Subject: Following up\n\nHi Yumna,\n\n" + _words(70) + "\n\nBest,\nJimmy"
+
+    segments = drafts.split(_draft_block("contact=1 channel=email kind=follow_up", body))
+
+    assert [s["type"] for s in segments] == ["draft"]
+    assert segments[0]["contact_id"] == 1
+
+
+def test_a_first_approach_gets_the_looser_cap():
+    body = "Subject: Intro\n\nHi Yumna,\n\n" + _words(110) + "\n\nBest,\nJimmy"
+    within = _draft_block("contact=1 channel=email kind=outreach", body)
+    over = _draft_block(
+        "contact=1 channel=email kind=outreach",
+        "Subject: Intro\n\nHi Yumna,\n\n" + _words(125) + "\n\nBest,\nJimmy",
+    )
+
+    assert [s["type"] for s in drafts.split(within)] == ["draft"]
+    assert [s["type"] for s in drafts.split(over)] == ["prose"]
+
+
+def test_a_thank_you_shares_the_follow_ups_cap():
+    over = _draft_block(
+        "contact=1 channel=email kind=thank_you",
+        "Subject: Thank you\n\nHi Yumna,\n\n" + _words(85) + "\n\nBest,\nJimmy",
+    )
+
+    assert [s["type"] for s in drafts.split(over)] == ["prose"]
+
+
+def test_an_unknown_kind_gets_the_default_cap_not_the_tight_one():
+    """An unknown kind already costs the block its chip; guessing
+    `follow_up` to apply the tighter cap would punish the same mistake
+    twice."""
+    body = "Subject: Hello\n\nHi Yumna,\n\n" + _words(100) + "\n\nBest,\nJimmy"
+
+    segments = drafts.split(_draft_block("contact=1 channel=email", body))
+
+    assert [s["type"] for s in segments] == ["draft"]
+    assert segments[0]["kind"] == ""
+
+
+def test_a_flagged_first_draft_does_not_shift_the_second_drafts_identity():
+    """The stream path pairs cards with these segments BY INDEX. A flagged
+    block must vanish from the draft list entirely, so the next real card
+    still carries its own contact — not the flagged one's."""
+    text = (
+        _draft_block("contact=1 channel=email kind=outreach", "Subject: One\n\nHi [Name],\n\nBest,\nJimmy")
+        + "\nand for Sam:\n"
+        + _draft_block("contact=2 channel=email kind=outreach", "Subject: Two\n\nHi Sam,\n\nBest,\nJimmy")
+    )
+
+    segments = drafts.split(text)
+
+    assert [s["type"] for s in segments] == ["prose", "draft"]
+    assert segments[1]["contact_id"] == 2
+    assert "Hi [Name]," in segments[0]["text"]
+    assert "and for Sam:" in segments[0]["text"]
+
+
+def test_a_flagged_draft_with_prose_after_it_keeps_that_prose():
+    text = (
+        "Before.\n\n"
+        + _draft_block("contact=1 channel=email kind=outreach", "Hi [Name],")
+        + "\n\nAfter."
+    )
+
+    segments = drafts.split(text)
+
+    assert len(segments) == 1
+    assert segments[0]["text"].startswith("Before.")
+    assert segments[0]["text"].endswith("After.")
+
+
+def test_flag_reason_names_the_rule_it_tripped():
+    assert drafts.flag_reason("", "Hi [Firm] team,", "outreach") == drafts.FLAG_PLACEHOLDER
+    assert drafts.flag_reason("Intro [draft]", "Hi Yumna,", "outreach") == drafts.FLAG_PLACEHOLDER
+    assert drafts.flag_reason("", _words(81), "follow_up") == drafts.FLAG_TOO_LONG
+    assert drafts.flag_reason("", _words(80), "follow_up") is None
+    assert drafts.flag_reason("", _words(121), "outreach") == drafts.FLAG_TOO_LONG
+    assert drafts.flag_reason("", _words(120), "outreach") is None
+    assert drafts.flag_reason("Catching up", "Hi Yumna,\n\nGood to see you Tuesday.\n\nBest,\nJimmy", "follow_up") is None
+
+
+def test_a_bracketed_aside_longer_than_a_slot_is_not_a_placeholder():
+    """The regex is for `[Firm]`-sized slots. A parenthetical aside in square
+    brackets that runs a whole sentence is a stylistic choice, not a blank
+    the student was meant to fill in."""
+    aside = "[" + _words(12) + " which is well past the forty characters a slot gets]"
+    assert drafts.flag_reason("", f"Hi Yumna, {aside}", "outreach") is None
+
+
+def test_the_js_mirror_carries_the_same_caps_and_placeholder_rule():
+    """chat.html re-implements the fence parser for the stream path and
+    pairs its cards with `split`'s draft segments by index, so its guard
+    has to agree with this one byte for byte on the two inputs that decide
+    whether a block is a card."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[2] / "templates" / "assistant" / "chat.html").read_text()
+
+    assert drafts._PLACEHOLDER_RE.pattern in source
+    caps = ", ".join(f"{kind}: {cap}" for kind, cap in drafts.WORD_CAPS.items())
+    assert f"DRAFT_WORD_CAPS = {{ {caps} }}" in source
+    assert f"DRAFT_WORD_CAP_DEFAULT = {drafts.DEFAULT_WORD_CAP}" in source

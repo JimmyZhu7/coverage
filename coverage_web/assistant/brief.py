@@ -161,6 +161,11 @@ BRIEF_SYSTEM = (
     "count you could need is already worked out for you and written next to "
     "its date; never compute, estimate or adjust one yourself, and if a "
     "count is not given, do not state one.\n\n"
+    "A deadline marked \"read from the posting, not published\" is "
+    "Coverage's own reading of the posting's text, not a date the firm "
+    "published. If you mention one, keep that qualifier in your own words "
+    "(\"the posting now reads the 30th\"); never call it the firm's "
+    "deadline.\n\n"
     "No hype, no emoji, no exclamation marks."
 )
 
@@ -239,6 +244,14 @@ def _summarize_actions(actions: list[dict], today: _date | None = None) -> str:
     return "\n".join(lines)
 
 
+# The `deadline_source` value (assistant.situation / assistant.tools) that
+# marks a date as Coverage's own reading of a posting, and the words the
+# prompt line carries for it. Words, because a prompt line has no dotted
+# underline to hover — the same answer the weekly digest and the .ics feed
+# already give the same constraint.
+_REPORTED = "reported"
+_REPORTED_NOTE = " (read from the posting, not published)"
+
 # How many situation events (assistant.situation.build_situation) the prompt
 # gets to see. Deliberately small and separate from the CARDS cap (also 3,
 # see crm/today.py's week()) — this is the same number for the same reason:
@@ -275,7 +288,17 @@ def _summarize_situation(events: list[dict], today: _date | None = None) -> str:
             old_date = _as_date(e.get("old_value"))
             old = old_date.isoformat() if old_date else (_fact(e.get("old_value"), 40) or "no prior date")
             new = _dated(e.get("new_value"), today) or "no date"
-            lines.append(f"- {title} at {firm}: deadline moved from {old} to {new}")
+            line = f"- {title} at {firm}: deadline moved from {old} to {new}"
+            # The same provenance rule `agent.SYSTEM_PROMPT` gives the chat
+            # page for a `reported` search result, in the brief's own words.
+            # 354 of the 394 moved-deadline rows in the last 30 days were on
+            # dates Coverage's regex read out of a posting's prose
+            # (`assistant.situation._deadline_source`); a brief that said
+            # "deadline moved" about those was vouching for our own misread
+            # as the firm's decision.
+            if e.get("deadline_source") == _REPORTED:
+                line += _REPORTED_NOTE
+            lines.append(line)
         elif kind == "role_closed":
             lines.append(f"- {title} at {firm}: this posting just closed")
         elif kind == "new_role_at_known_firm":

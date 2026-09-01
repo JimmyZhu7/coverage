@@ -1428,3 +1428,202 @@ def test_a_streamed_empty_reply_is_one_terminal_failed_notice(user, conversation
     assert events[0]["kind"] == "failed"
     # No "done" frame at all — there is nothing whole to finalise.
     assert not any(e["type"] == "done" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# The per-user preamble tells the advisor what the student STATED.
+#
+# Measured on the founder's account 2026-09-01 with only name / school /
+# class / regions / tracks in it: 405 board roles were visa-blocked for him
+# and the advisor could not know he needed sponsorship; all four digest picks
+# were the wrong intake and it could not know which cycle he was in; 44
+# follow-ups were due and it could not say that was his own 7-business-day
+# window. Every clause below reads a stated column, and the cached system
+# prefix stays byte-stable because none of it goes there.
+# ---------------------------------------------------------------------------
+def _founder_like(**overrides):
+    fields = dict(
+        email="founder@example.com", password="x", name="Jimmy", school="USC",
+        class_year=2029, regions=["hk", "us"], tracks=["ib", "st"],
+        target_cycles=["2028 Summer Internship"], timezone="Asia/Hong_Kong",
+        work_authorization={
+            "us": "sponsorship", "hk": "sponsorship", "eu": "sponsorship",
+            "sg": "sponsorship", "jp": "sponsorship", "cn": "citizen",
+        },
+        cadence_params={
+            "followup_after_business_days": 7,
+            "advocate_touch_min_weeks": 3,
+            "chatted_touch_min_weeks": 6,
+        },
+        weekly_touch_goal=14,
+    )
+    fields.update(overrides)
+    return User.objects.create_user(**fields)
+
+
+def test_the_preamble_names_markets_and_tracks_in_words_not_codes():
+    preamble = agent.build_preamble(_founder_like())
+
+    assert "Recruiting in: Hong Kong, United States" in preamble
+    assert "Tracks of interest: Investment Banking, Sales & Trading" in preamble
+    assert "hk, us" not in preamble
+    assert "ib, st" not in preamble
+
+
+def test_the_preamble_states_work_authorization_per_market_in_words():
+    preamble = agent.build_preamble(_founder_like())
+
+    assert (
+        "Work authorization: needs visa sponsorship in Hong Kong, United States, "
+        "Singapore, Europe, Japan; no sponsorship needed in Mainland China."
+    ) in preamble
+
+
+def test_the_preamble_names_the_markets_work_authorization_was_not_answered_for():
+    preamble = agent.build_preamble(
+        _founder_like(work_authorization={"us": "sponsorship", "hk": "citizen"})
+    )
+
+    assert "needs visa sponsorship in United States" in preamble
+    assert "no sponsorship needed in Hong Kong" in preamble
+    assert "not stated for Singapore, Europe, Mainland China, Japan" in preamble
+
+
+def test_a_student_with_no_work_authorization_answers_gets_no_clause():
+    preamble = agent.build_preamble(_founder_like(work_authorization={}))
+
+    assert "Work authorization" not in preamble
+
+
+def test_the_preamble_states_the_target_cycle_and_the_timezone_name():
+    preamble = agent.build_preamble(_founder_like())
+
+    assert "Recruiting for: 2028 Summer Internship" in preamble
+    assert "Timezone: Asia/Hong_Kong" in preamble
+
+
+def test_an_unset_timezone_is_named_as_utc_not_guessed_from_regions():
+    preamble = agent.build_preamble(_founder_like(timezone=""))
+
+    assert "Timezone: not set, so Coverage uses UTC" in preamble
+
+
+def test_the_preamble_carries_the_students_own_cadence_settings_and_marks_overrides():
+    preamble = agent.build_preamble(_founder_like())
+
+    assert "first follow-up: 7 business days (their own setting; the default is 6)" in preamble
+    assert "advocate check-in: 3 weeks (their own setting; the default is 4)" in preamble
+    assert "keep-warm check-in: 6 weeks (their own setting; the default is 3)" in preamble
+    assert "weekly touch goal: 14 touches (their own setting; the default is 10)" in preamble
+    assert "advocate target: 2 per firm" in preamble
+
+
+def test_default_cadence_reads_as_the_default_not_as_a_choice():
+    preamble = agent.build_preamble(_founder_like(cadence_params={}, weekly_touch_goal=None))
+
+    assert "first follow-up: 6 business days" in preamble
+    assert "their own setting" not in preamble
+    assert "weekly touch goal: 10 touches (the default)" in preamble
+
+
+def test_the_preamble_reads_fields_that_may_not_exist_yet_only_when_present():
+    """`languages`, `study_level`, `affiliations` are being added to User
+    alongside this. Absent (or empty) they print nothing; present they print
+    as stated — read with getattr, never assumed."""
+    user = _founder_like()
+    before = agent.build_preamble(user)
+    assert "Languages:" not in before
+    assert "Study level:" not in before
+    assert "Affiliations:" not in before
+
+    user.languages = ["English", "Mandarin"]
+    user.study_level = "undergrad"
+    user.affiliations = ["USC Investment Club", "Trojan Finance Society"]
+    after = agent.build_preamble(user)
+
+    assert "Languages: English, Mandarin" in after
+    assert "Study level: undergrad" in after
+    assert "Affiliations: USC Investment Club, Trojan Finance Society" in after
+
+
+def test_an_empty_profile_still_gets_the_cadence_and_timezone_facts():
+    """The old "they have not filled in their profile" sentence survives for
+    a blank account, but the settings that exist regardless of the profile
+    (cadence defaults, timezone) are still stated."""
+    blank = User.objects.create_user(email="blank@example.com", password="x")
+
+    preamble = agent.build_preamble(blank)
+
+    assert "have not filled in their profile yet" in preamble
+    assert "Timezone: not set, so Coverage uses UTC" in preamble
+    assert "Cadence settings" in preamble
+
+
+def test_none_of_the_new_per_user_facts_reach_the_cached_system_prefix():
+    """The byte-stability rule: everything above rides the first user turn,
+    never the system blocks. Checked on the wire, not on the function."""
+    user = _founder_like()
+    conversation = ChatConversation(user=user)
+    conversation.save()
+    client = FakeClient([_response([_text("ok")], "end_turn")])
+
+    agent.run_turn(user, conversation, "hi", client=client)
+
+    request = client.requests[0]
+    system_blob = json.dumps(request["system"])
+    preamble = request["messages"][0]["content"][0]["text"]
+    for fact in (
+        "needs visa sponsorship in Hong Kong", "Asia/Hong_Kong",
+        "2028 Summer Internship", "7 business days",
+    ):
+        assert fact not in system_blob
+        assert fact in preamble
+
+
+# ---------------------------------------------------------------------------
+# The drafting rules: one specific hook, short, no placeholders, no tells,
+# and honesty on a batch.
+# ---------------------------------------------------------------------------
+def test_the_prompt_replaces_the_one_sentence_template_rule_with_a_rule_block():
+    prompt = agent.SYSTEM_PROMPT
+
+    assert "not a generic template" not in prompt
+    assert "DRAFTING RULES" in prompt
+    # One specific thing from a tool result, named in prose before the block.
+    assert "Opens on ONE specific thing that came back from a tool result" in prompt
+    assert "say in prose which one you used" in prompt
+    # Not resending what already went.
+    assert "my_opener" in prompt
+    assert "recent_subjects" in prompt
+    # The caps.
+    assert "under 120 words" in prompt
+    assert "under 80" in prompt
+    # No placeholders.
+    assert "[Firm]" in prompt
+    assert "{name}" in prompt
+    # The banned phrases.
+    for phrase in ("pick your brain", "learn more about your journey",
+                   "would love to connect", "cut my teeth"):
+        assert phrase in prompt
+    # And the page's own enforcement is disclosed to the model.
+    assert "shown as plain text with no card" in prompt
+
+
+def test_the_prompt_caps_a_batch_at_five_and_asks_for_honesty_past_it():
+    prompt = agent.SYSTEM_PROMPT
+
+    assert "up to five people" in prompt
+    assert "opens on a different specific observation" in prompt
+    assert "these three have nothing in their history to hook on" in prompt
+    assert "name who is left for the next message" in prompt
+
+
+def test_the_prompts_own_example_draft_passes_the_pages_template_guard():
+    """The example the model copies must itself clear `drafts.flag_reason`,
+    or the page would demote the very thing the prompt teaches."""
+    from assistant import drafts
+
+    drafted = [s for s in drafts.split(agent.SYSTEM_PROMPT) if s["type"] == "draft"]
+
+    assert len(drafted) == 1
+    assert drafts.flag_reason(drafted[0]["subject"], drafted[0]["body"], drafted[0]["kind"]) is None

@@ -724,3 +724,57 @@ def test_the_prompt_forbids_the_model_computing_a_day_count_of_its_own():
     request = client.messages.requests[0]
     assert "never compute" in request["system"].lower()
     assert "do not compute" in request["messages"][0]["content"].lower()
+
+
+# ---------------------------------------------------------------------------
+# A moved deadline the brief reads has a provenance, and the prompt line
+# carries it in words — a prompt has no dotted underline to hover.
+#
+# 354 of the 394 moved-deadline rows in the last 30 days were on dates
+# Coverage's own regex read out of a posting's prose; the brief was writing
+# "deadline moved" about them as if the firm had decided something.
+# ---------------------------------------------------------------------------
+def test_a_moved_deadline_read_from_the_posting_says_so_in_the_prompt():
+    user = _user()
+    client = FakeClient(_response("The posting now reads the 15th."))
+    event = _deadline_event()
+    event["deadline_source"] = "reported"
+
+    brief.get_or_build(user, [], [event], client=client)
+
+    prompt = _prompt_of(client)
+    assert "deadline moved from 2026-08-01 to 2026-08-15" in prompt
+    assert "(read from the posting, not published)" in prompt
+
+
+def test_a_moved_deadline_the_board_published_carries_no_qualifier():
+    user = _user()
+    client = FakeClient(_response("Watch that deadline."))
+    event = _deadline_event()
+    event["deadline_source"] = "stated"
+
+    brief.get_or_build(user, [], [event], client=client)
+
+    assert "read from the posting" not in _prompt_of(client)
+
+
+def test_an_event_from_an_older_caller_with_no_provenance_key_is_left_alone():
+    """Callers built before the key existed keep the old line — a missing
+    key is not a `reported` one, and the brief claims nothing either way."""
+    user = _user()
+    client = FakeClient(_response("Watch that deadline."))
+
+    brief.get_or_build(user, [], [_deadline_event()], client=client)
+
+    assert "read from the posting" not in _prompt_of(client)
+
+
+def test_the_brief_system_prompt_carries_the_provenance_rule():
+    user = _user()
+    client = FakeClient(_response("ok"))
+
+    brief.get_or_build(user, [_action()], client=client)
+
+    system = client.messages.requests[0]["system"]
+    assert "read from the posting, not published" in system
+    assert "not a date the firm published" in system

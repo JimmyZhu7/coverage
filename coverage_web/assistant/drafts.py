@@ -57,6 +57,56 @@ _ATTR_RE = re.compile(r"([A-Za-z_]+)=([\w.-]+)")
 
 _SUBJECT_RE = re.compile(r"^Subject:[ \t]*(.*)$")
 
+# ---------------------------------------------------------------------------
+# The template guard. A card promises "paste this and send it", and the two
+# things that make that promise false are cheap to see without a model: a
+# placeholder the student was supposed to fill in (`[Firm]`, `{name}`,
+# `[Your Name]`) and a body long enough that nobody at a bank reads past
+# the first screen of it. `agent.SYSTEM_PROMPT` states both rules to the
+# model; this is the page keeping them when the model does not. A block
+# that trips either is rendered as ordinary prose — every word still
+# visible, nothing to copy with one click.
+#
+# The caps are the prompt's own numbers, keyed on the fence's `kind`. A kind
+# the info string did not name (or named wrongly) gets the looser cap: an
+# unknown kind already costs the block its chip, and guessing "follow_up"
+# to apply the tighter cap would punish the same mistake twice.
+# ---------------------------------------------------------------------------
+WORD_CAPS = {"outreach": 120, "follow_up": 80, "thank_you": 80}
+DEFAULT_WORD_CAP = 120
+
+# `[anything]` or `{anything}` on one line, up to 40 chars, no nesting. Long
+# enough for "[hiring manager's name]", short enough that a bracketed aside
+# spanning a sentence is not mistaken for a slot.
+_PLACEHOLDER_RE = re.compile(r"\[[^\[\]\n]{1,40}\]|\{[^{}\n]{1,40}\}")
+
+FLAG_PLACEHOLDER = "placeholder"
+FLAG_TOO_LONG = "too_long"
+
+
+def flag_reason(subject: str, body: str, kind: str) -> str | None:
+    """Why this draft may not be a card — `FLAG_PLACEHOLDER`,
+    `FLAG_TOO_LONG` — or None when it is fine. `kind` is the parsed fence
+    kind ("" when the fence did not name one). Kept as its own function so
+    the JS mirror in chat.html and the tests can pin the same rule."""
+    if _PLACEHOLDER_RE.search(f"{subject}\n{body}"):
+        return FLAG_PLACEHOLDER
+    if len(body.split()) > WORD_CAPS.get(kind, DEFAULT_WORD_CAP):
+        return FLAG_TOO_LONG
+    return None
+
+
+def _as_prose(subject: str, body: str) -> str:
+    """A flagged draft as the plain text the prose run absorbs: the Subject
+    line and the body, fence markers dropped. The student still reads every
+    word the model wrote — they just do not get a Copy button for it."""
+    lines = []
+    if subject:
+        lines.append(f"Subject: {subject}")
+    if body:
+        lines.append(body)
+    return "\n\n" + "\n\n".join(lines) + "\n\n"
+
 
 def _parse_info(info: str) -> dict:
     attrs = dict(_ATTR_RE.findall(info or ""))
@@ -115,23 +165,43 @@ def split(text: str) -> list[dict]:
 
     A message with no fence in it comes back as exactly one prose segment, so
     the caller never needs a separate "did this have a draft" branch.
+
+    A fence that trips `flag_reason` (a bracketed placeholder, a body over
+    its word cap) is not a draft either: its Subject and body join the
+    surrounding prose with the fence markers dropped, so the student reads
+    what was written and gets no card to copy a template from. Whole
+    segments, not a flag on a card, because the stream path's JS mirror
+    (chat.html) pairs its cards with this function's draft segments by
+    index — a card that exists on one side and not the other would hang the
+    next card's log-touch chip on the wrong person.
     """
     segments: list[dict] = []
     cursor = 0
+    # Prose that flagged fences have already handed back, waiting to be
+    # joined with whatever plain text follows them.
+    carry = ""
     for match in _FENCE_RE.finditer(text or ""):
         parsed = _parse_body(match.group("body"))
         if parsed is None:
             # An empty fence is not a draft. Leaving it inside the prose run
             # means the student still sees whatever the model actually wrote.
             continue
-        before = (text[cursor : match.start()]).strip("\n")
+        subject, body = parsed
+        info = _parse_info(match.group("info"))
+        if flag_reason(subject, body, info["kind"]):
+            carry += text[cursor : match.start()] + _as_prose(subject, body)
+            cursor = match.end()
+            continue
+        before = (carry + text[cursor : match.start()]).strip("\n")
+        carry = ""
         if before:
             segments.append({"type": "prose", "text": before})
-        subject, body = parsed
-        segments.append({"type": "draft", "subject": subject, "body": body, **_parse_info(match.group("info"))})
+        segments.append({"type": "draft", "subject": subject, "body": body, **info})
         cursor = match.end()
 
-    rest = (text or "")[cursor:].strip("\n") if segments else (text or "")
+    rest = carry + (text or "")[cursor:]
+    if segments or carry:
+        rest = rest.strip("\n")
     if rest or not segments:
         segments.append({"type": "prose", "text": rest})
     return segments

@@ -1384,8 +1384,31 @@ element by the next turn.
       var DRAFT_OPEN_RE = /^```draft[ \t]*([^\n]*)$/;
       var DRAFT_CLOSE_RE = /^```[ \t]*$/;
       var SUBJECT_RE = /^Subject:[ \t]*(.*)$/;
+      // The template guard, mirrored from assistant/drafts.py (`flag_reason`,
+      // `WORD_CAPS`, `_PLACEHOLDER_RE`): a bracketed placeholder or a body
+      // over its kind's word cap means no card, and the Subject + body go
+      // back into the prose with the fence markers dropped. Mirrored here
+      // for the reason the parser is: the server pairs its draft segments
+      // with these cards BY INDEX (renderTurnBody's `meta[drafted]`), so a
+      // block the server demotes and this side cards would hang the next
+      // card's log-touch chip on the wrong person. Only a CLOSED fence is
+      // judged; one still streaming keeps its card until its last line.
+      var DRAFT_KIND_RE = /(?:^|[ \t])kind=([\w.-]+)/;
+      var DRAFT_PLACEHOLDER_RE = /\[[^\[\]\n]{1,40}\]|\{[^{}\n]{1,40}\}/;
+      var DRAFT_WORD_CAPS = { outreach: 120, follow_up: 80, thank_you: 80 };
+      var DRAFT_WORD_CAP_DEFAULT = 120;
 
-      function draftFromLines(lines, open) {
+      function draftFlagged(subject, body, info) {
+        if (DRAFT_PLACEHOLDER_RE.test(subject + "\n" + body)) return true;
+        var kind = DRAFT_KIND_RE.exec(info || "");
+        var cap = kind && Object.prototype.hasOwnProperty.call(DRAFT_WORD_CAPS, kind[1])
+          ? DRAFT_WORD_CAPS[kind[1]] : DRAFT_WORD_CAP_DEFAULT;
+        var trimmed = body.trim();
+        var words = trimmed ? trimmed.split(/\s+/).length : 0;
+        return words > cap;
+      }
+
+      function draftFromLines(lines, open, info) {
         var subject = "";
         var match = lines.length ? SUBJECT_RE.exec(lines[0].trim()) : null;
         if (match) {
@@ -1395,6 +1418,9 @@ element by the next turn.
         }
         var body = lines.join("\n").replace(/^\n+|\n+$/g, "");
         if (!body && !subject) return null;
+        if (!open && draftFlagged(subject, body, info)) {
+          return { type: "flagged", subject: subject, body: body };
+        }
         return { type: "draft", subject: subject, body: body, open: !!open };
       }
 
@@ -1404,24 +1430,35 @@ element by the next turn.
         var prose = [];
         var draft = null;
         var raw = null; // the fence's own lines, verbatim, for the fail-soft path
+        var info = null; // the opening fence's info string, for the word cap's `kind`
         function flushProse(force) {
           var joined = prose.join("\n").replace(/^\n+|\n+$/g, "");
           if (joined || force) segments.push({ type: "prose", text: joined });
           prose = [];
         }
         function closeDraft(open, closer) {
-          var parsed = draftFromLines(draft, open);
-          if (parsed) { flushProse(false); segments.push(parsed); }
+          var parsed = draftFromLines(draft, open, info);
+          if (parsed && parsed.type === "flagged") {
+            // Same text drafts.py's `_as_prose` hands back: Subject line and
+            // body, no fence markers, absorbed by the surrounding prose.
+            prose.push("");
+            if (parsed.subject) { prose.push("Subject: " + parsed.subject); prose.push(""); }
+            if (parsed.body) prose = prose.concat(parsed.body.split("\n"));
+            prose.push("");
+          }
+          else if (parsed) { flushProse(false); segments.push(parsed); }
           // An empty fence is not a draft: put its literal lines back into
           // the prose run so nothing the model wrote disappears.
           else { prose = prose.concat(raw); if (closer) prose.push(closer); }
           draft = null;
           raw = null;
+          info = null;
         }
         for (var i = 0; i < lines.length; i++) {
           var line = lines[i];
           if (draft === null) {
-            if (DRAFT_OPEN_RE.test(line)) { draft = []; raw = [line]; continue; }
+            var opened = DRAFT_OPEN_RE.exec(line);
+            if (opened) { draft = []; raw = [line]; info = opened[1]; continue; }
             prose.push(line);
           } else if (DRAFT_CLOSE_RE.test(line)) {
             closeDraft(false, line);

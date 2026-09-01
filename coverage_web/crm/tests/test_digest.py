@@ -367,3 +367,290 @@ def test_the_digest_prefers_contacts_that_are_actually_sendable_today():
     )
     if paced:
         assert shown.index(paced[0]) >= len(unpaced)
+
+
+# ---------------------------------------------------------------------------
+# The line the digest leads with: advocates in place, firms with nobody.
+#
+# Computed through `crm.coverage.rank_gaps` from the same counts the Network
+# board's Coverage Gaps strip ranks, so the firms named are the ones that
+# strip would put first: tier 1 before tier 2, more open roles before fewer,
+# then name.
+# ---------------------------------------------------------------------------
+def _digest_with_something_due(user):
+    urgent_firm = _firm(name="Urgent Bank", slug="urgent-bank")
+    urgent = _opp(urgent_firm, n=99, days=2)
+    UserOpportunity.all_objects.create(user=user, opportunity=urgent, applied_status="saved")
+
+
+def test_the_digest_leads_with_advocates_and_zero_contact_firms():
+    user = _user()
+    alpha = _firm("Alpha Bank", "alpha")
+    beta = _firm("Beta Bank", "beta")
+    gamma = _firm("Gamma Bank", "gamma")
+    delta = _firm("Delta Bank", "delta")
+    for firm, tier in ((alpha, 1), (beta, 1), (gamma, 2), (delta, 1)):
+        UserFirm.all_objects.create(user=user, firm=firm, tier=tier)
+    # Two open roles at Beta: among equally-exposed tier-1 firms with nobody,
+    # the strip ranks the one with more seats first.
+    _opp(beta, n=1)
+    _opp(beta, n=2)
+    Contact.all_objects.create(user=user, name="Ada Advocate", firm=delta, warmth="advocate")
+    Contact.all_objects.create(user=user, name="Cold Call", firm=delta, warmth="cold")
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert digest["coverage"] == {
+        "advocates": 1,
+        "advocates_elsewhere": 0,
+        "firms": 4,
+        "no_contact": 3,
+        "named": ["Beta Bank", "Alpha Bank", "Gamma Bank"],
+        "line": ("1 advocate across 4 target firms · 3 firms with no contact "
+                 "yet: Beta Bank, Alpha Bank and Gamma Bank"),
+    }
+
+
+def test_advocates_outside_the_target_firms_are_counted_aside_not_as_zero():
+    """The founder's own case: both advocates carry `firm_text="usc"` and no
+    linked firm, so the target-firm count is honestly 0 — and a student who
+    knows they have two advocates reads a bare "0 advocates" as a bug."""
+    user = _user()
+    UserFirm.all_objects.create(user=user, firm=_firm(), tier=1)
+    Contact.all_objects.create(user=user, name="Yumna", firm_text="usc", warmth="advocate")
+    Contact.all_objects.create(user=user, name="Jeffrey", firm_text="usc", warmth="advocate")
+    _digest_with_something_due(user)
+
+    coverage = assemble_digest(user, today=TODAY)["coverage"]
+
+    assert coverage["advocates"] == 0
+    assert coverage["advocates_elsewhere"] == 2
+    assert coverage["line"].startswith("0 advocates across 1 target firm (2 elsewhere) · ")
+
+
+def test_more_than_three_zero_contact_firms_are_counted_and_the_worst_three_named():
+    user = _user()
+    for i in range(5):
+        UserFirm.all_objects.create(
+            user=user, firm=_firm(f"Bank {i}", f"bank-{i}"), tier=1)
+    _digest_with_something_due(user)
+
+    coverage = assemble_digest(user, today=TODAY)["coverage"]
+
+    assert coverage["no_contact"] == 5
+    assert coverage["named"] == ["Bank 0", "Bank 1", "Bank 2"]
+    assert coverage["line"] == (
+        "0 advocates across 5 target firms · 5 firms with no contact yet, "
+        "starting with Bank 0, Bank 1 and Bank 2"
+    )
+
+
+def test_a_tier_one_firm_with_nobody_is_named_before_a_tier_two_one():
+    user = _user()
+    UserFirm.all_objects.create(user=user, firm=_firm("Second Tier", "second"), tier=2)
+    UserFirm.all_objects.create(user=user, firm=_firm("Top Tier", "top"), tier=1)
+    _digest_with_something_due(user)
+
+    assert assemble_digest(user, today=TODAY)["coverage"]["named"] == ["Top Tier", "Second Tier"]
+
+
+def test_a_fully_covered_portfolio_says_so_instead_of_counting_zero():
+    user = _user()
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    Contact.all_objects.create(user=user, name="Someone", firm=firm, warmth="cold")
+    _digest_with_something_due(user)
+
+    line = assemble_digest(user, today=TODAY)["coverage"]["line"]
+
+    assert line == "0 advocates across 1 target firm · a contact at every one"
+
+
+def test_a_student_with_no_tiered_firms_gets_no_coverage_line():
+    user = _user()
+    _digest_with_something_due(user)
+
+    assert assemble_digest(user, today=TODAY)["coverage"] == {}
+
+
+def test_an_archived_contact_does_not_cover_a_firm():
+    user = _user()
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    Contact.all_objects.create(user=user, name="Gone", firm=firm, warmth="advocate", archived=True)
+    _digest_with_something_due(user)
+
+    coverage = assemble_digest(user, today=TODAY)["coverage"]
+
+    assert coverage["advocates"] == 0
+    assert coverage["named"] == ["Evercore"]
+
+
+# ---------------------------------------------------------------------------
+# "New for you" says when every pick is for a cycle the student is NOT in.
+#
+# The founder's four picks all carried a "2027 intake" chip whose tooltip
+# said "not a fit", printed in the digest as if it were a reason to apply. The
+# note is derived from each pick's own bucket + intake year against
+# `User.target_cycles`, never from the chip text another surface owns.
+# ---------------------------------------------------------------------------
+def _pick_opp(firm, *, cohort, n=1, days=None, confidence=0.0):
+    return Opportunity.objects.create(
+        firm=firm, url=f"https://x/{firm.slug}/pick-{n}", title=f"Summer Analyst {n}",
+        bucket="internship", status="open", cohort=cohort, confidence=confidence,
+        deadline=None if days is None else TODAY + timedelta(days=days),
+    )
+
+
+def test_picks_all_a_year_early_get_one_honest_line_about_the_cycle():
+    user = _user(target_cycles=["2028 Summer Internship"])
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2027")
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert digest["picks"], "fixture should have produced a pick"
+    assert digest["picks_note"] == (
+        "Nothing yet for your 2028 Summer Internship cycle; these are a year early"
+    )
+
+
+def test_a_pick_for_the_declared_cycle_silences_the_note():
+    user = _user(target_cycles=["2028 Summer Internship"])
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2028", n=1)
+    _pick_opp(firm, cohort="2027", n=2)
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert len(digest["picks"]) == 2
+    assert digest["picks_note"] == ""
+
+
+def test_a_pick_with_no_intake_year_gets_the_bare_sentence():
+    """Nothing about its timing is known, so nothing about its timing is
+    claimed — not "a year early", not "other intakes"."""
+    user = _user(target_cycles=["2028 Summer Internship"])
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="")
+    _digest_with_something_due(user)
+
+    assert assemble_digest(user, today=TODAY)["picks_note"] == (
+        "Nothing yet for your 2028 Summer Internship cycle"
+    )
+
+
+def test_picks_from_intakes_further_back_are_called_earlier_not_a_year_early():
+    user = _user(target_cycles=["2028 Summer Internship"])
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2026")
+    _digest_with_something_due(user)
+
+    assert assemble_digest(user, today=TODAY)["picks_note"].endswith("; these are earlier intakes")
+
+
+def test_an_insight_week_beside_a_year_early_internship_is_not_called_early():
+    """The founder's live picks: three 2027 summer internships and one 2027
+    insight programme against a 2028 Summer Internship cycle. The insight
+    week is a different programme, not an early one, so the suffix names the
+    roles it is actually about."""
+    user = _user(target_cycles=["2028 Summer Internship"])
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2027", n=1)
+    Opportunity.objects.create(
+        firm=firm, url=f"https://x/{firm.slug}/insight", title="Discover Programme",
+        bucket="insight", status="open", cohort="2027",
+    )
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert len(digest["picks"]) == 2
+    assert digest["picks_note"] == (
+        "Nothing yet for your 2028 Summer Internship cycle; "
+        "the summer internship roles here are a year early"
+    )
+
+
+def test_picks_in_a_bucket_the_student_did_not_declare_get_the_bare_sentence():
+    user = _user(target_cycles=["2028 Summer Internship"])
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    Opportunity.objects.create(
+        firm=firm, url=f"https://x/{firm.slug}/insight", title="Discover Programme",
+        bucket="insight", status="open", cohort="2027",
+    )
+    _digest_with_something_due(user)
+
+    assert assemble_digest(user, today=TODAY)["picks_note"] == (
+        "Nothing yet for your 2028 Summer Internship cycle"
+    )
+
+
+def test_a_student_with_no_declared_cycle_gets_no_note():
+    user = _user()
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2027")
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert digest["picks"]
+    assert digest["picks_note"] == ""
+
+
+# ---------------------------------------------------------------------------
+# A pick's deadline travels with its provenance or not at all.
+# ---------------------------------------------------------------------------
+def _only_pick(user):
+    picks = assemble_digest(user, today=TODAY)["picks"]
+    assert len(picks) == 1, picks
+    return picks[0]
+
+
+def test_a_picks_prose_read_deadline_is_marked_reported():
+    user = _user()
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2028", days=12, confidence=0.6)
+    _digest_with_something_due(user)
+
+    pick = _only_pick(user)
+
+    assert pick["deadline_marker"]["countdown"] == "closes in 12 days"
+    assert pick["reported"]["label"] == "reported"
+
+
+def test_a_picks_board_published_deadline_carries_no_marker():
+    user = _user()
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2028", days=12, confidence=1.0)
+    _digest_with_something_due(user)
+
+    pick = _only_pick(user)
+
+    assert pick["deadline_marker"]["countdown"] == "closes in 12 days"
+    assert pick["reported"] is None
+
+
+def test_an_undated_pick_prints_no_date():
+    user = _user()
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2028")
+    _digest_with_something_due(user)
+
+    pick = _only_pick(user)
+
+    assert pick["deadline_marker"]["posted"] is False
+    assert pick["reported"] is None

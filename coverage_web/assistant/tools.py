@@ -95,7 +95,7 @@ from crm.models import CalendarEvent, Contact, Touch, UserFirm
 from crm.today import TUNABLE_CADENCE_PARAMS, _build_actions
 from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS, _calendar_days_ago
 from crm.views import _display_note
-from directory.classify import TARGET_BUCKETS
+from directory.classify import TARGET_BUCKETS, TRACKED_REGIONS
 from directory.deadlines import is_posting_closed
 from directory.models import Firm, FirmDate, Opportunity
 from directory.recommend import cycle_choices
@@ -117,11 +117,16 @@ MAX_STR = 300
 DEFAULT_ROWS = 10
 MAX_ROWS = 25
 
-# The two deadline markets a posting search can filter by — the us/hk subset
-# of Contact.REGION_CHOICES. That vocabulary also carries "other" (a person
-# known to sit outside both markets), but "other" is a place a person can be,
-# not a market postings are filed under, so it stays out of this enum.
-REGIONS = ("us", "hk")
+# The markets a posting search can filter by: the SAME six a student can
+# name in Settings (`directory.classify.TRACKED_REGIONS`, which is also what
+# `accounts.forms.REGION_CHOICES` is built from). This was hardcoded to
+# `("us", "hk")` until 2026-09-01, while the board held 910 open campus rows
+# in eu, 250 in sg, 48 in cn and 40 in jp — a student who had set Europe as
+# a target market could not ask the advisor about it, and the advisor could
+# not ask the board. `_apply_region_filter` already handles every code here.
+# Not `REGION_ORDER`: "other"/"global" are places a role can BE, never a
+# market a student targets, and the enum is the student's vocabulary.
+REGIONS = tuple(TRACKED_REGIONS)
 
 # How many contacts one `set_contact_status` call may move. Same number and
 # same reasoning as MAX_ROWS above: a batch bigger than a screenful is one
@@ -353,8 +358,12 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "get_contact",
         "description": (
             "One person in full: warmth, thread state, firm and the student's "
-            "tier for it, plus their last 8 logged interactions with dates and "
-            "notes. Use before advising on a specific relationship."
+            "tier for it, their last 8 logged interactions with dates and "
+            "notes, the first line the student already wrote to them "
+            "(`my_opener`) and the subjects of the last emails sent "
+            "(`recent_subjects`). Use before advising on a specific "
+            "relationship, and always before drafting to them — a draft must "
+            "not resend the opener or the subject they have already used."
         ),
         "strict": True,
         "input_schema": _schema(
@@ -379,7 +388,11 @@ TOOL_SCHEMAS: list[dict] = [
                 "region": {
                     "type": "string",
                     "enum": list(REGIONS),
-                    "description": "us or hk. Omit for every market.",
+                    "description": (
+                        "One market: " + ", ".join(REGIONS) + " (hk Hong Kong, us "
+                        "United States, sg Singapore, eu Europe, cn Mainland "
+                        "China, jp Japan). Omit for every market."
+                    ),
                 },
                 "query": {"type": "string", "description": "Free text over title, firm, location."},
                 "firm": {"type": "string", "description": "Firm name or slug."},
@@ -401,7 +414,16 @@ TOOL_SCHEMAS: list[dict] = [
         ),
         "strict": True,
         "input_schema": _schema(
-            {"name_or_slug": {"type": "string", "description": "e.g. 'Goldman Sachs' or 'goldman-sachs'."}},
+            {
+                "name_or_slug": {
+                    "type": "string",
+                    "description": (
+                        "The firm's name as the student says it, e.g. 'Goldman "
+                        "Sachs' or 'Morgan Stanley'. A slug from an earlier "
+                        "result (e.g. 'gs') works too, but never guess one."
+                    ),
+                }
+            },
             ["name_or_slug"],
         ),
     },
@@ -446,7 +468,13 @@ TOOL_SCHEMAS: list[dict] = [
             "or a fresh posting at a firm where they have a contact or a "
             "target tier. Use this for 'what's new', 'anything changed', "
             "'did a deadline move' — it has memory of what a posting used "
-            "to say, which a fresh search_opportunities call does not."
+            "to say, which a fresh search_opportunities call does not. A "
+            "moved deadline carries `deadline_source` exactly as "
+            "search_opportunities does: `reported` means the new date is "
+            "Coverage's own reading of the posting's text and the 'move' "
+            "may be our regex reading a re-scraped page differently, not "
+            "the firm changing anything; `stated` means the board published "
+            "it as a field. Most are `reported`."
         ),
         "strict": True,
         "input_schema": _schema({}),
@@ -849,6 +877,19 @@ def _get_contact(user, args) -> dict:
         tier = uf.tier if uf else None
 
     touches = list(Touch.objects.for_user(user).filter(contact_id=contact.id)[:8])
+    # What has ALREADY gone to this person, so a draft never sends it twice.
+    # `Touch.subject` is stamped by the Gmail capture path (blank on a
+    # hand-logged chat, which is honest), newest first by the model's own
+    # ordering; a separate small query rather than a slice of `touches`
+    # because the last three SUBJECTS can sit further back than the last
+    # eight interactions once coffee chats and LinkedIn notes interleave.
+    recent_subjects = [
+        _s(subject, 120)
+        for subject in Touch.objects.for_user(user)
+        .filter(contact_id=contact.id)
+        .exclude(subject="")
+        .values_list("subject", flat=True)[:3]
+    ]
     history = [
         {
             "date": _iso(timezone.localtime(t.ts).date()),
@@ -880,6 +921,16 @@ def _get_contact(user, args) -> dict:
         # this tool generates or writes it.
         "advisor_summary": _s(contact.ai_summary),
         "advisor_summary_written": _iso(contact.ai_summary_generated_at),
+        # THE STUDENT'S OWN WORDS TO THIS PERSON. `Contact.opener` is the
+        # first line they wrote (or the CRM's compose link carried) for an
+        # outbound email — set on 55 of the founder's contacts — and
+        # `recent_subjects` are the Subject lines of what actually went out.
+        # Both exist here for one reason: a draft that reopens with the same
+        # line, or re-uses a subject already in this person's inbox, is the
+        # template failure the drafting rules in `agent.SYSTEM_PROMPT` ban,
+        # and the model cannot avoid resending what it was never shown.
+        "my_opener": _s(contact.opener),
+        "recent_subjects": recent_subjects,
         "recent_interactions": history,
     }
 
@@ -966,6 +1017,14 @@ def _get_firm(user, args) -> dict:
         .order_by("name")
         .first()
     )
+    if firm is None and "-" in needle:
+        # The model's instinct for a slug is the name with hyphens — this
+        # tool's own schema used to suggest 'goldman-sachs' as an example,
+        # and the real slug is `gs`. A hyphenated guess is still the firm's
+        # name with the spaces swapped, so match it as one before refusing.
+        spaced = " ".join(part for part in needle.split("-") if part)
+        if spaced:
+            firm = Firm.objects.filter(name__icontains=spaced).order_by("name").first()
     if firm is None:
         raise ToolError(f"No firm on Coverage's board matches {needle!r}.")
 
@@ -1174,6 +1233,14 @@ def _get_situation(user, _args) -> dict:
         if row["kind"] == "deadline_moved":
             row["old_deadline"] = e.get("old_value") or None
             row["new_deadline"] = e.get("new_value") or None
+            # Same key, same three values as every other dated row this
+            # module returns (`_deadline_source`): the situation module
+            # computes it on the row's current deadline and this forwards
+            # it. Until 2026-09-01 the event arrived with old/new and
+            # nothing else, and 354 of 394 recent moves were on prose-read
+            # dates — the advisor was reporting our own regex's rereads as
+            # firms changing their deadlines.
+            row["deadline_source"] = e.get("deadline_source")
         elif row["kind"] == "new_role_at_known_firm":
             row["location"] = _s(e.get("location"), 120)
         events.append(row)

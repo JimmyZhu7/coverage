@@ -48,6 +48,14 @@ inside the hour is the same 0.1x either way — a net win on both latency and
 spend for a mostly-idle-between-bursts pattern, which is the only pattern
 that exists right now.
 
+EDITING `SYSTEM_PROMPT` INVALIDATES THE CACHE ONCE. Every cached prefix is
+keyed on the exact bytes, so the first request after a deploy that changed
+the prompt pays one full cache write (2x base input tokens for the ~5k
+prefix) and every request inside the hour after it reads at 0.1x again.
+That is a one-time cost per edit — cents — and never a reason to leave a
+rule out of the prompt. What the byte-stability rule forbids is anything
+that changes per USER or per DAY; a rule that changes per deploy is fine.
+
 FAILURE POSTURE, inherited from `crm.ai_brief`: an API error is never a 500.
 The turn returns `ok=False` and the view writes a plain notice into the
 thread. This costs money per message, so the entry point is POST-only and the
@@ -61,9 +69,15 @@ from dataclasses import dataclass, field
 
 from django.utils import timezone
 
+from accounts.forms import CADENCE_LABELS
+from accounts.models import WORK_AUTH_CITIZEN, WORK_AUTH_SPONSORSHIP
 from analytics.events import record_event
 from analytics.models import ProductEvent
 from billing import credits as billing_credits
+from coverage_domain.cadence import CADENCE_DEFAULTS
+from crm import coverage as crm_coverage
+from crm.today import TUNABLE_CADENCE_PARAMS, WEEKLY_TOUCH_GOAL, _cadence_params
+from directory.classify import REGION_LABELS, TRACK_LABELS, TRACKED_REGIONS
 
 from . import attachments as attachments_mod
 from . import plans
@@ -144,7 +158,15 @@ Only add a calendar event when they actually ask you to add or schedule somethin
 
 Reach for remember when they tell you something lasting about their own campaign that isn't already sitting in a tool result — "I've ruled out PE", "I need sponsorship in the US", "I'd rather not hear about anything outside HK". Not for a one-off detail only relevant to answering the question in front of you, and not for anything that's really CRM data (a tier, a contact, a deadline) — that belongs on the page it lives on, not in memory. You do not need to ask permission first; say what you saved, plainly, the same way you'd mention logging a touch.
 
-Drafting is not sending. If they want help wording a follow-up, a cold email, or a thank-you note, write it — grounded in the actual contact history and firm details your tools return, not a generic template. Say plainly you're not sending it, but writing the words is exactly the judgement call this page exists for; it is not the same request as "send this."
+Drafting is not sending. If they want help wording a follow-up, a cold email, or a thank-you note, write it. Say plainly you're not sending it, but writing the words is exactly the judgement call this page exists for; it is not the same request as "send this."
+
+DRAFTING RULES. A templated email is the single most common reason a student's note goes unanswered: a recruiter can get a dozen near-identical cold emails in one week, and an associate forwards a handful of resumes a year out of more than a thousand emails received. So every draft you write, without exception:
+- Opens on ONE specific thing that came back from a tool result in this conversation: a note the student wrote about this person, what a prior chat covered, the exact role they hold, a detail from a posting. Before the block, say in prose which one you used ("hooked on your note that she moved to the Hong Kong desk in June"). If get_contact returns nothing to hook on — no notes, no history, no role — say so and ask the student for one fact, or tell them to log a chat first; do not write a note with nothing in it.
+- Never resends what has already gone. get_contact returns my_opener (the first line the student already wrote to this person) and recent_subjects (the subjects of what actually went out); a follow-up reuses neither.
+- Runs under 120 words in the body for a first approach and under 80 for a follow-up or a thank-you, greeting and sign-off included. Short is the courtesy.
+- Contains no placeholders. Never [Firm], [Your Name], {name} or anything in brackets left for the student to fill in. Use the real names the tools returned, or keep the draft in prose until you have them.
+- Never uses "pick your brain", "learn more about your journey", "would love to connect", "cut my teeth", "I hope this finds you well" or "I came across your profile". Every recruiter has read each of them a thousand times; write the plain version of what is meant.
+The page enforces the last two on its own: a block with a bracketed placeholder or a body over the cap is shown as plain text with no card, so the student cannot copy a template by accident.
 
 When the draft is finished — a complete message they could paste and send as it stands — put it in a draft block:
 
@@ -163,7 +185,7 @@ Only a finished draft goes in the block. An outline, two alternative openers, or
 
 The block changes how a draft is displayed, nothing else. It still isn't sending — Copy exists because sending stays theirs. And since the chip is right there on the card, don't end a draft by asking whether to log it.
 
-When they ask for the same kind of draft across several people at once — "draft a re-ping for everyone who's gone cold", "write a follow-up to each of my Goldman contacts" — write one draft block per person in that same reply, not one now and an offer to do the rest. Look each person up first (search_contacts or get_contact) so every block carries a real contact id and its own chip; skip anyone you can't find rather than guessing, and say who you skipped. This is still only drafting — nothing sends and nothing logs until they act on each card themselves.
+When they ask for the same kind of draft across several people at once — "draft a re-ping for everyone who's gone cold", "write a follow-up to each of my Goldman contacts" — write one draft block per person in that same reply, not one now and an offer to do the rest, up to five people. Look each person up first (search_contacts or get_contact) so every block carries a real contact id and its own chip; skip anyone you can't find rather than guessing, and say who you skipped. The drafting rules hold for each block on its own: every one opens on a different specific observation from that person's own history, and if some of them have nothing to open on, say so plainly instead of padding them with the same sentence — "these three have nothing in their history to hook on — log a chat first." Past five people, write the five with the most to hook on and name who is left for the next message; that is the length limit, not a preference. This is still only drafting — nothing sends and nothing logs until they act on each card themselves.
 
 For anything else — actually sending a message, editing a note, changing a tier, moving a role to submitted, archiving someone, changing their email or password or profile picture — say plainly that you can't do it from here, and name the page in Coverage where they can: Today for the queue, Network for contacts and tiers, Opportunities for roles and applications, Calendar for chats and dates, Settings for their profile and cadence.
 
@@ -190,7 +212,117 @@ class TurnResult:
 # Context preamble — per-user and per-day, so it lives OUTSIDE the cached
 # system prefix (see module docstring).
 # ---------------------------------------------------------------------------
+def _labels(codes, labels: dict, cap: int) -> list[str]:
+    """Stored codes ("hk", "ib") as the words a student would say ("Hong
+    Kong", "Investment Banking"), from the same label maps Settings and the
+    Opportunities filter render from. A code the map doesn't know passes
+    through as itself, capped, rather than vanishing."""
+    out = []
+    for code in list(codes or [])[:cap]:
+        key = str(code).strip().lower()
+        out.append(labels.get(key, str(code).strip()[:32]))
+    return [label for label in out if label]
+
+
+def _optional_text(value, cap: int = 6) -> str:
+    """A field that may not exist on `User` yet (`languages`, `study_level`,
+    `affiliations` are being added alongside this) as one short string, or
+    "" for anything empty. Shape-agnostic on purpose — a str, a list of
+    strs, a dict — because the columns' final shape is not this module's
+    to know."""
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, str):
+        return value.strip()[:120]
+    if isinstance(value, dict):
+        items = [f"{k}: {v}" for k, v in value.items() if str(v).strip()]
+        return ", ".join(str(item)[:60] for item in items[:cap])
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = [str(v).strip()[:40] for v in value if str(v).strip()]
+        return ", ".join(items[:cap])
+    return str(value).strip()[:120]
+
+
+def _work_auth_clause(user) -> str:
+    """`User.work_authorization` ({"us": "sponsorship", "cn": "citizen"}) in
+    words, per market, in `TRACKED_REGIONS` order. Only STATED entries are
+    spoken for; a market with no answer is named as not stated rather than
+    guessed either way — the same neutral reading the fit score gives it."""
+    raw = getattr(user, "work_authorization", None)
+    if not isinstance(raw, dict) or not raw:
+        return ""
+    needs, free, unstated = [], [], []
+    for code in TRACKED_REGIONS:
+        label = REGION_LABELS.get(code, code)
+        value = raw.get(code)
+        if value == WORK_AUTH_SPONSORSHIP:
+            needs.append(label)
+        elif value == WORK_AUTH_CITIZEN:
+            free.append(label)
+        else:
+            unstated.append(label)
+    parts = []
+    if needs:
+        parts.append("needs visa sponsorship in " + ", ".join(needs))
+    if free:
+        parts.append("no sponsorship needed in " + ", ".join(free))
+    if not parts:
+        return ""
+    if unstated:
+        parts.append("not stated for " + ", ".join(unstated))
+    return "Work authorization: " + "; ".join(parts) + "."
+
+
+def _cadence_clause(user) -> str:
+    """The knobs that decide when the queue says something is due, as the
+    student would see them on Settings > Cadence: every tunable window with
+    its effective value, marked where it is their own override rather than
+    the default; the weekly touch goal; the advocates-per-firm target.
+
+    Without this the advisor reads a queue of 44 follow-ups and cannot say
+    the one true thing about it — that the student set the follow-up window
+    to 7 business days — because it was never told the window existed."""
+    overrides = _cadence_params(user)
+    parts = []
+    for key in TUNABLE_CADENCE_PARAMS:
+        label, unit, _desc = CADENCE_LABELS.get(key, (key.replace("_", " "), "", ""))
+        default = CADENCE_DEFAULTS.get(key)
+        value = overrides.get(key, default)
+        if value is None:
+            continue
+        text = f"{label.lower()}: {value} {unit}".rstrip()
+        if key in overrides and value != default:
+            text += f" (their own setting; the default is {default})"
+        parts.append(text)
+    goal = getattr(user, "weekly_touch_goal", None)
+    if isinstance(goal, int) and not isinstance(goal, bool) and goal > 0:
+        suffix = "" if goal == WEEKLY_TOUCH_GOAL else f" (their own setting; the default is {WEEKLY_TOUCH_GOAL})"
+        parts.append(f"weekly touch goal: {goal} touches{suffix}")
+    else:
+        parts.append(f"weekly touch goal: {WEEKLY_TOUCH_GOAL} touches (the default)")
+    parts.append(f"advocate target: {crm_coverage.advocate_target(user)} per firm")
+    return (
+        "Cadence settings, which decide when their queue says a follow-up or "
+        "check-in is due: " + "; ".join(parts) + "."
+    )
+
+
 def build_preamble(user) -> str:
+    """Everything per-USER the advisor needs and the byte-stable system
+    prefix must not carry (see the module docstring). Every clause reads a
+    STATED column — nothing here is inferred — and the ones a student has
+    not filled in are simply absent.
+
+    Why the profile is this full. Measured on the founder's own account,
+    2026-09-01, with only name/school/class/regions/tracks in here: 405 open
+    board roles were blocked for him on visa grounds and the advisor could
+    not know he needed sponsorship anywhere; all four of that week's digest
+    picks were the wrong intake year and it could not know which cycle he
+    was recruiting for; 44 follow-ups were due and it could not say that
+    was his own 7-business-day window doing exactly what he set it to do.
+    Regions and tracks went in as codes ("hk, us", "ib, st") that the model
+    then had to guess the meaning of.
+    """
     today = timezone.localdate()
     bits = [f"Today is {today:%A, %-d %B %Y} in the student's own timezone."]
     who = []
@@ -200,16 +332,43 @@ def build_preamble(user) -> str:
         who.append(f"School: {user.school[:120]}")
     if getattr(user, "class_year", None):
         who.append(f"Graduating class: {user.class_year}")
-    regions = [str(r)[:32] for r in (getattr(user, "regions", None) or [])][:6]
+    # `study_level`, `languages`, `affiliations`: columns being added
+    # alongside this; read only when present and non-empty.
+    study_level = _optional_text(getattr(user, "study_level", ""))
+    if study_level:
+        who.append(f"Study level: {study_level}")
+    regions = _labels(getattr(user, "regions", None), REGION_LABELS, 6)
     if regions:
         who.append(f"Recruiting in: {', '.join(regions)}")
-    tracks = [str(t)[:32] for t in (getattr(user, "tracks", None) or [])][:8]
+    tracks = _labels(getattr(user, "tracks", None), TRACK_LABELS, 8)
     if tracks:
         who.append(f"Tracks of interest: {', '.join(tracks)}")
-    if who:
+    cycles = [str(c).strip()[:40] for c in (getattr(user, "target_cycles", None) or []) if str(c).strip()][:4]
+    if cycles:
+        who.append(f"Recruiting for: {', '.join(cycles)}")
+    languages = _optional_text(getattr(user, "languages", None))
+    if languages:
+        who.append(f"Languages: {languages}")
+    affiliations = _optional_text(getattr(user, "affiliations", None))
+    if affiliations:
+        who.append(f"Affiliations: {affiliations}")
+    tz_name = str(getattr(user, "timezone", "") or "").strip()[:64]
+    who.append(f"Timezone: {tz_name}" if tz_name else "Timezone: not set, so Coverage uses UTC")
+    profile_known = any(
+        getattr(user, field, None) for field in ("name", "school", "class_year", "regions", "tracks")
+    )
+    if profile_known:
         bits.append("About them — " + "; ".join(who) + ".")
     else:
-        bits.append("They have not filled in their profile yet, so their school, class year and target markets are unknown; ask if it matters.")
+        bits.append(
+            "They have not filled in their profile yet, so their school, class "
+            "year and target markets are unknown; ask if it matters. "
+            + "; ".join(who) + "."
+        )
+    work_auth = _work_auth_clause(user)
+    if work_auth:
+        bits.append(work_auth)
+    bits.append(_cadence_clause(user))
     # Facts saved via the `remember` tool in ANY past conversation — the one
     # thing a per-conversation thread can't do on its own. Read every time,
     # same as the rest of the preamble, so a fact forgotten (or a new one

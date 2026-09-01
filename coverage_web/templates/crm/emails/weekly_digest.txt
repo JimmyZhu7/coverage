@@ -4,7 +4,13 @@ with an "&" or a mailto: URL's "&"-joined query params render as literal
 characters instead of HTML entities (Django's template engine autoescapes by
 default regardless of the .txt extension; only an explicit tag turns it off).
 {% endcomment %}Coverage · your week of {{ digest.today|date:"N j" }}
-{% if digest.closing %}
+{% comment %}
+The line the digest leads with — see the HTML half for why. Built by
+`crm.digest._coverage_summary` from the counts the Network board's Coverage
+Gaps strip already ranks; absent for a student who has tiered nothing.
+{% endcomment %}{% if digest.coverage %}
+{{ digest.coverage.line }}
+{% endif %}{% if digest.closing %}
 CLOSING THIS WEEK
 {% comment %}
 `(reported)` rides in the countdown line, spelled out, for the same reason the
@@ -45,11 +51,21 @@ WHO TO PING
 ...and {{ digest.actions_overflow }} more waiting for you in Today.
 {% endif %}{% endif %}{% if digest.picks %}
 NEW FOR YOU
-{% for pick in digest.picks %}
+{% comment %}
+`picks_note`: one honest sentence when no pick is for a declared cycle. The
+pick's date prints only with its provenance, in the same words the closing
+rows use, and never when past — see the HTML half. The key prints here only
+when Closing did not already print it.
+{% endcomment %}{% if digest.picks_note %}
+{{ digest.picks_note }}.
+{% endif %}{% for pick in digest.picks %}
 * {{ pick.firm_name }} · {{ pick.title }}{% if pick.location %} · {{ pick.location }}{% endif %}
-  {{ pick.why }}
+  {{ pick.why }}{% if pick.deadline_marker.posted and not pick.deadline_marker.past %}
+  {{ pick.deadline_marker.countdown }}{% if pick.reported %} ({{ pick.reported.label }}){% endif %}{% endif %}
   {{ pick.url }}
-{% endfor %}{% endif %}
+{% endfor %}{% if digest.picks_reported and not digest.closing_reported %}
+({{ digest.picks_reported.label }}): {{ digest.picks_reported.why }}.
+{% endif %}{% endif %}
 Open Coverage: {{ site_url }}{% url 'crm:week' %}
 
 You're getting this because you're onboarded on Coverage. It runs weekly, built from your own tracked roles and contacts, and stops on its own the week neither has anything due.

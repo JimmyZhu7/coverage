@@ -66,7 +66,31 @@ from directory.deadlines import is_posting_closed
 from directory.dupes import fold_duplicates
 from directory.models import Opportunity, OpportunityChange
 from directory.recommend import role_matches_level, role_matches_regions, role_matches_tracks
-from directory.views import _eligibility, _eligibility_profile
+from directory.views import _eligibility, _eligibility_profile, deadline_provenance
+
+# `directory.recommend.role_level(title)` — the rung a posting's own title
+# names (mba / phd / experienced / ...) — is being added alongside this
+# module and may not exist yet. Guarded so this file imports either way:
+# with it, `_new_role_events` drops the roles an undergraduate cannot
+# apply to; without it, behaviour is exactly what it was. The Today strip
+# on the founder's own account carried a PIMCO "PhD Summer Intern" and an
+# RBC "IB Summer Associate" as news for a class-of-2029 undergrad, and
+# `role_matches_level` (bucket + derived class year) cannot see either:
+# both are `internship`-bucket rows whose only tell is in the title.
+try:
+    from directory.recommend import role_level as _role_level
+except ImportError:  # pragma: no cover - exercised by monkeypatching below
+    _role_level = None
+
+# The levels a student at `_UNDERGRAD_LEVELS` is never news for. Matched
+# case-insensitively against whatever `role_level` returns.
+_ADVANCED_LEVELS = frozenset({"mba", "phd", "experienced"})
+# `User.study_level` values that mean "undergraduate" — including the blank
+# that every account carries until the field exists and is answered. Blank
+# reads as undergrad on purpose: this product's students are overwhelmingly
+# undergraduates, and a PhD posting reaching a student who never said they
+# were a PhD is the measured failure, not the hypothetical one.
+_UNDERGRAD_LEVELS = frozenset({"", "undergrad", "undergraduate"})
 
 # How far back counts as "recent". Until 2026-08-31 this matched Today's
 # own now-retired `crm.today._new_at_your_firms` window (`since =
@@ -116,6 +140,28 @@ def _parse_date(value: str | None) -> _date | None:
         return None
 
 
+def _deadline_source(opp) -> str | None:
+    """Which KIND of fact the deadline on `opp` now is: "reported" for a date
+    Coverage's own regex read out of the posting's prose, "stated" for one
+    the board published as a field, None when there is no date at all.
+
+    The same three-way answer `assistant.tools._deadline_source` gives every
+    search / pipeline row, borrowed from `directory.views.deadline_provenance`
+    the same way — restated here (three lines) rather than imported from
+    `tools`, because `tools` imports this module and the import would be
+    circular. `test_situation` pins the two against each other.
+
+    WHY A MOVED DEADLINE NEEDS THIS AT ALL. Measured 2026-09-01: of 394
+    `deadline_moved` change rows in the last 30 days, 354 were on prose-read
+    deadlines (`confidence` 0.6) and 36 on stated ones. A regex that reads a
+    different date out of a re-scraped page is not the firm changing its
+    mind, and the daily brief was telling students "deadline moved from X to
+    Y" with nothing to say which of the two it was."""
+    if opp.deadline is None:
+        return None
+    return "reported" if deadline_provenance(opp) else "stated"
+
+
 def _deadline_moved_events(tracked_ids: list[int], since, limit: int) -> list[dict]:
     """`OpportunityChange` rows on a tracked opportunity where the stated
     deadline itself moved, most recent first, at most one row per
@@ -157,6 +203,11 @@ def _deadline_moved_events(tracked_ids: list[int], since, limit: int) -> list[di
             "new_value": row.new_value,
             "old_date": _parse_date(row.old_value),
             "new_date": _parse_date(row.new_value),
+            # Provenance of the date the role carries NOW (the `new_value`
+            # side of the move). Travels with the event because neither the
+            # advisor's tool payload nor the brief's prompt line has a
+            # dotted underline to carry it — see `_deadline_source`.
+            "deadline_source": _deadline_source(opp),
             "observed_at": row.observed_at,
         })
         if len(events) >= limit:
@@ -239,6 +290,31 @@ def _display_location(title: str, location: str) -> str:
     return ", ".join(segments)
 
 
+def _drop_advanced_levels(rows: list, user) -> list:
+    """`rows` minus the postings whose TITLE names a rung above an
+    undergraduate — MBA, PhD, experienced hire — for a student whose
+    `study_level` is blank or undergraduate. Unchanged rows when
+    `directory.recommend.role_level` is not importable yet, when the student
+    has stated a higher level, or when the level function itself misbehaves:
+    a signature change in the sibling module must cost a filter, never the
+    whole situation strip (`build_situation`'s own try/except would
+    otherwise blank every card over it)."""
+    if _role_level is None:
+        return rows
+    level = str(getattr(user, "study_level", "") or "").strip().lower()
+    if level not in _UNDERGRAD_LEVELS:
+        return rows
+    kept = []
+    for o in rows:
+        try:
+            rung = str(_role_level(o.title) or "").strip().lower()
+        except Exception:  # noqa: BLE001 — see docstring
+            return rows
+        if rung not in _ADVANCED_LEVELS:
+            kept.append(o)
+    return kept
+
+
 def _new_role_events(user, since, limit: int) -> list[dict]:
     """Fresh open postings at a firm the student already has a foothold at.
 
@@ -319,6 +395,17 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
     # Applied AFTER fold_duplicates so the fold still sees the full slice,
     # and it costs no query: the titles are already in memory.
     rows = [o for o in rows if role_matches_tracks(o.title, user.tracks)]
+
+    # RELEVANT TO THE STUDENT'S OWN RUNG, read off the TITLE. `role_matches_
+    # level` below judges bucket and derived class year, and a "PhD Summer
+    # Intern – Quantitative Research" or an "IB Summer Associate" clears
+    # both: same `internship` bucket, no derivable year. Two of the
+    # founder's four new-role events on 2026-09-01 were exactly those. So
+    # when `directory.recommend.role_level` exists (guarded import at the
+    # top of this module) and the student is an undergraduate — or has not
+    # said otherwise — the MBA / PhD / experienced-hire rows are dropped
+    # here. Without `role_level` nothing changes.
+    rows = _drop_advanced_levels(rows, user)
 
     # RELEVANT TO WHERE, AND WHEN. Same posture, two more axes: a Pune,
     # India ops role and a full-time "New Associate" programme both reached
