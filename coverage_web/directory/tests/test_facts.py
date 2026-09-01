@@ -209,11 +209,24 @@ def test_an_or_list_with_the_later_year_first_still_sorts_low_to_high():
     but the connector regex treats 'or' the same as '-'/'to', so the years
     were captured in the sentence's own order and the label read the
     backwards '2028–2027'. Confirmed live on 6 rows (Optiver ids
-    19209/18634/18629/18627, RBC ids 417/416)."""
+    19209/18634/18629/18627, RBC ids 417/416).
+
+    REWRITTEN, not weakened, when open-ended windows were taught to the
+    extractor: the Optiver sentence's "or AFTER 2027 September" is an open
+    lower half — anyone graduating from September 2027 onward — so the
+    closed label "2027–2028" this test used to pin was itself the defect
+    that blocked a 2029 student (see test_grad_windows.py). The floor is
+    still read low-to-high; the ceiling is now honestly open. RBC's
+    "Spring 2028 or December 2027" names two dates and no open bound, and
+    keeps the closed sorted range."""
     got = extract_grad_years("candidates graduating in 2028 or after 2027 September")
-    assert got["value"] == "2027–2028"
+    assert got["value"] == "2027+"
+    assert got["open_high"] is True
+    assert got["years"][0] == "2027"
     got = extract_grad_years("candidates graduating in Spring 2028 or December 2027")
     assert got["value"] == "2027–2028"
+    assert got["years"] == ["2027", "2028"]
+    assert "open_high" not in got
 
 
 def test_graduate_programme_start_is_not_the_applicants_own_graduation():
@@ -872,10 +885,16 @@ def test_grad_reads_or_ranges_and_recovers_past_a_stale_first_match():
         "graduate in 2027")
     assert got and got["years"] == ["2027"]
     # Deutsche Bank states the same fact without the word "graduate".
+    # REWRITTEN, not weakened, when the extractor learned open-ended
+    # windows: "2026 or later" was pinned here as the closed single year
+    # ["2026"], and that closed reading is what blocked a 2028 or 2029
+    # student on Deutsche Bank id=5017 (see test_grad_windows.py). The
+    # floor is still 2026; the ceiling is now honestly open.
     got = extract_grad_years(
         "Studying Technology related subjects; Bachelor's degree "
         "completion: 2026 or later")
-    assert got and got["years"] == ["2026"]
+    assert got and got["years"][0] == "2026"
+    assert got["open_high"] is True and got["value"] == "2026+"
 
 
 def test_event_date_is_a_start():
