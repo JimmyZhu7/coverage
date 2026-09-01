@@ -96,3 +96,34 @@ def test_the_palette_never_ships_a_raw_name_or_warmth_slug(client):
     assert person["warmth"] != "chatted"
     # A shouting firm name is tidied like it is everywhere else.
     assert person["firm"] == "Palette Capital"
+
+
+@pytest.mark.django_db
+def test_the_palette_reads_a_whole_address_stored_as_a_name(client):
+    """Capture usually keeps only the local part, but two of the founder's
+    rows hold the entire address ('victoria.hsu@gs.com', source="capture"),
+    and the palette shipped them as "Victoria.hsu@gs.com" -- `smart_title`
+    capitalising the first letter of what is, to it, one long word.
+
+    Pinned here and not only in `test_textstyle.py` because the palette
+    builds its strings in `core/views.py` rather than in a template: a
+    filter-level fix that never got wired into the serializer would pass
+    the unit test and change nothing a student sees.
+    """
+    User = get_user_model()
+    user = User.objects.create_user(email="addr@example.com", password="x")
+    firm = Firm.objects.create(slug="addr-co", name="Addr Capital")
+    Contact.all_objects.create(
+        user=user, name="victoria.hsu@addr.example",
+        email="victoria.hsu@addr.example", firm=firm, warmth="chatted",
+    )
+
+    client.force_login(user)
+    person = client.get("/search/", {"q": "victoria"}).json()["contacts"][0]
+
+    assert person["name"] == "Victoria Hsu"
+    assert "@" not in person["name"]
+    # The stored row keeps exactly what capture observed. The honesty rule
+    # is not suspended just because the evidence renders badly.
+    stored = Contact.all_objects.get(email="victoria.hsu@addr.example")
+    assert stored.name == "victoria.hsu@addr.example"

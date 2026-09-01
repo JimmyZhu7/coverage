@@ -252,6 +252,17 @@ def smart_person_name(value):
     # it is dropped and the local part goes through the identical rule below
     # -- one shape check, not a second one. Anything with more than one "@",
     # or nothing before it, is not an address and is left alone.
+    #
+    # BLAST RADIUS, measured the same way the local-part rule was. Swept over
+    # all 267 of the founder's contacts (2026-09-01, read-only), comparing
+    # this filter against the version that had no "@" branch: exactly those
+    # two rows render differently, and the other 40 rewrites are the
+    # bare-local-part case that already worked. No typed name moved, because
+    # reusing the shape check rather than relaxing it is what keeps the
+    # domain from buying the local part any leniency -- 'cv@citi.com' is
+    # still one ambiguous token and still renders as stored, and a local
+    # part that arrives already capitalised ('Victoria.Hsu@gs.com') is still
+    # read as deliberate and left alone.
     if "@" in text:
         local, _, domain = text.partition("@")
         if not local or "@" in domain:

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load textstyle %}
 
-{% block title %}Debrief · {{ contact.name }} · Coverage{% endblock %}
+{% block title %}Debrief · {{ contact.name|smart_person_name|smart_title }} · Coverage{% endblock %}
 
 {% block head %}
 {% include "crm/_styles.html" %}
