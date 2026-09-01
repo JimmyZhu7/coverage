@@ -186,3 +186,83 @@ def test_the_picked_column_really_does_render_a_shorter_id_stack(feed_with_both_
         "a :empty selector cannot match that row — it holds a whitespace text "
         "node — so a fix resting on one would be silently dead"
     )
+
+
+# ---------------------------------------------------------------------------
+# THE PICKED COLUMN'S IDENTITY (2026-08-31). It used to carry an accent WASH
+# (`background: var(--accent-soft)`), and the founder's own dark-mode screen-
+# shot is why it does not any more. Measured on the rendered page:
+#
+#     --accent-soft #232a35 vs --surface #1c201a   1.144:1
+#     --accent-soft #232a35 vs --paper   #141712   1.252:1
+#
+# So the wash separated the column by HUE, not luminance — a blue-grey slab
+# on a green-black page. Worse, `.firmcol-scroll` paints `--surface` over the
+# whole body, so the wash only ever reached the header: the column rendered
+# as a blue lid on a green-black box with that 1.144:1 jump at the seam
+# between them, which was the harshest edge in the column and internal to it.
+#
+# What replaces it must be structural, and these tests pin that it IS
+# structural — because with the wash gone there is very little left, and on
+# the founder's board there is even less than the stylesheet assumes: all 12
+# of his firm columns are `.is-mine`, so the `--accent-line` border the
+# Picked column wears is not distinguishing it from anything.
+# ---------------------------------------------------------------------------
+
+
+def test_the_picked_column_shares_its_neighbours_surface():
+    """No wash, and specifically no `--accent-soft`: the column that is meant
+    to look calm must not be the one column painted a different hue from the
+    page it sits in, and it must not seam against its own scroll body."""
+    rule = _rule(_feed_css(), ".firmcol--picked")
+    assert "background: var(--surface)" in rule, rule
+    assert "accent-soft" not in rule, (
+        "the accent wash is back. It measures 1.144:1 against the --surface "
+        "its own scroll window paints, so it reads as a hue change rather "
+        "than a level, and the seam between the two is inside the column."
+    )
+
+
+def test_the_picked_column_still_says_it_is_not_a_firm_without_the_wash():
+    """Three structural signals, none of them a fill: the accent top edge,
+    the accent hairline border, and the star tile. Removing the wash removed
+    a fourth, so the survivors are load-bearing and pinned here."""
+    css = _feed_css()
+    rule = _rule(css, ".firmcol--picked")
+    assert "inset 0 3px 0 0 var(--accent)" in rule, (
+        "the heavier accent top edge is the strongest remaining signal that "
+        "this column is a view and not a company")
+    assert "border-color: var(--accent-line)" in rule, rule
+    assert "var(--accent-ink)" in _rule(css, ".firmcol--picked .firmcol-name")
+
+
+def test_the_star_tile_actually_wins_the_cascade():
+    """It did not, for as long as the wash was there to hide it.
+
+    `.firmcol-logo--picked` is ONE class and `.firmcol-logo` is one class,
+    and the generic rule sits ~46 lines later in the file, so source order
+    handed the star the default monogram tile: measured live in light, the
+    tile rendered rgb(216, 230, 243) — `hsl(210 52% 90%)` — instead of
+    `--accent`, and the inset hairline this rule asks to drop came back too.
+    All three declarations were dead.
+
+    Pinned by SPECIFICITY rather than by source order, so re-sorting this
+    stylesheet cannot silently kill the star again. That matters more now
+    than it did: the tile is the one signal on this founder's board that no
+    firm column shares."""
+    css = _feed_css()
+    generic = css.index("\n  .firmcol-logo {")
+    picked = css.index(".firmcol-logo.firmcol-logo--picked {")
+    assert picked < generic, (
+        "if the picked rule ever moves BELOW the generic one this test stops "
+        "proving anything — it is the compound selector that must win, not "
+        "the position"
+    )
+    rule = _rule(css, ".firmcol-logo.firmcol-logo--picked")
+    assert "background: var(--accent)" in rule, rule
+    assert "color: var(--on-accent)" in rule, (
+        "the star sits ON the accent fill, so it takes the token measured "
+        "against it — dark mode's accent is a LIGHT blue")
+    assert "box-shadow: none" in rule, (
+        "the generic tile's inset hairline reads as a monogram chip, which "
+        "is the thing this tile exists not to look like")

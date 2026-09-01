@@ -57,7 +57,7 @@
       header was the page putting its own opening question twice.
       {% endcomment %}
       <p class="pagehead-sub">
-        Your chat with {{ contact.name|smart_title }}, written down while you
+        Your chat with {{ contact.name|smart_person_name|smart_title }}, written down while you
         still have it.
       </p>
     </div>
@@ -65,7 +65,7 @@
 
   {% if offer_promotion %}
     <div class="db-offer">
-      <p><strong>{{ contact.name|smart_title }} would advocate for you.</strong>
+      <p><strong>{{ contact.name|smart_person_name|smart_title }} would advocate for you.</strong>
          Move them to advocate?</p>
       <form method="post" action="{% url 'crm:debrief_promote' touch.pk %}">
         {% csrf_token %}
@@ -78,7 +78,7 @@
     <p class="db-made">
       Saved {{ debrief.created|date:"N j" }}.
       {% if debrief.intro_contact %}
-        Referral: <a href="{% url 'crm:contact_detail' debrief.intro_contact.pk %}">{{ debrief.intro_contact.name|smart_title }}</a>.
+        Referral: <a href="{% url 'crm:contact_detail' debrief.intro_contact.pk %}">{{ debrief.intro_contact.name|smart_person_name|smart_title }}</a>.
       {% endif %}
       {% if debrief.tracked_date %}Tracking {{ debrief.tracked_date|date:"N j, Y" }}.{% endif %}
       {% if debrief.promoted %}Promoted to advocate.{% endif %}
@@ -92,7 +92,7 @@
 
       <div class="db-q">
         <label for="{{ form.learned.id_for_label }}">What did you learn?</label>
-        <p class="db-hint">Goes onto {{ contact.name|smart_title }}'s notes under today's date.</p>
+        <p class="db-hint">Goes onto {{ contact.name|smart_person_name|smart_title }}'s notes under today's date.</p>
         {{ form.learned }}
       </div>
 
@@ -138,7 +138,7 @@
 
       <div class="db-actions">
         <button type="submit" class="btn btn-primary">Save Debrief</button>
-        <a class="db-cancel" href="{% url 'crm:contact_detail' contact.pk %}">Back to {{ contact.name|smart_title }}</a>
+        <a class="db-cancel" href="{% url 'crm:contact_detail' contact.pk %}">Back to {{ contact.name|smart_person_name|smart_title }}</a>
       </div>
     </form>
   </div>

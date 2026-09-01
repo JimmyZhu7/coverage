@@ -334,7 +334,16 @@ def test_the_new_fact_adds_no_second_truncation_rule():
     """A first pass at this row let several spans shrink independently and
     produced FOUR mid-word ellipses instead of one clean cut. `.rr-open` must
     behave like every other sibling — `flex: none`, and truncation left to
-    the single `.rr-meta > *:last-child` rule that owns it."""
+    the single rule that owns it.
+
+    That rule is `.rr-loc`'s stated max-width now, not `.rr-meta >
+    *:last-child` (see `test_the_feed_row_has_exactly_one_truncation_point`).
+    The change matters to THIS span specifically: being rendered last used to
+    make it the thing that gave way, and measured live on the founder's board
+    it was giving way all the way to 0px — the figure was on the page and
+    invisible. The assertions below are unchanged, because what they pin is
+    that this span never grows a shrink rule of its own, and that is true
+    under either owner."""
     css = ROLE_STYLES.read_text()
     rule = re.search(r"\.rr-open\s*\{([^}]*)\}", css)
     assert rule, ".rr-open must be styled explicitly, not left to defaults"

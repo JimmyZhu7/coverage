@@ -4,9 +4,11 @@ The Today cockpit (htmx swap target). Left: today's PLAN — the cadence queue
 capped to what a student with ~6 hours a week can actually do, ordered by
 relationship momentum rather than firm alphabet, split into three semantic
 lanes. Everything the cap held back is one click away under "Up next", with
-the exact count and the policy holding it. Right: the weekly pace ring, the
-chats already on the calendar, a getting-started checklist while setup is
-unfinished, this week's unplaced arrivals while there are any, and a
+the exact count and the policy holding it. Right (`.cockpit-rail`, ordered
+2026-08-31 per the founder's own words: "outreach this week goes on top,
+then deadlines, then unplaced"): a getting-started checklist while setup is
+unfinished, the weekly pace ring, the chats already on the calendar, this
+cycle's deadlines, this week's unplaced arrivals while there are any, and a
 recent-activity feed. Re-rendered whole on every quick action so all of it
 stays in sync.
 
@@ -156,7 +158,7 @@ copy exactly once, and this is the once.
                 <span class="opp-firm">{% if p.contact.firm %}{{ p.contact.firm.name|smart_title }}{% else %}{{ p.contact.firm_text|smart_title }}{% endif %}</span>
                 <span class="prep-at">{{ p.when }}</span>
               </div>
-              <h3 class="act-name"><a href="{% url 'crm:contact_detail' p.contact.id %}">{{ p.contact.name|smart_title }}</a></h3>
+              <h3 class="act-name"><a href="{% url 'crm:contact_detail' p.contact.id %}">{{ p.contact.name|smart_person_name|smart_title }}</a></h3>
               {% if p.contact.role %}<p class="act-role">{{ p.contact.role|smart_title }}</p>{% endif %}
               <div class="act-badges">
                 <span class="chip warmth-{{ p.contact.warmth }}">{{ p.contact.warmth }}</span>
@@ -404,7 +406,7 @@ copy exactly once, and this is the once.
               <div class="act-ident">
                 <div class="act-idtext">
                   <span class="opp-firm">{% if p.firm %}{{ p.firm.name|smart_title }}{% else %}{{ p.email|slice:"-254:" }}{% endif %}</span>
-                  <h3 class="act-name">{{ p.name|smart_title }}</h3>
+                  <h3 class="act-name">{{ p.name|smart_person_name|smart_title }}</h3>
                   {% if p.role_hint %}<p class="act-role">{{ p.role_hint|smart_title }}</p>{% elif p.firm %}<p class="act-role">{{ p.email }}</p>{% endif %}
                 </div>
                 <span class="chip warmth-cold">new</span>
@@ -773,7 +775,7 @@ copy exactly once, and this is the once.
               <div class="act-ident">
                 <div class="act-idtext">
                   <span class="opp-firm">{% if d.contact.firm %}{{ d.contact.firm.name|smart_title }}{% else %}{{ d.contact.firm_text|smart_title }}{% endif %}</span>
-                  <h3 class="act-name"><a href="{% url 'crm:contact_detail' d.contact.id %}">{{ d.contact.name|smart_title }}</a></h3>
+                  <h3 class="act-name"><a href="{% url 'crm:contact_detail' d.contact.id %}">{{ d.contact.name|smart_person_name|smart_title }}</a></h3>
                   <p class="act-role">Chatted {% if d.days_ago %}{{ d.days_ago }}d ago{% else %}today{% endif %}</p>
                 </div>
                 <span class="chip warmth-{{ d.contact.warmth }}">{{ d.contact.warmth }}</span>
@@ -867,7 +869,7 @@ copy exactly once, and this is the once.
               <div class="act-ident">
                 <div class="act-idtext">
                   <span class="opp-firm{% if b.contact.school_affiliation %} is-school{% endif %}">{{ b.firm_name|smart_title }}{% if b.contact.school_affiliation %} · alum{% endif %}</span>
-                  <h3 class="act-name"><a href="{% url 'crm:contact_detail' b.contact.id %}">{{ b.contact.name|smart_title }}</a></h3>
+                  <h3 class="act-name"><a href="{% url 'crm:contact_detail' b.contact.id %}">{{ b.contact.name|smart_person_name|smart_title }}</a></h3>
                 </div>
                 <span class="chip warmth-{{ b.contact.warmth }}">{{ b.contact.warmth }}</span>
               </div>
@@ -962,50 +964,6 @@ copy exactly once, and this is the once.
               {% else %}
                 <a class="getting-started-label" href="{{ item.href }}">{{ item.label }}</a>
               {% endif %}
-            </li>
-          {% endfor %}
-        </ul>
-      </div>
-    {% endif %}
-
-    {% comment %}
-    Unplaced arrivals. See crm.today._unplaced_arrivals' own module note for
-    the whole argument; the short version is that this product never infers a
-    region it cannot entail, so a contact captured from Gmail at a firm
-    running both a US and a Hong Kong desk arrives blank and stays blank until
-    a person says otherwise. Correct, and the designed steady state. What was
-    missing is that nobody found out until it had reached 71 on the founder's
-    own account (2026-08-31, every one of them from Gmail capture, 66 of them
-    in two batches four days apart).
-
-    AT MOST FIVE NAMES AND NO TOTAL. The count lives on the tab this links to,
-    where it belongs; a rail card reading "71" is a rail card students learn
-    to scroll past. "All" rather than a number is the same thing the Deadlines
-    card above does with its own cap.
-
-    ONE DESTINATION, AND IT IS THE ONE THAT ALREADY WORKS. The Unplaced tab
-    asks the question in its answerable shape (grouped by firm, select-all per
-    group, three region verbs). Nothing here rebuilds any of that: a second
-    place to set a region is exactly the duplicate-widget bug this session
-    removed three times over.
-
-    EXPIRES ON ITS OWN, like every other card in this rail vanishes when its
-    condition stops holding. Nothing stored, no dismiss button, no flag. The
-    Contacts page keeps its own passive caveat line unchanged as the
-    always-available fallback; that line answers a different question ("how
-    many rows in THIS region tab are here on a guess") and never expires.
-    {% endcomment %}
-    {% if unplaced_arrivals %}
-      <div class="rail-card unplaced-card">
-        <h3 class="rail-title">Unplaced
-          <a class="rail-more" href="{% url 'crm:contact_list' %}?scope=unplaced">All</a>
-        </h3>
-        <p class="unplaced-note">New this week. Nobody has said where they sit.</p>
-        <ul class="unplaced-list">
-          {% for c in unplaced_arrivals %}
-            <li class="unplaced-row">
-              <span class="unplaced-name">{{ c.name|smart_title }}</span>
-              <span class="unplaced-firm">{{ c.firm|default:"No firm" }}</span>
             </li>
           {% endfor %}
         </ul>
@@ -1155,6 +1113,83 @@ copy exactly once, and this is the once.
       </div>
     {% endif %}
 
+    {% comment %}
+    Unplaced arrivals. See crm.today._unplaced_arrivals' own module note for
+    the whole argument; the short version is that this product never infers a
+    region it cannot entail, so a contact captured from Gmail at a firm
+    running both a US and a Hong Kong desk arrives blank and stays blank until
+    a person says otherwise. Correct, and the designed steady state. What was
+    missing is that nobody found out until it had reached 71 on the founder's
+    own account (2026-08-31, every one of them from Gmail capture, 66 of them
+    in two batches four days apart).
+
+    RENDER POSITION, LAST OF THE THREE DATED/ACTIONABLE CARDS since
+    2026-08-31 (the founder's own words: "outreach this week goes on top,
+    then deadlines, then unplaced"). Pace led with nothing to lead with
+    before this move; Deadlines carries a real clock, `open_run` and all.
+    This card carries neither a goal nor a date — it is a standing question,
+    same rung as the "Firms with no contacts yet" lane that used to live
+    here and was removed for the identical reason cards above it earn their
+    place with a fresher fact — so it goes last of the three rather than
+    first.
+
+    THE HEADING AND NOTE, REWRITTEN THE SAME DAY (the founder's own words:
+    "this doesn't even make sense, make it more straightforward").
+    "Unplaced" named nothing a first-time reader could resolve on their
+    own — unplaced WHAT, and placed WHERE — and "Nobody has said where they
+    sit" restated the same fact obliquely instead of naming it. The real
+    fact is a market: Coverage cannot tell whether this person recruits out
+    of Hong Kong or the US, and it needs that answer to know which
+    deadlines are theirs. The heading now names the missing fact directly
+    ("No market set") and the note states the consequence in plain words
+    instead of hinting at it.
+
+    EVERY ROW IS NOW A LINK, not only "All". A card whose one clickable
+    surface was four words in the corner read as decoration to a student
+    scanning past it — nothing about a plain name and firm said "tap me".
+    Every other card in this rail (Schedule, Deadlines, Recent Activity)
+    already makes its rows links; this one now matches. Each row points to
+    the identical `?scope=unplaced` destination "All" already carries —
+    there is nowhere more specific to send a single row to, since
+    `crm:contact_detail` has no region control of its own (see the next
+    paragraph) and never has. The honest choice is the same door on every
+    row, not a link that reads specific and goes nowhere useful.
+
+    AT MOST FIVE NAMES AND NO TOTAL. The count lives on the tab this links
+    to, where it belongs; a rail card reading "71" is a rail card students
+    learn to scroll past. "All" rather than a number is the same thing the
+    Deadlines card above does with its own cap.
+
+    ONE DESTINATION, AND IT IS THE ONE THAT ALREADY WORKS. The Unplaced tab
+    asks the question in its answerable shape (grouped by firm, select-all per
+    group, three region verbs). Nothing here rebuilds any of that: a second
+    place to set a region is exactly the duplicate-widget bug this session
+    removed three times over.
+
+    EXPIRES ON ITS OWN, like every other card in this rail vanishes when its
+    condition stops holding. Nothing stored, no dismiss button, no flag. The
+    Contacts page keeps its own passive caveat line unchanged as the
+    always-available fallback; that line answers a different question ("how
+    many rows in THIS region tab are here on a guess") and never expires.
+    {% endcomment %}
+    {% if unplaced_arrivals %}
+      <div class="rail-card unplaced-card">
+        <h3 class="rail-title">No market set
+          <a class="rail-more" href="{% url 'crm:contact_list' %}?scope=unplaced">All</a>
+        </h3>
+        <p class="unplaced-note">New this week. Coverage doesn't know if they're Hong Kong or US, so they're matched to deadlines in both until you say.</p>
+        <ul class="unplaced-list">
+          {% for c in unplaced_arrivals %}
+            <li class="unplaced-row">
+              <a class="unplaced-link" href="{% url 'crm:contact_list' %}?scope=unplaced">
+                <span class="unplaced-name">{{ c.name|smart_person_name|smart_title }}</span>
+                <span class="unplaced-firm">{{ c.firm|default:"No firm" }}</span>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
 
     <div class="rail-card activity-card">
       <h3 class="rail-title">Recent Activity</h3>
@@ -1163,7 +1198,7 @@ copy exactly once, and this is the once.
           {% for e in activity %}
             <li class="activity-row">
               <span class="activity-dot{% if e.inbound %} in{% endif %}"></span>
-              <span class="activity-text"><a href="{% url 'crm:contact_detail' e.contact_id %}">{{ e.name|smart_title }}</a> <span class="activity-kind">{{ e.kind_label }}</span></span>
+              <span class="activity-text"><a href="{% url 'crm:contact_detail' e.contact_id %}">{{ e.name|smart_person_name|smart_title }}</a> <span class="activity-kind">{{ e.kind_label }}</span></span>
               <span class="activity-when">{{ e.ago }}</span>
             </li>
           {% endfor %}

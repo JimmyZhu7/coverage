@@ -120,6 +120,25 @@ def _rule(css: str, selector: str) -> str:
     return m.group(1)
 
 
+def _rules(css: str) -> list[tuple[str, str]]:
+    """(selector, declarations) for every flat rule in the stylesheet. Used
+    where the assertion is about how MANY rules do something rather than
+    what one named rule says — counting is what makes "exactly one
+    truncation point" testable instead of merely commented.
+
+    COMMENTS ARE STRIPPED FIRST. This stylesheet explains itself at length
+    directly above the rule being explained, and a naive `[^{}]+\\{` reads
+    that whole comment as part of the selector — so `.rr-loc`, which carries
+    a ten-line note, came back as "/* ... */ .rr-loc" and matched nothing.
+    Same class of bug as `_STYLE_RE` in the honesty tests: this file's own
+    prose is inside the string under test."""
+    flat = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return [
+        (m.group(1).strip(), m.group(2))
+        for m in re.finditer(r"([^{}@]+)\{([^{}]*)\}", flat)
+    ]
+
+
 def _rule_all(css: str, selector: str) -> str:
     """Every rule literally selecting `selector` (not a compound or pseudo
     selector built on it), concatenated in source order. `.rolerow` gets two
@@ -576,13 +595,25 @@ def test_the_feed_row_has_exactly_one_truncation_point():
     mid-word ellipses, each fact reduced to a handful of characters. Live
     on the founder's own feed this read as scrambled, not truncated.
 
-    The corrected contract: every named part of the line (`.rr-firm`,
-    `.rr-vd`, `.rr-fact`, `.rr-loc`, `.rr-kind`, `.rr-cls`) holds its own
-    width — `flex: none` — and only the ACTUAL last child on the line
-    gives way. `_rolecard.html` already orders the line by decisiveness
-    (verdict first, descriptive facts last), so `:last-child` always
-    resolves to the least important thing THIS row rendered, which is the
-    tail giving way rather than the head."""
+    ONE point is still the contract. WHICH point changed on 2026-08-31.
+
+    It used to be `.rr-meta > *:last-child`, and "last" turned out to mean
+    "whatever `_rolecard.html` happened to render last for this row" rather
+    than "the least decisive fact". On an undated row that is `.rr-undated`
+    — "No date posted, first seen 39d ago", the words the deliberately mute
+    dash in `.rr-due` does not say. Measured live in dark on the founder's
+    own board at 1512px, over all 790 rendered rows: 441 (55.8%) cut their
+    last meta item mid-word, 150 (19.0%) cut it under 24px, and 129 (16.3%)
+    overflowed with NO ellipsis at all because the one shrinkable item had
+    already reached zero. At 375px it was 732 / 397 / 363 of 790.
+
+    So the line wraps now, and the single cut is a NAMED one: `.rr-loc`,
+    capped at a stated width. That is the part this stylesheet already
+    designated as the compressible one ("a half-rendered year reads as a
+    rendering fault, a truncated city does not"), and it is the only rule
+    in the block allowed to say `text-overflow`. This test pins that
+    uniqueness, which is the invariant the old assertions were reaching for
+    through the `:last-child` implementation."""
     css = _feed_css()
     for cls in (".rr-firm", ".rr-vd", ".rr-fact", ".rr-loc", ".rr-kind", ".rr-cls"):
         rule = _rule(css, cls)
@@ -590,10 +621,37 @@ def test_the_feed_row_has_exactly_one_truncation_point():
             f"{cls} must hold its own width — a fixed-width part that "
             f"can still shrink reopens the multi-ellipsis bug")
 
-    tail = _rule(css, ".rr-meta > *:last-child")
-    assert "flex-shrink: 1" in tail, tail
-    assert "min-width: 0" in tail, (
-        "a flex item's automatic minimum size is its content, so without "
-        "min-width: 0 the last child refuses to shrink and the line overflows")
-    assert "text-overflow: ellipsis" in tail, (
-        "the one part of the line allowed to shrink must say so when it does")
+    # The wrap is what makes a single cut point enough: without it, the
+    # parts that cannot shrink simply overflow and get hard-clipped with no
+    # ellipsis, which is the 129-row / 363-row defect above.
+    meta = _rule(css, ".rr-meta")
+    assert "flex-wrap: wrap" in meta, meta
+    assert "white-space: nowrap" not in meta, (
+        "nowrap on the CONTAINER is the one-line contract that clipped; each "
+        "part keeps its own nowrap, the line of parts does not")
+
+    # Exactly one rule in the row's meta line may truncate, and it is the
+    # location. Asserted by counting, so adding a second one anywhere in the
+    # block fails here rather than shipping four ellipses again.
+    truncators = sorted(
+        sel for sel, body in _rules(css)
+        if sel.startswith(".rr-") and "text-overflow" in body)
+    assert truncators == [".rr-loc"], (
+        f"the meta line must have exactly one truncation point and it must "
+        f"be the location; found {truncators}")
+
+    loc = _rule(css, ".rr-loc")
+    assert "max-width" in loc, (
+        "the location truncates at a STATED width — that is what keeps the "
+        "cut in the same place down a column instead of at five different "
+        "widths, which is how the old contract failed")
+    assert "overflow: hidden" in loc and "text-overflow: ellipsis" in loc, loc
+
+    # `:last-child` must not quietly come back as a second cut point.
+    # Asserted against the comment-stripped source, because the rule that
+    # replaced it NAMES the retired selector while explaining why it went —
+    # the same trap `_STYLE_RE` exists for in the honesty tests, and this
+    # assertion walked straight into it on the first run.
+    assert not any(sel == ".rr-meta > *:last-child" for sel, _ in _rules(css)), (
+        "positional truncation is what cut 'No date posted' to 5px; the cut "
+        "point is named now")

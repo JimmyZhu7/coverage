@@ -44,7 +44,7 @@
                data-touch="{% if c.last_touch_ts %}{{ c.last_touch_ts|date:'U' }}{% endif %}"
                data-search="{{ c.name }} {% if c.firm %}{{ c.firm.name }}{% else %}{{ c.firm_text }}{% endif %} {{ c.role }} {{ c.email }}">
             <div class="arch-id">
-              <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_title }}</a>
+              <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_person_name|smart_title }}</a>
               <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}</span>
             </div>
             {% comment %}

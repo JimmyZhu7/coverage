@@ -22,9 +22,19 @@ WHAT DID NOT CHANGE, deliberately (see the design contract):
     posted" for a role that states nothing, and the .vh spans that carry
     each of those to a screen reader rather than leaving them in a title.
   - the fact ORDER. views.py::_FACT_CHIP_ORDER sorts by what can end the
-    decision soonest and the verdict leads it, so when the meta line runs
-    out of room the tail that ellipsises is the least decisive fact. That
-    was already true of the chip row; it is why truncation here is safe.
+    decision soonest and the verdict leads it, so the reader meets the
+    decisive facts first however the line breaks. That was already true of
+    the chip row.
+
+    ORDER IS NO LONGER THE TRUNCATION POLICY (2026-08-31). It was, and the
+    policy failed in the direction its own comments did not anticipate: with
+    every part `flex: none` and only `:last-child` allowed to shrink, the
+    line cut whatever the template rendered LAST, which on an undated row is
+    "No date posted, first seen 39d ago" — the answer the mute dash in
+    `.rr-due` deliberately withholds. Measured live on the founder's board,
+    that span was rendering at 5px of the 193px it needs. The meta line now
+    WRAPS, and the single cut is a named 205px cap on `.rr-loc`. Order still
+    governs what a reader meets first; it no longer governs what survives.
   - the Save/track control and Read, unchanged behaviour.
 
 Row height is a FLOOR (min-height), not a fixed height. The old card
@@ -66,11 +76,16 @@ only reintroduce the clipping bug this file's history is full of.
       rule the card used).
       {% endcomment %}
       {% comment %}
-      ORDER IS THE TRUNCATION POLICY. This line is one row of ~165px on a
-      302px column, so the tail is what disappears — which means whatever
-      sits last is what a student never reads. Measured on the live feed,
-      a first pass put location and role type ahead of the verdict and cut
-      the line at "Entry-Le…", losing the visa and year answers entirely.
+      ORDER IS READING ORDER. It used to be the truncation policy too, and
+      that second job is what broke (see the header comment): the line now
+      wraps and cuts only at `.rr-loc`'s stated cap, so no position on this
+      line is a death sentence any more. The ordering still decides what a
+      student meets FIRST, which on a line that can run to three rows of
+      text is the job that actually matters.
+
+      Measured on the live feed, a first pass put location and role type
+      ahead of the verdict and cut the line at "Entry-Le…", losing the visa
+      and year answers entirely.
 
       So: the verdict leads (the one fact about the READER, and the one
       that can end the decision outright), then the posting's own facts in
@@ -81,19 +96,33 @@ only reintroduce the clipping bug this file's history is full of.
       {% if r.show_firm %}<span class="rr-firm">{{ r.firm_name|smart_title }}</span>{% endif %}
       {% if r.verdict %}<span class="rr-vd vd-{{ r.verdict.kind }}" title="{{ r.verdict.why }}">{{ r.verdict.label }}</span>{% endif %}
       {% for f in r.facts %}<span class="rr-fact {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
+      {% comment %}
+      THE LOCATION ALWAYS CARRIES A `title`. It is the one part of the meta
+      line allowed to truncate (see `.rr-loc`'s 205px cap in _styles.html:
+      it holds ~95% of locations whole and bites on the multi-city dumps,
+      the widest of which is 762px of ten cities), so the full string has to
+      survive the cut somewhere. `_place`'s own `why` covers the tidied and
+      market-fallback cases and is the better sentence when it exists —
+      it says WHY the text differs from what the posting stated — but it is
+      deliberately empty when the text IS what the posting stated, and that
+      is exactly a raw multi-city list. Falling back to the text itself adds
+      no claim: it is the same string the span already holds.
+      {% endcomment %}
       {% if r.place.text %}<span class="rr-loc{% if not r.place.exact %} is-market{% endif %}"
-        {% if r.place.why %}title="{{ r.place.why }}"{% endif %}>{{ r.place.text|smart_location }}{% if r.place.more %} +{{ r.place.more }}{% endif %}</span>{% endif %}
+        title="{% if r.place.why %}{{ r.place.why }}{% else %}{{ r.place.text|smart_location }}{% if r.place.more %} +{{ r.place.more }}{% endif %}{% endif %}">{{ r.place.text|smart_location }}{% if r.place.more %} +{{ r.place.more }}{% endif %}</span>{% endif %}
       <span class="rr-kind"{% if r.cohort %} title="{{ r.cohort }} programme year"{% endif %}>{{ r.bucket_label }}{% if r.cohort %} {{ r.cohort }}{% endif %}</span>
       {% if r.class_year %}<span class="rr-cls" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
       {% comment %}
       HOW LONG THIS ONE HAS BEEN OPEN. Last in the meta line on purpose, and
       that placement is the whole argument for it being safe to add at all:
-      ORDER IS THE TRUNCATION POLICY (see above), so a new fact competing for
-      a ~165px line has to earn its slot or take the one that ellipsises
-      first. This takes the latter. It is about the posting's HISTORY, not
-      about the reader and not about their eligibility, so nothing that could
-      end the decision loses room to it — the verdict, the fact chips, the
-      location and the role type all keep their position ahead of it.
+      LAST IN READING ORDER (see above), because it is about the posting's
+      HISTORY, not about the reader and not about their eligibility: nothing
+      that could end the decision should be met after it. It used to be last
+      for a second reason — it was the slot that ellipsised first, and that
+      is what made it safe to add. That reasoning is retired with the policy:
+      under `:last-child` truncation this span was measured at 0px width on a
+      live Picked row, which is not "ellipsising first", it is being deleted.
+      The line wraps now, so it is simply read last.
 
       NOT a duration prediction, and the distinction is the reason this
       feature shipped in this shape. See `directory.open_runs`: the obvious
@@ -126,7 +155,8 @@ only reintroduce the clipping bug this file's history is full of.
       302px (the real column width): as a column they took 160px and left
       the title 70px — about twelve characters — which inverted the row's
       whole hierarchy. On this line they take their width from the meta
-      instead, which is the part that can afford to ellipsise.
+      instead, which is the part that can afford to give ground — it wraps
+      now rather than ellipsising, so the ground it gives is a line break.
       {% endcomment %}
       <div class="rr-act">
         {% if request.user.is_authenticated %}{% include "directory/_track_control.html" %}{% endif %}

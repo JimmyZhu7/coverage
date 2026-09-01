@@ -44,6 +44,26 @@ _MINOR = {
     "a", "an", "and", "as", "at", "but", "by", "for", "in", "into", "nor",
     "of", "on", "or", "per", "so", "the", "to", "via", "vs", "with",
     "de", "del", "della", "di", "da", "du", "des", "la", "le", "el", "y", "e",
+    # Germanic and Nordic nobiliary particles, added 2026-09-01. The founder's
+    # own board carries "Ebba af Klercker" -- the very row `ContactMerge`'s
+    # docstring cites as the case the merge feature was built for -- and it
+    # rendered "Ebba Af Klercker" on the Decisions card because "af" was not
+    # here.
+    #
+    # BLAST RADIUS, measured rather than assumed. A first pass of this comment
+    # claimed "no Firm name contains these, so only that one contact changes",
+    # which was true of firm names and wrong about everything else: this filter
+    # also runs over Opportunity titles and locations, and German and Danish
+    # postings carry these words constantly. Re-checked against live rows, the
+    # other hits are all improvements rather than regressions --
+    # "Berlin, Unter den Linden 13-15" is a real street that read "Unter Den
+    # Linden" before, and "Trainee in der Steuerberatung" now reads as German
+    # rather than as title case applied to German. Kept for that reason, not
+    # because the change was narrow.
+    #
+    # A LEADING particle is still capitalised (the `force_cap` branch below
+    # runs first), so a firm like "Van Lanschot" keeps its capital V.
+    "af", "van", "von", "der", "den", "ter",
 }
 
 # Punctuation that ends the clause before it, so the word AFTER it is a first
@@ -160,6 +180,77 @@ def smart_title(value):
                                  or _restarts_a_clause(words[i - 1])))
         for i, w in enumerate(words)
     )
+
+
+# A run of lowercase letters, the only shape this filter will ever split —
+# guards against "jsmith2" (a digit in the run) and "j" alone (a single
+# initial, indistinguishable from a truncated split) getting pulled apart.
+_LOCAL_PART_TOKEN = re.compile(r"^[a-z]{2,}$")
+
+
+@register.filter(name="smart_person_name")
+def smart_person_name(value):
+    """Turn an email-local-part-shaped `Contact.name` into a readable one:
+    'jude.yoon' -> 'Jude Yoon', 'wenyu.xiong' -> 'Wenyu Xiong'.
+
+    `capture` stores exactly what it observed, which for a contact pulled
+    off a Gmail thread is sometimes nothing better than the address's local
+    part — verified on the founder's own board (2026-08-31): 43 of 226
+    non-archived contacts (19%) have `name == email.split("@")[0]`
+    case-insensitively, and every one of them is `source="capture"`. Real
+    examples: 'jude.yoon' / 'jude.yoon@citi.com', 'wenyu.xiong' /
+    'wenyu.xiong@citi.com', 'dongyoon.kim' / 'dongyoon.kim@citi.com'.
+
+    This does not touch the stored row — `Contact.name` stays exactly what
+    capture observed, honest evidence rather than a guess dressed up as one.
+    The fix is presentational only, the same posture `smart_title` and
+    `smart_location` already take on messier fields.
+
+    THE SHAPE, and nothing looser than it. A local part reads as
+    "word[.+_-]word[.+_-]...", so the rule fires only when ALL of these
+    hold at once:
+      1. no whitespace anywhere — a typed name has spaces ("Youqi Chen",
+         "J.P. Morgan Recruiting"); a local part never does. This alone
+         rules out most real names before the rest of the checks run.
+      2. at least one of the three corporate-address separators (. _ -)
+         is present, splitting the string into two or more pieces.
+      3. every piece is two or more lowercase letters and nothing else —
+         no digits ("jsmith2"), no mixed case ("John_Smith" is left alone:
+         capitalization already present is a signal a person typed it
+         deliberately, not evidence to overwrite), no single-letter pieces
+         (an initial split from "j.smith" cannot be told apart from a typo,
+         so the whole name is left untouched rather than guessed at).
+
+    Each surviving piece is capitalized and rejoined with a plain space:
+    the separator character itself carried no meaning of its own, it was
+    just what an email system accepts in a local part.
+
+    WHAT THIS DELIBERATELY LEAVES ALONE, checked against the real 43:
+    a bare single token with no separator at all ('cv', from
+    'cv@citi.com') never reaches rule 2 — there is no way to tell a
+    truncated local part from a two-letter nickname, so it renders
+    exactly as stored. A single already-capitalized given name ('Kirthi',
+    'Matt') never reaches rule 2 either, and needs no fixing: it already
+    reads as a name.
+
+    KNOWN LIMIT: an all-lowercase hyphenated compound given name typed by
+    hand with no last name ('mary-jane') is indistinguishable from a
+    first.last local part and comes out split ('Mary Jane'). None of the
+    real 43 take this shape — every one is a firm-issued firstname.lastname
+    address — so this is a documented risk rather than a measured one.
+    """
+    if not value:
+        return value
+    text = str(value).strip()
+    if not text or any(ch.isspace() for ch in text):
+        return value
+    pieces = re.split(r"[._-]+", text)
+    pieces = [p for p in pieces if p]
+    if len(pieces) < 2:
+        return value
+    if not all(_LOCAL_PART_TOKEN.match(p) for p in pieces):
+        return value
+    return " ".join(p[:1].upper() + p[1:] for p in pieces)
 
 
 # ---------------------------------------------------------------------------

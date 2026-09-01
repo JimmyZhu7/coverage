@@ -337,3 +337,62 @@ def test_neither_surface_invents_a_sentence_for_an_unknown_place(client):
     for body in (firm_body, feed_body):
         assert "Location not listed" not in body
         assert "not listed" not in body.lower()
+
+
+# ---------------------------------------------------------------------------
+# 5. The location is the row's ONE truncation point, so the cut has to be
+#    recoverable (2026-08-31).
+#
+# `.rr-loc` is capped at a stated max-width and ellipsises past it — see
+# `test_the_feed_row_has_exactly_one_truncation_point`. The cap is off the
+# measured distribution on the founder's board (p50 60px, p95 185px, max
+# 762px), so ~95% of locations are untouched and the ones it bites are the
+# multi-city dumps: "Charlotte, NC, Chicago, IL, Pennington, NJ, Phoenix, AZ,
+# NYC Metro, NY, Dallas Metro, TX" and worse.
+#
+# Those are exactly the rows `_place` returns an EMPTY `why` for, because the
+# text IS what the posting stated and there is nothing to explain. So the
+# span that most needs a tooltip was the one span that had none.
+# ---------------------------------------------------------------------------
+
+
+def _feed_loc_tags(client):
+    body = client.get("/opportunities/").content.decode()
+    return re.findall(r'<span class="rr-loc[^"]*"[^>]*>', body)
+
+
+def test_a_verbatim_location_still_carries_a_title_so_the_cap_can_cut_it(client):
+    """The row this exists for: a raw multi-city string, printed verbatim,
+    wider than the cap. `_place`'s `why` is empty here by design, so the
+    title falls back to the location text itself — which adds no claim,
+    being the same string the span already holds."""
+    firm = _firm()
+    cities = ("Charlotte, NC, Chicago, IL, Pennington, NJ, Phoenix, AZ, "
+              "NYC Metro, NY, Dallas Metro, TX")
+    opp = _opp(firm, location=cities, region="us", n=91)
+    assert _place(opp)["why"] == "", (
+        "if this string now tidies, pick a rawer one — the point of the test "
+        "is the branch where there is no `why` to fall back on"
+    )
+
+    tags = _feed_loc_tags(client)
+    assert len(tags) == 1, tags
+    assert 'title="' in tags[0], (
+        "the one part of the meta line allowed to truncate must keep the "
+        "full string somewhere a reader can reach"
+    )
+    assert html.escape(cities, quote=True) in tags[0], tags[0]
+
+
+def test_a_tidied_location_keeps_the_explanation_not_just_the_text(client):
+    """The fallback must not displace the better sentence. Where `_place`
+    HAS a `why` — it tidied the string, or it is naming a market instead of
+    a city — that sentence says why the text differs from what the posting
+    stated, which the text alone cannot."""
+    firm = _firm()
+    _opp(firm, location="", region="us", n=92)
+
+    tags = _feed_loc_tags(client)
+    assert len(tags) == 1, tags
+    assert "is-market" in tags[0], tags[0]
+    assert "did not state a city" in html.unescape(tags[0]), tags[0]

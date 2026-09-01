@@ -211,7 +211,7 @@
             </details>
           {% endif %}
           {% if g.lever %}
-            <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Talk to {{ g.lever.name|smart_title }}</a>
+            <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Talk to {{ g.lever.name|smart_person_name|smart_title }}</a>
           {% else %}
             {% comment %}Visible text is "Add Contact", not "+ Add a contact"
             (2026-08-31) — six of these sit in a row and the full sentence
@@ -268,13 +268,13 @@
               {% for c in group.contacts %}
                 <label class="net-mini">
                   <input class="place-check" type="checkbox" name="ids" value="{{ c.id }}"
-                         aria-label="Select {{ c.name|smart_title }}">
+                         aria-label="Select {{ c.name|smart_person_name|smart_title }}">
                   <span class="net-mini-text">
-                    <span class="net-mini-name">{{ c.name|smart_title }}</span>
+                    <span class="net-mini-name">{{ c.name|smart_person_name|smart_title }}</span>
                     <span class="net-mini-firm">{{ c.role|default:"—" }}</span>
                   </span>
                   <a class="net-mini-open" href="{% url 'crm:contact_detail' c.id %}"
-                     aria-label="Open {{ c.name|smart_title }}'s profile"
+                     aria-label="Open {{ c.name|smart_person_name|smart_title }}'s profile"
                      title="Open profile">›</a>
                 </label>
               {% endfor %}
@@ -506,7 +506,7 @@
                   {% if fc.gap_label %}
                     {% if fc.lever %}
                       <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
-                         href="{% url 'crm:contact_detail' fc.lever.id %}">Talk to {{ fc.lever.name|smart_title }}</a>
+                         href="{% url 'crm:contact_detail' fc.lever.id %}">Talk to {{ fc.lever.name|smart_person_name|smart_title }}</a>
                     {% else %}
                       <a class="fc-act-link" draggable="false" title="{{ fc.gap_label }}"
                          href="{% url 'crm:contact_new' %}?firm={{ fc.firm.slug }}">＋ Add a contact</a>
@@ -653,7 +653,7 @@
                   {% endcomment %}
                   <input class="cc-check" type="checkbox" name="ids"
                          value="{{ card.c.id }}"
-                         aria-label="Select {{ card.c.name|smart_title }}">
+                         aria-label="Select {{ card.c.name|smart_person_name|smart_title }}">
                   {% comment %}The staleness ring: silence made visible. The
                   ring drains as the cadence clock this contact runs on is
                   consumed — full ring means the engine is about to nag. The
@@ -663,7 +663,7 @@
                   <span class="cc-avatar stale-{{ card.stale_tint }}" style="--stale: {{ card.stale_pct }}"
                         title="{% if card.days_since is not None %}{{ card.days_since }}d of this contact's keep-warm window used{% else %}Never contacted{% endif %}">{{ card.initials }}</span>
                   <div class="cc-id">
-                    <span class="cc-name">{{ card.c.name|smart_title }}
+                    <span class="cc-name">{{ card.c.name|smart_person_name|smart_title }}
                       {% if card.gender %}<span class="pill cc-pill">{{ card.gender }}</span>{% endif %}
                       {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
                       {% if card.region %}<span class="pill cc-pill">{{ card.region }}</span>{% endif %}

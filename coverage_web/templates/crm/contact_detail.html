@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load textstyle %}
 
-{% block title %}{{ contact.name|smart_title }} · Coverage{% endblock %}
+{% block title %}{{ contact.name|smart_person_name|smart_title }} · Coverage{% endblock %}
 
 {% block head %}{% include "crm/_styles.html" %}{% endblock %}
 
@@ -19,7 +19,7 @@
         {% if firm %}{{ firm.name|smart_title }}{% elif contact.firm_text %}{{ contact.firm_text|smart_title }}{% endif %}{% if contact.role %} · {{ contact.role }}{% endif %}
         {% if contact.school_affiliation %} · alum{% endif %}
       </p>
-      <h1 class="pagehead-title">{{ contact.name|smart_title }}</h1>
+      <h1 class="pagehead-title">{{ contact.name|smart_person_name|smart_title }}</h1>
     </div>
     <div class="pagehead-actions">
       <a class="btn" href="{% url 'crm:contact_edit' contact.pk %}">Edit</a>

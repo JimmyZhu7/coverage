@@ -377,19 +377,24 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font-weight: var(--w-reg); }
 
   /* Unplaced arrivals: at most five names, no total, gone once the week's
-     arrivals are placed or age out (see crm.today._unplaced_arrivals). Same
-     plain-list shape as the getting-started card above — there is nothing to
-     attest to here either, only a question to take somewhere — so a row is a
-     name and where they work, and the one link lives in the heading. */
+     arrivals are placed or age out (see crm.today._unplaced_arrivals). Every
+     row is a link now (2026-08-31) — every OTHER rail card's rows already
+     were, and a plain name and firm with no clickable feel read as
+     decoration. All rows share the one destination the heading's "All"
+     link already carries, since there is nowhere more specific to send a
+     single row (see the template's own comment). */
   .unplaced-note { margin: 0 0 var(--s2); font-size: var(--fs-micro);
     color: var(--ink-3); }
   .unplaced-list { list-style: none; margin: 0; padding: 0;
     display: flex; flex-direction: column; gap: var(--s1); }
+  .unplaced-row { font-size: var(--fs-s); }
+  .unplaced-link { display: flex; align-items: baseline;
+    justify-content: space-between; gap: var(--s2); color: inherit;
+    text-decoration: none; }
+  .unplaced-link:hover { text-decoration: underline; }
   /* The firm holds its width and the name gives way: a long name truncating
      is a nuisance, a truncated firm is the loss of the one fact that makes
      the question answerable at all. */
-  .unplaced-row { display: flex; align-items: baseline;
-    justify-content: space-between; gap: var(--s2); font-size: var(--fs-s); }
   .unplaced-name { color: var(--ink); font-weight: var(--w-med);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .unplaced-firm { flex: none; color: var(--ink-3);

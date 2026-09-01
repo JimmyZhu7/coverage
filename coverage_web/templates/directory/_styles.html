@@ -771,18 +771,45 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-1); }
 
   /* ----------------------------------------------------------------------
-     THE PICKED COLUMN — same shape as a firm column, a different colour.
+     THE PICKED COLUMN — same surface as a firm column, marked not tinted.
 
      It has to read as "not a firm" from across the page, because it sits in a
      row of firms and its header is a phrase where theirs are company names.
-     Three signals do that, none of them colour alone: an accent-tinted
-     surface and header, a heavier accent top edge, and a star where every
-     other column shows a monogram.
+     Three signals do that and none of them is a wash: a heavier accent top
+     edge, an accent hairline border, and a star where every other column
+     shows a monogram (plus the name in --accent-ink).
+
+     THE WASH IS GONE (2026-08-31), and the measurement is the argument.
+     The column used to paint its body `--accent-soft`. Measured live in dark
+     on the founder's own board at 1512px, `getComputedStyle` on the rendered
+     page:
+
+         --accent-soft #232a35 vs --surface  #1c201a   1.144:1
+         --accent-soft #232a35 vs --paper    #141712   1.252:1
+         --surface     #1c201a vs --paper    #141712   1.095:1
+
+     So the tint separated the column by HUE, not by luminance — a blue-grey
+     slab on a green-black page, in a palette whose own comment says it keeps
+     "the product's warm-paper character". Worse, the tint only ever reached
+     the 126px header: `.firmcol-scroll` paints `--surface` over the whole
+     340px body (it has to — the scroll-shadow cover layers are that colour,
+     see its own comment), so the column rendered as a blue lid on a
+     green-black box with a 1.144:1 hue jump at the seam between them. That
+     seam was the harshest edge in the column and it was internal to it,
+     which is a strange thing for the one column meant to look calm.
+
+     Dropping the wash to `--surface` removes the seam by construction (head
+     and body are now one colour) and puts the column in the same surface
+     hierarchy as the firm columns beside it. It also makes the header height
+     below harmless: this founder's Picked head renders two lines of content
+     (37.2px) inside its 126px box because his picks share no reason for the
+     third line, and 60px of empty TINT reads as a slab where 60px of empty
+     surface reads as padding.
 
      Same 468px height and same scroll window as its neighbours — a taller or
      shorter first column would break the row it is trying to join.
      ---------------------------------------------------------------------- */
-  .firmcol--picked { background: var(--accent-soft);
+  .firmcol--picked { background: var(--surface);
     border-color: var(--accent-line);
     box-shadow: inset 0 3px 0 0 var(--accent), var(--shadow-1); }
   .firmcol--picked:hover { border-color: var(--accent);
@@ -802,12 +829,32 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* Not a link — it names a view, not a firm — so it must not offer a link's
      hover affordance. */
   .firmcol--picked .firmcol-name:hover { color: var(--accent-ink); cursor: default; }
-  .firmcol-logo--picked { background: var(--accent); color: var(--on-accent);
-    box-shadow: none; font-size: var(--fs-m); }
-  /* The cards keep the neutral surface: tinting them too would drop the
-     contrast the standardised card relies on, and the column's own tint
-     already carries the signal. */
-  .firmcol--picked .rolerow { background: var(--surface); }
+  /* THE STAR TILE — compound selector, and the second class is load-bearing.
+     This rule was `.firmcol-logo--picked { ... }`, one class, sitting ~46
+     lines ABOVE `.firmcol-logo`'s own one-class rule. Equal specificity, so
+     source order decided it and the generic tile won: measured live in
+     light, the star rendered on rgb(216, 230, 243) — `hsl(210 52% 90%)`,
+     the default-hue monogram tile every logo-less firm column wears — not
+     on `--accent`. All three declarations here were dead. `.firmcol-logo`
+     also restored the inset hairline this rule asks to drop.
+
+     It went unnoticed while the column had an accent WASH doing the work.
+     With the wash gone (see the Picked block above) the star is one of the
+     three signals left saying "not a firm", and on this founder's board only
+     two of those three actually fire: all 12 of his rendered firm columns
+     are `.is-mine`, so they already carry the same `--accent-line` border
+     the Picked column does. That leaves the top edge and this tile, and a
+     star rendering in the same colour as every monogram beside it is not a
+     signal. Pinned by specificity rather than by moving the rule, so a
+     future reorder of this file cannot silently kill it again. */
+  .firmcol-logo.firmcol-logo--picked { background: var(--accent);
+    color: var(--on-accent); box-shadow: none; font-size: var(--fs-m); }
+  /* `.firmcol--picked .rolerow { background: var(--surface) }` used to sit
+     here, holding the rows back to the neutral surface while the column
+     around them was tinted. With the wash gone the column IS `--surface`, so
+     the override restated the inherited value and, being more specific than
+     `.rolerow:hover`, was one edit away from killing the row hover. Removed
+     rather than left as a no-op. */
   /* "N more hidden by your filters" — this column obeys the filters, so it
      owns up to what they removed. */
   .firmcol-hidden { display: block; font-size: var(--fs-micro); color: var(--ink-3);
@@ -1031,8 +1078,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      rendered. A first pass here guessed 56px against ~88px of real
      content and silently clipped the meta line — location and the visa
      verdict — off every row on the page. With `auto` the browser
-     substitutes each row's last real size once it has rendered one. */
-  .rolerow { content-visibility: auto; contain-intrinsic-size: auto 57px; }
+     substitutes each row's last real size once it has rendered one.
+
+     82px, not 57px (2026-08-31). The number is a scrollbar estimate for
+     rows that have never painted, so it should be the measured mean, and
+     the mean moved when the meta line started wrapping instead of clipping:
+     71.0px -> 81.6px over all 790 rows on the founder's board. 57px was
+     already 14px under the old mean; leaving it under the new one makes the
+     scrollbar lie harder the further down a 65-role column you drag. */
+  .rolerow { content-visibility: auto; contain-intrinsic-size: auto 82px; }
 
   /* The deadline column. `tabular-nums` is the whole point: the figures
      line up into a real column down the page, which is what lets the eye
@@ -1075,29 +1129,108 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     text-decoration: underline dotted currentColor; text-underline-offset: 3px; }
   .rr-title a.is-unconfirmed:hover { color: var(--stale-t); }
 
-  /* One line of facts, ordered by decisiveness upstream
-     (views.py::_FACT_CHIP_ORDER, verdict first), so the tail this
-     ellipsises is always the least decisive thing on the row. That
-     ordering is what makes truncation safe here; without it CSS would be
-     choosing which fact to drop. */
-  .rr-meta { display: flex; align-items: baseline; gap: 5px;
-    flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
+  /* THE FACTS, ordered by decisiveness upstream (views.py::_FACT_CHIP_ORDER,
+     verdict first) and WRAPPED rather than clipped.
+
+     It was one nowrap line with `overflow: hidden`, every part `flex: none`,
+     and a single `:last-child` allowed to ellipsise. That contract only
+     degrades gracefully while the shortfall is smaller than the last child's
+     own width, and it is not. Measured live in dark on the founder's own
+     board at 1512px (3 columns, 383.3px of meta per row), over all 790
+     rendered rows, with `content-visibility` forced on so offscreen rows
+     reported real layout instead of their placeholder:
+
+         441 of 790 rows (55.8%)  cut their last meta item mid-word
+         150 of 790 rows (19.0%)  cut it below 24px -- a fragment, not a fact
+         129 of 790 rows (16.3%)  overflowed the line ANYWAY, hard-clipped
+                                  with no ellipsis at all, because the one
+                                  shrinkable item had already reached zero
+
+     In the Picked column, which carries one item more than any other column
+     (the firm name -- see `show_firm`), 6 of 6 rows were cut and the worst
+     rendered `.rr-undated` at 5px of the 193px it needs: the founder's
+     the founder's two screenshotted fragments are the same span cut at four
+     different widths (119 / 76 / 76 / 5 / 21px) down one column, which is
+     why it reads as breakage rather than as brevity. One dated row lost
+     its open-run figure entirely (0px width) and still hard-clipped 219px of "Insight
+     Programme 2026" with no ellipsis to mark it.
+
+     Wrapping fixes all three at once because the line stops having to choose.
+     Measured the same way after: 0 items cut, 0 rows hard-clipped, mean row
+     height 71.0px -> 81.6px. 338 rows still fit one line, 408 take two, 41
+     take three, and the 3 that took four were all one runaway `.rr-loc`
+     (up to 762px of "Atlanta, GA, Charlotte, NC, Chicago, IL, ..."), which
+     the cap below now bounds.
+
+     This is the row's own stated philosophy applied to its second line: the
+     header comment in _rolecard.html says row height is a FLOOR and that a
+     fixed height "would only reintroduce the clipping bug this file's
+     history is full of". A one-line meta with `overflow: hidden` was a fixed
+     height wearing a different name, and it was clipping. */
+  .rr-meta { display: flex; flex-wrap: wrap; align-items: baseline;
+    column-gap: 5px; row-gap: 0;
+    flex: 1; min-width: 0; overflow: hidden;
     font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.4; }
-  .rr-meta > * + *::before { content: "·"; color: var(--line-strong);
-    margin-right: 5px; }
+  /* Each PART stays on one line; only the line of parts wraps. Without this
+     the `white-space: nowrap` that used to live on the container above is
+     gone, and a two-word location would break across lines on its own. */
+  .rr-meta > * { white-space: nowrap; }
+  /* THE SEPARATOR IS A RULE, NOT A MIDDOT, and wrapping is only half of why.
+     It was `.rr-meta > * + *::before { content: "·" }`, which a wrapped line
+     inherits at its START -- a stray middot opening line two. The `::after`
+     alternative fixes that and nothing else; a hairline fixes the other half
+     too. Half the fact labels views.py builds CONTAIN a middot of their own
+     ("Sponsors · firm policy", "No sponsorship · firm policy", "Penultimate
+     year · Grad 2027-2028"), so the founder's own dated Picked row read
+     "Bank of America · Sponsors · firm policy · Penultimate year · United
+     States · Insight Programme 2026" -- five identical marks, two of them
+     inside one label, and no way to tell which separated facts. The pill era
+     drew a border around each fact and hid that; the row has no border to
+     hide behind. A vertical hairline is the ledger's own column rule, cannot
+     be confused with punctuation inside a label, and belongs to the item it
+     follows, so no line ever opens with it. */
+  .rr-meta > *:not(:last-child) { padding-right: 6px;
+    border-right: 1px solid var(--line-strong); }
   .rr-firm { font-weight: var(--w-med); color: var(--ink-2); flex: none; }
-  .rr-loc { flex: none; }
+  /* THE ONE TRUNCATION POINT (see the contract note below `.rr-fact`).
+     205px is off the measured distribution of every `.rr-loc` on the
+     founder's board: p50 60px, p75 118px, p90 154px, p95 185px, p99 272px,
+     max 762px. So the cap leaves ~95% of locations whole and bites only on
+     the multi-city dumps ("Charlotte, NC, Chicago, IL, Pennington, NJ,
+     Phoenix, AZ, NYC Metro, NY, Dallas Metro, TX"), which are the rows that
+     wrapped to three and four lines and the rows a reader skims past anyway.
+     `flex: none` still holds: the cap is a max-width, so this part does not
+     shrink to make room for a sibling -- it truncates at one stated width or
+     not at all, which is what keeps the cut in the same place down a column
+     instead of at five different widths. _rolecard.html gives every location
+     a `title`, so the full list survives the cut. */
+  .rr-loc { flex: none; max-width: 205px; overflow: hidden;
+    text-overflow: ellipsis; }
   .rr-kind { flex: none; }
   /* Both keep their full width and let the location absorb the shortfall:
      a half-rendered year reads as a rendering fault, a truncated city does
-     not. Same call the card's `.class-chip { flex: none }` made. */
+     not. Same call the card's `.class-chip { flex: none }` made.
+
+     That sentence was the file's stated policy and, until 2026-08-31, not
+     what the CSS did: `.rr-loc` was `flex: none` too, so the shortfall fell
+     on `:last-child` instead -- which on an undated row is `.rr-undated`,
+     the one span that must not be half-rendered. The location now carries
+     it for real (see its own rule above). */
   .rr-cls { flex: none; }
+  /* NEVER the thing that gives way. The undated sentence this span renders
+     needs 193px; on the founder's board it was being handed 5px. The words
+     are the honest answer for a role that states no deadline -- the dash in
+     `.rr-due` is deliberately mute about WHY (see _rolecard.html) and these
+     words are the why -- so a fragment of them is worse than a wrapped line
+     carrying all of them. */
   .rr-undated { flex: none; }
   /* `flex: none` like every other part of the line, and NOT a truncation
-     rule of its own: on a dated row this is what the template renders last,
-     so the `.rr-meta > *:last-child` contract below is already the thing
-     that cuts it. A second, independent shrink rule here is precisely the
-     "FOUR separate mid-word ellipses" regression that comment records. */
+     rule of its own: the single `.rr-loc` cap above is the one thing on this
+     line allowed to cut. A second, independent shrink rule here is precisely
+     the "FOUR separate mid-word ellipses" regression that comment records.
+     Being rendered last no longer means being the thing that gives way --
+     under `:last-child` it did, which is how the open-run figure reached 0px on
+     a live row. */
   .rr-open { flex: none; }
   /* The one fact about the READER rather than about the posting, and so
      the only one that keeps colour now that the pills are gone. */
@@ -1116,18 +1249,25 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rr-fact.fact-wall { color: var(--danger); }
   .rr-fact.fact-ok { color: var(--ok); }
   .rr-fact.fact-pay { color: var(--accent-ink); font-weight: var(--w-med); }
-  /* ONE truncation point, not four. Every part above holds its own full
-     width; only the actual last child on the line gives way. A first pass
-     let `.rr-fact` and `.rr-loc` each shrink independently, which meant a
-     packed row -- verdict, two facts, a market qualifier, the role type --
-     showed FOUR separate mid-word ellipses instead of one clean cut, each
-     fact reduced to a handful of unreadable characters. `:last-child`
-     always resolves to whatever _rolecard.html actually rendered last for
-     THIS row (kind, class year, a fact, or even the verdict on a bare
-     row) -- the ordering there already puts the least decisive fact last,
-     so this is the tail giving way, not the head. */
-  .rr-meta > *:last-child { flex-shrink: 1; min-width: 0; overflow: hidden;
-    text-overflow: ellipsis; }
+  /* ONE TRUNCATION POINT, NOT FOUR — the contract holds, the point moved.
+
+     It used to be `.rr-meta > *:last-child { flex-shrink: 1; ... }`. The
+     "one point" half of that was right and is kept; the "last child" half
+     was a positional accident. `:last-child` resolves to whatever
+     _rolecard.html happened to render last for THIS row, and on the ~600
+     undated rows that is `.rr-undated` -- the span carrying the answer the
+     deadline column deliberately withholds, cut to 5px on the
+     founder's own board while "Internship 2027" beside it kept every pixel.
+     The line's decisiveness ordering was doing its job; the CSS was reading
+     "last" as "least decisive" when what was last was the deadline.
+
+     So the point is now NAMED: `.rr-loc` above, capped at a stated width.
+     That is the part the file already designated as the compressible one --
+     "a half-rendered year reads as a rendering fault, a truncated city does
+     not" (see `.rr-cls` above) -- and it is the only rule in this block that
+     declares `text-overflow`. Nothing else on the line can cut, so the
+     multi-ellipsis regression stays closed; and because the line now wraps,
+     nothing else on the line NEEDS to. */
 
   /* Controls, not chips: --r-ctl is what this product's own token comment
      reserves for a thing you press ("status chips keep the pill; controls
@@ -1382,8 +1522,24 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        The controls wrap to their own line here (see .rr-act above), so the
        content box is 35 title + 2 + 17 meta + 2 + 44 controls = 100. An
        earlier 81 was measured before that wrap existed and clipped 26 of
-       the first 80 rows at 390px. */
-    .rolerow { contain-intrinsic-size: auto 100px; }
+       the first 80 rows at 390px.
+
+       151px, not 100px (2026-08-31). Measured, not derived: at 375px the
+       whole board is one column and a row gets 257px of meta against the
+       desktop column's 383px, so the wrapping line costs MORE rows of text
+       here, not fewer — mean 2.38 lines against desktop's 1.56, and a mean
+       row height of 151.4px (max 214.9px) against desktop's 78.9px. 100px
+       was already 28px under the mean BEFORE this change (128.1px), which
+       is the same "guessed too small" defect the docstring above records,
+       just never re-measured after touch shipped.
+
+       Phones are where the old contract did its worst damage, which is why
+       this is worth the extra rows: over all 790 rendered rows at 375px,
+       732 (92.7%) cut their last meta item mid-word, 397 (50.3%) cut it
+       below 24px, and 363 (46.0%) overflowed with no ellipsis at all. The
+       same board after: 0 and 0, with 28 location ellipses at the one
+       stated cap. */
+    .rolerow { contain-intrinsic-size: auto 151px; }
     /* 6px between two opposite verbs is a hover-era gap. It grows with the
        targets it separates — not far, because the row has no width to spare
        (see the chip note below), but the dead band is now wider than the

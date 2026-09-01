@@ -4,7 +4,9 @@ to standardize."""
 
 import pytest
 
-from core.templatetags.textstyle import smart_location, smart_role, smart_title
+from core.templatetags.textstyle import (
+    smart_location, smart_person_name, smart_role, smart_title,
+)
 
 
 CASES = [
@@ -323,3 +325,85 @@ def test_smart_role_never_invents_a_word_that_was_not_typed():
 
 def test_smart_role_respects_a_lower_word_cap():
     assert smart_role("One Two Three Four Five Six", max_words=3) == "One Two Three"
+
+
+# --- smart_person_name: an email-local-part-shaped name, made readable ----
+# Verified against the founder's own real 43 (2026-08-31, read-only): every
+# firstname.lastname case below is a real `Contact.name` / `Contact.email`
+# pair taken off his live board, not an invented example.
+PERSON_NAME_CASES = [
+    # The measured bug, real pairs.
+    ("jude.yoon", "Jude Yoon"),
+    ("wenyu.xiong", "Wenyu Xiong"),
+    ("dongyoon.kim", "Dongyoon Kim"),
+    ("monica.xiao", "Monica Xiao"),
+    ("shubham.gupta", "Shubham Gupta"),
+    # Underscore and hyphen are corporate-address separators too.
+    ("jude_yoon", "Jude Yoon"),
+    ("jude-yoon", "Jude Yoon"),
+    # A typed name is untouched: it has a space, full stop.
+    ("Youqi Chen", "Youqi Chen"),
+    ("J.P. Morgan Recruiting", "J.P. Morgan Recruiting"),
+    # Mixed case already present reads as a deliberate typed name, not raw
+    # local-part evidence — left alone rather than overwritten.
+    ("John_Smith", "John_Smith"),
+    # A single initial split from a real name cannot be told apart from a
+    # typo cutting a real word short, so the whole thing is left alone.
+    ("j.smith", "j.smith"),
+    # A digit anywhere in a piece is not a name syllable.
+    ("jsmith2", "jsmith2"),
+    ("team-2026", "team-2026"),
+    # No separator at all: a bare local part like the real 'cv' (from
+    # 'cv@citi.com'), or a single already-good given name like the real
+    # 'Kirthi' and 'Matt' — nothing here to split, so nothing changes.
+    ("cv", "cv"),
+    ("Kirthi", "Kirthi"),
+    ("Matt", "Matt"),
+    # Degenerate inputs pass through.
+    ("", ""),
+    (None, None),
+]
+
+
+@pytest.mark.parametrize("raw,expected", PERSON_NAME_CASES)
+def test_smart_person_name(raw, expected):
+    assert smart_person_name(raw) == expected
+
+
+def test_smart_person_name_never_touches_a_name_with_a_space():
+    """The one signal this filter trusts completely: whitespace means a
+    person typed word breaks on purpose. No case in this file may pass a
+    spaced input through the separator-splitting logic at all."""
+    for raw in ("Youqi Chen", "J.P. Morgan Recruiting", "Ellen Huang", "  Jude   Yoon  "):
+        assert smart_person_name(raw) == raw
+
+
+def test_smart_person_name_chains_cleanly_with_smart_title():
+    """The real call sites pipe `name|smart_person_name|smart_title` — the
+    first filter turns the shape into words, the second standardizes their
+    case the same way every other name on the page is standardized."""
+    assert smart_title(smart_person_name("jude.yoon")) == "Jude Yoon"
+    assert smart_title(smart_person_name("Youqi Chen")) == "Youqi Chen"
+
+
+# ---------------------------------------------------------------------------
+# Nobiliary particles (2026-09-01). "Ebba af Klercker" is a real row on the
+# founder's board -- the one `ContactMerge`'s docstring names as the case the
+# merge feature exists for -- and it rendered "Ebba Af Klercker" on the
+# Decisions card until "af" joined _MINOR.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("ebba af klercker", "Ebba af Klercker"),
+        ("Ebba af Klercker", "Ebba af Klercker"),
+        ("ludwig van beethoven", "Ludwig van Beethoven"),
+        ("jan von neumann", "Jan von Neumann"),
+        # A LEADING particle is still a capital: `force_cap` runs before the
+        # _MINOR lookup, which is what keeps real firm names intact.
+        ("van lanschot", "Van Lanschot"),
+        ("Van Lanschot Kempen", "Van Lanschot Kempen"),
+    ],
+)
+def test_smart_title_lowercases_a_particle_but_never_a_leading_one(raw, expected):
+    assert smart_title(raw) == expected

@@ -1027,6 +1027,43 @@ def test_the_rail_names_every_confirmed_date_a_firm_has(client):
         "insight_open", "app_close"]
 
 
+# ---------------------------------------------------------------------------
+# The rail's own order, 2026-08-31. The founder's own words: "outreach this
+# week goes on top, then deadlines, then unplaced." Before this the rail read
+# Unplaced, Pace, Schedule, Deadlines — a standing question above the pace
+# ring and the confirmed dates it should trail.
+# ---------------------------------------------------------------------------
+def test_the_rail_orders_pace_before_deadlines_before_unplaced(client):
+    """Pins the DOM order, not just the context dict: a template can compute
+    the right data and still render it in the wrong slot. Getting Started is
+    not part of this claim — it is gated to an unfinished setup and, by its
+    own rule, outranks all three whenever it renders at all — so this fixture
+    leaves it unfinished-but-absent (no Firm/UserFirm/Gmail link needed to
+    make that true for a fresh test user) and checks only the three cards
+    the founder actually named."""
+    user = _user(weekly_touch_goal=14, regions=["hk", "us"])
+    firm = Firm.objects.create(slug="gs4", name="Goldman Sachs",
+                                regions=["hk", "us"])
+    FirmDate.objects.create(firm=firm, cycle="sa2028", region="us",
+                            event_kind="app_close",
+                            date=timezone.localdate() + timedelta(days=5),
+                            confidence=1.0)
+    _contact(user=user, name="Jude Yoon", firm=firm, source="capture")
+
+    ctx = _cockpit_context(user)
+    assert ctx["deadlines"], "precondition: a deadline exists"
+    assert ctx["unplaced_arrivals"], "precondition: an unplaced arrival exists"
+
+    body = _login_and_get(client, user)
+    pace = body.index('class="rail-card pace-card"')
+    deadlines = body.index('<h3 class="rail-title">Deadlines')
+    unplaced = body.index('class="rail-card unplaced-card"')
+    assert pace < deadlines < unplaced, (
+        f"expected pace ({pace}) < deadlines ({deadlines}) < "
+        f"unplaced ({unplaced}) in rendered order"
+    )
+
+
 def test_an_unconfirmed_date_never_reaches_the_rail():
     """Same bar the cadence engine acts on. A countdown built on a rumour is
     worse than no countdown."""

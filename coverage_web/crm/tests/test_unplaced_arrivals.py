@@ -32,6 +32,14 @@ The rules pinned here:
   5. COUNTS EQUAL WHAT RENDERS. Anyone the Network board takes off itself
      (campaign-hidden, recruitment-hidden, archived) is never named here
      either, or the card would send a student to a tab without them in it.
+  6. THE HEADING NAMES THE MISSING FACT. Rewritten 2026-08-31 (the founder's
+     own words: "this doesn't even make sense, make it more straightforward")
+     from "Unplaced" / "Nobody has said where they sit" — jargon restating
+     itself rather than naming what is actually missing — to "No market set"
+     and a note that says plainly what happens without one. Every row is
+     also a link to the same `?scope=unplaced` door "All" already opens,
+     since a single row has nowhere more specific to go
+     (`crm:contact_detail` carries no region control).
 
 Its own module rather than an append to `test_region_resolution.py`: that file
 is about the WRITE path (what a stated fact entails), and this one is about a
@@ -130,7 +138,8 @@ def test_a_contact_that_arrived_blank_this_week_is_named(client):
     card = _card(_today(client, user))
     assert "Jude Yoon" in card
     assert "Citi" in card
-    assert "Nobody has said where they sit." in card
+    assert "No market set" in card
+    assert "Hong Kong or US" in card
 
 
 def test_a_placed_contact_is_never_named(client):
@@ -365,6 +374,40 @@ def test_the_card_sends_them_to_the_tool_that_already_works(client):
         )
 
 
+def test_every_row_is_a_link_to_the_same_place(client):
+    """Not just the header's "All" — every row is its own affordance now,
+    matching every other card in this rail (Schedule, Deadlines, Recent
+    Activity all make their rows links). There is nowhere more specific to
+    send one row than the door "All" already opens, since
+    `crm:contact_detail` carries no region control of its own."""
+    user = _user()
+    firm = _firm()
+    _arrival(user, "Jude Yoon", firm)
+    _arrival(user, "Ada Lovelace", firm)
+
+    card = _card(_today(client, user))
+    href = f'href="{reverse("crm:contact_list")}?scope=unplaced"'
+    # One in the heading ("All") plus one per row (two arrivals here).
+    assert card.count(href) == 3, (
+        f"expected the heading link plus one per row; card was:\n{card}"
+    )
+    assert card.count('class="unplaced-link"') == 2
+
+
+def test_a_captured_local_part_name_renders_readably(client):
+    """Gmail capture sometimes stores nothing better than the email's local
+    part as `Contact.name` — verified on the founder's own board: 43 of 226
+    non-archived contacts (19%), every one `source="capture"`, same as this
+    card's own candidates. The raw form must never reach the page."""
+    user = _user()
+    contact = _arrival(user, "jude.yoon", _firm())
+    assert contact.name == "jude.yoon", "precondition: stored exactly as captured"
+
+    card = _card(_today(client, user))
+    assert "Jude Yoon" in card
+    assert "jude.yoon" not in card
+
+
 def test_the_passive_caveat_on_contacts_is_untouched(client):
     """The card is the EARLY word and it expires; this sentence is the
     always-available fallback and it does not. It also answers a different
@@ -439,7 +482,7 @@ def test_every_class_the_card_renders_is_styled(client):
 
     css = " ".join(STYLES.read_text().split())
     for cls in ("unplaced-note", "unplaced-list", "unplaced-row",
-                "unplaced-name", "unplaced-firm"):
+                "unplaced-link", "unplaced-name", "unplaced-firm"):
         assert f'class="{cls}"' in card or f'{cls}"' in card
         assert re.search(rf"\.{cls} \{{", css), (
             f".{cls} is rendered by the rail card but styled nowhere in "

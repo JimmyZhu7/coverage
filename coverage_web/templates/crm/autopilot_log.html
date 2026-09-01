@@ -51,7 +51,7 @@
             <div class="arch-row">
               <div class="arch-id">
                 {% if d.proposal %}
-                  {% if d.contact %}<a href="{% url 'crm:contact_detail' d.contact.pk %}">{{ d.proposal.name|smart_title }}</a>{% else %}{{ d.proposal.name|smart_title }}{% endif %}
+                  {% if d.contact %}<a href="{% url 'crm:contact_detail' d.contact.pk %}">{{ d.proposal.name|smart_person_name|smart_title }}</a>{% else %}{{ d.proposal.name|smart_person_name|smart_title }}{% endif %}
                   <span class="arch-meta">{{ d.proposal.email }}</span>
                 {% elif d.app_event %}
                   {{ d.app_event.firm_text|default:d.app_event.firm|smart_title }}
