@@ -2095,6 +2095,33 @@ select:focus-visible, input:focus-visible {
   animation-delay: min(calc(var(--i, 0) * 55ms), 330ms);
 }
 
+/* Named view transitions — an item leaves, its neighbours slide to fill the
+   gap. Not a hand-rolled FLIP: the browser's own View Transitions API,
+   opted into per element with a `view-transition-name` (Today's act-cards
+   set theirs inline, since the value has to be per-element and a CSS
+   variable can't supply it) plus htmx's `transition:true` swap modifier,
+   which wraps the DOM swap in document.startViewTransition(). An
+   unsupported browser (old Firefox) just gets the instant swap it already
+   had — htmx feature-detects the API before using it, so there is nothing
+   to fall back to by hand.
+
+   Only the GROUP's move/resize gets a custom timing here, matched to
+   .kin-reveal's own curve so an item's entrance and a sibling's reflow
+   read as the same motion system. The old/new snapshot cross-fade is left
+   at the UA default (a plain opacity fade) rather than hand-authored
+   scale/rotate keyframes on what is, per card, a raster image of
+   arbitrary content — exactly the kind of thing that looks right on one
+   card's text length and broken on the next's. */
+::view-transition-group(*) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) {
+    animation: none;
+  }
+}
+
 /* Live dot — a quiet "live now / fresh" marker.
 
    It used to fire an expanding ring out of an ::after, forever, and that

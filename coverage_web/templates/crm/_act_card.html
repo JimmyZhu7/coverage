@@ -5,7 +5,19 @@ One act card. `a` is a cadence action dict dressed by crm.today._build_actions
 last_kind, last_business_days, closes_on, pairs_with_debrief). The buttons post
 to crm:today_act; hx-target/hx-swap/hx-headers are inherited from
 #today-cockpit, so a click re-renders the whole cockpit (queue + pace +
-activity stay in sync). `idx` drives the staggered entrance.
+activity stay in sync) — the FULL recompute Today's honesty depends on,
+never trimmed to "just this card": a card that changes what the pace ring
+or another lane's count should say is exactly the case a partial swap
+would get wrong. `idx` drives the staggered entrance.
+
+That full-cockpit swap used to make every click read as a page reload. It
+still recomputes everything server-side; it no longer LOOKS like a reload,
+because the card's `view-transition-name` below opts it into the browser's
+own View Transition for the swap (enabled once, on #today-cockpit's
+hx-swap, in week.html) — a card the response drops fades where it stood,
+and one that survives (in this lane or a different one, e.g. a parked
+card reappearing in the park strip) glides to its new position instead of
+popping there.
 
 Every button carries an aria-label naming the contact: this page renders 30+
 buttons whose visible text is identical, which is unusable read aloud.
@@ -19,7 +31,8 @@ only per-person facts (the name, the elapsed time) drowned in chrome. The
 works here. One row per person now: identity | context | actions, priority
 as the row's left edge, every control and hx contract byte-identical.
 {% endcomment %}
-<article class="act-card kin-reveal act-{{ a.priority }}" style="--i:{{ idx }}">
+<article class="act-card kin-reveal act-{{ a.priority }}"
+         style="--i:{{ idx }}; view-transition-name: act-card-{{ a.contact.id }}">
   <div class="act-ident">
   <div class="act-idtext">
     {% comment %}

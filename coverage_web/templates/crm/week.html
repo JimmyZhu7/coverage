@@ -256,9 +256,19 @@
     </div>
   {% endif %}
 
-  {# ---- The cockpit: quick-action buttons inherit these hx-* attrs ---- #}
+  {% comment %}
+  The cockpit: quick-action buttons inherit these hx-* attrs. `transition:true`
+  wraps the swap in the browser's own document.startViewTransition(). Every
+  act-card below carries a stable view-transition-name (see _act_card.html),
+  so a card the response no longer renders just fades where it stood, and
+  every card that DOES survive - including one that moved lanes, e.g. into
+  the park strip - glides from its old rect to its new one, because the
+  browser is diffing by NAME, not by position. Unsupported browsers (old
+  Firefox) get the exact instant swap this already did; htmx checks for the
+  API before using it, so there is nothing to fall back to by hand.
+  {% endcomment %}
   <div id="today-cockpit"
-       hx-target="#today-cockpit" hx-swap="innerHTML"
+       hx-target="#today-cockpit" hx-swap="innerHTML transition:true"
        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
     {% include "crm/_cockpit.html" %}
   </div>
