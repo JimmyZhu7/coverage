@@ -266,3 +266,123 @@ def test_a_digest_with_no_prose_read_dates_prints_no_key_for_a_missing_marker(
     text, html = _parts(mailoutbox[0])
     assert "Read from the posting" not in text
     assert "Read from the posting" not in html
+
+
+# ---------------------------------------------------------------------------
+# The rendered email leads with coverage, labels a year-early pick set, and
+# prints a pick's date only with its provenance — in BOTH halves.
+# ---------------------------------------------------------------------------
+def _tier_one(user, name, slug):
+    from crm.models import UserFirm
+
+    firm = Firm.objects.create(name=name, slug=slug)
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    return firm
+
+
+def test_the_digest_opens_with_the_coverage_line_in_both_parts(mailoutbox):
+    user = _user("coverage@example.com")
+    _closing_opp(user)
+    _tier_one(user, "Alpha Bank", "alpha")
+    _tier_one(user, "Beta Bank", "beta")
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    line = "0 advocates across 2 target firms · 2 firms with no contact yet: Alpha Bank and Beta Bank"
+    assert line in text
+    assert line in html
+    # Leads: above this week's deadlines, not below them.
+    assert text.index(line) < text.index("CLOSING THIS WEEK")
+    assert html.index(line) < html.index("Closing this week")
+
+
+def test_a_student_with_nothing_tiered_gets_no_coverage_line(mailoutbox):
+    user = _user("untiered@example.com")
+    _closing_opp(user)
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    assert "advocate" not in text
+    assert "advocate" not in html
+
+
+def test_picks_a_year_early_are_labelled_so_in_both_parts(mailoutbox):
+    user = _user("early@example.com", target_cycles=["2028 Summer Internship"])
+    _closing_opp(user)
+    firm = _tier_one(user, "Alpha Bank", "alpha")
+    Opportunity.objects.create(
+        firm=firm, url="https://x/alpha/pick", title="Summer Analyst 2027",
+        bucket="internship", status="open", cohort="2027",
+    )
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    note = "Nothing yet for your 2028 Summer Internship cycle; these are a year early."
+    assert note in text
+    assert note in html
+    # Under the section it qualifies, before the first pick.
+    assert text.index("NEW FOR YOU") < text.index(note) < text.index("Summer Analyst 2027")
+
+
+def test_a_picks_prose_read_deadline_is_marked_and_the_key_printed_once(mailoutbox):
+    user = _user("pickdate@example.com")
+    # A closing row the board PUBLISHED: no marker, no key from that section.
+    _closing_opp_with_confidence(user, 1, 1.0, days=2)
+    firm = _tier_one(user, "Alpha Bank", "alpha")
+    Opportunity.objects.create(
+        firm=firm, url="https://x/alpha/pick", title="Summer Analyst 2028",
+        bucket="internship", status="open", cohort="2028", confidence=0.6,
+        deadline=TODAY + timedelta(days=12),
+    )
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    assert "closes in 12 days (reported)" in text
+    assert "closes in 12 days" in html and "(reported)" in html
+    why = "Read from the posting's own text, not a field the board published"
+    assert text.count(why) == 1
+    assert html.count(why.replace("'", "&#x27;")) == 1
+    # The key sits with the pick that earned it, since Closing printed none.
+    assert text.index("NEW FOR YOU") < text.index(why)
+
+
+def test_the_key_is_not_printed_twice_when_both_sections_carry_the_marker(mailoutbox):
+    user = _user("twice@example.com")
+    _closing_opp_with_confidence(user, 1, 0.6, days=2)
+    firm = _tier_one(user, "Alpha Bank", "alpha")
+    Opportunity.objects.create(
+        firm=firm, url="https://x/alpha/pick", title="Summer Analyst 2028",
+        bucket="internship", status="open", cohort="2028", confidence=0.6,
+        deadline=TODAY + timedelta(days=12),
+    )
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    why = "Read from the posting's own text, not a field the board published"
+    assert text.count(why) == 1
+    assert html.count(why.replace("'", "&#x27;")) == 1
+    assert "closes in 2 days (reported)" in text
+    assert "closes in 12 days (reported)" in text
+
+
+def test_a_picks_board_published_deadline_prints_without_a_marker(mailoutbox):
+    user = _user("stateddate@example.com")
+    _closing_opp_with_confidence(user, 1, 1.0, days=2)
+    firm = _tier_one(user, "Alpha Bank", "alpha")
+    Opportunity.objects.create(
+        firm=firm, url="https://x/alpha/pick", title="Summer Analyst 2028",
+        bucket="internship", status="open", cohort="2028", confidence=1.0,
+        deadline=TODAY + timedelta(days=12),
+    )
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    assert "closes in 12 days" in text
+    assert "reported" not in text
+    assert "reported" not in html

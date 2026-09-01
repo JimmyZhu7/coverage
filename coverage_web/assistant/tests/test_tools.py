@@ -1636,3 +1636,156 @@ def test_the_tool_description_no_longer_claims_the_firm_published_these_dates():
     assert "what the firm published" not in text
     assert "deadline_source" in text
     assert "reported" in text
+
+
+# ---------------------------------------------------------------------------
+# get_situation forwards a moved deadline's provenance (2026-09-01).
+# ---------------------------------------------------------------------------
+def _move_deadline(user, opportunity, *, confidence):
+    from directory.models import OpportunityChange
+
+    Opportunity.objects.filter(pk=opportunity.pk).update(confidence=confidence)
+    if not UserOpportunity.objects.for_user(user).filter(opportunity=opportunity).exists():
+        UserOpportunity(user=user, opportunity=opportunity).save()
+    OpportunityChange.objects.create(
+        opportunity=opportunity, field="deadline", old_value="2026-08-01",
+        new_value="2026-08-20", stage="reverify", observed_at=timezone.now(),
+    )
+
+
+def test_get_situation_forwards_the_provenance_of_a_moved_deadline(user, opportunity):
+    """354 of the 394 moved-deadline rows in the last 30 days were on dates
+    our own regex read; the payload said nothing, so the advisor reported
+    every one as the firm moving its deadline."""
+    _move_deadline(user, opportunity, confidence=0.6)
+
+    result, is_error = _call(user, "get_situation")
+
+    assert not is_error
+    event = result["events"][0]
+    assert event["kind"] == "deadline_moved"
+    assert event["deadline_source"] == "reported"
+
+
+def test_get_situation_marks_a_board_published_moved_deadline_stated(user, opportunity):
+    _move_deadline(user, opportunity, confidence=1.0)
+
+    result, _ = _call(user, "get_situation")
+
+    assert result["events"][0]["deadline_source"] == "stated"
+
+
+def test_the_situation_tool_description_carries_the_provenance_rule():
+    spec = next(t for t in tools.TOOL_SCHEMAS if t["name"] == "get_situation")
+    assert "deadline_source" in spec["description"]
+    assert "reported" in spec["description"]
+
+
+# ---------------------------------------------------------------------------
+# search_opportunities can ask about every market a student can target.
+#
+# The enum was ("us", "hk") while Settings offered six and the board held 910
+# eu / 250 sg / 48 cn / 40 jp open campus rows — a student who set Europe as
+# a target could not ask the advisor about it.
+# ---------------------------------------------------------------------------
+def test_search_opportunities_region_enum_is_every_market_a_student_can_target():
+    from directory.classify import TRACKED_REGIONS
+
+    spec = next(t for t in tools.TOOL_SCHEMAS if t["name"] == "search_opportunities")
+    enum = spec["input_schema"]["properties"]["region"]["enum"]
+
+    assert enum == list(TRACKED_REGIONS)
+    for code in ("eu", "sg", "cn", "jp"):
+        assert code in enum
+    # Places a role can BE, never a market a student targets.
+    assert "other" not in enum
+    assert "global" not in enum
+
+
+def test_search_opportunities_filters_a_market_beyond_us_and_hk(user, firm):
+    london = Opportunity.objects.create(
+        firm=firm, title="2028 Summer Analyst, London", bucket="internship",
+        region="eu", location="London", status="open",
+        url="https://north.example/jobs/london")
+    Opportunity.objects.create(
+        firm=firm, title="2028 Summer Analyst, Hong Kong", bucket="internship",
+        region="hk", location="Hong Kong", status="open",
+        url="https://north.example/jobs/hk")
+
+    result, is_error = _call(user, "search_opportunities", {"region": "eu"})
+
+    assert not is_error
+    assert [r["opportunity_id"] for r in result["roles"]] == [london.id]
+
+
+# ---------------------------------------------------------------------------
+# get_firm survives the slug the model guesses.
+#
+# The schema's own example was 'goldman-sachs'; the real slug is `gs`, so the
+# tool refused the very string it had suggested.
+# ---------------------------------------------------------------------------
+def test_get_firm_finds_a_firm_by_its_hyphenated_name_when_the_slug_differs(user):
+    Firm.objects.create(slug="gs", name="Goldman Sachs")
+
+    result, is_error = _call(user, "get_firm", {"name_or_slug": "goldman-sachs"})
+
+    assert not is_error
+    assert result["slug"] == "gs"
+    assert result["firm"] == "Goldman Sachs"
+
+
+def test_get_firm_still_refuses_a_hyphenated_name_nothing_matches(user):
+    Firm.objects.create(slug="gs", name="Goldman Sachs")
+
+    result, is_error = _call(user, "get_firm", {"name_or_slug": "nowhere-plc"})
+
+    assert is_error
+    assert "error" in result
+
+
+def test_the_get_firm_example_no_longer_suggests_a_slug_that_does_not_exist():
+    spec = next(t for t in tools.TOOL_SCHEMAS if t["name"] == "get_firm")
+    description = spec["input_schema"]["properties"]["name_or_slug"]["description"]
+    assert "goldman-sachs" not in description
+    assert "Goldman Sachs" in description
+
+
+# ---------------------------------------------------------------------------
+# get_contact carries what the student already sent this person, so a draft
+# never resends it.
+# ---------------------------------------------------------------------------
+def test_get_contact_carries_the_students_own_opener_and_recent_subjects(user, contact):
+    contact.opener = "Hi Jane, I'm a second-year at HKU and saw you moved to the HK desk in June."
+    contact.save(update_fields=["opener"])
+    now = timezone.now()
+    for days_ago, subject in ((40, "Intro from an HKU student"), (30, ""),
+                              (20, "Following up"), (10, "Quick question on the SA process"),
+                              (5, "Thank you for Tuesday")):
+        Touch(
+            user=user, contact=contact, ts=now - timedelta(days=days_ago),
+            kind="outreach", channel="email", subject=subject,
+        ).save()
+
+    result, is_error = _call(user, "get_contact", {"contact_id": contact.id})
+
+    assert not is_error
+    assert result["my_opener"] == contact.opener
+    # Newest first, blanks skipped, capped at three.
+    assert result["recent_subjects"] == [
+        "Thank you for Tuesday",
+        "Quick question on the SA process",
+        "Following up",
+    ]
+
+
+def test_get_contact_with_nothing_sent_yet_says_so_plainly(user, contact):
+    result, _ = _call(user, "get_contact", {"contact_id": contact.id})
+
+    assert result["my_opener"] == ""
+    assert result["recent_subjects"] == []
+
+
+def test_the_get_contact_description_names_both_fields():
+    spec = next(t for t in tools.TOOL_SCHEMAS if t["name"] == "get_contact")
+    assert "my_opener" in spec["description"]
+    assert "recent_subjects" in spec["description"]

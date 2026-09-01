@@ -25,6 +25,20 @@ the product.
       <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#666a5e;margin-top:4px;">
         Your week of {{ digest.today|date:"N j" }}
       </div>
+      {% comment %}
+      THE LINE THE DIGEST LEADS WITH. Advocates in place and firms with nobody
+      at all are the two numbers that predict whether this student gets an
+      interview (`crm.coverage`'s own ladder); this week's deadlines are what
+      happens to them. `crm.digest._coverage_summary` builds the sentence from
+      the same counts the Network board's Coverage Gaps strip ranks, so the
+      three firms it names are the three that strip would put first. Absent
+      entirely for a student who has tiered nothing.
+      {% endcomment %}
+      {% if digest.coverage %}
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;color:#191b16;margin-top:12px;line-height:1.5;">
+        {{ digest.coverage.line }}
+      </div>
+      {% endif %}
     </td>
   </tr>
 
@@ -144,6 +158,20 @@ the product.
       </span>
     </td>
   </tr>
+  {% comment %}
+  ONE honest sentence when not one pick is for a cycle the student declared
+  (`crm.digest._cycle_note`). The founder's four picks all wore a "2027
+  intake" chip whose tooltip said "not a fit", printed below as if it were a
+  reason to apply; the chip's wording is being fixed where it is made, and
+  this is the digest saying the one thing the chips could not.
+  {% endcomment %}
+  {% if digest.picks_note %}
+  <tr>
+    <td style="padding:4px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#4e5248;line-height:1.5;">
+      {{ digest.picks_note }}.
+    </td>
+  </tr>
+  {% endif %}
   {% for pick in digest.picks %}
   <tr>
     <td style="padding:12px 32px;{% if not forloop.last %}border-bottom:1px solid #d7dccd;{% endif %}">
@@ -151,9 +179,32 @@ the product.
       <div style="font-size:13px;color:#666a5e;margin-top:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
         {{ pick.why }}
       </div>
+      {% comment %}
+      A pick's date prints ONLY with its provenance, the same words the
+      Closing rows use — never the bare `deadline` `_pick_card` carries. Past
+      dates print nothing: a pick is an open role, and "deadline passed" on
+      it would be the scraper's lag, not news.
+      {% endcomment %}
+      {% if pick.deadline_marker.posted and not pick.deadline_marker.past %}
+      <div style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:12px;color:#2f6a45;margin-top:3px;">
+        {{ pick.deadline_marker.countdown }}{% if pick.reported %} ({{ pick.reported.label }}){% endif %}
+      </div>
+      {% endif %}
     </td>
   </tr>
   {% endfor %}
+  {% comment %}
+  The marker's key, once per digest: Closing already printed it if any of its
+  rows was prose-read (`digest.closing_reported`), so this only fires when the
+  first reported date in the email is on a pick.
+  {% endcomment %}
+  {% if digest.picks_reported and not digest.closing_reported %}
+  <tr>
+    <td style="padding:10px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;line-height:1.5;">
+      ({{ digest.picks_reported.label }}): {{ digest.picks_reported.why }}.
+    </td>
+  </tr>
+  {% endif %}
   {% endif %}
 
   <tr>

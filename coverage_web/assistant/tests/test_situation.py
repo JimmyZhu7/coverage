@@ -599,3 +599,169 @@ def test_every_field_a_situation_card_renders_comes_from_a_typed_row():
     # sentence being written about them anywhere.
     assert event["old_date"].isoformat() == "2026-09-01"
     assert event["new_date"].isoformat() == "2026-09-20"
+
+
+# ---------------------------------------------------------------------------
+# A moved deadline says what KIND of date it now is.
+#
+# Measured 2026-09-01: 354 of 394 `deadline_moved` change rows in the last 30
+# days were on prose-read deadlines (confidence 0.6), 36 on stated ones. The
+# event carried old/new and nothing else, so the advisor and the daily brief
+# were reporting our own regex re-reading a page as the firm moving a date.
+# ---------------------------------------------------------------------------
+def _moved(user, *, confidence):
+    firm = _firm(name=f"Bank {confidence}", slug=f"bank-{confidence}")
+    opp = _opp(firm, deadline=timezone.localdate() + timedelta(days=10))
+    Opportunity.objects.filter(pk=opp.pk).update(confidence=confidence)
+    opp.refresh_from_db()
+    _track(user, opp)
+    _change(opp, "deadline", "2026-09-01", "2026-09-20")
+    return opp
+
+
+def test_a_moved_deadline_on_a_prose_read_date_is_marked_reported():
+    user = _user()
+    _moved(user, confidence=0.6)
+
+    event = situation.build_situation(user)["deadline_moved"][0]
+
+    assert event["deadline_source"] == "reported"
+
+
+def test_a_moved_deadline_on_a_board_published_date_is_marked_stated():
+    user = _user()
+    _moved(user, confidence=1.0)
+
+    event = situation.build_situation(user)["deadline_moved"][0]
+
+    assert event["deadline_source"] == "stated"
+
+
+def test_the_situation_and_the_tools_agree_on_a_deadlines_provenance():
+    """`situation._deadline_source` restates `tools._deadline_source` (the
+    import would be circular). Pinned against each other so the advisor's
+    search rows and its situation rows can never call the same date two
+    different things."""
+    from assistant import tools
+
+    firm = _firm()
+    for confidence, expected in ((0.6, "reported"), (1.0, "stated")):
+        opp = _opp(firm, title=f"Role {confidence}", deadline=timezone.localdate())
+        Opportunity.objects.filter(pk=opp.pk).update(confidence=confidence)
+        opp.refresh_from_db()
+        assert situation._deadline_source(opp) == tools._deadline_source(opp) == expected
+    undated = _opp(firm, title="Undated", deadline=None)
+    assert situation._deadline_source(undated) is None
+    assert tools._deadline_source(undated) is None
+
+
+# ---------------------------------------------------------------------------
+# The level a posting's TITLE names, for a student who is (or has not said
+# they are not) an undergraduate.
+#
+# `role_matches_level` reads bucket and derived class year; a "PhD Summer
+# Intern" and an "IB Summer Associate" clear both. Two of the founder's four
+# new-role events on 2026-09-01 were exactly those. `directory.recommend.
+# role_level(title)` is being added alongside this and is imported guarded,
+# so both branches are pinned: with it, those rows are not news for an
+# undergrad; without it, nothing changes.
+# ---------------------------------------------------------------------------
+def _fake_role_level(title: str) -> str:
+    t = title.lower()
+    if "phd" in t:
+        return "phd"
+    if "mba" in t:
+        return "mba"
+    if "associate" in t:
+        return "experienced"
+    return "undergrad"
+
+
+def _known_firm_with_three_new_roles(user):
+    """One tiered firm (past its board debut) that posted, newest first, a
+    PhD internship, an Associate internship, and an Analyst internship this
+    week. Newest-first matters: `_new_role_events` keeps ONE role per firm,
+    the most recent, so without the level filter the PhD row is the one the
+    student is told about."""
+    firm = _firm(name="Quant Capital", slug="quant-capital")
+    UserFirm(user=user, firm=firm, tier=1).save()
+    _opp(firm, title="Old Posting", url="https://example.com/quant/old",
+         first_seen=timezone.now() - timedelta(days=60))
+    now = timezone.now()
+    analyst = _opp(firm, title="Summer Analyst, Trading",
+                   url="https://example.com/quant/analyst",
+                   first_seen=now - timedelta(hours=3))
+    associate = _opp(firm, title="IB Summer Associate",
+                     url="https://example.com/quant/associate",
+                     first_seen=now - timedelta(hours=2))
+    phd = _opp(firm, title="PhD Summer Intern – Quantitative Research",
+               url="https://example.com/quant/phd",
+               first_seen=now - timedelta(hours=1))
+    return analyst, associate, phd
+
+
+def test_with_a_role_level_reader_an_undergrad_is_not_told_about_phd_or_associate_roles(monkeypatch):
+    monkeypatch.setattr(situation, "_role_level", _fake_role_level)
+    user = _user()
+    analyst, associate, phd = _known_firm_with_three_new_roles(user)
+
+    ids = [e["opportunity_id"] for e in situation.build_situation(user)["new_role_at_known_firm"]]
+
+    assert phd.id not in ids, "a PhD internship is not news for an undergraduate"
+    assert associate.id not in ids, "an Associate programme is not news for an undergraduate"
+    assert ids == [analyst.id], "the filter must not zero out the real match"
+
+
+def test_a_student_who_stated_a_higher_level_keeps_those_postings(monkeypatch):
+    """`study_level` is a column being added alongside this. A student who
+    has SAID they are a PhD gets PhD postings — the filter only ever acts
+    on blank-or-undergraduate, never on a stated higher level."""
+    monkeypatch.setattr(situation, "_role_level", _fake_role_level)
+    user = _user()
+    user.study_level = "phd"
+    _analyst, _associate, phd = _known_firm_with_three_new_roles(user)
+
+    ids = [e["opportunity_id"] for e in situation.build_situation(user)["new_role_at_known_firm"]]
+
+    assert ids == [phd.id]
+
+
+def test_without_a_role_level_reader_behaviour_is_unchanged(monkeypatch):
+    """The import is guarded; until `role_level` lands, the newest posting
+    at the firm is reported exactly as before, PhD or not."""
+    monkeypatch.setattr(situation, "_role_level", None)
+    user = _user()
+    _analyst, _associate, phd = _known_firm_with_three_new_roles(user)
+
+    ids = [e["opportunity_id"] for e in situation.build_situation(user)["new_role_at_known_firm"]]
+
+    assert ids == [phd.id]
+
+
+def test_a_misbehaving_role_level_reader_costs_the_filter_never_the_strip(monkeypatch):
+    """A signature change in the sibling module must degrade to "no level
+    filter", not to `build_situation`'s empty-everything fallback."""
+    def boom(*_a, **_k):
+        raise TypeError("role_level() takes 2 positional arguments")
+
+    monkeypatch.setattr(situation, "_role_level", boom)
+    user = _user()
+    _analyst, _associate, phd = _known_firm_with_three_new_roles(user)
+
+    result = situation.build_situation(user)
+
+    assert [e["opportunity_id"] for e in result["new_role_at_known_firm"]] == [phd.id]
+
+
+def test_drop_advanced_levels_reads_the_level_case_insensitively(monkeypatch):
+    monkeypatch.setattr(situation, "_role_level", lambda title: "PhD" if "PhD" in title else "Undergrad")
+    user = _user()
+
+    class Row:
+        def __init__(self, title):
+            self.title = title
+
+    rows = [Row("PhD Intern"), Row("Summer Analyst")]
+    kept = situation._drop_advanced_levels(rows, user)
+
+    assert [r.title for r in kept] == ["Summer Analyst"]
