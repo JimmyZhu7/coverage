@@ -81,6 +81,17 @@ def assemble_digest(user, *, today: date | None = None) -> dict | None:
     """
     today = today or timezone.localdate()
 
+    # Inside the December blackout the email does not go out. Today itself
+    # keeps showing confirmed deadlines on those days; the digest gets no
+    # such carve-out, because an email landing on Dec 24 headed "who to ping"
+    # is the product doing the one thing the page is telling the student not
+    # to. `None` is the "skip this user" signal the command already logs. See
+    # `crm.today.outreach_blackout` for the window and the evidence.
+    from crm.today import BLACKOUT_HOLIDAY, outreach_blackout
+
+    if outreach_blackout(today) == BLACKOUT_HOLIDAY:
+        return None
+
     closing = _closing_this_week(user, today=today)
     actions, actions_overflow = _who_to_ping(user)
     if not closing and not actions:
