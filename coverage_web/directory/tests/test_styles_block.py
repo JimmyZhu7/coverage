@@ -655,3 +655,34 @@ def test_the_feed_row_has_exactly_one_truncation_point():
     assert not any(sel == ".rr-meta > *:last-child" for sel, _ in _rules(css)), (
         "positional truncation is what cut 'No date posted' to 5px; the cut "
         "point is named now")
+
+
+# ---------------------------------------------------------------------------
+# The abbreviated countdown must keep a full accessible name (2026-09-01).
+# `directory/views.py` shortens "Closes in 12 days" to "12d" because the
+# column is 44px, and its own comment promised "the full sentence stays the
+# accessible name". It did not: the span shipped bare, so a screen reader
+# read "22 d". A cross-surface consistency audit found it.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_the_abbreviated_countdown_still_reads_the_full_sentence_aloud(client):
+    from directory.models import Firm, Opportunity
+    from django.contrib.auth import get_user_model
+    from django.utils import timezone
+    import datetime as dt
+
+    User = get_user_model()
+    user = User.objects.create_user(email="due-a11y@example.com", password="x")
+    firm = Firm.objects.create(slug="due-a11y-co", name="Due Co", regions=["us"])
+    Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        url="https://due-a11y.example/1",
+        deadline=timezone.localdate() + dt.timedelta(days=5),
+    )
+    client.force_login(user)
+    body = client.get("/opportunities/").content.decode()
+
+    # The eye gets the abbreviation, hidden from assistive tech.
+    assert '<span aria-hidden="true">5d</span>' in body
+    # The ear gets the sentence the comment promised.
+    assert '<span class="vh">Closes in 5 days</span>' in body

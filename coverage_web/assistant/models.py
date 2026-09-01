@@ -86,6 +86,10 @@ class ChatMessage(PrivateModel):
     NOTICE_UNCONFIGURED = "unconfigured"
     NOTICE_CAPPED = "capped"
     NOTICE_FAILED = "failed"
+    # The answer above this one is real but INCOMPLETE — MAX_TOKENS cut it
+    # off. Its own kind rather than `failed` because the turn did produce
+    # something worth reading; see `agent._TRUNCATED_TEXT`.
+    NOTICE_TRUNCATED = "truncated"
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     conversation = models.ForeignKey(

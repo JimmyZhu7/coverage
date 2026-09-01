@@ -94,8 +94,31 @@ def test_outreach_alone_is_not_proof_of_delivery(user, contact, firm):
 
 
 def test_a_scheduled_chat_counts_as_delivered(user, contact, firm):
-    apply_findings(user, [_finding(chat_status="scheduled")])
+    """A chat that names its time is a chat, and a chat proves the address
+    works as surely as a reply does."""
+    apply_findings(user, [_finding(
+        chat_status="scheduled", chat_scheduled_at="2026-09-10T12:00:00+00:00",
+    )])
     assert EmailPatternStats.objects.get(firm=firm).delivered == 1
+
+
+def test_an_uncorroborated_chat_claim_banks_nothing(user, contact, firm):
+    """`email_pattern_recorded` is a one-shot per-contact flag, so banking a
+    "delivered" off a chat claim with no time behind it is worse than merely
+    wrong: it also spends the contact's one chance to bank the real evidence
+    later. Same corroboration rule the ladder uses — see
+    `capture.providers.corroborated_chat_status` for the two live failures
+    that set it.
+
+    The finding is not thrown away. It still floors at what the message
+    itself proves, and a reply banks the evidence on its own — which is why
+    this case carries no `replied` flag: the chat claim alone must not be
+    the thing that speaks."""
+    result = apply_findings(user, [_finding(chat_status="completed")])
+    contact.refresh_from_db()
+    assert result.pattern_delivered == 0
+    assert contact.email_pattern_recorded is False
+    assert not EmailPatternStats.objects.filter(firm=firm).exists()
 
 
 def test_a_contact_with_no_firm_says_nothing_about_any_firm(user):

@@ -611,6 +611,50 @@ def test_tier_one_beats_tier_three_all_else_equal():
     assert rel.expected_value(_action(tier=1)) > rel.expected_value(_action(tier=3))
 
 
+@pytest.mark.parametrize("action", ["advance", "follow_up", "first_outreach",
+                                    "park", "confirm_chat", "maintain",
+                                    "keep_warm"])
+@pytest.mark.parametrize("kind", [rel.OPENING_FIRM_DATE,
+                                  rel.OPENING_ROLE_DEADLINE,
+                                  rel.OPENING_NEW_ROLE])
+def test_an_opening_can_only_raise_a_cards_claim_on_today(action, kind):
+    """Found 2026-09-01: `_OPENING_WEIGHT` sat in an `elif` chain AHEAD of the
+    action's own weight, so an opening REPLACED it instead of adding to it.
+    `_NOW_ADVANCE` is 1.8 and `_OPENING_WEIGHT[new_role]` is 1.6, so an
+    `advance` card at a firm with a role posted this week scored BELOW the
+    identical card at a firm where nothing at all was happening. Finding a
+    reason to write demoted the card, which inverts the module docstring's own
+    rule 3: a nudge with a trigger behind it outranks one without.
+
+    Asserted across every action and every opening kind rather than on the one
+    pair that was inverted, because the defect was a structural one — any
+    future weight that lands a tenth below an action baseline re-creates it."""
+    without = _action(warmth="chatted", tier=1, action=action)
+    with_opening = _action(warmth="chatted", tier=1, action=action,
+                           opening={"kind": kind})
+    assert rel.expected_value(with_opening) >= rel.expected_value(without)
+
+
+def test_the_specific_inversion_that_was_shipping():
+    """The exact pair, pinned on its own so the numbers stay readable in a
+    failure: an advance with a new role on the board vs. one with nothing."""
+    quiet = _action(warmth="chatted", tier=1, action="advance")
+    with_role = _action(warmth="chatted", tier=1, action="advance",
+                        opening={"kind": rel.OPENING_NEW_ROLE})
+    assert rel._NOW_ADVANCE > rel._OPENING_WEIGHT[rel.OPENING_NEW_ROLE]
+    assert rel.expected_value(with_role) == rel.expected_value(quiet)
+
+
+def test_an_unanswered_inbound_still_outranks_any_opening():
+    """The `max` is confined to the fallback branch on purpose. Somebody
+    waiting on an answer, and a confirmed close the engine called priority 0,
+    are still the two things that unconditionally own the top."""
+    inbound = _action(warmth="cold", tier=3, owed_reply=True, action="advance")
+    opening = _action(warmth="cold", tier=3, action="advance",
+                      opening={"kind": rel.OPENING_FIRM_DATE})
+    assert rel.expected_value(inbound) > rel.expected_value(opening)
+
+
 # ---------------------------------------------------------------------------
 # 7. The override is reachable, not just storable.
 # ---------------------------------------------------------------------------
@@ -1016,3 +1060,4 @@ def test_a_chinese_finance_title_is_not_mistaken_for_a_recruiter(role):
     assert rel.is_recruiting_role(role) is False, (
         f"{role!r} names a track seat, not the recruiting function"
     )
+

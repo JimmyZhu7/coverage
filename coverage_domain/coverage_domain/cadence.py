@@ -258,7 +258,19 @@ CADENCE_DEFAULTS: dict[str, int] = {
     "chatted_touch_min_weeks": 3,        # keep chatted contacts warm every 3-5 weeks
     "chatted_touch_max_weeks": 5,
     "pre_deadline_reping_days": 14,      # re-ping warm contacts when a CONFIRMED app_close is this near
-    "stale_thread_days": 21,             # (kept for parity; used by status-style reports, not due_actions)
+    # `stale_thread_days: 21` used to sit here, carried over from
+    # campaign/cadence.yaml and labelled "kept for parity; used by status-style
+    # reports, not due_actions". Removed 2026-09-01: grepped the whole repo and
+    # NOTHING reads it — not this module, not `crm`, not the digest, not a
+    # template, not a test. There are no status-style reports. It was a knob
+    # that looked tunable, sat in the public defaults bundle, and could not
+    # change any output.
+    #
+    # This module already states the rule it was breaking, in the 2026-07-28
+    # reverted-divergence note: "a configuration knob that LOOKS reachable is
+    # worse than no knob at all, because a future reader has to rediscover that
+    # it can't fire before trusting that it doesn't." Applied to its own
+    # defaults rather than only to the one that prompted it.
     "advocate_target": 2,                # advocates-in-place yardstick (from profile.advocate_target)
 }
 
@@ -782,7 +794,22 @@ def due_actions(
                         "reschedule"
                     )
                 add(
-                    "confirm_chat", reason, 1, business_days=bd,
+                    "confirm_chat", reason, 1,
+                    # `business_days` IS AND ONLY IS "business days since the
+                    # last real touch". It is NOT the age of the booking, and
+                    # when `scheduled_on` is set the two are different facts
+                    # sitting in one dict: a chat booked for Aug 24 whose
+                    # booking email is the last thing on record has a
+                    # `business_days` measured off the EMAIL. The sentence
+                    # above is careful about this (it names a day only from
+                    # `scheduled_on`, and prints `bd` only in the branch where
+                    # no day is held); `ctx` is the machine-readable half of
+                    # the same promise, so the name has to carry the same
+                    # care. Verified 2026-09-01: no template and no view reads
+                    # this key today, so nothing renders the mismatch — the
+                    # comment is here so the first reader who wants to cannot
+                    # do it by accident.
+                    business_days=bd,
                     # None whenever no real time is on record, which is the
                     # normal case. A UI reading `ctx` gets the same three-way
                     # answer the sentence does rather than having to parse it.
@@ -872,12 +899,35 @@ def due_actions(
             if days is None or days >= chat_min_days:
                 # Range rendered from the params, never hardcoded — the same
                 # rule (and the same bug) as the advocate branch above.
+                #
+                # "LAST TOUCH {days}d ago", NOT "chatted {days}d ago" (fixed
+                # 2026-09-01). `days` is `(today - lt_date).days` where
+                # `lt_date` is the latest REAL touch of ANY kind — the same
+                # clock branch 5 reads and words correctly one branch up. It is
+                # not the age of the chat, and the two diverge as soon as the
+                # student does the thing the cadence just told them to do:
+                # sending the thank-you resets `lt_date` and shortens the
+                # number while the conversation keeps aging.
+                #
+                # MEASURED on the founder's live account 2026-09-01: 6 of his
+                # 24 chatted contacts carry a latest real touch that is not the
+                # chat, and for 4 of them the two numbers differ outright —
+                # Patina Chu would have read "chatted 24d ago" about a chat 31
+                # days old, Amy Zhou "chatted 29d ago" against 35, James Bai
+                # "chatted 41d ago" against 46.
+                #
+                # Same defect class as the confirm-chat card fixed 2026-08-31
+                # ("chat was scheduled 6 business days ago" off a last-touch
+                # clock): a real number rendered as a different fact. The fix
+                # is the same one — say what the number measures and stop. The
+                # warmth lead stays, because `warmth == "chatted"` IS true; it
+                # is only the clock that had the wrong noun on it.
                 reason = (
                     "chatted — no dateable touch on record — send an update or a "
                     f"question (target every {chat_min_weeks}–{chat_max_weeks} weeks)"
                     if days is None else
-                    f"chatted {days}d ago — send an update or a question "
-                    f"(target every {chat_min_weeks}–{chat_max_weeks} weeks)"
+                    f"chatted — last touch {days}d ago — send an update or a "
+                    f"question (target every {chat_min_weeks}–{chat_max_weeks} weeks)"
                 )
                 add("keep_warm", reason, 2, days_since=days, target_min_weeks=chat_min_weeks)
             continue

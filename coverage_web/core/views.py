@@ -176,15 +176,28 @@ def search(request):
     if len(q) < 2:
         return JsonResponse({"contacts": [], "firms": [], "roles": []})
 
+    # Hoisted above the auth gate on purpose: the firms and roles sections
+    # below run for a signed-out visitor too, and both now tidy their text.
+    from core.templatetags.textstyle import smart_person_name, smart_title
+
     out = {"contacts": [], "firms": [], "roles": []}
 
     if request.user.is_authenticated:
         from crm.models import Contact
+        from crm.views import _warmth_labels
+
+        # The palette renders what it is handed, verbatim, so the tidying has
+        # to happen HERE. Before this it shipped three raw database values
+        # straight to the student: 'jude.yoon' (an email local part stored as
+        # a name by capture, 40 of the founder's 226 contacts), the warmth
+        # slug 'chatted' rather than the words every other surface uses, and
+        # a role title in whatever case the firm's board shouted it in.
+        warmth_labels = _warmth_labels()
         out["contacts"] = [
             {
-                "name": c.name,
-                "firm": c.firm.name if c.firm else c.firm_text,
-                "warmth": c.warmth,
+                "name": smart_title(smart_person_name(c.name)),
+                "firm": smart_title(c.firm.name if c.firm else c.firm_text),
+                "warmth": warmth_labels.get(c.warmth, c.warmth),
                 "url": f"/app/contacts/{c.id}/",
             }
             for c in Contact.objects.for_user(request.user)
@@ -194,7 +207,7 @@ def search(request):
         ]
 
     out["firms"] = [
-        {"name": f.name, "url": f"/firms/{f.slug}/"}
+        {"name": smart_title(f.name), "url": f"/firms/{f.slug}/"}
         for f in Firm.objects.filter(name__icontains=q).order_by("name")[:6]
     ]
 
@@ -206,8 +219,8 @@ def search(request):
     # genuinely is the only copy.
     out["roles"] = [
         {
-            "title": o.title,
-            "firm": o.firm.name,
+            "title": smart_title(o.title),
+            "firm": smart_title(o.firm.name),
             "url": (f"/opportunities/?q={quote(o.title[:60])}&read={o.id}"
                     if (o.raw or {}).get("detail_text") else o.url),
             "external": not (o.raw or {}).get("detail_text"),

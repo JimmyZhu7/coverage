@@ -2071,3 +2071,60 @@ def test_a_bulk_touch_after_a_reply_does_not_mask_the_owed_reply():
         "still unanswered"
     )
     assert mine[0]["last_kind"] and "bulk" not in mine[0]["last_kind"].lower()
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-01 audit: an opening-raised keep-warm has to carry a SORTABLE tier.
+# ---------------------------------------------------------------------------
+def test_an_opening_keep_warm_at_an_unranked_firm_does_not_break_the_page():
+    """`crm.views.set_firm_tier` writes `tier=None` on purpose when a firm is
+    dragged to the "Unranked" lane — a real recorded value, not an absent key.
+
+    `_build_actions` builds `firm_meta` as `tiers.get(fid, 3)`, so for an
+    unranked firm the key is PRESENT holding None and the `, 3` default never
+    fires. Every action the cadence engine returns has already been through
+    `cadence._coerce_tier`; `_opening_keep_warms` builds its own action dicts
+    by hand and used to copy the raw value straight in. `_today_sort_key`'s
+    fourth key is `a["tier"]`, so one such card tying with any other action on
+    (class, ev, priority) compared None against an int and took the whole Today
+    page down with a TypeError.
+
+    `_coerce_tier`'s own docstring names this exact failure and warns that
+    "fixing the reported shape and leaving its siblings is how the same bug
+    ships twice". This is the sibling. Latent rather than live: measured
+    2026-09-01, the founder has 54 tiered firms and none unranked.
+    """
+    from crm.today import _build_actions, _today_sort_key
+
+    user = _user("unranked-tier@example.com")
+    # Dial the keep-warm clock out past the contact's own idle age, so engine
+    # branch 5b stays quiet and the ONLY thing that can raise this card is
+    # `_opening_keep_warms`.
+    user.cadence_params = {"chatted_touch_min_weeks": 6}
+    user.save(update_fields=["cadence_params"])
+
+    firm = Firm.objects.create(slug="unranked-sortkey", name="Unranked Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=None)
+    FirmDate.objects.create(
+        firm=firm, cycle="sa2028", region="hk", event_kind="app_close",
+        date=timezone.localdate() + timedelta(days=30),
+        precision="day", confidence=1.0,
+    )
+    _contact(
+        user=user, name="Unranked Warm", firm=firm,
+        warmth="chatted", thread_state="chat_done",
+    )
+    contact = Contact.all_objects.get(user=user, name="Unranked Warm")
+    # Inside the 6-week dial, past OPENING_MIN_IDLE_DAYS (10).
+    _touch(user, contact, "chat", days_ago=21)
+
+    actions, _ = _build_actions(user)
+    card = next(a for a in actions if a["contact"]["name"] == "Unranked Warm")
+    assert card["from_opening"] is True
+    # The engine's own answer for an unranked firm, not the raw column.
+    assert card["tier"] == 3
+    # THE ACTUAL FAILURE MODE, stated directly rather than staged: the sort key
+    # has to be comparable against an ordinary tier. `None < 3` is the
+    # TypeError that took the page down.
+    assert card["tier"] < 4
+    assert _today_sort_key(card)[3] < 4

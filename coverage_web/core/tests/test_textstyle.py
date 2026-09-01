@@ -407,3 +407,29 @@ def test_smart_person_name_chains_cleanly_with_smart_title():
 )
 def test_smart_title_lowercases_a_particle_but_never_a_leading_one(raw, expected):
     assert smart_title(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# A whole address stored as a name (2026-09-01). Capture usually keeps only
+# the local part, but two of the founder's rows hold the full string and
+# rendered as "Victoria.hsu@gs.com" on the firm page and in the Cmd-K
+# palette. The domain says nothing a reader wants in a name.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("victoria.hsu@gs.com", "Victoria Hsu"),
+        ("yvonne.cheng@gs.com", "Yvonne Cheng"),
+        # The local part still has to clear the same shape rule: one token
+        # is ambiguous, so it is left alone rather than guessed at.
+        ("cv@citi.com", "cv@citi.com"),
+        # Not an address: nothing before the @, or more than one.
+        ("@handle", "@handle"),
+        ("a@b@c", "a@b@c"),
+        # A real typed name that happens to contain an address is untouched,
+        # because the whitespace check upstream already refuses it.
+        ("Youqi Chen <youqi@ms.com>", "Youqi Chen <youqi@ms.com>"),
+    ],
+)
+def test_smart_person_name_reads_a_whole_address(raw, expected):
+    assert smart_person_name(raw) == expected

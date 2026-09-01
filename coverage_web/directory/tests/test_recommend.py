@@ -26,10 +26,11 @@ from django.urls import reverse
 from django.utils import timezone
 
 from crm.models import UserFirm
+from directory.classify import DERIVED_SUMMER
 from directory.models import Firm, Opportunity
 from directory.recommend import (
     MIN_SCORE, Candidate, Profile, parse_target_cycle, recommend,
-    school_region, score_candidate,
+    role_function, school_region, score_candidate,
 )
 
 from .test_tracking import _user
@@ -137,11 +138,26 @@ def test_class_year_mismatch_chip_reads_as_a_reason_against_not_for():
 def test_a_programme_year_is_inference_and_is_labelled_as_such():
     """A 2028 summer internship implies 2029 graduates. That mapping is a
     convention, so the reason chip says "likely" and the tooltip admits the
-    posting never stated it."""
+    posting never stated it.
+
+    REWRITTEN 2026-09-01, and the invariant is unchanged: the tooltip must
+    say the posting did not state this and that Coverage inferred it. What
+    changed is that the sentence is no longer composed here. `_class_fit`
+    now takes both the derived year AND its justification from
+    `classify.derive_class_year`, which is the product's one answer to
+    "what class does this programme's shape imply" and the same sentence
+    `views._eligibility` renders on its "Likely your year" chip. The old
+    assertion pinned this module's private phrasing ("does not state a class
+    year"), which is exactly the second wording the fix removed — so it is
+    asserted through `DERIVED_SUMMER` rather than a literal, and a change to
+    the canonical sentence now has to be made once."""
     points, reasons = score_candidate(JIMMY, _cand(1, cohort="2028"))
     class_reason = next(r for r in reasons if r.kind == "class" and "Class" in r.text)
     assert class_reason.text == "likely Class of 2029"
-    assert "does not state a class year" in class_reason.detail
+    assert class_reason.detail == DERIVED_SUMMER.format(cohort="2028", year=2029)
+    # The two admissions the chip exists to make, asserted on the rendered
+    # string and not on the template that produced it.
+    assert "does not say this" in class_reason.detail
     assert "inferred" in class_reason.detail
     assert points > 0
 
@@ -1075,3 +1091,215 @@ def test_an_expired_role_sorts_last_among_equal_scores():
     rolling = Recommendation(_cand(3, deadline=None), 50, ())
     order = sorted([dead, soon, rolling], key=lambda r: _sort_key(r, _TODAY))
     assert [r.candidate.id for r in order] == [2, 3, 1]
+
+
+# ---------------------------------------------------------------------------
+# The audit of 2026-09-01. Four defects, each measured against the founder's
+# live board (2,662 open campus rows, 26,163 rows board-wide) before it was
+# called a defect. Every test below pins the RULE, never the arithmetic that
+# happens to satisfy it today.
+# ---------------------------------------------------------------------------
+
+def test_the_derived_class_year_is_classifys_and_there_is_only_one_of_them():
+    """`_class_fit` used to keep its own `_GRAD_WINDOW` table — bucket to
+    offset window, internship +1, entry_level +0, insight +2..+3 — while
+    `classify.derive_class_year` reads the bucket AND the title and refuses
+    outright for every shape whose convention has more than one answer.
+
+    Measured on the live open campus set: 737 of 2,662 rows (28%) were rows
+    the scorer derived a graduation year for and `derive_class_year` refuses
+    to. Each rendered "likely Class of 20XX" as a labelled inference the
+    product had already measured as unsupportable. On the 642 rows where both
+    derived, they agreed on every one — the disagreement was never the
+    arithmetic, only whether there is an answer at all.
+
+    So: whatever `derive_class_year` refuses, this axis must score zero on and
+    make no claim about."""
+    from directory.classify import derive_class_year
+
+    refused = [
+        # Off-cycle: a 3-6 month placement taken on a gap year, a placement
+        # year, or after graduating. "2027 - Investment Banking Off Cycle
+        # Internship – Paris (July start)", live.
+        dict(bucket="internship", title="Off-Cycle Internship", cohort="2027"),
+        # An internship naming no season. "ONE TD Intern / Co-Op (Winter
+        # 2027)", live.
+        dict(bucket="internship", title="Winter Intern / Co-Op", cohort="2027"),
+        # The whole insight bucket: a first-year in year N graduates N+2 or
+        # N+3 depending on the degree. This is the shape the old table was
+        # most confident about (+2..+3, so it matched FOUR class years) and
+        # the one classify.py refuses most explicitly.
+        dict(bucket="insight", title="Spring Week", cohort="2027"),
+        dict(bucket="insight", title="Discovery Programme", cohort="2027"),
+        # Nobody graduates out of a talent community.
+        dict(bucket="entry_level", title="Talent Community", cohort="2028"),
+    ]
+    for kw in refused:
+        assert derive_class_year(kw["bucket"], kw["title"], kw["cohort"]) == ("", "")
+        for year in (2026, 2027, 2028, 2029, 2030, 2031):
+            who = replace(JIMMY, class_year=year, target_cycles=())
+            reasons = [r for r in score_candidate(who, _cand(1, **kw))[1]
+                       if r.kind == "class"]
+            assert reasons == [], (kw, year, reasons)
+
+
+def test_the_derived_chip_quotes_classifys_own_sentence():
+    """The justification is not re-composed here. `views._eligibility`'s
+    "Likely your year" chip and this rail's "likely Class of" chip are the
+    same inference and now read the same sentence, so a student who meets the
+    role on two surfaces is given one explanation of it rather than two that
+    have to be kept in step by hand."""
+    from directory.classify import DERIVED_GRAD
+
+    _, reasons = score_candidate(
+        replace(JIMMY, target_cycles=()),
+        _cand(1, bucket="entry_level", title="Graduate Analyst Programme",
+              cohort="2029"),
+    )
+    detail = next(r.detail for r in reasons if r.kind == "class")
+    assert detail == DERIVED_GRAD.format(cohort="2029")
+
+
+def test_an_adjacent_derived_year_still_says_it_is_not_a_fit():
+    """The near-miss chip is a reason to look, explicitly not a reason to
+    apply, and it still has to admit the year was inferred."""
+    _, reasons = score_candidate(
+        replace(JIMMY, target_cycles=()), _cand(1, cohort="2027"))
+    r = next(r for r in reasons if r.kind == "class")
+    assert r.text == "2027 intake"
+    assert "inferred" in r.detail
+    assert "not a fit" in r.detail
+
+
+@pytest.mark.parametrize("school", [
+    # Canada, keyed under "us" until this audit. "columbia" matched on a word
+    # boundary inside "British Columbia"; "ivey" was simply filed under the
+    # wrong country (Western University, London, Ontario).
+    "University of British Columbia",
+    "Ivey Business School",
+    # An untracked market that `normalize_region` can place, which used to
+    # come back as the literal code "other" — a BUCKET holding Toronto,
+    # Sydney, Mumbai and Dubai at once, not a market.
+    "University of Toronto",
+    "University of Melbourne",
+    "Indian Institute of Technology Bombay",
+    # The placeless tier. A university is not "Remote".
+    "Remote University",
+])
+def test_school_region_answers_only_with_a_tracked_market(school):
+    """`_region_fit` compares the student's home code against the ROLE's code
+    for equality and renders "{market} — the market your university sits in"
+    as a fact. "other" on both sides makes that sentence a false claim about
+    two different countries, and it collects the highest region weight on the
+    board (20). 713 of 2,662 live open campus rows carry region="other"."""
+    from directory.classify import TRACKED_REGIONS
+    got = school_region(school)
+    assert got == "" or got in TRACKED_REGIONS
+    assert got not in ("other", "global")
+
+
+def test_an_untracked_home_market_scores_zero_rather_than_matching_other():
+    """The end-to-end shape of the bug: a Toronto student and a Dubai role,
+    both region="other", scored W_REGION_SCHOOL and were told Dubai is the
+    market their university sits in."""
+    toronto = Profile(school="University of Toronto", tracks=("ib",))
+    dubai = _cand(1, region="other", location="Dubai, United Arab Emirates")
+    points, reasons = score_candidate(toronto, dubai)
+    assert [r for r in reasons if r.kind == "region"] == []
+    assert points == 0
+
+
+def test_columbia_still_resolves_in_the_spellings_that_are_unambiguous():
+    """Dropping the bare token must not cost the school it was there for.
+    Same trade the table already makes for Oxford and Cambridge."""
+    assert school_region("Columbia University") == "us"
+    assert school_region("Columbia Business School") == "us"
+
+
+@pytest.mark.parametrize("title,expected", [
+    # The two live rows that ranked #2 and #3 on the founder's own rail,
+    # chipped "matches IB + S&T" off Nomura's firm-level coverage because
+    # nothing in either title was a phrase any blocklist matched.
+    ("2027 - Risk - Industrial Placement - London", "none"),
+    ("2027 - Information Technology - Industrial Placement - London", "none"),
+    # The same division under the names the rest of the board uses for it.
+    ("Controllers — Summer Analyst", "none"),
+    ("2027 Corporate Risk Summer Internship (Workout) - Early Careers", "none"),
+    ("Risk Assurance Information Technology Trainee", "none"),
+    ("Enterprise Risk Summer Analyst", "none"),
+    ("Liquidity Risk Intern", "none"),
+    ("Risk — Summer Analyst", "none"),
+    ("Internship – Risk", "none"),
+    # ...and the front-office roles the narrow patterns must not touch. Bare
+    # `\brisk\b` stays out of the blocklist because it is also a consulting
+    # practice: 5 open campus rows state a real track alongside the word.
+    ("Financial Services Risk Consulting Intern", "consulting"),
+    ("Quant & Analytics Intern - Financial Services Risk Consulting", "consulting"),
+    # "Capital Markets" is an IB phrase and must survive a title that merely
+    # contains the letters of a risk word elsewhere.
+    ("2027 Global Capital Markets Summer Analyst", "ib"),
+    # The existing carve-outs, re-asserted so a new pattern cannot quietly
+    # take them: retail as an IB coverage group, technology as an IB sector.
+    ("Investment Banking - Consumer & Retail Summer Analyst", "ib"),
+    ("Investment Banking Associate - Technology", "ib"),
+])
+def test_the_blocklist_additions_read_the_department_not_the_desk(title, expected):
+    """2026-09-01 census. Each phrase added was checked against all 26,163
+    rows on the board: "information technology" 26 rows / 1 co-stating a
+    track, "controllers" 24 / 1, the delimited bare "Risk" segment 14 / 1,
+    and "corporate risk" / "enterprise risk" / "risk assurance" /
+    "liquidity risk" 0 collisions between them. Each of the three collisions
+    is an experienced or support-function row that correctly degrades to
+    "none" — the same "co-occurring non-track word, decline rather than
+    guess" call this module already makes for "Trading Operations Analyst"."""
+    assert role_function(title) == expected
+
+
+def test_a_risk_or_it_req_never_inherits_its_banks_track_coverage():
+    """The end-to-end claim, which is the one that reached the founder's
+    screen: a universal bank's `Firm.tracks` must not put "matches IB + S&T"
+    on the card of its risk and IT requisitions."""
+    for title in ("2027 - Risk - Industrial Placement - London",
+                  "2027 - Information Technology - Industrial Placement - London"):
+        points, reasons = score_candidate(
+            JIMMY, _cand(1, title=title, firm_tracks=("ib", "st")))
+        assert [r for r in reasons if r.kind == "track"] == [], title
+
+
+@pytest.mark.parametrize("track,expected", [
+    ("ib", "an IB role"), ("st", "an S&T role"), ("am", "an AM role"),
+    ("pe", "a PE role"), ("consulting", "a Consulting role"),
+    ("corp-strat", "a Corp Strat role"),
+])
+def test_the_stated_track_tooltip_reads_as_english(track, expected):
+    """It read "The posting itself is a IB role" on every live IB pick. The
+    article follows the initial SOUND of the label, not its initial letter:
+    "an IB" and "an S&T" and "an AM", but "a PE"."""
+    title = {"ib": "Investment Banking Summer Analyst",
+             "st": "Sales & Trading Summer Analyst",
+             "am": "Asset Management Summer Analyst",
+             "pe": "Private Equity Summer Analyst",
+             "consulting": "Consulting Summer Analyst",
+             "corp-strat": "Corporate Strategy Summer Analyst"}[track]
+    who = replace(JIMMY, tracks=(track,), target_cycles=())
+    _, reasons = score_candidate(who, _cand(1, title=title))
+    detail = next(r.detail for r in reasons if r.kind == "track")
+    assert detail == f"The posting itself is {expected}, which you're recruiting for."
+
+
+def test_min_score_admits_statements_alone_and_inferences_only_in_pairs():
+    """The bar's own comment used to claim "a track match alone (18) ... is
+    not a recommendation, while a tier-1 target firm (26), or any two inputs
+    together, is." Both halves were wrong: a title that STATES the student's
+    track scores 26 and clears alone, and the two weakest inputs together sum
+    to 10. This pins the corrected rule so the comment and the arithmetic
+    cannot drift apart again."""
+    from directory.recommend import (
+        TIER_POINTS, W_CLASS_DERIVED_NEAR, W_CLASS_STATED, W_TARGET_UNTIERED,
+        W_TRACK_STATED,
+    )
+    # Statements clear the bar alone.
+    for alone in (W_CLASS_STATED, TIER_POINTS[1], W_TRACK_STATED):
+        assert alone >= MIN_SCORE
+    # The weakest pair of inferences does not.
+    assert W_CLASS_DERIVED_NEAR + W_TARGET_UNTIERED < MIN_SCORE

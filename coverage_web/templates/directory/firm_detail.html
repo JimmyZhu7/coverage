@@ -38,7 +38,7 @@
           _my_network_at's my_next_restates_top_row comment in views.py).
           {% endcomment %}
           <p class="fd-next">Warmest here:
-            <a href="{% url 'crm:contact_detail' my_next.id %}">{{ my_next.name|smart_title }}</a>{% if my_next.role %} · {{ my_next.role|smart_title }}{% endif %}
+            <a href="{% url 'crm:contact_detail' my_next.id %}">{{ my_next.name|smart_person_name|smart_title }}</a>{% if my_next.role %} · {{ my_next.role|smart_title }}{% endif %}
           </p>
         {% endif %}
         <div class="fd-people">
@@ -46,7 +46,7 @@
             <a class="fd-person" href="{% url 'crm:contact_detail' p.c.id %}">
               <span class="fd-dot warmth-dot-{{ p.c.warmth }}" aria-hidden="true"></span>
               <span class="fd-person-id">
-                <b>{{ p.c.name|smart_title }}</b>
+                <b>{{ p.c.name|smart_person_name|smart_title }}</b>
                 {% if p.c.role %}<span class="fd-role">{{ p.c.role|smart_title }}</span>{% endif %}
               </span>
               <span class="fd-when">

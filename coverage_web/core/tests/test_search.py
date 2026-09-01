@@ -60,3 +60,39 @@ def test_results_are_capped(client, user):
                                    bucket="internship")
     client.force_login(user)
     assert len(client.get("/search/", {"q": "gold"}).json()["roles"]) == 8
+
+
+# ---------------------------------------------------------------------------
+# The palette renders whatever the serializer hands it, verbatim, so the
+# tidying has to happen server-side. A cross-surface audit (2026-09-01) found
+# it shipping three raw database values to the student at once: an email
+# local part stored as a name by capture, the warmth slug, and a role title
+# in whatever case the firm's board shouted it in.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_the_palette_never_ships_a_raw_name_or_warmth_slug(client):
+    from django.contrib.auth import get_user_model
+    from crm.models import Contact
+    from directory.models import Firm
+    import json
+
+    User = get_user_model()
+    user = User.objects.create_user(email="palette@example.com", password="x")
+    firm = Firm.objects.create(slug="palette-co", name="PALETTE CAPITAL")
+    Contact.all_objects.create(
+        user=user, name="jude.yoon", email="jude.yoon@palette.example",
+        firm=firm, warmth="chatted",
+    )
+
+    client.force_login(user)
+    data = json.loads(client.get("/search/?q=yoon").content)
+    person = data["contacts"][0]
+
+    # The local part becomes a readable name, and the stored row is untouched.
+    assert person["name"] == "Jude Yoon"
+    assert Contact.all_objects.get(email="jude.yoon@palette.example").name == "jude.yoon"
+    # The warmth slug becomes the words every other surface already uses.
+    assert person["warmth"] == "Chatted"
+    assert person["warmth"] != "chatted"
+    # A shouting firm name is tidied like it is everywhere else.
+    assert person["firm"] == "Palette Capital"

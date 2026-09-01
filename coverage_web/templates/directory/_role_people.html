@@ -27,10 +27,10 @@ included — when there is no firm to join on.
         would send an email the CRM never sees, which is the one thing this
         product exists to stop happening.{% endcomment %}
         <a class="rp-person" href="{% url 'crm:contact_detail' p.id %}"
-           title="{{ p.name|smart_title }} · {{ p.warmth_label }}">
+           title="{{ p.name|smart_person_name|smart_title }} · {{ p.warmth_label }}">
           <span class="rp-dot warmth-dot-{{ p.warmth }}" aria-hidden="true"></span>
           <span class="rp-id">
-            <b>{{ p.name|smart_title }}</b>
+            <b>{{ p.name|smart_person_name|smart_title }}</b>
             {% if p.role %}<span class="rp-role">{{ p.role|smart_title }}</span>{% endif %}
           </span>
           {% comment %}Warmth is carried by the dot's colour, by the list's

@@ -549,3 +549,53 @@ LOCATION_CASES = [
 @pytest.mark.parametrize("title,location,expected", LOCATION_CASES)
 def test_display_location_never_repeats_itself(title, location, expected):
     assert situation._display_location(title, location) == expected
+
+
+# ---------------------------------------------------------------------------
+# The claim in the module docstring, pinned in code.
+#
+# "pure code, no model" is the load-bearing promise of this whole module —
+# a moved deadline is the one thing on the Today page that must never be
+# allowed to hallucinate urgency, and the strip's cards are built straight
+# from these typed fields (templates/crm/week.html). A docstring cannot
+# enforce that; this can. If a future change genuinely needs a model here,
+# the fix is a different module, not an exemption.
+# ---------------------------------------------------------------------------
+def test_the_situation_module_never_reaches_for_a_model():
+    import re
+    from pathlib import Path
+
+    source = (Path(situation.__file__)).read_text()
+    banned = re.compile(r"\banthropic\b|get_client|is_configured|messages\.(create|stream)")
+    offenders = [
+        f"{n}: {line.strip()}"
+        for n, line in enumerate(source.splitlines(), start=1)
+        if banned.search(line)
+    ]
+    assert not offenders, "situation.py must stay model-free:\n" + "\n".join(offenders)
+
+
+def test_every_field_a_situation_card_renders_comes_from_a_typed_row():
+    """The three card shapes in templates/crm/week.html read exactly these
+    keys. Each one is a column or a derived value, never a sentence — so
+    there is nothing on the strip for a model to have written."""
+    user = _user()
+    firm = _firm()
+    tracked = _opp(firm, title="2028 Summer Analyst", deadline=timezone.localdate())
+    UserOpportunity(user=user, opportunity=tracked).save()
+    OpportunityChange.objects.create(
+        opportunity=tracked, field="deadline",
+        old_value="2026-09-01", new_value="2026-09-20",
+        observed_at=timezone.now(),
+    )
+
+    event = situation.build_situation(user)["deadline_moved"][0]
+
+    assert event["firm"] == firm.name
+    assert event["title"] == tracked.title
+    assert event["old_value"] == "2026-09-01"
+    assert event["new_value"] == "2026-09-20"
+    # Dates as real dates, so the template formats them rather than a
+    # sentence being written about them anywhere.
+    assert event["old_date"].isoformat() == "2026-09-01"
+    assert event["new_date"].isoformat() == "2026-09-20"

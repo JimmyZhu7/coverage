@@ -35,6 +35,7 @@ from . import (campaigns, coverage, debrief as debrief_svc, recruitment,
 from .models import (BenchDismissal, CalendarEvent, ChatDebrief, Contact, PlayDismissal, Touch, UserFirm)
 from .utils import (
     ACTION_LABELS,
+    _calendar_days_ago,
     FIRM_DATE_LABELS as _FIRM_DATE_LABELS,
     TOUCH_KIND_LABELS,
     _clock,
@@ -553,7 +554,24 @@ def _opening_keep_warms(
             # off the engine rather than chosen here, so the two can never
             # disagree about what a keep-warm is worth.
             "priority": 2,
-            "tier": meta.get("tier", 3),
+            # THROUGH THE ENGINE'S OWN COERCION, never the raw column. This
+            # dict is appended straight into `actions` and then sorted by
+            # `_today_sort_key`, whose fourth key is `a["tier"]` — and every
+            # OTHER action in that list has already been through
+            # `cadence._coerce_tier` inside `due_actions`. `firm_meta` above is
+            # built as `tiers.get(fid, 3)`, and `crm.views.set_firm_tier`
+            # deliberately writes `tier=None` when a firm is dragged to the
+            # "Unranked" lane, so the key is PRESENT holding None and the `, 3`
+            # default never fires. One unranked-firm keep-warm tying with any
+            # other action on (class, ev, priority) then compares None against
+            # an int and takes the whole Today page down with a TypeError.
+            #
+            # `_coerce_tier`'s own docstring names this exact failure and warns
+            # that "fixing the reported shape and leaving its siblings is how
+            # the same bug ships twice" — this is a sibling. Not reachable on
+            # the founder's account today (measured 2026-09-01: 54 tiered
+            # firms, none unranked), so it is a latent crash, not a live one.
+            "tier": cadence._coerce_tier(meta.get("tier")),
             "firm_name": meta.get("name") or c.get("firm_text") or c.get("firm_id"),
             # These only ever exist for a contact at a DIRECTORY firm (the
             # openings index is keyed by firm_id), so the firm is known by
@@ -766,7 +784,26 @@ def _opening_bench(user, contacts, actions, today) -> list[dict]:
             "_score": score,
         })
 
-    candidates.sort(key=lambda b: -b["_score"])
+    # A TOTAL ORDER, for the third time in this codebase and for the same
+    # reason. `-_score` alone is not one: `_score` is a product of three small
+    # lookup tables (`rel._TIER_WEIGHT` x `rel._RELATIONSHIP_WEIGHT` x
+    # `rel._OPENING_WEIGHT`), so it takes very few distinct values and ties are
+    # the normal case, not the rare one — two chatted contacts at two tier-2
+    # firms that both have a role deadline on the board score identically every
+    # time. `list.sort` is stable, so a tie fell through to the order `eligible`
+    # was built in, which traces back to `_build_actions`' unordered `Contact`
+    # queryset (no `.order_by()`), free to change after any UPDATE.
+    #
+    # `BENCH_PLAN_MAX` is 1, which makes this sharper here than anywhere else it
+    # has come up: the tiebreak does not merely reorder a list, it decides WHICH
+    # SINGLE PERSON the bench shows — the same account, the same data, a
+    # different face on the next page load. Same fix and same reasoning as
+    # `cadence.due_actions`' C5 tiebreak and `crm.coverage.rank_gaps`' firm_id
+    # key: `str(...)` on both, because a name can be non-string and an id only
+    # has to be hashable, and mixing types in a sort key is its own crash.
+    candidates.sort(
+        key=lambda b: (-b["_score"], str(b["firm_name"]), str(b["contact"]["id"]))
+    )
     return candidates[:BENCH_PLAN_MAX]
 
 
@@ -958,11 +995,29 @@ PACE_TOUCH_KINDS = (
 TODAY_PLAN_MIN = 3    # never plan fewer: below this the page stops building momentum
 # Was 12. Twelve was a ceiling on a queue nobody had ranked: it let a whole
 # afternoon of cold follow-ups onto one screen and, at 500 contacts, would have
-# let forty. With `ev` ordering the list, the top five ARE the five highest-value
-# things available, so a longer list buys volume rather than value — and the
-# remainder is not lost, it is one click away under "Up next" (`held`). Five is
-# a morning's work a student will actually finish, which is the only number a
-# habit loop can be built on.
+# let forty. With `ev` ordering the list, a longer list buys volume rather than
+# value — and the remainder is not lost, it is one click away under "Up next"
+# (`held`). Five is a morning's work a student will actually finish, which is
+# the only number a habit loop can be built on.
+#
+# THIS COMMENT USED TO CLAIM "the top five ARE the five highest-value things
+# available". Softened 2026-09-01, because the measurement does not support it
+# once the plan reaches into the cold lane. `ev` is
+# relevance x relationship x trigger, and for a cold contact with no opening
+# and no deadline all three terms are constants: 44 of the 46 items on the
+# founder's live queue that day scored 2.4, every one of them, and they also
+# shared a tier (1) and an idle age (27 business days, because they were all
+# sent in the same batch). 44 items collapsed to FOUR distinct sort keys ahead
+# of the contact-id tiebreak, so their order is their firm's name and then an
+# id — stable, reproducible, and carrying no information about value.
+#
+# That is not a defect to fix by inventing a discriminator; there genuinely is
+# nothing to tell eleven identically-treated strangers at Citi apart, and a
+# score that separated them would be asserting knowledge the data does not
+# contain. It IS a reason not to let a comment promise ranking the engine only
+# delivers down to the engaged rung. What the cap actually guarantees: the
+# CRITICAL and ENGAGED items reaching the plan are ranked; past them the plan
+# is a fair, deterministic FIFO drain of an unranked pile.
 TODAY_PLAN_MAX = 5
 
 # How many keep-warm cards with NO live reason behind them may take a plan slot
@@ -2395,15 +2450,42 @@ def _cockpit_context(user) -> dict:
     # gives ground to keep the whole column inside a laptop viewport.
     recent = Touch.objects.for_user(user).select_related("contact").order_by("-ts")[:6]
     now = timezone.now()
+
+    def _rail_ago(ts) -> str:
+        # `_calendar_days_ago`, not `timesince`. This was the last call site
+        # still measuring a raw elapsed floor, and `crm/utils.py`'s helper
+        # exists precisely to abolish it -- its docstring names the failure
+        # ("two surfaces showing the same touch disagreed on 'how long
+        # ago'"). It was disagreeing here: on 2026-09-01 one of the
+        # founder's contacts read "3 business days ago" on her act card, "4
+        # days" in this rail, and "5d since last touch" on her Network card,
+        # all about a single touch. This rail now speaks the same
+        # calendar-day clock the rest of the CRM does; the business-day
+        # count on the act card stays what it is, because that one is the
+        # cadence engine's own reasoning and says so.
+        #
+        # CLAMPED AT 0, not just falsy-checked. `recent` has no `ts__lte`
+        # guard (unlike `crm.debrief.pending`, which filters `ts__lte=as_of`
+        # for exactly this reason), so a touch dated after `now` sorts to
+        # the top of the feed rather than being excluded from it. An
+        # unclamped negative day count rendered "-2d ago" for a touch
+        # 2 days in the future -- a wrong result, demonstrated in
+        # `test_the_activity_rail_does_not_render_a_negative_day_count`.
+        # Nothing on the founder's live account is future-dated today, but
+        # `coverage_domain.cadence` and `.scoring` both guard this same
+        # shape rather than assume it can't happen (a chat hand-logged with
+        # tomorrow's date, or a caller whose clock runs behind the touch's),
+        # so the rail matches that posture instead of trusting the query.
+        days = _calendar_days_ago(ts, as_of=now)
+        return f"{days}d ago" if days and days > 0 else "today"
+
     activity = [
         {
             "name": t.contact.name,
             "contact_id": t.contact_id,
             "kind": t.kind,
             "kind_label": kind_labels.get(t.kind, t.kind.replace("_", " ").capitalize()),
-            # depth=1: the default two units render "1 hour, 3 minutes", which
-            # is noise in a glanceable feed. One unit is the whole signal.
-            "ago": timesince(t.ts, now, depth=1),
+            "ago": _rail_ago(t.ts),
             "inbound": t.kind in _INBOUND_TOUCH_KINDS,
         }
         for t in recent

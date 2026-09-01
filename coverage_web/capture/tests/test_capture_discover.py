@@ -77,11 +77,42 @@ def test_an_archived_person_is_reported_never_resurrected(run, user):
 
 
 def test_a_chat_logs_a_real_touch_through_the_ratchet(run, user):
-    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "chat_status": "completed"}])
+    """A chat that carries its own time is the corroborated case, and it
+    still climbs all the way — see the Ellen Chung test below for the half
+    that was shipping wrong."""
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "chat_status": "completed",
+          "chat_scheduled_at": "2026-08-20T12:00:00+00:00"}])
     c = Contact.objects.for_user(user).get(name="Ada Lovelace")
     assert c.warmth == "chatted"
     assert c.thread_state == "chat_done"
     assert Touch.objects.for_user(user).filter(contact=c, kind="chat").exists()
+
+
+def test_a_chat_nobody_can_date_is_a_reply_not_a_chat(run, user):
+    """The Ellen Chung case, 2026-08-12, and the rung the 08-31 fix missed.
+
+    "Thanks for the email, filled out the form!" came back as
+    `chat_status: "completed"`. No call, no meeting. Coverage set her warmth
+    to `chatted` and her thread_state to `chat_done`, then spent three days
+    asking the founder to debrief a conversation that never happened. Patina
+    Chu carries the identical shape from 2026-08-02 and was never corrected.
+
+    This is the MORE expensive of the two chat rungs, not the safer one:
+    `capture_worklist.RECHECK_WARMTH` is `("cold", "replied")`, so a contact
+    at `chatted` is dropped from every later re-check. The Youqi Chen fix
+    gated `"scheduled"` and stopped there, which left the stronger claim
+    taking a language judgment entirely on trust.
+
+    A chat that was held had a time, the same way a chat that was booked
+    does. Without one the honest floor is what the message itself proves."""
+    run([{"name": "Ellen Chung", "email": "ellen@withpersona.com",
+          "replied": True, "chat_status": "completed",
+          "evidence": "Thanks for the email, filled out the form!"}])
+    c = Contact.objects.for_user(user).get(name="Ellen Chung")
+    assert c.warmth == "replied"
+    assert c.thread_state == "replied"
+    kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
+    assert kinds == ["reply_received"]
 
 
 def test_a_booked_chat_is_scheduled_not_had(run, user):
@@ -284,11 +315,41 @@ def test_outreach_you_already_sent_is_logged_as_a_touch(run, user):
     assert kinds == ["outreach"], "the note he already sent is on the record"
 
 
+def test_a_named_thread_is_stamped_so_the_daily_sync_dedups_against_it(run, user):
+    """Every other door into the ratchet stamps `[gmail:<id>]` on the note,
+    and `capture.gmail.thread_stage_rank` reads exactly that string.
+
+    Without it a discovery touch ranks 0 on every thread forever, so the
+    daily sync re-finding the same conversation logs a SECOND
+    `reply_received` — nothing false, but `last_touch` is reset and the
+    cadence engine's follow-up nudge slides a week to the right. Youqi Chen's
+    `chat_scheduled` touch (live, 2026-08-24) carries no marker for exactly
+    this reason."""
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "replied": True,
+          "thread_id": "19fa2affd366a2d0"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    (touch,) = Touch.objects.for_user(user).filter(contact=c)
+    assert touch.note.startswith("[gmail:19fa2affd366a2d0] ")
+
+    from capture.gmail import thread_stage_rank
+    assert thread_stage_rank(user, c, "19fa2affd366a2d0") == 1
+
+
+def test_a_finding_with_no_thread_is_unchanged(run, user):
+    """`thread_id` is optional and absent from the documented shape; a scan
+    that cannot name a thread must behave exactly as it always did."""
+    run([{"name": "Grace Hopper", "email": "grace@gs.com", "replied": True}])
+    c = Contact.objects.for_user(user).get(name="Grace Hopper")
+    (touch,) = Touch.objects.for_user(user).filter(contact=c)
+    assert touch.note == "Discovered by mailbox scan"
+
+
 def test_the_evidence_ladder_takes_the_strongest_signal(run, user):
     """A thread can show all three. A chat outranks a reply outranks outreach
     — the same order the touch ratchet uses everywhere else."""
     run([{"name": "Ada Lovelace", "email": "ada@gs.com",
-          "outreach_sent": True, "replied": True, "chat_status": "completed"}])
+          "outreach_sent": True, "replied": True, "chat_status": "completed",
+          "chat_scheduled_at": "2026-08-20T12:00:00+00:00"}])
     c = Contact.objects.for_user(user).get(name="Ada Lovelace")
     kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
     assert kinds == ["chat"]

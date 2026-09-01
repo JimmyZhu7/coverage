@@ -39,7 +39,10 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Mapping, Sequence
 
-from directory.classify import ENTRY_LEVEL, INSIGHT, INTERNSHIP, normalize_region
+from directory.classify import (
+    ENTRY_LEVEL, INSIGHT, INTERNSHIP, TRACKED_REGIONS, derive_class_year,
+    normalize_region,
+)
 
 # ---------------------------------------------------------------------------
 # Weights. All four inputs the brief names are here, and each one alone can
@@ -107,11 +110,27 @@ TIER_POINTS: Mapping[int, int] = {1: 26, 2: 16, 3: 8}
 #: A firm the student targeted but never tiered. Real signal, weak.
 W_TARGET_UNTIERED = 4
 
-#: The bar a role must clear to be shown at all. Calibrated so that no single
-#: weak input can put a role on the bar by itself: a track match alone (18) or
-#: a region match alone (16/20) is not a recommendation, while a tier-1 target
-#: firm (26), or any two inputs together, is. Below this the honest answer is
-#: an empty state, not a padded list — see `recommend`.
+#: The bar a role must clear to be shown at all. Calibrated so that no INFERRED
+#: input can put a role on the bar by itself, while any input that is somebody's
+#: own statement can.
+#:
+#: Exactly three inputs clear 25 alone, and all three are statements rather than
+#: guesses: the posting's own stated class year (30), the student's own tier-1
+#: ranking of the firm (26), and a title that names the student's track outright
+#: (26). Everything inferred falls short by itself and needs a second signal —
+#: a firm-coverage track match (18/20), either region match (16/20), a
+#: convention-derived class year (18), the target-cycle bonus (15), a warm
+#: contact (14), tier 2 (16), tier 3 (8), an untiered target (4), an adjacent
+#: derived year (6).
+#:
+#: An earlier version of this comment claimed "any two inputs together" clears
+#: the bar. That was never true and the arithmetic says so: the two weakest
+#: inputs are an adjacent derived year (6) and an untiered target firm (4),
+#: which sum to 10. Left corrected rather than deleted, because a comment that
+#: mis-describes its own calibration is how a threshold stops being audited.
+#:
+#: Below this the honest answer is an empty state, not a padded list — see
+#: `recommend`.
 MIN_SCORE = 25
 
 #: How many cards the bar shows. The bar is one horizontal row; more than this
@@ -172,10 +191,25 @@ MAX_PER_FIRM = 2
 SCHOOL_REGION_KEYS: Mapping[str, tuple[str, ...]] = {
     "us": (
         "usc", "marshall", "ucla", "berkeley", "haas", "wharton", "upenn",
-        "nyu", "stern", "columbia", "mit", "sloan", "harvard", "hbs", "yale",
+        "nyu", "stern", "mit", "sloan", "harvard", "hbs", "yale",
         "princeton", "stanford", "gsb", "booth", "kellogg", "northwestern",
         "ross", "mccombs", "fuqua", "cornell", "dartmouth", "tuck",
-        "georgetown", "mcdonough", "emory", "goizueta", "ivey", "stevens",
+        "georgetown", "mcdonough", "emory", "goizueta", "stevens",
+        # "columbia" is stored in its long forms only, for the same reason
+        # bare "cambridge" and bare "oxford" are below: the bare word is also
+        # the University of BRITISH Columbia (Vancouver), which this table
+        # answered "us" for on a word-boundary match, and Columbia, Missouri /
+        # Columbia, South Carolina. A Canadian student was told, in a tooltip
+        # rendered as fact, that the United States is "the market your
+        # university sits in" — and collected the highest region weight on the
+        # board (W_REGION_SCHOOL = 20) for every American role. Canada is not
+        # a tracked market, so the honest answer for UBC is "" and no points.
+        "columbia university", "columbia business school",
+        # "ivey" was in this list and is not American: the Ivey Business
+        # School is Western University's, in London, Ontario. Same false
+        # "your university's market" sentence as UBC above, on a name that
+        # was simply filed under the wrong country. Removed rather than
+        # re-keyed — Canada has no code here to move it to.
         # Spelled-out forms of the same institutions, plus the US schools
         # whose full names carry no token above at all.
         "southern california", "massachusetts institute of technology",
@@ -238,41 +272,92 @@ TRACK_SHORT = {
     "consulting": "Consulting", "corp-strat": "Corp Strat",
 }
 
+#: The indefinite article each short label takes, spelled out rather than
+#: derived. The tooltip said "The posting itself is a IB role" on every live
+#: IB pick, because the rule is the initial SOUND and not the initial letter:
+#: "IB", "S&T" and "AM" are read as letter names beginning with a vowel sound
+#: ("an eye-bee", "an ess-and-tee", "an ay-em") while "PE" is not ("a pee-ee").
+#: A vowel-letter test gets three of these six wrong in both directions, so
+#: the answer is written down per label instead of computed.
+TRACK_ARTICLE = {
+    "ib": "an", "st": "an", "pe": "a", "am": "an",
+    "consulting": "a", "corp-strat": "a",
+}
+
 
 def school_region(school: str) -> str:
-    """Map a free-text school name to one of the product's region codes, or ""
-    when it cannot be determined. Never guesses — see the section comment."""
+    """Map a free-text school name to one of the six TRACKED market codes, or
+    "" when it cannot be determined. Never guesses — see the section comment.
+
+    ONLY a tracked market, never "other" or "global". `normalize_region` has
+    three answers this function must not pass on:
+
+      "other"   a stated place outside the six markets Coverage tracks. It is
+                a BUCKET, not a market: Toronto, Sydney, Mumbai and Dubai all
+                resolve to it. `_region_fit` compares the student's home code
+                against the ROLE's code for equality and, on a match, renders
+                "{market} — the market your university sits in" as a fact.
+                With "other" on both sides that sentence is a false statement
+                about two different countries, and it collects the highest
+                region weight on the board. Measured on the live open campus
+                set: 713 of 2,662 rows carry region="other", so a student at
+                any untracked-market university was being told the market of
+                27% of the board matched their own.
+      "global"  the placeless tier ("Remote", "Worldwide"). A university is
+                not placeless; a school name that resolves here has been
+                misread, not located.
+      ""        already the honest abstention.
+
+    A student at an untracked-market university simply scores zero on this
+    axis, which is the same answer the table already gives for a school it
+    does not recognise."""
     text = (school or "").strip()
     if not text:
         return ""
     for code, pattern in _SCHOOL_PATTERNS:
         if pattern.search(text):
             return code
-    return normalize_region(text)
+    code = normalize_region(text)
+    return code if code in TRACKED_REGIONS else ""
 
 
 # ---------------------------------------------------------------------------
-# Programme year -> graduation year. The documented, honest mapping.
+# Programme year -> graduation year. THERE IS ONE ANSWER TO THIS QUESTION AND
+# IT LIVES IN `classify.derive_class_year`.
 #
-# A summer internship running in intake year N is, in the ordinary case, done
-# by a student the summer BEFORE they graduate — so N implies graduation N+1.
-# A full-time graduate programme starting in year N is joined by that year's
-# graduates, so N implies N. An insight programme / spring week in year N is
-# aimed at first- and second-years, who are typically two to three years from
-# graduating, so N implies N+2 or N+3.
+# This module used to keep a second one: a `_GRAD_WINDOW` table mapping the
+# bucket alone to an offset window (internship +1, entry_level +0, insight
+# +2..+3). It read only the BUCKET, while `derive_class_year` reads the bucket
+# AND the title, and refuses outright for every shape whose convention has more
+# than one answer — off-cycle and seasonal placements, co-ops, internships that
+# name no season, apprenticeships and alternance contracts, talent communities,
+# PhD internships, sophomore/freshman/first-year programmes, and the whole
+# insight bucket (a first-year in year N graduates N+2 or N+3 depending on the
+# degree, which is exactly the variance that makes it unanswerable).
 #
-# All three are conventions, not rules: degree lengths differ, regions differ,
-# and individual firms differ. That is exactly why this mapping only ever
-# feeds the DERIVED weights and why every UI string built from it says
-# "likely". The stated-class-year path never touches this table.
+# Measured on the live open campus set, 2026-09-01: 2,662 rows, of which
+# **737 (28%) were rows this module derived a graduation year for and
+# `derive_class_year` refuses to**. Every one of them rendered a chip reading
+# "likely Class of 20XX" with a tooltip asserting "A 20XX programme is usually
+# done by students graduating 20YY" — for winter co-ops, off-cycle Paris
+# internships, a "Women in Quantitative Finance" event and a Boston career
+# forum, which was the #1 pick on the founder's own live rail. On the 642 rows
+# where both derived, the two agreed on every single one; the disagreement was
+# never about the arithmetic, only about when there is an answer at all.
 #
-# Values are inclusive `(min_offset, max_offset)` windows added to the cohort.
+# Two features reading the same fact and disagreeing about it is the
+# inconsistency the `grad_years` field on `Candidate` was added to stop, and
+# `role_matches_level` and `views._eligibility` already read
+# `derive_class_year`'s answer (through `Opportunity.class_year_derived`).
+# Ranking now reads the same one, computed live rather than off the stored
+# column: that column was stale on 247 of the same 2,662 rows, all in the
+# direction of an empty value, and a ranker that abstains because a backfill
+# has not run is abstaining for the wrong reason.
+#
+# The conventions themselves, and the argument for admitting only two of them,
+# are documented once at `classify.derive_class_year`. This module keeps only
+# the WEIGHTS, and the rule that a derived answer is labelled "likely".
 # ---------------------------------------------------------------------------
-_GRAD_WINDOW: Mapping[str, tuple[int, int]] = {
-    INTERNSHIP: (1, 1),
-    ENTRY_LEVEL: (0, 0),
-    INSIGHT: (2, 3),
-}
 
 #: Target-cycle prefixes -> the bucket that cycle is actually made of. Kept
 #: for any stored value already in this shape ("SA 2028" — kind, then year).
@@ -615,29 +700,27 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
         # made a posting that *stated* the student's class score lower than one
         # that merely implied it. That was backwards.
     elif cohort is not None and profile.class_year:
-        window = _GRAD_WINDOW.get(c.bucket)
-        if window is not None:
-            lo, hi = (cohort + window[0], cohort + window[1])
-            gap = 0 if lo <= profile.class_year <= hi else min(
-                abs(profile.class_year - lo), abs(profile.class_year - hi)
-            )
+        # The ONE derivation, `classify.derive_class_year` — which also hands
+        # back the sentence that justifies it, the same sentence
+        # `views._eligibility` renders on its "Likely your year" chip. Reusing
+        # it rather than composing a second wording is the point: a student
+        # who sees this role in the feed and in the rail is now given one
+        # explanation of the inference, not two that have to be kept in step.
+        derived, note = derive_class_year(c.bucket, c.title, c.cohort)
+        implied = _int_or_none(derived)
+        if implied is not None:
+            gap = abs(profile.class_year - implied)
             if gap == 0:
                 points += W_CLASS_DERIVED
                 reasons.append(Reason(
-                    f"likely Class of {profile.class_year}",
-                    f"A {cohort} programme is usually done by students "
-                    f"graduating {lo}{'' if lo == hi else f'–{hi}'}. The posting "
-                    f"does not state a class year — this is inferred from the "
-                    f"{cohort} intake year, not something the firm said.",
-                    "class",
+                    f"likely Class of {implied}", note, "class",
                 ))
             elif gap == 1:
                 points += W_CLASS_DERIVED_NEAR
                 reasons.append(Reason(
                     f"{cohort} intake",
-                    f"A {cohort} programme usually targets {lo}"
-                    f"{'' if lo == hi else f'–{hi}'} graduates — a year off "
-                    f"from your {profile.class_year}, so worth a look but not a fit.",
+                    f"{note} That is a year off from your "
+                    f"{profile.class_year}, so worth a look but not a fit.",
                     "class",
                 ))
 
@@ -737,7 +820,50 @@ _NON_TRACK_FUNCTION = re.compile(
     # "Investment Banking — Consumer & Retail" analyst roles as non-track.
     r"|\bbranch\b"
     r"|\brisk management\b|\bcredit risk\b|\bmodel validation\b"
+    # The risk department's own names, 2026-09-01 census. Bare `\brisk\b`
+    # stays OUT for the same reason bare `\bretail\b` and bare `\btechnology\b`
+    # do: it is also a front-office consulting practice ("Financial Services
+    # Risk Consulting", "Business Consulting Risk"), and 5 open campus rows
+    # state a real track alongside it. These four phrases collide with nothing
+    # on the whole 26,163-row board (0 rows state a track), and between them
+    # they stop 10 open campus rows inheriting their bank's ib/st coverage.
+    r"|\bcorporate risk\b|\benterprise risk\b|\brisk assurance\b"
+    r"|\bliquidity risk\b"
+    # ...and the case the phrase list cannot reach: "Risk" standing alone as
+    # its own delimited segment of a routing-style title. Nomura files every
+    # posting as "YYYY - Division - Programme - City", so its risk placement
+    # is "2027 - Risk - Industrial Placement - London" — a title with no
+    # phrase in it for any blocklist to match, which therefore inherited
+    # Nomura's ["ib", "st"] and ranked SECOND on the founder's own live
+    # Picked-for-you rail. A word standing alone between delimiters is the
+    # division's name; a risk word attached to something else ("Risk
+    # Consulting") is the shape the phrase list deliberately declines to
+    # touch. 14 rows board-wide carry this shape, 7 of them open campus; the
+    # single row that also states a track is EY's "Industrial Trainee -
+    # Business Consulting Risk - AMI - CNS - Risk - Process & Controls -
+    # Kolkata", which now answers "none" — the same "co-occurring non-track
+    # word, decline rather than guess" outcome this file already gives
+    # "Trading Operations Analyst".
+    r"|(?:^|[|\-–—]\s*)risk\s*(?:$|[|\-–—])"
     r"|\baccounting\b|\bfinancial report(ing)?\b|\bprocurement\b"
+    # Product control / financial control, under the name the banks give the
+    # division. `\baccounting\b` above is the same function under its generic
+    # name and was already here; "Controllers" is what Goldman, Morgan Stanley
+    # and Citi call it, and their "Controllers — Summer Analyst" rows carry no
+    # other function word at all. 24 rows board-wide; the one that also states
+    # a track is "Senior Manager Capital Markets Controllers", an experienced
+    # hire that correctly declines. Plural on purpose: a singular "Controller"
+    # is also a job title this has no evidence about.
+    r"|\bcontrollers\b"
+    # The internal IT department under its full name. The `\btechnology\s+...`
+    # clauses below catch the department's job-title vocabulary but not the
+    # spelled-out division name, so "2027 - Information Technology -
+    # Industrial Placement - London" inherited Nomura's ib/st coverage and
+    # ranked THIRD on the founder's live rail, chipped "matches IB + S&T".
+    # 26 rows board-wide; the one that also states a track is "Lead Support
+    # Analyst, Trading Applications, Information Technology", which is an IT
+    # support job and correctly declines.
+    r"|\binformation technology\b"
     # Internal technology department, named the way the department names
     # itself, never a bare `\btechnology\b`: that word is ALSO an IB coverage
     # sector ("Investment Banking Associate - Technology" at Solomon
@@ -1082,9 +1208,11 @@ def _track_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
         if fn not in profile.tracks:
             return 0, []
         name = TRACK_SHORT.get(fn, fn.upper())
+        article = TRACK_ARTICLE.get(fn, "a")
         return W_TRACK_STATED, [Reason(
             f"{name} role",
-            f"The posting itself is a {name} role, which you're recruiting for.",
+            f"The posting itself is {article} {name} role, which you're "
+            f"recruiting for.",
             "track",
         )]
     firm = set(c.firm_tracks)

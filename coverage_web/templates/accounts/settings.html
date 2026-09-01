@@ -1999,7 +1999,16 @@ that don't already declare explicit htmx behaviour.
               <span class="set-row-label">Past History</span>
               <div class="set-row-desc">
                 {% if gmail_live.backfill_status == "done" %}
-                  {{ gmail_live.backfill_stats.touches_logged|default:0 }} touch{{ gmail_live.backfill_stats.touches_logged|default:0|pluralize:"es" }} logged.
+                  {% comment %}
+                  `touches_written`, not `touches_logged`. The latter counts
+                  LADDER stages only (reply/chat), which is the right number
+                  for "how much relationship progress did this find" and the
+                  wrong one for "what did this run write". His first-connect
+                  backfill reported 525 findings and rendered "0 touches
+                  logged" here, while the same run had inserted 14 rows and
+                  cleared 4 dead addresses. See `SyncResult.touches_written`.
+                  {% endcomment %}
+                  {{ gmail_live.backfill_stats.touches_written|default:0 }} touch{{ gmail_live.backfill_stats.touches_written|default:0|pluralize:"es" }} logged.
                 {% elif gmail_live.backfill_status == "running" %}
                   Running. Can take a few minutes.
                 {% elif gmail_live.backfill_status == "failed" %}
@@ -2030,7 +2039,7 @@ that don't already declare explicit htmx behaviour.
                 {% elif gmail_live.rescan_status == "failed" %}
                   Hit a snag, retrying automatically.
                 {% elif gmail_live.rescan_status == "done" %}
-                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago, {{ gmail_live.rescan_stats.touches_logged|default:0 }} touch{{ gmail_live.rescan_stats.touches_logged|default:0|pluralize:"es" }} logged.
+                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago, {{ gmail_live.rescan_stats.touches_written|default:0 }} touch{{ gmail_live.rescan_stats.touches_written|default:0|pluralize:"es" }} logged.
                   {% with residue=gmail_live.rescan_stats.residue %}
                     {% if residue.credit_limited %}
                       {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look, {{ residue.residue_threads_processed }} covered, rest unclassified until credits refill.

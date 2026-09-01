@@ -244,6 +244,19 @@ def smart_person_name(value):
     text = str(value).strip()
     if not text or any(ch.isspace() for ch in text):
         return value
+    # A WHOLE ADDRESS, not just the local part. Capture usually stores the
+    # local part alone, but two of the founder's rows hold the full string
+    # ('victoria.hsu@gs.com', 'yvonne.cheng@gs.com', both source="capture"),
+    # and they rendered as "Victoria.hsu@gs.com" on the firm page and in the
+    # Cmd-K palette. The domain carries nothing a reader wants in a name, so
+    # it is dropped and the local part goes through the identical rule below
+    # -- one shape check, not a second one. Anything with more than one "@",
+    # or nothing before it, is not an address and is left alone.
+    if "@" in text:
+        local, _, domain = text.partition("@")
+        if not local or "@" in domain:
+            return value
+        text = local
     pieces = re.split(r"[._-]+", text)
     pieces = [p for p in pieces if p]
     if len(pieces) < 2:

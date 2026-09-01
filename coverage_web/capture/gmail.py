@@ -68,7 +68,12 @@ from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
 from capture import appmail, discovery, mailfacts
-from capture.providers import AmbiguousContactError, CaptureProvider, InteractionEvent
+from capture.providers import (
+    AmbiguousContactError,
+    CaptureProvider,
+    InteractionEvent,
+    corroborated_chat_status,
+)
 from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import campaigns as crm_campaigns, services as crm_services
 from crm.models import CalendarEvent, Contact, Touch
@@ -208,9 +213,33 @@ class SyncResult:
     discovery_errors: int = 0
     details: list[str] = field(default_factory=list)
 
+    @property
+    def touches_written(self) -> int:
+        """Every `Touch` row this run actually inserted.
+
+        `touches_logged` counts LADDER stages only, on purpose (see its own
+        comment), and that is the right number for "how much relationship
+        progress did this run find". It is the wrong number for "what did
+        this run write", and it is the one the Settings page renders.
+
+        The founder's first-connect backfill (2026-08-30) recorded `525
+        findings, 0 touches_logged` and Settings said so — while the same run
+        had inserted 12 `outreach` touches, 1 `follow_up` and 1
+        `bulk_received`, and cleared 4 dead addresses. Every one of those
+        counters is present in the same dict; only the headline was wrong,
+        and the headline is the whole of what a user reads.
+        """
+        return (
+            self.touches_logged
+            + self.outreach_logged
+            + self.follow_ups_logged
+            + self.bulk_logged
+        )
+
     def as_stats(self) -> dict:
         return {
             "findings": self.findings,
+            "touches_written": self.touches_written,
             "discovery_errors": self.discovery_errors,
             "emails_backfilled": self.emails_backfilled,
             "alternate_emails_noted": self.alternate_emails_noted,
@@ -248,8 +277,16 @@ class GmailFindingsProvider(CaptureProvider):
         {"contact_id": int|None, "name": str, "email": str|None, "found": bool,
          "bounced": bool, "outreach_sent": bool, "replied": bool,
          "chat_status": "none"|"scheduled"|"completed",
+         "chat_scheduled_at": str|None,
          "evidence": str|None, "thread_id": str|None,
          "bulk": bool, "bulk_reasons": str|None}
+
+    ``chat_scheduled_at`` (ISO 8601) is not decoration on ``chat_status`` —
+    it is what a chat claim is CORROBORATED BY. A ``"scheduled"`` or
+    ``"completed"`` arriving without one falls one rung down the ladder to
+    what the message itself proves (see ``_touch_kind_for`` and
+    ``capture.providers.corroborated_chat_status`` for the two live failures
+    that set this bar).
 
     ``bulk`` (optional, defaults False — every finding written before it
     existed keeps behaving exactly as it did) says the message is a mass or
@@ -403,6 +440,51 @@ def _logged_recently(user, contact: Contact, kind: str, *, reference=None) -> bo
         .filter(contact=contact, kind=kind, ts__gte=ref - window, ts__lte=ref + window)
         .exists()
     )
+
+
+def _outranked_later(user, contact: Contact, kind: str, *, reference) -> str | None:
+    """The name of a HIGHER ladder stage already on record for this contact at
+    or after `reference`, or None when nothing outranks this finding.
+
+    WHY THIS EXISTS ALONGSIDE `thread_stage_rank`. The module docstring calls
+    the caller-side ratchet "the port", and states its job as stopping
+    `apply_touch` from walking `thread_state` backward (the pipeline
+    deliberately rank-guards warmth and NOT thread_state — see its own
+    docstring). But the ratchet was keyed on the Gmail thread alone, and a
+    conversation does not stay on one thread: Google opens a NEW thread for a
+    calendar reply, which is the exact case `_upsert_scheduled_chat` was
+    rewritten around ("Accepted: Jimmy <> Lily Coffee Chat" on one thread, her
+    "New Time Proposed" on another). That rewrite keyed the CALENDAR on the
+    .ics UID and left the TOUCH ladder keyed on the thread.
+
+    The result, live on the founder's account: Lily Liu (contact 765) carries
+    a `chat_scheduled` touch dated 2026-08-25 15:10 and two `reply_received`
+    touches dated 08-24 15:40 and 08-25 12:45 — both EARLIER events, both on
+    different threads, both applied to the database afterwards. Each one
+    ranked 0 on its own thread, so neither was refused, and the last one to be
+    written set her `thread_state` back to `replied` from `chat_scheduled`.
+
+    So the question this asks is about TIME, not about insertion order: has
+    something further up the ladder already happened at or after the moment
+    this finding describes? If it has, logging this finding states that the
+    relationship is where it was before that, which is false. Same-rank
+    touches are deliberately NOT refused — a second genuine reply on a second
+    thread is a second real event and moves nothing backward — and an undated
+    finding reads as "now", which nothing can be later than, so this guard
+    leaves the daily sync's undated findings to `thread_stage_rank` exactly as
+    before.
+    """
+    ref = reference or timezone.now()
+    ranks = [
+        THREAD_STAGE_RANK[k]
+        for k in (
+            Touch.objects.for_user(user)
+            .filter(contact=contact, kind__in=list(THREAD_STAGE_RANK), ts__gte=ref)
+            .values_list("kind", flat=True)
+        )
+    ]
+    top = max(ranks, default=0)
+    return _STAGE_NAME.get(top) if top > THREAD_STAGE_RANK[kind] else None
 
 
 # What `_follow_up_action` decided about a second outbound send.
@@ -949,7 +1031,21 @@ def _touch_kind_for(finding: dict) -> str | None:
     """
     if finding.get("bulk"):
         return BULK_RECEIVED_KIND
-    chat_status = finding.get("chat_status", "none")
+    # A CHAT CLAIM NEEDS A TIME (capture.providers.corroborated_chat_status).
+    # `chat_status` arrives from a classifier outside this repo for every
+    # finding the live path did not build, and both live failures on these
+    # rungs — Ellen Chung 2026-08-12 (`"completed"` off "filled out the
+    # form!"), Youqi Chen 2026-08-31 (`"scheduled"` off an offer nobody
+    # accepted) — were chat claims with nothing behind them. `gmail_live`
+    # itself only ever says "scheduled" when it parsed an .ics DTSTART, so
+    # this holds every path to the bar one path was already meeting.
+    #
+    # The floor is what the message ITSELF proves, which is why this reads
+    # `replied` rather than dropping a rung blindly: an uncorroborated chat
+    # claim on inbound mail is still a reply, and on the user's own outbound
+    # mail it is nothing this ladder should log at all (the outreach branch
+    # in `apply_findings` has already recorded that send).
+    chat_status = corroborated_chat_status(finding)
     if chat_status == "completed":
         return "chat"
     if chat_status == "scheduled":
@@ -1291,8 +1387,17 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # works. Banking it would let one newsletter raise a whole firm's
         # shared pattern confidence — and `email_pattern_recorded` means the
         # contact then never banks the real evidence later.
+        #
+        # THE CHAT HALF OF THIS TEST IS READ THROUGH THE CORROBORATION RULE
+        # for the same reason the ladder is: `email_pattern_recorded` is a
+        # one-shot per-contact flag, so a "delivered" banked off an
+        # uncorroborated chat claim is not just wrong, it also spends the
+        # contact's one chance to bank the real evidence later. A reply on
+        # its own still banks it — that half needs nothing extra, because a
+        # reply IS the proof the address works.
         if not is_bulk and (
-            finding.get("replied") or finding.get("chat_status") in ("scheduled", "completed")
+            finding.get("replied")
+            or corroborated_chat_status(finding) in ("scheduled", "completed")
         ):
             if _record_pattern_evidence(contact, delivered=True, dry_run=dry_run):
                 result.pattern_delivered += 1
@@ -1384,6 +1489,22 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         kind = _touch_kind_for(finding)
         if kind is None:
             continue
+
+        # Refusing to regress across threads as well as within one — see
+        # `_outranked_later`. `bulk_received` is exempt because it is off the
+        # ladder entirely: it moves neither warmth nor thread_state, so it has
+        # nothing to regress.
+        if kind != BULK_RECEIVED_KIND:
+            outranked = _outranked_later(
+                user, contact, kind, reference=finding_time
+            )
+            if outranked is not None:
+                result.skipped_already_logged += 1
+                result.details.append(
+                    f"{name}: {kind} not logged — a later '{outranked}' is "
+                    "already on record for this contact; refusing to regress"
+                )
+                continue
 
         if kind == BULK_RECEIVED_KIND:
             # Off the ladder — see `_bulk_already_logged` for why the thread

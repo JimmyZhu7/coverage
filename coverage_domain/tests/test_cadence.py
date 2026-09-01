@@ -1062,6 +1062,38 @@ def test_keep_warm_reason_has_no_sentinel_when_undateable():
     assert "no dateable touch on record" in my["reason"]
 
 
+def test_keep_warm_sentence_names_the_last_touch_not_the_chat():
+    """Branch 5b's number is business-agnostic days since the LAST REAL TOUCH,
+    and the sentence has to say that and nothing else.
+
+    THE HISTORY IS BUILT SO THE TWO FACTS DIVERGE, because that is the only
+    shape that can catch the bug: the chat is 51 days back and the thank-you
+    the cadence itself asked for is 28 days back, so "days since the chat" is
+    51 and "days since the last touch" is 28. The old copy read
+    "chatted 28d ago" — the last-touch clock wearing the chat's noun, exactly
+    the defect the confirm-chat card was fixed for on 2026-08-31.
+
+    Measured on the founder's live account 2026-09-01: 6 of his 24 chatted
+    contacts carry a latest real touch that is not the chat (Patina Chu 24 vs
+    31, Amy Zhou 29 vs 35, James Bai 41 vs 46).
+    """
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [
+        touch(1, "chat", "2026-06-01 10:00"),        # 51 calendar days before AS_OF
+        touch(1, "thank_you", "2026-06-24 12:00"),   # 28 calendar days before AS_OF
+    ]
+    my = [a for a in cadence.due_actions([c], touches, [], as_of=AS_OF, firms=FIRMS)
+          if a["contact"]["id"] == 1][0]
+    assert my["action"] == "keep_warm"
+    # The number itself is unchanged — it always measured the last touch.
+    assert my["ctx"]["days_since"] == 28
+    assert "last touch 28d ago" in my["reason"]
+    # And it must NOT be presented as the age of the conversation, on either
+    # number: 28 is not when they chatted, and 51 is not what was measured.
+    assert "chatted 28d ago" not in my["reason"]
+    assert "51" not in my["reason"]
+
+
 def test_keep_warm_clock_ignores_audit_rows_too():
     """C1 is born on the C2 clock: a promotion/correction row must not push a
     chatted contact's keep-warm date out."""

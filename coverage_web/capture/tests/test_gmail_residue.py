@@ -175,6 +175,53 @@ def test_an_auto_reply_outcome_never_logs_a_touch_even_when_grounded(student):
 
 
 @override_settings(ANTHROPIC_API_KEY="sk-test-key")
+def test_the_header_test_overrides_a_genuine_reply_the_model_got_wrong(student):
+    """The deterministic bulk test (`capture.inbound.classify_inbound`) runs
+    on this path too, and it runs BEFORE the model's answer means anything.
+
+    Every inbound message on the deterministic path is put through those
+    header tiers; this path skipped them entirely, which left an LLM as the
+    only thing between a mass send and warmth `replied` — the arrangement the
+    Caroline Baenen failure (2026-08-13, a "Sophomore Series" blast logged as
+    `reply_received`, warming a recruiter the founder had never emailed)
+    produced the header test to end. The model's closed answer set has no
+    option for "a blast", so it was never the right thing to be holding that
+    line.
+
+    The message is still RECORDED — `bulk_received` moves neither warmth nor
+    thread_state, and keeping it is how a real deadline or event inside a
+    blast still reaches `capture.appmail`.
+    """
+    contact = Contact.all_objects.create(
+        user=student, name="Jane Banker", email="jane@bank.example", source="manual"
+    )
+    residue = [_residue_message(
+        thread_id="t-blast",
+        from_addr="Jane Banker <jane@bank.example>",
+        subject="Sophomore Series: join us",
+        snippet="We would love to see you at the Sophomore Series!",
+    )]
+    residue[0]["message"]["payload"]["headers"] += [
+        {"name": "List-Unsubscribe", "value": "<https://x.example/u>"},
+        {"name": "Precedence", "value": "bulk"},
+    ]
+    reply = _api_text_response({
+        "outcome": "genuine_reply",
+        "quote": "We would love to see you at the Sophomore Series!",
+    })
+    with patch.object(gmail_residue, "_post_json", return_value=reply):
+        stats = run_residue_stage(FakeConnection(student), residue)
+
+    contact.refresh_from_db()
+    assert stats["touches_logged"] == 0
+    assert contact.warmth == "cold"
+    assert contact.thread_state == "no_reply"
+    assert list(
+        Touch.objects.for_user(student).values_list("kind", flat=True)
+    ) == ["bulk_received"]
+
+
+@override_settings(ANTHROPIC_API_KEY="sk-test-key")
 def test_malformed_json_is_treated_as_ambiguous_not_a_crash(student):
     residue = [_residue_message(thread_id="t-bad", from_addr="a@x.com", subject="hi", snippet="hello")]
     reply = {"content": [{"type": "text", "text": "not json at all"}]}

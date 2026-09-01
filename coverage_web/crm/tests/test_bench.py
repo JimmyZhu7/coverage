@@ -9,6 +9,7 @@ therefore cannot see uncommitted rows — same posture as `test_today.py`.
 
 from __future__ import annotations
 
+import itertools
 from datetime import timedelta
 
 import pytest
@@ -302,3 +303,49 @@ def test_bench_dismissal_does_not_leak_across_tenants():
 
     names = [x["contact"]["name"] for x in _cockpit_context(a)["bench"]]
     assert names == ["Katy A"]
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-01 audit: the bench's order has to be a TOTAL order.
+# ---------------------------------------------------------------------------
+def test_the_bench_picks_the_same_person_however_the_rows_arrive():
+    """`_score` is a product of three small lookup tables, so ties are the
+    normal case — and `BENCH_PLAN_MAX` is 1, so a tie decides WHICH SINGLE
+    PERSON the strip shows, not merely how a list is arranged.
+
+    Before the tiebreak, `sort(key=-_score)` fell through `list.sort`'s
+    stability to the order `_build_actions`' unordered `Contact` queryset
+    happened to return — free to change after any UPDATE. Same defect
+    `coverage_domain.cadence.due_actions` was given its C5 contact-id key for
+    and `crm.coverage.rank_gaps` its firm_id key for; this is the third
+    surface, and the one where it is most visible.
+
+    Three contacts identical on every scoring term (same tier, same warmth,
+    same opening kind at their own firm), fed to the ranker in every possible
+    order. One answer, every time.
+    """
+    user = _user("bench-order@example.com", weekly_touch_goal=14)
+    people = []
+    for i in range(3):
+        firm = _firm_with_opening(
+            user, name=f"Tied Bank {i}", slug=f"tied-bench-{i}", tier=2, days_out=34
+        )
+        c = _contact(
+            user=user, name=f"Tied Person {i}", firm=firm, region="us",
+            warmth="chatted", thread_state="parked",
+        )
+        _touch(user, c, "chat", days_ago=20)
+        people.append(c)
+
+    today = timezone.localdate()
+    scores = {
+        _opening_bench(user, [c], [], today)[0]["_score"] for c in people
+    }
+    assert len(scores) == 1, "fixture is not actually tied; the test proves nothing"
+
+    picked = set()
+    for order in itertools.permutations(people):
+        result = _opening_bench(user, list(order), [], today)
+        assert len(result) == BENCH_PLAN_MAX
+        picked.add(result[0]["contact"]["name"])
+    assert len(picked) == 1, f"the bench showed {picked} for one unchanged dataset"

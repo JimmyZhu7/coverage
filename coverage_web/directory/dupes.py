@@ -408,6 +408,22 @@ def fold_duplicates(
     dated copy: that is one posting recorded twice at different completeness,
     not two events.
 
+    THE SPONSORSHIP VETO: a cluster holding both a stated "yes" and a stated
+    "no" is likewise left alone. `_survivor_rank` rule 4 breaks a tie on
+    STATED-vs-unknown and says so explicitly — "two copies that STATE
+    different answers ('yes' vs 'no') are a data conflict ... not something
+    this ranking should paper over by picking one" — but nothing was actually
+    catching that case, so the tie fell through to first-seen and the fold
+    picked whichever copy was older. That is the one fold whose cost is not a
+    scroll: `directory.views._eligibility` turns a posting's own "no" into a
+    BLOCKING "Won't sponsor you here" verdict, so hiding the sibling copy that
+    says "yes" leaves an international student looking at a hard wall the
+    board itself contradicts one row away. A blank or "unknown" copy is a
+    posting that did not say and still folds normally, exactly as with the two
+    vetoes below — only two competing claims block. (No cluster on the current
+    15,798 open rows trips this; it is a guard against the shape, not a
+    repair of live data.)
+
     THE COHORT VETO: a cluster holding two or more DIFFERENT stated `cohort`
     (programme/intake year) values is likewise left alone. `by_role`/
     `_cluster_by_location` group purely on firm + normalized title + place,
@@ -449,7 +465,11 @@ def fold_duplicates(
                                  if d is not None}
             stated_cohorts = {c for c in (getattr(m, "cohort", "") or "" for m in cluster)
                                if c}
-            if len(stated_deadlines) > 1 or len(stated_cohorts) > 1:
+            stated_sponsorship = {v for v in (getattr(m, "sponsorship", "") or ""
+                                              for m in cluster)
+                                  if v in ("yes", "no")}
+            if (len(stated_deadlines) > 1 or len(stated_cohorts) > 1
+                    or len(stated_sponsorship) > 1):
                 keep.update(id(m) for m in cluster)
                 continue
             winner = min(cluster, key=lambda m: _survivor_rank(m, sticky))

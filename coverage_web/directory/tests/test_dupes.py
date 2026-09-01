@@ -658,6 +658,33 @@ class TestFoldDuplicates:
         assert folded == 0
         assert len(kept) == 3
 
+    def test_two_stated_sponsorship_answers_veto_the_fold(self):
+        """`_survivor_rank` rule 4 already said out loud that two copies
+        STATING different answers are "a data conflict ... not something this
+        ranking should paper over by picking one" — and nothing was catching
+        it, so the tie fell through to first-seen and the fold picked whichever
+        copy was older.
+
+        This is the one fold whose cost is not a scroll.
+        `directory.views._eligibility` turns a posting's own "no" into a
+        BLOCKING "Won't sponsor you here" verdict, so hiding the sibling that
+        says "yes" leaves an international student staring at a hard wall the
+        board itself contradicts one row away."""
+        kept, folded = fold_duplicates([
+            _Row(1, sponsorship="no"),
+            _Row(2, sponsorship="yes"),
+        ])
+        assert folded == 0
+        assert {r.id for r in kept} == {1, 2}
+
+    def test_one_stated_sponsorship_answer_still_folds(self):
+        """"unknown" is a posting that did not say, not a competing claim —
+        the same asymmetry the deadline and cohort vetoes hold, and the case
+        `_survivor_rank` rule 4 exists to win."""
+        kept, folded = fold_duplicates([_Row(1), _Row(2, sponsorship="yes")])
+        assert folded == 1
+        assert [r.id for r in kept] == [2]
+
     # ---- the tiebreak, in its documented order
 
     def test_deadline_beats_no_deadline(self):

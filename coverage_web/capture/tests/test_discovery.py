@@ -282,11 +282,60 @@ def test_threaded_reply_from_personal_domain_proposes(student, firm):
     assert p.firm_id is None
 
 
-def test_chat_evidence_carries_its_kind(student, firm):
+def test_a_proposal_never_carries_a_chat_rung(student, firm):
+    """A proposal's ceiling is `reply_received`, whatever `chat_status` says.
+
+    Two things made a chat rung structurally dishonest on this path:
+
+    * `ContactProposal` has no field for the chat's TIME, and
+      `_upsert_scheduled_chat` runs in `apply_findings` for MATCHED contacts
+      only — so accepting a `chat_scheduled` proposal parked a brand-new
+      contact at `thread_state="chat_scheduled"` with no calendar event
+      anywhere behind it. That is the Youqi Chen card exactly: a daily "did
+      it happen? log the chat or reschedule" prompt about a meeting with no
+      time. Live: Lily Liu (contact 765) carries a `chat_scheduled` touch
+      written by this path and zero calendar events.
+    * `chat` sets warmth `chatted`, which `capture_worklist.RECHECK_WARMTH`
+      drops from every later re-check — one tap on a card, and a person
+      Coverage had never tracked lands in the one state no later run
+      revisits. Live: Tanner Kleinberg (contact 764).
+
+    Nothing is lost. The touch carries the thread marker, so the very next
+    sync sees that thread staged at rank 1 and a real `chat_scheduled`
+    finding climbs past it through `apply_findings` — the path that writes
+    the calendar event too."""
     assert consider(
-        student, finding(chat_status="scheduled")
+        student, finding(chat_status="scheduled",
+                         chat_scheduled_at="2026-08-25T09:00:00+00:00")
     ) == discovery.PROPOSED
-    assert pending(student)[0].evidence_kind == "chat_scheduled"
+    assert pending(student)[0].evidence_kind == "reply_received"
+
+    assert consider(
+        student,
+        finding(email="dana@northbank.example", chat_status="completed"),
+    ) == discovery.PROPOSED
+    kinds = {p.evidence_kind for p in pending(student)}
+    assert kinds == {"reply_received"}
+
+
+def test_a_stored_chat_proposal_still_writes_only_a_reply(student, firm):
+    """Rows minted before that rule existed are still in the table. The floor
+    is applied at the moment of the WRITE too, not only where the value is
+    chosen, so a proposal from last week cannot smuggle in the state this
+    module now refuses to write."""
+    proposal = ContactProposal.all_objects.create(
+        user=student, name="Tanner Kleinberg", email="tanner@northbank.example",
+        evidence="Wrote to you from a firm address: USC | Beta Sigma",
+        evidence_kind="chat", thread_id="t-old",
+    )
+    contact = discovery.accept(proposal)
+    contact.refresh_from_db()
+    assert contact.warmth == "replied"
+    assert contact.thread_state == "replied"
+    assert list(
+        Touch.objects.for_user(student).filter(contact=contact)
+        .values_list("kind", flat=True)
+    ) == ["reply_received"]
 
 
 def test_recruiting_hint_from_display_name(student, firm):

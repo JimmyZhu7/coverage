@@ -449,13 +449,22 @@ def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
     # import ledger (`user=connection.user`, capture/management/commands/
     # gmail_poll.py) -- none is a new unscoped read or write.
     #
+    # Raised to 97 on 2026-09-01: the new `audit_chat_claims` management
+    # command (capture/management/commands/audit_chat_claims.py) reads
+    # CalendarEvent and Touch rows through `all_objects` because both queries
+    # run against a `contact` already pulled from `Contact.objects.for_user
+    # (user)` a few lines up, so `all_objects` here is not an unscoped
+    # cross-tenant read. Both calls carry an explicit `user=user` predicate
+    # anyway (added alongside this ratchet bump), matching every other call
+    # site's style rather than leaning on the contact FK alone.
+    #
     # A RATCHET, not a limit. The headroom is small on purpose: this is meant
     # to fire on the next batch of unscoped calls so somebody looks at them,
     # which is the whole justification for `all_objects` being greppable.
     # Raising the number is a legitimate response — AFTER reading the diff.
-    assert len(lines) <= 96, (
-        f"{len(lines)} unscoped `all_objects` lines, up from the 93 reviewed "
-        "on 2026-08-29. Each new call site needs an explicit `user=` predicate "
+    assert len(lines) <= 97, (
+        f"{len(lines)} unscoped `all_objects` lines, up from the 97 reviewed "
+        "on 2026-09-01. Each new call site needs an explicit `user=` predicate "
         "or a written cross-tenant justification — read the diff, then raise "
         "this number deliberately."
     )

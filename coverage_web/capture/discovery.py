@@ -943,7 +943,7 @@ def _match_existing(
 
 
 def _evidence_kind(finding: dict, *, outbound_only: bool = False) -> str:
-    """The strongest touch kind the evidence honestly supports.
+    """The strongest touch kind the evidence honestly supports. Never a chat.
 
     An outreach-only finding is ALWAYS `outreach` — even when it carries a
     `chat_status` of "scheduled" off a calendar invite the user themselves
@@ -952,14 +952,37 @@ def _evidence_kind(finding: dict, *, outbound_only: bool = False) -> str:
     `replied` to somebody who has never typed a word. (For matched
     contacts the pipeline does count an outbound .ics as a scheduled chat;
     a proposal is a stricter surface.)
+
+    A PROPOSAL'S CEILING IS `reply_received`, and that is the same "stricter
+    surface" argument applied to the other three rungs. This used to return
+    `chat_scheduled` / `chat` straight off `chat_status`, and the result was
+    structurally dishonest in two ways at once:
+
+    * A `ContactProposal` has no field for the chat's TIME. So a proposal
+      accepted as `chat_scheduled` created a contact parked at
+      `thread_state="chat_scheduled"` with no `CalendarEvent` behind it —
+      `_upsert_scheduled_chat` runs in `apply_findings` for MATCHED contacts
+      and never on this path. That is the Youqi Chen shape exactly: a daily
+      "did it happen? log the chat or reschedule" card about a meeting with
+      no time and no calendar entry, in a state whose only exit is a human.
+      Live on the founder's account: Lily Liu (contact 765) carries a
+      `chat_scheduled` touch written by this path and zero calendar events.
+    * `chat` sets warmth `chatted`, which `capture_worklist.RECHECK_WARMTH`
+      drops from every later re-check — so a proposal card, one tap, could
+      put a person Coverage had never tracked into the one state no later run
+      can revisit. Live: Tanner Kleinberg (contact 764), accepted off a
+      `chat` proposal whose evidence line reads "Wrote to you from a firm
+      address".
+
+    Nothing is lost by flooring here, because the person becomes a CONTACT at
+    the same moment. `reply_received` carries the marker, so the very next
+    sync sees the same thread staged at rank 1, and a genuine `chat_scheduled`
+    finding (rank 2) climbs past it through `apply_findings` — the path that
+    writes the calendar event too. The chat arrives one run later, corroborated,
+    instead of arriving now, uncorroborated and unrecoverable.
     """
     if outbound_only:
         return "outreach"
-    chat_status = str(finding.get("chat_status", "none") or "none").strip().lower()
-    if chat_status == "completed":
-        return "chat"
-    if chat_status == "scheduled":
-        return "chat_scheduled"
     return "reply_received"
 
 
@@ -1313,12 +1336,23 @@ def accept(proposal: ContactProposal) -> Contact | None:
     # says exactly the true thing: "added but never contacted — send the
     # first note."
     if proposal.evidence_kind != "referral":
+        # ROWS WRITTEN BEFORE `_evidence_kind` STOPPED PRODUCING CHAT RUNGS
+        # are still in the table (two on the founder's account, both already
+        # accepted; a pending one on any account would still be waiting on a
+        # tap). Reading the stored value straight back would let a proposal
+        # minted last week write the state this module now refuses to write,
+        # so the floor is applied HERE too, at the moment of the write,
+        # rather than only where the value is chosen. See `_evidence_kind`
+        # for why a proposal's ceiling is `reply_received`.
+        kind = proposal.evidence_kind
+        if kind in ("chat", "chat_scheduled"):
+            kind = "reply_received"
         marker = f"[gmail:{proposal.thread_id}] " if proposal.thread_id else ""
         now = proposal.occurred_at
         if now is not None:
             now = min(now, timezone.now())
         crm_services.log_touch(
-            user.id, contact.id, proposal.evidence_kind, "email",
+            user.id, contact.id, kind, "email",
             note=f"{marker}{proposal.evidence}".strip() or None,
             now=now,
             source="capture",

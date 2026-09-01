@@ -52,8 +52,17 @@ only reintroduce the clipping bug this file's history is full of.
   {% endcomment %}
   <span class="rr-due">
     {% if r.dated %}
+      {% comment %}
+      The abbreviation is deliberate (views.py: "Closes in 12 days" does not
+      fit 44px), and that comment also promised "the full sentence stays the
+      accessible name". It did not: this span shipped "22d" with no aria-label
+      and no title, so a screen reader read it aloud as "22 d". The visually
+      hidden span below is that promise, kept -- same `.vh` technique the
+      reported/unconfirmed markers on this row already use, so nothing about
+      the rendered pixels changes.
+      {% endcomment %}
       <span class="rr-due-n meta-{{ r.level }}{% if r.reported %} is-reported{% endif %}"
-            {% if r.reported %}title="{{ r.reported.why }}"{% endif %}>{{ r.countdown_short|default:r.countdown }}{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
+            {% if r.reported %}title="{{ r.reported.why }}"{% endif %}><span aria-hidden="true">{{ r.countdown_short|default:r.countdown }}</span><span class="vh">{{ r.countdown }}</span>{% if r.reported %}<span class="vh"> ({{ r.reported.label }})</span>{% endif %}</span>
     {% elif r.rolling_stated %}
       <span class="rr-due-n rr-due-rolling" title="{{ r.rolling_why }}"><span class="rolling-dot"></span></span>
     {% else %}

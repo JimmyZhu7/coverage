@@ -1,3 +1,4 @@
+{% load textstyle %}
 {% comment %}
 One entry on the calendar. Shared by the month grid and the narrow-screen
 agenda so the two can't drift apart.
@@ -44,7 +45,7 @@ Two shapes, decided by `ev.editable`:
           the date still makes sense.</p>
       {% endif %}
       {% if ev.all_day %}<p class="cal-ev-meta">All day</p>{% endif %}
-      {% if ev.contact %}<p class="cal-ev-meta">{{ ev.contact.name }}</p>{% endif %}
+      {% if ev.contact %}<p class="cal-ev-meta">{{ ev.contact.name|smart_person_name|smart_title }}</p>{% endif %}
       {% if ev.location %}<p class="cal-ev-meta">{{ ev.location }}</p>{% endif %}
       {% if ev.description %}<p class="cal-ev-note">{{ ev.description|linebreaksbr }}</p>{% endif %}
       {% if ev.source == 'capture' %}

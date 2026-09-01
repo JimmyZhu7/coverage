@@ -67,6 +67,12 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timezone
 from typing import Any
 
+# The one definition of "a row the system wrote about itself" for the whole
+# domain package. See the comment beside the touch-kind sets below for what
+# reads it here and why it is imported rather than re-spelled. `cadence` does
+# not import `scoring`, so this direction cannot cycle.
+from .cadence import _CLOCK_SILENT_KINDS
+
 # ---------------------------------------------------------------------------
 # Parameters. One versioned bundle of every weight and constant the engine
 # uses. `version` is echoed into each score row as `params_version` and mixed
@@ -160,6 +166,34 @@ _MEANINGFUL_KINDS = ("reply_received", "chat_scheduled", "chat")  # their engage
 # `thank_you`/`maintain`.
 _OUTBOUND_KINDS = ("outreach", "follow_up", "reping")
 _MANUAL_OVERRIDE_KIND = "manual_override"  # pipeline.set_state's audit touch
+
+# Kinds that are the system writing about itself, not an interaction anybody
+# had. IMPORTED from `cadence` rather than re-spelled, so the one concept has
+# one definition across the domain package — the cadence module carries the
+# full argument for the set in its C2 divergence note and in the constant's own
+# comment, and a second copy here is one edit away from disagreeing with it.
+#
+# WHY MOMENTUM NEEDED IT (2026-09-01). `_score_momentum` counted every touch
+# with a parseable `ts`, so `manual_override` (an audit row `pipeline.set_state`
+# writes when a state is corrected by hand) and `bulk_received` (an inbound
+# blast `capture.inbound` judged from message headers) both read as interaction
+# volume. Measured on the founder's live account: 142 of his touch rows are
+# clock-silent kinds — 135 manual_override, 7 bulk_received — and ALL 142 sit
+# inside the 45-day momentum base window. 117 of the overrides are two
+# bulk-park sessions (102 clicks on Aug 10, 15 more on Aug 25), so the axis was
+# reading his own screen-clearing as firm activity and then, as that spike aged
+# out of the 14-day recent window, reporting "activity cooling" about it in
+# `_firm_reason`. Cadence has excluded these from every idle clock since
+# 2026-07-30 for exactly this reason; momentum is the same question ("is
+# anything actually happening with these people?") asked over a window instead
+# of a gap, and it must not answer it from bookkeeping.
+#
+# DEPTH DELIBERATELY STILL READS `manual_override` (see `_depth_level`): there
+# it is not evidence of an interaction, it is an explicit SET of the warmth
+# level, which is a different use of the same row and stays.
+#
+# (The import itself is at the top of the module with the rest; the argument
+# lives here, beside the other touch-kind sets it has to be read against.)
 
 # Depth level implied by each `pipeline.WARMTH` value, for reading a
 # manual_override audit touch's "warmth=<value>" clause back into a level.
@@ -387,7 +421,36 @@ def _score_responsiveness(
 ) -> tuple[float, dict[str, Any]]:
     """Reply ratio (how often they answer) blended with median reply latency
     (how fast). Latency is measured per reply as the gap to the immediately
-    preceding outbound touch. No outbound at all -> 0 (no signal yet).
+    preceding outbound touch.
+
+    NO OUTBOUND AT ALL -> THE RATIO IS UNDEFINED, AND SAYS SO. This docstring
+    used to read "No outbound at all -> 0 (no signal yet)", which was true only
+    for a contact with no touches whatsoever — the early return below requires
+    BOTH sides empty. With zero sends and one or more replies (the ordinary
+    shape for anyone the mailbox scan discovered from an inbound thread) the
+    code did something else entirely: `min(1.0, replies / max(1, sends))`
+    substituted a denominator of 1 for the real denominator of 0 and produced
+    `reply_ratio = 1.0` — "they answer every time you write" asserted about
+    somebody the student has never written to. Measured on the founder's live
+    account 2026-09-01: 12 of his 226 contacts, every one of them at ratio 1.0,
+    including an advocate whose composite (76.9) sits over the "hot" band line
+    at 75.
+
+    So the axis now refuses the ratio rather than inventing one: `reply_ratio`
+    is None when there is nothing to divide by, matching the way
+    `median_latency_days` already reports "not measured" and the way
+    `_score_timeline` / `resolve_firm_sponsors` refuse a region-scoped answer
+    they do not have.
+
+    THE SCORE ITSELF IS UNCHANGED at 100 * `resp_ratio_weight`, and that is
+    deliberate rather than lazy. It is what the old arithmetic already
+    produced for this case (a full ratio term, a zero latency term, since a
+    latency needs a preceding outbound), it is pinned by
+    `test_contact_golden_values`, and there is no measurement anywhere in this
+    product saying a different number would be better. Moving it would be
+    swapping one asserted constant for another while claiming a discovery.
+    What was wrong was the CLAIM in the metadata, not the number, so only the
+    claim moved.
 
     "They answered" is `_MEANINGFUL_KINDS`, the same set `_score_recency`
     decays from and a superset of the `_REPLY_KINDS` `_compute_depth`
@@ -408,16 +471,32 @@ def _score_responsiveness(
     # 99% of a network and KeyError on the newest person in it. Nothing reads
     # it today; a payload this engine serializes into a snapshot should not
     # have an optional field waiting for the first reader to find out.
+    #
+    # SEEDED None, NOT 0.0. A reply ratio is replies-per-send, and with no
+    # sends there is nothing to divide by — 0.0 asserts "they never answer you"
+    # about somebody you have never written to, which is the same manufactured
+    # claim as the 1.0 the zero-send branch below used to produce, pointed the
+    # other way. None is the value `median_latency_days` beside it already uses
+    # for "not measured", so the two unmeasurable fields on this axis now read
+    # alike.
     meta: dict[str, Any] = {
         "sends": len(sends),
         "replies": len(replies),
         "median_latency_days": None,
-        "reply_ratio": 0.0,
+        "reply_ratio": None,
     }
-    if not sends and not replies:
-        return 0.0, meta
+    if not sends:
+        # NOTHING WAS EVER SENT, so neither half of this axis is measurable:
+        # no ratio (no denominator) and no latency (a latency is the gap from a
+        # send to the reply that followed it, and there is no send to measure
+        # from). See the docstring for the 12 live contacts this covers and for
+        # why the returned number is left exactly where the old arithmetic put
+        # it rather than re-picked.
+        if not replies:
+            return 0.0, meta
+        return _clamp(100.0 * params["resp_ratio_weight"]), meta
 
-    ratio = min(1.0, len(replies) / max(1, len(sends)))
+    ratio = min(1.0, len(replies) / len(sends))
 
     # Median latency: for each reply, the gap to the last outbound before it.
     ordered = sorted(touches, key=lambda t: (_as_dt(t.get("ts")) or datetime.min.replace(tzinfo=timezone.utc)))
@@ -455,11 +534,35 @@ def _score_recency(
 ) -> tuple[float, dict[str, Any]]:
     """Exponential decay on the last MEANINGFUL interaction (their
     engagement: a reply or a chat). Half-life = recency_half_life_days. This
-    is the ONLY axis in the whole engine that decays."""
+    is the ONLY axis in the whole engine that decays.
+
+    A TOUCH DATED AFTER `as_of` IS NOT EVIDENCE OF PAST ENGAGEMENT and is
+    skipped (2026-09-01). `max(0.0, ...)` used to clamp a future touch to zero
+    days elapsed, which is not a neutral clamp: zero days is the MAXIMUM of
+    this axis, so a chat sitting on next week's calendar scored recency 100 and
+    `_contact_reason` rendered it "last today" — the engine telling a student
+    that a conversation which has not happened yet happened this morning.
+    `crm/_contact_live.html` prints the same figure as "0d since a meaningful
+    reply/chat".
+
+    `cadence` already treats this shape as reachable rather than hypothetical
+    and guards it in two branches (its C4 divergence: a `chat` touch dated
+    ahead of `as_of` arrives from a calendar-sourced capture, from a chat
+    hand-logged with tomorrow's date, and from any caller whose clock runs
+    behind the touch's). `_score_momentum` in this module already refuses them
+    too, via its `0 <= age` window test. Recency was the one place left where a
+    future touch produced a confident answer about the past. None are present
+    on the founder's account today (measured 2026-09-01: 0 of 459 touches),
+    which is why this is a guard rather than a bug report.
+
+    Skipping, not clamping, and the difference is the point: with the future
+    touch out of the way the axis decays from the latest REAL engagement, and a
+    contact whose only meaningful touch is in the future falls to the same
+    "nothing has happened yet" answer as a contact with none at all."""
     meaningful = [
         _as_dt(t.get("ts")) for t in touches if t.get("kind") in _MEANINGFUL_KINDS
     ]
-    meaningful = [dt for dt in meaningful if dt is not None]
+    meaningful = [dt for dt in meaningful if dt is not None and dt <= as_of]
     if not meaningful:
         return 0.0, {"days_since_meaningful": None}
     last = max(meaningful)
@@ -729,6 +832,13 @@ def _score_momentum(
     base_days = params["momentum_base_days"] or 1
     recent = base = 0
     for t in touches:
+        # Bookkeeping rows are not interaction volume — see
+        # `_CLOCK_SILENT_KINDS` above for the measurement (142 of the founder's
+        # touch rows, all of them inside this base window, 117 of them his own
+        # bulk-park clicks) and for why the set is imported from `cadence`
+        # rather than restated.
+        if t.get("kind") in _CLOCK_SILENT_KINDS:
+            continue
         dt = _as_dt(t.get("ts"))
         if dt is None:
             continue
@@ -811,7 +921,21 @@ def _score_timeline(
         "next_event": None, "days_until": None, "network_readiness": None,
     }
     if nxt is None:
-        # No confirmed date -> not measurably behind; neutral, and say so.
+        # NO CONFIRMED DATE. Nothing was measured, so the meta says nothing:
+        # `next_event`, `days_until` and `network_readiness` all stay None, and
+        # `_firm_reason` emits no timeline clause at all rather than inventing
+        # one.
+        #
+        # 60.0 IS ASSERTED, NOT DERIVED, and labelling it is the honest half of
+        # keeping it. It is a "not measurably behind" placeholder that still
+        # contributes 15 points to the firm composite (weight 0.25) on no
+        # evidence, and it is not the 50.0 midpoint a reader would guess from
+        # the word "neutral". It was left at 60.0 deliberately on 2026-09-01:
+        # there is no measurement in this product that makes 50 — or any other
+        # number — a better answer than 60, and moving every firm's composite
+        # to make an arbitrary constant look more principled would be a change
+        # with a rationale it has not earned. Flagged here so the next reader
+        # inherits the fact rather than the impression that it was computed.
         return 60.0, meta
 
     days_until = (_as_dt(nxt.get("date")).date() - today).days

@@ -34,7 +34,12 @@ actually verify it:
         Funneled through the SAME `capture.gmail.apply_findings` apply
         layer every other finding in this codebase goes through, so a
         confirmed residue reply ratchets `thread_state`/`warmth` exactly
-        like a deterministic one would.
+        like a deterministic one would. It is also put through the SAME
+        deterministic bulk test (`capture.inbound.classify_inbound`) that
+        every message on the deterministic path faces, and a bulk verdict
+        overrides the model: see `_finding_from_genuine_reply`. The model's
+        three answers have no option for "a blast", so it was never the
+        right thing to be holding that line alone.
   - "auto_reply"     -- an out-of-office / vacation responder / other
         automated bounce-adjacent reply. Never logged as a touch — the
         whole point of catching it is to NOT warm a contact off a robot.
@@ -69,6 +74,7 @@ from email.utils import parseaddr
 
 from django.conf import settings
 
+from capture import inbound
 from capture.gmail import apply_findings
 
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -220,7 +226,8 @@ def _classify_one(message: dict, *, model: str, timeout: float, retries: int) ->
 def _finding_from_genuine_reply(own_email: str, message: dict, thread_id: str) -> dict | None:
     """Build the same finding-dict shape `_classify_message` would have,
     for a residue message the model confidently grounded as a genuine
-    reply. Mirrors `gmail_live._classify_message`'s inbound-reply branch."""
+    reply. Mirrors `gmail_live._classify_message`'s inbound branches — both
+    of them, the bulk one included."""
     headers = message.get("payload", {}).get("headers", [])
     from_header = ""
     for header in headers:
@@ -231,6 +238,45 @@ def _finding_from_genuine_reply(own_email: str, message: dict, thread_id: str) -
     from_addr = (from_addr or "").strip()
     if not from_addr or from_addr.lower() == own_email.lower():
         return None
+
+    # THE DETERMINISTIC BULK TEST STILL RUNS HERE, and it runs BEFORE the
+    # model's answer is allowed to mean anything. `capture.inbound.
+    # classify_inbound` reads RFC headers — List-Unsubscribe, Precedence,
+    # Auto-Submitted, the recipient shape — and every inbound message on the
+    # deterministic path is put through it. This path skipped it entirely,
+    # which made an LLM the only thing standing between a mass send and
+    # warmth `replied`: exactly the arrangement the Caroline Baenen failure
+    # (2026-08-13, a "Sophomore Series" blast logged as `reply_received`)
+    # produced the header test to end. A model that has been told to answer
+    # "genuine_reply" or "auto_reply" has no third option for "a blast", so
+    # asking it to hold that line was asking the wrong question.
+    #
+    # A bulk verdict does not throw the message away. It becomes the same
+    # `bulk_received` finding the deterministic path builds — recorded, with
+    # its reasons, warmth and thread_state unmoved — so a deadline or an
+    # event inside it still reaches `capture.appmail` and `capture.mailfacts`.
+    verdict = inbound.classify_inbound(own_email, message)
+    if verdict.is_bulk:
+        return {
+            "name": from_name or from_addr.split("@")[0],
+            "email": from_addr.lower(),
+            "found": True,
+            "bounced": False,
+            "outreach_sent": False,
+            "replied": False,
+            "chat_status": "none",
+            "chat_scheduled_at": None,
+            "bulk": True,
+            "bulk_reasons": verdict.reason_text,
+            "auto_reply": verdict.auto_submitted,
+            "snippet": (message.get("snippet") or "")[:600],
+            "evidence": (
+                "Bulk/automated email (residue): "
+                f"{message.get('snippet', '')[:280]}"
+            ),
+            "thread_id": thread_id,
+        }
+
     return {
         "name": from_name or from_addr.split("@")[0],
         "email": from_addr.lower(),
@@ -240,6 +286,9 @@ def _finding_from_genuine_reply(own_email: str, message: dict, thread_id: str) -
         "replied": True,
         "chat_status": "none",
         "chat_scheduled_at": None,
+        "bulk": False,
+        "threaded_reply": verdict.threaded_reply,
+        "addressed_to_user": verdict.addressed_to_user,
         "evidence": f"AI-classified reply (residue): {message.get('snippet', '')[:300]}",
         "thread_id": thread_id,
     }

@@ -60,6 +60,11 @@ def finding(**over):
     return base
 
 
+# A stated time is what a chat claim is corroborated by — see
+# `capture.providers.corroborated_chat_status`.
+CHAT_AT = "2026-09-10T12:00:00+00:00"
+
+
 def kinds(user, contact):
     return sorted(
         Touch.objects.for_user(user).filter(contact=contact).values_list("kind", flat=True)
@@ -218,10 +223,14 @@ def test_same_finding_twice_is_a_no_op(student, contact):
 
 def test_thread_climbs_the_ladder(student, contact):
     """reply -> scheduled -> chat over three days, all on one thread: each
-    genuinely new stage logs."""
+    genuinely new stage logs.
+
+    Every chat finding here carries a `chat_scheduled_at`, because that is
+    what the ladder now requires of one — see
+    `test_a_chat_claim_with_no_time_is_only_a_reply`."""
     apply_findings(student, [finding(replied=True)])
-    apply_findings(student, [finding(chat_status="scheduled")])
-    apply_findings(student, [finding(chat_status="completed")])
+    apply_findings(student, [finding(chat_status="scheduled", chat_scheduled_at=CHAT_AT)])
+    apply_findings(student, [finding(chat_status="completed", chat_scheduled_at=CHAT_AT)])
     assert kinds(student, contact) == ["chat", "chat_scheduled", "reply_received"]
 
 
@@ -230,15 +239,158 @@ def test_ladder_refuses_to_regress(student, contact):
     rank-guard thread_state, so a 'scheduled' finding resurfacing after the
     chat already happened would walk a chat_done contact backward. Refuse it
     at this layer."""
-    apply_findings(student, [finding(chat_status="completed")])
+    apply_findings(student, [finding(chat_status="completed", chat_scheduled_at=CHAT_AT)])
     contact.refresh_from_db()
     assert contact.thread_state == "chat_done"
 
-    result = apply_findings(student, [finding(chat_status="scheduled")])
+    result = apply_findings(student, [finding(chat_status="scheduled", chat_scheduled_at=CHAT_AT)])
     contact.refresh_from_db()
     assert result.touches_logged == 0
     assert result.skipped_already_logged == 1
     assert contact.thread_state == "chat_done", "a stale 'scheduled' must not regress a done chat"
+
+
+# --------------------------------------------------------------------------- #
+# A chat claim has to bring a time
+# --------------------------------------------------------------------------- #
+
+class TestChatClaimsNeedATime:
+    """`chat_status` is produced by a classifier OUTSIDE this repo for every
+    finding the live path did not build (`gmail_live` says "scheduled" only
+    when it parsed an .ics DTSTART, and never says "completed" at all). Both
+    live failures on these rungs were chat claims with nothing behind them:
+    Ellen Chung 2026-08-12 ("completed" off "filled out the form!") and Youqi
+    Chen 2026-08-31 ("scheduled" off an offer nobody had accepted).
+
+    `capture_discover` was tightened for "scheduled" on 2026-08-31; this
+    module was not tightened at all, and it is the door the daily agent-run
+    sync comes through. These pin both rungs, on both doors' shared rule.
+    """
+
+    def test_a_chat_claim_with_no_time_is_only_a_reply(self, student, contact):
+        """The Youqi Chen shape, on the daily sync's door."""
+        result = apply_findings(student, [finding(replied=True, chat_status="scheduled")])
+        contact.refresh_from_db()
+        assert result.touches_logged == 1
+        assert kinds(student, contact) == ["reply_received"]
+        assert contact.warmth == "replied"
+        assert contact.thread_state == "replied", (
+            "an offer nobody accepted must not park her at chat_scheduled"
+        )
+
+    def test_a_completed_chat_with_no_time_is_only_a_reply(self, student, contact):
+        """The Ellen Chung shape, and the more expensive of the two: `chat`
+        sets warmth `chatted`, which `capture_worklist.RECHECK_WARMTH` drops
+        from every later re-check, so no automated run can ever revisit it."""
+        apply_findings(student, [finding(replied=True, chat_status="completed")])
+        contact.refresh_from_db()
+        assert kinds(student, contact) == ["reply_received"]
+        assert contact.warmth == "replied"
+        assert contact.thread_state == "replied"
+
+    def test_an_uncorroborated_claim_on_the_users_own_send_logs_no_ladder_touch(
+        self, student, contact
+    ):
+        """Outbound-only, so the floor is what the message proves: the send.
+        The outreach branch has already recorded that; the ladder adds
+        nothing, and must not gift warmth `replied` to somebody who has not
+        typed a word."""
+        result = apply_findings(
+            student, [finding(outreach_sent=True, chat_status="scheduled")]
+        )
+        contact.refresh_from_db()
+        assert result.outreach_logged == 1
+        assert result.touches_logged == 0
+        assert kinds(student, contact) == ["outreach"]
+        assert contact.warmth == "cold"
+
+    def test_a_stated_time_is_what_lets_the_claim_through(self, student, contact):
+        """The corroborated case is untouched — this is the shape every
+        `gmail_live` finding carries, and it still books the chat."""
+        apply_findings(
+            student, [finding(replied=True, chat_status="scheduled", chat_scheduled_at=CHAT_AT)]
+        )
+        contact.refresh_from_db()
+        assert kinds(student, contact) == ["chat_scheduled"]
+        assert contact.thread_state == "chat_scheduled"
+
+    def test_no_pattern_evidence_is_banked_off_an_uncorroborated_chat(
+        self, student, contact
+    ):
+        """`email_pattern_recorded` is a one-shot per-contact flag, so a
+        "delivered" banked on a guess also spends the contact's one chance to
+        bank the real evidence later."""
+        result = apply_findings(student, [finding(chat_status="completed")])
+        contact.refresh_from_db()
+        assert result.pattern_delivered == 0
+        assert contact.email_pattern_recorded is False
+
+
+def test_the_run_reports_every_touch_it_actually_wrote(student, contact):
+    """`touches_logged` counts LADDER stages only, which is right for "how
+    much progress did this run find" and wrong for "what did this run
+    write" — and the Settings page renders it as the headline.
+
+    The founder's first-connect backfill (2026-08-30) stored `525 findings,
+    0 touches_logged`, so Settings said the scan wrote nothing. The same run
+    had inserted 12 `outreach` touches, 1 `follow_up` and 1 `bulk_received`,
+    and cleared 4 dead addresses."""
+    result = apply_findings(student, [finding(outreach_sent=True)])
+    assert result.touches_logged == 0
+    assert result.touches_written == 1
+    assert result.as_stats()["touches_written"] == 1
+    assert Touch.objects.for_user(student).filter(contact=contact).count() == 1
+
+
+def test_an_earlier_reply_on_another_thread_cannot_regress_a_booked_chat(
+    student, contact
+):
+    """Lily Liu, live 2026-08-25 (contact 765).
+
+    Google opens a NEW Gmail thread for a calendar reply, so a conversation
+    does not stay on one thread — `_upsert_scheduled_chat` was rewritten
+    around exactly that and keyed the CALENDAR on the .ics UID. The touch
+    ladder stayed keyed on the thread, so her two `reply_received` findings
+    (dated 08-24 15:40 and 08-25 12:45, on two other threads) each ranked 0 on
+    their own thread, were logged after the `chat_scheduled` touch dated 08-25
+    15:10, and set her `thread_state` back to `replied`.
+
+    The question is about TIME, not insertion order: something further up the
+    ladder has already happened at a later moment, so this finding cannot be
+    the state of the relationship.
+    """
+    later = timezone.now() - timedelta(hours=1)
+    earlier = later - timedelta(days=1)
+
+    apply_findings(student, [finding(
+        thread_id="invite", chat_status="scheduled",
+        chat_scheduled_at=CHAT_AT, occurred_at=later.isoformat(),
+    )])
+    contact.refresh_from_db()
+    assert contact.thread_state == "chat_scheduled"
+
+    result = apply_findings(student, [finding(
+        thread_id="reply-thread", replied=True, occurred_at=earlier.isoformat(),
+    )])
+    contact.refresh_from_db()
+    assert result.touches_logged == 0
+    assert result.skipped_already_logged == 1
+    assert contact.thread_state == "chat_scheduled"
+
+
+def test_a_second_reply_on_a_second_thread_still_logs(student, contact):
+    """The guard above is deliberately strict-greater, not at-or-above: a
+    same-rank touch moves nothing backward, and a second genuine reply is a
+    second real event whose whole job is to move `last_touch`."""
+    first = timezone.now() - timedelta(days=2)
+    second = timezone.now() - timedelta(days=1)
+
+    apply_findings(student, [finding(
+        thread_id="t-a", replied=True, occurred_at=first.isoformat())])
+    result = apply_findings(student, [finding(
+        thread_id="t-b", replied=True, occurred_at=second.isoformat())])
+    assert result.touches_logged == 1
+    assert kinds(student, contact) == ["reply_received", "reply_received"]
 
 
 def test_separate_threads_each_log(student, contact):

@@ -963,10 +963,12 @@ def test_set_contact_status_moves_one_contact_and_leaves_an_audit_touch():
     # the assistant marker rides on it exactly as it does for log_touch. It
     # sits INSIDE set_state's own "manual override: ..." prefix (that string
     # is written by the domain package, not here), and `_display_note` strips
-    # both, so the student reads only their own words.
+    # both, so the student reads only their own words and the before-state.
     touch = Touch.objects.for_user(u).get(contact=c)
     assert "[assistant:msg_status1]" in touch.note
-    assert _display_note(touch.note) == "Three notes, nothing back"
+    assert _display_note(touch.note) == (
+        "Three notes, nothing back (was warmth=cold, thread=no_reply)"
+    )
 
 
 @pytest.mark.django_db(transaction=True)
@@ -1296,3 +1298,215 @@ def test_confirmed_is_ignored_on_an_ordinary_field(user):
     assert not is_error
     user.refresh_from_db()
     assert user.name == "Sam Chan"
+
+
+# ---------------------------------------------------------------------------
+# Honesty about a posting's own liveness.
+#
+# `Opportunity.status` is a bare CharField defaulting to `""` — a posting the
+# reverify pass has never re-checked carries neither "open" nor "closed", and
+# `directory.deadlines.is_posting_closed` exists precisely so no surface reads
+# that third state as a confirmed close. These pin that the advisor's tools
+# use it rather than an is-open test of their own.
+# ---------------------------------------------------------------------------
+def test_a_pipeline_role_the_scraper_never_rechecked_is_not_reported_as_closed(user, firm):
+    """Regression: `still_open: o.status == "open"` reported every unverified
+    posting as not open, which the model can only read as "that role is
+    closed". Nothing established that — the scraper has simply never looked
+    at it again since it was ingested."""
+    never_rechecked = Opportunity.objects.create(
+        firm=firm, title="2028 Summer Analyst", bucket="internship", region="hk",
+        status="", deadline=timezone.localdate() + timedelta(days=20),
+        url="https://north.example/jobs/unverified",
+    )
+    UserOpportunity(user=user, opportunity=never_rechecked).save()
+
+    result, is_error = _call(user, "get_my_pipeline")
+
+    assert not is_error
+    row = result["by_status"]["saved"][0]
+    assert row["posting_closed"] is False
+
+
+def test_a_pipeline_role_the_scraper_confirmed_closed_is_reported_as_closed(user, firm):
+    dead = Opportunity.objects.create(
+        firm=firm, title="2028 Summer Analyst", bucket="internship", region="hk",
+        status="closed", deadline=timezone.localdate() + timedelta(days=20),
+        url="https://north.example/jobs/dead",
+    )
+    UserOpportunity(user=user, opportunity=dead).save()
+
+    result, is_error = _call(user, "get_my_pipeline")
+
+    assert not is_error
+    assert result["by_status"]["saved"][0]["posting_closed"] is True
+
+
+def test_saving_a_closed_posting_says_so_rather_than_offering_its_deadline(user, firm):
+    """Ids reach `track_opportunity` from `get_situation` too, and a
+    `role_closed` event carries the id of a posting the scraper watched the
+    firm take down. The save still happens — it is the student's own
+    application record — but the result must not read as a live window."""
+    dead = Opportunity.objects.create(
+        firm=firm, title="2028 Summer Analyst", bucket="internship", region="hk",
+        status="closed", deadline=timezone.localdate() + timedelta(days=20),
+        url="https://north.example/jobs/dead",
+    )
+
+    result, is_error = _call(
+        user, "track_opportunity", {"opportunity_id": dead.id, "status": "saved"}
+    )
+
+    assert not is_error
+    assert result["saved"] is True
+    assert result["posting_closed"] is True
+    assert "closed" in result["instruction"]
+    assert UserOpportunity.objects.for_user(user).filter(opportunity=dead).exists()
+
+
+def test_saving_a_live_posting_carries_no_closed_flag_at_all(user, opportunity):
+    """The flag is only ever present on a confirmed close, so its absence is
+    never something the model has to interpret."""
+    result, is_error = _call(
+        user, "track_opportunity", {"opportunity_id": opportunity.id, "status": "saved"}
+    )
+
+    assert not is_error
+    assert "posting_closed" not in result
+    assert "instruction" not in result
+
+
+# ---------------------------------------------------------------------------
+# The bulk override: what makes it recoverable.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db(transaction=True)
+def test_a_bulk_status_change_records_what_each_contact_was_before():
+    """`set_state` writes only the state AFTER. This is the one write the
+    model can make against many relationships at once off a single reading
+    of a chat, and "the student can set any of these back" is only a real
+    instruction if their own history says what each one was."""
+    from crm.views import _display_note
+
+    u = User.objects.create_user(email="bulkundo@example.com", password="x")
+    warm = Contact(user=u, name="Warm Person", warmth="chatted", thread_state="replied")
+    warm.save()
+    cold = Contact(user=u, name="Cold Person")
+    cold.save()
+
+    payload, is_error = tools.execute(
+        u, "set_contact_status",
+        {"contact_ids": [warm.id, cold.id], "thread_state": "parked"},
+        "msg_bulk1",
+    )
+    result = json.loads(payload)
+
+    assert not is_error
+    assert result["changed_count"] == 2
+
+    warm_note = _display_note(Touch.objects.for_user(u).get(contact=warm).note)
+    cold_note = _display_note(Touch.objects.for_user(u).get(contact=cold).note)
+    # Per contact, not one note for the batch: the whole point is that a
+    # student reading ONE contact's page learns what THAT contact was.
+    assert warm_note == "(was warmth=chatted, thread=replied)"
+    assert cold_note == "(was warmth=cold, thread=no_reply)"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_students_own_words_still_lead_the_audit_note():
+    """The before-state is a suffix, never a replacement — the reason the
+    student gave is what they will actually be reading."""
+    from crm.views import _display_note
+
+    u = User.objects.create_user(email="bulkwords@example.com", password="x")
+    c = Contact(user=u, name="Never Replies")
+    c.save()
+
+    tools.execute(
+        u, "set_contact_status",
+        {"contact_ids": [c.id], "warmth": "cold", "note": "Three notes, nothing back"},
+        "msg_bulk2",
+    )
+
+    note = _display_note(Touch.objects.for_user(u).get(contact=c).note)
+    assert note.startswith("Three notes, nothing back")
+    assert "(was warmth=cold, thread=no_reply)" in note
+
+
+# ---------------------------------------------------------------------------
+# log_touch: idempotent within one model response, the same guard
+# `assistant.views.log_draft_touch` already applies to one click.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db(transaction=True)
+def test_the_same_touch_logged_twice_in_one_response_is_written_once():
+    u = User.objects.create_user(email="dupe@example.com", password="x")
+    c = Contact(user=u, name="Reply Person")
+    c.save()
+
+    first = json.loads(tools.execute(
+        u, "log_touch",
+        {"contact_id": c.id, "kind": "reply_received", "channel": "email"},
+        "msg_same",
+    )[0])
+    second_payload, is_error = tools.execute(
+        u, "log_touch",
+        {"contact_id": c.id, "kind": "reply_received", "channel": "email"},
+        "msg_same",
+    )
+    second = json.loads(second_payload)
+
+    assert first["logged"] is True
+    # Not an error: the model has nothing to correct, it just must not say
+    # it logged the thing twice.
+    assert not is_error
+    assert second["logged"] is False
+    assert second["already_logged"] is True
+    assert Touch.objects.for_user(u).filter(contact=c).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_different_interactions_in_one_response_are_still_two_touches():
+    """"I emailed her Monday and she replied Wednesday" is two real events in
+    one reply. The dedupe key carries kind and channel so it can never
+    swallow the second one."""
+    u = User.objects.create_user(email="twokinds@example.com", password="x")
+    c = Contact(user=u, name="Reply Person")
+    c.save()
+
+    tools.execute(u, "log_touch",
+                  {"contact_id": c.id, "kind": "outreach", "channel": "email"}, "msg_two")
+    tools.execute(u, "log_touch",
+                  {"contact_id": c.id, "kind": "reply_received", "channel": "email"}, "msg_two")
+
+    assert Touch.objects.for_user(u).filter(contact=c).count() == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_same_touch_in_a_later_response_is_a_new_interaction():
+    """A different message id is a different turn, which is a genuinely new
+    interaction — the guard must not reach across turns and silently refuse
+    to log a second coffee chat with the same person."""
+    u = User.objects.create_user(email="laterturn@example.com", password="x")
+    c = Contact(user=u, name="Reply Person")
+    c.save()
+
+    tools.execute(u, "log_touch",
+                  {"contact_id": c.id, "kind": "outreach", "channel": "email"}, "msg_one")
+    tools.execute(u, "log_touch",
+                  {"contact_id": c.id, "kind": "outreach", "channel": "email"}, "msg_two")
+
+    assert Touch.objects.for_user(u).filter(contact=c).count() == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_blank_message_id_never_deduplicates_anything():
+    """`[assistant:]` is not an identity. A caller with no message id (the
+    `execute` default) must write every touch it is asked for rather than
+    matching them all against each other."""
+    u = User.objects.create_user(email="nomsgid@example.com", password="x")
+    c = Contact(user=u, name="Reply Person")
+    c.save()
+
+    tools.execute(u, "log_touch", {"contact_id": c.id, "kind": "outreach", "channel": "email"}, "")
+    tools.execute(u, "log_touch", {"contact_id": c.id, "kind": "outreach", "channel": "email"}, "")
+
+    assert Touch.objects.for_user(u).filter(contact=c).count() == 2

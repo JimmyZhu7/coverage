@@ -96,6 +96,7 @@ from crm.today import TUNABLE_CADENCE_PARAMS, _build_actions
 from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS
 from crm.views import _display_note
 from directory.classify import TARGET_BUCKETS
+from directory.deadlines import is_posting_closed
 from directory.models import Firm, FirmDate, Opportunity
 from directory.recommend import cycle_choices
 from directory.views import _apply_region_filter, _STAGE_LABELS
@@ -1081,7 +1082,20 @@ def _get_my_pipeline(user, _args) -> dict:
                 "firm": _s(o.firm.name, 120),
                 "deadline": _iso(o.deadline),
                 "days_left": (o.deadline - today).days if o.deadline else None,
-                "still_open": o.status == "open",
+                # `is_posting_closed`, not `status == "open"`. The two are
+                # NOT complements: `Opportunity.status` is a bare CharField
+                # defaulting to `""` (directory/models.py), so a posting the
+                # reverify pass has never re-checked carries neither value —
+                # and an is-open test reported every one of those as not
+                # open, which the advisor can only read as "that role is
+                # closed". Nothing established that. `directory.deadlines.
+                # is_posting_closed` is the app's own predicate for this and
+                # its docstring argues the same point ("an is-open test would
+                # drop every one of those from the lists a student reads,
+                # which is a worse bug than the one it would fix"); it says
+                # True only where the scraper actually watched the firm pull
+                # the posting.
+                "posting_closed": is_posting_closed(o),
             }
         )
     return {"today": today.isoformat(), "total": len(rows), "by_status": by_status}
@@ -1289,6 +1303,40 @@ def _log_touch(user, args, *, message_id: str) -> dict:
     note = _s(args.get("note"), MAX_STR)
     marked = f"[assistant:{message_id}] " + note if note else f"[assistant:{message_id}]"
 
+    # IDEMPOTENT WITHIN ONE MODEL RESPONSE, exactly as `assistant.views.
+    # log_draft_touch` is idempotent within one click ("a double-click and a
+    # retried request are both normal"). The two paths write the same marker
+    # and this module's docstring promises they are indistinguishable in a
+    # student's history, so they get the same guard. `message_id` is the
+    # API response id, so this only ever collapses a tool_use block the
+    # model emitted TWICE in one response — a later turn is a new id and a
+    # genuinely new interaction, and kind/channel are in the key so "I
+    # emailed her and she replied", two calls in one round, is still two
+    # touches. Skipped entirely when `message_id` is blank: `[assistant:]`
+    # is not an identity, and matching on it would swallow real touches.
+    if message_id:
+        prior = (
+            Touch.objects.for_user(user)
+            .filter(contact_id=contact.id, kind=kind, channel=channel,
+                    note__contains=f"[assistant:{message_id}]")
+            .exists()
+        )
+        if prior:
+            return {
+                "logged": False,
+                "already_logged": True,
+                "contact_id": contact.id,
+                "contact": _s(contact.name, 120),
+                "kind": _KIND_LABELS.get(kind, kind),
+                "channel": _CHANNEL_LABELS.get(channel, channel),
+                "warmth": contact.warmth,
+                "thread_state": contact.thread_state,
+                "instruction": (
+                    "You already logged this exact interaction in this same "
+                    "reply, so nothing was written twice. Mention it once."
+                ),
+            }
+
     before = (contact.warmth, contact.thread_state)
     services.log_touch(user.id, contact.id, kind, channel, marked, source="assistant")
     contact.refresh_from_db()
@@ -1372,7 +1420,7 @@ def _track_opportunity(user, args) -> dict:
     existing.applied_status = ""
     existing.dismissed = False
     existing.save(update_fields=["applied_status", "dismissed"])
-    return {
+    result = {
         "saved": True,
         "opportunity_id": opp.id,
         "title": _s(opp.title, 160),
@@ -1380,6 +1428,25 @@ def _track_opportunity(user, args) -> dict:
         "deadline": _iso(opp.deadline),
         "undo": "The student can unsave this from the Opportunities page.",
     }
+    # THE SAVE STILL HAPPENS, THE SENTENCE ABOUT IT CHANGES. Ids reach this
+    # tool from `get_my_pipeline` and `get_situation` as well as from
+    # `search_opportunities`, and only the last of those is filtered to open
+    # postings — a `role_closed` situation event carries the id of a posting
+    # the scraper watched the firm take down. Tracking a dead role is the
+    # student's call to make (it is still their application record), but
+    # handing the model a bare `deadline` on one is how it says "saved, that
+    # closes on the 30th" about a window that no longer exists. This is the
+    # same pairing `assistant/situation.py` had to make at its own merge:
+    # "a moved deadline is a promise about a window still open; on a dead
+    # posting it is a stale row the scraper has already overtaken."
+    if is_posting_closed(opp):
+        result["posting_closed"] = True
+        result["instruction"] = (
+            "Coverage's scraper has seen this posting taken down. It is "
+            "saved, but say plainly that it is closed rather than talking "
+            "about its deadline as something still ahead of them."
+        )
+    return result
 
 
 def _remember(user, args) -> dict:
@@ -1567,6 +1634,31 @@ def _add_contact(user, args) -> dict:
     }
 
 
+def _override_note(message_id: str, note: str, before: tuple[str, str]) -> str:
+    """The audit note one bulk override leaves on ONE contact.
+
+    Same permanent `[assistant:<id>]` marker as `_log_touch`, so the student
+    can tell which assistant message moved this contact, and
+    `crm.views._display_note` strips it so the marker is never something
+    they have to read.
+
+    THE PARENTHETICAL IS THE UNDO. `coverage_domain.pipeline.set_state`
+    already writes "manual override: warmth=cold, thread_state=parked" — the
+    state AFTER — and nothing anywhere recorded the state BEFORE. This is
+    the one write in this file the model can make against 25 relationships
+    at once off a single reading of a chat, and the result's own `undo` line
+    ("the student can set any of these back on the contact's own page") was
+    only true for a student who happened to remember what all 25 of them
+    were. Now the answer is on each contact's own history, which is the
+    page that sentence sends them to.
+    """
+    parts = [f"[assistant:{message_id}]"]
+    if note:
+        parts.append(note)
+    parts.append(f"(was warmth={before[0] or 'unset'}, thread={before[1] or 'unset'})")
+    return " ".join(parts)
+
+
 def _set_contact_status(user, args, *, message_id: str = "") -> dict:
     """Move warmth and/or thread_state on up to `MAX_BULK_CONTACTS` contacts,
     one `services.set_contact_state` call each.
@@ -1582,6 +1674,10 @@ def _set_contact_status(user, args, *, message_id: str = "") -> dict:
     one that never existed — is collected into `not_found` and reported
     back, not silently dropped and not allowed to fail the other 24. The
     model needs that list to answer honestly instead of saying "done".
+
+    Each contact's audit touch carries the state it was in BEFORE this call
+    — see `_override_note`, which is what makes the `undo` line below a
+    real instruction rather than a hope.
     """
     raw_ids = args.get("contact_ids")
     if not isinstance(raw_ids, list) or not raw_ids:
@@ -1603,10 +1699,6 @@ def _set_contact_status(user, args, *, message_id: str = "") -> dict:
         raise ToolError(f"Unknown warmth {warmth!r}.")
 
     note = _s(args.get("note"), MAX_STR)
-    # Same permanent marker as `_log_touch`: the override's own audit touch
-    # says which assistant message moved this contact, and
-    # `crm.views._display_note` strips the marker so the student never reads it.
-    marked = f"[assistant:{message_id}] " + note if note else f"[assistant:{message_id}]"
 
     # Ordered, de-duplicated: "park 12, 12, 9" is one park each, and the
     # result reports the ids in the order the model asked for them.
@@ -1636,7 +1728,7 @@ def _set_contact_status(user, args, *, message_id: str = "") -> dict:
             contact.id,
             warmth=warmth or None,
             thread_state=thread_state or None,
-            note=marked,
+            note=_override_note(message_id, note, before),
         )
         contact.refresh_from_db()
         changed.append(
@@ -1655,7 +1747,10 @@ def _set_contact_status(user, args, *, message_id: str = "") -> dict:
         "changed_count": len(changed),
         "changed": changed,
         "not_found": not_found,
-        "undo": "The student can set any of these back on the contact's own page.",
+        "undo": (
+            "The student can set any of these back on the contact's own page, "
+            "where the history now records what each one was before this."
+        ),
     }
     if not_found:
         result["instruction"] = (

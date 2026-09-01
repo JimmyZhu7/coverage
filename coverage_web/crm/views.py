@@ -716,6 +716,23 @@ def app_event_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 # it was a reply TO. "Advocates" was the one plural noun in a list of
 # past-tense verbs -- a status the contact is IN, spelled differently
 # from the four statuses next to it -- singularized to match.
+# The one map from a stored warmth slug to the words a student reads. Derived
+# from `_WARMTH_SECTIONS` below rather than retyped, so the Network board's
+# section headings and every other surface cannot drift apart -- the same
+# reason `templates/core/home.html` was made to mirror this list instead of
+# inventing its own "Cold / In touch / Warm" vocabulary.
+#
+# `no_reply` and `not_contacted` are BOTH cold in the database; the split is
+# whether anything was ever sent. A caller holding only `Contact.warmth` (the
+# Cmd-K palette, the assistant's tool payloads) cannot tell those apart, so
+# "cold" maps to the sent-nothing wording and any surface that knows better
+# should keep using `_WARMTH_SECTIONS` directly.
+def _warmth_labels() -> dict[str, str]:
+    labels = {key: label for key, label in _WARMTH_SECTIONS}
+    labels["cold"] = labels["not_contacted"]
+    return labels
+
+
 _WARMTH_SECTIONS = [
     ("replied", "Emailed, Replied"),
     ("chatted", "Chatted"),

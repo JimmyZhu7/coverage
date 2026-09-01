@@ -534,14 +534,30 @@ def expected_value(action: dict) -> float:
         now = _NOW_DEADLINE
     elif action.get("action") == "thank_you":
         now = _NOW_THANK_YOU
-    elif action.get("opening"):
-        now = _OPENING_WEIGHT.get(action["opening"]["kind"], _NOW_NOTHING)
-    elif action.get("action") == "advance":
-        now = _NOW_ADVANCE
-    elif action.get("action") in ("first_outreach", "follow_up", "park", "confirm_chat"):
-        now = _NOW_COLD_DUE
     else:
-        now = _NOW_NOTHING
+        # The action's OWN claim on today, before anything at the firm is
+        # consulted.
+        if action.get("action") == "advance":
+            now = _NOW_ADVANCE
+        elif action.get("action") in ("first_outreach", "follow_up", "park",
+                                      "confirm_chat"):
+            now = _NOW_COLD_DUE
+        else:
+            now = _NOW_NOTHING
+        # An opening RAISES the claim; it can never lower it. This used to be
+        # an `elif` branch ahead of the action's own weight, which made the
+        # opening REPLACE it — so an `advance` card at a firm with a role
+        # posted this week scored `_OPENING_WEIGHT[new_role]` (1.6) while the
+        # identical card at a firm with nothing happening scored `_NOW_ADVANCE`
+        # (1.8). Finding a reason to write demoted the card below the one with
+        # no reason at all, which inverts the whole point of `firm_openings`:
+        # the module docstring's rule 3 is that a nudge WITH a trigger behind
+        # it outranks one without. `max` is the fix and states the rule
+        # directly, so a future weight cannot re-create the inversion by
+        # sitting a tenth below an action baseline.
+        opening = action.get("opening")
+        if opening:
+            now = max(now, _OPENING_WEIGHT.get(opening["kind"], _NOW_NOTHING))
 
     return round(rel * strength * now, 4)
 

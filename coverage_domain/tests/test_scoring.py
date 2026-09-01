@@ -598,3 +598,116 @@ def test_manual_override_warmth_does_not_produce_a_self_contradicting_line():
 def test_how_the_answer_was_logged_no_longer_changes_the_composite():
     scores = {k: _resp(k)["composite"] for k in ("reply_received", "chat_scheduled")}
     assert scores["chat_scheduled"] == scores["reply_received"], scores
+
+
+# --------------------------------------------------------------------------
+# 2026-09-01 audit of the decision engine. Three claims the scorer was making
+# that its inputs did not support.
+# --------------------------------------------------------------------------
+def test_momentum_ignores_the_rows_the_system_wrote_about_itself():
+    """`manual_override` and `bulk_received` are not interaction volume.
+
+    MEASURED, founder's live account 2026-09-01: 142 of his touch rows are
+    clock-silent kinds (135 manual_override, 7 bulk_received) and ALL 142 sit
+    inside the 45-day momentum base window. 117 of the overrides are two
+    bulk-park sessions, so the axis was reading his own screen-clearing as
+    firm activity — and then, as that spike aged past the 14-day recent
+    window, reporting "activity cooling" about it.
+
+    `cadence._CLOCK_SILENT_KINDS` is the single definition; this pins that the
+    scorer honours it rather than keeping a second opinion.
+    """
+    contacts = [{"id": 1, "role": None}]
+    real = [touch(1, "outreach", 6), touch(1, "reply_received", 4)]
+    padded = real + [
+        touch(1, "manual_override", 30, note="manual override: thread_state=parked")
+        for _ in range(20)
+    ] + [touch(1, "bulk_received", 25)]
+
+    plain = scoring.score_firm(_user(), _firm(), contacts, real, as_of=AS_OF)
+    noisy = scoring.score_firm(_user(), _firm(), contacts, padded, as_of=AS_OF)
+    assert noisy["axes"]["momentum"] == plain["axes"]["momentum"]
+    assert "activity cooling" not in noisy["reasoning"]
+
+
+def test_momentum_still_counts_every_real_touch():
+    """The exclusion must be exactly the two bookkeeping kinds — a keep-warm
+    note or a thank-you the student actually sent is real volume."""
+    contacts = [{"id": 1, "role": None}]
+    quiet = [touch(1, "outreach", 40)]
+    busy = quiet + [touch(1, "thank_you", 2), touch(1, "maintain", 1)]
+    a = scoring.score_firm(_user(), _firm(), contacts, quiet, as_of=AS_OF)
+    b = scoring.score_firm(_user(), _firm(), contacts, busy, as_of=AS_OF)
+    assert b["axes"]["momentum"]["recent_count"] == 2
+    assert b["axes"]["momentum"]["score"] > a["axes"]["momentum"]["score"]
+
+
+def test_a_contact_you_never_wrote_to_has_no_reply_ratio():
+    """Zero sends means the ratio has no denominator, so there is no ratio.
+
+    It used to report 1.0 — "they answer every time you write" about somebody
+    the student has never written to — because `max(1, sends)` substituted a
+    denominator. Measured on the founder's account: 12 of 226 contacts, every
+    one at 1.0, including an advocate whose composite (76.9) sits over the
+    'hot' line at 75.
+
+    The SCORE is deliberately unchanged (see `_score_responsiveness`): nothing
+    measured says a different number is better, so only the claim moved.
+    """
+    r = scoring.score_contact({"id": 1}, [touch(1, "reply_received", 3)], as_of=AS_OF)
+    axis = r["axes"]["responsiveness"]
+    assert axis["sends"] == 0
+    assert axis["replies"] == 1
+    assert axis["reply_ratio"] is None
+    assert axis["median_latency_days"] is None
+    assert axis["score"] == 60.0
+
+
+def test_a_contact_with_no_touches_at_all_has_no_reply_ratio_either():
+    """0.0 is the same manufactured claim pointed the other way — 'they never
+    answer you' about somebody nothing was ever sent to."""
+    axis = scoring.score_contact({"id": 1}, [], as_of=AS_OF)["axes"]["responsiveness"]
+    assert axis["reply_ratio"] is None
+    assert axis["score"] == 0.0
+
+
+def test_a_real_reply_ratio_is_still_reported():
+    """The refusal is scoped to the undefined case and nothing else."""
+    axis = scoring.score_contact(
+        {"id": 1},
+        [touch(1, "outreach", 10), touch(1, "outreach", 8), touch(1, "reply_received", 7)],
+        as_of=AS_OF,
+    )["axes"]["responsiveness"]
+    assert axis["sends"] == 2
+    assert axis["reply_ratio"] == 0.5
+
+
+def test_recency_does_not_read_a_future_touch_as_having_happened_today():
+    """A chat on next week's calendar is not engagement that happened.
+
+    `max(0.0, days)` clamped a future touch to zero days elapsed, and zero is
+    this axis's MAXIMUM: recency 100, `days_since_meaningful` 0, a reasoning
+    line reading "last today", and `_contact_live.html` printing "0d since a
+    meaningful reply/chat". `cadence`'s C4 divergence already treats
+    future-dated touches as a reachable shape and guards two branches against
+    them; `_score_momentum` excludes them via its own `0 <= age` window. This
+    was the last place one produced a confident claim about the past.
+    """
+    future_only = scoring.score_contact(
+        {"id": 1}, [touch(1, "chat", -7)], as_of=AS_OF
+    )["axes"]["recency"]
+    assert future_only["days_since_meaningful"] is None
+    assert future_only["score"] == 0.0
+
+
+def test_a_future_touch_does_not_reset_a_real_recency_clock():
+    """With a genuine past reply on record the axis decays from THAT, not from
+    the booking sitting in next week."""
+    both = scoring.score_contact(
+        {"id": 1}, [touch(1, "reply_received", 45), touch(1, "chat", -7)], as_of=AS_OF
+    )["axes"]["recency"]
+    past_only = scoring.score_contact(
+        {"id": 1}, [touch(1, "reply_received", 45)], as_of=AS_OF
+    )["axes"]["recency"]
+    assert both == past_only
+    assert both["days_since_meaningful"] == 45.0

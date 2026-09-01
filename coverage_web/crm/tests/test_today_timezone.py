@@ -380,3 +380,69 @@ def test_a_cancelled_chat_contributes_no_date_to_the_card():
     card = [a for a in actions if a["action"] == "confirm_chat"][0]
     assert card["ctx"]["scheduled_on"] is None
     assert "nothing logged in 6 business days" in card["reason"]
+
+
+# ---------------------------------------------------------------------------
+# The Recent Activity rail must count on the student's clock (2026-09-01).
+# It used `timesince(..., depth=1)`, a raw elapsed UTC floor, while every
+# other CRM surface uses `crm.utils._calendar_days_ago` -- whose docstring
+# exists to abolish exactly that drift. Live on the founder's board one
+# touch read "4 days" in this rail and "5d since last touch" on the same
+# contact's Network card. (The act card's "3 business days ago" is a
+# deliberate difference: that is the cadence engine's own reasoning and the
+# sentence says so.)
+# ---------------------------------------------------------------------------
+def test_the_activity_rail_counts_days_on_the_students_own_clock():
+    from crm.today import _cockpit_context
+
+    user = get_user_model().objects.create_user(
+        email="tz-rail@example.com", password="pw12345!",
+        timezone="America/Los_Angeles",
+    )
+    contact = Contact.all_objects.create(user=user, name="Rail Clock")
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="outreach", channel="email",
+        ts=LA_TOUCH,
+    )
+
+    timezone.activate(LA)
+    try:
+        with mock.patch("django.utils.timezone.now", return_value=LA_NOW):
+            ctx = _cockpit_context(user)
+    finally:
+        timezone.deactivate()
+
+    row = next(a for a in ctx["activity"] if a["name"] == "Rail Clock")
+    # LA_TOUCH is Aug 23 in Los Angeles and LA_NOW is Aug 31: eight calendar
+    # days. The raw elapsed floor would have said seven.
+    assert row["ago"] == "8d ago", row["ago"]
+
+
+# ---------------------------------------------------------------------------
+# The rail must not render a negative day count (2026-09-01). `recent` has no
+# `ts__lte` guard the way `crm.debrief.pending` does, so a touch dated after
+# `as_of` sorts to the top of the feed instead of being excluded from it.
+# Nothing on the founder's live account is future-dated, but
+# `coverage_domain.cadence` and `.scoring` both treat a future-dated touch as
+# reachable rather than hypothetical (a chat hand-logged with tomorrow's
+# date, or a caller whose clock runs behind the touch's) and guard it —
+# this pins the rail to the same posture.
+# ---------------------------------------------------------------------------
+def test_the_activity_rail_does_not_render_a_negative_day_count():
+    from crm.today import _cockpit_context
+
+    user = get_user_model().objects.create_user(
+        email="future-rail@example.com", password="pw12345!",
+    )
+    now = timezone.now()
+    contact = Contact.all_objects.create(user=user, name="Future Chat")
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="chat_scheduled", channel="email",
+        ts=now + timedelta(days=2),
+    )
+
+    with mock.patch("django.utils.timezone.now", return_value=now):
+        ctx = _cockpit_context(user)
+
+    row = next(a for a in ctx["activity"] if a["name"] == "Future Chat")
+    assert row["ago"] == "today", row["ago"]

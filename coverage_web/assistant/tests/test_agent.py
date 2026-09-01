@@ -1305,3 +1305,126 @@ def test_the_draft_fence_in_the_prompt_parses_with_the_real_parser():
     assert drafted[0]["channel"] == "email"
     assert drafted[0]["kind"] == "follow_up"
     assert drafted[0]["subject"] == "Catching up on the summer analyst process"
+
+
+# ---------------------------------------------------------------------------
+# The two endings that used to read as an ordinary success.
+# ---------------------------------------------------------------------------
+def test_a_truncated_answer_says_so_instead_of_passing_as_a_whole_one(user, conversation):
+    """`stop_reason == "max_tokens"` means MAX_TOKENS cut the model off
+    mid-sentence. Every other cap in this module exists so the student is
+    told plainly what happened rather than handed a truncated answer that
+    looks like the real one; this was the one cap that did exactly that.
+
+    The reachable case is not exotic: SYSTEM_PROMPT asks for one draft block
+    per person on a batch request, and five send-ready emails do not fit in
+    2048 tokens — the last would render as a card with a Copy button under
+    half an email."""
+    client = FakeClient([_response([_text("Hi Yumna,\n\nI wanted to fol")], "max_tokens")])
+
+    result = agent.run_turn(user, conversation, "Draft a re-ping for everyone cold", client=client)
+
+    # The partial answer is kept — the student can see exactly where it cut
+    # off, and it is genuinely the start of what they asked for.
+    assert result.ok
+    assert result.reply.text.startswith("Hi Yumna,")
+    notice = _turns(user, conversation)[-1]
+    assert notice.notice == ChatMessage.NOTICE_TRUNCATED
+    assert "length limit" in notice.text
+    assert "—" not in notice.text  # product copy rule: no em dashes
+
+
+def test_an_ordinary_answer_gets_no_truncation_notice(user, conversation):
+    client = FakeClient([_response([_text("Chase Jane today.")], "end_turn")])
+
+    agent.run_turn(user, conversation, "who first", client=client)
+
+    assert [m.notice for m in _turns(user, conversation)] == ["", ""]
+
+
+def test_a_reply_with_nothing_in_it_is_a_notice_not_silence(user, conversation):
+    """`views._thread_rows` skips an assistant row with no text, so an empty
+    response rendered as nothing whatsoever: the student's own question, no
+    answer, no error, and a credit gone."""
+    client = FakeClient([_response([], "end_turn")])
+
+    result = agent.run_turn(user, conversation, "who first", client=client)
+
+    assert not result.ok and result.reason == "failed"
+    assert result.reply.notice == ChatMessage.NOTICE_FAILED
+    assert result.reply.text.strip()
+
+
+def test_a_reply_with_nothing_in_it_is_refunded(user, conversation):
+    """Nothing to read is not an answer — the same fairness rule every other
+    failed turn already gets."""
+    from billing import credits as billing_credits
+
+    before = billing_credits.balance(user)
+    agent.run_turn(user, conversation, "who first", client=FakeClient([_response([], "end_turn")]))
+
+    assert billing_credits.balance(user) == before
+
+
+def test_a_truncated_answer_is_not_refunded(user, conversation):
+    """They did get an answer and the tokens were genuinely spent on it."""
+    from billing import credits as billing_credits
+    from assistant import plans
+
+    before = billing_credits.balance(user)
+    client = FakeClient([_response([_text("Half an ans")], "max_tokens")])
+    agent.run_turn(user, conversation, "who first", client=client)
+
+    assert billing_credits.balance(user) == before - plans.limits_for(user).message_cost
+
+
+def test_a_tool_call_the_model_never_finished_is_never_persisted(user, conversation):
+    """A turn only executes tools on `stop_reason == "tool_use"`, so a
+    `tool_use` block in a turn that stopped for any other reason gets no
+    `tool_result` — and the Messages API rejects the very next request over
+    an assistant turn holding one nothing answered. One truncated tool call
+    must not 400 every later turn in the conversation."""
+    cut_off = _response(
+        [_text("Let me look her up."), _tool_use("get_contact", {"contact_id": 1})],
+        "max_tokens",
+    )
+    client = FakeClient([cut_off])
+
+    agent.run_turn(user, conversation, "tell me about Jane", client=client)
+
+    stored = [b for m in _turns(user, conversation) for b in m.blocks()]
+    assert not any(b.get("type") == "tool_use" for b in stored)
+    assert any(b.get("type") == "tool_result" for b in stored) is False
+
+    # ...and the next turn's replay is a shape the API will accept.
+    second = FakeClient([_response([_text("She's warm.")], "end_turn")])
+    result = agent.run_turn(user, conversation, "and her firm?", client=second)
+    assert result.ok
+    replayed = [b for m in second.requests[0]["messages"] for b in m["content"]]
+    assert not any(b.get("type") == "tool_use" for b in replayed)
+
+
+def test_a_streamed_truncated_answer_yields_a_notice_before_done(user, conversation):
+    """Before "done", not after: the notice belongs under the partial answer
+    in the log, not after the composer has already re-enabled."""
+    client = FakeStreamingClient(
+        [(["Hi Yumna,", "\n\nI wanted to fol"], _response([_text("Hi Yumna,\n\nI wanted to fol")], "max_tokens"))]
+    )
+
+    events = list(agent.stream_turn(user, conversation, "draft them all", client=client))
+
+    kinds = [e["type"] for e in events]
+    assert kinds[-2:] == ["notice", "done"]
+    assert events[-2]["kind"] == ChatMessage.NOTICE_TRUNCATED
+    assert _turns(user, conversation)[-1].notice == ChatMessage.NOTICE_TRUNCATED
+
+
+def test_a_streamed_empty_reply_is_one_terminal_failed_notice(user, conversation):
+    client = FakeStreamingClient([([], _response([], "end_turn"))])
+
+    events = list(agent.stream_turn(user, conversation, "who first", client=client))
+
+    assert [e["type"] for e in events] == ["notice"]
+    assert events[0]["kind"] == "failed"
+    # No "done" frame at all — there is nothing whole to finalise.
+    assert not any(e["type"] == "done" for e in events)

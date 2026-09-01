@@ -399,6 +399,60 @@ def _save(message: ChatMessage) -> ChatMessage:
     return message
 
 
+# ---------------------------------------------------------------------------
+# The two ways a round can END that both loops used to read as an ordinary
+# success — and one shape of persisted turn that used to break every later
+# turn in the conversation.
+# ---------------------------------------------------------------------------
+_TRUNCATED_TEXT = (
+    "That answer hit the length limit and stops mid-thought above. Ask for "
+    "it one person or one firm at a time."
+)
+
+_EMPTY_TEXT = "I didn't get an answer together that time. Try asking that again."
+
+
+def _final_blocks(blocks: list[dict]) -> list[dict]:
+    """The blocks of a turn that is NOT going round again, safe to replay.
+
+    Both loops execute tools only when `stop_reason == "tool_use"`. So a
+    `tool_use` block inside a turn that stopped for any OTHER reason —
+    `max_tokens` cutting the model off part-way through emitting one is the
+    real case — never gets a `tool_result` written for it, and the Messages
+    API rejects the next request outright over an assistant turn holding a
+    `tool_use` that nothing answered. Dropping it at the moment of persist
+    is what stops one truncated tool call from 400-ing every later turn in
+    a conversation the student can otherwise still use.
+    """
+    return [b for b in blocks if b.get("type") != "tool_use"]
+
+
+def _ending_notice(reply: ChatMessage, stop_reason: str) -> tuple[str, str] | None:
+    """`(notice_kind, text)` for an ending that must not pass as an answer.
+
+    TRUNCATED. `stop_reason == "max_tokens"` means MAX_TOKENS stopped the
+    model mid-sentence. Every other cap in this module exists so a student
+    is "told plainly what happened rather than being handed a truncated
+    answer that looks like the real one" (module docstring) — this was the
+    one cap that did exactly that, silently. It is not a theoretical
+    ending either: SYSTEM_PROMPT asks for ONE DRAFT BLOCK PER PERSON when
+    a student says "draft a re-ping for everyone who's gone cold", and
+    five send-ready emails do not fit in 2048 tokens. The last of them
+    would render as a card with a Copy button under half an email.
+
+    EMPTY. A reply with no text at all rendered as nothing whatsoever:
+    `views._thread_rows` skips an assistant row with no text, so the
+    student saw their own question, no answer, no error, and a spent
+    credit. Reachable on `stop_reason == "refusal"` and on any response
+    whose content came back with nothing in it.
+    """
+    if not reply.text.strip():
+        return ChatMessage.NOTICE_FAILED, _EMPTY_TEXT
+    if stop_reason == "max_tokens":
+        return ChatMessage.NOTICE_TRUNCATED, _TRUNCATED_TEXT
+    return None
+
+
 def reject_attachments(user, conversation, text: str, errors: list[str]) -> ChatMessage:
     """One or more files the student picked couldn't be attached
     (assistant/attachments.py already decided why — size, type, or count).
@@ -626,16 +680,35 @@ def run_turn(user, conversation, text: str, *, client=None, attachment_blocks=No
             charged = True
         _log_usage(user, limits.model, response)
         blocks = [_as_dict(b) for b in response.content]
+        going_again = response.stop_reason == "tool_use"
         last_assistant = _save(
             ChatMessage(
                 user=user,
                 conversation=conversation,
                 role=ChatMessage.ROLE_ASSISTANT,
-                content=blocks,
+                content=blocks if going_again else _final_blocks(blocks),
             )
         )
 
-        if response.stop_reason != "tool_use":
+        if not going_again:
+            ending = _ending_notice(last_assistant, response.stop_reason)
+            if ending and ending[0] == ChatMessage.NOTICE_FAILED:
+                # Nothing to read at all is not an answer, so it is refunded
+                # on the same fairness rule every other failed turn is —
+                # see `charged` above.
+                if charged:
+                    billing_credits.refund(
+                        user, limits.message_cost, reason="turn_returned_nothing", model=limits.model
+                    )
+                reply = _save(_notice(user, conversation, *ending))
+                return TurnResult(
+                    ok=False, reason="failed", rounds=round_no + 1, tool_calls=executed, reply=reply
+                )
+            if ending:
+                # Truncated: they DID get an answer, and the tokens were
+                # genuinely spent on it, so no refund — just a plain line
+                # under it saying it stops early.
+                _save(_notice(user, conversation, *ending))
             _retitle_if_first_message(user, conversation, is_first, client, text, last_assistant)
             return TurnResult(ok=True, rounds=round_no + 1, tool_calls=executed, reply=last_assistant)
 
@@ -841,11 +914,33 @@ def stream_turn(user, conversation, text: str, *, client=None, attachment_blocks
             yield {"type": "notice", "kind": "failed", "text": notice_text}
             return
 
+        going_again = stop_reason == "tool_use"
         last_reply = _save(
-            ChatMessage(user=user, conversation=conversation, role=ChatMessage.ROLE_ASSISTANT, content=blocks)
+            ChatMessage(
+                user=user,
+                conversation=conversation,
+                role=ChatMessage.ROLE_ASSISTANT,
+                content=blocks if going_again else _final_blocks(blocks),
+            )
         )
 
-        if stop_reason != "tool_use":
+        if not going_again:
+            # The same two endings run_turn settles, settled the same way —
+            # see `_ending_notice`. A truncation notice is yielded BEFORE
+            # "done" so it lands under the partial answer in the log rather
+            # than after the composer has already re-enabled.
+            ending = _ending_notice(last_reply, stop_reason or "")
+            if ending and ending[0] == ChatMessage.NOTICE_FAILED:
+                if charged:
+                    billing_credits.refund(
+                        user, limits.message_cost, reason="turn_returned_nothing", model=limits.model
+                    )
+                _save(_notice(user, conversation, *ending))
+                yield {"type": "notice", "kind": "failed", "text": ending[1]}
+                return
+            if ending:
+                _save(_notice(user, conversation, *ending))
+                yield {"type": "notice", "kind": ending[0], "text": ending[1]}
             # `message_id` is the stored row's pk, not the model's own id: it
             # is what a draft card's log-touch chip posts back, and the view
             # uses it to hang the resolved draft metadata off this same frame

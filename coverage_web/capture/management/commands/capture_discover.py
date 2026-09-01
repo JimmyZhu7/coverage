@@ -32,7 +32,11 @@ FINDINGS SHAPE
 --------------
 A JSON array of `{"name", "email", "role_guess", "firm", "outreach_sent",
 "replied", "chat_status", "chat_scheduled_at", "evidence", "bulk",
-"bulk_reasons"}`. `firm` is an
+"bulk_reasons", "thread_id"}`. `thread_id` is optional and is the Gmail
+thread the evidence came from: supplying it stamps the touch with the same
+`[gmail:<id>]` marker every other capture door writes, so the daily sync
+re-reading that conversation dedups against it instead of logging the same
+reply a second time. `firm` is an
 optional Coverage slug;
 an unknown one is kept as free text rather than dropped, because
 `Contact.firm_text` exists precisely so capture never blocks on directory
@@ -64,15 +68,20 @@ has already shipped. Youqi Chen, live, 2026-08-31: a discovery run read
 chat or reschedule" card on Today about a meeting that was never booked. The
 same shape as the Ellen Chung case below, one rung up the ladder.
 
-`chat_scheduled_at` (optional, ISO 8601) is the agreed start time, and it is
-what `"scheduled"` is CORROBORATED BY rather than a decoration on it. See the
-touch ladder in `handle` for what happens without it, and why the bar is set
-where the live capture path already sets it.
+`chat_scheduled_at` (ISO 8601) is the chat's own time, and it is what BOTH
+chat values are CORROBORATED BY rather than a decoration on them. Not
+optional in practice: `"completed"` and `"scheduled"` alike fall one rung
+down the ladder without it. A chat that was held had a time and so did a
+chat that was booked; a classifier that can tell you two people were warm at
+each other but cannot tell you when they met is reading enthusiasm. See the
+touch ladder in `handle` for the two live failures that set this bar, and why
+it is the bar the live capture path already meets.
 
 The evidence signals are a ladder, and at least one of them should be
 present for anyone worth creating: you cannot discover a stranger. Strongest
-first: `chat_status == "completed"`, then `chat_status == "scheduled"`, then
-`replied`, then `outreach_sent`. If none is set the contact is still created
+first: `chat_status == "completed"`, then `chat_status == "scheduled"` (both
+only when `chat_scheduled_at` corroborates them), then `replied`, then
+`outreach_sent`. If none is set the contact is still created
 (someone met at an event and added by hand is real) but stays cold with no
 touches.
 
@@ -94,7 +103,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from capture.providers import normalize_email
+from capture.providers import CHAT_CLAIMS, chat_status_of, chat_time_stated, normalize_email
 from coverage_domain.pipeline import BULK_RECEIVED_KIND
 from crm import services as crm_services
 from crm.models import Contact
@@ -305,23 +314,63 @@ class Command(BaseCommand):
             # already carves out: an outreach-only finding stays `outreach`
             # however it is labelled, because "an invite the user sent an
             # unknown person is still only the user's own act".
-            chat_status = str(person.get("chat_status", "none") or "none").strip().lower()
+            #
+            # `"completed"` IS HELD TO THE SAME BAR, and it is the rung that
+            # matters most. The fix above covered `"scheduled"` and stopped
+            # there, which left the STRONGER claim ungated: `"completed"`
+            # logs kind `chat`, which sets warmth `chatted`, and
+            # `capture_worklist.RECHECK_WARMTH` drops `chatted` from every
+            # later re-check — so that one is not a card a human can argue
+            # with, it is a contact no automated run will ever look at again.
+            # Ellen Chung, live 2026-08-12: "Thanks for the email, filled out
+            # the form!" came in as `"completed"`, and Coverage spent three
+            # days asking the founder to debrief a conversation that never
+            # happened. Patina Chu carries the same shape from 2026-08-02 and
+            # was never corrected. Neither finding named a time; a chat that
+            # happened had one.
+            # Through `capture.providers` rather than re-spelled: this is one
+            # of the three places `chat_status` is turned into a decision
+            # (`capture.gmail._touch_kind_for` is another), and that module's
+            # docstring names re-spelling the test as the exact way the
+            # Youqi Chen shape could ship a second time. `chat_status_of` is
+            # `chat_status` normalized the same way this line used to do it
+            # inline (`str(...).strip().lower()`, default "none");
+            # `chat_time_stated` is the `chat_scheduled_at` presence check.
+            chat_status = chat_status_of(person)
             outbound_only = bool(person.get("outreach_sent")) and not person.get("replied")
             uncorroborated = (
-                chat_status == "scheduled"
-                and not str(person.get("chat_scheduled_at") or "").strip()
+                chat_status in CHAT_CLAIMS
+                and not chat_time_stated(person)
             )
             if uncorroborated:
                 unconfirmed_chats += 1
             kind = (BULK_RECEIVED_KIND if person.get("bulk")
-                    else "chat" if chat_status == "completed"
                     else "outreach" if uncorroborated and outbound_only
                     else "reply_received" if uncorroborated
+                    else "chat" if chat_status == "completed"
                     else "chat_scheduled" if chat_status == "scheduled"
                     else "reply_received" if person.get("replied")
                     else "outreach" if person.get("outreach_sent") else None)
             if kind:
                 reasons = str(person.get("bulk_reasons") or "").strip()
+                # THE THREAD MARKER, WHEN THE SCAN CAN NAME A THREAD. Every
+                # other door into the ratchet stamps `[gmail:<id>]` on the
+                # note, and `capture.gmail.thread_stage_rank` reads exactly
+                # that string to decide whether a later finding on the same
+                # thread is new evidence or the same message re-seen. A touch
+                # written here without one ranks 0 on every thread forever, so
+                # the daily sync re-finding that same conversation logs a
+                # SECOND touch of the same kind — which states nothing false,
+                # but resets `last_touch` and pushes the cadence engine's
+                # follow-up nudge out by a week. `capture.discovery.accept`
+                # already stamps the marker for the proposal door and says so
+                # in its docstring; this door was the one exception.
+                #
+                # Optional, because the field is not part of the documented
+                # findings shape and the scan does not always have a thread to
+                # name. Absent, this behaves exactly as it did.
+                thread_id = str(person.get("thread_id") or "").strip()
+                marker = f"[gmail:{thread_id}] " if thread_id else ""
                 note = "Discovered by mailbox scan"
                 if kind == BULK_RECEIVED_KIND:
                     note = (
@@ -332,16 +381,15 @@ class Command(BaseCommand):
                         note = f"{note} [{reasons}]"
                 crm_services.log_touch(
                     user.id, contact.id, kind, "email",
-                    note=note, source="capture",
+                    note=f"{marker}{note}", source="capture",
                 )
                 touched += 1
 
         if unconfirmed_chats:
             self.stdout.write(self.style.WARNING(
-                f"{tag}{unconfirmed_chats} finding(s) said chat_status="
-                "'scheduled' with no chat_scheduled_at — logged one rung down. "
-                "A booking needs an agreed time; an offer nobody accepted is a "
-                "reply."))
+                f"{tag}{unconfirmed_chats} finding(s) claimed a chat with no "
+                "chat_scheduled_at — logged one rung down. A chat has a time, "
+                "booked or held; an offer nobody accepted is a reply."))
         self.stdout.write(self.style.SUCCESS(
             f"{tag}{created} created ({touched} with a touch logged), "
             f"{existing} already tracked, {archived_hits} archived-and-left-alone, "
