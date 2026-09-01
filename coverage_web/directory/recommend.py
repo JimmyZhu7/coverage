@@ -755,7 +755,20 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
 
     if window is not None and profile.class_year:
         lo, hi = window
-        label = str(lo) if lo == hi else f"{lo}–{hi}"
+        # An OPEN window ("2028 or later", "December 2028 onwards") is stored
+        # by the extractor as every year from the floor to its horizon, because
+        # `Candidate` carries the years alone and not the `open_high` flag. So
+        # a ceiling at the horizon IS the openness signal, and the chip must
+        # read "For 2028+ grads", not "For 2028–2035 grads" - the posting never
+        # said 2035, and printing it would typeset the product's own bookkeeping
+        # as the firm's words.
+        from directory.facts import GRAD_YEAR_MAX
+        if lo == hi:
+            label = str(lo)
+        elif hi >= GRAD_YEAR_MAX:
+            label = f"{lo}+"
+        else:
+            label = f"{lo}–{hi}"
         if not (lo <= profile.class_year <= hi):
             # The posting named a different class. This is a veto, not a
             # subtraction: no other class/cycle evidence gets to argue with the
@@ -1472,7 +1485,21 @@ def role_matches_level(
             parsed = parse_target_cycle(raw)
             if parsed is not None:
                 wanted_buckets.add(parsed[0])
-        if wanted_buckets and bucket not in wanted_buckets:
+        # An INSIGHT programme is never the wrong rung. It is the on-ramp to
+        # the internship the student declared - Citi's Early ID, Nomura's
+        # Discover, Evercore's Intro sessions all state "fast-tracked to
+        # interviews for the Summer Internship" - and a sophomore who ticked
+        # "2028 Summer Internship" has not told the product to hide them; she
+        # has told it which internship they feed. Refusing them here cost the
+        # founder his #1 pick (Nomura Discover, 90 pts) the day this check
+        # reached `recommend()`, and the research is unambiguous that this
+        # layer is where a first- or second-year's real options are (9 of 17
+        # bulge brackets run it off the main board; when it does surface,
+        # hiding it is the worst available outcome). `entry_level` stays
+        # refused: a full-time role is a rung ABOVE, which is what this check
+        # was written for.
+        if (wanted_buckets and bucket not in wanted_buckets
+                and not (bucket == "insight" and "internship" in wanted_buckets)):
             return False
     if class_year_derived and profile_class_year:
         derived = _int_or_none(class_year_derived)

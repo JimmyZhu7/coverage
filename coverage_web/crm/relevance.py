@@ -555,7 +555,7 @@ _SPECIFIC_TIE_RE = re.compile("|".join(_SPECIFIC_TIE_MARKERS), re.IGNORECASE)
 _AFFINITY_TEXT_KEYS = ("school", "angle", "notes")
 
 
-def specific_tie(contact: dict, user=None) -> str | None:
+def specific_tie(contact: dict, user=None, affiliations=()) -> str | None:
     """The phrase that names a specific tie with this contact, or None.
 
     Two sources. The marker list above, matched against the contact's own
@@ -575,16 +575,19 @@ def specific_tie(contact: dict, user=None) -> str | None:
     if m:
         return m.group(0)
     lowered = text.lower()
-    for aff in (getattr(user, "affiliations", None) or []):
+    # `affiliations` wins when given: the queue passes the list itself
+    # rather than the User, because `_gate_and_rank` takes derived facts,
+    # not query paths (see its docstring).
+    for aff in (affiliations or getattr(user, "affiliations", None) or []):
         aff = str(aff or "").strip()
         if len(aff) >= 3 and aff.lower() in lowered:
             return aff
     return None
 
 
-def affinity(contact: dict, user=None) -> float:
+def affinity(contact: dict, user=None, affiliations=()) -> float:
     """1.6 for a named tie, 1.3 for the bare school flag, 1.0 otherwise."""
-    if specific_tie(contact, user):
+    if specific_tie(contact, user, affiliations):
         return _AFFINITY_SPECIFIC
     if contact.get("school_affiliation"):
         return _AFFINITY_SCHOOL
@@ -610,7 +613,7 @@ _NOW_COLD_DUE = 1.0
 _NOW_NOTHING = 0.4
 
 
-def expected_value(action: dict, user=None) -> float:
+def expected_value(action: dict, user=None, affiliations=()) -> float:
     """Relevance x relationship strength x affinity x whether something real
     is happening.
 
@@ -633,7 +636,7 @@ def expected_value(action: dict, user=None) -> float:
     """
     contact = action.get("contact") or {}
     rel = relevance_weight(action.get("relevance"), action.get("relevance_tier"))
-    strength = _RELATIONSHIP_WEIGHT.get(contact.get("warmth"), 0.8) * affinity(contact, user)
+    strength = _RELATIONSHIP_WEIGHT.get(contact.get("warmth"), 0.8) * affinity(contact, user, affiliations)
 
     if action.get("owed_reply"):
         now = _NOW_INBOUND

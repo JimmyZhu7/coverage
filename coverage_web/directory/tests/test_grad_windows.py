@@ -582,3 +582,19 @@ def test_classify_change_names_the_five_classes():
     assert classify_change(closed, {**closed, "phrase": "q"}) == "SHAPE"
     assert refreshed_grad_fact({"detail_text": "   "}) is None
     assert refreshed_grad_fact(None) is None
+
+
+def test_an_open_window_chip_reads_plus_not_the_horizon():
+    """"2028 or later" is stored as 2028..GRAD_YEAR_MAX so the years reach the
+    scorer at all (`Candidate` has no `open_high`). The chip must not print that
+    bookkeeping as the firm's words: "For 2028+ grads", never "2028–2035"."""
+    from directory.facts import GRAD_YEAR_MAX
+    from directory.recommend import _class_fit, Candidate, Profile
+    profile = Profile(class_year=2029)
+    c = Candidate(id=1, firm_id=1, firm_name="X", firm_slug="x", title="Summer Analyst",
+                  url="https://x.test/1", bucket="internship", cohort="2027", region="us",
+                  grad_years=tuple(str(y) for y in range(2028, GRAD_YEAR_MAX + 1)))
+    _points, reasons = _class_fit(profile, c)
+    texts = [r.text for r in reasons]
+    assert any("2028+" in t for t in texts), texts
+    assert not any(str(GRAD_YEAR_MAX) in t for t in texts), texts

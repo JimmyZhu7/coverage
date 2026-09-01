@@ -108,6 +108,14 @@
   {% if gaps %}
   <section class="gap-strip">
     <h2 class="strip-title strip-title-lg" title="Ranked by exposure: tier weight × how far this firm is from your advocate target, plus a bonus if its deadline is close. Hover a card for the exact math.">Coverage Gaps</h2>
+    {% if advocate_summary %}
+    {% comment %}One number, because it is the one the evidence says predicts
+    outcomes: across every self-reported funnel the count that tracked
+    success was how many people actually pushed for the student (2-20),
+    not how many were emailed. The 54 identical "0 of 2" tooltips below
+    say the same thing 54 times; this says it once.{% endcomment %}
+    <p class="strip-note">{{ advocate_summary.line }}</p>
+    {% endif %}
     <div class="gap-row">
       {% for g in gaps %}
         <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"
@@ -193,6 +201,9 @@
               <div class="src-panel">
                 <p class="src-note">{{ sourcing_note }}</p>
                 <ul class="src-list">
+                  {% if g.sourcing_note %}
+                    <li class="src-note">{{ g.sourcing_note }}</li>
+                  {% endif %}
                   {% for s in g.sourcing %}
                     <li class="src-row">
                       {% comment %}"opens LinkedIn search" is stated on the
@@ -210,7 +221,16 @@
               </div>
             </details>
           {% endif %}
-          {% if g.lever %}
+          {% if g.verb == "Apply" %}
+            {% comment %}An assessment-gated firm: Jane Street's own FAQ
+            declines the coffee chat, Citadel Securities' funnel is its
+            competitions. Prompting "Add Contact" here would send a student
+            to manufacture a relationship the firm has said does not move
+            the process.{% endcomment %}
+            <a class="btn gap-act" href="{{ g.apply_url }}"
+               title="{{ g.verb_reason }}"
+               aria-label="Apply at {{ g.name|smart_title }}">Apply</a>
+          {% elif g.lever %}
             <a class="btn gap-act" href="{% url 'crm:contact_detail' g.lever.id %}">Talk to {{ g.lever.name|smart_person_name|smart_title }}</a>
           {% else %}
             {% comment %}Visible text is "Add Contact", not "+ Add a contact"

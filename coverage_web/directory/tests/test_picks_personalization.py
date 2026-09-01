@@ -130,14 +130,20 @@ def test_the_wrong_rung_is_not_a_pick():
 
 
 def test_a_stated_class_outranks_the_rung_filters_inference():
-    """Evidence beats inference, the module's own rule. An insight programme
-    that says "for 2029 graduates" reaches a 2029 student who named only
-    Summer Internship cycles; the same programme saying nothing does not."""
+    """Evidence beats inference, the module's own rule - and for INSIGHT
+    programmes the inference never refuses in the first place. Rewritten
+    the day it landed: the original pinned that a silent insight programme
+    is refused for a student who named only Summer Internship cycles. That
+    refusal was the news-strip bucket rule applied to picks, and it hid every
+    early-ID programme from nearly every student (Nomura Discover, the
+    founder's #1 pick). An insight programme is the on-ramp to the internship
+    the student declared, so both reach her; the one that states her class
+    still ranks first because it earns the stated-class points."""
     stated = _cand(1, bucket="insight", cohort="2027", class_year="2029",
                    title="2027 Discover Programme - Insight")
     silent = _cand(2, bucket="insight", cohort="2027",
                    title="2027 Discover Programme - Insight")
-    assert _ids(recommend(SOPHOMORE, [stated, silent], max_per_firm=9)) == [1]
+    assert _ids(recommend(SOPHOMORE, [stated, silent], max_per_firm=9)) == [1, 2]
     # ...but a stated class does not override the posting's OWN rung word.
     mba = _cand(3, bucket="internship", cohort="2028", class_year="2029",
                 title="Investment Banking Summer Associate")
@@ -559,3 +565,35 @@ def test_the_track_facet_files_the_markets_programme_under_st(client):
     assert ids("ib") == {ib.id}
     assert ids("st") == {markets.id}
     assert payments.id not in ids("ib") | ids("st")
+
+
+# ---------------------------------------------------------------------------
+# An insight programme is the on-ramp to the internship the student declared,
+# never the wrong rung. The bucket check in `role_matches_level` was written
+# for the news strip to keep FULL-TIME roles off a sophomore's radar; applied
+# unchanged to picks it hid every early-ID programme from every student who
+# only ticked an internship cycle - which is nearly every student, and cost
+# the founder his #1 pick (Nomura Discover) the day it landed.
+# ---------------------------------------------------------------------------
+
+def test_an_insight_programme_is_a_pick_for_a_student_who_declared_only_an_internship():
+    from directory.recommend import role_matches_level
+    assert role_matches_level("insight", "", ["2028 Summer Internship"], 2029,
+                              title="Discover Programme")
+    # The rung ABOVE is still refused - that is what the check exists for.
+    assert not role_matches_level("entry_level", "", ["2028 Summer Internship"], 2029,
+                                  title="Analyst Program")
+
+
+def test_an_insight_programme_survives_recommend_for_the_founders_profile():
+    """End to end through `recommend()`: the fixture mirrors Nomura Discover -
+    insight bucket, cohort 2027, no stated class, at a tier-1 firm."""
+    from directory.recommend import Candidate, Profile, _stated_grad_window, role_matches_level, derive_class_year
+    profile = Profile(class_year=2029, target_cycles=("2028 Summer Internship",))
+    c = Candidate(id=1, firm_id=1, firm_name="Nomura", firm_slug="nomura",
+                  title="2027 Discover Nomura Programme - Insight Programme",
+                  url="https://x.test/discover", bucket="insight", cohort="2027")
+    assert _stated_grad_window(profile, c) is None
+    derived, _ = derive_class_year(c.bucket, c.title, c.cohort)
+    assert role_matches_level(c.bucket, derived, profile.target_cycles, profile.class_year,
+                              title=c.title, study_level=profile.study_level)

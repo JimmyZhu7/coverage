@@ -2857,3 +2857,37 @@ def test_an_ordinary_weekday_renders_byte_identical_with_the_blackout_in_place()
     assert not any(
         "Bankers are off" in a["reason"] or "weekend" in a["reason"] for a in everyone
     )
+
+
+def test_a_park_neither_paces_nor_spends_the_firms_budget():
+    """A park is a prompt to stop chasing, not an email. With the follow-up
+    expiry, 44 parks can land at one bank in a morning; if each charged the
+    firm, every real cold note there would be paced behind cards that put
+    nothing in anyone's inbox."""
+    from crm.today import _pace_by_firm, FIRM_DAILY_CONTACT_CAP
+    parks = [_pace_action(i, 9, "park", ev=0.5) for i in range(FIRM_DAILY_CONTACT_CAP + 3)]
+    cold = _pace_action(50, 9, "follow_up", ev=2.4)
+    _pace_by_firm(parks + [cold], sent_today={}, today=None)
+    assert all(not p["firm_paced"] for p in parks)
+    assert not cold["firm_paced"], "parks must not have spent the budget the cold note needs"
+    assert "better tomorrow" not in cold["reason"]
+
+
+def test_a_named_affiliation_lifts_a_live_card():
+    """The 1.6x for a specific tie has to reach the queue, not just the
+    function that computes it. `_gate_and_rank` takes the student's
+    affiliations as a tuple (a derived fact, like `sent_today`), never the
+    User, and hands them to `rel.expected_value`."""
+    from crm.today import _gate_and_rank
+    def act(cid, notes):
+        return {"contact": {"id": cid, "firm_id": 9, "warmth": "replied", "notes": notes,
+                            "school_affiliation": False},
+                "action": "follow_up", "ev": 0, "owed_reply": False, "reason": "r",
+                "firm_name": "Citi", "class": 2, "priority": 1,
+                "last_business_days": 5, "closes_on": None, "relevance": 1.0}
+    plain, tied = act(1, "met at a conference"), act(2, "Consulting Club e-board with me")
+    _gate_and_rank([plain, tied], tiers={9: 1}, openings={}, sent_today={}, today=None,
+                   affiliations=("Consulting Club",))
+    assert tied["ev"] > plain["ev"], (tied["ev"], plain["ev"])
+    ratio = tied["ev"] / plain["ev"] if plain["ev"] else 0
+    assert abs(ratio - 1.6) < 0.05, f"expected the measured 1.6x named-tie lift, got {ratio:.2f}"

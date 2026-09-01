@@ -524,7 +524,16 @@ def _build_actions(user):
         if local_date(t.ts).date() == today:
             sent_today[key] += 1
 
-    actions = _gate_and_rank(actions, tiers, openings, sent_today, today)
+    # The student's own affiliations, as a tuple of strings: a derived fact
+    # the ranker may read, the same way it reads `sent_today` - never the
+    # User itself. This is what switches on `rel.affinity` (1.3x school,
+    # 1.6x a named tie) for live cards; without it the multiplier was
+    # computed and never reached one.
+    affiliations = tuple(
+        str(x).strip() for x in (getattr(user, "affiliations", None) or ()) if str(x).strip()
+    )
+    actions = _gate_and_rank(actions, tiers, openings, sent_today, today,
+                             affiliations=affiliations)
     return actions, contacts
 
 
@@ -985,6 +994,11 @@ def _pace_firm_key(contact: dict):
 FIRM_PACEABLE_ACTIONS = frozenset({
     "first_outreach", "follow_up", "keep_warm", "maintain", "confirm_chat",
 })
+# Every action that puts an email in a banker's inbox - the paceable kinds
+# plus the expected ones. Anything else (`park`, and any future non-send
+# prompt) neither paces nor spends. Derived, not hand-listed, so a new send
+# kind added to the paceable set is charged automatically.
+FIRM_SEND_ACTIONS = FIRM_PACEABLE_ACTIONS | frozenset({"thank_you", "advance", "reping"})
 
 
 def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
@@ -1046,8 +1060,13 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
                 budget[key] += 1
             continue
         if a.get("owed_reply") or a.get("action") not in FIRM_PACEABLE_ACTIONS:
-            # Expected by the other side: never paced, but a real send.
-            budget[key] += 1
+            # Expected by the other side: never paced. It spends budget only
+            # if it is a SEND - a `park` is a prompt to stop chasing, not an
+            # email, and charging the firm for it would pace a real cold note
+            # behind a card that puts nothing in anyone's inbox. Found when
+            # the follow-up expiry landed and 44 parks arrived at once.
+            if a.get("action") in FIRM_SEND_ACTIONS:
+                budget[key] += 1
             continue
         rankable.append((key, a))
 
@@ -1073,7 +1092,7 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
 
 
 def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
-                   sent_today=None, today=None) -> list[dict]:
+                   sent_today=None, today=None, affiliations=()) -> list[dict]:
     """Decide who the queue may speak about, what it may ask them for, and in
     what order. Everything here is a VIEW decision — see `crm/relevance.py`'s
     module docstring for why none of it belongs in `coverage_domain.cadence`.
@@ -1203,7 +1222,7 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
         elif a["action"] in ("keep_warm", "maintain"):
             a["reason"] = rel.keep_warm_reason(a)
 
-        a["ev"] = rel.expected_value(a)
+        a["ev"] = rel.expected_value(a, affiliations=affiliations)
         out.append(a)
 
     _pace_by_firm(out, sent_today, today)

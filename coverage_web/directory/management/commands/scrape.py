@@ -26,7 +26,7 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 
 from directory import ingest
-from directory.boards import DEFAULT_TRACKS, select_boards
+from directory.boards import DEFAULT_TRACKS, select_boards, ASSESSMENT_RECRUITING
 from directory.models import Firm
 
 # Keep in lockstep with coverage_connectors.CONNECTORS — a provider missing
@@ -69,6 +69,9 @@ class Command(BaseCommand):
                 firm = Firm.objects.create(
                     slug=slug, name=board.firm,
                     tracks=DEFAULT_TRACKS.get(slug, []), status="active",
+                    recruiting_style=(
+                        "assessment" if slug in ASSESSMENT_RECRUITING else "campus"
+                    ),
                 )
                 firm_by_slug[slug] = firm
                 self.stdout.write(f"  created catalog firm: {slug} ({board.firm})")

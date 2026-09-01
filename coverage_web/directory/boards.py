@@ -605,6 +605,24 @@ BOARDS: list[tuple[str, BoardConfig]] = [
 # filter bites on them; without this, ingest's auto-create would derive a
 # drifting slug ("the-brattle-group") and an empty tracks list the filter can
 # never match. Seeded firms are untouched — their tracks come from firms.yaml.
+# Firms that hire off a test or a competition, where a coffee chat does not
+# move the process. Jane Street's public FAQ answers "Can I schedule a phone
+# call or coffee?" with "unfortunately, no"; Citadel Securities' campus
+# funnel is Datathons and Invitationals; the practitioner finding is "if you
+# can't pass their tests, it doesn't matter who you know." Drives
+# `Firm.recruiting_style="assessment"`: the migration that seeded the live
+# rows (directory/0017) carries the same list, frozen there by convention;
+# THIS is the one `scrape` reads when it pre-creates a catalog firm, so a
+# fresh deploy that migrates before its first scrape still tags them.
+# Multi-strat funds that run analyst programmes with real networking
+# (Millennium, Point72, AQR) are deliberately absent.
+ASSESSMENT_RECRUITING: frozenset[str] = frozenset({
+    "janestreet", "citadel", "citadelsecurities", "citadel-securities", "sig",
+    "imc", "jump", "drw", "hrt", "optiver", "akuna", "belvedere", "fiverings",
+    "flowtraders", "tower", "towerresearch", "virtu", "xtx", "squarepoint",
+    "qube",
+})
+
 DEFAULT_TRACKS: dict[str, list[str]] = {
     "brattle": ["consulting"],
     "oliverwyman": ["consulting"],
