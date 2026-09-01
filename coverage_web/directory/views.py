@@ -1608,6 +1608,13 @@ _FUSE_HORIZON = 45
 _ELAPSED_HORIZON = _FUSE_HORIZON
 # How recently a rolling posting must have first been seen to count as "fresh".
 _FRESH_DAYS = 10
+# How long a posting may go with no positive liveness signal before the card
+# says so on ABSOLUTE age, regardless of what our own checks reported. Three
+# days is `health.py`'s own `CONSECUTIVE_FAILURES` threshold for calling a
+# connector failed rather than blipping, borrowed rather than re-chosen so the
+# operator alarm and the student-facing note fire on the same evidence instead
+# of holding two different ideas of stale.
+_UNCONFIRMED_AFTER_DAYS = 3
 # How many rolling cards the feed shows before deferring to browse-by-firm.
 _ROLLING_FEED_CAP = 30
 
@@ -1645,14 +1652,40 @@ def _unconfirmed_note(o) -> dict:
     `{% if o.status == 'closed' %}` branch."""
     if o.status == "closed":
         return {}
-    if not o.last_checked or not o.last_verified or o.last_checked <= o.last_verified:
+    if not o.last_verified:
+        return {}
+    # Our own check ran, and came back unable to reconfirm.
+    check_failed = bool(o.last_checked and o.last_checked > o.last_verified)
+    # WHY AN ABSOLUTE TEST HAS TO SIT BESIDE THE RELATIVE ONE. The comparison
+    # above is between two timestamps written by the same code path, so it can
+    # only speak when that path RUNS. A board that fails outright never reaches
+    # ingest's stamp at all: both timestamps freeze together, `last_checked <=
+    # last_verified` comes back equal, and the row renders as freshly
+    # confirmed. The docstring above used to assume this away ("every open row
+    # carries both timestamps from ingest, so in practice this is only {} on a
+    # clean confirmation") — true only while the connector works, which is
+    # exactly the case this note exists for.
+    #
+    # Measured 2026-09-01: 92 open campus rows were more than 3 days stale, 37
+    # of them silent under the relative test alone, and 23 of those were
+    # rendering a live countdown. All 23 were HSBC, whose board had been
+    # throwing an SSL error since 2026-08-25 — one card read "closes in 2
+    # days" off a page last read 6 days earlier. `health.py` was already
+    # printing "stale data being presented as fresh" to an operator-only
+    # channel for that firm; nothing said it to the student looking at it.
+    stale_days = _calendar_days_ago(o.last_verified)
+    if not check_failed and stale_days < _UNCONFIRMED_AFTER_DAYS:
         return {}
     return {
         "label": "Not recently confirmed live",
-        "why": ("Our last check of this posting could not confirm it is "
-                "still live. It still shows as open because we also can't "
-                "confirm it closed — verify on the firm's own site before "
-                "relying on this link."),
+        "why": (("Our last check of this posting could not confirm it is "
+                 "still live. ")
+                if check_failed else
+                (f"We have not been able to confirm this posting in "
+                 f"{stale_days} days. ")) +
+               ("It still shows as open because we also can't confirm it "
+                "closed. Verify on the firm's own site before relying on "
+                "this link."),
     }
 
 

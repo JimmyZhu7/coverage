@@ -635,7 +635,25 @@ def region_from_title_segments(title: str | None) -> str:
 # is a real data job — so it must be qualified by an event/programme word or
 # an early/spring prefix.
 _INSIGHT = _rx(
-    r"insights?\s+(?:day|week|programme|program|event|evening|series|session)",
+    # US early-ID programmes name the same event with different nouns than the
+    # UK ones this list was built from. "BofA Campus Insight Forum" fell all
+    # the way through to `_ENTRY`, which matches the bare word "campus", and
+    # was filed as an entry-level JOB - the bucket a graduating senior applies
+    # to - for an event aimed at first- and second-years. Every noun here is
+    # still qualified by "insight", so this widens the event vocabulary
+    # without loosening the guard the comment above describes.
+    r"insights?\s+(?:day|week|programme|program|event|evening|series|session"
+    r"|forum|summit|conference)",
+    r"\bearly\s+id(?:entification)?\b",
+    # "Career Insights: Meet the Business - Banking (NAM Session)" is Citi's
+    # name for exactly the attend-this-don't-apply-to-it event the comment
+    # above describes, and the board already ingests a dozen of them - the
+    # colon and the parenthetical just keep "insights" from sitting adjacent
+    # to "session", so the qualified-noun rule above never fired and every one
+    # was filed as `other`, which is not in TARGET_BUCKETS. They were fetched
+    # and then dropped. Both phrases below are event names on their face.
+    r"\bcareer\s+insights?\s*:",
+    r"\bmeet\s+the\s+(?:business|team|firm)\b",
     r"\binsight\s+into\b",                      # "Insight into Operations Opportunities"
     r"(?:early|spring|first[\s-]?year|1st[\s-]?year)\s+insights?\b",
     r"\bspring\s*week\b",

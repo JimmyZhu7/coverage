@@ -82,9 +82,26 @@
         <span class="ribbon-num">{{ dash.at_your_firms }}</span>
         <span class="ribbon-lbl"><span class="live-dot"></span> Open at your firms</span>
       </a>
-      <a class="ribbon-stat kin-reveal{% if dash.closing_10 %} is-urgent{% endif %}" style="--i: 1" href="{% url 'opportunities' %}">
+      {% comment %}
+      MIXED EVIDENCE, SAID OUT LOUD. The number is a count of deadlines, and
+      `Opportunity.confidence` says where each of those deadlines came from:
+      1.0 is a field the board published, anything under it is Coverage's own
+      regex reading the posting's prose. On the live board that is the large
+      majority of dated open roles, so a bare urgent figure here was quoting
+      our reading back as the market's calendar — the exact claim every other
+      surface refuses to make (`views.deadline_provenance`, the .ics SUMMARY,
+      the feed card, the drawer, both My Applications lenses).
+
+      "reported" and not a new word: the whole product marks this one fact one
+      way, and a second vocabulary for it on the busiest page would be worse
+      than the missing marker. The count carries it rather than a caveat
+      sentence, because a stat cell that grows prose stops being a stat cell;
+      the `title` holds the full provenance for anyone who wants it, which
+      works here in a way it cannot in the digest email.
+      {% endcomment %}
+      <a class="ribbon-stat kin-reveal{% if dash.closing_10 %} is-urgent{% endif %}" style="--i: 1" href="{% url 'opportunities' %}"{% if dash.closing_10_reported %} title="{{ dash.closing_10_reported }} of these dates were read from the posting's own text, not a field the board published"{% endif %}>
         <span class="ribbon-num">{{ dash.closing_10 }}</span>
-        <span class="ribbon-lbl">Closing in 10 days</span>
+        <span class="ribbon-lbl">Closing in 10 days{% if dash.closing_10_reported %}, {{ dash.closing_10_reported }} reported{% endif %}</span>
       </a>
       {% comment %}
       The most actionable number on the page, honest at zero too: nothing

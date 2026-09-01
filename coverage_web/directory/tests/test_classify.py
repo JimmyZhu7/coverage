@@ -831,3 +831,61 @@ def test_extract_sponsorship_future_phrase_question_vs_statement(text, expected)
 ])
 def test_extract_sponsorship_structured_field_and_new_phrasings(text, expected):
     assert extract_sponsorship(text) == expected
+
+
+# ---------------------------------------------------------------------------
+# US early-identification programmes name the same event with different nouns
+# than the UK ones `_INSIGHT` was built from. Measured 2026-09-01 against 16
+# real programme names: 9 missed the insight bucket, and "BofA Campus Insight
+# Forum" landed in `entry_level` — the bucket a GRADUATING SENIOR applies to —
+# because `_ENTRY` matches the bare word "campus" and is checked before the
+# affinity rule. An event for first- and second-years filed as a full-time job
+# is wrong in both directions: it shows the wrong students the wrong thing,
+# and `derive_class_year` will happily derive a graduating year for it, which
+# the insight bucket exists partly to refuse.
+# ---------------------------------------------------------------------------
+
+def test_a_campus_insight_event_is_not_an_entry_level_job():
+    assert classify_role("BofA Campus Insight Forum") == "insight"
+    assert classify_role("Insight Summit") == "insight"
+    assert classify_role("Early ID Program") == "insight"
+    assert classify_role("Early Identification Program") == "insight"
+
+
+def test_widening_the_event_nouns_did_not_loosen_the_insight_guard():
+    """`_INSIGHT`'s own comment says "insight" alone must never be enough,
+    because "Market Insights Analyst" is a real data job. The added nouns are
+    all still qualified by "insight", so that guard has to still hold."""
+    assert classify_role("Market Insights Analyst") != "insight"
+    assert classify_role("Insights Manager, Consumer Research") != "insight"
+    # And the word "campus" alone still cannot manufacture an insight event.
+    assert classify_role("Campus Recruiting Analyst") != "insight"
+
+
+# ---------------------------------------------------------------------------
+# Citi names its insight events "Career Insights: Meet the Business - Banking
+# (NAM Session)". The board ALREADY INGESTS them — 16 open rows on 2026-09-01
+# — but the colon and the parenthetical keep "insights" from sitting adjacent
+# to "session", so the qualified-noun rule never fired and every one was filed
+# `other`, which is not in TARGET_BUCKETS. They were fetched and then dropped,
+# which is why Citi showed 1 insight row out of 170.
+# ---------------------------------------------------------------------------
+
+def test_citis_career_insights_events_reach_the_insight_bucket():
+    assert classify_role(
+        "Career Insights: Meet the Business - Banking (NAM Session)") == "insight"
+    assert classify_role(
+        "Career Insights: Meet the Business - Markets & Research (NAM Session)") == "insight"
+    assert classify_role("Meet the Business - Banking") == "insight"
+
+
+def test_career_insights_needs_the_colon_because_it_is_also_a_job_title():
+    """The near-miss this rule was written around. "Career Insights Manager,
+    Consumer Data" is a real job, and `_INSIGHT` is rule 1 — it runs BEFORE
+    the experienced-hire veto, so a false positive here cannot be caught
+    downstream. The colon is what separates a programme title from a job
+    title, and it is load-bearing: drop it and the manager role becomes an
+    insight event."""
+    assert classify_role("Career Insights Manager, Consumer Data") != "insight"
+    assert classify_role("Business Insights Lead") != "insight"
+    assert classify_role("Market Insights Analyst") != "insight"

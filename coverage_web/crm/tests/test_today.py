@@ -915,6 +915,78 @@ def test_the_today_stats_are_not_count_animated(client):
     assert 'class="ribbon-num"' in body
 
 
+# ---------------------------------------------------------------------------
+# The closing-soon cell says what kind of evidence it is counting.
+#
+# `Opportunity.confidence` is the one provenance carrier: 1.0 is a deadline a
+# provider published as a structured field, anything under it is Coverage's
+# own regex reading the posting's prose. Measured on the live board, 96% of
+# dated open campus roles are the second kind — so a bare urgent number on the
+# busiest page was presenting our reading as the market's calendar, the exact
+# claim `views.deadline_provenance`, the .ics SUMMARY, the feed card, the
+# drawer and both My Applications lenses each refuse to make.
+# ---------------------------------------------------------------------------
+def _campus_role(n, *, days, confidence):
+    from directory.models import Opportunity
+
+    firm = Firm.objects.get_or_create(
+        slug=f"close-{n}", defaults={"name": f"Close Co {n}"})[0]
+    return Opportunity.objects.create(
+        firm=firm, url=f"https://example.test/close/{n}", title=f"SA {n}",
+        bucket="internship", status="open",
+        deadline=timezone.localdate() + timedelta(days=days),
+        confidence=confidence,
+    )
+
+
+def _ribbon(client, user) -> str:
+    """Just the stat strip. The page inlines its whole stylesheet, whose
+    comments use the word "reported" in an unrelated sense, so a
+    "not in body" assertion about the marker has to be scoped to the markup
+    that carries it."""
+    body = _login_and_get(client, user)
+    start = body.index('class="ribbon"')
+    return body[start:body.index("</section>", start)]
+
+
+def test_the_closing_cell_names_how_many_of_its_dates_are_our_own_reading(client):
+    """Same word the rest of the product uses for this fact, on the count
+    itself rather than in a caveat sentence a stat cell has no room for."""
+    _campus_role(1, days=1, confidence=0.6)   # prose-read
+    _campus_role(2, days=2, confidence=0.6)   # prose-read
+    _campus_role(3, days=3, confidence=1.0)   # the board published a field
+
+    ribbon = _ribbon(client, _user(weekly_touch_goal=14))
+
+    assert "Closing in 10 days, 2 reported" in ribbon
+    # The urgent figure itself is unchanged: this qualifies the count, it does
+    # not shrink it.
+    assert '<span class="ribbon-num">3</span>' in ribbon
+
+
+def test_the_closing_cell_carries_the_provenance_sentence_on_hover(client):
+    """The page HAS hover, unlike the digest email, so the full provenance
+    rides in a `title` instead of eating the label."""
+    _campus_role(1, days=1, confidence=0.6)
+
+    ribbon = _ribbon(client, _user(weekly_touch_goal=14))
+
+    assert ("1 of these dates were read from the posting's own text, not a "
+            "field the board published") in ribbon
+
+
+def test_a_closing_cell_of_published_dates_claims_no_reading_of_its_own(client):
+    """Zero reported is a real state and gets no marker at all — the label
+    goes back to the bare count rather than saying "0 reported"."""
+    _campus_role(1, days=1, confidence=1.0)
+    _campus_role(2, days=2, confidence=1.0)
+
+    ribbon = _ribbon(client, _user(weekly_touch_goal=14))
+
+    assert "Closing in 10 days<" in ribbon
+    assert "reported" not in ribbon
+
+
 def test_an_empty_funnel_says_so_in_words_rather_than_drawing_zeroes(client):
     user = _user(weekly_touch_goal=14)
     body = _login_and_get(client, user)

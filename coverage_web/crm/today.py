@@ -26,6 +26,7 @@ from analytics.models import UserOpportunity
 from coverage_domain import cadence
 from coverage_domain.pipeline import BULK_RECEIVED_KIND, TOUCH_TRANSITIONS
 from directory.classify import TARGET_BUCKETS
+from directory.deadlines import closing_soon_filter
 from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
 from directory.open_runs import firm_open_runs
@@ -43,6 +44,7 @@ from .utils import (
     _mailto,
     _touch_dicts,
     _warmth_pct,
+    CONFIRMED_CONFIDENCE,
     confirmed_firm_dates,
     firm_date_confidence,
     local_date,
@@ -2992,7 +2994,26 @@ def _dashboard_context(user) -> dict:
     today = timezone.localdate()
 
     campus = Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
-    closing_10 = campus.filter(deadline__range=(today, today + timedelta(days=9))).count()
+    # THE WINDOW COMES FROM `directory.deadlines`, NOT FROM HERE. This line
+    # used to spell `deadline__range=(today, today + timedelta(days=9))` — a
+    # second, inline copy of the arithmetic that module exists to own, and the
+    # copy its own docstring names as the last thing standing between "the
+    # definitions agree today" and "the definitions cannot drift" (it still
+    # points at `crm/views.py`, where this function lived before the 2026-08-05
+    # split). My Applications' Closing Soon lens and the weekly digest both
+    # call `closing_soon_filter`; now so does the number the ribbon shouts.
+    closing = closing_soon_filter(campus, today=today)
+    closing_10 = closing.count()
+    # HOW MANY OF THOSE DATES ARE OURS RATHER THAN THE FIRM'S. `confidence`
+    # is the one provenance carrier on an Opportunity: 1.0 means a provider
+    # published the deadline as a structured field, anything below it means
+    # Coverage read the date out of the posting's prose
+    # (`directory.views.deadline_provenance`, `crm.calendar_views._is_reported`
+    # — same test, stated once each). On the live board that is 96% of dated
+    # open campus roles, so an unqualified urgent number over this window is
+    # mostly reporting our own reading back as the market's calendar. The
+    # ribbon says how many, in the same word every other surface uses.
+    closing_10_reported = closing.filter(confidence__lt=CONFIRMED_CONFIDENCE).count()
 
     firm_ids = set(UserFirm.objects.for_user(user).values_list("firm_id", flat=True))
     # Minus the ones this student has said are not for them. This cell is a
@@ -3052,6 +3073,7 @@ def _dashboard_context(user) -> dict:
         "dash": {
             "at_your_firms": at_your_firms,
             "closing_10": closing_10,
+            "closing_10_reported": closing_10_reported,
             "eligible_unsaved": eligible_unsaved,
             # Whether the eligibility check RAN. Zero eligible-unsaved means
             # two very different things — "you saved them all" versus "you

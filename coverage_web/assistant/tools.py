@@ -99,7 +99,9 @@ from directory.classify import TARGET_BUCKETS
 from directory.deadlines import is_posting_closed
 from directory.models import Firm, FirmDate, Opportunity
 from directory.recommend import cycle_choices
-from directory.views import _apply_region_filter, _STAGE_LABELS
+from directory.views import (
+    _apply_region_filter, _STAGE_LABELS, deadline_provenance,
+)
 
 from .models import AdvisorMemory
 from .situation import build_situation
@@ -238,6 +240,27 @@ def _iso(value) -> str | None:
     return value.isoformat() if value else None
 
 
+def _deadline_source(o) -> str | None:
+    """Which KIND of fact this row's deadline is.
+
+    Borrowed from `deadline_provenance` rather than restated, so the advisor
+    and the board can never drift apart on what counts as a published date:
+    it returns a "reported" marker for a deadline our own regex read out of
+    the posting's prose, and None for one the board handed us as a field.
+
+    This has to travel as data because the distinction cannot survive the
+    trip. Every visual surface carries it as a dotted underline the reader
+    can hover; a sentence in a chat reply has no underline to carry, so
+    without this field the model sees a bare date and no way to know it is
+    our reading. On the live board the split is 327 prose-read to 14
+    published, which is why a payload that says nothing is not neutral - it
+    presents the rare case as the normal one.
+    """
+    if o.deadline is None:
+        return None
+    return "reported" if deadline_provenance(o) else "stated"
+
+
 def _today(user):
     """The student's own date. `accounts.middleware.TimezoneMiddleware` has
     already activated `User.timezone` for the request, so `localdate()` is
@@ -344,8 +367,11 @@ TOOL_SCHEMAS: list[dict] = [
         "description": (
             "Open campus roles on Coverage's board — insight programmes, "
             "internships and entry-level roles only. Filter by market, firm, "
-            "free text, or how soon they close. Deadlines here are what the "
-            "firm published; a role with no deadline simply never stated one."
+            "free text, or how soon they close. Every dated role carries a "
+            "`deadline_source`: `stated` means the board published that "
+            "date as a field, `reported` means Coverage read it out of "
+            "the posting's own text and it may be wrong. Most are "
+            "`reported`. A role with no deadline simply never stated one."
         ),
         "strict": True,
         "input_schema": _schema(
@@ -916,6 +942,7 @@ def _search_opportunities(user, args) -> dict:
             "location": _s(o.location, 120),
             "region": o.region or "unstated",
             "deadline": _iso(o.deadline),
+            "deadline_source": _deadline_source(o),
             "days_left": (o.deadline - today).days if o.deadline else None,
             "url": _s(o.url, 300),
         }
@@ -1107,6 +1134,7 @@ def _get_my_pipeline(user, _args) -> dict:
                 "title": _s(o.title, 160),
                 "firm": _s(o.firm.name, 120),
                 "deadline": _iso(o.deadline),
+                "deadline_source": _deadline_source(o),
                 "days_left": (o.deadline - today).days if o.deadline else None,
                 # `is_posting_closed`, not `status == "open"`. The two are
                 # NOT complements: `Opportunity.status` is a bare CharField
@@ -1452,6 +1480,7 @@ def _track_opportunity(user, args) -> dict:
         "title": _s(opp.title, 160),
         "firm": _s(opp.firm.name, 120),
         "deadline": _iso(opp.deadline),
+        "deadline_source": _deadline_source(opp),
         "undo": "The student can unsave this from the Opportunities page.",
     }
     # THE SAVE STILL HAPPENS, THE SENTENCE ABOUT IT CHANGES. Ids reach this

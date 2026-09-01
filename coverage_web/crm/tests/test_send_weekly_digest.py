@@ -166,3 +166,103 @@ def test_two_users_one_quiet_one_due_only_the_due_one_is_mailed(mailoutbox):
     _run()
 
     assert [m.to[0] for m in mailoutbox] == ["loud@example.com"]
+
+
+# ---------------------------------------------------------------------------
+# THE PROVENANCE MARKER SURVIVES THE INBOX.
+#
+# `Opportunity.confidence` is the one carrier for where a deadline came from:
+# 1.0 means a provider published it as a structured field, anything under it
+# means Coverage read the date out of the posting's own prose. Measured on the
+# live board, 96% of dated open campus roles are the second kind.
+#
+# Six web surfaces mark that with a dotted underline plus a `title` holding
+# `deadline_provenance`'s `why`. An email has neither hover nor tooltip, and a
+# mail client's sanitizer strips the styling anyway — so the digest was
+# printing a prose-read date exactly the way it printed a firm-published one.
+# The .ics feed hit the same constraint on a phone lock screen and answered it
+# by putting the marker in the SUMMARY as words (crm/calendar_views.py); these
+# pin the digest to that answer, in BOTH parts of the pair, because some
+# clients render only the plain-text half.
+# ---------------------------------------------------------------------------
+def _parts(msg) -> tuple[str, str]:
+    """(plain text, html) — the two halves every one of these checks twice."""
+    html = next(body for body, mime in msg.alternatives if mime == "text/html")
+    return msg.body, html
+
+
+def _closing_opp_with_confidence(user, n, confidence, *, days=2):
+    o = _closing_opp(user, n=n, days=days)
+    o.confidence = confidence
+    o.save(update_fields=["confidence"])
+    return o
+
+
+def test_a_prose_read_deadline_is_marked_reported_in_both_parts(mailoutbox):
+    user = _user("prose@example.com")
+    _closing_opp_with_confidence(user, 1, 0.6)
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    # Words, not styling: readable with the stylesheet stripped and with no
+    # pointer to hover with.
+    assert "(reported)" in text
+    assert "(reported)" in html
+    # Beside the countdown it qualifies, not floating loose in the row.
+    assert "closes in 2 days (reported)" in text
+
+
+def test_a_deadline_the_board_published_gets_no_marker_in_either_part(mailoutbox):
+    """The marker means something because it is not on everything. A
+    confidence of 1.0 is the firm's own stated field and is quoted plainly."""
+    user = _user("stated@example.com")
+    _closing_opp_with_confidence(user, 1, 1.0)
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    assert "reported" not in text
+    assert "reported" not in html
+    assert "closes in 2 days" in text
+
+
+def test_the_marker_is_explained_once_per_digest_not_once_per_row(mailoutbox):
+    """An inbox has nowhere to put the `why` that every web surface hangs off
+    a `title`, so the digest spells it out — as a key under the section, once,
+    however many rows carry the marker."""
+    user = _user("legend@example.com")
+    _closing_opp_with_confidence(user, 1, 0.6, days=2)
+    _closing_opp_with_confidence(user, 2, 0.6, days=3)
+    _closing_opp_with_confidence(user, 3, 1.0, days=4)
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    why = "Read from the posting's own text, not a field the board published"
+    assert text.count(why) == 1
+    # The HTML half escapes the apostrophe; the sentence is the same one.
+    assert html.count(why.replace("'", "&#x27;")) == 1
+    # Two of the three rows carry the marker, and the third does not. Named
+    # by countdown so a failure says WHICH row changed sides.
+    assert "closes in 2 days (reported)" in text
+    assert "closes in 3 days (reported)" in text
+    assert "closes in 4 days (reported)" not in text
+    # Two rows plus the key itself, which opens with the marker it explains.
+    assert text.count("(reported)") == 3
+
+
+def test_a_digest_with_no_prose_read_dates_prints_no_key_for_a_missing_marker(
+    mailoutbox,
+):
+    """The key is not boilerplate. Nothing in this digest is our own reading,
+    so there is no marker to explain and the section stays clean."""
+    user = _user("nokey@example.com")
+    _closing_opp_with_confidence(user, 1, 1.0, days=2)
+    _closing_opp_with_confidence(user, 2, 1.0, days=3)
+
+    _run()
+
+    text, html = _parts(mailoutbox[0])
+    assert "Read from the posting" not in text
+    assert "Read from the posting" not in html

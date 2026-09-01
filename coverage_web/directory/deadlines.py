@@ -14,12 +14,14 @@ The window is deliberately kept as a *length* rather than a pair of dates:
 `today` is a parameter everywhere so tests can pin it, and no caller has to
 re-derive the off-by-one.
 
-STATUS: `crm/views.py` still inlines its own copy of the arithmetic. That file
-is outside this change's ownership, so it was left alone; switching it to
-`closing_soon_filter(campus)` is a one-line follow-up and is the only thing
-standing between "the definitions agree today" and "the definitions cannot
-drift". `test_closing_soon.py` pins the equivalence in the meantime, so the
-two implementations diverging will fail the suite rather than ship silently.
+STATUS: settled 2026-09-01. The second implementation is gone — the Today
+dashboard now counts through `closing_soon_filter` like everything else. (It
+had also moved: the inline copy went from `crm/views.py` to `crm/today.py` in
+the 2026-08-05 split, so this paragraph named the wrong file for a month, and
+a note that points at the wrong file is worse than no note.) The definitions
+can no longer drift because there is only one; `test_closing_soon.py` keeps
+the guard by pinning that the widget follows `CLOSING_SOON_DAYS` when it
+moves, rather than merely agreeing with a second copy on today's data.
 
 `is_posting_closed` lives here for the same reason the window does. It answers
 the other half of "does this row still deserve urgency", and four surfaces

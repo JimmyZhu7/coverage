@@ -1570,3 +1570,69 @@ def test_a_blank_message_id_never_deduplicates_anything():
     tools.execute(u, "log_touch", {"contact_id": c.id, "kind": "outreach", "channel": "email"}, "")
 
     assert Touch.objects.for_user(u).filter(contact=c).count() == 2
+
+
+# ---------------------------------------------------------------------------
+# Deadline provenance has to survive into the advisor.
+#
+# Measured on the live board 2026-09-01: of 341 dated open campus roles, 14
+# came from a provider's structured field and 327 were our own regex reading
+# the posting's prose — 96%. Every visual surface carries that distinction as
+# a dotted underline the reader can hover. A sentence in a chat reply has no
+# underline, so the tool payload is the only place it can travel, and the
+# tool description used to assert the opposite outright: "Deadlines here are
+# what the firm published."
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_deadline_source_names_a_prose_read_date_as_reported(firm):
+    o = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        deadline=timezone.localdate() + timedelta(days=10),
+        confidence=0.6, url="https://north.example/jobs/reported")
+    assert tools._deadline_source(o) == "reported"
+
+
+@pytest.mark.django_db
+def test_deadline_source_names_a_board_published_date_as_stated(firm):
+    o = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        deadline=timezone.localdate() + timedelta(days=10),
+        confidence=1.0, url="https://north.example/jobs/stated")
+    assert tools._deadline_source(o) == "stated"
+
+
+@pytest.mark.django_db
+def test_deadline_source_is_none_when_there_is_no_date_to_qualify(firm):
+    o = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        deadline=None, url="https://north.example/jobs/undated")
+    assert tools._deadline_source(o) is None
+
+
+@pytest.mark.django_db
+def test_search_results_carry_provenance_beside_every_deadline(user, firm):
+    """A bare date in the payload is not neutral. With 96% of the board
+    prose-read, a payload that says nothing hands the model the rare case as
+    though it were the normal one."""
+    Opportunity.objects.create(
+        firm=firm, title="2028 Summer Analyst", bucket="internship",
+        region="hk", status="open",
+        deadline=timezone.localdate() + timedelta(days=10),
+        confidence=0.6, url="https://north.example/jobs/searchable")
+    out, _ = _call(user, "search_opportunities", {})
+    dated = [r for r in out["roles"] if r.get("deadline")]
+    assert dated, "fixture should have produced at least one dated row"
+    for row in dated:
+        assert row["deadline_source"] in ("reported", "stated")
+
+
+def test_the_tool_description_no_longer_claims_the_firm_published_these_dates():
+    """The specific false sentence, pinned so it cannot come back. It was
+    false for 327 of 341 dated rows."""
+    spec = next(t for t in tools.TOOL_SCHEMAS
+                if t["name"] == "search_opportunities")
+    text = spec["description"]
+    assert "what the firm published" not in text
+    assert "deadline_source" in text
+    assert "reported" in text

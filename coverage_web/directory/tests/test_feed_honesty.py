@@ -1326,3 +1326,69 @@ def test_an_estimated_deadline_never_reaches_the_firm_page_as_a_day_count(client
     # "this month" or "next month" depending on where +4 days lands; the
     # assertion that matters is the word, not which of the two.
     assert "Estimated" in body
+
+
+# ---------------------------------------------------------------------------
+# The silent-staleness gap: a board that fails OUTRIGHT froze both timestamps
+# together, so the relative `last_checked > last_verified` test above went
+# quiet on exactly the rows it existed to warn about.
+#
+# Measured on live data 2026-09-01: 92 open campus rows more than 3 days
+# stale, 37 of them silent under the relative test alone, 23 of those still
+# rendering a live countdown. Every one of the 23 was HSBC, whose board had
+# been throwing an SSL error since 2026-08-25 — one card read "closes in 2
+# days" off a page last successfully read six days earlier. `health.py` had
+# been printing "stale data being presented as fresh" for that firm to an
+# operator-only channel the whole time.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_unconfirmed_note_fires_when_a_dead_board_froze_both_stamps():
+    """The HSBC shape. No check ever FAILED — the connector stopped running
+    at all, so `last_checked` never ran ahead of `last_verified` and the
+    relative test read the row as cleanly confirmed. Absolute age is the only
+    evidence left, and it has to be enough."""
+    firm = _firm(slug="hsbc-dead", name="HSBC")
+    o = _opp(firm, "https://hsbc.com/frozen", deadline=(NOW + timedelta(days=2)).date())
+    stamp = NOW - timedelta(days=6)
+    Opportunity.objects.filter(pk=o.pk).update(last_checked=stamp, last_verified=stamp)
+    o.refresh_from_db()
+
+    note = _unconfirmed_note(o)
+    assert note, "a six-day-old confirmation with a live countdown must not read as fresh"
+    assert note["label"] == "Not recently confirmed live"
+    # It names the age, because "could not confirm" would be a false account
+    # of what happened: nothing came back unable to confirm, nothing ran.
+    assert "6 days" in note["why"]
+    assert "could not confirm it is" not in note["why"]
+
+
+@pytest.mark.django_db
+def test_unconfirmed_note_stays_quiet_on_a_recent_clean_confirmation():
+    """The other half of the same rule. Absolute age must not turn the note
+    into noise on every card: a row confirmed yesterday, by a check that
+    succeeded, says nothing. Without this the threshold could drift down to
+    where 2,700 rows all carry a warning and the warning stops meaning
+    anything."""
+    firm = _firm(slug="ubs-fresh", name="UBS")
+    o = _opp(firm, "https://ubs.com/fresh")
+    stamp = NOW - timedelta(days=1)
+    Opportunity.objects.filter(pk=o.pk).update(last_checked=stamp, last_verified=stamp)
+    o.refresh_from_db()
+    assert _unconfirmed_note(o) == {}
+
+
+@pytest.mark.django_db
+def test_unconfirmed_note_still_names_a_failed_check_as_a_failed_check():
+    """A check that RAN and came back unable to reconfirm is a different fact
+    from a board we could not reach, and keeps its own wording even once the
+    row is also old enough to trip the absolute test. Both are true; the
+    specific one is the honest one."""
+    firm = _firm(slug="jpm-failed", name="J.P. Morgan")
+    o = _opp(firm, "https://jpmc.oraclecloud.com/failed")
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=NOW - timedelta(days=9), last_checked=NOW)
+    o.refresh_from_db()
+    note = _unconfirmed_note(o)
+    assert "could not confirm it is" in note["why"]
+    assert "9 days" not in note["why"]

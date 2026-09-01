@@ -36,6 +36,23 @@ the product.
       </span>
     </td>
   </tr>
+  {% comment %}
+  THE PROVENANCE MARKER IS WORDS HERE, NOT STYLING. Every other surface marks a
+  prose-read deadline with a dotted underline and a `title` holding
+  `item.reported.why` (_card.html, _rolecard.html, _role_drawer.html,
+  _scope.html, _apps_body.html, _calendar_event.html). Mail has no hover and no
+  tooltip, and a client's CSS sanitizer would strip the underline anyway, so
+  both of those carry zero signal in an inbox. The .ics feed already hit this
+  exact constraint on a phone lock screen and answered it the same way — the
+  marker rides in the SUMMARY, spelled out (crm/calendar_views.py) — so this
+  follows it rather than inventing a second answer.
+
+  `item.reported` is `directory.views.deadline_provenance`, set only when
+  `Opportunity.confidence` is under 1.0: Coverage read the date out of the
+  posting's prose rather than quoting a field the board published. That is 96%
+  of dated open campus roles on the live board, so the digest was rendering our
+  own reading as the firm's stated fact on nearly every row it sent.
+  {% endcomment %}
   {% for item in digest.closing %}
   <tr>
     <td style="padding:12px 32px;{% if not forloop.last %}border-bottom:1px solid #d7dccd;{% endif %}">
@@ -49,12 +66,34 @@ the product.
           </td>
           <td align="right" style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;color:{% if item.urgency.key == 'now' %}#9d2b23{% else %}#2f6a45{% endif %};white-space:nowrap;padding-left:12px;">
             {{ item.deadline.countdown }}
+            {% comment %}
+            Its own line, in the muted ink rather than the countdown's urgency
+            red/green: the marker qualifies the date, it is not a second alarm.
+            Same cell so it cannot be read as belonging to the next row.
+            {% endcomment %}
+            {% if item.reported %}<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;margin-top:3px;">({{ item.reported.label }})</div>{% endif %}
           </td>
         </tr>
       </table>
     </td>
   </tr>
   {% endfor %}
+  {% comment %}
+  The key for that marker, printed once and only when a row actually carries
+  it. A second pass over the same list rather than a flag on the context,
+  because `crm.digest` assembles rows and states no section-level facts;
+  `{% ifchanged %}` keeps its state in the enclosing `forloop`, so the constant
+  block renders on the first reported row and is suppressed on every one after
+  it. Rows that are NOT reported never enter the block, so they cannot reset
+  it.
+  {% endcomment %}
+  {% for item in digest.closing %}{% if item.reported %}{% ifchanged %}
+  <tr>
+    <td style="padding:10px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;line-height:1.5;">
+      ({{ item.reported.label }}): {{ item.reported.why }}.
+    </td>
+  </tr>
+  {% endifchanged %}{% endif %}{% endfor %}
   {% endif %}
 
   {% if digest.actions %}

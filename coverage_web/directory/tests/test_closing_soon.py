@@ -5,10 +5,17 @@ The Today dashboard has a "closing in 10 days" stat card; My Applications has a
 Closing Soon section. If those definitions ever drift, the product has told one
 student two different things about the same set of dates.
 
-`directory/deadlines.py` holds the single definition. `crm/views.py` still
-inlines its own copy of the arithmetic (it is outside this change's ownership),
-so the first test below pins the two against each other on identical fixtures —
-the day someone edits one and not the other, this fails instead of shipping.
+`directory/deadlines.py` holds the single definition, and as of 2026-09-01 the
+Today widget CALLS it: `crm.today._dashboard_context` used to spell
+`deadline__range=(today, today + timedelta(days=9))` inline, and now reads
+`closing_soon_filter`. The first test below no longer pins two implementations
+against each other — there is one — but it stays as the guard that the widget's
+number is still the shared window's number and not a fresh inline copy.
+
+(`deadlines.py`'s own docstring still carries a STATUS paragraph naming
+`crm/views.py` as the outstanding duplicate. That module was outside this
+change's file scope; the paragraph is now stale in two ways — the duplicate is
+gone, and the code moved to `crm/today.py` in the 2026-08-05 split.)
 """
 
 from __future__ import annotations
@@ -82,9 +89,9 @@ def test_a_rolling_role_is_never_closing_soon():
 
 @pytest.mark.django_db
 def test_shared_window_agrees_with_the_today_widget(board):
-    """The load-bearing test. `crm/views._dashboard_context` computes
-    `closing_10` with its own inline arithmetic; `closing_soon_filter` is the
-    shared definition. On identical rows they must produce the same number."""
+    """The load-bearing test. `closing_soon_filter` is the shared definition
+    and `_dashboard_context`'s `closing_10` now calls it; on identical rows
+    they must produce the same number, whoever edits which."""
     user = _user()
     campus = Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
 
@@ -94,6 +101,71 @@ def test_shared_window_agrees_with_the_today_widget(board):
     # Named rather than counted, so a failure says WHICH edge moved.
     assert shared_ids == {board["today"].id, board["last_in"].id}
     assert len(shared_ids) == today_widget == 2
+
+
+@pytest.mark.django_db
+def test_the_today_widget_counts_through_the_shared_helper(board, monkeypatch):
+    """Not merely "the two numbers agree today" — the widget must go THROUGH
+    `closing_soon_filter`, which is the only property that keeps them from
+    drifting the next time the window moves.
+
+    Pinned by moving the window rather than by mocking: `CLOSING_SOON_DAYS`
+    is patched to 1 (today only), and the widget has to follow it down to 1
+    row. An inline `timedelta(days=9)` would keep answering 2.
+    """
+    import directory.deadlines as deadlines
+
+    monkeypatch.setattr(deadlines, "CLOSING_SOON_DAYS", 1)
+    assert _dashboard_context(_user())["dash"]["closing_10"] == 1
+
+
+# ---------------------------------------------------------------------------
+# ...and what the count is EVIDENCE for.
+#
+# `Opportunity.confidence` is the one provenance carrier: 1.0 means a provider
+# published the deadline as a structured field, anything under it means
+# Coverage read the date out of the posting's prose. On the live board that is
+# 96% of dated open campus roles, so an unqualified urgent number over this
+# window is mostly our own reading wearing the firm's authority.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_the_widget_says_how_many_of_the_closing_dates_are_our_own_reading():
+    firm = Firm.objects.create(name="Lazard", slug="lazard")
+    stated = _opp(firm, 20, days=1)
+    stated.confidence = 1.0          # the board published a deadline field
+    stated.save(update_fields=["confidence"])
+    prose_a = _opp(firm, 21, days=2)  # default 0.0 — our regex read the text
+    prose_b = _opp(firm, 22, days=3)
+    _opp(firm, 23, days=CLOSING_SOON_DAYS)  # outside the window, counts for neither
+
+    dash = _dashboard_context(_user())["dash"]
+
+    assert dash["closing_10"] == 3
+    assert dash["closing_10_reported"] == 2
+    # Named, so a failure says WHICH row changed sides. The stated row is
+    # inside the window and still not reported: the marker counts provenance,
+    # never urgency.
+    reported_ids = set(
+        closing_soon_filter(
+            Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS),
+            today=TODAY,
+        ).filter(confidence__lt=1.0).values_list("id", flat=True)
+    )
+    assert reported_ids == {prose_a.id, prose_b.id}
+    assert stated.id not in reported_ids
+
+
+@pytest.mark.django_db
+def test_a_window_of_only_stated_dates_carries_no_reported_count(board):
+    """Zero is a real answer and must not be dressed up. Every fixture row
+    gets a published deadline field, so nothing in the window is our reading
+    and the ribbon has no marker to show."""
+    Opportunity.objects.update(confidence=1.0)
+
+    dash = _dashboard_context(_user())["dash"]
+
+    assert dash["closing_10"] == 2
+    assert dash["closing_10_reported"] == 0
 
 
 # ---------------------------------------------------------------------------

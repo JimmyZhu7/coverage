@@ -6,11 +6,36 @@ default regardless of the .txt extension; only an explicit tag turns it off).
 {% endcomment %}Coverage · your week of {{ digest.today|date:"N j" }}
 {% if digest.closing %}
 CLOSING THIS WEEK
-{% for item in digest.closing %}
+{% comment %}
+`(reported)` rides in the countdown line, spelled out, for the same reason the
+.ics feed puts it in the SUMMARY rather than the DESCRIPTION
+(crm/calendar_views.py): the surface has no hover. Every OTHER surface marks a
+prose-read date with a dotted underline plus a `title` carrying
+`item.reported.why` (_card.html, _rolecard.html, _role_drawer.html, _scope.html,
+_apps_body.html, _calendar_event.html); in an inbox both of those convey exactly
+nothing, and a mail client's sanitizer would strip the styling anyway. So the
+marker is words, in both halves of this pair.
+
+`item.reported` is `directory.views.deadline_provenance` — set only when
+`Opportunity.confidence` is below 1.0, i.e. Coverage read the date out of the
+posting's own prose instead of quoting a field the board published. On the live
+board that is 96% of dated open campus roles, so a digest that dropped the
+marker was presenting our own reading as the firm's statement on nearly every
+row it printed.
+{% endcomment %}{% for item in digest.closing %}
 * {{ item.firm_name }} · {{ item.title }}{% if item.location %} · {{ item.location }}{% endif %}
-  {{ item.stage_label }} · {{ item.deadline.countdown }} ({{ item.deadline.label }})
+  {{ item.stage_label }} · {{ item.deadline.countdown }}{% if item.reported %} ({{ item.reported.label }}){% endif %} ({{ item.deadline.label }})
   {{ item.url }}
-{% endfor %}{% endif %}{% if digest.actions %}
+{% endfor %}{% comment %}
+The key for that marker, printed once and only when a row actually carries it.
+A second pass over the same list rather than a flag on the context, because
+`crm.digest` assembles rows and states no section-level facts; `{% ifchanged %}`
+keeps its state in the enclosing `forloop`, so the constant block renders on the
+first reported row and is suppressed on every one after it. Rows that are NOT
+reported never enter the block, so they cannot reset it.
+{% endcomment %}{% for item in digest.closing %}{% if item.reported %}{% ifchanged %}
+({{ item.reported.label }}): {{ item.reported.why }}.
+{% endifchanged %}{% endif %}{% endfor %}{% endif %}{% if digest.actions %}
 WHO TO PING
 {% for a in digest.actions %}
 * {{ a.contact.name }} · {{ a.firm_name }} · {{ a.label }}
