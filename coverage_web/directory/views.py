@@ -1826,6 +1826,21 @@ _FACT_CHIP_ORDER = ("sponsorship", "study", "language", "pay", "grad", "gpa",
                     "duration", "cover_letter", "transcript", "assessment")
 _FACT_CHIPS_MAX = 2
 
+# The two verdict kinds `_language_fit` issues. Neither blocks — see that
+# function for why a posting's language line is a warning at most.
+_LANGUAGE_KINDS = ("language_warn", "language_ok")
+
+
+def _language_chip_label(fact, lang_verdict) -> str:
+    """The language chip's text: the personal reading when the student has
+    stated their languages ("Mandarin needed · not in your profile",
+    "Mandarin · you speak it"), the posting's bare fact ("Mandarin needed")
+    when they have not — which is exactly the chip this feed showed before
+    `User.languages` existed."""
+    if lang_verdict:
+        return lang_verdict["label"]
+    return f"{fact['value']} needed"
+
 # A class-standing fact ("Penultimate year", "Final year", "First year" — see
 # facts.py's `_STUDY_STAGE`) and a grad-year fact, BOTH stated by the same
 # posting, are two spellings of one requirement often enough to merge — but
@@ -1928,6 +1943,15 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     facts = (o.raw or {}).get("facts") or {}
     made = {}
     kind = (verdict or {}).get("kind")
+    # The language answer, wherever `_eligibility` put it: as the verdict
+    # itself when nothing else spoke, or riding on a year verdict under
+    # `verdict["language"]` — see `_eligibility` for why it never outranks
+    # the year branch. A visa verdict returns before language is read at all
+    # and carries no such key, so under a visa wall the chip stays the bare
+    # fact. None for anonymous visitors and for students who have not filled
+    # Languages in, which leaves the chip exactly as it always was.
+    lang_verdict = (verdict if kind in _LANGUAGE_KINDS
+                    else (verdict or {}).get("language"))
 
     # SPONSORSHIP, WITH ITS SOURCE. Read through `effective_sponsorship`, not
     # off `o.sponsorship` — that was the last surface still reading the raw
@@ -1971,7 +1995,7 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     labels = {
         "pay": lambda f: f["value"],
         "study": lambda f: f["value"],
-        "language": lambda f: f"{f['value']} needed",
+        "language": lambda f: _language_chip_label(f, lang_verdict),
         "grad": lambda f: f"Grad {f['value']}",
         "gpa": lambda f: f"GPA {f['value']} pref." if f.get("hedge") else f"GPA {f['value']}",
         "duration": lambda f: f["value"],
@@ -1988,6 +2012,8 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     for fact_kind, label in labels.items():
         if fact_kind == "grad" and kind == "year_out":
             continue           # the verdict beside it already says this
+        if fact_kind == "language" and kind in _LANGUAGE_KINDS:
+            continue           # the verdict beside it already says this
         if fact_kind == "study" and standing_merge:
             continue           # merges into the grad chip below instead
         fact = facts.get(fact_kind)
@@ -1999,6 +2025,14 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
             continue           # true of ~every row this feed can show at all
         entry = {"label": label(fact), "css": css.get(fact_kind, "fact-plain"),
                  "why": fact.get("phrase", "")}
+        if fact_kind == "language" and lang_verdict:
+            # The personal reading rides on a year verdict here, so the chip
+            # carries it: a match reads green ("you speak it"); a miss keeps
+            # the wall styling, because the posting's own words did not
+            # change — only what the reader knows about themselves did.
+            entry["css"] = ("fact-ok" if lang_verdict["kind"] == "language_ok"
+                            else css["language"])
+            entry["why"] = lang_verdict["why"]
         if fact_kind == "grad" and standing_merge:
             # One chip, both sentences: the label carries the stage AND the
             # year, and the tooltip keeps the stage phrase's own evidence
@@ -2020,14 +2054,80 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
 def _eligibility_profile(user):
     """What the signed-in user has stated about themselves, for verdicts.
     None for anonymous visitors and users who have stated nothing — a
-    verdict requires BOTH sides to have spoken."""
+    verdict requires BOTH sides to have spoken.
+
+    `languages` and `study_level` ride along (2026-09-01) for the lenses that
+    read them: `_language_fit` below, and the year branch's reader of
+    `study_level`. Both through `getattr` like the rest, so a user-shaped
+    stub without the newer columns still yields a profile. `languages` is
+    normalised here — stripped, lowercased — so every reader compares the
+    same spelling against the extractor's title-cased names."""
     if not getattr(user, "is_authenticated", False):
         return None
     class_year = getattr(user, "class_year", None)
     work_auth = getattr(user, "work_authorization", None) or {}
-    if not class_year and not work_auth:
+    languages = [
+        str(lang).strip().lower()
+        for lang in (getattr(user, "languages", None) or [])
+        if str(lang).strip()
+    ]
+    study_level = (getattr(user, "study_level", "") or "").strip()
+    if not class_year and not work_auth and not languages and not study_level:
         return None
-    return {"class_year": class_year, "work_auth": work_auth}
+    return {"class_year": class_year, "work_auth": work_auth,
+            "languages": languages, "study_level": study_level}
+
+
+def _language_fit(o, profile):
+    """A posting's stated language read against the languages the student
+    said they can work in — a warning or a match, and NEVER a wall.
+
+    Two findings drive the design. The gate is real: Barclays' Hong Kong
+    posting states "fluent in written Chinese and spoken Mandarin if applying
+    to the role in Hong Kong SAR", and practitioners put Mandarin on about
+    95% of first-year HK IB desks. And the gate is mostly unstated: 8 HK
+    campus rows on the live board carry a Mandarin fact, and the rest are
+    silent and no less gated. So the language has to be a fact about the
+    STUDENT (`User.languages`) matched against the posting's own words,
+    never inferred from postings alone — and a posting that names a language
+    the student lacks must not block, because the line is often softer than
+    it reads and the real gate lives in the silent rows this function cannot
+    see. A block here would hide the one posting in seven that was honest
+    enough to say so, and none of the six that were not.
+
+    Both sides must have spoken, per the verdict contract: no stated
+    language means None, and a student with no languages listed gets None
+    too, which leaves their card exactly as it was before the field existed.
+    """
+    spoken = {
+        str(lang).strip().lower()
+        for lang in (profile or {}).get("languages") or []
+        if str(lang).strip()
+    }
+    if not spoken:
+        return None
+    fact = ((o.raw or {}).get("facts") or {}).get("language") or {}
+    # `langs` is the extractor's own list; rows extracted before it carried
+    # one have only `value`, the " · "-joined display string.
+    named = [str(l).strip() for l in (fact.get("langs") or []) if str(l).strip()]
+    if not named:
+        named = [p.strip() for p in str(fact.get("value") or "").split("·")
+                 if p.strip()]
+    if not named:
+        return None
+    phrase = fact.get("phrase", "")
+    missing = [lang for lang in named if lang.lower() not in spoken]
+    if missing:
+        return {"kind": "language_warn", "blocking": False,
+                "label": f"{missing[0]} needed · not in your profile",
+                "why": (f"{phrase} Your profile does not list {missing[0]}. "
+                        "Add it in Settings if you can work in it; this "
+                        "never hides a role.").strip()}
+    shown = " · ".join(named)
+    tail = {1: "you speak it", 2: "you speak both"}.get(len(named), "you speak them")
+    return {"kind": "language_ok", "blocking": False,
+            "label": f"{shown} · {tail}",
+            "why": f"{phrase} Your profile lists {shown}.".strip()}
 
 
 def _eligibility(o, profile):
@@ -2045,6 +2145,11 @@ def _eligibility(o, profile):
     Blocking verdicts (wrong stated year, refuses-your-visa) carry
     `blocking: True`, which the fit filter and Picked-for-you read; the
     positive year match earns a chip but blocks nothing.
+
+    Language (`_language_fit`) is the third pairing, and the one that never
+    blocks: a visa verdict returns before it is read; a year verdict carries
+    it under `"language"` so the card's language chip can still say the
+    personal reading; it is the verdict itself only when both are silent.
     """
     if not profile:
         return None
@@ -2076,6 +2181,22 @@ def _eligibility(o, profile):
                             "stated policy is not to sponsor visas in this "
                             "market, and your Settings say you need "
                             "sponsorship here.")}
+    # LANGUAGE, as a warning or a match, never a wall (`_language_fit`). It
+    # sits here, after the visa branch, but must not outrank the year branch
+    # below: a blocking `year_out` is what `Candidate.blocked` and the fit
+    # filter read, and `year_ok` is what the bulk-save offer counts, so a
+    # non-blocking language chip returned first would silently un-block
+    # wrong-year roles and un-count right-year ones for exactly the students
+    # who filled the field in. So the year branch is asked first — this same
+    # function, with languages withheld (the visa branch above has already
+    # answered None for this pairing, so re-entering it changes nothing) —
+    # and the language verdict either rides along on what it says or stands
+    # alone when it says nothing. Measured live: 33 of 214 language-stating
+    # rows also state a grad window, so the ordering is not hypothetical.
+    lang = _language_fit(o, profile)
+    if lang is not None:
+        rest = _eligibility(o, {**profile, "languages": []})
+        return {**rest, "language": lang} if rest else lang
     cy = profile["class_year"]
     # The TITLE's own explicit statement ("Class of 2027") — `Opportunity.
     # class_year`, extractors.extract_class_year. This is the rarest and most

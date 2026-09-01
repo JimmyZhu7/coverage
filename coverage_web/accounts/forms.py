@@ -30,6 +30,12 @@ from coverage_domain.cadence import CADENCE_DEFAULTS
 from directory.classify import (
     REGION_LABELS, TRACKED_REGIONS, TRACK_LABELS, TRACKED_TRACKS,
 )
+# The languages the board's own extractor can recognise on a posting — the
+# module-private tuple rather than a public alias, on the same footing as
+# `clean_school_emails`' import of `capture.discovery._FREEMAIL_DOMAINS`: the
+# reader of the value owns the value, and a public copy here would be the
+# second source of truth this file keeps refusing to become.
+from directory.facts import _LANGS as _GATED_LANGUAGES
 from directory.recommend import cycle_choices
 
 # Same rule for both of these as for the ranges below: import the value from
@@ -46,7 +52,7 @@ from crm.coverage import DEFAULT_ADVOCATE_TARGET
 # is a settings page that happily saves a value the engine then ignores.
 from crm.views import TUNABLE_CADENCE_PARAMS
 
-from .models import WORK_AUTH
+from .models import STUDY_LEVEL_CHOICES, WORK_AUTH
 
 # How many school addresses one student can state. Not a storage limit — a
 # sanity ceiling, so a pasted mailing list can't become an exclusion list.
@@ -74,6 +80,24 @@ REGION_CHOICES: list[tuple[str, str]] = [
 TRACK_CHOICES: list[tuple[str, str]] = [
     (code, TRACK_LABELS[code]) for code in TRACKED_TRACKS
 ]
+
+# Working-language vocabulary: English first, then every language
+# `directory.facts.extract_languages` detects on postings, in its own order.
+# Sourced from that module rather than restated, so a language the board
+# learns to read is a language a student can claim in the same release, and
+# a student can never claim one the matcher would not recognise. Values are
+# the lowercase names `User.languages` stores; `directory.views._language_fit`
+# compares them case-blind against the title-cased names the extractor emits.
+LANGUAGE_CHOICES: list[tuple[str, str]] = [("english", "English")] + [
+    (lang, lang.title()) for lang in _GATED_LANGUAGES
+]
+
+# Affiliations: the cap is the research's own "3 to 6 entries". Fewer than
+# three is allowed (blank is a legitimate answer); more than six is refused
+# out loud, because the point of each one is that it is specific enough to
+# open an email with, and a list of twelve is a résumé, not a hook.
+AFFILIATION_LIMIT = 6
+AFFILIATION_MAX_CHARS = 160
 
 # Class year (graduation year) options, anchored to the current year so the
 # list always spans last year's grads through six years out — undergrad
@@ -219,6 +243,12 @@ class ProfileForm(forms.Form):
         required=False,
         widget=forms.Select,
     )
+    # Beside class year because it is the other half of the same answer: the
+    # year says WHEN the student finishes, this says WHAT they finish. Blank
+    # is "not stated" and stays blank — see accounts.models.STUDY_LEVEL_CHOICES.
+    study_level = forms.ChoiceField(
+        choices=STUDY_LEVEL_CHOICES, required=False, widget=forms.Select,
+    )
     target_cycles = forms.MultipleChoiceField(
         choices=[],  # set per instance in __init__, same reason as below
         required=False,
@@ -233,6 +263,28 @@ class ProfileForm(forms.Form):
         choices=TRACK_CHOICES,
         required=False,
         widget=forms.CheckboxSelectMultiple,
+    )
+    # Languages the student can work in. Same chip group as regions/tracks;
+    # choices are LANGUAGE_CHOICES plus, per instance, any stored value the
+    # list no longer carries — see __init__, which applies the target_cycles
+    # rule to this field for the same reason.
+    languages = forms.MultipleChoiceField(
+        choices=LANGUAGE_CHOICES,
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
+    # One tie per line. A textarea rather than a chip widget: each entry is a
+    # short phrase the student writes, not a value picked from a list, and
+    # the count is small enough (AFFILIATION_LIMIT) that lines are the
+    # clearest way to show where one tie ends and the next begins.
+    affiliations = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={
+            "rows": 4,
+            "placeholder": ("Consulting club, e-board\n"
+                            "London M&A boutique, summer intern\n"
+                            "Grew up in Hong Kong"),
+        }),
     )
     # Lives in Profile rather than a section of its own: it is a fact about the
     # student, in the same breath as school and target regions. Choices are set
@@ -281,6 +333,17 @@ class ProfileForm(forms.Form):
         if stale:
             choices = choices + [(v, f"{v} (no longer offered)") for v in stale]
         self.fields["target_cycles"].choices = choices
+        # The same rule for languages, for the same reason: a stored value
+        # the vocabulary no longer lists must render checked, not vanish from
+        # the page and then be dropped by the next save. Read from
+        # `self.initial` like the block above — the view hands the stored row
+        # in on a bound form (accounts/views.py `_bound_profile_form`).
+        spoken = [v.strip() for v in (self.initial.get("languages") or []) if v.strip()]
+        lang_choices = list(LANGUAGE_CHOICES)
+        known_langs = {value for value, _ in lang_choices}
+        lang_choices += [(v, f"{v.title()} (no longer listed)")
+                         for v in spoken if v not in known_langs]
+        self.fields["languages"].choices = lang_choices
 
     def clean_avatar(self):
         """Validate and NORMALISE the upload: never store what was handed to us.
@@ -359,9 +422,12 @@ class ProfileForm(forms.Form):
                 "school": user.school,
                 "school_emails": ", ".join(user.school_emails or []),
                 "class_year": user.class_year,
+                "study_level": user.study_level,
                 "target_cycles": list(user.target_cycles or []),
                 "regions": list(user.regions or []),
                 "tracks": list(user.tracks or []),
+                "languages": list(user.languages or []),
+                "affiliations": "\n".join(user.affiliations or []),
                 # A stored zone the host's tzdata no longer carries would
                 # render as nothing selected — the same silent-clear the
                 # `target_cycles` stale-value handling exists to prevent. Here the
@@ -428,6 +494,29 @@ class ProfileForm(forms.Form):
             )
         return addresses
 
+    def clean_affiliations(self) -> list[str]:
+        """One tie per line; blank lines and repeats dropped; the cap refused
+        out loud rather than silently truncated. Returns a LIST — `apply_to`
+        writes it to the ArrayField."""
+        raw = self.cleaned_data.get("affiliations") or ""
+        ties: list[str] = []
+        for line in raw.splitlines():
+            tie = " ".join(line.split())
+            if not tie or tie in ties:
+                continue
+            if len(tie) > AFFILIATION_MAX_CHARS:
+                raise forms.ValidationError(
+                    f"Keep each tie under {AFFILIATION_MAX_CHARS} characters. "
+                    "A club, an employer, a hometown: enough to open an email with."
+                )
+            ties.append(tie)
+        if len(ties) > AFFILIATION_LIMIT:
+            raise forms.ValidationError(
+                f"That's more than {AFFILIATION_LIMIT}. Keep the ones you'd "
+                "actually open an email with."
+            )
+        return ties
+
     def clean_timezone(self) -> str:
         """AUTO and blank both pass through untouched; anything else must name
         a zone `zoneinfo` actually knows, so the middleware's read can never be
@@ -446,15 +535,19 @@ class ProfileForm(forms.Form):
         `is_valid()`."""
         cd = self.cleaned_data
         update_fields = ["name", "school", "school_emails", "class_year",
-                         "target_cycles", "regions", "tracks", "timezone",
+                         "study_level", "target_cycles", "regions", "tracks",
+                         "languages", "affiliations", "timezone",
                          "timezone_auto"]
         user.name = cd["name"]
         user.school = cd["school"]
         user.school_emails = cd["school_emails"]
         user.class_year = cd["class_year"]
+        user.study_level = cd["study_level"]
         user.target_cycles = cd["target_cycles"]
         user.regions = cd["regions"]
         user.tracks = cd["tracks"]
+        user.languages = cd["languages"]
+        user.affiliations = cd["affiliations"]
         # AUTO turns following back on and leaves `timezone` alone: whatever
         # the browser last reported stays correct until the next page load
         # says otherwise, and clearing it here would give the user a UTC day

@@ -196,13 +196,21 @@ def test_the_language_section_is_gone(body):
 def test_posting_a_language_no_longer_does_anything(client, logged_in):
     """The old branch dispatched on the mere PRESENCE of a `language` key,
     bypassing the section marker entirely. It must now be an unrecognised POST
-    — a no-op re-render, not a profile fallthrough."""
+    — a no-op re-render, not a profile fallthrough.
+
+    Rewritten 2026-09-01: this used to assert `logged_in.language == "en"`.
+    The column itself is gone (accounts migration 0015), so the assertion is
+    now that there is nothing left for a stray `language` key to land on —
+    and that `languages`, plural, the working-language field the Profile
+    section owns, is not touched by it either."""
     logged_in.school = "Unchanged U"
-    logged_in.save(update_fields=["school"])
+    logged_in.languages = ["mandarin"]
+    logged_in.save(update_fields=["school", "languages"])
     resp = client.post(reverse(SETTINGS), {"language": "zh"})
     assert resp.status_code == 200
     logged_in.refresh_from_db()
-    assert logged_in.language == "en"
+    assert not hasattr(logged_in, "language")
+    assert logged_in.languages == ["mandarin"]
     assert logged_in.school == "Unchanged U"
 
 

@@ -150,10 +150,17 @@ def _bound_profile_form(request) -> ProfileForm:
     Sourced from the STORED row, never from `request.POST`: reading the
     submitted data would be the easy fix and the wrong one, because it would
     let any POST invent its own cycle vocabulary and have it validate.
+
+    `languages` rides along for the same reason: `ProfileForm.__init__` keeps
+    a no-longer-listed language in that field's choices the same way, and a
+    bound form has nothing else to read it from.
     """
     return ProfileForm(
         request.POST, request.FILES,
-        initial={"target_cycles": list(request.user.target_cycles or [])},
+        initial={
+            "target_cycles": list(request.user.target_cycles or []),
+            "languages": list(request.user.languages or []),
+        },
     )
 
 
@@ -627,8 +634,11 @@ def settings_view(request):
     # 2026-07-30 (docs/specs/settings-page.md audit #3): `User.language` was
     # written by this branch and read back only to re-render the same dropdown.
     # No LocaleMiddleware, no catalogs, no {% trans %} anywhere. Picking 中文
-    # changed nothing. The column stays (harmless, already populated); the
-    # control returns with an actual i18n pass, not before.
+    # changed nothing. The column followed on 2026-09-01 (migration 0015).
+    # `User.languages`, plural, is a different fact and not a revival of this
+    # one: the languages a student can WORK in, read by the feed's eligibility
+    # lens, saved through the Profile section like every other fact about
+    # them. The interface control returns with an actual i18n pass, not before.
     section = request.POST.get("section") if request.method == "POST" else None
     if section in SECTION_FORMS:
         bound = SECTION_FORMS[section](request.POST)

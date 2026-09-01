@@ -59,7 +59,10 @@ def student():
         regions=["hk", "us"],
         tracks=["ib"],
         work_authorization={"hk": "citizen"},
-        assets={"angles": ["Rowed in college"], "advocate_target": 3},
+        study_level="undergrad",
+        languages=["english", "mandarin"],
+        affiliations=["Rowed in college"],
+        assets={"advocate_target": 3},
         cadence_params={"followup_after_business_days": 4},
         weekly_touch_goal=12,
         timezone="Asia/Hong_Kong",
@@ -354,10 +357,19 @@ def test_fit_scores_resolve_their_subject_to_a_name(student, loaded):
 
 
 def test_the_profile_row_is_exported_with_its_engine_settings(student, loaded):
+    """Rewritten 2026-09-01 when `affiliations`, `languages` and
+    `study_level` became real columns (accounts migration 0015): the row
+    used to carry `angles` (an `assets` key) and `language` (the dead
+    interface-language column). Both headings are asserted GONE, so the
+    export cannot quietly keep exporting a key nothing writes any more."""
     row = _rows(_zip(student), "profile.csv")[0]
     assert row["email"] == "exporter@example.com"
     assert row["school"] == "Test University"
-    assert "Rowed in college" in row["angles"]
+    assert "Rowed in college" in row["affiliations"]
+    assert "mandarin" in row["languages"] and "english" in row["languages"]
+    assert row["study_level"] == "undergrad"
+    assert "angles" not in row, "renamed to affiliations, not duplicated"
+    assert "language" not in row, "the dead column is gone, not exported blank"
     assert row["advocate_target"] == "3"
     assert "followup_after_business_days" in row["cadence_params"]
     assert row["weekly_touch_goal"] == "12"
