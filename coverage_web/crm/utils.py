@@ -31,7 +31,26 @@ def _calendar_days_ago(ts, *, as_of=None) -> int:
     3, and two surfaces showing the same touch disagreed on "how long ago".
     """
     as_of = as_of or timezone.now()
-    return (timezone.localtime(as_of).date() - timezone.localtime(ts).date()).days
+    return (local_date(as_of).date() - local_date(ts).date()).days
+
+
+def local_date(ts):
+    """`ts` re-expressed on the account's own clock. Same instant, one zone.
+
+    THE ONE CONVERSION every calendar-day fact about a stored timestamp has to
+    go through. `settings.TIME_ZONE` is UTC and a user's real zone is activated
+    per request by `accounts.middleware.TimezoneMiddleware`, so a raw
+    `Touch.ts.date()` answers a question nobody asked: which day it was in UTC.
+    This product has already settled that "today" means the user's today (see
+    `accounts.tests.test_timezone`), and this is the single call that enforces
+    it.
+
+    Returned as a datetime, not a date, so callers that need the day take
+    `.date()` and callers handing the value to a domain engine (which does its
+    own `.date()`) pass it straight through. Both then read the same day, which
+    is the whole point — see `_touch_dicts`.
+    """
+    return timezone.localtime(ts)
 
 
 # ---------------------------------------------------------------------------
@@ -194,9 +213,42 @@ def _warmth_pct(warmth: str) -> int:
 
 
 def _touch_dicts(touches) -> list[dict[str, Any]]:
-    """Shape Touch rows into the plain dicts the domain engines read."""
+    """Shape Touch rows into the plain dicts the domain engines read.
+
+    `ts` IS LOCALIZED HERE, at the one boundary every domain engine's touch
+    timestamps cross, rather than at any single call site.
+
+    THE BUG THIS CLOSES, measured on the founder's live account 2026-08-31.
+    `cadence.due_actions` derives its whole calendar from the zone its inputs
+    arrive in: `today = as_of.date()`, and each touch's day from
+    `_as_date(t["ts"])`. `crm.today._build_actions` was already handing it a
+    LOCAL `as_of` (`timezone.localtime(timezone.now())`, and its comment
+    explains why) while these dicts still carried UTC. His account is
+    America/Los_Angeles; Youqi Chen's `chat_scheduled` touch is stored
+    2026-08-24 01:37Z, which is 2026-08-23 18:37 where he lives. The engine
+    read Aug 24 and the card's own ledger line read Aug 23, so ONE card, in
+    ONE render, said "5 business days" in its sentence and "6 business days
+    ago" in the row beneath it. Six is the right answer: the product has a
+    `TimezoneMiddleware` and a test file establishing that "today" means the
+    user's today.
+
+    A per-call-site patch would have fixed the one card and left the next
+    caller to rediscover the same skew, so the conversion lives at the funnel:
+    everything downstream of here is on one clock by construction, and the
+    ledger line reads its day through `local_date` too.
+
+    Harmless for the other consumer. `coverage_domain.scoring` measures in
+    continuous elapsed time (`_days_between` is a float timedelta), which is
+    zone-independent, so `crm.views.contact_detail`'s two calls are unaffected
+    either way.
+    """
     return [
-        {"contact_id": t.contact_id, "ts": t.ts, "kind": t.kind, "note": t.note}
+        {
+            "contact_id": t.contact_id,
+            "ts": local_date(t.ts),
+            "kind": t.kind,
+            "note": t.note,
+        }
         for t in touches
     ]
 

@@ -519,7 +519,8 @@ def due_actions(
             `thread_state`, `region` ("us" / "hk" / "other" for known to
             be outside both markets / blank-or-absent for unknown — the
             ONLY key consulted for region; see `contact_region`),
-            `archived` (optional; truthy rows are skipped).
+            `archived` (optional; truthy rows are skipped),
+            `chat_scheduled_at` (optional; see below).
         touches: touch dicts across those contacts. Keys used: `contact_id`,
             `ts`, `kind`.
         firm_dates: shared firm_date dicts. Keys used: `firm_id`,
@@ -528,6 +529,29 @@ def due_actions(
             business-day math; `as_of` itself drives the thank-you
             "hours since chat" calculation (the original's one
             `datetime.now()` read).
+
+    CALENDAR-DAY MATH IS DECIDED BY THE ZONE ITS INPUTS ARRIVE IN. `today`
+    is `as_of.date()` and every touch date is `_as_date(t["ts"]).date()`, so
+    two timestamps naming the same instant in different zones can land on
+    different calendar days and the same event can be counted twice over.
+    Measured on the founder's live account 2026-08-31: `as_of` arrived as a
+    local (America/Los_Angeles) instant while touch rows arrived as UTC, so a
+    touch stored 2026-08-24 01:37Z (2026-08-23 18:37 local) was read as Aug 24
+    here and Aug 23 by the web layer's own ledger line, and one Today card
+    printed "5 business days" in the engine's sentence and "6 business days
+    ago" in the row directly beneath it. The engine cannot detect the skew —
+    both values are valid aware datetimes — so the contract is on the caller:
+    hand `as_of` AND every `ts` in the SAME zone, the user's own. See
+    `crm.utils._touch_dicts`, which is where that conversion now happens for
+    every caller at once.
+
+    ONE MORE OPTIONAL CONTACT KEY. `chat_scheduled_at` is the real start time
+    of a chat this contact has on the books, or absent when none is known
+    (the usual case — Coverage only learns a chat time from an .ics DTSTART).
+    Branch 2 is the only reader: with it the confirm-chat card may name the
+    day, and a time still in the future suppresses the card entirely; without
+    it the card says how long the thread has been quiet and names no day at
+    all. Same zone contract as `ts` above.
         firms: firm metadata (see `_firm_meta`).
         params: overrides for `CADENCE_DEFAULTS`.
 
@@ -683,22 +707,87 @@ def due_actions(
             # Thanked for the latest chat, or the window has closed — fall
             # through to the reping / maintain cadence below either way.
 
-        # 2. a scheduled-but-not-logged chat gone stale > 4 business days.
+        # 2. a chat being arranged that has gone quiet > 4 business days.
         if thread_state == "chat_scheduled":
+            # WHAT `bd` MEASURES, AND WHAT THE COPY USED TO CLAIM IT MEANT.
+            # `bd` is business days since the LAST TOUCH — since Coverage last
+            # logged anything about this contact. The sentence here used to
+            # render it as "chat was scheduled {bd} business days ago", which
+            # is a different fact, and on the common path not even a related
+            # one: the last touch IS the `chat_scheduled` touch (the moment a
+            # mailbox scan read scheduling-ish language), so the card dated a
+            # booking off a clock that only knows when we last wrote something
+            # down.
+            #
+            # LIVE CASE, founder's account 2026-08-31 (Youqi Chen). Her contact
+            # notes read "Replied to your email: coffee in HK, offered same-day
+            # meetup" — she OFFERED, he never confirmed, nothing was booked,
+            # and she carries zero CalendarEvents. The card still read "chat
+            # was scheduled 6 business days ago": a booking that never existed,
+            # on a date nobody ever named. Same class of defect this codebase
+            # has fixed twice already — "first seen" printed as "posted", and a
+            # "New" badge that only meant "we imported it". State what the data
+            # entails and nothing else.
+            #
+            # `chat_scheduled_at` IS USUALLY ABSENT, and that is the designed
+            # state, not a degraded one. `capture.gmail._upsert_scheduled_chat`
+            # creates a `CalendarEvent` only when the finding carried a real
+            # .ics DTSTART, and says so in its own docstring: "A finding with
+            # no time is not an error — most are — it simply makes no event."
+            # `crm.models.CalendarEvent` records that before it existed "we do
+            # not store a chat datetime anywhere". So the branch has three
+            # sentences, not one with a hole in it: one for a time we hold, one
+            # for a silence we can date, one for a contact we cannot date at
+            # all. Only the first is allowed to name a day.
+            #
+            # The key is threaded in from the Django side through the contact
+            # dict (`crm.today._build_actions`), because this package is pure
+            # and cannot reach `crm.CalendarEvent` itself.
+            sched = _as_dt(c.get("chat_scheduled_at"))
+            # A chat still ahead of us is not stale, and "did it happen?" is
+            # the wrong question to ask about it. Same guard and same reasoning
+            # as branch 1's `not_yet` above: the engine must not ask a student
+            # to confirm a conversation it can see has not occurred. Reachable
+            # whenever the booked time is further out than the silence window —
+            # a chat set three weeks ahead, then nothing logged for a week.
+            if sched is not None and sched > as_of:
+                continue
             # `bd is None` (no dateable touch on record) is treated the same
             # as "definitely stale" — the branch still needs to surface
             # SOMETHING, but the reason text below says so honestly instead
             # of rendering a 999-day sentinel as if it were a real count.
             bd = business_days_since(lt_date, today) if lt_date else None
             if bd is None or bd > 4:
-                reason = (
-                    "chat was scheduled but no touches are on record — did it "
-                    "happen? log the chat or reschedule"
-                    if bd is None else
-                    f"chat was scheduled {bd} business days ago — did it happen? "
-                    "log the chat or reschedule"
+                if sched is not None:
+                    # The only branch that may state a scheduling date,
+                    # because it is the only one holding one. ISO here on
+                    # purpose: `crm.today._prose_dates` rewrites it into the
+                    # same "Aug 24" the rest of the card speaks.
+                    reason = (
+                        f"chat was scheduled for {sched.date().isoformat()} — "
+                        "did it happen? log the chat or reschedule"
+                    )
+                elif bd is None:
+                    reason = (
+                        "a chat was being arranged and no touches are on "
+                        "record — did it happen? log the chat or reschedule"
+                    )
+                else:
+                    # No day is named, because none is held. What IS known is
+                    # how long Coverage has gone without logging anything, and
+                    # the sentence says exactly that and stops.
+                    reason = (
+                        f"a chat was being arranged, nothing logged in {bd} "
+                        "business days — did it happen? log the chat or "
+                        "reschedule"
+                    )
+                add(
+                    "confirm_chat", reason, 1, business_days=bd,
+                    # None whenever no real time is on record, which is the
+                    # normal case. A UI reading `ctx` gets the same three-way
+                    # answer the sentence does rather than having to parse it.
+                    scheduled_on=sched.date().isoformat() if sched else None,
                 )
-                add("confirm_chat", reason, 1, business_days=bd)
             continue
 
         # 3. pre-deadline re-ping for warm contacts at closing firms, scoped

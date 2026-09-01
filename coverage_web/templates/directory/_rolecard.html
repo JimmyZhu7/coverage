@@ -86,6 +86,32 @@ only reintroduce the clipping bug this file's history is full of.
       <span class="rr-kind"{% if r.cohort %} title="{{ r.cohort }} programme year"{% endif %}>{{ r.bucket_label }}{% if r.cohort %} {{ r.cohort }}{% endif %}</span>
       {% if r.class_year %}<span class="rr-cls" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
       {% comment %}
+      HOW LONG THIS ONE HAS BEEN OPEN. Last in the meta line on purpose, and
+      that placement is the whole argument for it being safe to add at all:
+      ORDER IS THE TRUNCATION POLICY (see above), so a new fact competing for
+      a ~165px line has to earn its slot or take the one that ellipsises
+      first. This takes the latter. It is about the posting's HISTORY, not
+      about the reader and not about their eligibility, so nothing that could
+      end the decision loses room to it — the verdict, the fact chips, the
+      location and the role type all keep their position ahead of it.
+
+      NOT a duration prediction, and the distinction is the reason this
+      feature shipped in this shape. See `directory.open_runs`: the obvious
+      "typically open N days" figure is measurable but wrong, because a
+      39-day observation window can only pair the postings that closed inside
+      it, and 77% of the still-open rows have already outlived the median
+      that pairing produces. This counts up from an open we watched, and
+      predicts nothing.
+
+      DATED ROWS ONLY. An undated row's `.rr-undated` span below already ends
+      with "first seen 12d ago" — the same measurement, in wording pinned by
+      a test — and printing both would be the row saying one fact twice. A
+      dated row has nowhere else that says it.
+      {% endcomment %}
+      {% if r.dated and r.open_run_days is not None %}
+        <span class="rr-open" title="Coverage watched this posting open and it is still open. Not a forecast of when it closes.">Open {% if r.open_run_days == 0 %}today{% else %}{{ r.open_run_days }}d{% endif %}</span>
+      {% endif %}
+      {% comment %}
       "first seen", never "posted": this is when the row entered OUR
       database, and a bulk import once wore "New" on 794 of 805 roles at
       once. Shortening it to "seen" in a first pass lost exactly that

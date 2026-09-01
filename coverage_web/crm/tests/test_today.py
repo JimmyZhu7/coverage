@@ -119,15 +119,19 @@ def test_last_weeks_work_does_not_count_toward_this_week():
 
 
 # ---------------------------------------------------------------------------
-# E9. "5 more touchs" — `pluralize` with no argument yields "touchs".
+# E9. The pace note's wording (2026-08-31, the founder's own phrasing:
+# "outreach this week" / "N more to go", with "touches" dropped). The old
+# copy needed a dedicated test because `pluralize` with no argument on
+# "touch" yields "touchs", not "touches" -- dropping the word retires that
+# gotcha along with the sentence, so this now just pins the current copy.
 # ---------------------------------------------------------------------------
-def test_pace_note_pluralizes_touches_correctly(client):
+def test_pace_note_reads_more_to_go(client):
     user = _user(weekly_touch_goal=14)
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
-    assert "touchs" not in body
-    # The figure is bolded now, so the sentence is not one contiguous string.
-    assert "<b>14</b> more touches to go" in body
+    assert "outreach this week" in body
+    # The figure is bolded, so the sentence is not one contiguous string.
+    assert "<b>14</b> more to go" in body
 
 
 # ---------------------------------------------------------------------------
@@ -1280,13 +1284,13 @@ def test_the_eligibility_cell_never_congratulates_an_unchecked_user(client):
     user.save(update_fields=["class_year"])
     body = client.get(reverse("crm:week")).content.decode()
     assert "Add your class year" in body
-    assert "All caught up on your year" not in body
+    assert "Caught up for Class of" not in body
 
     user.class_year = 2029
     user.save(update_fields=["class_year"])
     body = client.get(reverse("crm:week")).content.decode()
     # No open roles name 2029 in this fixture, so the all-clear is EARNED.
-    assert "All caught up on your year" in body
+    assert "Caught up for Class of 2029" in body
     assert "Add your class year" not in body
 
 

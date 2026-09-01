@@ -80,25 +80,17 @@ from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from django.db.models import Min
-from django.db.models.functions import TruncDate
 
 from directory.classify import TARGET_BUCKETS
 from directory.cycle_trust import SUSPECT, TRUSTED, classify_closes
 from directory.models import Firm, FirmCycleObservation, Opportunity, OpportunityChange
-
-
-def _onboarding_cutoff() -> dict[int, "datetime.date"]:
-    """`{firm_id: the calendar date of that firm's first-ever scraped
-    posting}`, across ALL of the firm's postings (not just campus-bucket
-    ones) — see module docstring for why this is a firm-level, not a
-    bucket-level, question."""
-    rows = (
-        Opportunity.objects.annotate(seen_date=TruncDate("first_seen"))
-        .values("firm_id")
-        .annotate(cutoff=Min("seen_date"))
-    )
-    return {r["firm_id"]: r["cutoff"] for r in rows}
+# `_onboarding_cutoff` used to be defined right here as a private helper.
+# `directory.open_runs` now shows a live posting's elapsed openness on the
+# Opportunities feed and the Today rail, and that fact needs the exact same
+# "this date means we started watching, not that this opened" cutoff — so the
+# definition moved there and this command imports it, rather than three
+# surfaces each carrying their own copy of a rule they have to agree on.
+from directory.open_runs import onboarding_cutoffs as _onboarding_cutoff
 
 
 class Command(BaseCommand):

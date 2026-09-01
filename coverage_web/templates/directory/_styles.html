@@ -787,7 +787,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     box-shadow: inset 0 3px 0 0 var(--accent), var(--shadow-1); }
   .firmcol--picked:hover { border-color: var(--accent);
     box-shadow: inset 0 3px 0 0 var(--accent), var(--shadow-2); }
-  .firmcol--picked .firmcol-head { border-bottom-color: var(--accent-line); }
+  .firmcol--picked .firmcol-head { border-bottom-color: var(--accent-line);
+    /* Measured 2026-08-31: a real firm's head carries three lines (name,
+       "TIER · N OPEN", "Tier N") and lands at 126px; Picked for you has
+       always shown two (name, its own single-line "why") and landed at
+       107px, so its first role row started 19px higher than every real
+       firm column beside it in the same grid row -- correct internally,
+       misaligned across the row it visually belongs to. Matched to the
+       real columns' height rather than the reverse: 126px is what most
+       of the founder's own 81 real firms render at, so bringing the
+       shorter one up to meet them moves one column, not eighty. */
+    min-height: 126px; }
   .firmcol--picked .firmcol-name { color: var(--accent-ink); }
   /* Not a link — it names a view, not a firm — so it must not offer a link's
      hover affordance. */
@@ -1083,6 +1093,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      not. Same call the card's `.class-chip { flex: none }` made. */
   .rr-cls { flex: none; }
   .rr-undated { flex: none; }
+  /* `flex: none` like every other part of the line, and NOT a truncation
+     rule of its own: on a dated row this is what the template renders last,
+     so the `.rr-meta > *:last-child` contract below is already the thing
+     that cuts it. A second, independent shrink rule here is precisely the
+     "FOUR separate mid-word ellipses" regression that comment records. */
+  .rr-open { flex: none; }
   /* The one fact about the READER rather than about the posting, and so
      the only one that keeps colour now that the pills are gone. */
   .rr-vd { flex: none; font-weight: var(--w-med); }

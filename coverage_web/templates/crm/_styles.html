@@ -335,6 +335,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .activity-text { flex: 1; min-width: 0; }
   .activity-text a { color: var(--ink); font-weight: var(--w-med); }
   .activity-kind { color: var(--ink-3); }
+  /* The open-run line under a deadline. Its own line rather than a third
+     inline part: `.activity-text` already carries a firm name plus an event
+     label in a ~200px rail column, and a third clause on that line would
+     wrap mid-phrase. Quieter than `.activity-kind` on purpose — it is
+     context on the deadline above it, never a second headline. */
+  .activity-run { display: block; color: var(--ink-3);
+    font-size: var(--fs-xs); line-height: 1.4; margin-top: 1px; }
   .activity-when { color: var(--ink-3); font-size: var(--fs-xs);
     font-family: var(--font-mono); white-space: nowrap; }
   /* Today, and a deadline inside a week, are the two things in the rail
@@ -368,6 +375,25 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      nowhere left to send the student for a step they already finished. */
   .getting-started-row.is-done .getting-started-label { color: var(--ink-3);
     font-weight: var(--w-reg); }
+
+  /* Unplaced arrivals: at most five names, no total, gone once the week's
+     arrivals are placed or age out (see crm.today._unplaced_arrivals). Same
+     plain-list shape as the getting-started card above — there is nothing to
+     attest to here either, only a question to take somewhere — so a row is a
+     name and where they work, and the one link lives in the heading. */
+  .unplaced-note { margin: 0 0 var(--s2); font-size: var(--fs-micro);
+    color: var(--ink-3); }
+  .unplaced-list { list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: var(--s1); }
+  /* The firm holds its width and the name gives way: a long name truncating
+     is a nuisance, a truncated firm is the loss of the one fact that makes
+     the question answerable at all. */
+  .unplaced-row { display: flex; align-items: baseline;
+    justify-content: space-between; gap: var(--s2); font-size: var(--fs-s); }
+  .unplaced-name { color: var(--ink); font-weight: var(--w-med);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .unplaced-firm { flex: none; color: var(--ink-3);
+    font-family: var(--font-mono); font-size: var(--fs-micro); }
 
   /* Below 1024 the rail stacks under the queue, pace ring first. Cards flow
      in a row while they fit and wrap rather than shrinking. */
@@ -1676,8 +1702,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border: 1px solid var(--line); border-radius: var(--r-panel);
     background: var(--surface); color: inherit; text-decoration: none;
     transition: border-color var(--t-fast), background var(--t-fast); }
+  /* `text-decoration: none` has to be repeated HERE, not just on the base
+     rule above: coverage.css's global `a:hover { text-decoration:
+     underline }` matches every link on hover, including this one, and its
+     specificity (element + :hover) beats the base `.situation-card` rule
+     (a bare class) for the one property neither `:hover` rule here used to
+     touch -- so the whole card underlined on hover despite the base rule
+     saying none. Setting it again inside `:hover` itself is what actually
+     wins. */
   .situation-card:hover { border-color: var(--accent-line);
-    background: var(--accent-soft); }
+    background: var(--accent-soft); text-decoration: none; }
   .situation-card-text { flex: 1; min-width: 0; color: var(--ink-2);
     font-size: var(--fs-xs); line-height: 1.5; }
   .situation-card-text b { color: var(--ink); font-weight: var(--w-med); }

@@ -28,6 +28,7 @@ from coverage_domain.pipeline import BULK_RECEIVED_KIND, TOUCH_TRANSITIONS
 from directory.classify import TARGET_BUCKETS
 from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
+from directory.open_runs import firm_open_runs
 
 from . import (campaigns, coverage, debrief as debrief_svc, recruitment,
                relevance as rel, services)
@@ -43,6 +44,7 @@ from .utils import (
     _warmth_pct,
     confirmed_firm_dates,
     firm_date_confidence,
+    local_date,
     WARMTH_ORDER,
 )
 
@@ -233,6 +235,59 @@ def _build_actions(user):
         for fd in FirmDate.objects.filter(firm_id__in=firm_ids)
     ]
 
+    # THE ONE FACT THE CADENCE ENGINE'S CONFIRM-CHAT BRANCH CANNOT HOLD.
+    # `coverage_domain` is pure and cannot reach `CalendarEvent`, so a chat's
+    # real start time is threaded in through the contact dict, the same way
+    # `tier` and `campaign_excluded` already are.
+    #
+    # WHY THE ENGINE NEEDS IT. Branch 2 nags a `chat_scheduled` contact whose
+    # thread has gone quiet, and its sentence used to date that booking off
+    # the LAST TOUCH — a different fact wearing the same number. Youqi Chen,
+    # live, 2026-08-31: notes reading "offered same-day meetup", nothing ever
+    # confirmed, zero CalendarEvents, and a card claiming "chat was scheduled
+    # 6 business days ago". With this key the engine names a day only when a
+    # day exists, and stays quiet about a chat still in the future.
+    #
+    # USUALLY EMPTY, BY DESIGN. `capture.gmail._upsert_scheduled_chat` writes
+    # an event only for a finding carrying a real .ics DTSTART; most carry
+    # none. The founder has exactly one contact at `chat_scheduled` and she
+    # has no event at all, which is the ordinary shape, not a gap.
+    #
+    # A CANCELLED CHAT CONTRIBUTES NOTHING, deliberately, and its contact
+    # falls back to the no-day sentence. `thread_state` stays
+    # "chat_scheduled" through a cancellation, so naming the called-off time
+    # would print "chat was scheduled for Aug 24, did it happen?" about a
+    # meeting nobody attended. "Log the chat or reschedule" without a date is
+    # the true thing to say, and it matches `_schedule`'s own silence about a
+    # cancelled row.
+    #
+    # Ascending by `starts_at` so the last write wins: after a reschedule the
+    # chat currently on the books is the latest one, which is what the card
+    # is asking about.
+    #
+    # Gated on the candidate set, the same cost discipline `_starter_seeds`
+    # and `_unplaced_arrivals` hold to: only branch 2 reads this key, only a
+    # `chat_scheduled` contact reaches branch 2, and most accounts have none
+    # (the founder has exactly one). On those days this costs no query at all.
+    scheduled_chats: dict[int, object] = {}
+    awaiting_chat_ids = [
+        c.id for c in contacts if c.thread_state == "chat_scheduled"
+    ]
+    for cid, starts_at in (
+        CalendarEvent.objects.for_user(user)
+        .filter(kind=CalendarEvent.KIND_CHAT, cancelled_at__isnull=True,
+                contact_id__in=awaiting_chat_ids)
+        .order_by("starts_at")
+        .values_list("contact_id", "starts_at")
+        if awaiting_chat_ids else ()
+    ):
+        # Localized through the same helper `_touch_dicts` uses, because the
+        # engine will take `.date()` off this and compare it against a `today`
+        # derived from a LOCAL `as_of`. A raw UTC value here would reintroduce
+        # the exact off-by-one-day skew that made one card print 5 and 6 for
+        # the same touch. See `crm.utils._touch_dicts`.
+        scheduled_chats[cid] = local_date(starts_at)
+
     # cadence returns action["contact"] as the exact dict we pass in, so we
     # hand it dicts already carrying the display fields the template needs.
     # `angle` is deliberately NOT in here: it is the user's private note about
@@ -276,6 +331,12 @@ def _build_actions(user):
             # `crm.relevance.contact_relevance` right after the campaign
             # bool, with the same inbound override.
             "recruitment_hidden": c.id in recruitment_hidden_ids,
+            # When this person's chat is actually on the books, and absent
+            # (None) when nobody knows — the ordinary case. Read by exactly
+            # one place, `cadence.due_actions`' confirm-chat branch, which is
+            # forbidden from naming a scheduling day without it. See
+            # `scheduled_chats` above.
+            "chat_scheduled_at": scheduled_chats.get(c.id),
         }
         for c in contacts
     ]
@@ -368,7 +429,17 @@ def _build_actions(user):
 
         last = last_real.get(c["id"])
         a["last_kind"] = kind_labels.get(last.kind, last.kind) if last else None
-        a["last_on"] = timezone.localtime(last.ts).date() if last else None
+        # THE LEDGER LINE AND THE ENGINE'S SENTENCE NOW COUNT THE SAME DAYS.
+        # `local_date` is the same helper `_touch_dicts` runs every `ts`
+        # through before the engine sees it, so `business_days_since` is
+        # called twice on identical inputs — here, and inside branch 2 — and
+        # the two numbers on one card cannot disagree. They did: 2026-08-31,
+        # the founder's Youqi Chen card said "5 business days" in its sentence
+        # and "6 business days ago" in this row, because the engine was
+        # reading Aug 24 (UTC) and this line Aug 23 (America/Los_Angeles) off
+        # one 01:37Z timestamp. `crm.utils._touch_dicts` carries the full
+        # account.
+        a["last_on"] = local_date(last.ts).date() if last else None
         a["last_business_days"] = (
             cadence.business_days_since(a["last_on"], today) if last else None
         )
@@ -1484,16 +1555,49 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
     built on a date whose own `precision` says it is a month-level estimate.
     See `crm.utils.confirmed_firm_dates` for why the second half of the bar
     was missing here and what walks through the gap.
+
+    MIXED IN, NOT RANKED AGAINST. Each row can also carry `open_run` — how
+    many of that firm's campus postings are open right now and how long the
+    longest has been open (`directory.open_runs.firm_open_runs`, which holds
+    the argument for why that elapsed figure is a fact and a "typically open
+    N days" figure is not). It TRAILS a countdown that already earned its
+    place; it never becomes a row of its own, and the sort below is
+    deliberately untouched.
+
+    WHY IT CANNOT BE ITS OWN ROW. "Time priority" here means one thing: the
+    soonest date first, which is what `order_by("date")` does. An elapsed
+    openness counts UP from a day in the past and a deadline counts DOWN to a
+    day in the future; there is no axis both sit on, and the only way to
+    interleave them would be to treat "open 22 days" as if it were "22 days
+    away" — ranking a fact about the past as a fact about the future, and
+    pushing a real deadline down the card to do it. So the ranking stays a
+    pure deadline ranking and the duration rides along as context on the firm
+    it belongs to, which is also the only place a student can act on it.
+
+    A firm with open runs and NO confirmed date gets nothing here, on
+    purpose. This is the Deadlines card; its entry condition is a confirmed
+    date. That firm's postings each carry their own elapsed openness in the
+    Opportunities feed, which is the surface that lists every live posting
+    rather than the four nearest dates.
     """
-    rows = (confirmed_firm_dates()
-            .filter(date__gte=today)
-            .select_related("firm")
-            .order_by("date")[:limit])
+    rows = list(confirmed_firm_dates()
+                .filter(date__gte=today)
+                .select_related("firm")
+                .order_by("date")[:limit])
+    # One batch for at most `limit` firms, after the slice — the rail asks
+    # about four firms, not about the whole board.
+    open_runs = firm_open_runs({fd.firm_id for fd in rows}, today)
     out = []
     for fd in rows:
         days = (fd.date - today).days
         out.append({
             "firm": fd.firm,
+            # {"count": n, "longest_days": d}, or None when this firm has
+            # fewer than `CYCLE_OBSERVATION_MIN_SAMPLE` postings whose
+            # opening Coverage actually watched. None renders as nothing at
+            # all, the same empty state `_cycle_observed` keeps for a
+            # below-threshold window — not a hedge, not a "no data yet".
+            "open_run": open_runs.get(fd.firm_id),
             "label": _FIRM_DATE_LABELS.get(
                 fd.event_kind, fd.event_kind.replace("_", " ")),
             # The raw kind, alongside the human `label` above — a stable key
@@ -1799,6 +1903,117 @@ def _getting_started_checklist(user) -> list[dict] | None:
     if all(i["done"] for i in items):
         return None
     return items
+
+
+# ---------------------------------------------------------------------------
+# Unplaced arrivals — the early word on contacts nobody has placed yet.
+# ---------------------------------------------------------------------------
+# WHAT THIS IS NOT. It is not inference and it never will be.
+# `Contact.resolve_region` decides a region from stated facts only, and its
+# docstring carries the measurement that closed the other door: across 174
+# real inbound messages the Date header's UTC offset had 0% coverage on
+# corporate senders, and signature cities and phone country codes turned out
+# to be firm-wide templates naming an office rather than a desk. A student who
+# declares BOTH us and hk, with contacts at firms that run both desks, reaches
+# tier 5 of that precedence chain and the row stays blank. That is the
+# algorithm working, not failing.
+#
+# THE ACTUAL GAP, MEASURED ON THE FOUNDER'S OWN ACCOUNT 2026-08-31: 71 blank
+# contacts, every one of them `source="capture"`, and nobody noticed until the
+# Contacts page was reading "67 of these have no region set". They did not
+# trickle in either — 44 landed in one Gmail-capture batch that day and 22 in
+# another four days earlier. Nothing anywhere in the product said a word while
+# that happened, because the entire nag budget for the unplaced pool was one
+# passive caveat line on a page you have to go to (`crm.views.contact_list`).
+#
+# SO THIS SAYS ONE WORD, EARLY, AND THEN STOPS. It names at most five people,
+# prints no total, and only exists while the arrivals are new. It sends the
+# student to the tab that already answers the question in its answerable shape
+# (grouped by firm, select-all per group, three region verbs) rather than
+# rebuilding any of that in the rail: a second place to set a region would be
+# the duplicate-widget bug this session already removed three times over ("New
+# at your firms", "Waiting on reply", the coverage-gaps lane).
+#
+# `crm.views.contact_list`'s own note said "no badge, no Today card" and this
+# is the exception to it, deliberately taken and recorded there too. The
+# promise underneath that note survives intact: ignore this card forever and
+# nothing breaks, because it expires on its own and blank contacts keep the
+# cadence engine's both-regions fallback either way.
+#
+# BOTH LIMITS, EACH DOING A DIFFERENT JOB. The window decides WHETHER the card
+# exists at all, which is what keeps a 71-row steady-state backlog from
+# nagging forever; the cap decides HOW MUCH it shows, which is what keeps the
+# ask a two-minute one.
+#
+# Seven days, the same number and the same reasoning as
+# `crm.debrief.DEBRIEF_EXPIRES_AFTER_DAYS`: past the window the prompt simply
+# stops, because a prompt that never stops is one people learn to scroll past.
+# Seven also clears the founder's own measured arrival pattern — his two
+# batches landed four days apart, so a week-wide window catches a batch before
+# the next one lands on top of it, which is the whole job.
+UNPLACED_ARRIVAL_WINDOW_DAYS = 7
+# Five names, and no total anywhere on the card. "71" is a number that makes a
+# student close the tab; five names is a task. The card carries an "All" link
+# instead of a count — the same convention the Deadlines rail card already
+# uses — so it never claims to be exhaustive and never states a number that
+# could disagree with what it rendered.
+UNPLACED_ARRIVAL_MAX = 5
+
+
+def _unplaced_arrivals(user, contacts, now) -> list[dict] | None:
+    """The newest contacts carrying no region, or `None` when there are none.
+
+    `contacts` is the live, non-archived list `_build_actions` already loaded,
+    so the candidate filter costs no query at all — and on the ordinary day,
+    where nothing new arrived unplaced, this function costs nothing full stop.
+    Every query below is gated behind a non-empty candidate set, the same cost
+    discipline `_starter_seeds` and `_next_wave` hold to.
+
+    Nothing here reads a region, writes a region, or guesses one. The only
+    facts consulted are `region == ""` and `created`.
+
+    `created` is a UTC-aware timestamp and `now` is an aware instant, so the
+    comparison is an ordering of two instants and cannot be knocked a day off
+    by the account's own timezone the way a `.date()` on either side would be
+    (see `_next_wave`'s note for that exact bug class).
+
+    The two exclusions are the SAME pair `_next_wave` applies, for the same
+    reason: `crm.views.contact_list` takes campaign-excluded and
+    recruitment-hidden people off the board before it computes the unplaced
+    pool at all, so naming one of them here would send the student to a tab
+    that does not contain them.
+    """
+    cutoff = now - timedelta(days=UNPLACED_ARRIVAL_WINDOW_DAYS)
+    fresh = [c for c in contacts if not c.region and c.created >= cutoff]
+    if not fresh:
+        return None
+    excluded_ids = (
+        campaigns.excluded_contact_ids(user) | recruitment.hidden_contact_ids(user)
+    )
+    fresh = [c for c in fresh if c.id not in excluded_ids]
+    if not fresh:
+        return None
+    # Newest first, id as the tie-break — a capture batch writes dozens of
+    # rows inside the same second, and without the second key the five names
+    # on the card could reshuffle between two renders of the same page.
+    fresh.sort(key=lambda c: (c.created, c.id), reverse=True)
+    picked = fresh[:UNPLACED_ARRIVAL_MAX]
+    # One query for at most five firms, not `select_related` on the shared
+    # `_build_actions` fetch: that list is every live contact and this card
+    # needs five names off it.
+    firm_names = dict(
+        Firm.objects.filter(
+            id__in={c.firm_id for c in picked if c.firm_id}
+        ).values_list("id", "name")
+    )
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "firm": firm_names.get(c.firm_id) or c.firm_text,
+        }
+        for c in picked
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -2353,6 +2568,14 @@ def _cockpit_context(user) -> dict:
         # anything due"). `None` once all three items are done, which the
         # template reads as "render nothing".
         "getting_started": _getting_started_checklist(user),
+        # Contacts that arrived this week with nobody having said where they
+        # sit. Unconditional like `getting_started` above and for the same
+        # reason — it answers "is anything about this account unanswered",
+        # not "is anything due" — and `None` (render nothing) the moment the
+        # week's arrivals are all placed or have aged out of the window. Costs
+        # zero queries on a day when nothing new arrived unplaced, which is
+        # most days. See `_unplaced_arrivals`.
+        "unplaced_arrivals": _unplaced_arrivals(user, contacts, timezone.now()),
         # The raw, uncapped queue — carried through only so week() (the full
         # page view, below) can hand it to the daily brief. Deliberately NOT
         # used by _cockpit.html itself: that template is also rendered by

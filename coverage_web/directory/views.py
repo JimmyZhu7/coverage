@@ -58,6 +58,11 @@ from directory.deadlines import (
 from directory.dupes import fold_duplicates
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
+from directory.open_runs import (
+    CYCLE_OBSERVATION_MIN_SAMPLE as _CYCLE_OBSERVATION_MIN_SAMPLE,
+    onboarding_cutoffs,
+    open_run_days,
+)
 from directory.recommend import Candidate, Profile, parse_target_cycle, recommend
 from directory.sponsorship import effective_sponsorship, firm_policy_map, firm_policy_q
 from directory.timeline import (
@@ -1089,17 +1094,13 @@ def _timeline(firm, *, today, user=None):
 # counted.
 # ---------------------------------------------------------------------------
 
-# A single close (or open) is not a window: `open_window_first ==
-# open_window_last` by construction when `opened_count == 1`, so the "window"
-# is really just the one date something happened to be seen on, no spread at
-# all. Two is barely better — a min/max over two postings is still easily
-# just which two postings this firm happened to run, not a shape. Three is
-# the smallest sample where the spread starts to describe something rather
-# than restate an anecdote — the same magnitude `cycle_trust
-# .MASS_CLOSE_MIN_OPEN` uses for the identical reason (a count "not yet
-# distinguishable from ordinary churn"). Below this, the honesty rule this
-# feature exists to uphold is served by rendering nothing, not by hedging.
-CYCLE_OBSERVATION_MIN_SAMPLE = 3
+# The sample floor below every measured-cycle claim in the product, now
+# defined once in `directory.open_runs` and re-exported here under the name
+# `_cycle_observed` has always read it by. It moved because a second surface
+# (the Today rail's open-run line) needed the same gate, and two constants
+# agreeing by coincidence is exactly how they stop agreeing. The reasoning
+# for the number itself travels with the definition.
+CYCLE_OBSERVATION_MIN_SAMPLE = _CYCLE_OBSERVATION_MIN_SAMPLE
 
 
 def _window_text(first, last) -> str:
@@ -1936,10 +1937,18 @@ def _eligibility(o, profile):
     return None
 
 
-def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
+def _urgency_item(o, *, now, today, my_firm_ids, profile=None, cutoffs=None):
     """One feed card: firm identity + the honest urgency signal for this
     role (a real countdown when dated, freshness when rolling, or an
-    explicit "deadline passed" state — see the three-way split below)."""
+    explicit "deadline passed" state — see the three-way split below).
+
+    `cutoffs` is `directory.open_runs.onboarding_cutoffs()` for at least the
+    firms in this batch. It is a caller-supplied map rather than a lookup
+    done in here because this function runs once per row and that map is one
+    grouped aggregate for the whole page; computing it per call would be an
+    N+1 over the exact query that exists to avoid one. Omitted, the row
+    simply carries no elapsed-openness fact — no fallback, no guess.
+    """
     bucket = o.bucket or OTHER
     seen_days = (now - o.first_seen).days if o.first_seen else None
     place = _place(o)
@@ -1967,6 +1976,18 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None):
         "is_mine": o.firm_id in my_firm_ids,
         "seen_days": seen_days,
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
+        # How long THIS posting has been open, or None when that is not a
+        # fact we hold — see `directory.open_runs` for the full argument,
+        # including why a "typically open N days" figure is not shippable off
+        # a 39-day observation window and this elapsed one is. Distinct from
+        # `seen_days` above, which is a raw age with no onboarding filter on
+        # it and no claim that the posting is still open: 880 of the 2581
+        # live campus rows have a `seen_days` and correctly get no
+        # `open_run_days`, because their `first_seen` records when Coverage
+        # arrived rather than when they did.
+        "open_run_days": (
+            None if cutoffs is None else open_run_days(o, today, cutoffs)
+        ),
         "facts": _fact_chips(o, verdict=_eligibility(o, profile)),
         "reported": deadline_provenance(o),
         "verdict": _eligibility(o, profile),
@@ -2143,14 +2164,23 @@ def _group_city_variants(items, opps):
             head["variants"].append(item)
 
 
-def _urgency_feed(qs, *, now, today, my_firm_ids, profile=None):
+def _urgency_feed(qs, *, now, today, my_firm_ids, profile=None, cutoffs=None):
     """Rank the filtered set into the Closing-Soon and Fresh-&-Rolling bands.
     Dated roles sort by nearest deadline; rolling roles sort by your-firm
     first, then freshest-seen, then this-cycle cohort."""
     closing, rolling = [], []
+    # One grouped aggregate for the whole band, scoped to the firms actually
+    # in it — see `_urgency_item`'s `cutoffs` note. The `opportunities` view
+    # renders this band AND the firm clusters off the same `rows`, so it
+    # passes its own map in rather than paying for the identical aggregate
+    # twice on one page; `None` means nobody supplied one and this is a
+    # standalone call.
+    qs = list(qs)
+    if cutoffs is None:
+        cutoffs = onboarding_cutoffs({o.firm_id for o in qs})
     for o in qs:
         item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
-                             profile=profile)
+                             profile=profile, cutoffs=cutoffs)
         (closing if item["dated"] else rolling).append(item)
 
     # Passed-deadline rows are "dated" (see `_urgency_item`) but are neither
@@ -2536,9 +2566,13 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
                 keep.append(o)
         rows = keep
 
+    # Once for the page, shared by the urgency band below and the firm
+    # clusters further down — both build their items off this same `rows`.
+    cutoffs = onboarding_cutoffs({o.firm_id for o in rows})
+
     feed = (None if cols_fragment else
             _urgency_feed(rows, now=now, today=today, my_firm_ids=my_firm_ids,
-                          profile=elig_profile))
+                          profile=elig_profile, cutoffs=cutoffs))
 
     # Firm clusters are the page: one firm, all its open roles listed below it
     # in its own scroll window. Each role keeps its honest urgency signal (a
@@ -2669,7 +2703,7 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
                 "roles": [],
             }
         item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
-                             profile=elig_profile)
+                             profile=elig_profile, cutoffs=cutoffs)
         cl.setdefault("_opps", []).append(o)
         cl["roles"].append(item)
         item_by_id[o.id] = item
@@ -3522,6 +3556,10 @@ def _one_rolecard(request, opp, *, show_firm=False):
             UserFirm.objects.for_user(request.user).values_list("firm_id", flat=True)
         ),
         profile=_eligibility_profile(request.user),
+        # One firm, so the aggregate this rebuild pays for is a single
+        # indexed group — and passing it is what keeps "the card that comes
+        # back is the card that left" true of the elapsed-openness fact too.
+        cutoffs=onboarding_cutoffs([opp.firm_id]),
     )
     item["track_status"] = None
     item["show_firm"] = show_firm

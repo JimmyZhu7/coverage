@@ -470,8 +470,13 @@ def test_the_unplaced_tab_groups_by_firm_biggest_first(client):
 
 @pytest.mark.django_db
 def test_the_tab_is_absent_when_nobody_is_unplaced(client):
-    """No badge, no card, and no permanent tab reading zero. An empty pool
-    asks nothing — which is the posture: unplaced is an allowed state."""
+    """No badge and no permanent tab reading zero. An empty pool asks nothing
+    — which is the posture: unplaced is an allowed state.
+
+    Today's rail card for the WEEK'S ARRIVALS (`crm.today._unplaced_arrivals`,
+    added 2026-08-31) holds the identical posture on its own page and is
+    tested there: empty means the card does not render, not that it renders
+    empty. Neither surface ever shows a zero."""
     user = _user(["us"])
     _place(user, _firm(["hk", "us"]))  # placed by the declaration
     client.force_login(user)

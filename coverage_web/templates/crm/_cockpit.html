@@ -6,8 +6,9 @@ relationship momentum rather than firm alphabet, split into three semantic
 lanes. Everything the cap held back is one click away under "Up next", with
 the exact count and the policy holding it. Right: the weekly pace ring, the
 chats already on the calendar, a getting-started checklist while setup is
-unfinished, and a recent-activity feed. Re-rendered whole on every quick
-action so all of it stays in sync.
+unfinished, this week's unplaced arrivals while there are any, and a
+recent-activity feed. Re-rendered whole on every quick action so all of it
+stays in sync.
 
 
 WHAT LEADS THIS COLUMN, AND WHY. Read this before moving a section.
@@ -968,6 +969,50 @@ copy exactly once, and this is the once.
     {% endif %}
 
     {% comment %}
+    Unplaced arrivals. See crm.today._unplaced_arrivals' own module note for
+    the whole argument; the short version is that this product never infers a
+    region it cannot entail, so a contact captured from Gmail at a firm
+    running both a US and a Hong Kong desk arrives blank and stays blank until
+    a person says otherwise. Correct, and the designed steady state. What was
+    missing is that nobody found out until it had reached 71 on the founder's
+    own account (2026-08-31, every one of them from Gmail capture, 66 of them
+    in two batches four days apart).
+
+    AT MOST FIVE NAMES AND NO TOTAL. The count lives on the tab this links to,
+    where it belongs; a rail card reading "71" is a rail card students learn
+    to scroll past. "All" rather than a number is the same thing the Deadlines
+    card above does with its own cap.
+
+    ONE DESTINATION, AND IT IS THE ONE THAT ALREADY WORKS. The Unplaced tab
+    asks the question in its answerable shape (grouped by firm, select-all per
+    group, three region verbs). Nothing here rebuilds any of that: a second
+    place to set a region is exactly the duplicate-widget bug this session
+    removed three times over.
+
+    EXPIRES ON ITS OWN, like every other card in this rail vanishes when its
+    condition stops holding. Nothing stored, no dismiss button, no flag. The
+    Contacts page keeps its own passive caveat line unchanged as the
+    always-available fallback; that line answers a different question ("how
+    many rows in THIS region tab are here on a guess") and never expires.
+    {% endcomment %}
+    {% if unplaced_arrivals %}
+      <div class="rail-card unplaced-card">
+        <h3 class="rail-title">Unplaced
+          <a class="rail-more" href="{% url 'crm:contact_list' %}?scope=unplaced">All</a>
+        </h3>
+        <p class="unplaced-note">New this week. Nobody has said where they sit.</p>
+        <ul class="unplaced-list">
+          {% for c in unplaced_arrivals %}
+            <li class="unplaced-row">
+              <span class="unplaced-name">{{ c.name|smart_title }}</span>
+              <span class="unplaced-firm">{{ c.firm|default:"No firm" }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    {% comment %}
     Pace, laid out sideways. The ring used to be 120px tall with the figure
     inside it and a caption underneath — a third of the rail's height for one
     fraction, which is what pushed the rail past the viewport and forced it to
@@ -987,10 +1032,18 @@ copy exactly once, and this is the once.
         <div class="pace-text">
           <p class="pace-figure">
             <span class="pace-done">{{ pace.done }}</span><span class="pace-goal">/{{ pace.goal }}</span>
-            <span class="pace-lbl">this week</span>
+            <span class="pace-lbl">outreach this week</span>
           </p>
           <p class="pace-note">
-            {% if pace.hit %}Weekly goal hit.{% else %}<b>{{ pace.remaining }}</b> more touch{{ pace.remaining|pluralize:"es" }} to go.{% endif %}
+            {% comment %}
+            "touches" dropped (2026-08-31, the founder's own wording): the
+            bare count reads plainer, and it also retires the pluralize
+            gotcha the old sentence needed a test for -- `pluralize` with
+            no argument yields "touchs", not "touches", which is why the
+            old copy had to spell out `pluralize:"es"` explicitly. Nothing
+            here needs that any more.
+            {% endcomment %}
+            {% if pace.hit %}Weekly goal hit.{% else %}<b>{{ pace.remaining }}</b> more to go.{% endif %}
           </p>
         </div>
       </div>
@@ -1076,6 +1129,24 @@ copy exactly once, and this is the once.
               <span class="activity-text">
                 <a href="{% url 'directory:firm_detail' d.firm.slug %}">{{ d.firm.name|smart_title }}</a>
                 <span class="activity-kind">{{ d.label }}</span>
+                {% comment %}
+                HOW LONG THIS FIRM'S PROGRAMME HAS BEEN OPEN, under the
+                countdown for the same firm. See `crm.today._next_deadlines`
+                for why it trails a date rather than ranking against one, and
+                `directory.open_runs` for why it is an ELAPSED figure and not
+                the "typically open N days" one that was asked for: on a
+                39-day observation window that figure is measurable and
+                wrong, and this page would have printed "Goldman's roles stay
+                open about 11 days" while the Opportunities feed showed 73
+                Goldman roles that had already been open longer.
+
+                Absent, not hedged, for a firm below the sample floor. There
+                is no "no data yet" line and no placeholder — the row simply
+                goes back to being what it was, a firm and a countdown.
+                {% endcomment %}
+                {% if d.open_run %}
+                  <span class="activity-run" title="Campus postings at this firm that Coverage watched open and that are still open. Not a forecast of when they close.">{% if d.open_run.longest_days %}{{ d.open_run.count }} open, longest {{ d.open_run.longest_days }}d{% else %}{{ d.open_run.count }} open, all today{% endif %}</span>
+                {% endif %}
               </span>
               <span class="activity-when{% if d.urgent %} is-urgent{% endif %}">{{ d.when }}</span>
             </li>

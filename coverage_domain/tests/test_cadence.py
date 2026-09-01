@@ -371,6 +371,109 @@ def test_scheduled_but_fresh_gets_no_action():
     assert kinds_for(actions, 1) == set()
 
 
+# --------------------------------------------------------------------------
+# The confirm-chat sentence may only state facts it holds.
+#
+# Youqi Chen, founder's live account, 2026-08-31. Her notes read "Replied to
+# your email: coffee in HK, offered same-day meetup" — an offer, never
+# confirmed, no CalendarEvent anywhere. Her Today card read "chat was
+# scheduled 6 business days ago". That number is business days since the LAST
+# TOUCH, and the last touch IS the `chat_scheduled` touch, so the sentence
+# dated a booking off a clock that only knows when Coverage last wrote
+# something down — about a booking that never existed.
+#
+# Coverage holds a chat's real time only when a capture read an .ics DTSTART,
+# which is rare (`capture.gmail._upsert_scheduled_chat`: "A finding with no
+# time is not an error — most are"). So the no-time sentence below is the
+# ORDINARY path and is the one that must not name a day.
+# --------------------------------------------------------------------------
+def test_confirm_chat_never_claims_a_scheduling_date_it_does_not_have():
+    c = contact(1, warmth="replied", thread_state="chat_scheduled")
+    actions = cadence.due_actions([c], [touch(1, "chat_scheduled", "2026-07-08 10:00")],
+                                  [], as_of=AS_OF, firms=FIRMS)
+    my = [a for a in actions if a["contact"]["id"] == 1][0]
+    assert my["action"] == "confirm_chat"
+    assert "was scheduled 10 business days ago" not in my["reason"]
+    assert "scheduled for" not in my["reason"], "no day is held, so none is named"
+    # What IS known, and all that is claimed: how long the thread has been
+    # quiet. The count itself is still carried, in the reason and in ctx.
+    assert "nothing logged in 10 business days" in my["reason"]
+    assert my["ctx"]["business_days"] == 10
+    assert my["ctx"]["scheduled_on"] is None
+
+
+def test_confirm_chat_names_the_day_when_a_real_time_is_on_record():
+    """The one case where a scheduling date is a fact, threaded in from the
+    Django side as `chat_scheduled_at` (a `crm.CalendarEvent` start time)."""
+    c = contact(1, warmth="replied", thread_state="chat_scheduled",
+                chat_scheduled_at=datetime(2026, 7, 9, 15, 0, tzinfo=UTC))
+    actions = cadence.due_actions([c], [touch(1, "chat_scheduled", "2026-07-08 10:00")],
+                                  [], as_of=AS_OF, firms=FIRMS)
+    my = [a for a in actions if a["contact"]["id"] == 1][0]
+    assert my["action"] == "confirm_chat"
+    assert "chat was scheduled for 2026-07-09" in my["reason"]
+    assert my["ctx"]["scheduled_on"] == "2026-07-09"
+
+
+def test_confirm_chat_stays_quiet_about_a_chat_still_in_the_future():
+    """"Did it happen?" is the wrong question about a meeting that has not.
+
+    Same guard and same reasoning as branch 1's `not_yet`. Reachable whenever
+    the booked time is further out than the silence window: a chat set three
+    weeks ahead, then nothing logged for two."""
+    c = contact(1, warmth="replied", thread_state="chat_scheduled",
+                chat_scheduled_at=datetime(2026, 8, 12, 15, 0, tzinfo=UTC))
+    actions = cadence.due_actions([c], [touch(1, "chat_scheduled", "2026-07-08 10:00")],
+                                  [], as_of=AS_OF, firms=FIRMS)
+    assert kinds_for(actions, 1) == set()
+
+
+def test_confirm_chat_with_no_dateable_touch_names_no_day_either():
+    c = contact(1, warmth="replied", thread_state="chat_scheduled")
+    actions = cadence.due_actions([c], [], [], as_of=AS_OF, firms=FIRMS)
+    my = [a for a in actions if a["contact"]["id"] == 1][0]
+    assert my["reason"].startswith("a chat was being arranged")
+    assert "scheduled for" not in my["reason"]
+    assert my["ctx"]["scheduled_on"] is None
+
+
+# --------------------------------------------------------------------------
+# The engine's calendar is decided by the zone its inputs arrive in.
+#
+# On the founder's live account the web layer handed `as_of` in local time
+# (America/Los_Angeles) while touch rows still arrived in UTC. A touch stored
+# 2026-08-24 01:37Z is 2026-08-23 18:37 local, so the engine counted from Aug
+# 24 and the card's own ledger line counted from Aug 23: one card, one render,
+# "5 business days" in the sentence and "6 business days ago" in the row
+# beneath it. The engine cannot detect the skew — both are valid aware
+# datetimes — so the contract is that every timestamp arrives in ONE zone.
+# This test pins the arithmetic that contract protects; the web side's half
+# is `crm/tests/test_cadence_timezone_agreement.py`.
+# --------------------------------------------------------------------------
+def test_business_day_count_follows_the_zone_the_caller_hands_in():
+    la = timezone(timedelta(hours=-7))
+    instant = datetime(2026, 8, 24, 1, 37, tzinfo=UTC)
+    assert instant.astimezone(la).date() == date(2026, 8, 23), "the boundary case"
+    as_of = datetime(2026, 8, 31, 9, 0, tzinfo=UTC).astimezone(la)
+
+    def bd_for(ts):
+        c = contact(1, warmth="replied", thread_state="chat_scheduled")
+        actions = cadence.due_actions(
+            [c], [touch(1, "chat_scheduled", ts)], [], as_of=as_of, firms=FIRMS
+        )
+        return [a for a in actions if a["contact"]["id"] == 1][0]["ctx"]["business_days"]
+
+    # Localized input (what `crm.utils._touch_dicts` now always hands over)
+    # agrees with the ledger line's own `localtime(ts).date()`.
+    assert bd_for(instant.astimezone(la)) == cadence.business_days_since(
+        instant.astimezone(la).date(), as_of.date()
+    ) == 6
+    # The raw-UTC input that used to arrive is off by exactly the one day the
+    # boundary crosses. Pinned so a regression is a failing assert, not a
+    # discrepancy somebody has to notice on a card.
+    assert bd_for(instant) == 5
+
+
 def test_follow_up_when_one_cold_touch_and_stale():
     c = contact(1, warmth="cold", thread_state="no_reply")
     actions = cadence.due_actions([c], [touch(1, "outreach", "2026-07-10 10:00")],

@@ -1065,12 +1065,24 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # scope filter, because it is the size of the pool, not of the current
     # view.
     #
-    # It is never an interruption. No badge, no Today card, no digest line, no
+    # The POOL is never an interruption. No badge, no digest line, no
     # escalation — the caveat line under the Contacts header becoming a link
-    # to this tab is the entire nag budget. Ignored forever, nothing breaks:
-    # blank contacts keep the cadence engine's both-regions fallback and go on
-    # appearing in their firm's tabs marked unconfirmed. That is the designed
-    # steady state.
+    # to this tab is the entire nag budget for it. Ignored forever, nothing
+    # breaks: blank contacts keep the cadence engine's both-regions fallback
+    # and go on appearing in their firm's tabs marked unconfirmed. That is the
+    # designed steady state and this tab is still where it is answered.
+    #
+    # ONE EXCEPTION, TAKEN DELIBERATELY 2026-08-31: this line used to read "no
+    # Today card" too, and the founder's account is what changed it. 71 blank
+    # contacts, all of them from Gmail capture, 66 arriving in two batches four
+    # days apart, and nothing in the product said a word until this page read
+    # "67 of these have no region set". A steady-state pool nobody nags about
+    # is a policy; a pool nobody FINDS OUT ABOUT is a bug. So Today's rail now
+    # carries `crm.today._unplaced_arrivals` — at most five names, no total,
+    # and only while they are new, linking straight back to this tab rather
+    # than growing a second way to set a region. Read that function's module
+    # note before changing either surface: this page owns the standing pool and
+    # its passive caveat, that card owns the week's arrivals and expires.
     unplaced_total = sum(1 for c in contacts if not c.region)
     # Tab counts, read off this SAME pre-scope list with the SAME predicates
     # `_scoped` filters by below — a tab that shows a number it didn't also

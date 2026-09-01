@@ -85,17 +85,83 @@ def test_a_chat_logs_a_real_touch_through_the_ratchet(run, user):
 
 
 def test_a_booked_chat_is_scheduled_not_had(run, user):
-    """"Let's do Tuesday at noon" is a chat that has not happened yet.
+    """An AGREED time is a chat that has not happened yet.
 
     It gets its own rung: `chat_scheduled` leaves warmth at `replied` and
     parks the thread at `chat_scheduled`. Calling it a chat would fire the
-    thank-you cadence for a conversation still in the future."""
-    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "chat_status": "scheduled"}])
+    thank-you cadence for a conversation still in the future.
+
+    `chat_scheduled_at` is what makes it a booking rather than a language
+    judgment — see the test below for the half of this pair that was
+    shipping wrong."""
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com",
+          "chat_status": "scheduled",
+          "chat_scheduled_at": "2026-09-01T12:00:00+00:00"}])
     c = Contact.objects.for_user(user).get(name="Ada Lovelace")
     assert c.warmth == "replied"
     assert c.thread_state == "chat_scheduled"
     kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
     assert kinds == ["chat_scheduled"]
+
+
+def test_an_offer_nobody_accepted_is_a_reply_not_a_booking(run, user):
+    """The Youqi Chen case, 2026-08-31.
+
+    Her contact notes read "Replied to your email: coffee in HK, offered
+    same-day meetup". She OFFERED; nobody confirmed; nothing was booked. A
+    discovery run called that `chat_status: "scheduled"` anyway, which parked
+    her at `thread_state="chat_scheduled"` — a state whose only behaviour is
+    a daily "did it happen? log the chat or reschedule" card, and whose only
+    exit is a human.
+
+    The contract now says a booking takes two parties, and the ladder no
+    longer takes that on trust: `"scheduled"` without a `chat_scheduled_at`
+    to corroborate it floors at `reply_received`. That is the same bar
+    `capture.gmail_live` has always enforced ("scheduled" if ics_dt else
+    "none") and the same direction the Ellen Chung fix took one rung up.
+
+    Under-reporting is the safe side. She is still warm, still in the queue,
+    still re-checkable by every later run. She simply is not carrying a
+    booking nobody made."""
+    run([{"name": "Youqi Chen", "email": "youqi@example.com",
+          "replied": True, "chat_status": "scheduled",
+          "evidence": "Replied to your email: coffee in HK, offered same-day meetup"}])
+    c = Contact.objects.for_user(user).get(name="Youqi Chen")
+    assert c.warmth == "replied"
+    assert c.thread_state != "chat_scheduled", "an offer is not a booking"
+    kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
+    assert kinds == ["reply_received"]
+
+
+def test_an_uncorroborated_scheduled_still_logs_a_touch(run, user):
+    """The floor is one rung down, not off the ladder.
+
+    A classifier that sets the strongest rung has no reason to also set the
+    weaker `replied` beneath it, so dropping an uncorroborated `"scheduled"`
+    to nothing would recreate the failure the `outreach_sent` fix already
+    fixed once: a contact created with zero touches, about whom Today says
+    "added but never contacted" while their own notes describe the
+    exchange."""
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com", "chat_status": "scheduled"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
+    assert kinds == ["reply_received"], "still recorded, just honestly"
+    assert c.warmth == "replied"
+
+
+def test_an_uncorroborated_scheduled_on_outreach_only_stays_outreach(run, user):
+    """The carve-out `capture.discovery._evidence_kind` already makes: "an
+    invite the user sent an unknown person is still only the user's own act".
+
+    Flooring to `reply_received` here would gift warmth to somebody who has
+    never typed a word, which is the opposite error from the one this whole
+    change is closing."""
+    run([{"name": "Ada Lovelace", "email": "ada@gs.com",
+          "outreach_sent": True, "chat_status": "scheduled"}])
+    c = Contact.objects.for_user(user).get(name="Ada Lovelace")
+    kinds = list(Touch.objects.for_user(user).filter(contact=c).values_list("kind", flat=True))
+    assert kinds == ["outreach"]
+    assert c.warmth != "replied"
 
 
 def test_a_reply_logs_a_reply_not_a_chat(run, user):

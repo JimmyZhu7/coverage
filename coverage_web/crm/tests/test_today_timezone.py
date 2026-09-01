@@ -26,7 +26,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from crm.models import Contact, Touch, UserFirm
+from crm.models import CalendarEvent, Contact, Touch, UserFirm
 from crm.today import _build_actions
 from directory.models import Firm, FirmDate
 
@@ -171,3 +171,212 @@ def test_a_deadline_still_open_today_keeps_its_critical_card(client):
         f"a deadline still open today in the student's timezone lost its "
         f"critical card: {kinds}"
     )
+
+
+# ---------------------------------------------------------------------------
+# ONE CARD, ONE EVENT, TWO DIFFERENT NUMBERS.
+# ---------------------------------------------------------------------------
+# The section above fixed the AS-OF side: the engine is asked about the
+# student's day. It left the other side of the same comparison alone. Touch
+# timestamps still arrived in UTC, and `cadence` derives a touch's day with
+# `_as_date(t["ts"])` — a `.date()` on whatever zone it was handed.
+#
+# So the engine counted from a UTC day and the act card's own ledger line
+# counted from a local one (`crm.today`'s `last_on`, always
+# `localtime(ts).date()`). Measured on the founder's live account 2026-08-31,
+# his account on America/Los_Angeles: Youqi Chen's `chat_scheduled` touch is
+# stored 2026-08-24 01:37Z, which is 2026-08-23 18:37 where he lives. The
+# engine's sentence said "5 business days" and the row directly beneath it
+# said "6 business days ago", about the same touch, in the same render.
+#
+# Six is the right answer — this product has a `TimezoneMiddleware` and this
+# very file establishing that "today" means the user's today — and the fix is
+# `crm.utils._touch_dicts`, which now localizes every `ts` at the one boundary
+# they all cross rather than at any single call site.
+#
+# The zone here is the founder's real one for this incident and the boundary
+# runs the OTHER way from the HK cases above: LA is behind UTC, so the local
+# date is the EARLIER one and the un-fixed engine under-counted. Both
+# directions are the same defect.
+LA = ZoneInfo("America/Los_Angeles")
+# Deliberately mid-morning in both zones, so `today` is not in question and
+# the ONLY boundary in play is the touch's own.
+LA_NOW = datetime(2026, 8, 31, 17, 0, tzinfo=ZoneInfo("UTC"))
+# Youqi Chen's actual touch timestamp.
+LA_TOUCH = datetime(2026, 8, 24, 1, 37, tzinfo=ZoneInfo("UTC"))
+
+
+def test_the_touch_fixture_actually_straddles_a_date_boundary():
+    """Guard the guard, same as the HK fixture above. If this timestamp ever
+    stops disagreeing between the two zones, the test below passes while
+    testing nothing."""
+    assert LA_TOUCH.astimezone(ZoneInfo("UTC")).date() == date(2026, 8, 24)
+    assert LA_TOUCH.astimezone(LA).date() == date(2026, 8, 23)
+    assert LA_NOW.astimezone(ZoneInfo("UTC")).date() == LA_NOW.astimezone(LA).date()
+
+
+def _la_confirm_chat_card():
+    """One `confirm_chat` action for an LA student whose only touch lands on
+    the wrong side of midnight in UTC. Returns the dressed action dict."""
+    user = get_user_model().objects.create_user(
+        email="tz-ledger@example.com", password="pw12345!",
+        timezone="America/Los_Angeles",
+    )
+    contact = Contact.all_objects.create(
+        user=user, name="Youqi Chen", warmth="replied",
+        thread_state="chat_scheduled", school_affiliation=True,
+    )
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="chat_scheduled", channel="email",
+        ts=LA_TOUCH,
+    )
+    timezone.activate(LA)
+    try:
+        with mock.patch("django.utils.timezone.now", return_value=LA_NOW):
+            actions, _ = _build_actions(user)
+    finally:
+        timezone.deactivate()
+    cards = [a for a in actions if a["action"] == "confirm_chat"]
+    assert len(cards) == 1, f"expected one confirm_chat card, got {actions}"
+    return cards[0]
+
+
+def test_the_engines_business_days_and_the_ledgers_cannot_disagree():
+    """The 5-vs-6 bug, pinned.
+
+    FAILS BEFORE THE FIX: revert `crm.utils._touch_dicts` to passing `t.ts`
+    raw and `ctx["business_days"]` reports 5 while `last_business_days`
+    reports 6."""
+    card = _la_confirm_chat_card()
+    engine = card["ctx"]["business_days"]
+    ledger = card["last_business_days"]
+    assert engine == ledger, (
+        f"one card is printing two different ages for one touch: the engine's "
+        f"sentence says {engine} business days, the ledger row says {ledger}"
+    )
+    assert ledger == 6, (
+        "and they agree on the STUDENT'S answer, not UTC's: the touch landed "
+        "2026-08-23 in America/Los_Angeles"
+    )
+    assert card["last_on"] == date(2026, 8, 23)
+
+
+def test_the_confirm_chat_card_never_states_a_scheduling_date_it_lacks():
+    """Youqi Chen again, on the copy side.
+
+    She has no `CalendarEvent` — the ordinary state, since Coverage only
+    learns a chat's time from an .ics DTSTART — so the card must not name a
+    day. It used to say "chat was scheduled 6 business days ago", rendering
+    business days since the LAST TOUCH as if it were the day a booking was
+    made, about a booking that never existed."""
+    card = _la_confirm_chat_card()
+    reason = card["reason"]
+    assert "scheduled for" not in reason, "no chat time is on record"
+    assert "was scheduled 6 business days ago" not in reason
+    assert "nothing logged in 6 business days" in reason, (
+        f"the card should say what it knows, and only that: {reason!r}"
+    )
+    assert card["ctx"]["scheduled_on"] is None
+
+
+def test_a_real_calendar_event_lets_the_card_name_the_day():
+    """The other half: when Coverage DOES hold a time, the card says it, in
+    the student's own zone. `_prose_dates` then renders the ISO day as the
+    "Aug 23" the rest of the card already speaks."""
+    user = get_user_model().objects.create_user(
+        email="tz-sched@example.com", password="pw12345!",
+        timezone="America/Los_Angeles",
+    )
+    contact = Contact.all_objects.create(
+        user=user, name="Booked Person", warmth="replied",
+        thread_state="chat_scheduled", school_affiliation=True,
+    )
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="chat_scheduled", channel="email",
+        ts=LA_TOUCH,
+    )
+    # Same boundary instant, so a UTC read would name Aug 24 and a local one
+    # Aug 23. The card must speak the student's day here too.
+    CalendarEvent.all_objects.create(
+        user=user, contact=contact, title="Chat with Booked Person",
+        starts_at=LA_TOUCH, kind=CalendarEvent.KIND_CHAT,
+        source=CalendarEvent.SOURCE_CAPTURE,
+    )
+    timezone.activate(LA)
+    try:
+        with mock.patch("django.utils.timezone.now", return_value=LA_NOW):
+            actions, _ = _build_actions(user)
+    finally:
+        timezone.deactivate()
+
+    card = [a for a in actions if a["action"] == "confirm_chat"][0]
+    assert card["ctx"]["scheduled_on"] == "2026-08-23"
+    assert "Aug 23" in card["reason"], card["reason"]
+
+
+def test_a_chat_still_ahead_of_the_student_raises_no_card_at_all():
+    """"Did it happen?" is the wrong question about a meeting that has not.
+
+    A chat booked three weeks out, with the thread quiet since the invite,
+    used to get the full stale-chat nag because the only clock consulted was
+    the last touch's."""
+    user = get_user_model().objects.create_user(
+        email="tz-future@example.com", password="pw12345!",
+        timezone="America/Los_Angeles",
+    )
+    contact = Contact.all_objects.create(
+        user=user, name="Future Person", warmth="replied",
+        thread_state="chat_scheduled", school_affiliation=True,
+    )
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="chat_scheduled", channel="email",
+        ts=LA_TOUCH,
+    )
+    CalendarEvent.all_objects.create(
+        user=user, contact=contact, title="Chat with Future Person",
+        starts_at=LA_NOW + timedelta(days=14), kind=CalendarEvent.KIND_CHAT,
+        source=CalendarEvent.SOURCE_CAPTURE,
+    )
+    timezone.activate(LA)
+    try:
+        with mock.patch("django.utils.timezone.now", return_value=LA_NOW):
+            actions, _ = _build_actions(user)
+    finally:
+        timezone.deactivate()
+
+    assert [a["action"] for a in actions if a["contact"]["id"] == contact.id] == []
+
+
+def test_a_cancelled_chat_contributes_no_date_to_the_card():
+    """`thread_state` stays "chat_scheduled" through a cancellation, so naming
+    the called-off time would print "chat was scheduled for Aug 23, did it
+    happen?" about a meeting nobody attended. The card falls back to the
+    no-day sentence, whose "log the chat or reschedule" is exactly right, and
+    the contact does NOT get suppressed as a future chat either."""
+    user = get_user_model().objects.create_user(
+        email="tz-cancelled@example.com", password="pw12345!",
+        timezone="America/Los_Angeles",
+    )
+    contact = Contact.all_objects.create(
+        user=user, name="Cancelled Person", warmth="replied",
+        thread_state="chat_scheduled", school_affiliation=True,
+    )
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="chat_scheduled", channel="email",
+        ts=LA_TOUCH,
+    )
+    CalendarEvent.all_objects.create(
+        user=user, contact=contact, title="Chat with Cancelled Person",
+        starts_at=LA_NOW + timedelta(days=14), kind=CalendarEvent.KIND_CHAT,
+        source=CalendarEvent.SOURCE_CAPTURE, cancelled_at=LA_NOW,
+    )
+    timezone.activate(LA)
+    try:
+        with mock.patch("django.utils.timezone.now", return_value=LA_NOW):
+            actions, _ = _build_actions(user)
+    finally:
+        timezone.deactivate()
+
+    card = [a for a in actions if a["action"] == "confirm_chat"][0]
+    assert card["ctx"]["scheduled_on"] is None
+    assert "nothing logged in 6 business days" in card["reason"]

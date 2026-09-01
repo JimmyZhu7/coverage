@@ -80,7 +80,7 @@
     <div class="ribbon-row">
       <a class="ribbon-stat kin-reveal" style="--i: 0" href="{% url 'opportunities' %}">
         <span class="ribbon-num">{{ dash.at_your_firms }}</span>
-        <span class="ribbon-lbl"><span class="live-dot"></span> At your firms</span>
+        <span class="ribbon-lbl"><span class="live-dot"></span> Open at your firms</span>
       </a>
       <a class="ribbon-stat kin-reveal{% if dash.closing_10 %} is-urgent{% endif %}" style="--i: 1" href="{% url 'opportunities' %}">
         <span class="ribbon-num">{{ dash.closing_10 }}</span>
@@ -106,7 +106,14 @@
         </a>
       {% elif dash.has_year %}
         <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'opportunities' %}">
-          <span class="ribbon-lbl">All caught up on your year</span>
+          {% comment %}
+          "All caught up on your year" was the one label in this cell that
+          didn't say WHICH year -- its two siblings both name the class
+          year explicitly ("For Class of 2027, not saved yet", "Add your
+          class year..."), so this state read as the odd one out. Matched
+          to the same specificity (2026-08-31, wording pass).
+          {% endcomment %}
+          <span class="ribbon-lbl">Caught up for Class of {{ user.class_year }}</span>
         </a>
       {% else %}
         {% comment %}

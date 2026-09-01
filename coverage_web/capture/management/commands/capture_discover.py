@@ -31,7 +31,8 @@ WHAT IT REFUSES TO DO
 FINDINGS SHAPE
 --------------
 A JSON array of `{"name", "email", "role_guess", "firm", "outreach_sent",
-"replied", "chat_status", "evidence", "bulk", "bulk_reasons"}`. `firm` is an
+"replied", "chat_status", "chat_scheduled_at", "evidence", "bulk",
+"bulk_reasons"}`. `firm` is an
 optional Coverage slug;
 an unknown one is kept as free text rather than dropped, because
 `Contact.firm_text` exists precisely so capture never blocks on directory
@@ -42,11 +43,31 @@ for, so both doors into the ratchet describe a conversation the same way:
 
 - `"completed"` — the conversation ALREADY HAPPENED (a call, a coffee chat,
   a meeting). This is the only value that makes someone `chatted`.
-- `"scheduled"` — a chat has been set up but has not happened yet. "Let's do
-  Tuesday at noon" is scheduled, not completed.
+- `"scheduled"` — BOTH SIDES HAVE AGREED ON A TIME and the chat has not
+  happened yet. A calendar invite either side accepted qualifies. So does
+  "Tuesday at noon works, see you then" — an offer plus the other party's
+  agreement to it.
 - `"none"` — no chat either way. This is the default when the key is
   omitted, and it is what a warm email reply on its own earns, however
   enthusiastic the reply reads.
+
+WHAT IS NOT `"scheduled"`: an offer nobody has accepted yet. "Happy to grab
+coffee Tuesday at noon if that works" from them, with no reply from you, is a
+REPLY — `replied: true`, `chat_status: "none"`. So is your own proposal they
+have not answered. One party naming a time is a proposal; a booking takes
+two. The date being specific does not make it agreed.
+
+That distinction is the whole point of the value, and getting it backwards
+has already shipped. Youqi Chen, live, 2026-08-31: a discovery run read
+"coffee in HK, offered same-day meetup" as `"scheduled"`, which parked her at
+`thread_state="chat_scheduled"` and put a permanent "did it happen? log the
+chat or reschedule" card on Today about a meeting that was never booked. The
+same shape as the Ellen Chung case below, one rung up the ladder.
+
+`chat_scheduled_at` (optional, ISO 8601) is the agreed start time, and it is
+what `"scheduled"` is CORROBORATED BY rather than a decoration on it. See the
+touch ladder in `handle` for what happens without it, and why the bar is set
+where the live capture path already sets it.
 
 The evidence signals are a ladder, and at least one of them should be
 present for anyone worth creating: you cannot discover a stranger. Strongest
@@ -119,6 +140,12 @@ class Command(BaseCommand):
 
         created = existing = archived_hits = skipped = 0
         touched = 0
+        # Findings that claimed `chat_status: "scheduled"` and brought no time
+        # to back it up. Counted and printed rather than silently downgraded:
+        # a steady stream of these is a classifier that has not read the
+        # contract, and the whole reason this defect reached a live card is
+        # that nothing anywhere said a word while it happened.
+        unconfirmed_chats = 0
 
         for person in people:
             if not isinstance(person, dict):
@@ -226,9 +253,70 @@ class Command(BaseCommand):
             # A bulk finding still CREATES the contact (the person and their
             # firm are real information) — it just does not pretend they
             # answered him.
+            #
+            # A DOCUMENTED CONTRACT IS NOT A GUARD, so `"scheduled"` now has
+            # to bring a time with it. The contract above says a booking takes
+            # two parties; nothing here could check that, and the classifier
+            # that fills these findings runs OUTSIDE this repo, so tightening
+            # the prose alone changes nothing about what arrives. Youqi Chen,
+            # live 2026-08-31: "Replied to your email: coffee in HK, offered
+            # same-day meetup" came in as `"scheduled"`, and an offer nobody
+            # had accepted became `thread_state="chat_scheduled"` — a state
+            # whose only exit is a human, and whose only behaviour is a daily
+            # "did it happen? log the chat or reschedule" card about a meeting
+            # that was never booked.
+            #
+            # THE BAR IS THE ONE THE LIVE PATH ALREADY ENFORCES. `capture.
+            # gmail_live` emits `"chat_status": "scheduled" if ics_dt else
+            # "none"` — twice, at both of its exits. It will not call a chat
+            # scheduled without a real invite time. Discovery accepted a bare
+            # language judgment with no corroboration at all, and the
+            # asymmetry is what let this through. `chat_scheduled_at` is that
+            # corroboration: a stated time, which an agreement produces and a
+            # vibe does not.
+            #
+            # FLOORING AT `reply_received` IS THE SAFE DIRECTION and is not a
+            # loss. They did write to you, so a reply is true; warmth still
+            # moves to `replied`, the contact is still warm, still in the
+            # queue, still re-checkable by every later run. What it does not
+            # do is invent a booking. Compare the failure it replaces: the
+            # comment above records that `capture_worklist` drops `chatted`
+            # and `advocate` from every re-check, and `chat_scheduled` is the
+            # same kind of trap one rung down — branch 2 of the cadence engine
+            # `continue`s on it, so a wrongly-parked contact gets that one
+            # card and nothing else, forever, until a human intervenes.
+            # Under-reporting costs a rung that the next real signal restores.
+            #
+            # Reported, never silent: the summary line counts these so a run
+            # that keeps producing them is visible as a classifier problem
+            # rather than looking like a quiet day.
+            # ONE RUNG DOWN, NOT OFF THE LADDER. The floor is `reply_received`
+            # and not "fall through to whatever else is set", because a
+            # `"scheduled"` finding is inbound evidence by construction —
+            # somebody proposed a chat to this student — and a classifier that
+            # sets the strongest rung has no reason to also set the weaker
+            # `replied` beneath it. Dropping such a finding to no touch at all
+            # would recreate the failure the `outreach_sent` comment above
+            # documents: a contact created with zero touches, about whom Today
+            # then says "added but never contacted" while their own notes
+            # describe the exchange.
+            #
+            # The one exception is the shape `capture.discovery._evidence_kind`
+            # already carves out: an outreach-only finding stays `outreach`
+            # however it is labelled, because "an invite the user sent an
+            # unknown person is still only the user's own act".
             chat_status = str(person.get("chat_status", "none") or "none").strip().lower()
+            outbound_only = bool(person.get("outreach_sent")) and not person.get("replied")
+            uncorroborated = (
+                chat_status == "scheduled"
+                and not str(person.get("chat_scheduled_at") or "").strip()
+            )
+            if uncorroborated:
+                unconfirmed_chats += 1
             kind = (BULK_RECEIVED_KIND if person.get("bulk")
                     else "chat" if chat_status == "completed"
+                    else "outreach" if uncorroborated and outbound_only
+                    else "reply_received" if uncorroborated
                     else "chat_scheduled" if chat_status == "scheduled"
                     else "reply_received" if person.get("replied")
                     else "outreach" if person.get("outreach_sent") else None)
@@ -248,6 +336,12 @@ class Command(BaseCommand):
                 )
                 touched += 1
 
+        if unconfirmed_chats:
+            self.stdout.write(self.style.WARNING(
+                f"{tag}{unconfirmed_chats} finding(s) said chat_status="
+                "'scheduled' with no chat_scheduled_at — logged one rung down. "
+                "A booking needs an agreed time; an offer nobody accepted is a "
+                "reply."))
         self.stdout.write(self.style.SUCCESS(
             f"{tag}{created} created ({touched} with a touch logged), "
             f"{existing} already tracked, {archived_hits} archived-and-left-alone, "
