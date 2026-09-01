@@ -892,3 +892,76 @@ def test_talnet_zero_rows_guard_also_covers_a_broken_table_board(monkeypatch):
     result = fetch(BOFA_JOBS)
     assert result.ok is False
     assert "not empty" in result.error
+
+
+# ---------------------------------------------------------------------------
+# Oracle's details endpoint is shaped differently from its search endpoint,
+# and `_fetch_details` was reading the search shape. Two independent defects,
+# both silent, both fixed 2026-09-01:
+#
+#   1. The URL asked for `expand=requisitionList` — the SEARCH endpoint's
+#      expand value. The details endpoint rejects it and the request FAILS,
+#      and `_fetch_details` swallows its own exceptions, so every call
+#      returned None and it read as "this firm publishes no deadlines".
+#   2. Even on a successful response the parse looked for
+#      `items[0].requisitionList[0]`, which the details payload does not have
+#      — its fields sit directly on `items[0]`.
+#
+# Measured against the live boards afterwards: 25 of 25 open campus rows at
+# J.P. Morgan and 6 of 16 at Lazard gained a real `ExternalPostedEndDate`,
+# from zero. J.P. Morgan's board is 7,136 requisitions, and this connector
+# was paying one extra HTTP request for each of them to get nothing back.
+# ---------------------------------------------------------------------------
+
+_ORACLE_DETAILS_FLAT = {
+    "items": [{
+        "Id": "210775238",
+        "Title": "2027 Corporate Analyst Development Program",
+        "ExternalPostedStartDate": "2026-08-27T18:30:48+00:00",
+        "ExternalPostedEndDate": "2026-11-01T23:55:00+00:00",
+    }]
+}
+
+
+def test_oracle_details_url_asks_for_expand_all_not_requisitionlist():
+    """`expand=requisitionList` is the SEARCH endpoint's value. Sending it to
+    the details endpoint fails the request outright, which this helper hides
+    behind its own except — so the wrong expand is indistinguishable from a
+    firm that states no deadlines."""
+    assert "expand=all" in oracle_mod._DETAILS_URL
+    assert "expand=requisitionList" not in oracle_mod._DETAILS_URL
+
+
+def test_oracle_fetch_details_reads_the_flat_details_shape(monkeypatch):
+    monkeypatch.setattr(oracle_mod, "fetch_json", lambda url, **kw: _ORACLE_DETAILS_FLAT)
+    got = oracle_mod._fetch_details("jpmc.fa.oraclecloud.com", "CX_1001", "210775238")
+    assert got is not None, "details payload has no requisitionList; reading one returns None"
+    assert got["ExternalPostedEndDate"] == "2026-11-01T23:55:00+00:00"
+
+
+def test_oracle_fetch_details_still_reads_the_nested_search_shape(monkeypatch):
+    """Both shapes are accepted on purpose. This helper takes a bare
+    host/site/id, so a caller pointing it at a `findReqs` response should keep
+    working rather than silently going quiet the way the flat shape did."""
+    nested = {"items": [{"requisitionList": [{"ExternalPostedEndDate": "2026-10-12T03:59:00+00:00"}]}]}
+    monkeypatch.setattr(oracle_mod, "fetch_json", lambda url, **kw: nested)
+    got = oracle_mod._fetch_details("h", "s", "1")
+    assert got["ExternalPostedEndDate"] == "2026-10-12T03:59:00+00:00"
+
+
+def test_oracle_fetch_details_returns_none_when_there_is_no_end_date(monkeypatch):
+    """A requisition that genuinely states no end date must come back None,
+    not an empty dict — callers treat a truthy return as "we learned
+    something". Lazard's board is ~34% populated, so this is the common case."""
+    monkeypatch.setattr(oracle_mod, "fetch_json",
+                        lambda url, **kw: {"items": [{"Id": "6494", "Title": "x"}]})
+    assert oracle_mod._fetch_details("h", "s", "6494") is None
+
+
+def test_oracle_fetch_details_swallows_a_failed_request(monkeypatch):
+    """Unchanged behaviour, pinned: a transient failure costs one row its
+    deadline and never the whole board fetch."""
+    def boom(url, **kw):
+        raise RuntimeError("503")
+    monkeypatch.setattr(oracle_mod, "fetch_json", boom)
+    assert oracle_mod._fetch_details("h", "s", "1") is None

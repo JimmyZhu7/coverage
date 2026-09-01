@@ -60,9 +60,15 @@ _SEARCH_URL = (
     "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
     "?onlyData=true&expand=requisitionList&finder=findReqs;siteNumber={site},limit=25,keyword={kw}"
 )
+# `expand=all`, NOT `expand=requisitionList`. The latter is the SEARCH
+# endpoint's expand value; the details endpoint rejects it and the request
+# fails outright, which is why this call never once succeeded - the error was
+# swallowed by `_fetch_details`'s own except, so it looked like "this firm
+# publishes no deadlines" rather than "we asked wrong". Verified 2026-09-01:
+# with `expand=all` the same requisition ids return real dates.
 _DETAILS_URL = (
     "https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
-    "?onlyData=true&expand=requisitionList&finder=ById;Id=%22{rid}%22,siteNumber={site}"
+    "?onlyData=true&expand=all&finder=ById;Id=%22{rid}%22,siteNumber={site}"
 )
 _JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{rid}"
 
@@ -146,8 +152,26 @@ def _fetch_details(host: str, site: str, rid: str) -> dict | None:
     items = data.get("items", [])
     if not items:
         return None
-    reqs = items[0].get("requisitionList", [])
-    return reqs[0] if reqs else None
+    # THE DETAILS ENDPOINT IS NOT SHAPED LIKE THE SEARCH ENDPOINT. Search
+    # returns `items[0].requisitionList[]`; details returns the requisition's
+    # fields DIRECTLY on `items[0]` - there is no `requisitionList` key on it
+    # at all. Reading the search shape here meant this function returned None
+    # on every call it ever made, so the extra per-requisition request was
+    # paid for J.P. Morgan (a 7,136-job board), Lazard and Schroders and the
+    # deadline was thrown away every time. Measured 2026-09-01: 9 of 12
+    # sampled JPM requisitions carry a real `ExternalPostedEndDate`, several
+    # at 23:55, which is a candidate-facing deadline time, not an
+    # administrative unpost.
+    #
+    # Both shapes are accepted rather than just swapping to the flat one: the
+    # nested form is what a `finder=findReqs` response looks like, and this
+    # helper takes a bare host/site/id, so a caller pointing it at the search
+    # endpoint should keep working rather than silently going quiet again.
+    top = items[0]
+    reqs = top.get("requisitionList")
+    if reqs:
+        return reqs[0]
+    return top if "ExternalPostedEndDate" in top else None
 
 
 def _normalize(req: dict, board: OracleBoard) -> Opportunity:
