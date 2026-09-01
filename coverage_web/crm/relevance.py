@@ -492,6 +492,105 @@ def _relevant_to_student(user, rows):
 # product where "who" and "why now" are both real inputs.
 _RELATIONSHIP_WEIGHT = {"advocate": 3.0, "chatted": 2.4, "replied": 1.6, "cold": 0.8}
 
+# ---------------------------------------------------------------------------
+# 4b. Affinity — what a shared school is actually worth (2026-09-01).
+# ---------------------------------------------------------------------------
+# `school_affiliation` used to be an ADMISSION flag and nothing else: it got
+# a contact past the relevance gate (REL_SCHOOL) and then changed their ev
+# by exactly nothing at a tiered firm — measured 8.64 vs 8.64 for an alumnus
+# and a stranger at the same tier-1 bank — while at a non-tiered firm
+# `_SCHOOL_WEIGHT` (0.9) sat BELOW the stranger-at-an-unranked-firm weight
+# (1.2). The one thing the networking research says is worth something
+# scored as nothing, or as less than a stranger.
+#
+# WHAT IT IS WORTH, MEASURED RATHER THAN FOLKLORE. On a counted log of 93
+# cold emails, alumni replied at 43% against 34% for strangers: a lift of
+# about 1.3x, NOT the 4-6x the "alumni always reply" folklore claims. That
+# is the multiplier for the bare flag, and it is small on purpose.
+# SPECIFICITY BEATS THE FLAG: the same research puts a high-school-directory
+# approach at 85%+ replies against ~25% for a bare college tie, so a NAMED
+# tie — a club, a programme, a hometown, a prior employer, a mutual — earns
+# 1.6. Two steps, not a curve, because two is what the evidence supports.
+#
+# A MULTIPLIER ON STRENGTH, NEVER ON THE CLASS LADDER. `crm.today`'s
+# `_today_class` is untouched, so a cold alumnus with the best tie on the
+# board still sits below a stranger who actually wrote back — asserted in
+# tests, because it is the whole reason this is a multiplier and not a rank.
+# Degrades to 1.0 with no flag and no text.
+_AFFINITY_NONE = 1.0
+_AFFINITY_SCHOOL = 1.3
+_AFFINITY_SPECIFIC = 1.6
+
+# Phrases that NAME A TIE between two people, matched case-insensitively
+# against the contact's `school`, `angle` and `notes` — never `role`
+# ("Analyst Programme" in a title is a job, not a bond). Same doctrine as
+# `_RECRUITING_ROLE_MARKERS` above and `crm.recruitment`'s person markers:
+# every entry is something a person writes when they mean "we have this in
+# common", never a word that merely co-occurs with one. Rejected on purpose:
+# a bare school name (that is the flag, not a specific tie), a bare
+# "program"/"programme" (every posting has one), "finance" (a topic), and
+# bare "MBA"/"scholar" (a credential the contact holds, not one shared).
+_SPECIFIC_TIE_MARKERS: tuple[str, ...] = (
+    r"\b(?:club|society|fraternity|sorority)\b",
+    r"\b(?:same|my|our) (?:program(?:me)?|cohort|class|year|dorm|team|desk"
+    r"|major|professor|section|high school|hometown)\b",
+    r"\bhometown\b|\bgrew up (?:in|together|near)\b|\bhigh school\b",
+    r"\b(?:worked|interned) (?:together|with me|alongside)\b",
+    r"\b(?:prior|previous|former|old) (?:employer|colleague|co-?worker|manager"
+    r"|boss|teammate)\b",
+    r"\b(?:classmate|roommate|teammate|mentor|mentee)\b",
+    r"\b(?:referred|introduced) (?:me|by|via|through)\b"
+    r"|\bintro(?:duction)? (?:from|via|through)\b",
+    r"\bmutual (?:friend|contact|connection)\b",
+)
+_SPECIFIC_TIE_RE = re.compile("|".join(_SPECIFIC_TIE_MARKERS), re.IGNORECASE)
+
+# The contact-dict keys the tie search reads. `school` is always on the
+# queue's dict; `angle` and `notes` are read WHEN PRESENT — `crm.today.
+# _build_actions` withholds `angle` from the dict on purpose (it once leaked
+# into a draft), so on the live queue the text lift arrives through `school`
+# and through the student's own affiliations, and a caller that wants the
+# notes scanned adds the keys. Reading, never writing: nothing here can put
+# the text anywhere a draft would see it.
+_AFFINITY_TEXT_KEYS = ("school", "angle", "notes")
+
+
+def specific_tie(contact: dict, user=None) -> str | None:
+    """The phrase that names a specific tie with this contact, or None.
+
+    Two sources. The marker list above, matched against the contact's own
+    text; and the student's `affiliations` — a list of free-text strings on
+    the User (a club, a programme, a hometown) that another change is adding
+    concurrently, read with `getattr` so this works before the column
+    exists and with no user at all. An affiliation counts when the contact's
+    text contains it, case-insensitively; three characters is the floor so
+    "PE" cannot match inside "open".
+    """
+    text = " ".join(
+        str(contact.get(k) or "") for k in _AFFINITY_TEXT_KEYS
+    ).strip()
+    if not text:
+        return None
+    m = _SPECIFIC_TIE_RE.search(text)
+    if m:
+        return m.group(0)
+    lowered = text.lower()
+    for aff in (getattr(user, "affiliations", None) or []):
+        aff = str(aff or "").strip()
+        if len(aff) >= 3 and aff.lower() in lowered:
+            return aff
+    return None
+
+
+def affinity(contact: dict, user=None) -> float:
+    """1.6 for a named tie, 1.3 for the bare school flag, 1.0 otherwise."""
+    if specific_tie(contact, user):
+        return _AFFINITY_SPECIFIC
+    if contact.get("school_affiliation"):
+        return _AFFINITY_SCHOOL
+    return _AFFINITY_NONE
+
+
 # A confirmed close the engine itself called priority 0, and an unanswered
 # inbound message, are the two things that are unambiguously happening right
 # now. A thank-you window is nearly as live. Everything below them is a clock
@@ -511,8 +610,9 @@ _NOW_COLD_DUE = 1.0
 _NOW_NOTHING = 0.4
 
 
-def expected_value(action: dict) -> float:
-    """Relevance x relationship strength x whether something real is happening.
+def expected_value(action: dict, user=None) -> float:
+    """Relevance x relationship strength x affinity x whether something real
+    is happening.
 
     Multiplicative, not additive, and that is the substance of the ranking
     rather than a detail of it. Added, a pile of small facts about a stranger
@@ -520,13 +620,20 @@ def expected_value(action: dict) -> float:
     Multiplied, a zero-ish term stays zero-ish: a cold contact at a firm the
     student does not target cannot climb, however long they have been silent.
 
+    `affinity` (section 4b) rides on strength: the measured ~1.3x for a
+    shared school, 1.6 for a named tie, 1.0 for neither. `user` is optional
+    and only feeds the student's own `affiliations` into the tie search;
+    `crm.today._gate_and_rank` does not pass one yet, so the live queue gets
+    the flag lift and the marker lift, and the affiliation lift is one
+    argument away.
+
     Reads only keys `crm.today._build_actions` has already attached, so the
     scorer stays a pure function of the action dict and is testable without a
     database.
     """
     contact = action.get("contact") or {}
     rel = relevance_weight(action.get("relevance"), action.get("relevance_tier"))
-    strength = _RELATIONSHIP_WEIGHT.get(contact.get("warmth"), 0.8)
+    strength = _RELATIONSHIP_WEIGHT.get(contact.get("warmth"), 0.8) * affinity(contact, user)
 
     if action.get("owed_reply"):
         now = _NOW_INBOUND

@@ -256,15 +256,22 @@ def test_within_a_class_the_longest_silent_goes_first():
     not flakiness. 10 is the smallest offset that clears 6 business days on
     every weekday (and still sits under the park threshold), so the test now
     measures the ordering it is named for rather than the day it runs on.
+
+    The top offset is 20, not 30 (rewritten 2026-09-01, pinning the corrected
+    behaviour): a first note has a shelf life now
+    (`followup_expires_after_business_days`, 15, strict `>`), and 30 calendar
+    days is 20-22 business days — a PARK, off the plan entirely. 20 calendar
+    days is 14 or 15 business days on every weekday, so it is the longest
+    silence that is still a follow-up whatever day this runs.
     """
     user = _user(weekly_touch_goal=14)
-    for days in (10, 30, 15):
+    for days in (10, 20, 15):
         c = _contact(user=user, name=f"Silent {days:02d}")
         _touch(user, c, "outreach", days_ago=days)
 
     ctx = _cockpit_context(user)
     planned = [a for lane in ctx["lanes"] for a in lane["items"]]
-    assert [a["contact"]["name"] for a in planned] == ["Silent 30", "Silent 15", "Silent 10"]
+    assert [a["contact"]["name"] for a in planned] == ["Silent 20", "Silent 15", "Silent 10"]
 
 
 def test_a_confirmed_deadline_is_never_capped_away():
@@ -689,7 +696,14 @@ def test_pacing_a_follow_up_out_never_produces_a_second_one(client):
     ever produce is a park — never another follow-up."""
     user = _user(weekly_touch_goal=14)
     c = _contact(user=user, name="Ethan Gao")
-    _touch(user, c, "outreach", days_ago=40)
+    # 10 calendar days, not 40 (rewritten 2026-09-01, pinning the corrected
+    # behaviour): 10 is the weekday-proof "follow-up is due" offset the
+    # engine's own tests use, and it sits inside the follow-up's shelf life.
+    # At 40 the first note is 28-30 business days old, and since branch 6
+    # gained `followup_expires_after_business_days` (15) that thread is a
+    # `park`, not a follow-up — the fixture was relying on the very
+    # never-expires defect the change removed.
+    _touch(user, c, "outreach", days_ago=10)
 
     ctx = _cockpit_context(user)
     planned = [a for lane in ctx["lanes"] for a in lane["items"]]
@@ -698,7 +712,16 @@ def test_pacing_a_follow_up_out_never_produces_a_second_one(client):
     client.force_login(user)
     client.post(reverse("crm:today_act", args=[c.id, "sent"]), {"kind": "follow_up"})
 
-    # Age the freshly logged follow-up past every window and look again.
+    # Age the whole thread past every window and look again: the note to 40
+    # days, the freshly logged follow-up to 30. Both, not just the follow-up
+    # (rewritten 2026-09-01): the note above now starts at 10 days so it is
+    # still a follow-up rather than an expired park, and the engine's park
+    # clock reads the LATEST real touch, so a follow-up dated before the
+    # note it follows would leave the 10-day-old note as the clock and park
+    # nothing. Aging both keeps the order a real thread has.
+    Touch.all_objects.filter(user=user, contact=c, kind="outreach").update(
+        ts=timezone.now() - timedelta(days=40)
+    )
     Touch.all_objects.filter(user=user, contact=c, kind="follow_up").update(
         ts=timezone.now() - timedelta(days=30)
     )
@@ -2458,7 +2481,12 @@ def test_a_stale_critical_does_not_spend_a_firms_budget():
         _touch(user, stuck, "chat_scheduled", days_ago=60)
     for i in range(4):
         cold = _contact(user=user, name=f"Cold {i}", firm=firm)
-        _touch(user, cold, "outreach", days_ago=40 + i)
+        # 10-13 calendar days (rewritten 2026-09-01): due on every weekday
+        # and inside the follow-up's 15-business-day shelf life, so these
+        # stay the live cold follow-ups the test is about. At 40+ days
+        # branch 6 now parks them (`followup_expires_after_business_days`),
+        # and a park is not the sendable card this budget test is counting.
+        _touch(user, cold, "outreach", days_ago=10 + i)
 
     today = timezone.localdate()
     actions, _ = _build_actions(user)

@@ -271,8 +271,21 @@ def test_zero_contacts():
 
 
 def test_ten_thousand_contacts_stay_linear_and_complete():
+    # Rewritten 2026-09-01 to pin the corrected behaviour: a first note 30
+    # calendar days old is 20-22 business days of silence, past branch 6's
+    # `followup_expires_after_business_days` (15), so ten thousand of them
+    # are ten thousand PARKS — every one expired, none dropped — and not the
+    # never-expiring follow-ups this used to assert (that was the defect,
+    # not the invariant). The invariant is completeness and linearity; the
+    # second block keeps the follow-up case at an offset inside the window.
     cs = [contact(i) for i in range(10_000)]
     ts = [touch(i, "outreach", AS_OF - timedelta(days=30)) for i in range(10_000)]
+    actions = cadence.due_actions(cs, ts, [], as_of=AS_OF)
+    assert len(actions) == 10_000
+    assert {a["action"] for a in actions} == {"park"}
+    assert all(a["ctx"]["expired"] for a in actions)
+
+    ts = [touch(i, "outreach", AS_OF - timedelta(days=10)) for i in range(10_000)]
     actions = cadence.due_actions(cs, ts, [], as_of=AS_OF)
     assert len(actions) == 10_000
     assert {a["action"] for a in actions} == {"follow_up"}

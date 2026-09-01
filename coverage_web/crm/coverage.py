@@ -94,6 +94,90 @@ DEADLINE_BONUS: tuple[tuple[int, int], ...] = ((14, 3), (30, 2), (60, 1))
 # Warmth values that mean the contact has engaged back at least once.
 WARM = frozenset({"replied", "chatted", "advocate"})
 
+# ---------------------------------------------------------------------------
+# TWO MORE FIRM-LEVEL FACTS (2026-09-01): track fit, which HALVES the gap
+# points, and recruiting style, which ZEROES them.
+# ---------------------------------------------------------------------------
+#
+#     exposure = TIER_WEIGHT[tier] × GAP_POINTS[state] × track_fit + deadline_bonus
+#
+# 4. track_fit — does this firm hire for the student's own tracks at all?
+#    Measured on the founder's account 2026-09-01: 18 of his 25 zero-contact
+#    tiered firms are OFF his tracks (7 PE, 3 AM, 2 consulting, 6 corp-strat
+#    tech), and eleven of them — Apollo, Ares, Bain & Co, Bain Capital,
+#    BlackRock, Blue Owl, Carlyle, Fidelity International, KKR, McKinsey,
+#    Oaktree, PIMCO — outranked HSBC, a tier-1 bank on his track with 8
+#    contacts and a confirmed close on 2026-10-30. The strip was telling an
+#    IB/S&T student that his worst exposure was at private-equity shops he
+#    had tiered aspirationally, and the formula could not see it because it
+#    never read `firm.tracks` or `user.tracks`.
+#
+#    A MULTIPLIER, not a filter: the firm is still his tier 2 and still a
+#    gap, it is just half the gap a same-tier on-track firm is, because the
+#    seat it would open is not the one he is recruiting for. Half lands
+#    where a student would put it by hand: a tier-2 off-track firm with
+#    nobody (2 × 4 × 0.5 = 4) now sits below a tier-1 on-track firm with no
+#    advocate (3 × 2 = 6) and above a tier-3 on-track firm one advocate
+#    short (1 × 1 = 1). The card says why it sank: its state becomes
+#    OFF_TRACK ("Not on your tracks") and the ladder rung it would otherwise
+#    show rides along as `ladder_state`.
+#
+#    DEGRADES TO TODAY'S ORDER EXACTLY when either side has no tracks. A firm
+#    with no verticals on file, or a student who skipped that onboarding
+#    step, gets 1.0 — "we do not know" is not "off track". ANY overlap is a
+#    full fit: the founder runs two tracks (ib, st), and a firm that hires
+#    for one of them is on track, so a multi-track student is never
+#    penalised for the track they are not using at this firm.
+#
+# 5. recruiting_style — can networking move this firm's process at all?
+#    `Firm.recruiting_style == "assessment"` (see that field's comment for
+#    the evidence: Jane Street's FAQ answers "Can I schedule a phone call or
+#    coffee?" with "unfortunately, no"; Citadel Securities' campus funnel is
+#    Datathons and Invitationals; "if you can't pass their tests it doesn't
+#    matter who you know") sets GAP_POINTS to 0 outright. There is no
+#    networking gap to close at a firm that hires off a test, and a strip
+#    that ranked Jane Street "No contacts · exp 12" was asking the student
+#    to do the one thing the firm says does nothing. What survives is the
+#    deadline term: a confirmed close still puts the firm on the strip, for
+#    the deadline alone, and the card's verb is "Apply" rather than "Add"
+#    with the reason beside it. No confirmed close, no card — the strip has
+#    nothing honest to ask.
+OFF_TRACK = "off_track"
+GAP_LABELS[OFF_TRACK] = "Not on your tracks"
+
+ON_TRACK_FIT = 1.0
+OFF_TRACK_FIT = 0.5
+
+# `Firm.recruiting_style` values, spelled here so this module stays free of
+# Django imports (see the module docstring: pure, like the cadence engine).
+CAMPUS = "campus"
+ASSESSMENT = "assessment"
+
+# The verb on an empty firm's card, and the one line that explains "Apply".
+VERB_ADD = "Add"
+VERB_APPLY = "Apply"
+ASSESSMENT_REASON = "They hire off their test, not off a chat."
+
+# The outcome-predicting yardstick from the networking research: students
+# who land offers carry somewhere between 2 and 20 people who would actively
+# vouch for them, across all their target firms. Per-firm, `advocate_target`
+# is the student's own dial; this pair is the product-wide range the Network
+# summary prints beside the count, so a student with 0 of 2 at every one of
+# 54 firms reads one number and one range instead of 54 identical tooltips.
+ADVOCATE_RANGE: tuple[int, int] = (2, 20)
+
+
+def track_fit(firm_tracks: Iterable[str] | None, user_tracks: Iterable[str] | None) -> float:
+    """1.0 when the firm hires for at least one of the student's tracks, or
+    when either side has no tracks on file; 0.5 when both sides are known
+    and share nothing. See the paragraph above for why half and why the
+    unknown case is a full fit."""
+    firm = {t for t in (firm_tracks or []) if t}
+    user = {t for t in (user_tracks or []) if t}
+    if not firm or not user:
+        return ON_TRACK_FIT
+    return ON_TRACK_FIT if firm & user else OFF_TRACK_FIT
+
 
 def advocate_target(user) -> int:
     """The user's advocates-per-firm yardstick from
@@ -158,6 +242,11 @@ def rank_gaps(
             CONFIRMED official close, or None — the caller does the
             confidence filtering, exactly as the cadence engine's caller
             does), and `open` (count of open campus roles, optional).
+            Three more, all optional and all degrading to today's ranking
+            when absent: `firm_tracks` and `user_tracks` (lists of track
+            slugs; see `track_fit`), and `recruiting_style` (a
+            `Firm.recruiting_style` value; "assessment" zeroes the gap
+            points and turns the card's verb into "Apply").
             `open` does NOT enter the exposure formula and never will —
             hiring volume is not a coverage gap. It breaks TIES, and only
             after exposure and tier have both said nothing. Same-tier,
@@ -175,7 +264,15 @@ def rank_gaps(
     Returns:
         Gap dicts sorted worst-first, each carrying the full arithmetic
         (`tier_weight`, `gap_points`, `deadline_bonus`, `exposure`) so the
-        UI can show its work instead of asserting a number.
+        UI can show its work instead of asserting a number. `gap_points` is
+        the ladder's points AFTER `track_fit`, so `tier_weight × gap_points
+        + deadline_bonus` is always exactly `exposure` — the card's hover
+        arithmetic stays true without knowing about tracks; the unfitted
+        rung is `ladder_points`. Also on each: `state` (OFF_TRACK when the
+        fit halved it, else the ladder rung), `ladder_state` / `ladder_label`
+        (the rung either way), `track_fit`, `off_track`, `recruiting_style`,
+        `verb` ("Add", or "Apply" at an assessment firm) and `verb_reason`
+        (the one line beside "Apply"; "" otherwise).
     """
     ranked: list[dict] = []
     for f in firms:
@@ -185,28 +282,50 @@ def rank_gaps(
         warmths = list(f.get("warmths") or [])
         advocates = sum(1 for w in warmths if w == "advocate")
         state = gap_state(warmths, advocates, target)
-        points = GAP_POINTS[state]
-        if not points:
+        if state == COVERED:
             continue
+        fit = track_fit(f.get("firm_tracks"), f.get("user_tracks"))
+        style = f.get("recruiting_style") or CAMPUS
+        assessment = style == ASSESSMENT
+        ladder_points = GAP_POINTS[state]
+        # Fitted points: the rung halved for an off-track firm, zeroed for a
+        # firm that hires off a test. Kept as a number the hover can print —
+        # 2, 1.5, 1, 0.5 — rather than hidden inside `exposure`.
+        points = 0 if assessment else ladder_points * fit
         close = f.get("app_close")
         days_out = (close - today).days if close else None
         bonus = deadline_bonus(days_out)
+        exposure = TIER_WEIGHT[tier] * points + bonus
+        if exposure <= 0:
+            # Only an assessment firm with no confirmed close lands here
+            # (a covered firm left above): nothing on this strip can help
+            # it, so it is not drawn rather than drawn at zero.
+            continue
+        off_track = fit < ON_TRACK_FIT
         ranked.append(
             {
                 "firm_id": f.get("firm_id"),
                 "name": f.get("name") or "",
                 "tier": tier,
-                "state": state,
-                "label": GAP_LABELS[state],
+                "state": OFF_TRACK if off_track else state,
+                "label": GAP_LABELS[OFF_TRACK] if off_track else GAP_LABELS[state],
+                "ladder_state": state,
+                "ladder_label": GAP_LABELS[state],
                 "contact_count": len(warmths),
                 "advocates": advocates,
                 "target": target,
                 "app_close": close,
                 "days_out": days_out,
                 "tier_weight": TIER_WEIGHT[tier],
-                "gap_points": points,
+                "gap_points": _tidy(points),
+                "ladder_points": ladder_points,
+                "track_fit": fit,
+                "off_track": off_track,
+                "recruiting_style": style,
+                "verb": VERB_APPLY if assessment else VERB_ADD,
+                "verb_reason": ASSESSMENT_REASON if assessment else "",
                 "deadline_bonus": bonus,
-                "exposure": TIER_WEIGHT[tier] * points + bonus,
+                "exposure": _tidy(exposure),
                 "open": int(f.get("open") or 0),
             }
         )
@@ -233,6 +352,58 @@ def rank_gaps(
         )
     )
     return ranked[:limit]
+
+
+def _tidy(value: float) -> int | float:
+    """`4.0` prints as `4`, `4.5` stays `4.5`. The strip's numbers were all
+    integers before `track_fit` existed and most still are; a card that
+    reads "exposure 12.0" would be the multiplier leaking into the copy."""
+    return int(value) if float(value).is_integer() else round(value, 1)
+
+
+def advocate_summary(
+    firms: Iterable[Mapping[str, Any]], *, target: int = DEFAULT_ADVOCATE_TARGET
+) -> dict:
+    """One honest aggregate for the top of the Network page: how many
+    advocates the student has across their tiered firms, against the range
+    the outcome research says matters (`ADVOCATE_RANGE`, 2-20).
+
+    Takes the same row dicts `rank_gaps` takes (only `tier` and `warmths`
+    are read). Counts ADVOCATES AT TIERED FIRMS ONLY, because that is what
+    the number is for: the founder's two advocates are both USC peers at a
+    free-text firm, and a summary that counted them would print "2" over a
+    board where every one of his 54 target firms is at zero. Untiered
+    `UserFirm` rows are left out for the same reason `rank_gaps` skips
+    them — the student has not claimed to care about them yet.
+
+    Returns a dict rather than the bare line so a template can print the
+    parts it wants: `advocates`, `firms` (tiered firm count), `covered`
+    (firms at or above `target`), `target`, `low`/`high` (the range), and
+    `line` — "Advocates: 0 across 54 target firms · aim for 2-20". The
+    template is not touched here; `crm.views.contact_list` puts this in
+    the context as `advocate_summary`.
+    """
+    tiered = [f for f in firms if f.get("tier") in TIER_WEIGHT]
+    per_firm = [
+        sum(1 for w in (f.get("warmths") or []) if w == "advocate") for f in tiered
+    ]
+    advocates = sum(per_firm)
+    covered = sum(1 for n in per_firm if n >= target)
+    low, high = ADVOCATE_RANGE
+    firms_n = len(tiered)
+    line = (
+        f"Advocates: {advocates} across {firms_n} target "
+        f"firm{'' if firms_n == 1 else 's'} · aim for {low}-{high}"
+    )
+    return {
+        "advocates": advocates,
+        "firms": firms_n,
+        "covered": covered,
+        "target": target,
+        "low": low,
+        "high": high,
+        "line": line,
+    }
 
 
 def tier_cost(cards: Iterable[Mapping[str, Any]], target: int) -> dict:

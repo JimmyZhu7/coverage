@@ -5,8 +5,8 @@ from .models import EmailPatternStats, Firm, FirmDate, Opportunity, ScrapeRun
 
 @admin.register(Firm)
 class FirmAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "status", "regions", "tracks")
-    list_filter = ("status",)
+    list_display = ("name", "slug", "status", "regions", "tracks", "recruiting_style")
+    list_filter = ("status", "recruiting_style")
     search_fields = ("name", "slug", "domains")
     prepopulated_fields = {"slug": ("name",)}
 

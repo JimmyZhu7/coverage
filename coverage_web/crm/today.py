@@ -81,6 +81,20 @@ TUNABLE_CADENCE_PARAMS: dict[str, tuple[int, int]] = {
     # tried and reverted on 2026-07-28 (see cadence.py's DIVERGENCE note) — so
     # the range itself, not just the default, has to stay at (1, 2).
     "max_cold_touches": (1, 2),
+    # The shelf life of that one follow-up, in business days since the first
+    # note. Past it, cadence.due_actions' branch 6 stops offering the
+    # follow-up and parks the thread instead (see the engine's
+    # `followup_expires_after_business_days` comment for the measurement:
+    # 44 of the founder's 44 queue cards were "follow up" on a note 27
+    # business days old). Floor of 5 so a student cannot set it below the
+    # default follow-up window and turn every cold thread into a same-week
+    # park; ceiling of 60 (twelve working weeks) because past that the
+    # window is not a shelf life, it is "never expires", which is the
+    # behaviour this knob exists to end.
+    #
+    # PAIRED WITH accounts.forms.CADENCE_LABELS — a key here without an
+    # entry there is an immediate 500 on the Settings page.
+    "followup_expires_after_business_days": (5, 60),
     "advocate_touch_min_weeks": (1, 52),
     # The keep-warm clock for someone you have actually met but who is not yet
     # an advocate. Same range as the advocate clock because it is the same kind

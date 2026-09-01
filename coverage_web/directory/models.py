@@ -58,6 +58,43 @@ class Firm(models.Model):
     )
     regions = ArrayField(models.CharField(max_length=64), default=list, blank=True)
     tracks = ArrayField(models.CharField(max_length=64), default=list, blank=True)
+    # HOW THIS FIRM ACTUALLY HIRES, as far as networking is concerned.
+    #
+    # `campus` (the default, and the blank-equivalent) is the funnel the rest
+    # of the CRM is built for: coffee chats, referrals, an analyst who pushes
+    # a name onto the shortlist. `assessment` is the funnel where none of that
+    # moves the process, because the process IS a test — Jane Street's public
+    # FAQ answers "Can I schedule a phone call or coffee?" with "unfortunately,
+    # no"; Citadel Securities' campus funnel is Datathons and Invitationals;
+    # the practitioner finding is "if you can't pass their tests it doesn't
+    # matter who you know". Tagging a firm `assessment` tells three readers
+    # to stop pretending otherwise: the Coverage Gaps strip (no networking
+    # gap to close, the verb is "Apply"), the "Who to find" panel (a campus
+    # recruiter and a referral, never "an analyst to chat with"), and the
+    # Network summary that counts them.
+    #
+    # A firm-level fact, not a per-user one, for the same reason `tracks` and
+    # `regions` are: it describes the employer. Seeded by migration
+    # `directory/0017` for the prop-trading and quant names on the board;
+    # multi-strat hedge funds that run analyst programmes with real
+    # networking (Millennium, Point72, AQR) are deliberately left `campus`.
+    RECRUITING_STYLE_CAMPUS = "campus"
+    RECRUITING_STYLE_ASSESSMENT = "assessment"
+    RECRUITING_STYLE_CHOICES = [
+        (RECRUITING_STYLE_CAMPUS, "Campus: networking moves the process"),
+        (RECRUITING_STYLE_ASSESSMENT, "Assessment: test-gated, a chat does not"),
+    ]
+    recruiting_style = models.CharField(
+        max_length=16,
+        choices=RECRUITING_STYLE_CHOICES,
+        default=RECRUITING_STYLE_CAMPUS,
+        blank=True,
+        help_text=(
+            "How the firm hires. 'campus' (default): coffee chats and "
+            "referrals move the process. 'assessment': the process is a "
+            "test or competition and networking does not move it."
+        ),
+    )
     # The firm's own mark, fetched ONCE by `fetch_firm_logos` and served from
     # our own media — never hotlinked. A hotlinked logo would tell a third
     # party, on every page load, which firms this student is researching;
