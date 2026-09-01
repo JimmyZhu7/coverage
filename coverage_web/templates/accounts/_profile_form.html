@@ -49,24 +49,41 @@ replacement for one.
 {{ form.name }}
 {{ form.name.errors }}
 
-{% comment %}Two-up on the settings page (.set-form scopes the grid); a plain stack everywhere else, e.g. the narrow onboarding step.{% endcomment %}
+<label for="id_school">School</label>
+{% comment %}Autocompletes from the bundled world-universities list — htmx fills the datalist as you type; no external API call.{% endcomment %}
+<input type="text" name="school" id="id_school" list="uni-options"
+       value="{{ form.school.value|default:'' }}" autocomplete="off"
+       placeholder="Start typing your university…"
+       hx-get="{% url 'accounts:university_search' %}"
+       hx-trigger="keyup changed delay:200ms"
+       hx-target="#uni-options" hx-swap="innerHTML">
+<datalist id="uni-options"></datalist>
+{{ form.school.errors }}
+
+{% comment %}
+Two-up on the settings page (.set-form scopes the grid); a plain stack
+everywhere else, e.g. the narrow onboarding step. School shared this row with
+Class Year until 2026-09-01; it moved above so Study Level could sit beside
+the year it qualifies (the year says when you finish, this says what), and a
+long university name gets the full width. _welcome_head.html anchors the
+identity/search seam to this grid, so it stays the last block of that half.
+
+The study-level hint states a consequence: PhD-only, MBA-only and Summer
+Associate roles stay off an undergraduate's picks once the year branch of
+directory.views._eligibility reads `study_level`. Blank is "not stated" and
+is never guessed from class year.
+{% endcomment %}
 <div class="grid-2">
-  <div>
-    <label for="id_school">School</label>
-    {% comment %}Autocompletes from the bundled world-universities list — htmx fills the datalist as you type; no external API call.{% endcomment %}
-    <input type="text" name="school" id="id_school" list="uni-options"
-           value="{{ form.school.value|default:'' }}" autocomplete="off"
-           placeholder="Start typing your university…"
-           hx-get="{% url 'accounts:university_search' %}"
-           hx-trigger="keyup changed delay:200ms"
-           hx-target="#uni-options" hx-swap="innerHTML">
-    <datalist id="uni-options"></datalist>
-    {{ form.school.errors }}
-  </div>
   <div>
     <label for="id_class_year">Class Year</label>
     {{ form.class_year }}
     {{ form.class_year.errors }}
+  </div>
+  <div>
+    <label for="id_study_level">Study Level</label>
+    {{ form.study_level }}
+    <p class="field-hint">Some programmes are MBA- or PhD-only. This keeps them off your picks.</p>
+    {{ form.study_level.errors }}
   </div>
 </div>
 
@@ -147,6 +164,34 @@ independent of whether anything currently renders it.
 <label>Tracks of Interest</label>
 <div class="chipset">{{ form.tracks }}</div>
 {{ form.tracks.errors }}
+
+{% comment %}
+Languages the student can WORK in, matched against what a posting states
+(directory/facts.py::extract_languages read by directory/views.py::
+_language_fit). Labelled for what it does. A chip here turns the feed's bare
+"Mandarin needed" into "Mandarin needed, not in your profile" or "Mandarin,
+you speak it"; it never hides a role. The gate is real (Hong Kong IB desks
+run on Mandarin) and mostly unstated (about one HK posting in seven says
+so), so the honest reading of a posting's language line is a warning, not a
+wall, and the honest reading of silence is nothing at all.
+{% endcomment %}
+<label>Languages</label>
+<p class="field-hint">Languages you can work in. Hong Kong desks often want Mandarin.</p>
+<div class="chipset">{{ form.languages }}</div>
+{{ form.languages.errors }}
+
+{% comment %}
+Free text, one tie per line, capped at six (ProfileForm.clean_affiliations).
+Formerly the founder's `assets["angles"]`, reachable from no form. These are
+the hooks an outreach draft opens with. A generic email with no specific hook
+is the number-one reason a draft goes unanswered, and specificity beats a
+binary alumni flag by a wide margin (a high-school-directory tie replies at
+85%+; a bare college affiliation at about 25%).
+{% endcomment %}
+<label for="id_affiliations">Affiliations</label>
+<p class="field-hint">Specific ties get replies: a club, a prior employer, a hometown. One per line, up to six.</p>
+{{ form.affiliations }}
+{{ form.affiliations.errors }}
 
 <label for="{{ form.timezone.id_for_label }}">Timezone</label>
 {{ form.timezone }}

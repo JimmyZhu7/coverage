@@ -28,17 +28,21 @@ from django.db import models
 from coverage_web.tenancy import PrivateModel
 
 
-# The five most-spoken languages (by total speakers) as an interface-language
-# preference. NOT rendered anywhere today — the Settings control that wrote
-# `User.language` was removed on 2026-07-30 because nothing read the value
-# (see that field below). Kept here, ready, for the i18n pass that brings the
-# control back alongside actual translations.
-LANGUAGES = [
-    ("en", "English"),
-    ("zh", "中文 (Chinese)"),
-    ("hi", "हिन्दी (Hindi)"),
-    ("es", "Español (Spanish)"),
-    ("fr", "Français (French)"),
+# Study level — see `User.study_level`. Four named levels plus blank, which
+# means NOT STATED and is a legitimate answer: never guessed from class year,
+# because a 2028 class year is an undergraduate at one school and a master's
+# candidate at another, and the whole point of the field is that nothing
+# else on the row can tell those apart.
+STUDY_UNDERGRAD = "undergrad"
+STUDY_MASTERS = "masters"
+STUDY_MBA = "mba"
+STUDY_PHD = "phd"
+STUDY_LEVEL_CHOICES = [
+    ("", "Not stated"),
+    (STUDY_UNDERGRAD, "Undergraduate"),
+    (STUDY_MASTERS, "Master's"),
+    (STUDY_MBA, "MBA"),
+    (STUDY_PHD, "PhD"),
 ]
 
 
@@ -159,6 +163,48 @@ class User(AbstractUser):
     # `needs_sponsorship=None` for everyone. A region with no entry stays
     # UNKNOWN (the scorer treats unknown as neutral, never as a penalty).
     work_authorization = models.JSONField(default=dict, blank=True)
+    # Languages the student can WORK in, as lowercase names ("mandarin",
+    # "french") — the vocabulary `directory.facts.extract_languages` emits
+    # (title-cased there, lowercased here, compared case-blind), so a
+    # posting's stated language and a student's stated language can meet.
+    # Read by `directory.views._language_fit`, and only ever as a warning or
+    # a match, never a wall. Two findings drive that: the gate is real (a
+    # Barclays HK posting states "fluent in written Chinese and spoken
+    # Mandarin if applying to the role in Hong Kong SAR"; practitioners put
+    # Mandarin on about 95% of first-year HK IB desks) and it is mostly
+    # UNSTATED (8 HK campus rows on the live board carry a Mandarin fact; the
+    # rest are silent and no less gated). So it has to be a fact about the
+    # student matched against the posting's own words, never inferred from
+    # postings alone — and a posting naming a language the student lacks
+    # cannot block, because the real gate lives in the rows that say nothing.
+    # Formerly `assets["languages"]`, written by a cutover script, reachable
+    # from no form and read by nothing; migration 0015 moved it here.
+    languages = ArrayField(
+        models.CharField(max_length=32), default=list, blank=True
+    )
+    # Undergraduate / master's / MBA / PhD, or blank for not stated. Exists
+    # because nothing knew a sophomore was an undergraduate: PhD, MBA and
+    # "Summer Associate" roles reached his picks and situation strip on class
+    # year alone. Eligibility in UK/APAC postings is stated by year of study
+    # ("penultimate year"), and "Class of 20XX" appears once in 177 postings,
+    # so the year cannot carry this on its own. Formerly
+    # `assets["current_status"]` ("rising sophomore"); migration 0015 mapped
+    # the undergraduate class-standing words onto "undergrad" and left any
+    # other wording where it was.
+    study_level = models.CharField(
+        max_length=16, choices=STUDY_LEVEL_CHOICES, blank=True, default=""
+    )
+    # Specific ties an outreach draft can open with — free text, a few
+    # entries: a club, a prior employer, a hometown, a programme. Plural and
+    # specific on purpose. A binary "alumni" flag is what a generic email is
+    # built from, and the research puts a high-school-directory hook at 85%+
+    # reply against ~25% for a bare college affiliation; the number-one draft
+    # disqualifier is a generic email with no specific hook. Formerly
+    # `assets["angles"]`; migration 0015 moved it here, and profile.csv now
+    # exports it under this name.
+    affiliations = ArrayField(
+        models.CharField(max_length=160), default=list, blank=True
+    )
     # Per-user overrides for coverage_domain.cadence's rule parameters. Only
     # the keys in crm.views.TUNABLE_CADENCE_PARAMS are honored, and only inside
     # their documented ranges — this column is user-writable data, so the
@@ -167,14 +213,6 @@ class User(AbstractUser):
     # Touches-per-week target for the Today pace ring. NULL means "use the
     # product default" (crm.views.WEEKLY_TOUCH_GOAL) rather than "no goal".
     weekly_touch_goal = models.PositiveSmallIntegerField(null=True, blank=True)
-    # Preferred interface language (code from accounts.LANGUAGES). Stored, and
-    # currently READ BY NOTHING: there is no LocaleMiddleware, no catalogs, and
-    # no {% trans %} in any template. The Settings control was removed on
-    # 2026-07-30 for exactly that reason (docs/specs/settings-page.md audit #3
-    # — a setting that saves a value the engine ignores is the same defect as
-    # the old target_cycle). The column stays because it is harmless and
-    # already populated; the control comes back WITH the i18n pass, not before.
-    language = models.CharField(max_length=8, default="en", blank=True)
     # IANA zone name ("Asia/Hong_Kong"). Blank means UNSET, and unset means
     # UTC — which is what the whole product ran on before this column existed.
     #

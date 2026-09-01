@@ -691,11 +691,16 @@ GMAIL_CONNECTION_EXPORT_COLUMNS = [
 PUSH_SUBSCRIPTION_EXPORT_COLUMNS = ["user_agent", "created"]
 CREDIT_LEDGER_EXPORT_COLUMNS = ["created", "kind", "delta", "period", "props"]
 PRO_WAITLIST_EXPORT_COLUMNS = ["email", "source", "created"]
+# `affiliations`, `languages` and `study_level` are real columns as of
+# migration 0015 (2026-09-01); `angles` was the `assets` key `affiliations`
+# replaced, and `language` was the dead interface-language column the same
+# migration dropped. A student who exported before and after sees the rename
+# as one column heading changing, with the same values under it.
 PROFILE_EXPORT_COLUMNS = [
-    "email", "name", "school", "school_emails", "class_year",
-    "target_cycles", "regions",
-    "tracks", "work_authorization", "angles", "advocate_target",
-    "cadence_params", "weekly_touch_goal", "timezone", "language",
+    "email", "name", "school", "school_emails", "class_year", "study_level",
+    "target_cycles", "regions", "tracks", "work_authorization", "languages",
+    "affiliations", "advocate_target",
+    "cadence_params", "weekly_touch_goal", "timezone",
     "joined", "onboarded_at",
 ]
 
@@ -1267,16 +1272,17 @@ def profile_csv(user) -> str:
             user.school,
             _json_cell(list(user.school_emails or [])),
             user.class_year if user.class_year else "",
+            user.study_level or "",
             _json_cell(list(user.target_cycles or [])),
             _json_cell(list(user.regions or [])),
             _json_cell(list(user.tracks or [])),
             _json_cell(user.work_authorization),
-            _json_cell(assets.get("angles")),
+            _json_cell(list(user.languages or [])),
+            _json_cell(list(user.affiliations or [])),
             assets.get("advocate_target", ""),
             _json_cell(user.cadence_params),
             user.weekly_touch_goal if user.weekly_touch_goal else "",
             getattr(user, "timezone", "") or "",
-            user.language,
             _dt(user.created),
             _dt(user.onboarded_at),
         ]],
@@ -1348,8 +1354,8 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("pro_waitlist.csv", pro_waitlist_csv,
      "Whether you joined the Pro launch waitlist, and when."),
     ("profile.csv", profile_csv,
-     "Your profile row: school, cycle, regions, work authorization, angles, "
-     "and every engine setting."),
+     "Your profile row: school, study level, cycle, regions, work "
+     "authorization, languages, affiliations, and every engine setting."),
 ]
 
 # Named out loud rather than quietly skipped, on the page and in the README —

@@ -187,16 +187,18 @@ this file is not redundant with it — see the note there.
      5. Step 1 — Profile
 
      The step asks two kinds of question: who you are (photo, name, school,
-     year) and what you're recruiting for (cycles, regions, tracks). Same
-     card, but a hairline and a wider gap where the subject changes, so the
-     eye gets a seam instead of nine identical rows.
+     year, study level) and what you're recruiting for (cycles, regions,
+     tracks, languages, ties). Same card, but a hairline and a wider gap
+     where the subject changes, so the eye gets a seam instead of a dozen
+     identical rows.
 
      Done with a sibling selector rather than new wrappers on purpose:
      _profile_form.html is shared with the settings page and is an htmx
      swap target there. Adding divs to it to serve this layout would change
      margin collapsing on a page this pass was not asked to touch. The seam
-     is anchored to `.grid-2` (school + class year), the last block of the
-     identity half.
+     is anchored to `.grid-2` (class year + study level; school sat in it
+     until 2026-09-01 and now stands above), the last block of the identity
+     half.
      =================================================================== */
   .ob-step--profile .grid-2 {
     display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4);
