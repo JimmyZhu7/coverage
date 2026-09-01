@@ -1257,6 +1257,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rr-vd { flex: none; font-weight: var(--w-med); }
   .rr-vd.vd-year_ok, .rr-vd.vd-year_likely { color: var(--ok); }
   .rr-vd.vd-year_out, .rr-vd.vd-visa_out { color: var(--ink-3); }
+  /* Language verdicts are advisory, never blocking - the research says the
+     real Mandarin gate is usually unstated, so a posting that names it gets a
+     warning tint and one that matches the student's profile gets the ok
+     colour, and neither dims the row the way year_out/visa_out do. */
+  .rr-vd.vd-language_ok { color: var(--ok); }
+  .rr-vd.vd-language_warn { color: var(--stale-t); }
   .rr-fact { flex: none; }
   /* Same meaning the old pill era gave these classes, restored as text
      colour instead of a bordered chip -- a wall (no sponsorship, a
