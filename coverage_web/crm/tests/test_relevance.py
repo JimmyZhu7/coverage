@@ -422,7 +422,11 @@ def test_an_opening_raises_a_keep_warm_the_bare_clock_has_not_reached():
     a = _actions_by_name(user)["Not Due Yet"]
     assert a["action"] == "keep_warm"
     assert a["from_opening"] is True
-    assert "Insight deadline" in a["reason"]
+    # "Insight programme deadline" — `crm.utils.FIRM_DATE_LABELS` now derives
+    # from `directory.timeline.EVENT_LABELS`, which fixed this exact
+    # sentence-cased-raw-slug string ("Insight deadline") for the firm
+    # timeline; the CRM's own copy of the map had not picked up the fix.
+    assert "Insight programme deadline" in a["reason"]
 
 
 def test_an_opening_does_not_reopen_a_parked_contact():

@@ -78,6 +78,14 @@ from datetime import date
 from django.db.models import Min
 from django.db.models.functions import TruncDate
 
+# Cross-app read, same posture as `directory.views`' import of the same name:
+# `local_date` is `crm.utils`' single conversion point for "this stored UTC
+# timestamp, on the account's own clock" — see its docstring. `open_run_days`
+# needs it for the same reason `directory.views._urgency_item`'s `seen_days`
+# does: `first_seen` is UTC, `today` below is the account's local date, and
+# comparing a raw `.date()` to a local date is comparing two different clocks.
+from crm.utils import local_date
+
 from .classify import TARGET_BUCKETS
 from .models import Opportunity
 
@@ -149,16 +157,29 @@ def open_run_days(opp, today: date, cutoffs: dict[int, date]) -> int | None:
     """
     if opp.status != "open" or opp.first_seen is None:
         return None
-    seen = opp.first_seen.date()
+    # `local_date`, not a raw `.date()`. `first_seen` is stored UTC and
+    # `today` (the caller's `timezone.localdate()`) is the account's local
+    # date; comparing UTC's `.date()` against a local date is comparing two
+    # different clocks. An account whose zone sits any number of hours off
+    # UTC — an Asia/Hong_Kong account is 8 hours wide, for instance — can
+    # have that skew move a row across a calendar-date boundary. Measured on
+    # the live board 2026-08-31: of the 2,339 undated open campus rows with
+    # a `seen_days`, this line and `directory.views._urgency_item`'s (also
+    # fixed to route through the same `crm.utils.local_date`/
+    # `_calendar_days_ago`) disagreed on 2,202 of them (94%) before this fix.
+    seen = local_date(opp.first_seen).date()
     cutoff = cutoffs.get(opp.firm_id)
     if cutoff is not None and seen <= cutoff:
         return None
     days = (today - seen).days
     # Negative would mean a row first seen in the future. Not reachable from
-    # `auto_now_add`, but `today` is the account's local date and `first_seen`
-    # is UTC, so an account far enough east can legitimately be a few hours
-    # "before" a row stamped moments ago. Floored rather than dropped: the
-    # posting is open and we did watch it open, which is the whole claim.
+    # `auto_now_add` under a shared clock, but `seen` and `today` are each
+    # resolved at a slightly different instant within the same request
+    # (`today` upstream, `seen` here), so a posting whose `first_seen` lands
+    # in the handful of milliseconds between the two — or ordinary clock
+    # skew between app server and DB — could still print -0 days without
+    # this floor. Floored rather than dropped: the posting is open and we
+    # did watch it open, which is the whole claim.
     return max(0, days)
 
 

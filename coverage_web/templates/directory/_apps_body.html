@@ -138,8 +138,13 @@ survives even if it was in the batch.
                     <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 10.4a3.1 3.1 0 1 1 3.1-3.1 3.1 3.1 0 1 0 3.1 3.1 3.1 3.1 0 1 1 3.1-3.1" stroke-linecap="round"/></svg>
                     <span title="{{ r.rolling_why }}">Rolling</span>
                   {% else %}
+                    {% comment %}
+                    `r.deadline.label`, not a hardcoded "No date posted" —
+                    both read `views.deadline_marker`'s own wording now, so
+                    a future copy change only has one place to make it.
+                    {% endcomment %}
                     <svg class="lens-gl" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 10.4a3.1 3.1 0 1 1 3.1-3.1 3.1 3.1 0 1 0 3.1 3.1 3.1 3.1 0 1 1 3.1-3.1" stroke-linecap="round"/></svg>
-                    No date posted
+                    {{ r.deadline.label }}
                   {% endif %}
                 </span>
                 <span class="lens-role">

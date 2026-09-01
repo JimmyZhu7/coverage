@@ -538,11 +538,23 @@
       from "the legend always shows one anyway". That helper now stops at
       THIS element's own opening tag instead; see its docstring.
       {% endcomment %}
+      {% comment %}
+      Labels come from `warmth_labels` (crm/views.py's `_warmth_labels()`,
+      derived from `_WARMTH_SECTIONS`) rather than being retyped here. This
+      legend used to hardcode "Emailed, no reply" / "Emailed, replied" as
+      lowercase literals while `.net-group-head` a scroll below renders the
+      Title Case canonical "Emailed, No Reply" / "Emailed, Replied" off the
+      same `_WARMTH_SECTIONS` -- one board, two spellings of its own
+      vocabulary. `dot-cold` keeps its CSS name (the class predates the
+      no_reply/not_contacted split and repainting every selector for a label
+      rename is out of scope here) but now reads the `no_reply` label, the
+      warmth state it has always coloured.
+      {% endcomment %}
       <p class="net-legend-mini">
-        <span><i class="dot dot-cold"></i>Emailed, no reply</span>
-        <span><i class="dot dot-replied"></i>Emailed, replied</span>
-        <span><i class="dot dot-chatted"></i>Chatted</span>
-        <span><i class="dot dot-advocate"></i>Advocate</span>
+        <span><i class="dot dot-cold"></i>{{ warmth_labels.no_reply }}</span>
+        <span><i class="dot dot-replied"></i>{{ warmth_labels.replied }}</span>
+        <span><i class="dot dot-chatted"></i>{{ warmth_labels.chatted }}</span>
+        <span><i class="dot dot-advocate"></i>{{ warmth_labels.advocate }}</span>
         <span><span class="pill fc-spon" aria-hidden="true">SP</span>Sponsors visas</span>
       </p>
       </div>

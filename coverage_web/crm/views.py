@@ -1500,6 +1500,15 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "sections": sections,
             "contact_total": len(contacts),
             "unconfirmed_total": unconfirmed_total,
+            # The legend's own dot->words, read off `_WARMTH_SECTIONS` via
+            # `_warmth_labels()` rather than typed a second time in the
+            # template. `contact_list.html`'s legend used to hardcode
+            # "Emailed, no reply" / "Emailed, replied" as lowercase literals
+            # while the section headings a scroll below it read the Title
+            # Case canonical "Emailed, No Reply" / "Emailed, Replied" off
+            # `sections` above — the same board disagreeing with itself about
+            # its own vocabulary one screen apart.
+            "warmth_labels": _warmth_labels(),
         },
     )
 

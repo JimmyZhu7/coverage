@@ -42,6 +42,16 @@ from analytics.events import record_event
 # tenant-scoped manager. No import cycle: crm.models imports directory.models.
 from crm import campaigns as crm_campaigns
 from crm.models import Contact, UserFirm
+# `_calendar_days_ago` — same cross-app read as the two imports above. This
+# feed's "first seen Nd ago" used to be a raw `(now - first_seen).days`
+# elapsed floor, timezone-independent and effectively `elapsed_hours // 24`.
+# `crm.utils._calendar_days_ago` is the product's declared single source of
+# truth for "how many days ago" (its own docstring names the failure mode:
+# two surfaces disagreeing once elapsed time crosses a local calendar-date
+# boundary). Measured on the founder's live board 2026-09-01: of the 2,339
+# undated open campus rows that print "first seen Nd ago", the raw floor and
+# the calendar-date diff disagreed on 2,202 of them (94%). See `_urgency_item`.
+from crm.utils import _calendar_days_ago
 from directory.classify import (
     BUCKET_LABELS, ENTRY_LEVEL, INSIGHT, INTERNSHIP, OTHER, REGION_LABELS,
     REGION_ORDER, TARGET_BUCKETS, derive_class_year,
@@ -202,9 +212,32 @@ def deadline_marker(deadline, precision, *, today=None):
     never fabricating one. A null deadline says so out loud, and an inexact
     one gets a countdown in its own unit rather than a day count it cannot
     support — see `_INEXACT_PRECISIONS`.
+
+    LABEL, NOT "No deadline posted". This is the one function the firm page
+    (`_card.html`, `_role_drawer.html`) reads for that fact, and until
+    2026-09-01 it said "No deadline posted" — a third wording for the exact
+    claim the feed makes as "No date posted, first seen Nd ago"
+    (`_urgency_item`, test-pinned in `test_feed_honesty.py` and
+    `test_styles_block.py`) and My Applications makes as bare "No date
+    posted" (`_apps_body.html`, hardcoded rather than reading this label at
+    all). "First seen", never "posted", is the feed's own considered
+    wording — a bulk import once wore the word "New" on 794 of 805 roles,
+    which is the same category of overclaim "posted" makes about a date
+    nobody stated. Standardized to "No date posted" here, the bare half of
+    the feed's phrase, not the full "first seen Nd ago" one: this function
+    has no `first_seen` in scope (only `deadline`/`precision`/`today`), and
+    both its callers already carry a DIFFERENT freshness fact where the feed
+    has none — the role drawer prints `checked_ago` (when we last verified
+    the posting is still live), and both the drawer and the firm row mark
+    `unconfirmed` (`_unconfirmed_note`) when that last check could not
+    reconfirm the URL. Adding "first seen" there would be a second
+    elapsed-time clause on a single-role view already carrying one; the
+    feed's version earns its place because triaging ~2,600 rows at once is
+    exactly the job "how long has Coverage known about this" is useful for,
+    and neither of these two single-role views is that job.
     """
     if deadline is None:
-        return {"posted": False, "label": "No deadline posted", "countdown": "", "past": False}
+        return {"posted": False, "label": "No date posted", "countdown": "", "past": False}
     prec = (precision or "").lower()
     if prec == "month":
         label = f"{deadline:%b %Y}"
@@ -1950,7 +1983,16 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None, cutoffs=None):
     simply carries no elapsed-openness fact — no fallback, no guess.
     """
     bucket = o.bucket or OTHER
-    seen_days = (now - o.first_seen).days if o.first_seen else None
+    # LOCAL-CALENDAR days, not a raw elapsed floor — see the import comment
+    # above. This used to be `(now - o.first_seen).days`, a UTC timedelta
+    # floor that is really `elapsed_hours // 24` and drifts from every other
+    # "how long ago" fact in the product once elapsed time crosses a local
+    # calendar-date boundary. It fed three things off one number: the "first
+    # seen Nd ago" text, the "Fresh" pill (`is_fresh` below), and the
+    # elapsed-openness bar — so the drift was invisible in the text (both
+    # readings are close) but silently flipped the Fresh pill's verdict on
+    # rows sitting right at the `_FRESH_DAYS` boundary.
+    seen_days = _calendar_days_ago(o.first_seen, as_of=now) if o.first_seen else None
     place = _place(o)
     item = {
         "id": o.id,
@@ -3733,7 +3775,11 @@ def _posting_closed_note(uo) -> dict | None:
     if not is_posting_closed(o):
         return None
     submitted = (uo.applied_status or "saved") in _FUNNEL_STATES
-    when = f", confirmed {timesince(o.closed_at)} ago" if o.closed_at else ""
+    # `depth=1`, matching the drawer this sentence tracks (see the docstring
+    # above) and `checked_ago` a few call sites over — `timesince`'s default
+    # `depth=2` renders two units ("1 hour, 38 minutes ago"), noise in a
+    # sentence meant to be read at a glance rather than studied.
+    when = f", confirmed {timesince(o.closed_at, depth=1)} ago" if o.closed_at else ""
     tail = ("Your application still stands." if submitted
             else "It's no longer accepting applications.")
     return {

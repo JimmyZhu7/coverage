@@ -145,7 +145,34 @@ pure CSS, so the panel opens with the script broken or still loading.
           {% for r in bulk_save_peek.rows %}
             <li class="peek-row">
               <span class="peek-firm">{{ r.firm_name }}</span>
-              <span class="peek-title">{{ r.title }}</span>
+              {% comment %}
+              The title is a LINK, and to the same two destinations the feed
+              card beside it already chooses between. The panel names roles a
+              click is about to save on the student's behalf, and until now
+              those names were inert text -- the one question it invites
+              ("which ones?") was the one thing it would not let you follow.
+
+              Where Coverage holds the posting's own text, this opens the
+              drawer on this page (`data-role-read`, the same hook the card's
+              Read button uses, answered by the dialog `opportunities.html`
+              already includes). Where it does not, the firm's board is
+              genuinely the only copy, so it opens there in a new tab -- the
+              same rule `core/views.py` applies to the Cmd-K palette, for the
+              reason stated there: sending a reader out to a four-second
+              Workday shell for text sitting in our own database is the
+              drawer undoing its own purpose.
+              {% endcomment %}
+              {% if r.has_text %}
+                <button type="button" class="peek-title peek-title-btn"
+                        data-role-read data-role-id="{{ r.id }}"
+                        hx-get="{% url 'role_description' r.id %}"
+                        hx-target="#role-drawer-body" hx-swap="innerHTML"
+                        title="Read this posting">{{ r.title }}</button>
+              {% else %}
+                <a class="peek-title" href="{{ r.url }}"
+                   target="_blank" rel="nofollow noopener"
+                   title="Open this posting on the firm's board">{{ r.title }}</a>
+              {% endif %}
               {% comment %}The role card's own deadline treatment, class for
               class — `.meta-status` plus the level tint, the dotted rule and
               hidden "(reported)" when the date was read out of the posting's

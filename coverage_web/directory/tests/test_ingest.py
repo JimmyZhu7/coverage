@@ -299,11 +299,12 @@ def test_null_deadline_stored_as_null(monkeypatch):
 @pytest.mark.django_db
 def test_malformed_deadline_fails_loudly_instead_of_becoming_no_deadline(monkeypatch):
     """C11: a provider date that doesn't parse must not silently become the
-    same `None` used for "the provider stated no deadline at all" — the feed
-    (`views.deadline_marker`) renders a null deadline as the affirmative
-    claim "No deadline posted", which would misrepresent a parse FAILURE as
-    a stated fact about the posting. The failure must be counted AND
-    surfaced in `ScrapeRun.error`."""
+    same `None` used for "the provider stated no deadline at all" —
+    `views.deadline_marker` renders a null deadline as the affirmative claim
+    "No date posted" (standardized 2026-09-01 to match the feed's own
+    wording; it read "No deadline posted" here before that), which would
+    misrepresent a parse FAILURE as a stated fact about the posting. The
+    failure must be counted AND surfaced in `ScrapeRun.error`."""
     _patch(monkeypatch, [_result([_opp(U1, deadline="not-a-real-date")])])
     run = ingest.ingest_boards([BOARD], label="greenhouse")
 

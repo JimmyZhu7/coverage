@@ -267,6 +267,35 @@ def test_feed_and_firm_page_agree_a_passed_deadline_has_passed(client):
     assert "passed" in firm_body.lower()
 
 
+@pytest.mark.django_db
+def test_feed_and_firm_page_agree_on_no_date_posted_wording(client):
+    """Cross-surface consistency audit, finding F: three wordings for the
+    identical "this role has no deadline" fact — the feed's considered
+    "No date posted, first seen Nd ago" (test-pinned:
+    `test_feed_badge_reads_first_seen_not_new` above), the firm page's old
+    "No deadline posted" (`views.deadline_marker`), and My Applications'
+    bare "No date posted" (`_apps_body.html`). Standardized on the feed's
+    base phrase, "No date posted" — `deadline_marker` is the one function
+    all three read from (directly, or via `_lens_item`/`_stage_card` for My
+    Applications), so fixing it there fixes the firm page and keeps My
+    Applications' existing wording exactly as it was.
+
+    JUDGMENT CALL: the firm page and My Applications do NOT also gain the
+    feed's "first seen Nd ago" clause. `deadline_marker` has no `first_seen`
+    in scope, and both callers already carry a DIFFERENT elapsed-time fact
+    where the feed has none (the role drawer's `checked_ago`, and both the
+    drawer and firm row's `unconfirmed` flag) — a second one would clutter a
+    single-role view rather than help it, where the feed's earns its place
+    triaging ~2,600 rows at once."""
+    firm = _firm()
+    _opp(firm, "https://x/undated", deadline=None)
+    firm_body = client.get(
+        reverse("directory:firm_detail", args=[firm.slug])
+    ).content.decode()
+    assert "No date posted" in firm_body
+    assert "No deadline posted" not in firm_body
+
+
 # ---------------------------------------------------------------------------
 # A3 — the "Everything" escape hatch must actually reveal the hidden
 # non-campus roles, preserving the student's other active filters.
@@ -1201,6 +1230,20 @@ def test_the_drawer_stays_silent_for_a_freshly_confirmed_role(client):
 from datetime import date as _date  # noqa: E402
 
 from directory.views import deadline_marker  # noqa: E402
+
+
+def test_a_null_deadline_says_no_date_posted():
+    """Cross-surface consistency audit, finding F: `deadline_marker` said
+    "No deadline posted" here until 2026-09-01, a third wording for the same
+    fact the feed states as "No date posted, first seen Nd ago" and My
+    Applications states as bare "No date posted". Standardized on the base
+    phrase both of those already used — see the module-level
+    `test_feed_and_firm_page_agree_on_no_date_posted_wording` for the
+    firm-page rendering and the judgment call on why the "first seen" clause
+    does not also move here."""
+    m = deadline_marker(None, "")
+    assert m["label"] == "No date posted"
+    assert m["posted"] is False
 
 
 def test_an_estimated_deadline_gets_no_day_count():

@@ -1195,7 +1195,11 @@ def test_an_estimated_date_stays_off_the_grid_even_at_full_confidence(
                             precision="month", confidence=1.0)
 
     body = _grid(client, when).content.decode()
-    assert "Insight deadline" in body, (
+    # "Insight programme deadline" — see `crm.utils.FIRM_DATE_LABELS`'s
+    # 2026-09-01 fix, which collapsed this map onto
+    # `directory.timeline.EVENT_LABELS` and picked up its own earlier fix for
+    # this exact string.
+    assert "Insight programme deadline" in body, (
         "a month-precision date is confirmed — the firm timeline says so too"
     )
     assert "Applications close" not in body

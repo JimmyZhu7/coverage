@@ -168,6 +168,37 @@ def test_a_closed_postings_drawer_says_so_and_drops_the_apply_claim(client):
 
 
 @pytest.mark.django_db
+def test_the_closed_postings_confirmation_time_is_a_single_unit(client):
+    """Cross-surface consistency audit, finding C: `timesince` defaults to
+    `depth=2` and this line rendered "confirmed 5 days, 13 hours ago" —
+    noise for a caution meant to be read at a glance, and inconsistent with
+    `directory.views._posting_closed_note`'s identical My Applications
+    sentence, which already called `timesince(..., depth=1)` directly. Both
+    now go through the same one-unit convention — the drawer via
+    `core.templatetags.textstyle.timesince1`, the Python site via its own
+    `depth=1` argument."""
+    from datetime import timedelta
+
+    from django.utils import timezone as dj_timezone
+
+    firm = Firm.objects.create(slug="td-sec-depth", name="TD Securities")
+    now = dj_timezone.now()
+    role = Opportunity.objects.create(
+        firm=firm, url="https://td.wd3.myworkdayjobs.com/job/depth-test",
+        title="Banking Associate", bucket="internship", region="us",
+        location="Cherry Hill, New Jersey", status="closed",
+    )
+    Opportunity.objects.filter(pk=role.pk).update(
+        last_verified=now - timedelta(days=5, hours=14),
+        last_checked=now, closed_at=now - timedelta(days=5, hours=13),
+    )
+    html = client.get(reverse("role_description", args=[role.id])).content.decode()
+
+    assert "confirmed 5\xa0days ago" in html
+    assert "confirmed 5\xa0days, 13\xa0hours ago" not in html
+
+
+@pytest.mark.django_db
 def test_an_open_postings_drawer_is_unaffected_by_the_closed_branch(client, role):
     """Sibling check: the new `{% if o.status == 'closed' %}` branch must not
     change anything for the ~all-open common case."""

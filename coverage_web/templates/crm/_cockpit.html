@@ -1174,10 +1174,28 @@ copy exactly once, and this is the once.
     {% endcomment %}
     {% if unplaced_arrivals %}
       <div class="rail-card unplaced-card">
-        <h3 class="rail-title">No market set
-          <a class="rail-more" href="{% url 'crm:contact_list' %}?scope=unplaced">All</a>
+        {% comment %}
+        A QUESTION AND ITS VERB, not a state and a paragraph. This card read
+        "No market set" over three lines of explanation ending "until you
+        say", which names a condition and buries what to do about it.
+
+        Two more things were wrong with that sentence. It hardcoded "Hong
+        Kong or US" -- the founder's own two regions -- so any student
+        recruiting anywhere else read a card naming markets they do not
+        target. And "market" is the postings vocabulary: `crm/views.py`
+        already settled that people sit in COUNTRIES and the directory's
+        "Other Markets" wording belongs to roles, which is why the Network
+        scope tabs read "Hong Kong" and "United States" rather than a market
+        code.
+
+        "Place them" is not a new phrase either -- it is the verb the
+        Contacts caption on the Network page already uses for this exact
+        action, pointing at this exact tool.
+        {% endcomment %}
+        <h3 class="rail-title">Where do they sit?
+          <a class="rail-more" href="{% url 'crm:contact_list' %}?scope=unplaced">Place them</a>
         </h3>
-        <p class="unplaced-note">New this week. Coverage doesn't know if they're Hong Kong or US, so they're matched to deadlines in both until you say.</p>
+        <p class="unplaced-note">New this week. Coverage cannot match them to the right deadlines until you say.</p>
         <ul class="unplaced-list">
           {% for c in unplaced_arrivals %}
             <li class="unplaced-row">

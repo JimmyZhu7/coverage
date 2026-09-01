@@ -415,7 +415,7 @@ ul, ol { padding-left: 1.25rem; }
  * this is the FIRST control on the page, and it should look like the buttons
  * the rest of that tab order leads to. */
 .skip-link { position: absolute; left: 8px; top: -60px; z-index: 100;
-  padding: 10px 16px; border-radius: var(--r-ctl); background: var(--accent);
+  padding: 10px var(--s4); border-radius: var(--r-ctl); background: var(--accent);
   color: var(--on-accent); font-size: var(--fs-s); font-weight: var(--w-med);
   transition: top var(--t-fast); }
 .skip-link:focus { top: 8px; text-decoration: none; }
@@ -478,7 +478,7 @@ main:focus { outline: none; }
   border-radius: var(--r-ctl); padding: 4px;
 }
 .site-nav a {
-  color: var(--ink-2); padding: 7px 16px; border-radius: calc(var(--r-ctl) - 4px);
+  color: var(--ink-2); padding: 7px var(--s4); border-radius: calc(var(--r-ctl) - 4px);
   font-size: var(--fs-micro); font-weight: var(--w-med);
   text-transform: uppercase; letter-spacing: 0.07em;
   transition: color var(--t-fast), background-color var(--t-fast);
@@ -601,7 +601,7 @@ main { flex: 1 0 auto; }
   margin: 0; font-family: var(--font-mono); font-size: var(--fs-micro);
   text-transform: uppercase; letter-spacing: 0.08em;
   font-weight: var(--w-med); color: var(--ink-3);
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--s2);
   animation: rise-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .pagehead-eyebrow::before {
@@ -613,7 +613,7 @@ main { flex: 1 0 auto; }
    request, but still under the marketing hero's 46px ceiling — the page
    title now leads the page without competing with the wordmark. */
 .pagehead-title {
-  margin: 4px 0 0; letter-spacing: -0.018em;
+  margin: var(--s1) 0 0; letter-spacing: -0.018em;
   font: var(--w-black) clamp(30px, 3.6vw, 42px)/1.06 var(--font-display);
   color: var(--ink);
   animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
@@ -915,7 +915,7 @@ main { flex: 1 0 auto; }
    like a disabled button. They are also the base `.subnav.scope-tabs` a
    segments inherit — the segmented capsule is doing real work and stays a
    pill — so squaring here would only move the hardcode down the file. */
-.subnav a { padding: 4px 12px; border-radius: 999px; transition: background-color var(--t-fast); }
+.subnav a { padding: var(--s1) var(--s3); border-radius: 999px; transition: background-color var(--t-fast); }
 .subnav a:hover { background: var(--accent-soft); text-decoration: none; }
 /* Breadcrumbs sit on the page's LEFT RAIL, directly above the title.
  *
@@ -942,10 +942,10 @@ main { flex: 1 0 auto; }
  * selected tab 8px outside its own container, which is exactly what it looked
  * like. Two components, one class; only one of them wants this. */
 .page > .subnav:first-child:not(.scope-tabs) > :first-child,
-.subnav.standalone:not(.scope-tabs) > :first-child { margin-left: -12px; }
+.subnav.standalone:not(.scope-tabs) > :first-child { margin-left: calc(-1 * var(--s3)); }
 .subnav a[aria-current="page"], .subnav strong {
   color: var(--accent-ink); font-weight: var(--w-med); background: var(--accent-soft);
-  border-radius: 999px; padding: 4px 12px;
+  border-radius: 999px; padding: var(--s1) var(--s3);
 }
 
 /* Scope tabs — the segmented capsule (same look as the pricing switcher):
@@ -963,7 +963,7 @@ main { flex: 1 0 auto; }
      phone. Centering is what `.standalone`'s auto margins are for, and those
      only apply when the strip FITS. */
   justify-content: flex-start;
-  align-items: center; gap: 4px; padding: 4px; flex-wrap: nowrap;
+  align-items: center; gap: var(--s1); padding: var(--s1); flex-wrap: nowrap;
   border: 1px solid var(--line); border-radius: 999px;
   background: var(--surface); box-shadow: var(--shadow-1);
   scrollbar-width: none;
@@ -971,7 +971,7 @@ main { flex: 1 0 auto; }
 .subnav.scope-tabs::-webkit-scrollbar { display: none; }
 .subnav.scope-tabs.standalone { margin-left: auto; margin-right: auto; }
 .subnav.scope-tabs a {
-  padding: 8px 20px; line-height: 1.2; white-space: nowrap;
+  padding: var(--s2) 20px; line-height: 1.2; white-space: nowrap;
   font-weight: var(--w-med); color: var(--ink-2);
 }
 .subnav.scope-tabs a:hover { background: var(--accent-soft); color: var(--ink); }
@@ -1590,7 +1590,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .deadline.none { color: var(--ink-3); font-style: italic; }
 .markers { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
 /* A second markers row for fact chips, tighter than the pill row above it. */
-.markers-facts { gap: 4px; margin-top: -2px; }
+.markers-facts { gap: var(--s1); margin-top: -2px; }
 
 /* Eligibility verdicts — the one chip about the READER. Green names their
    year. A blocking verdict is grey-on-quiet, not red: a closed door is a
@@ -1766,7 +1766,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    was the accidental gap. */
 .meta-read { flex: none; margin-left: auto; border: 1px solid var(--line);
   border-radius: 999px; background: var(--surface); color: var(--ink-3);
-  padding: 1px 8px; font-size: var(--fs-nano); font-family: var(--font-mono);
+  padding: 1px var(--s2); font-size: var(--fs-nano); font-family: var(--font-mono);
   letter-spacing: -0.01em;
   cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
 .meta-read:hover { border-color: var(--accent-line); color: var(--accent-ink); }
@@ -1908,7 +1908,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
   font-weight: var(--w-reg); text-transform: uppercase; letter-spacing: 0.04em; }
 .rp-people { display: grid; gap: 2px; }
 .rp-person { display: flex; align-items: center; gap: var(--s2);
-  padding: 5px 8px; margin: 0 -8px; border-radius: 8px; text-decoration: none;
+  padding: 5px var(--s2); margin: 0 calc(-1 * var(--s2)); border-radius: 8px; text-decoration: none;
   color: var(--ink); font-size: var(--fs-s);
   transition: background-color var(--t-fast), transform var(--t-fast); }
 .rp-person:hover { background: var(--surface); text-decoration: none;
@@ -2189,11 +2189,11 @@ select:focus-visible, input:focus-visible {
 .csel-menu::-webkit-scrollbar { width: 8px; }
 .csel-menu::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
 .csel-menu-empty::after { content: "No matches"; display: block;
-  padding: 8px 12px; color: var(--ink-3); font-size: var(--fs-s); font-style: italic; }
+  padding: var(--s2) var(--s3); color: var(--ink-3); font-size: var(--fs-s); font-style: italic; }
 @keyframes csel-open { from { opacity: 0; transform: translateY(-4px) scale(0.98); }
   to { opacity: 1; transform: none; } }
 .csel-opt { display: flex; align-items: center; gap: var(--s2);
-  padding: 8px 12px; border-radius: var(--r-ctl); cursor: pointer;
+  padding: var(--s2) var(--s3); border-radius: var(--r-ctl); cursor: pointer;
   font-size: var(--fs-s); color: var(--ink); white-space: nowrap;
   transition: background-color var(--t-fast), color var(--t-fast); }
 /* A class, not `hidden` — see the panel note above; `.csel-opt` sets its
@@ -2294,21 +2294,21 @@ select:focus-visible, input:focus-visible {
   margin: 12vh auto auto; animation: csel-open 140ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
 .palette::backdrop { background: rgba(15, 27, 42, 0.32); }
 .palette input[type="search"] { width: 100%; border: 0; margin: 0;
-  border-bottom: 1px solid var(--line); border-radius: 0; padding: 14px 16px;
+  border-bottom: 1px solid var(--line); border-radius: 0; padding: 14px var(--s4);
   font-size: var(--fs-m); background: transparent; }
 .palette input[type="search"]:focus { outline: none; box-shadow: none; }
 #cmdk-results { list-style: none; margin: 0; padding: 6px;
   max-height: 46vh; overflow-y: auto; }
 .palette-sec { font-family: var(--font-mono); font-size: var(--fs-micro);
   text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3);
-  padding: 8px 10px 3px; }
+  padding: var(--s2) 10px 3px; }
 .palette-item { display: flex; align-items: baseline; justify-content: space-between;
-  gap: var(--s3); padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  gap: var(--s3); padding: var(--s2) 10px; border-radius: 8px; cursor: pointer;
   font-size: var(--fs-s); }
 .palette-item b { font-weight: var(--w-med); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .palette-item span { color: var(--ink-3); font-size: var(--fs-xs); flex: none; }
 .palette-item.is-active, .palette-item:hover { background: var(--accent-soft); }
 .palette-none { padding: 14px 10px; color: var(--ink-3); font-size: var(--fs-s); }
-.palette-hint { margin: 0; padding: 7px 12px; border-top: 1px solid var(--line);
+.palette-hint { margin: 0; padding: 7px var(--s3); border-top: 1px solid var(--line);
   font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--ink-3); }

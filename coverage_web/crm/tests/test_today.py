@@ -1003,7 +1003,10 @@ def test_deadlines_are_named_not_just_counted(client):
         ("Morgan Stanley", "2d", True)]
 
     body = _login_and_get(client, user)
-    assert "Insight deadline" in body
+    # "Insight programme deadline", not the old "Insight deadline" — see
+    # `crm.utils.FIRM_DATE_LABELS`, which now derives from (and can no
+    # longer drift from) `directory.timeline.EVENT_LABELS`.
+    assert "Insight programme deadline" in body
 
 
 def test_the_rail_names_every_confirmed_date_a_firm_has(client):

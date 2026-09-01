@@ -132,13 +132,13 @@ def content_hash_for(opp: ConnOpportunity) -> str:
 
 def _parse_deadline(value: str | None) -> tuple[date | None, bool]:
     """`YYYY-MM-DD` -> `(date, True)`. No value at all -> `(None, True)` —
-    the provider stated nothing, which honestly IS "no deadline posted".
+    the provider stated nothing, which honestly IS "no date posted".
 
     A NON-empty but unparseable value -> `(None, False)`: the provider is
     claiming a deadline exists but sent something this can't read (a format
     change, a bad key, truncated garbage) — a materially different fact from
     "there is no deadline", and collapsing it to the same `None` used to
-    silently relabel a parse FAILURE as the affirmative claim "No deadline
+    silently relabel a parse FAILURE as the affirmative claim "No date
     posted" (`views.deadline_marker`). The `bool` lets `_apply_opportunity`
     count these into `stats` instead of losing the distinction."""
     if not value:
@@ -271,7 +271,7 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
     deadline, deadline_ok = _parse_deadline(opp.deadline)
     if not deadline_ok:
         # A provider date that didn't parse must not vanish as a quiet
-        # `None` — the feed renders that as "No deadline posted", an
+        # `None` — the feed renders that as "No date posted", an
         # affirmative claim the posting never made. Counted AND surfaced in
         # `ScrapeRun.error` (see `ingest_results`, which joins `stats
         # ["errors"]` into it) so a format change on a provider's date field

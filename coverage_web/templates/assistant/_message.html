@@ -1,4 +1,5 @@
 {% load assistant_extras %}
+{% load textstyle %}
 {% comment %}
 One turn in the thread. `row` is a dict built by assistant.views._thread_rows:
 role, text, message_id (the stored row's own pk), tools (human labels for the
@@ -25,7 +26,10 @@ knows how to do. No new JS path, just a second door into the same one.
     <span class="as-avatar" aria-hidden="true">{% include "_logo.html" %}</span>
   {% endif %}
   <div class="as-turn">
-    <p class="as-who">{% if row.role == 'user' %}You{% else %}Coverage{% endif %}{% if row.created %} <time class="as-msg-time" datetime="{{ row.created|date:'c' }}">{{ row.created|timesince }} ago</time>{% endif %}</p>
+    {# `timesince1`: depth=1, so a turn from earlier today reads "13 hours #}
+    {# ago" rather than the default depth=2's "5 days, 13 hours ago" -- see #}
+    {# core.templatetags.textstyle.timesince1. #}
+    <p class="as-who">{% if row.role == 'user' %}You{% else %}Coverage{% endif %}{% if row.created %} <time class="as-msg-time" datetime="{{ row.created|date:'c' }}">{{ row.created|timesince1 }} ago</time>{% endif %}</p>
     <div class="as-bubble">
       {% if row.attachments %}
         <div class="as-attachments">

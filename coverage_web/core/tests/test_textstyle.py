@@ -433,3 +433,45 @@ def test_smart_title_lowercases_a_particle_but_never_a_leading_one(raw, expected
 )
 def test_smart_person_name_reads_a_whole_address(raw, expected):
     assert smart_person_name(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# `timesince1` — cross-surface consistency audit, finding C. Django's
+# `timesince` template filter defaults to `depth=2` and has no way to pass a
+# depth (its one argument is a comparison time), so every template that
+# wanted the product's own one-unit convention had nothing to reach for and
+# rendered "1 hour, 38 minutes ago" / "5 days, 13 hours ago" — noise in a
+# sentence meant to be read at a glance, and inconsistent with the Python
+# call sites (`directory.views`' `checked_ago` and closed-posting note) that
+# already pass `depth=1` directly.
+# ---------------------------------------------------------------------------
+from datetime import timedelta
+
+from django.utils import timezone
+from django.utils.timesince import timesince
+
+from core.templatetags.textstyle import timesince1
+
+
+def test_timesince1_collapses_to_one_unit():
+    now = timezone.now()
+    # 5 days, 13 hours ago — the exact shape named in the audit
+    # (`templates/assistant/_message.html`'s old "5 days, 13 hours ago").
+    # Default `timesince` renders two units; `timesince1` must render one.
+    two_units = timesince(now - timedelta(days=5, hours=13), now)
+    one_unit = timesince1(now - timedelta(days=5, hours=13))
+    assert two_units.count(",") == 1
+    assert "," not in one_unit
+    # Django's `timesince` joins the count and unit with a non-breaking
+    # space (`\xa0`), not a plain one — matched literally rather than
+    # normalized, so a future Django upgrade that changes the separator
+    # fails this test instead of silently changing the rendered HTML.
+    assert one_unit == "5\xa0days"
+
+
+def test_timesince1_passes_through_falsy_values_unchanged():
+    """A blank/`None` timestamp is a real, expected case at every call site
+    (`o.closed_at`, `row.created`, `gmail_live.last_notification_at` are all
+    optional) — the filter must not raise or print "0 minutes" for it."""
+    assert timesince1(None) is None
+    assert timesince1("") == ""

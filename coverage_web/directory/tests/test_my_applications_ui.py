@@ -427,6 +427,25 @@ def _shut(user, *, n=90, days=3, stage="saved", status="closed", firm=None):
 
 
 @pytest.mark.django_db
+def test_a_closed_postings_confirmation_time_is_a_single_unit(client):
+    """Cross-surface consistency audit, finding C:
+    `directory.views._posting_closed_note` builds "confirmed X ago" with
+    `timesince(o.closed_at, depth=1)` — pinned here so a future edit that
+    drops the `depth=1` argument (reverting to the noisy default two-unit
+    "confirmed 5 days, 13 hours ago") fails a test instead of shipping."""
+    user = _user()
+    now = timezone.now()
+    o = _shut(user, days=3)
+    Opportunity.objects.filter(pk=o.pk).update(
+        closed_at=now - timedelta(days=5, hours=13))
+    client.force_login(user)
+
+    body = client.get(reverse("my_applications")).content.decode()
+    assert "confirmed 5\xa0days ago" in body
+    assert "confirmed 5\xa0days, 13\xa0hours ago" not in body
+
+
+@pytest.mark.django_db
 def test_a_closed_posting_leaves_the_deadline_lenses_for_its_own(client):
     """It was in Closing Soon, counting down. A dead posting has no deadline
     urgency left in it for anyone."""

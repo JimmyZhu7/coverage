@@ -34,6 +34,7 @@ import hashlib
 import re
 
 from django import template
+from django.utils.timesince import timesince as _timesince
 
 register = template.Library()
 
@@ -447,6 +448,29 @@ def smart_location(value):
                             force_cap=(i == 0))
         for i, w in enumerate(words)
     )
+
+
+@register.filter(name="timesince1")
+def timesince1(value):
+    """`{{ value|timesince }}`, collapsed to its coarser unit alone.
+
+    Django's `timesince` template filter has no way to pass `depth` — its
+    one argument is a comparison time, not a depth — so every template that
+    wanted `depth=1` had no filter to reach for and fell back to the plain
+    `timesince` tag, which defaults to `depth=2`: two units ("1 hour, 38
+    minutes ago", "5 days, 13 hours ago"). That is noise in a sentence read
+    at a glance rather than studied, which is why `directory.views` already
+    calls `timesince(..., depth=1)` directly in Python wherever it builds
+    the string itself (`checked_ago`, the closed-posting note). This filter
+    is that same call, for the templates that render `timesince` straight
+    off a context value instead: the closed-posting caution
+    (`_role_drawer.html`), the advisor's own timestamp
+    (`assistant/_message.html`), and the Gmail Live status lines
+    (`accounts/settings.html`).
+    """
+    if not value:
+        return value
+    return _timesince(value, depth=1)
 
 
 @register.filter(name="firm_hue")

@@ -17,7 +17,9 @@ file quietly holding the escape hatch would make the check a formality.
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
+from unittest import mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -130,6 +132,64 @@ def test_search_contacts_flags_ambiguity_in_the_result_not_only_the_prompt(user,
 def test_search_contacts_single_match_is_not_flagged_ambiguous(user, contact):
     result, _ = _call(user, "search_contacts", {"query": "jane"})
     assert "ambiguous" not in result
+
+
+def test_search_contacts_last_touch_field_is_named_and_computed_in_calendar_days(user, firm):
+    """Cross-surface consistency audit, finding B: `assistant.tools` handed
+    the model two "how long ago" numbers under near-identical names —
+    `days_idle` (business days, `crm.today`'s own reasoning) and
+    `last_touch_days` (calendar days via a local `_days_since`) — with
+    neither name saying which was which. This pins the renamed field
+    (`last_touch_calendar_days`, the old name must be gone) and that
+    `_days_since` now routes through `crm.utils._calendar_days_ago` instead
+    of its own raw UTC floor, so a contact's last touch cannot read a
+    different "how long ago" here than it does on the Today page for the
+    identical timestamp. Same fixture shape as
+    `directory.tests.test_seen_days_timezone` (the sibling fix for the
+    feed)."""
+    HK = ZoneInfo("Asia/Hong_Kong")
+    # 2026-08-27 20:00 UTC is 2026-08-28 04:00 in Hong Kong.
+    NOW = datetime(2026, 8, 27, 20, 0, tzinfo=ZoneInfo("UTC"))
+    # 2026-08-17 15:00 UTC is 2026-08-17 23:00 in Hong Kong — 5 hours before
+    # HK midnight. Raw UTC elapsed time is 10 days 5 hours (floors to 10);
+    # the LOCAL calendar-date difference (Aug 28 minus Aug 17) is 11.
+    LAST_TOUCH = datetime(2026, 8, 17, 15, 0, tzinfo=ZoneInfo("UTC"))
+
+    c = Contact(user=user, firm=firm, name="Jane Banker", region="hk")
+    c.save()
+    Touch(user=user, contact=c, kind="email", channel="email", ts=LAST_TOUCH).save()
+
+    timezone.activate(HK)
+    try:
+        with mock.patch("django.utils.timezone.now", return_value=NOW):
+            result, is_error = _call(user, "search_contacts", {"query": "jane"})
+    finally:
+        timezone.deactivate()
+
+    assert not is_error
+    row = result["contacts"][0]
+    assert "last_touch_days" not in row
+    # 11, the local-calendar answer — not 10, the raw UTC floor the old
+    # name and old implementation would have given for this exact instant.
+    assert row["last_touch_calendar_days"] == 11
+
+
+def test_get_today_queue_labels_its_idle_count_as_business_days(user, contact, firm):
+    """The sibling half of finding B: `days_idle` (BUSINESS days — the
+    cadence engine's own reasoning, `crm.today._build_actions`'
+    `last_business_days`) renamed to `business_days_idle` so it cannot be
+    mistaken for `last_touch_calendar_days` (CALENDAR days) above. This is a
+    deliberately different question from the calendar-day count — see
+    `crm.today`'s own business-day cadence math — so only the NAME changes
+    here, not the value."""
+    UserFirm(user=user, firm=firm, tier=1).save()
+    result, is_error = _call(user, "get_today_queue")
+
+    assert not is_error
+    assert result["queue"]
+    row = result["queue"][0]
+    assert "days_idle" not in row
+    assert "business_days_idle" in row
 
 
 def test_search_contacts_limit_is_capped_by_code(user, firm):

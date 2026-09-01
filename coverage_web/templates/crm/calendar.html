@@ -466,6 +466,33 @@
   from.{% endcomment %}
   {% include "_pagehead.html" with eyebrow="Your dates" title="Calendar" sub="Chats from your inbox, touches you logged, and the deadlines you track." %}
 
+  {% comment %}
+  EVERY NAVIGATION ON THIS PAGE SWAPS THIS BLOCK; nothing reloads the page.
+  Switching Month/Week/Day, or paging, or pressing Today, used to be a full
+  document load -- a white flash and a scroll reset to re-render a grid whose
+  surrounding chrome is identical every time. The bar, the legend and the
+  grid are exactly the parts that differ between views, so they are the swap
+  unit, and `hx-select` pulls this same id back out of the full response so
+  the view keeps working with no JS and no second template.
+
+  `hx-push-url` keeps the address bar honest, which is what makes the back
+  button, a refresh and a shared link all still land where the student
+  actually is.
+
+  DELIBERATELY NOT `hx-boost` on this container. Boost also intercepts
+  FORMS, and the add-to-calendar form below is a plain POST whose view
+  answers with a redirect; the sibling failure that shape produces was
+  reported live on the assistant's folder delete, which returned a bare
+  fragment into a boosted form and painted unstyled markup as the whole
+  page. The six navigation links are named individually instead, so a form
+  can never be swept in by accident.
+
+  `hx-target`/`hx-select`/`hx-swap`/`hx-push-url` are inherited by the links
+  below rather than repeated six times; only `hx-get` differs per link.
+  {% endcomment %}
+  <div id="cal-view"
+       hx-target="#cal-view" hx-select="#cal-view"
+       hx-swap="outerHTML" hx-push-url="true">
   <div class="cal-bar">
     <h2 class="cal-month">{{ period_label }}</h2>
     <div class="cal-nav">
@@ -625,6 +652,7 @@
       {% endif %}
     </div>
   {% endif %}
+  </div>{# /#cal-view #}
 </div>
 {% comment %}
 Reported live: "Today" appeared to do nothing when clicked while already

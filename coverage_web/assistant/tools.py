@@ -93,7 +93,7 @@ from coverage_domain.pipeline import CHANNELS, THREAD_STATES, TOUCH_TRANSITIONS,
 from crm import campaigns as crm_campaigns, services
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
 from crm.today import TUNABLE_CADENCE_PARAMS, _build_actions
-from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS
+from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS, _calendar_days_ago
 from crm.views import _display_note
 from directory.classify import TARGET_BUCKETS
 from directory.deadlines import is_posting_closed
@@ -247,10 +247,24 @@ def _today(user):
 
 
 def _days_since(ts, *, now=None) -> int | None:
+    """CALENDAR days since `ts`, on the account's own clock — routed through
+    `crm.utils._calendar_days_ago`, the product's single definition of "how
+    long ago" (its own docstring: two surfaces computing this independently
+    drifted apart once elapsed time crossed a local calendar-date boundary).
+
+    This function used to do that independent computation itself — a raw
+    `(now - ts).days` UTC timedelta floor — sitting a few lines below `_today`
+    above, whose own docstring says the advisor calls the same `localdate()`
+    `crm/today.py` does "so the advisor and the Today page can never
+    disagree". `_days_since` was the one place that didn't: a contact's last
+    touch could read a different day count here than on the Today page for
+    the same underlying timestamp. See `last_touch_calendar_days` below.
+    """
     if ts is None:
         return None
-    now = now or timezone.now()
-    return max(0, (now - ts).days)
+    # Clamped at 0, matching `crm.today._rail_ago`'s own guard — a touch
+    # hand-logged with a future date must not read as a negative "days ago".
+    return max(0, _calendar_days_ago(ts, as_of=now))
 
 
 def _firm_name(contact) -> str:
@@ -698,7 +712,14 @@ def _get_today_queue(user, _args) -> dict:
                 "warmth": c.get("warmth"),
                 "thread_state": c.get("thread_state"),
                 "reason": _s(a.get("reason")),
-                "days_idle": (
+                # BUSINESS days, not calendar — `last_business_days` is the
+                # cadence engine's own reasoning (`crm.today`/`_build_actions`),
+                # the same unit Today's act card shows, and a deliberately
+                # different question from `last_touch_calendar_days` below
+                # (see that field's comment). Named with the unit in it
+                # because the model receives both in one payload and neither
+                # used to say which was which.
+                "business_days_idle": (
                     None if a.get("last_business_days") is None else a["last_business_days"]
                 ),
                 "last_interaction": a.get("last_kind"),
@@ -764,7 +785,12 @@ def _search_contacts(user, args) -> dict:
             "warmth": c.warmth,
             "thread_state": c.thread_state,
             "region": c.region or "unknown",
-            "last_touch_days": _days_since(last_touch.get(c.id), now=now),
+            # CALENDAR days, not business — see `business_days_idle` above
+            # for the sibling field this used to be indistinguishable from
+            # by name alone. `_days_since` now routes through
+            # `crm.utils._calendar_days_ago`, so this and the Today page can
+            # never print a different "how long ago" for the same touch.
+            "last_touch_calendar_days": _days_since(last_touch.get(c.id), now=now),
             "not_my_recruiting": c.id in hidden,
         }
         for c in contacts

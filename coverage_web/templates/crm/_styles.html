@@ -201,7 +201,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     line-height: 1.35; color: var(--ink); }
   .seed-why { margin: 2px 0 0; font-size: var(--fs-xs); color: var(--ink-2);
     line-height: 1.45; }
-  .seed-btn { flex: none; padding: 6px 12px; font-size: var(--fs-xs);
+  .seed-btn { flex: none; padding: 6px var(--s3); font-size: var(--fs-xs);
     white-space: nowrap; }
   /* On a narrow screen the button drops under the text rather than crushing
      it to two words a line. 44px min-height is the finger target the rest of
@@ -260,7 +260,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     text-align: center; white-space: nowrap; }
   .act-ghosts { display: flex; gap: var(--s4); }
   .act-ghost { background: transparent; border-color: transparent; color: var(--ink-3);
-    padding: 3px 8px; font-size: var(--fs-xs); }
+    padding: 3px var(--s2); font-size: var(--fs-xs); }
   .act-ghost:hover { background: var(--paper); border-color: var(--line); color: var(--ink-2); }
 
   /* Pace — a weekly-goal donut that fills on load, laid out SIDEWAYS. The
@@ -277,7 +277,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .pace-fill.is-hit { stroke: var(--ok); }
   @keyframes pace-grow { from { stroke-dashoffset: 327; } }
   .pace-text { min-width: 0; }
-  .pace-figure { margin: 0; display: flex; align-items: baseline; gap: 4px; }
+  .pace-figure { margin: 0; display: flex; align-items: baseline; gap: var(--s1); }
   .pace-done { font: var(--w-black) 26px/1 var(--font-display); color: var(--ink);
     font-variant-numeric: tabular-nums; }
   .pace-goal { color: var(--ink-3); font-family: var(--font-mono);
@@ -591,7 +591,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      Styled as quoted speech, never truncated: the quote is the audit trail. */
   .act-quote { margin: 0; color: var(--ink-2); font-size: var(--fs-xs);
     line-height: 1.45; font-style: italic; border-left: 2px solid var(--line);
-    padding-left: 8px; }
+    padding-left: var(--s2); }
   /* The debrief/thank-you pair acknowledging itself. */
   .act-pair { margin: 0; color: var(--accent-ink); font-size: var(--fs-micro); }
   /* Compose opens an empty email when there's no opener. Say so on the
@@ -643,14 +643,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      because it is the same promise: you just did something big, here is the
      way back. Sits where the card was. */
   .prop-undo { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
-    margin-bottom: var(--s5); padding: 8px var(--s4) 8px var(--s3);
+    margin-bottom: var(--s5); padding: var(--s2) var(--s4) var(--s2) var(--s3);
     background: var(--accent-soft); border: 1px solid var(--accent-line);
     border-left: 3px solid var(--accent); border-radius: 10px;
     color: var(--ink-2); font-size: var(--fs-s); }
   .prop-undo-said { flex: 1 1 auto; }
   .prop-undo-note { color: var(--ink-3); }
   .prop-undo-btn { border: 1px solid var(--accent-line); background: var(--surface);
-    color: var(--accent-ink); border-radius: 999px; padding: 4px 14px;
+    color: var(--accent-ink); border-radius: 999px; padding: var(--s1) 14px;
     font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
     transition: background var(--t-fast), border-color var(--t-fast); }
   .prop-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
@@ -695,7 +695,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .act-card.act-prep { border-left-color: var(--accent); }
   .prep-at { font-family: var(--font-mono); font-size: var(--fs-xs);
     font-weight: var(--w-bold); color: var(--accent-ink);
-    background: var(--accent-soft); border-radius: 999px; padding: 2px 8px;
+    background: var(--accent-soft); border-radius: 999px; padding: 2px var(--s2);
     white-space: nowrap; }
   .lane-prep .prio-prep { background: var(--stale-s); color: var(--stale-t);
     border-color: var(--stale-l); }
@@ -1013,7 +1013,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .bulk-count b { color: var(--ink); font-weight: var(--w-med);
     font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
   .bulk-acts { display: flex; gap: var(--s2); flex-wrap: wrap; }
-  .bulk-acts .btn { padding: 4px var(--s3); font-size: var(--fs-xs); }
+  .bulk-acts .btn { padding: var(--s1) var(--s3); font-size: var(--fs-xs); }
   .net-none { color: var(--ink-3); font-style: italic; font-size: var(--fs-s);
     text-align: center; margin: var(--s3) 0; }
 
@@ -1096,10 +1096,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     gap: var(--s4); margin: var(--s4) 0 0; padding-top: var(--s3);
     border-top: 1px solid var(--line); font-size: var(--fs-micro);
     color: var(--ink-3); }
-  .net-legend-mini span { display: inline-flex; align-items: center; gap: 4px; }
+  .net-legend-mini span { display: inline-flex; align-items: center; gap: var(--s1); }
   .net-legend-mini .pill.fc-spon { margin-right: 2px; pointer-events: none; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    margin-right: 4px; }
+    margin-right: var(--s1); }
   .dot-cold { background: var(--w-cold-bar); }
   .dot-replied { background: var(--w-replied-bar); }
   .dot-chatted { background: var(--w-chatted-bar); }
@@ -1160,7 +1160,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
     grid-auto-rows: minmax(44px, auto); gap: var(--s3);
     max-height: var(--tier-cap, none); overflow-y: auto;
-    padding-right: 4px; scrollbar-width: thin;
+    padding-right: var(--s1); scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent; }
   /* Only a grid `capAllGrids()` actually capped gets the loud, always-on
      scrollbar `.net-panel` already draws above (track + thumb + hover) —
@@ -1586,7 +1586,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cd-opener[open] > summary::before { transform: rotate(45deg); }
   .cd-opener-on { font-size: var(--fs-micro); font-weight: var(--w-med);
     color: var(--ok); background: var(--ok-soft); border-radius: 999px;
-    padding: 1px 8px; }
+    padding: 1px var(--s2); }
   .cd-opener textarea { width: 100%; margin-top: var(--s2); font-size: var(--fs-s); }
   .cd-opener-foot { display: flex; justify-content: flex-end; margin-top: var(--s2); }
 
@@ -1762,7 +1762,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* "Moving" — inbound activity within the week, the queue's one good-news
      signal. The dot breathes with the same pulse the feed's live-dot uses;
      the word carries the meaning, the title the definition. */
-  .act-moved { display: inline-flex; align-items: center; gap: 4px;
+  .act-moved { display: inline-flex; align-items: center; gap: var(--s1);
     color: var(--ok); font-weight: var(--w-med); }
   .act-moved i { width: 7px; height: 7px; border-radius: 50%;
     background: var(--ok); position: relative; }

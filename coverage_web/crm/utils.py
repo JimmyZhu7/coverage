@@ -13,6 +13,11 @@ from urllib.parse import quote, urlencode
 
 from django.utils import timezone
 
+# Cross-app read, same posture as `crm.today`'s own import of
+# `directory.open_runs` — directory never imports this module, so there is
+# no cycle. See `FIRM_DATE_LABELS` below for why.
+from directory.timeline import EVENT_LABELS as _FIRM_DATE_EVENT_LABELS
+
 
 # ---------------------------------------------------------------------------
 # Time.
@@ -261,11 +266,50 @@ def _clock(at) -> str:
 
 
 
+def _sentence_case(label: str) -> str:
+    """Title Case -> sentence case: only the first word keeps its capital.
+    An already-uppercase word (an acronym, none of which occur in the firm-
+    dates vocabulary today) survives unchanged rather than being lowercased
+    into something unpronounceable."""
+    words = label.split(" ")
+    return " ".join(
+        w if i == 0 or w.isupper() else w.lower() for i, w in enumerate(words)
+    )
+
+
+# The CRM's own casing of `directory.timeline.EVENT_LABELS`, not a second
+# hand-typed vocabulary. Until 2026-09-01 this dict was maintained by hand
+# and had drifted from the canonical one in two ways:
+#
+#   1. It covered 4 of the 8 `event_kind`s. The other 4 fell through five
+#      CRM call sites' own `event_kind.replace("_", " ")` fallback -- an
+#      `app_deadline` row would have rendered "app deadline".
+#   2. The one kind both maps DID cover under the same key still disagreed:
+#      this dict said `"insight_deadline": "Insight deadline"` -- the exact
+#      sentence-cased-raw-slug string `directory.timeline.EVENT_LABELS`'s own
+#      docstring records fixing, for the identical key, to "Insight
+#      Programme Deadline". Live effect: Morgan Stanley (id 32)'s
+#      `insight_deadline` row read "Insight deadline" on Today's rail and the
+#      reasoning-panel label, while the firm timeline three clicks away
+#      correctly said "Insight Programme Deadline" for the same row -- the
+#      same defect class `directory.timeline` was written to end,
+#      reintroduced by keeping a second, independently-maintained map of the
+#      same vocabulary.
+#
+# CASING IS DELIBERATELY NOT THE SAME AS THE SOURCE MAP. The firm timeline
+# (`directory/views.py`'s `_firm_date_row`) renders `EVENT_LABELS` Title
+# Case in a table column, next to other Title Case headers. Every CRM call
+# site prints this map's value as a short pill or inline phrase beside
+# `crm.utils.ACTION_LABELS` ("Send thank-you", "Keep warm", "Follow up") --
+# sentence case, one capital, on the exact same card
+# (`templates/crm/_cockpit.html`'s `p.firm_date_label` sits beside
+# `a.label`). `crm/views.py`'s own comment on the old map already called it
+# "the crm surface's own lowercase vocabulary... so the three [Today strip,
+# calendar, reasoning panel] cannot drift" -- true and worth keeping, so the
+# casing is derived here rather than dropped, and the SOURCE of the words
+# is now the one map instead of two.
 FIRM_DATE_LABELS = {
-    "app_open": "Applications open",
-    "app_close": "Applications close",
-    "insight_open": "Insight programme opens",
-    "insight_deadline": "Insight deadline",
+    kind: _sentence_case(label) for kind, label in _FIRM_DATE_EVENT_LABELS.items()
 }
 
 

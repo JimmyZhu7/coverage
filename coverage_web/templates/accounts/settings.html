@@ -1954,7 +1954,8 @@ that don't already declare explicit htmx behaviour.
                     {{ gmail_live.gmail_address }}.
                     {% if gmail_live.is_pro %}
                       {% if gmail_live.last_notification_at %}
-                        Last update {{ gmail_live.last_notification_at|timesince }} ago.
+                        {# depth=1, matching every other "ago" line on the product -- see core.templatetags.textstyle.timesince1. #}
+                        Last update {{ gmail_live.last_notification_at|timesince1 }} ago.
                       {% elif gmail_live.watch_active %}
                         No activity seen yet.
                       {% else %}
@@ -2039,7 +2040,8 @@ that don't already declare explicit htmx behaviour.
                 {% elif gmail_live.rescan_status == "failed" %}
                   Hit a snag, retrying automatically.
                 {% elif gmail_live.rescan_status == "done" %}
-                  Last scan {{ gmail_live.rescan_completed_at|timesince }} ago, {{ gmail_live.rescan_stats.touches_written|default:0 }} touch{{ gmail_live.rescan_stats.touches_written|default:0|pluralize:"es" }} logged.
+                  {# depth=1 here too -- same reasoning as the Last update line above. #}
+                  Last scan {{ gmail_live.rescan_completed_at|timesince1 }} ago, {{ gmail_live.rescan_stats.touches_written|default:0 }} touch{{ gmail_live.rescan_stats.touches_written|default:0|pluralize:"es" }} logged.
                   {% with residue=gmail_live.rescan_stats.residue %}
                     {% if residue.credit_limited %}
                       {{ residue.residue_threads_seen }} thread{{ residue.residue_threads_seen|pluralize }} needed a closer look, {{ residue.residue_threads_processed }} covered, rest unclassified until credits refill.

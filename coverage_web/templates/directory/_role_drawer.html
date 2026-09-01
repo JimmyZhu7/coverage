@@ -83,7 +83,12 @@ last and unmissable — this drawer is for deciding, not for applying.
   instead of claiming "it still shows as open because we can't confirm it
   closed" — which would be false here. See `_unconfirmed_note` in views.py.
   {% endcomment %}
-  <p class="drawer-caution is-closed">This posting is closed{% if o.closed_at %}, confirmed {{ o.closed_at|timesince }} ago{% endif %}. It's no longer accepting applications.</p>
+  {# `timesince1`, not the bare `timesince` filter -- depth=1, matching the #}
+  {# My Applications sentence this caution tracks (`directory.views._posting_closed_note`) #}
+  {# and every Python-side `timesince(..., depth=1)` call. The default #}
+  {# `depth=2` rendered "confirmed 1 hour, 38 minutes ago" here, noise for a #}
+  {# caution meant to be read at a glance. #}
+  <p class="drawer-caution is-closed">This posting is closed{% if o.closed_at %}, confirmed {{ o.closed_at|timesince1 }} ago{% endif %}. It's no longer accepting applications.</p>
   <a class="drawer-apply is-closed" href="{{ o.url }}" target="_blank" rel="nofollow noopener">
     View the closed posting on {{ firm.name|smart_title }} ↗
   </a>

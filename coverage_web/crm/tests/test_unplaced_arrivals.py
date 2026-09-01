@@ -138,8 +138,15 @@ def test_a_contact_that_arrived_blank_this_week_is_named(client):
     card = _card(_today(client, user))
     assert "Jude Yoon" in card
     assert "Citi" in card
-    assert "No market set" in card
-    assert "Hong Kong or US" in card
+    # The heading asks the question and the link carries the verb. Pinned
+    # together because the card's whole job is to be answerable: a state
+    # ("No market set") with no verb beside it was what it read as before.
+    assert "Where do they sit?" in card
+    assert "Place them" in card
+    # And it must not name the founder's own two regions. This sentence
+    # hardcoded "Hong Kong or US", which every student outside those two
+    # markets would have read as a card about somewhere they do not recruit.
+    assert "Hong Kong or US" not in card
 
 
 def test_a_placed_contact_is_never_named(client):
