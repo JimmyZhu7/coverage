@@ -737,13 +737,39 @@ def delete_folder(request: HttpRequest) -> HttpResponse:
     """Deletes the FOLDER only — every chat inside it becomes unfiled, never
     deleted (ChatConversation.folder is on_delete=SET_NULL). A folder is a
     label a student put on some chats; removing the label is not a reason
-    to remove the chats."""
+    to remove the chats.
+
+    A REDIRECT, exactly like `delete_conversation` below, and for a reason
+    that was found the hard way: this used to `render()` the bare
+    `_history.html` sidebar fragment. That is an htmx-shaped response, but
+    the form that posts here (`_history.html`'s own folder menu) is a plain
+    `<form method="post">` carrying no `hx-*` attributes at all, so the
+    browser navigated to this URL and painted the raw fragment AS the whole
+    page — sidebar markup with no <head>, no stylesheet, no layout. Reported
+    live as "when I try to delete this, it blows up the page".
+
+    Making the form htmx instead would not have worked without a second
+    change: the shared `data-confirm` dialog in chat.html deliberately calls
+    `form.submit()` rather than `requestSubmit()` so it cannot re-enter its
+    own submit listener, and a native `.submit()` fires no submit event for
+    htmx to intercept either. So the honest fix is the one its sibling
+    already proves: answer a full navigation with a full navigation.
+
+    Where it lands mirrors `delete_conversation`: the chats survive this, so
+    the conversation being read is still real and the student stays on it.
+    """
     folder = get_object_or_404(
         ChatFolder.objects.for_user(request.user), pk=_posted_int(request, "folder") or 0
     )
     folder.delete()
-    conversation = _current_conversation(request.user, _posted_int(request, "current"))
-    return render(request, "assistant/_history.html", _history_context(request.user, conversation))
+
+    current_id = _posted_int(request, "current")
+    if (
+        current_id
+        and ChatConversation.objects.for_user(request.user).filter(pk=current_id).exists()
+    ):
+        return redirect("assistant:chat_conversation", conversation_id=current_id)
+    return redirect("assistant:chat")
 
 
 @login_required

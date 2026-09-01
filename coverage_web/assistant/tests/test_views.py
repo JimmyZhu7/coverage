@@ -634,11 +634,44 @@ def test_deleting_a_folder_unfiles_its_conversations_without_deleting_them(signe
 
     response = signed_in.post(reverse("assistant:folder_delete"), {"folder": folder.id})
 
-    assert response.status_code == 200
+    # 302, not 200. This assertion used to read `== 200` and so PINNED the
+    # bug: the view answered a plain, non-htmx form post with a bare
+    # `_history.html` sidebar fragment, which the browser then painted as the
+    # entire page (no head, no stylesheet). Reported live as "when I try to
+    # delete this, it blows up the page". A full navigation gets a full
+    # navigation, exactly as `delete_conversation` already did.
+    assert response.status_code == 302
     assert not ChatFolder.objects.for_user(user).filter(pk=folder.id).exists()
     conversation.refresh_from_db()
     assert conversation.folder_id is None
     assert ChatConversation.objects.for_user(user).filter(pk=conversation.id).exists()
+
+
+def test_deleting_a_folder_lands_on_a_whole_page_not_a_bare_fragment(signed_in, user):
+    """The regression guard for the "blows up the page" report.
+
+    The status code alone is not the invariant worth pinning: what actually
+    broke was that the response BODY was sidebar markup with no document
+    around it. Following the redirect and asserting a real document is what
+    would have caught it, so that is what this checks."""
+    folder = ChatFolder(user=user, name="Temp")
+    folder.save()
+    conversation = ChatConversation(user=user, folder=folder, title="Still here")
+    conversation.save()
+
+    response = signed_in.post(
+        reverse("assistant:folder_delete"),
+        {"folder": folder.id, "current": conversation.id},
+        follow=True,
+    )
+
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert "<!doctype html>" in body.lower(), "a form post must land on a real document"
+    assert "</html>" in body.lower()
+    # And the student stays where they were reading: the chats survive a
+    # folder delete, so the open conversation is still real.
+    assert response.redirect_chain[-1][0].endswith(f"/{conversation.id}/")
 
 
 def test_deleting_another_students_folder_404s(client, user):
