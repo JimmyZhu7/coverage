@@ -17,23 +17,44 @@ URL of the kind a student could type themselves; the value is that they
 do not have to know what to type.
 
 PURE, in the same sense as `crm.coverage`: no database, no clock, no
-network. It reads `firm.name` and two fields off the user (`tracks`,
-`school`) and returns plain dicts. That is what makes the archetype table
-below assertable in a unit test rather than eyeballed on a page.
+network. It reads three fields off the firm (`name`, `tracks`,
+`recruiting_style`) and two off the user (`tracks`, `school`) and returns
+plain dicts. That is what makes the archetype table below assertable in a
+unit test rather than eyeballed on a page.
 
 THE SHAPE OF ONE ANSWER
 -----------------------
 Three rows per firm, always three, so the panel has a predictable size:
 
-  * the student's tracks pick the archetypes, ROUND ROBIN across tracks
-    rather than depth-first, so a student running both IB and S&T sees
-    one of each instead of three IB rows and nothing about markets;
+  * THE FIRM'S OWN TRACKS, intersected with the student's, pick the
+    archetypes (2026-09-01). Before this the student's tracks alone did,
+    and the panel was measured proposing "investment banking analyst" at
+    Jane Street and "sales and trading analyst" at KKR and Google — seats
+    those firms do not have. 21 of the 33 `st`-tagged firms on the board
+    are quant or prop shops. So: the tracks the two share, else the firm's
+    (a PE shop gets PE seats whatever the student runs), else the
+    student's when the firm has no tracks on file. Two shared tracks still
+    ROUND ROBIN rather than depth-first, so a student running both IB and
+    S&T at a bank that hires for both sees one of each;
   * `User.school`, when set, claims the last row for the alumni search,
     because a shared school is the single highest-yield cold open a
     student has and it costs one extra keyword to hand over;
-  * no tracks set (a student who skipped that step in onboarding) falls
-    back to a generic trio rather than to nothing. "We do not know your
-    track" is not a reason to withhold "find an analyst two years in".
+  * no tracks set on either side (a student who skipped that step in
+    onboarding, a firm nobody has classified) falls back to a generic
+    trio rather than to nothing. "We do not know your track" is not a
+    reason to withhold "find an analyst two years in".
+
+THE ONE FIRM THAT GETS A DIFFERENT ANSWER
+-----------------------------------------
+A firm whose `recruiting_style` is "assessment" (Jane Street, Citadel
+Securities, SIG, Optiver, HRT — see `directory.models.Firm` for the
+evidence) hires off a test, and a coffee chat is not part of its process:
+Jane Street's own FAQ answers "Can I schedule a phone call or coffee?"
+with "unfortunately, no". Proposing "an analyst to chat with" there is not
+help, it is homework the firm has said it will not mark. Those firms get
+the two rows that are true of them — the campus recruiter who runs the
+process, and an alumnus for a resume referral only — and a note that says
+to apply. The alumni row stays; its `why` stops promising a conversation.
 
 WHY THESE ARCHETYPES
 --------------------
@@ -155,20 +176,81 @@ GENERIC_ARCHETYPES: tuple[Archetype, ...] = (
 
 ALUMNI_WHY = "Shared school is the easiest cold open you will get."
 
+# `Firm.recruiting_style` value for a test-gated process, spelled here so
+# this module stays free of Django imports (same posture as `crm.coverage`).
+ASSESSMENT = "assessment"
+
+# The two honest rows for an assessment firm. Not a seventh track: these
+# are the only two seats at such a firm where an email does anything, and
+# each `why` says exactly how little. The alumnus row's `terms` are what
+# gets searched when the student has no school on file; with a school the
+# row searches the school itself (see `suggestions_for`), because that is
+# the referral the row is for.
+ASSESSMENT_ARCHETYPES: tuple[Archetype, ...] = (
+    ("Campus recruiter (they run the process; a chat is not part of it)",
+     "Ask what the assessment covers and when it runs. That is the whole conversation.",
+     "campus recruiting"),
+    ("Alumnus at the firm, for a resume referral only",
+     "A referral gets your resume read. It does not skip the test.",
+     "alumni"),
+)
+
+# What the panel says above those two rows instead of `DISCLOSURE`'s
+# generic line. It links the student to the one verb that works: apply.
+ASSESSMENT_NOTE = (
+    "This firm does not do coffee chats. Apply, then prepare for the test."
+)
+
 # Three rows. Enough to be a plan, few enough to read inside a card.
 DEFAULT_LIMIT = 3
 
 
-def _tracks_of(user) -> list[str]:
-    """The user's tracks, filtered to ones this module has a table for and
-    de-duplicated, in the order the user set them. `tracks` is a
-    free-form ArrayField, so an unknown or repeated value is data, not a
-    crash."""
+def _firm_field(firm: Any, key: str, default: Any = None) -> Any:
+    """Read `key` off a `directory.models.Firm` or a mapping standing in
+    for one, so tests need no database row."""
+    if isinstance(firm, dict):
+        return firm.get(key, default)
+    return getattr(firm, key, default)
+
+
+def _known_tracks(values: Iterable[str] | None) -> list[str]:
+    """`values` filtered to tracks this module has a table for and
+    de-duplicated, in the order given. Both `User.tracks` and `Firm.tracks`
+    are free-form ArrayFields, so an unknown or repeated value is data, not
+    a crash."""
     seen: list[str] = []
-    for t in (getattr(user, "tracks", None) or []):
+    for t in (values or []):
         if t in TRACK_ARCHETYPES and t not in seen:
             seen.append(t)
     return seen
+
+
+def _tracks_of(user, firm: Any = None) -> list[str]:
+    """The tracks the archetypes are drawn from, for this user AT this firm.
+
+    The firm's tracks are the honest constraint: a seat the firm does not
+    have is not a suggestion. So the answer is the tracks the two sides
+    share, in the order the STUDENT set them (that order is a preference
+    and it is theirs); failing any overlap, the firm's own tracks (a PE
+    shop gets PE seats whatever the student runs — measured, "sales and
+    trading analyst" at KKR); failing tracks on the firm at all, the
+    student's, exactly as before this module read the firm. Empty only
+    when neither side has a track this module knows.
+    """
+    user_tracks = _known_tracks(getattr(user, "tracks", None))
+    firm_tracks = _known_tracks(_firm_field(firm, "tracks"))
+    shared = [t for t in user_tracks if t in firm_tracks]
+    return shared or firm_tracks or user_tracks
+
+
+def panel_note(firm: Any) -> str:
+    """The one line the panel prints above its rows for `firm`: the
+    assessment note for a test-gated firm, `DISCLOSURE` for everyone else.
+    The template reads `sourcing_note` per card; this is what the view
+    puts there."""
+    if (_firm_field(firm, "recruiting_style") or "") == ASSESSMENT:
+        return ASSESSMENT_NOTE
+    return DISCLOSURE
 
 
 def _round_robin(tracks: Iterable[str]) -> list[tuple[str, int, Archetype]]:
@@ -223,7 +305,9 @@ def suggestions_for(firm: Any, user: Any, *, limit: int = DEFAULT_LIMIT) -> list
 
     Args:
         firm: anything carrying a `name` (a `directory.models.Firm`, or a
-            mapping, so tests do not need a database row).
+            mapping, so tests do not need a database row). `tracks` and
+            `recruiting_style` are read too when present; absent, the
+            answer is the student's-tracks one this module always gave.
         user: anything carrying `tracks` (list of `TRACK_LABELS` keys) and
             `school` (string). Both optional; both degrade to a sensible
             answer rather than to an empty panel.
@@ -234,17 +318,36 @@ def suggestions_for(firm: Any, user: Any, *, limit: int = DEFAULT_LIMIT) -> list
         A list of dicts with `key`, `label`, `why`, `query` and
         `linkedin_url`. Empty ONLY when the firm has no name, since a
         keyword search with no firm in it is not a suggestion about this
-        firm at all.
+        firm at all. An assessment firm gets exactly two rows (see the
+        module docstring) — two honest rows beat three padded ones.
     """
-    firm_name = (
-        (firm.get("name") if isinstance(firm, dict) else getattr(firm, "name", ""))
-        or ""
-    ).strip()
+    firm_name = (_firm_field(firm, "name") or "").strip()
     if not firm_name or limit < 1:
         return []
 
     school = (getattr(user, "school", "") or "").strip()
-    tracks = _tracks_of(user)
+
+    if (_firm_field(firm, "recruiting_style") or "") == ASSESSMENT:
+        recruiter, alumnus = ASSESSMENT_ARCHETYPES
+        rows = [_row("assess-0", recruiter[0], recruiter[1], firm_name, recruiter[2])]
+        label, why, terms = alumnus
+        if school:
+            # Keyed "alumni" like every other school row, so the analytics
+            # funnel keeps one name for "the school search" across firms;
+            # the label and `why` are the referral-only ones.
+            query = f'"{firm_name}" "{school}"'
+            rows.append({
+                "key": "alumni",
+                "label": label,
+                "why": why,
+                "query": query,
+                "linkedin_url": linkedin_search_url(query),
+            })
+        else:
+            rows.append(_row("assess-1", label, why, firm_name, terms))
+        return rows[:limit]
+
+    tracks = _tracks_of(user, firm)
 
     # The school row is one of the three, not a fourth: the panel's size
     # is the promise, and a student with a school set has one fewer thing

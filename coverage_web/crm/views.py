@@ -1397,25 +1397,39 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # --- Coverage Gaps strip (top of the page) ---------------------------
     # `closes` is computed above, with the firm-card inputs — the strip and
     # the cards read the same dict and the same CONFIRMED-only bar.
-    gaps = coverage.rank_gaps(
-        [
-            {
-                "firm_id": uf.firm_id,
-                "name": uf.firm.name,
-                "tier": uf.tier,
-                "warmths": [c.warmth for c in by_firm_contacts.get(uf.firm_id, [])],
-                "app_close": closes.get(uf.firm_id),
-                # Goes IN to the ranking now rather than being attached to
-                # the result afterwards, because it decides ORDER now rather
-                # than being printed on the card. See `rank_gaps` — it breaks
-                # ties and touches nothing else.
-                "open": open_by_firm.get(uf.firm_id, 0),
-            }
-            for uf in user_firms
-        ],
-        today=today,
-        target=adv_target,
-    )
+    gap_rows = [
+        {
+            "firm_id": uf.firm_id,
+            "name": uf.firm.name,
+            "tier": uf.tier,
+            "warmths": [c.warmth for c in by_firm_contacts.get(uf.firm_id, [])],
+            "app_close": closes.get(uf.firm_id),
+            # Goes IN to the ranking now rather than being attached to
+            # the result afterwards, because it decides ORDER now rather
+            # than being printed on the card. See `rank_gaps` — it breaks
+            # ties and touches nothing else.
+            "open": open_by_firm.get(uf.firm_id, 0),
+            # The firm's verticals and the student's own, and how the firm
+            # hires. `rank_gaps` halves the gap at a firm off the student's
+            # tracks and zeroes it at one that hires off a test (see
+            # `crm.coverage`'s formula, terms 4 and 5). Both were always in
+            # hand here — `uf.firm` is select_related — and never handed
+            # over, which is how eleven PE/AM/consulting shops outranked a
+            # tier-1 bank with a confirmed close on the founder's strip.
+            "firm_tracks": list(uf.firm.tracks or []),
+            "user_tracks": list(user.tracks or []),
+            "recruiting_style": uf.firm.recruiting_style,
+        }
+        for uf in user_firms
+    ]
+    gaps = coverage.rank_gaps(gap_rows, today=today, target=adv_target)
+    # One honest aggregate over the same rows: advocates across every tiered
+    # firm, against the 2-20 the outcome research says predicts an offer.
+    # Fifty-four cards each reading "0 of 2 advocates" is one fact fifty-four
+    # times; this is the fact once. Returned as a dict (see
+    # `coverage.advocate_summary`) so the template can print `line` whole or
+    # its parts.
+    advocate_summary = coverage.advocate_summary(gap_rows, target=adv_target)
     # One click to act on each gap: somewhere to start when the firm is
     # empty, and the warmest person who isn't an advocate yet when it
     # isn't — that contact is the shortest path to closing the gap.
@@ -1438,6 +1452,20 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         # fetched and nothing is imported (see that module's docstring) —
         # these are suggestions and links out.
         g["sourcing"] = sourcing.suggestions_for(firm, user) if firm else []
+        # The line above the rows: the generic "suggestions, not a list of
+        # people" for most firms, and for a firm that hires off a test the
+        # one that says so and points at "apply". Per card because the
+        # answer is per firm; the page-level `sourcing_note` below stays for
+        # anything that still reads it.
+        g["sourcing_note"] = sourcing.panel_note(firm) if firm else sourcing.DISCLOSURE
+        # Where "Apply" goes. `rank_gaps` sets `verb` to "Apply" only for an
+        # assessment firm, and the honest destination is that firm's own
+        # roles page here — not a LinkedIn search, which is what every other
+        # link on the card opens. Empty for the ordinary "Add" card.
+        g["apply_url"] = (
+            reverse("directory:firm_detail", args=[firm.slug])
+            if firm and g["verb"] == coverage.VERB_APPLY else ""
+        )
 
     # --- Full contact cards ---------------------------------------------
     # Warmth sections, same four as every other scope — School used to
@@ -1492,6 +1520,12 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "unplaced_groups": unplaced_groups,
             "region_verbs": REGION_BULK_VERBS,
             "gaps": gaps,
+            # `coverage.advocate_summary(...)`: advocates across the tiered
+            # firms, the firm count, and the 2-20 range, plus a ready `line`.
+            # Computed above with the gap rows; not rendered yet — the
+            # template owner prints `advocate_summary.line` (or its parts)
+            # in the coverage summary.
+            "advocate_summary": advocate_summary,
             # Said once per panel, in the module that builds the links, so
             # the promise and the code can't drift apart.
             "sourcing_note": sourcing.DISCLOSURE,

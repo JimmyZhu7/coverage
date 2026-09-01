@@ -633,6 +633,15 @@ CADENCE_LABELS: dict[str, tuple[str, str, str]] = {
         "touches",
         "How many times to nudge them.",
     ),
+    # Paired with crm.today.TUNABLE_CADENCE_PARAMS, same rule as the
+    # keep-warm entry below: the two dicts are added to and removed from
+    # together. Rendered as a plain spinner (not in CADENCE_SEGMENTS), so it
+    # gets the default via placeholder like the other windows.
+    "followup_expires_after_business_days": (
+        "Follow-Up Expiry",
+        "business days",
+        "Silence before a cold thread is parked instead of chased.",
+    ),
     "advocate_touch_min_weeks": (
         "Advocate Check-In",
         "weeks",

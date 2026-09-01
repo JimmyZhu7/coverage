@@ -21,7 +21,9 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
          divergences below)
       6. cold / no_reply: 0 outbound -> first_outreach; 1 outbound and
          idle >= followup window -> follow_up (the ONLY one — see
-         `max_cold_touches`'s comment); else park once max_cold
+         `max_cold_touches`'s comment), unless the silence has passed
+         `followup_expires_after_business_days`, in which case -> park
+         (see the 2026-09-01 divergence); else park once max_cold
          reached and idle >= park window
       7. replied + idle >= 3 business days                      -> advance
          (warmth set widened past the port — see the C3 divergence)
@@ -93,6 +95,25 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
     that LOOKS reachable is worse than no knob at all, because a future
     reader has to rediscover that it can't fire before trusting that it
     doesn't.
+
+  - DIVERGENCE from the original (deliberate, 2026-09-01): the ONE
+    follow-up EXPIRES. Branch 6 used to offer it forever: a contact with a
+    single outbound note and no reply read `follow_up` at 27 business days
+    exactly as at 6, and the only expiry anywhere in the tree was the
+    thank-you's. Measured on the founder's live queue 2026-09-01: 44 of 44
+    cards were "follow up", every one on a note sent 27 business days
+    earlier. A stranger re-appearing five weeks after one unanswered email
+    is not a follow-up, it is a second cold open wearing a follow-up's
+    label, and the research is blunt about it — two or three follow-ups at
+    most, then stop; "just let it go". So once the silence since the first
+    note passes `followup_expires_after_business_days` (default 15, three
+    working weeks) the branch emits `park` with the reason "First note went
+    unanswered N weeks ago. Park it, or re-open with a new reason." Same
+    shape as branch 1's `thank_you_expires_after_days`: the same strict `>`
+    on the window, the same reading of an undated touch as expired, and the
+    same argument — a courtesy with a shelf life, past which the right move
+    is a fresh reason to talk and not a belated nudge. Tunable from
+    Settings (`crm.today.TUNABLE_CADENCE_PARAMS`, 5-60).
 
   - DIVERGENCE from the original (deliberate, 2026-07-30, "C2"): every idle
     clock now reads the latest REAL touch — every kind EXCEPT
@@ -231,6 +252,23 @@ CADENCE_DEFAULTS: dict[str, int] = {
     # gap then swallows two weekends).
     "followup_after_business_days": 6,   # gap before the (only) follow-up
     "park_after_business_days": 10,      # after max_cold_touches, no reply this long -> park
+    # ...and the one follow-up itself STOPS being offered once the silence
+    # since the first note passes this many business days. The sibling of
+    # `thank_you_expires_after_days` below, and the same argument: a courtesy
+    # with a shelf life. Nudging a stranger the week after a note is a
+    # follow-up; nudging them five weeks later is a second cold open wearing
+    # a follow-up's label, and the research says stop well before that
+    # ("2-3 follow-ups max, then just let it go"). Past the window branch 6
+    # emits `park` instead, with the reason naming the weeks, so the student
+    # either lets it go or comes back with a NEW reason rather than the old
+    # note re-sent. 15 is three working weeks: clear of the default follow-up
+    # window (6) by enough that a student who missed the card for a fortnight
+    # still gets it, and short of the point where the note is a memory.
+    # Measured on the founder's queue 2026-09-01: 44 of 44 cards were
+    # follow-ups on a 27-business-day-old note; at 15 every one of them
+    # parks. Strict `>`, like the thank-you window, so a thread on day 15
+    # exactly still gets its follow-up.
+    "followup_expires_after_business_days": 15,
     # Deliberately capped at 2 in crm.views.TUNABLE_CADENCE_PARAMS: one
     # outreach note, one follow-up, then park — never a second follow-up. See
     # that constant's comment for why this is enforced structurally rather
@@ -620,6 +658,7 @@ def due_actions(
     """
     p = _merged_params(params)
     followup_bd = int(p["followup_after_business_days"])
+    followup_expiry_bd = int(p["followup_expires_after_business_days"])
     park_bd = int(p["park_after_business_days"])
     max_cold = int(p["max_cold_touches"])
     ty_hours = int(p["thank_you_within_hours"])
@@ -1008,6 +1047,36 @@ def due_actions(
                 )
                 add("park", reason, 3, outbound=outbound, business_days=bd)
             elif outbound < max_cold and (bd is None or bd >= followup_bd):
+                # The follow-up has a shelf life (2026-09-01 divergence, see
+                # the module docstring and `followup_expires_after_business_
+                # days`). Past it the silence is not a follow-up's, it is a
+                # dead thread's, and the honest card is "park it, or come
+                # back with a new reason". `bd is None` — outbound touches
+                # with no dateable ts — is expired here too, exactly as
+                # branch 1 reads an undated chat and as the park test above
+                # reads it ("definitely stale enough"): an undated note must
+                # not sit in the queue forever either. Strict `>` like the
+                # thank-you window, so day 15 exactly still gets its
+                # follow-up.
+                if bd is None or bd > followup_expiry_bd:
+                    # Whole weeks, never below one: `bd` counts business days,
+                    # five to a week, and "0 weeks ago" would be false on a
+                    # thread that has by construction outlived the window.
+                    weeks = max(1, round(bd / 5)) if bd is not None else None
+                    reason = (
+                        "First note went unanswered, no dateable touch on "
+                        "record. Park it, or re-open with a new reason."
+                        if weeks is None else
+                        f"First note went unanswered {weeks} week"
+                        f"{'' if weeks == 1 else 's'} ago. Park it, or "
+                        "re-open with a new reason."
+                    )
+                    add(
+                        "park", reason, 3, outbound=outbound, business_days=bd,
+                        expired=True, expiry_business_days=followup_expiry_bd,
+                        weeks_silent=weeks,
+                    )
+                    continue
                 reason = (
                     f"no reply after touch {outbound}, no dateable touch on record — follow up"
                     if bd is None else
