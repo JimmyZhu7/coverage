@@ -714,3 +714,181 @@ def test_talentgateway_verify_unreachable_on_error(monkeypatch):
     monkeypatch.setattr(tg, "fetch_text", boom)
     result = verify("https://jobs.ubs.com/TGnewUI/Search/home?jobid=349091")
     assert result.result == "unreachable"
+
+
+# ------------------------------------------------- talnet: the card layout
+#
+# Oleeo renders the same board two ways and the choice is per tenant, not a
+# platform migration. Jefferies serves a card grid — `<li class="col-md-6
+# opp-container">` tiles, not a single `<tr>` on the page — so the table
+# regex matched nothing, the loop body never ran, and `fetch()` returned a
+# clean, successful, EMPTY board. Jefferies ingested zero rows for its whole
+# history while serving 50+ live vacancies, and nothing downstream could
+# tell that apart from a firm that posts nothing.
+
+JEFFERIES_CARDS = TalnetBoard(
+    firm="Jefferies", kind="jobs",
+    board_url="https://jefferies.tal.net/vx/lang-en-GB/mobile-0/appcentre-ext/brand-4/candidate/jobboard/vacancy/2/adv/",
+)
+
+
+def _card_pages(monkeypatch, first, second=None):
+    """Serve the card fixture, and the page-2 fixture for the `?start=` URL
+    its own pagination nav points at."""
+    def fake(url, **kw):
+        if "start=" in url:
+            if second is None:
+                raise AssertionError(f"unexpected pagination fetch: {url}")
+            return second
+        return first
+    monkeypatch.setattr(talnet_mod, "fetch_text", fake)
+
+
+def test_talnet_card_layout_parses_a_board_with_no_table_at_all(monkeypatch):
+    page1 = (FIXTURES / "talnet_cards_sample.html").read_text()
+    page2 = (FIXTURES / "talnet_cards_sample_page2.html").read_text()
+    assert "<tr" not in page1, "the point of this fixture is that there is no table"
+    _card_pages(monkeypatch, page1, page2)
+
+    result = fetch(JEFFERIES_CARDS)
+    assert result.ok and result.error is None
+
+    titles = [o.title for o in result.opportunities]
+    assert titles == [
+        "2027 Summer Analyst Program - Investment Banking - Hong Kong",
+        # HTML-escaped ampersand and a real en-dash survive intact.
+        "2027 Investment Banking Internship – Frankfurt, M&A (ALL INTAKES)",
+        "2026 Investment Banking Off-Cycle Internship - Stockholm (Q3/Q4 Start)",
+        # page 2, reached through the board's own next_links nav
+        "2027 Quant Masters Summer Programme - London",
+    ]
+    hk = result.opportunities[0]
+    assert hk.source == "talnet"
+    assert hk.firm == "Jefferies"
+    assert hk.url.endswith(
+        "/candidate/so/pm/1/pl/2/opp/"
+        "1814-2027-Summer-Analyst-Program-Investment-Banking-Hong-Kong/en-GB")
+    # Same per-session xf-<hex> strip the table path does: without it every
+    # fetch mints new URLs and closed-detection kills the previous set.
+    assert "/xf-" not in hk.url
+    assert all("/xf-" not in o.url for o in result.opportunities)
+    # The full list was read, so absence from it IS evidence of absence.
+    assert result.truncated is False
+
+
+def test_talnet_card_layout_reads_fields_by_label_not_by_position(monkeypatch):
+    """Label order is not guaranteed stable across Oleeo tenants, so the
+    card parser keys `cols` off each tile's own field-label text. A tenant
+    that labels City and Registration Deadline therefore fills `location`
+    and `deadline` through the very same `_normalize` the table path uses —
+    and the order the two fields appear in must not matter."""
+    def card(oppid, title, fields):
+        return (
+            f'<li class="col-md-6 opp-container" id="oppid-{oppid}" data-oppid="{oppid}">'
+            f'<div class="opp_{oppid} search_res details_row candidate-opp-tile" '
+            f'data-oppid="{oppid}" data-title="{title}">'
+            + "".join(
+                f'<div class="candidate-opp-field-{i}">'
+                f'<span class="candidate-opp-field-label">{label}:</span> {value}</div>'
+                for i, (label, value) in enumerate(fields, start=1))
+            + f'<h3 class="candidate-opp-field-{len(fields) + 1}">'
+              f'<a class="subject" href="https://acme.tal.net/vx/candidate/so/pm/1/pl/2/'
+              f'opp/{oppid}-{title.replace(" ", "-")}/en-GB">{title}</a></h3>'
+            "</div></li>")
+
+    page = ('<html><body><ul id="tile-results-list">'
+            + card(11, "Deadline First", [("Registration Deadline", "28/07/2026"),
+                                          ("City", "Hong Kong")])
+            + card(12, "City First", [("City", "London"),
+                                      ("Registration Deadline", "1/9/2026")])
+            + "</ul></body></html>")
+    monkeypatch.setattr(talnet_mod, "fetch_text", lambda url, **kw: page)
+
+    first, second = fetch(JEFFERIES_CARDS).opportunities
+    assert (first.location, first.deadline) == ("Hong Kong", "2026-07-28")
+    assert (second.location, second.deadline) == ("London", "2026-09-01")
+
+
+def test_talnet_card_pagination_says_truncated_rather_than_looping(monkeypatch):
+    """A card board pages at 50 tiles. If the nav keeps pointing back at a
+    page already read, stop — but report the list as partial, because
+    ingest reads "absent from the fetch" as "closed"."""
+    page1 = (FIXTURES / "talnet_cards_sample.html").read_text()
+    monkeypatch.setattr(talnet_mod, "fetch_text", lambda url, **kw: page1)
+
+    result = fetch(JEFFERIES_CARDS)
+    assert result.ok
+    assert len(result.opportunities) == 3
+    assert result.truncated is True
+
+
+# ---------------------------------------------- talnet: the zero-rows guard
+
+def test_talnet_table_layout_is_untouched_by_card_support(monkeypatch):
+    """Regression guard for the four tenants that parse today (BofA, Morgan
+    Stanley, Nomura, Evercore). The table path must stay the first and
+    unconditional branch, and the card parser must find nothing in a table
+    board — otherwise the two layouts could double-count."""
+    html = (FIXTURES / "talnet_jobs_sample.html").read_text()
+    assert talnet_mod._parse_table(html), "table parser must still read a table board"
+    assert talnet_mod._parse_cards(html) == [], "card parser must not claim table rows"
+
+    calls = []
+
+    def fake(url, **kw):
+        calls.append(url)
+        return html
+
+    monkeypatch.setattr(talnet_mod, "fetch_text", fake)
+    result = fetch(BOFA_JOBS)
+    assert result.ok and len(result.opportunities) == 2
+    assert result.opportunities[0].location == "Hong Kong"
+    assert result.truncated is False
+    # Card-only pagination: a table board issues exactly the one request it
+    # always did.
+    assert calls == [BOFA_JOBS.board_url]
+
+
+def test_talnet_genuinely_empty_board_still_reports_zero_cleanly(monkeypatch):
+    """Jefferies' events board really is empty right now, and says so with
+    `no_results_message` and zero vacancy markup. That must stay a clean
+    ok=True/0-row result — the guard below is worthless if it cries wolf on
+    a board that is honestly quiet."""
+    html = (FIXTURES / "talnet_cards_empty_sample.html").read_text()
+    monkeypatch.setattr(talnet_mod, "fetch_text", lambda url, **kw: html)
+
+    result = fetch(JEFFERIES_CARDS)
+    assert result.ok is True
+    assert result.opportunities == [] and result.raw_count == 0
+    assert result.error is None
+    assert result.truncated is False
+
+
+def test_talnet_zero_rows_off_a_page_full_of_vacancies_is_an_error(monkeypatch):
+    """The failure this whole change exists to surface: the page is plainly
+    listing vacancies and the parser read none of them. ok=True/0 rows is
+    the dangerous shape — it reads downstream as "this firm posts nothing"
+    and lets closed-detection auto-close the firm's entire open set."""
+    page = (FIXTURES / "talnet_cards_sample.html").read_text().replace(
+        '<a class="subject"', '<a class="subject-link"')  # tomorrow's rename
+    assert "opp-container" in page and "candidate-opp-field-label" in page
+    monkeypatch.setattr(talnet_mod, "fetch_text", lambda url, **kw: page)
+
+    result = fetch(JEFFERIES_CARDS)
+    assert result.ok is False
+    assert result.opportunities == [] and result.raw_count == 0
+    assert "not empty" in result.error
+
+
+def test_talnet_zero_rows_guard_also_covers_a_broken_table_board(monkeypatch):
+    """Same guard, other layout: the four table tenants get the identical
+    protection, so an Oleeo change to the `<tr>` markup surfaces as a
+    failure instead of as a quiet mass close."""
+    page = (FIXTURES / "talnet_jobs_sample.html").read_text().replace(
+        '<tr class="opp_', '<tr class="vacancy_')  # tomorrow's rename
+    assert '<a class="subject"' in page, "the page still visibly lists vacancies"
+    monkeypatch.setattr(talnet_mod, "fetch_text", lambda url, **kw: page)
+
+    result = fetch(BOFA_JOBS)
+    assert result.ok is False
+    assert "not empty" in result.error

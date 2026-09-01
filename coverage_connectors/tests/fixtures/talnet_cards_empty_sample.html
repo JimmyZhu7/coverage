@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head><meta charset="utf-8">
+<title>Events</title></head>
+<body>
+<div id="main-content">
+  <h1 class="job-board-title solr-search-view">Events</h1>
+        <div class="search-results">
+                    <p id="no_results_message">Sorry, we currently have no active events.           </p>
+        </div><!-- End of search results -->
+  <script>
+    // Kept verbatim from the live page: its own jQuery selectors name
+    // .candidate-opp-tile, which is why the vacancy-markup guard must
+    // not key off that class (it would flag an empty board as broken).
+    $('#main-content').on('mouseover', 'table.solr_search_list tr, #tile-results-list .candidate-opp-tile ', function() {});
+  </script>
+</div>
+</body>
+</html>

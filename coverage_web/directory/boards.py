@@ -220,8 +220,20 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("jpm", OracleBoard(firm="J.P. Morgan", host="jpmc.fa.oraclecloud.com",
                         site_number="CX_1001",
                         keywords=("summer analyst", "intern", "insight"))),
-    # tal.net — each firm runs two boards: vacancy/1 (jobs, City column) and
-    # vacancy/2 (events, Event Date + Registration Deadline columns).
+    # tal.net — each tenant runs SEVERAL numbered boards, and the numbering is
+    # NOT stable between tenants, so read the board's own <title> rather than
+    # assuming. Verified by direct fetch 2026-09-01 (the Atom feed at
+    # `.../jobboard/vacancy/<N>/feed` names each board and is unauthenticated):
+    #     bankcampuscareers  1 Global Programs (148)   2 Campus Events (18)
+    #     jefferies          1 Events (0)              2 Campus Opportunities (51)
+    #     evercore           1 Events (1)              2 Students and Graduates (9)
+    #     moelis-careers     1 Events (7)              2 Student Opportunities (1)
+    #     pwpcareers         1 Events (1)              2 Student Opportunities (5)
+    # BofA inverts the usual order, which is exactly why the numbering cannot
+    # be assumed. The Events sibling is where the insight-day layer lives -
+    # Moelis's Virtual Discovery Series, Evercore's focus events, BofA's
+    # insight days - and a connector that watches only the jobs board drops
+    # that whole category silently.
     ("bofa", TalnetBoard(firm="Bank of America", kind="jobs",
                          board_url="https://bankcampuscareers.tal.net/vx/mobile-0/brand-4/candidate/jobboard/vacancy/1/adv/")),
     ("bofa", TalnetBoard(firm="Bank of America", kind="events",
@@ -274,13 +286,42 @@ BOARDS: list[tuple[str, BoardConfig]] = [
                              board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/2/adv/")),
     ("evercore", TalnetBoard(firm="Evercore", kind="jobs",
                              board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/3/adv/")),
+    # Board 1 is "Events" (1 entry, verified 2026-09-01) - the campus focus
+    # events. Evercore also mixes event registrations INTO its students board,
+    # so dedupe by title rather than assuming one board owns one kind.
+    ("evercore", TalnetBoard(firm="Evercore", kind="events",
+                             board_url="https://evercore.tal.net/vx/mobile-0/candidate/jobboard/vacancy/1/adv/")),
+    # Ingested ZERO rows from configuration until 2026-09-01 while serving
+    # 50+ live vacancies, and reported every one of those fetches as a clean
+    # success. Cause: this tenant renders the card grid, not the `<tr>`
+    # table the other four tal.net tenants serve, so the row regex matched
+    # nothing. talnet.py now parses both layouts and refuses to call a page
+    # full of vacancy markup an empty board — see its module docstring.
     ("jefferies", TalnetBoard(firm="Jefferies", kind="jobs",
                               board_url="https://jefferies.tal.net/vx/lang-en-GB/mobile-0/appcentre-ext/brand-4/xf-016c915b0a67/candidate/jobboard/vacancy/2/adv/")),
+    # Board 1 is "Events" and is EMPTY today (verified 2026-09-01, ok=True
+    # n=0) - Jefferies' own site says "we currently have no active events".
+    # Registered anyway because this is where its Insight Days, the Equity
+    # Research Mentorship Program and the Stock Pitch Competition post when
+    # the cycle opens (Nov-Jan), and an empty board that reports zero cleanly
+    # costs nothing.
+    ("jefferies", TalnetBoard(firm="Jefferies", kind="events",
+                              board_url="https://jefferies.tal.net/vx/mobile-0/candidate/jobboard/vacancy/1/adv/")),
     # Solomon's students board is real but empty out of season; the
     # professionals board carries the current IB associate roles.
     ("solomonpartners", GreenhouseBoard(firm="Solomon Partners", token="solomonpartnersprofessionals")),
     ("pwp", WorkdayBoard(firm="Perella Weinberg", tenant_host="pwp.wd1",
                          site="PWP_Experienced_Opportunities", tenant="pwp", search_text="intern")),
+    # The Workday site above is, as its name says, the EXPERIENCED board -
+    # it was the only PWP board registered, and PWP showed 0 open campus rows
+    # as a result. The students live on tal.net (verified 2026-09-01):
+    # board 2 "Student Opportunities" (5, incl. the 2027 Private Funds
+    # Advisory Analyst and the 2027 Advisory Off-Cycle Internship) and
+    # board 1 "Events" (1).
+    ("pwp", TalnetBoard(firm="Perella Weinberg", kind="jobs",
+                        board_url="https://pwpcareers.tal.net/vx/mobile-0/candidate/jobboard/vacancy/2/adv/")),
+    ("pwp", TalnetBoard(firm="Perella Weinberg", kind="events",
+                        board_url="https://pwpcareers.tal.net/vx/mobile-0/candidate/jobboard/vacancy/1/adv/")),
 
     ("apollo", WorkdayBoard(firm="Apollo", tenant_host="athene.wd5", site="apollononpubliccareersite",
                             search_text="intern")),
@@ -292,6 +333,15 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("blueowl", WorkdayBoard(firm="Blue Owl", tenant_host="blueowl.wd1", site="Blueowl", search_text="intern")),
     ("brookfield", WorkdayBoard(firm="Brookfield", tenant_host="brookfield.wd5", site="Brookfield", search_text="intern")),
     ("moelis", WorkdayBoard(firm="Moelis", tenant_host="moelis.wd1", site="Experienced-Hires", search_text="intern")),
+    # Same shape as PWP above: the Workday site is literally "Experienced-
+    # Hires", and Moelis showed 0 open campus rows. Students and the whole
+    # insight layer are on tal.net (verified 2026-09-01): board 2 "Student
+    # Opportunities" (1, the 2027 London Summer Analyst) and board 1 "Events"
+    # (7 - the Moelis Virtual Discovery Series, running 11 Sep to 13 Nov 2026).
+    ("moelis", TalnetBoard(firm="Moelis", kind="jobs",
+                           board_url="https://moelis-careers.tal.net/vx/mobile-0/candidate/jobboard/vacancy/2/adv/")),
+    ("moelis", TalnetBoard(firm="Moelis", kind="events",
+                           board_url="https://moelis-careers.tal.net/vx/mobile-0/candidate/jobboard/vacancy/1/adv/")),
     ("rothschild", WorkdayBoard(firm="Rothschild & Co", tenant_host="rothschildandco.wd3", site="RothschildAndCo_Lateral", search_text="intern")),
     ("baird", WorkdayBoard(firm="Baird", tenant_host="baird.wd1", site="Careers", search_text="intern")),
     ("raymondjames", WorkdayBoard(firm="Raymond James", tenant_host="raymondjames.wd1", site="raymondjamescareers",
