@@ -528,6 +528,16 @@ def test_the_period_title_cannot_shove_the_controls_along_the_bar(client, logged
     start the next one at a fixed origin. Re-measured after: the switcher sits
     at x=112 and Today at x=354 in all three views, at 1440px and at 375px.
 
+    UPDATE 2026-08-31, same day: `.cal-month` moved off the 26px display face
+    onto a 20px Instrument Sans (see its comment in calendar.html) and the
+    week format now abbreviates months, so the numbers above are the
+    ORIGINAL bug this guard was written against, not the current live sizes.
+    Re-measured in the new type, the range is 92px ("May 2026") to 306px
+    ("Wednesday 30 September 2026", now the widest case — day overtakes week
+    once week's months abbreviate). Still a real shove if shared, which is
+    what `test_one_date_gets_three_very_differently_sized_headings` in
+    test_calendar_views.py now pins with the current strings and widths.
+
     Two ways to break it, so two assertions:
       * dropping the full-width basis, which puts the title back on the
         controls' line;

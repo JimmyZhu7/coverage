@@ -406,16 +406,29 @@ def _view_range(view: str, anchor: date) -> tuple[date, date]:
 def _period_label(view: str, first: date, last: date) -> str:
     """What the heading says. A week is the one case that has to name two
     months or two years, because a week that straddles either is otherwise
-    two unlabelled numbers with no year on them."""
+    two unlabelled numbers with no year on them.
+
+    The week format abbreviates the month (`%b`, "Aug" not "August").
+    Reported live off this exact string: at 1440px in the heading's former
+    26px display face, "31 August to 6 September 2026" ran 471px wide —
+    wider than the switcher, Today, Subscribe and Add combined — and the
+    worst case, "28 December 2026 to 3 January 2027", ran the same. Both
+    months a straddling week can name now abbreviate: the worst case is "28
+    Dec 2026 to 3 Jan 2027", 244px in the heading's current (smaller) type —
+    see the `.cal-month` comment in calendar.html for the full re-measured
+    table. Month and day keep the full name: neither is the case this was
+    too wide for, and a lone "Aug 2026" reads as a truncation nobody asked
+    for when "August 2026" already fit.
+    """
     if view == "day":
         return f"{first:%A} {first.day} {first:%B %Y}"
     if view == "month":
         return first.strftime("%B %Y")
     if first.year != last.year:
-        return f"{first.day} {first:%B %Y} to {last.day} {last:%B %Y}"
+        return f"{first.day} {first:%b} {first.year} to {last.day} {last:%b} {last.year}"
     if first.month != last.month:
-        return f"{first.day} {first:%B} to {last.day} {last:%B %Y}"
-    return f"{first.day} to {last.day} {first:%B %Y}"
+        return f"{first.day} {first:%b} to {last.day} {last:%b %Y}"
+    return f"{first.day} to {last.day} {first:%b %Y}"
 
 
 def _qs(view: str, anchor: date, **extra) -> str:

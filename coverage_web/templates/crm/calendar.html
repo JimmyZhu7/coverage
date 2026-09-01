@@ -58,9 +58,46 @@
      them past each other.
 
      `min-width: 8ch` is gone with it. It was sizing a slot this rule no longer
-     has, and at 146px the narrowest real label already cleared it. */
-  .cal-month { font: var(--w-black) clamp(20px, 2.2vw, 26px)/1.1 var(--font-display);
-    letter-spacing: -0.01em; margin: 0; flex-basis: 100%; }
+     has, and at 146px the narrowest real label already cleared it.
+
+     UPDATE 2026-08-31, same day: `_period_label`'s week format switched to
+     abbreviated months (see calendar_views.py), which took "28 December
+     2026 to 3 January 2027" to "28 Dec 2026 to 3 Jan 2027". The two-line
+     wrap above no longer happens at 375px — re-measured, that label is now
+     one line and the switcher lands within 8px across all three views
+     instead of 22px lower in week. `flex-basis: 100%` stays regardless: see
+     the re-measured range in the `.cal-month` comment just below, still wide
+     enough that sharing the controls' line would shove them. */
+  /* Weight and face, 2026-08-31: this used to be `--w-black` Fraunces at
+     20-26px -- the SAME face, weight and ink as `.pagehead-title` two lines
+     above it ("Calendar", 30-42px). Same font, same black weight, same
+     color, 37px apart: rendered, the two read as two mastheads stacked, not
+     as a title and its current context. Reported as "wtf are these in
+     calendar... it is lacking".
+
+     Restyled to the app's ordinary section-heading voice instead of a
+     second masthead: `--font-ui`/`--w-bold` is the same pairing `h2` uses
+     everywhere else in the product (coverage.css: `h2 { font: var(--w-bold)
+     var(--fs-l) ... }`), and `--ink-2` is the secondary-text token
+     `.pagehead-sub` already uses one line below the real title. This is
+     the "you are looking at" label for the grid beneath it, not a second
+     page title, and now reads like one.
+
+     Re-measured at 1440px in the new 20px Instrument Sans bold (paired with
+     the shortened week format above):
+
+         "May 2026"                       92px    narrowest month
+         "September 2026"                 160px   widest month
+         "Friday 1 May 2026"              166px   narrowest day
+         "15 to 21 Mar 2027"              158px   narrowest week
+         "28 Dec 2026 to 3 Jan 2027"      244px   widest week, year straddle
+         "Wednesday 30 September 2026"    306px   widest day, now the max
+
+     Day overtakes week as the widest case now that week abbreviates its
+     months — 214px still separates the extremes (92 to 306), which is why
+     `flex-basis: 100%` above is still earning its keep. */
+  .cal-month { font: var(--w-bold) clamp(17px, 1.7vw, 20px)/1.3 var(--font-ui);
+    letter-spacing: -0.005em; margin: 0; flex-basis: 100%; color: var(--ink-2); }
   /* 2026-08-29: this bar's controls carried their own one-off pill shape
      (border-radius: 999px), a permanent box-shadow, and the lighter --line
      border — none of which is what a button looks like anywhere else in

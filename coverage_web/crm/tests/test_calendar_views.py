@@ -126,7 +126,7 @@ def test_the_week_is_the_seven_days_containing_the_anchor(client, logged_in):
 
 
 def test_a_week_spanning_two_months_shows_both_ends(client, logged_in):
-    """29 March to 4 April 2027. The bug this guards against is a week view
+    """29 Mar to 4 Apr 2027. The bug this guards against is a week view
     that quietly clips itself to the anchor's month and drops the days on the
     far side of the 31st."""
     _event(logged_in, date(2027, 3, 30), "March end")
@@ -138,8 +138,9 @@ def test_a_week_spanning_two_months_shows_both_ends(client, logged_in):
     body = resp.content.decode()
     assert "March end" in body and "April start" in body
     # And the heading says which month each end is in, because "29 to 4" does
-    # not.
-    assert resp.context["period_label"] == "29 March to 4 April 2027"
+    # not. Abbreviated ("Mar"/"Apr" not "March"/"April") -- see
+    # `_period_label`'s docstring for why the week format abbreviates.
+    assert resp.context["period_label"] == "29 Mar to 4 Apr 2027"
 
 
 def test_a_week_spanning_two_years_names_both(client, logged_in):
@@ -151,12 +152,12 @@ def test_a_week_spanning_two_years_names_both(client, logged_in):
     assert days[0] == date(2026, 12, 28) and days[-1] == date(2027, 1, 3)
     body = resp.content.decode()
     assert "Old year" in body and "New year" in body
-    assert resp.context["period_label"] == "28 December 2026 to 3 January 2027"
+    assert resp.context["period_label"] == "28 Dec 2026 to 3 Jan 2027"
 
 
 def test_a_week_inside_one_month_says_so_once(client, logged_in):
     resp = _get(client, view="week", y=2027, m=3, d=17)
-    assert resp.context["period_label"] == "15 to 21 March 2027"
+    assert resp.context["period_label"] == "15 to 21 Mar 2027"
 
 
 def test_one_date_gets_three_very_differently_sized_headings(client, logged_in):
@@ -164,9 +165,12 @@ def test_one_date_gets_three_very_differently_sized_headings(client, logged_in):
 
     Switching view keeps the anchor (the test above this section pins that),
     so the same date is labelled three ways, and the three are nowhere near
-    the same width. Measured in the page's own 26px display black at 1440px,
-    the widest label each view can produce runs 210px (month), 399px (day)
-    and 471px (week), against 146px for the narrowest month.
+    the same width. Measured in the page's own 20px Instrument Sans bold at
+    1440px (2026-08-31: `.cal-month` moved off the display face -- see its
+    comment in calendar.html), the widest label each view can produce runs
+    244px (week, year straddle) and 306px (day, now the widest of the three
+    since the week format abbreviates its months), against 92px for the
+    narrowest month and 153px for this exact date's month label.
 
     That is why the title cannot share a flex line with the controls: a range
     that wide is a shove, not a wobble. If these three ever converge on one
@@ -179,11 +183,11 @@ def test_one_date_gets_three_very_differently_sized_headings(client, logged_in):
     }
     assert labels == {
         "month": "December 2026",
-        "week": "28 December 2026 to 3 January 2027",
+        "week": "28 Dec 2026 to 3 Jan 2027",
         "day": "Wednesday 30 December 2026",
     }
     widths = [len(v) for v in labels.values()]
-    assert max(widths) - min(widths) >= 15, (
+    assert max(widths) - min(widths) >= 10, (
         "The three views' headings for one date are now close enough in "
         "length to reconsider the bar's layout."
     )
