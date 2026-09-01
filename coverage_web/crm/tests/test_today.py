@@ -12,11 +12,14 @@ therefore cannot see uncommitted rows.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from unittest import mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
@@ -2522,3 +2525,307 @@ def test_only_self_initiated_kinds_are_in_the_paceable_set():
                                      "maintain", "confirm_chat"}
     for expected in ("thank_you", "advance", "reping", "park"):
         assert expected not in FIRM_PACEABLE_ACTIONS
+
+
+# ---------------------------------------------------------------------------
+# PACE BY FIRM AND MARKET (`_pace_firm_key`).
+#
+# The practitioner rule is per TEAM: "do not email multiple people on the
+# same team in the same day, the analysts talk to each other".
+# `Contact.region` is the closest honest proxy the data holds for a team (on
+# the founder's live contacts, 2026-09-01: hk 94 / us 61 / blank 71).
+# Measured before this: two HK and two US contacts at one bank shared one
+# 2-a-day budget, so `us #3` and `#4` waited behind desks that never talk to
+# them.
+# ---------------------------------------------------------------------------
+def _market_action(cid, firm_id, region, **kw):
+    a = _pace_action(cid, firm_id, "follow_up", **kw)
+    a["contact"]["region"] = region
+    return a
+
+
+def test_a_market_is_part_of_the_pace_key_and_a_blank_one_is_not():
+    """A set region splits the firm's budget; a blank one is unknown, and
+    unknown gets the firm's pool rather than a guess: the firm-only key, byte
+    for byte what it was."""
+    from crm.today import _pace_firm_key
+
+    assert _pace_firm_key({"firm_id": 9}) == ("id", 9)
+    assert _pace_firm_key({"firm_id": 9, "region": ""}) == ("id", 9)
+    assert _pace_firm_key({"firm_id": 9, "region": "hk"}) == ("id", 9, "hk")
+    assert _pace_firm_key({"firm_id": 9, "region": "us"}) == ("id", 9, "us")
+    assert _pace_firm_key({"firm_id": None, "firm_text": "Jefferies"}) == ("text", "jefferies")
+    assert _pace_firm_key(
+        {"firm_id": None, "firm_text": "Jefferies", "region": "us"}
+    ) == ("text", "jefferies", "us")
+    assert _pace_firm_key({"firm_id": None, "firm_text": "", "region": "us"}) is None
+
+
+def test_two_markets_at_one_bank_are_two_daily_budgets():
+    from crm.today import _pace_by_firm
+
+    hk = [_market_action(i, 9, "hk", ev=9.0) for i in range(2)]
+    us = [_market_action(10 + i, 9, "us", ev=1.0) for i in range(3)]
+    _pace_by_firm(hk + us, sent_today={}, today=None)
+    assert not any(a["firm_paced"] for a in hk)
+    # Two US cards go despite scoring below every HK card; the third waits on
+    # its OWN desk's budget, and the note says which desk.
+    assert [a["firm_paced"] for a in us] == [False, False, True]
+    assert us[2]["pace_note"] == (
+        "Citi (US) already has 2 today, so this one is better tomorrow"
+    )
+    assert not any("(" in a["reason"] for a in hk + us[:2])
+
+
+def test_a_blank_region_paces_exactly_as_the_firm_alone_did():
+    """The founder's live queue the day this landed: 44 actions at four banks
+    (12 J.P. Morgan, 11 Citi, 11 Goldman, 10 Morgan Stanley), every one with
+    a blank region. Not one of them may move: same 8 live, same 36 paced,
+    same sentence, no market named."""
+    from crm.today import _pace_by_firm
+
+    def queue(region):
+        out, cid = [], 0
+        for fid, n in ((1, 12), (2, 11), (3, 11), (4, 10)):
+            for _ in range(n):
+                a = _pace_action(cid, fid, "follow_up", ev=2.4)
+                if region is not None:
+                    a["contact"]["region"] = region
+                out.append(a)
+                cid += 1
+        _pace_by_firm(out, sent_today={}, today=None)
+        return out
+
+    no_field, blank = queue(None), queue("")
+    assert sum(a["firm_paced"] for a in blank) == 36
+    assert (
+        [(a["firm_paced"], a["reason"]) for a in blank]
+        == [(a["firm_paced"], a["reason"]) for a in no_field]
+    )
+    assert not any("(" in a["pace_note"] for a in blank)
+
+
+def test_a_morning_of_hk_sends_does_not_spend_the_us_desks_budget():
+    """Sends already logged today are tallied by the same key the cards use
+    (`_build_actions` keys `sent_today` off `_pace_firm_key`), so a morning
+    spent on Hong Kong leaves the New York desk its full day."""
+    from crm.today import _build_actions
+
+    user = _user("pace-market-sent@example.com")
+    firm = Firm.objects.create(slug="pace-market", name="Split Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    for i in range(2):
+        done = _contact(user=user, name=f"HK Emailed {i}", firm=firm, region="hk")
+        _touch(user, done, "outreach", days_ago=0)
+    _contact(user=user, name="HK Fresh", firm=firm, region="hk")
+    _contact(user=user, name="US Fresh", firm=firm, region="us")
+
+    actions, _ = _build_actions(user)
+    by_name = {a["contact"]["name"]: a for a in actions}
+    assert by_name["HK Fresh"]["firm_paced"], (
+        "two HK sends this morning did not spend the HK desk's budget"
+    )
+    assert "Split Bank (HK) already has 2 today" in by_name["HK Fresh"]["reason"]
+    assert not by_name["US Fresh"]["firm_paced"], (
+        "the US desk was paced behind Hong Kong sends"
+    )
+
+
+# ---------------------------------------------------------------------------
+# OUTREACH BLACKOUT (`outreach_blackout`: Dec 20 to Jan 2, plus weekends).
+#
+# THE EVIDENCE (Grade A, two practitioners describing their own inboxes, Dec
+# 2025): "None. Anyone sending emails right now is on my shit list honestly.
+# This is one of the only quiet weeks. Wait until first week of January."
+# The only window in the research set where outreach is called DAMAGING
+# rather than low-yield. Weekdays over weekends: near-unanimous across five.
+#
+# THE DEFECT, measured on the founder's live account with the clock patched:
+# 2026-12-24, 94 actions, daily cap 5, five planned. Saturday 2026-12-26,
+# inside the window, the plan fired in full.
+#
+# The cockpit tests here run on the REAL calendar (`outreach_blackout`
+# marker); every other test in the suite sees an ordinary weekday. See
+# coverage_web/conftest.py for why that default exists.
+# ---------------------------------------------------------------------------
+_UTC = ZoneInfo("UTC")
+
+
+def _frozen(day: date):
+    """Pin the clock at noon UTC on `day`, at the module Django itself reads,
+    so `timezone.now`, `localtime` and `localdate` all agree (the pattern
+    test_today_timezone.py established). No zone is activated, so the local
+    date IS `day`."""
+    return mock.patch(
+        "django.utils.timezone.now",
+        return_value=datetime(day.year, day.month, day.day, 12, tzinfo=_UTC),
+    )
+
+
+def _blackout_queue(tag: str):
+    """One confirmed-deadline re-ping (critical) plus three cold follow-ups at
+    a second bank, of which the cap paces one, so a card that is BOTH
+    firm-paced and blacked out is always in the fixture. Built inside the
+    caller's frozen clock so every `days_ago` is relative to the pinned day."""
+    user = _user(f"blackout-{tag}@example.com", weekly_touch_goal=14)
+    closing = Firm.objects.create(slug=f"bo-closing-{tag}", name="Closing Bank")
+    UserFirm.all_objects.create(user=user, firm=closing, tier=1)
+    FirmDate.objects.create(
+        firm=closing, event_kind="app_close", region="us",
+        date=timezone.localdate() + timedelta(days=6),
+        confidence=1.0, precision="day",
+    )
+    warm = _contact(user=user, name="Deadline Warm", firm=closing, region="us",
+                    warmth="replied", thread_state="replied")
+    _touch(user, warm, "reply_received", days_ago=20)
+    cold = Firm.objects.create(slug=f"bo-cold-{tag}", name="Cold Bank")
+    UserFirm.all_objects.create(user=user, firm=cold, tier=1)
+    for i in range(3):
+        _contact(user=user, name=f"Cold {i}", firm=cold)
+    return user
+
+
+@pytest.mark.outreach_blackout   # the helper itself, so the suite default must not answer for it
+def test_outreach_blackout_names_the_holiday_window_and_weekends():
+    from crm.today import outreach_blackout
+
+    assert outreach_blackout(date(2026, 12, 19)) == "weekend"   # the Saturday before
+    assert outreach_blackout(date(2026, 12, 20)) == "holiday"   # a Sunday: the holiday wins
+    assert outreach_blackout(date(2026, 12, 24)) == "holiday"
+    assert outreach_blackout(date(2026, 12, 25)) == "holiday"   # a business day to the engine
+    assert outreach_blackout(date(2026, 12, 26)) == "holiday"   # the Saturday that fired in full
+    assert outreach_blackout(date(2027, 1, 2)) == "holiday"     # inclusive
+    assert outreach_blackout(date(2027, 1, 3)) == "weekend"     # a Sunday, just outside
+    assert outreach_blackout(date(2027, 1, 4)) is None
+    assert outreach_blackout(date(2026, 3, 3)) is None          # a Tuesday
+    assert outreach_blackout(date(2031, 12, 25)) == "holiday"   # year-agnostic
+
+
+def test_the_resume_day_is_the_first_weekday_after_the_window():
+    """Not the window's edge. Jan 3, 2027 is a Sunday, and "resumes Jan 3"
+    would have sent the student to email on a day the weekend rule then says
+    not to, in this very cycle."""
+    from crm.today import _blackout_resumes
+
+    assert _blackout_resumes(date(2026, 12, 24), "holiday") == "Jan 4"
+    assert _blackout_resumes(date(2027, 1, 1), "holiday") == "Jan 4"    # same window, from January
+    assert _blackout_resumes(date(2027, 12, 24), "holiday") == "Jan 3"  # a Monday
+    assert _blackout_resumes(date(2025, 12, 24), "holiday") == "Jan 5"  # Jan 3, 2026 is a Saturday
+    assert _blackout_resumes(date(2026, 12, 5), "weekend") == "Monday"
+
+
+@pytest.mark.outreach_blackout
+def test_the_holiday_plans_confirmed_deadlines_only_and_marks_the_rest():
+    with _frozen(date(2026, 12, 24)):
+        assert timezone.localdate() == date(2026, 12, 24)
+        user = _blackout_queue("holiday")
+        ctx = _cockpit_context(user)
+        body = render_to_string("crm/_cockpit.html", ctx)
+
+    assert ctx["blackout"] == "holiday"
+    assert ctx["blackout_resumes"] == "Jan 4"
+    planned = [a for lane in ctx["lanes"] for a in lane["items"]]
+    # The confirmed deadline is never something the page decides you'll get
+    # to in January.
+    assert [a["action"] for a in planned] == ["reping"]
+    assert planned[0]["blackout"] is None
+    assert "Bankers are off" not in planned[0]["reason"]
+    assert ctx["planned_total"] == 1
+    # Everything else: MARKED, never dropped, and says so on the card.
+    assert {a["contact"]["name"] for a in ctx["held"]} == {"Cold 0", "Cold 1", "Cold 2"}
+    assert sum(1 for a in ctx["held"] if a["firm_paced"]) == 1, (
+        "fixture must hold a firm-paced card"
+    )
+    for a in ctx["held"]:
+        assert a["blackout"] == "holiday"
+        assert a["reason"].endswith("Bankers are off until Jan 4. This one is better then.")
+        assert "better tomorrow" not in a["reason"], (
+            "a firm-pace clause contradicting the blackout survived on the card"
+        )
+    # The strip, and the two lines that used to quote the cap.
+    assert 'data-blackout="holiday"' in body
+    assert "Outreach resumes Jan 4." in body
+    assert "Confirmed deadlines still show below." in body
+    assert "It's the weekend" not in body
+    assert "waiting for Jan 4" in body
+    assert "pacing out at" not in body
+    assert "Resumes Jan 4." in body
+    assert "more to go" not in body
+
+
+@pytest.mark.outreach_blackout
+def test_a_weekend_holds_everything_but_confirmed_deadlines_until_monday():
+    with _frozen(date(2026, 12, 5)):   # a Saturday outside the holiday window
+        user = _blackout_queue("weekend")
+        ctx = _cockpit_context(user)
+        body = render_to_string("crm/_cockpit.html", ctx)
+
+    assert ctx["blackout"] == "weekend"
+    assert ctx["blackout_resumes"] == "Monday"
+    assert [a["action"] for lane in ctx["lanes"] for a in lane["items"]] == ["reping"]
+    assert len(ctx["held"]) == 3
+    for a in ctx["held"]:
+        assert a["blackout"] == "weekend"
+        assert a["reason"].endswith("It's the weekend. Better Monday.")
+        assert "better tomorrow" not in a["reason"]
+    assert "It's the weekend. Outreach resumes Monday." in body
+    assert "waiting for Monday" in body
+    assert "Resumes Monday." in body
+
+
+@pytest.mark.outreach_blackout
+def test_the_strip_does_not_point_at_deadlines_that_are_not_there():
+    """No critical in the queue, no "still show below": a strip pointing at a
+    lane that is not rendered would be the page over-claiming in a new way.
+    And held work is not an empty account: no seeds, and the "Done for today"
+    line names the wait rather than a cap that is not what holds them."""
+    with _frozen(date(2026, 12, 26)):   # the Saturday inside the window: the holiday wins
+        user = _user("blackout-empty@example.com", weekly_touch_goal=14)
+        for i in range(3):
+            _contact(user=user, name=f"Cold {i}")
+        ctx = _cockpit_context(user)
+        body = render_to_string("crm/_cockpit.html", ctx)
+
+    assert ctx["blackout"] == "holiday"
+    assert ctx["lanes"] == []
+    assert ctx["held_total"] == 3
+    assert ctx["seeds"] == []
+    assert "Only confirmed deadlines show until then." in body
+    assert "Confirmed deadlines still show below." not in body
+    assert "Done for today." in body
+    assert "3 more are waiting for Jan 4." in body
+    assert "pacing out" not in body
+
+
+@pytest.mark.outreach_blackout
+def test_an_ordinary_weekday_renders_byte_identical_with_the_blackout_in_place():
+    """Degrade: outside the window and Mon-Fri, nothing changed.
+
+    "Before" is the helper answering None, which is the only door the
+    blackout has into the page (`_cockpit_context` calls it once, the
+    template branches on the key it sets, nothing else reads the calendar).
+    "After" is the live helper on a Tuesday in March. Same frozen clock, same
+    fixture: the two renders must be the same bytes."""
+    from crm import today as today_mod
+
+    tuesday = date(2026, 3, 3)
+    assert today_mod.outreach_blackout(tuesday) is None
+    with _frozen(tuesday):
+        user = _blackout_queue("tuesday")
+        after = render_to_string("crm/_cockpit.html", _cockpit_context(user))
+        with mock.patch.object(today_mod, "outreach_blackout", return_value=None):
+            before = render_to_string("crm/_cockpit.html", _cockpit_context(user))
+        ctx = _cockpit_context(user)
+
+    assert after == before
+    assert ctx["blackout"] is None
+    assert ctx["blackout_resumes"] == ""
+    assert "data-blackout" not in after
+    assert "Outreach resumes" not in after
+    assert "pacing out at" in after, "the cap's own line must still render"
+    assert "more to go" in after
+    everyone = [a for lane in ctx["lanes"] for a in lane["items"]] + ctx["held"]
+    assert everyone and all(a["blackout"] is None for a in everyone)
+    assert not any(
+        "Bankers are off" in a["reason"] or "weekend" in a["reason"] for a in everyone
+    )

@@ -206,6 +206,25 @@ copy exactly once, and this is the once.
     all: this is the same ranking the page already computed, applied to
     headings instead of cards.
     {% endcomment %}
+
+    {% comment %}
+    Outreach blackout (crm.today.outreach_blackout): Dec 20 to Jan 2, and
+    weekends. The plan below holds confirmed deadlines only; everything else
+    waits under "Up next" with its own sentence saying why. A disclosure, like
+    "Up next", and it LEADS the plan rather than following it because what it
+    explains is mostly an absence: a lane that is not there has to be
+    accounted for before the reader reaches where it would have been. Quiet
+    skin, no control. It is a statement about the calendar, nothing to spend
+    and nothing to undo. Renders nothing on a working day.
+    {% endcomment %}
+    {% if blackout %}
+      <div class="prop-undo ap-strip-quiet" role="status" data-blackout="{{ blackout }}">
+        <span class="prop-undo-said">
+          {% if blackout == "weekend" %}It's the weekend. {% endif %}Outreach resumes {{ blackout_resumes }}.
+          {% if lanes %}Confirmed deadlines still show below.{% else %}Only confirmed deadlines show until then.{% endif %}
+        </span>
+      </div>
+    {% endif %}
     {% for lane in lanes %}
       <section class="lane lane-{{ lane.key }}">
         <h2 class="lane-title">
@@ -653,7 +672,7 @@ copy exactly once, and this is the once.
         <h2>Done for today.</h2>
         <p>
           {% if still_open_total %}{{ still_open_total }} {% if still_open_total == 1 %}question is{% else %}questions are{% endif %} still open below. {% endif %}
-          {% if held_total %}{{ held_total }} more {% if held_total == 1 %}is{% else %}are{% endif %} pacing out over the coming days. {% endif %}
+          {% if held_total %}{{ held_total }} more {% if held_total == 1 %}is{% else %}are{% endif %} {% if blackout %}waiting for {{ blackout_resumes }}{% else %}pacing out over the coming days{% endif %}. {% endif %}
           {% if park_total %}{{ park_total }} {% if park_total == 1 %}contact has{% else %}contacts have{% endif %} gone quiet; park them below. {% endif %}
           That's {{ pace.done }} of {{ pace.goal }} this week.
         </p>
@@ -726,7 +745,13 @@ copy exactly once, and this is the once.
       <details class="upnext">
         <summary>
           <span class="upnext-count">{{ held_total }} more queued</span>
-          <span class="upnext-why">pacing out at {{ daily_cap }} a day</span>
+          {% comment %}
+          On a blackout day the cap is not what holds these, so its number is
+          not quoted: "pacing out at 5 a day" would count 94 held cards as
+          owed at five a morning through Christmas week. Same switch in the
+          "Done for today" line above and the ring's caption in the rail.
+          {% endcomment %}
+          <span class="upnext-why">{% if blackout %}waiting for {{ blackout_resumes }}{% else %}pacing out at {{ daily_cap }} a day{% endif %}</span>
           <span class="upnext-toggle">Show all</span>
         </summary>
         <div class="act-grid upnext-grid">
@@ -1000,8 +1025,14 @@ copy exactly once, and this is the once.
             no argument yields "touchs", not "touches", which is why the
             old copy had to spell out `pluralize:"es"` explicitly. Nothing
             here needs that any more.
+
+            On a blackout day (crm.today.outreach_blackout) the caption names
+            the day outreach resumes instead of a number: "14 more to go" on
+            Dec 24 is the ring owing the student fourteen sends in the one
+            week the page is telling them not to send. The figure and the
+            fill above it stay exactly what they are; only the ask changes.
             {% endcomment %}
-            {% if pace.hit %}Weekly goal hit.{% else %}<b>{{ pace.remaining }}</b> more to go.{% endif %}
+            {% if pace.hit %}Weekly goal hit.{% elif blackout %}Resumes {{ blackout_resumes }}.{% else %}<b>{{ pace.remaining }}</b> more to go.{% endif %}
           </p>
         </div>
       </div>

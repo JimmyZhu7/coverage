@@ -907,6 +907,13 @@ FIRM_PACE_TOUCH_KINDS = (
 )
 
 
+# The short market name a pace note prints after the firm ("Citi (HK) already
+# has 2 today"). Keyed by `Contact.region`. "other" is a real declared value
+# (London, Singapore: known to be outside both markets) and gets a phrase,
+# because "(OTHER)" is not a place anyone would read.
+_PACE_MARKET_LABELS = {"hk": "HK", "us": "US", "other": "other markets"}
+
+
 def _pace_firm_key(contact: dict):
     """The identity the per-day budget is counted against, or None for a
     contact whose employer we cannot name.
@@ -917,12 +924,29 @@ def _pace_firm_key(contact: dict):
     under one "" key would pace people who work nowhere near each other. It
     is the same refusal `cadence.contact_region` makes about a blank region —
     a missing field is not a value.
+
+    THE MARKET SPLITS THE BUDGET when the contact carries one. The
+    practitioner rule the cap is built on is per TEAM ("the analysts talk to
+    each other"), and `Contact.region` is the closest honest proxy the data
+    holds for a team: two Hong Kong bankers and two New York bankers at one
+    bank do not sit in the same room, and the measured defect (2026-09-01)
+    was exactly that pair — `us #3` and `#4` at one bank paced behind HK
+    desks that never talk to them. So a set region is part of the key,
+    `("id", 9, "hk")` and `("id", 9, "us")` being two budgets, and a blank
+    one is not: `("id", 9)`, the firm-only key, byte for byte what it was.
+    Blank is "unknown", and unknown gets the firm's pool rather than a guess.
+    On the founder's live queue every one of the 44 actions is blank, and
+    nothing moves. A free-text employer follows the same rule for the same
+    reason.
     """
+    region = (contact.get("region") or "").strip().lower()
     fid = contact.get("firm_id")
     if fid is not None:
-        return ("id", fid)
+        return ("id", fid, region) if region else ("id", fid)
     text = (contact.get("firm_text") or "").strip().lower()
-    return ("text", text) if text else None
+    if not text:
+        return None
+    return ("text", text, region) if region else ("text", text)
 
 
 # The action kinds the per-firm budget may defer: the ones the STUDENT
@@ -991,7 +1015,9 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
 
     Degrades to today's behaviour on thin data by construction: a student with
     two or fewer contacts per firm has nothing paced, and a contact with no
-    nameable employer is never paced at all.
+    nameable employer is never paced at all. A contact with a region shares
+    the budget only with their own market at that firm (`_pace_firm_key`);
+    a blank region pools with the firm exactly as before.
     """
     budget = Counter(sent_today or {})
     rankable: list[tuple[tuple, dict]] = []
@@ -1018,8 +1044,14 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
             continue
         a["firm_paced"] = True
         firm = a.get("firm_name") or a["contact"].get("firm_text") or "this firm"
+        # Name the market when it is the market's budget that is spent.
+        # "Citi (HK) already has 2 today" is a different fact from "Citi
+        # already has 2 today", and a student working the US desk should be
+        # able to see at a glance that the note is not about them.
+        market = _PACE_MARKET_LABELS.get(key[2], key[2].upper()) if len(key) == 3 else ""
+        where = f"{firm} ({market})" if market else firm
         a["pace_note"] = (
-            f"{firm} already has {budget[key]} today, "
+            f"{where} already has {budget[key]} today, "
             "so this one is better tomorrow"
         )
         base = (a.get("reason") or "").strip()
@@ -1588,6 +1620,103 @@ def _workdays_left(today) -> int:
     instead of a division by zero — and so the weekend isn't quietly treated
     as extra capacity that never existed."""
     return max(1, 5 - today.weekday()) if today.weekday() < 5 else 1
+
+
+# ---------------------------------------------------------------------------
+# OUTREACH BLACKOUT. The one window in the whole research set where a cold
+# email is described as actively DAMAGING rather than merely low-yield, which
+# makes it a different cost class from pacing. Two practitioners,
+# independently, describing their own inboxes in December 2025: "None. Anyone
+# sending emails right now is on my shit list honestly. This is one of the
+# only quiet weeks. Wait until first week of January." and "There's no faster
+# way to get on someone's shit list than messaging them on one of the few
+# weeks of peace they might get for months." Weekdays over weekends was
+# near-unanimous across five respondents: a softer rule (low yield, not
+# damage), and the card copy reads that way.
+#
+# THE DEFECT, measured on the founder's live account with the clock patched:
+# on 2026-12-24 the queue held 94 actions at a daily cap of 5, and on Saturday
+# 2026-12-26, inside the window, the plan fired in full.
+# `coverage_domain.cadence.business_days_since` counts Mon-Fri with no holiday
+# calendar, so Dec 25 is a business day to the engine. Left alone on purpose:
+# the engine says what is DUE and this layer says what is worth TODAY, the
+# same line `_stale_critical` and the daily cap already hold, and a country's
+# holiday calendar has no place in a pure engine that has no notion of one.
+#
+# WHAT IT DOES, and does not do. Inside the window the plan holds criticals
+# only. A confirmed deadline is never something the page decides you'll get
+# to in January, the identical rule the cap follows. Everything else is
+# MARKED, never dropped: `blackout` on the action, the reason it prints
+# extended by one clause, the card still under "Up next" with every button it
+# had. It is the shape `_pace_by_firm` gives a firm-paced card, on purpose.
+# The window is (month, day), inclusive at both ends and year-agnostic, and
+# the holiday wins over the weekend when both apply because the stronger
+# claim is the one the card should make.
+#
+# Dec 20 rather than the 24th because the quotes are about the QUIET WEEKS,
+# not the two public holidays: the week before Christmas is when desks
+# empty. Jan 2 rather than Jan 1 because "first week of January" is when both
+# said to resume, and the day after Jan 2 is the earliest honest reading.
+HOLIDAY_BLACKOUT_START = (12, 20)   # (month, day), inclusive
+HOLIDAY_BLACKOUT_END = (1, 2)       # (month, day), inclusive, the year after
+BLACKOUT_HOLIDAY = "holiday"
+BLACKOUT_WEEKEND = "weekend"
+
+
+def outreach_blackout(today) -> str | None:
+    """Why today is not a day to start an email thread, or None.
+
+    `BLACKOUT_HOLIDAY` from Dec 20 through Jan 2 in any year, `BLACKOUT_WEEKEND`
+    on a Saturday or Sunday outside that. Pure: a date in, a string out, and
+    the whole feature hangs off this one call, so a test (or the suite's own
+    default, `coverage_web/conftest.py`) pins an ordinary weekday by patching
+    it and touching nothing else about the clock."""
+    md = (today.month, today.day)
+    if md >= HOLIDAY_BLACKOUT_START or md <= HOLIDAY_BLACKOUT_END:
+        return BLACKOUT_HOLIDAY
+    if today.weekday() >= 5:
+        return BLACKOUT_WEEKEND
+    return None
+
+
+def _blackout_resumes(today, blackout: str) -> str:
+    """The day the page starts asking for outreach again, as copy.
+
+    "Monday" for a weekend. For the holiday, the first WEEKDAY after Jan 2,
+    named ("Jan 4"), and not the window's edge: Jan 3, 2027 is a Sunday, so a
+    strip reading "resumes Jan 3" in this very cycle would have sent the
+    student to email on a day the weekend rule then says not to. Read off
+    `today`'s own year, so a December and a January reading of one window
+    name the same day."""
+    if blackout == BLACKOUT_WEEKEND:
+        return "Monday"
+    year = today.year + 1 if today.month == 12 else today.year
+    resumes = date(year, *HOLIDAY_BLACKOUT_END) + timedelta(days=1)
+    while resumes.weekday() >= 5:
+        resumes += timedelta(days=1)
+    return f"{resumes:%b} {resumes.day}"
+
+
+def _blackout_action(a: dict, blackout: str, resumes: str) -> None:
+    """Mark one action as held by the blackout, and say so on its card.
+
+    Same contract as `_pace_by_firm`: MARK, never drop, and disclose in the
+    sentence the student already reads. A firm-pace clause already on the
+    card is REPLACED rather than stacked. "Citi already has 2 today, so this
+    one is better tomorrow" is false on a day Citi has nothing and tomorrow
+    is Christmas, and two "better ..." clauses on one card would contradict
+    each other. `firm_paced` itself stays set: the budget is a fact about the
+    queue, the clause was advice about today."""
+    a["blackout"] = blackout
+    if blackout == BLACKOUT_HOLIDAY:
+        note = f"Bankers are off until {resumes}. This one is better then."
+    else:
+        note = "It's the weekend. Better Monday."
+    base = (a.get("reason") or "").strip()
+    pace = a.get("pace_note")
+    if pace and base.endswith(pace):
+        base = base[: -len(pace)].rstrip().rstrip("—").rstrip()
+    a["reason"] = f"{base} — {note}" if base else note
 
 
 def _daily_cap(goal: int, done: int, today) -> int:
@@ -2474,6 +2603,10 @@ def _cockpit_context(user) -> dict:
         a["stale_critical"] = _stale_critical(a, today)
         if a["stale_critical"]:
             a["reason"] = _stale_critical_reason(a)
+        # On every card, like `firm_paced`, so a template or a test can read
+        # the key off a planned card without guarding for its absence. Set
+        # to the reason below for the cards the blackout holds.
+        a["blackout"] = None
 
     park = [a for a in ordered if _today_class(a) == CLASS_PARK]
     still_open = [
@@ -2520,6 +2653,25 @@ def _cockpit_context(user) -> dict:
     # better tomorrow. Demoting or dropping them instead would starve a firm
     # rather than pace it, and the practitioner evidence the cap is built on
     # says the opposite — work the firm over days, just not all in one.
+    #
+    # A THIRD, AND THE ONLY ONE THAT EMPTIES THE LANES ON PURPOSE. On a day
+    # `outreach_blackout` names (Dec 20 to Jan 2, or a weekend) nothing in
+    # `rest` takes a slot: the plan is `critical` and nothing else. A
+    # confirmed deadline is never something the page decides you'll get to in
+    # January, and everything else is a thread the student would be STARTING
+    # in the one window the research calls damaging rather than low-yield
+    # (see the constants' own note above `outreach_blackout`). Marked, never
+    # dropped, same as the two exceptions above: every card still renders
+    # under "Up next" and its own sentence says why it waits. The cap's number
+    # is left alone (it is still what the plan would hold on a working day),
+    # but every line of copy that quotes it ("pacing out at N a day", "N more
+    # to go") switches to the day outreach resumes, so neither the cap nor the
+    # pace ring reads a blacked-out card as owed today.
+    blackout = outreach_blackout(today)
+    blackout_resumes = _blackout_resumes(today, blackout) if blackout else ""
+    if blackout:
+        for a in rest:
+            _blackout_action(a, blackout, blackout_resumes)
     slots = max(0, cap - len(critical))
     planned_rest: list[dict] = []
     held: list[dict] = []
@@ -2529,6 +2681,7 @@ def _cockpit_context(user) -> dict:
         blocked = (
             (quiet and quiet_used >= QUIET_UPKEEP_PLAN_MAX)
             or a.get("firm_paced")
+            or a.get("blackout")
         )
         if len(planned_rest) < slots and not blocked:
             planned_rest.append(a)
@@ -2865,6 +3018,13 @@ def _cockpit_context(user) -> dict:
         # offer a single button that changes state on a dozen people at once.
         "park_bulk": len(park) > 5,
         "daily_cap": cap,
+        # The blackout (`outreach_blackout`): "holiday", "weekend" or None,
+        # and the day outreach resumes as copy ("Jan 4", "Monday"). None and
+        # "" on every working day, and the template branches only on the
+        # first, so a working day renders byte for byte what it did before
+        # the blackout existed. A test pins that.
+        "blackout": blackout,
+        "blackout_resumes": blackout_resumes,
         "queue_total": len(actions),
         # Chats from the last week that nobody has written down yet. Its own
         # lane rather than a cadence action: the cadence engine is pure and

@@ -9,7 +9,7 @@ already owns. See crm/digest.py's module docstring for the full rationale.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -367,3 +367,30 @@ def test_the_digest_prefers_contacts_that_are_actually_sendable_today():
     )
     if paced:
         assert shown.index(paced[0]) >= len(unpaced)
+
+
+# ---------------------------------------------------------------------------
+# The weekly email does not go out inside the December blackout.
+#
+# `crm.today.outreach_blackout` holds Today to confirmed deadlines from Dec 20
+# to Jan 2 (two practitioners, Dec 2025: "Anyone sending emails right now is
+# on my shit list ... Wait until first week of January"). An email headed "who
+# to ping" landing on Dec 24 is the product doing the one thing the page is
+# telling the student not to, so `assemble_digest` returns None, the existing
+# "skip this user" signal, on every day of the window. Runs on the real
+# calendar (`outreach_blackout` marker, see coverage_web/conftest.py).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.outreach_blackout
+def test_the_weekly_digest_stays_silent_inside_the_holiday_window():
+    user = _user(weekly_touch_goal=14)
+    c = Contact.all_objects.create(user=user, name="Ada Lovelace", school_affiliation=True)
+    _touch(user, c, "outreach", days_ago=20)  # a real thing to ping, on any day
+
+    assert assemble_digest(user, today=date(2026, 12, 19)) is not None, (
+        "the Saturday before the window: weekends do not gate the email"
+    )
+    assert assemble_digest(user, today=date(2026, 12, 20)) is None
+    assert assemble_digest(user, today=date(2026, 12, 24)) is None
+    assert assemble_digest(user, today=date(2027, 1, 2)) is None
+    assert assemble_digest(user, today=date(2027, 1, 4)) is not None
