@@ -512,6 +512,51 @@ def test_every_week_lays_out_on_identical_columns(client, logged_in):
     assert "repeat(7, 1fr)" not in grid[0]
 
 
+def test_the_period_title_cannot_shove_the_controls_along_the_bar(client, logged_in):
+    """Reported as "the whole thing moves around when I change from day to
+    month to week".
+
+    `.cal-bar` is one wrapping flex row, and `.cal-month` is the only item on
+    it whose width is content. `_period_label` spans a range no reserved slot
+    can absorb — measured at 1440px in the page's own 26px display black,
+    "May 2026" is 146px and "28 December 2026 to 3 January 2027" is 471px. On
+    a shared line every control after the title inherited that 325px range:
+    switching Month -> Week -> Day on 30 December 2026 moved the view switcher
+    from x=326 to x=595 to x=515, and Today, Subscribe and Add each by 268px.
+
+    `flex-basis: 100%` gives the title the whole first line, so the controls
+    start the next one at a fixed origin. Re-measured after: the switcher sits
+    at x=112 and Today at x=354 in all three views, at 1440px and at 375px.
+
+    Two ways to break it, so two assertions:
+      * dropping the full-width basis, which puts the title back on the
+        controls' line;
+      * introducing a SECOND content-width item ahead of them, which
+        reintroduces the same shove from a different element.
+    """
+    body = client.get(reverse("crm:calendar")).content.decode()
+    css = _style_block(body)
+
+    assert ".cal-month {" in css, "the .cal-month rule moved; update this guard"
+    block = css.split(".cal-month {", 1)[1].split("}", 1)[0]
+    assert "flex-basis: 100%" in block, (
+        "The period title must take the whole first line of .cal-bar. Sharing "
+        "it, a 325px swing in the label's own width drags the switcher, Today, "
+        "Subscribe and Add along with it."
+    )
+
+    # Nothing content-width may precede the controls. The title opens
+    # `.cal-bar` and `.cal-nav` opens the control run, so the only tags
+    # between them are the title's own.
+    bar = body.split('<div class="cal-bar">', 1)[1].split('<div class="cal-nav">', 1)[0]
+    assert re.findall(r"</?([a-z0-9]+)", bar) == ["h2", "h2"], (
+        "Only the period title may sit between the start of .cal-bar and "
+        ".cal-nav. A second item there shares the controls' line and moves "
+        "them again."
+    )
+    assert 'class="cal-month"' in bar
+
+
 # ---------------------------------------------------------------------------
 # Timezone anchoring: what a reported time MEANS.
 # ---------------------------------------------------------------------------

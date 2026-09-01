@@ -16,8 +16,51 @@
      -------------------------------------------------------------------- */
   .cal-bar { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
     margin-bottom: var(--s4); }
+  /* `flex-basis: 100%` — the period title takes the whole first line, and
+     every control sits on the line below it.
+     -----------------------------------------------------------------------
+     Reported live: "the whole thing moves around when I change from day to
+     month to week". The title is real content whose width genuinely varies by
+     view, and `_period_label` (calendar_views.py) spans a far wider range than
+     the old `min-width: 8ch` slot ever reserved. Measured at 1440px, 26px
+     display black:
+
+         "May 2026"                            146px   (narrowest month)
+         "September 2026"                      210px   (widest month)
+         "Friday 1 May 2026"                   232px   (narrowest day)
+         "Wednesday 30 September 2026"         399px   (widest day)
+         "28 December 2026 to 3 January 2027"  471px   (widest week, year straddle)
+
+     Sharing one line with the title, everything after it inherited that 325px
+     range. Switching Month -> Week -> Day on the SAME date (30 Dec 2026) moved
+     the view switcher from x=326 to x=595 to x=515, and Today, Subscribe and
+     Add each by the same 268px. At 375px it was worse than a shift: the bar
+     wrapped to a different number of lines per view, so Today sat at x=254 on
+     its own line in month view and at x=12 two lines lower in week view.
+
+     No reserved slot can fix that — a 471px title track leaves 325px of dead
+     air beside "May 2026" and cannot survive a phone width at all. Giving the
+     title its own line is what makes the rest of the bar constant-width: the
+     arrows, the switcher, Today, Subscribe and Add are the same five controls
+     with the same five labels in all three views, so once nothing variable
+     precedes them they wrap identically and land on the same pixel every time.
+
+     Costs one line of height (43px -> 85px at 1440px). That is the trade: the
+     bar is taller and it stops moving. Re-measured after, the switcher sits at
+     x=112 and Today at x=354 in all three views, byte-identical at 1440, 900
+     and 600px. `.cal-add[open]`'s own full-width line still works underneath
+     it — the open form drops below the controls exactly as before.
+
+     What this deliberately does NOT flatten: at 375px the widest week label
+     needs two lines to itself, so the controls start 22px lower in week view
+     than in month or day. That is the heading taking the room its own text
+     needs, and it moves the controls DOWN as a block rather than shuffling
+     them past each other.
+
+     `min-width: 8ch` is gone with it. It was sizing a slot this rule no longer
+     has, and at 146px the narrowest real label already cleared it. */
   .cal-month { font: var(--w-black) clamp(20px, 2.2vw, 26px)/1.1 var(--font-display);
-    letter-spacing: -0.01em; margin: 0; min-width: 8ch; }
+    letter-spacing: -0.01em; margin: 0; flex-basis: 100%; }
   /* 2026-08-29: this bar's controls carried their own one-off pill shape
      (border-radius: 999px), a permanent box-shadow, and the lighter --line
      border — none of which is what a button looks like anywhere else in

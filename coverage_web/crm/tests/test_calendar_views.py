@@ -159,6 +159,36 @@ def test_a_week_inside_one_month_says_so_once(client, logged_in):
     assert resp.context["period_label"] == "15 to 21 March 2027"
 
 
+def test_one_date_gets_three_very_differently_sized_headings(client, logged_in):
+    """The premise `.cal-month { flex-basis: 100% }` rests on.
+
+    Switching view keeps the anchor (the test above this section pins that),
+    so the same date is labelled three ways, and the three are nowhere near
+    the same width. Measured in the page's own 26px display black at 1440px,
+    the widest label each view can produce runs 210px (month), 399px (day)
+    and 471px (week), against 146px for the narrowest month.
+
+    That is why the title cannot share a flex line with the controls: a range
+    that wide is a shove, not a wobble. If these three ever converge on one
+    length, the layout guard in test_calendar.py can be revisited -- until
+    then it is load-bearing.
+    """
+    labels = {
+        view: _get(client, view=view, y=2026, m=12, d=30).context["period_label"]
+        for view in ("month", "week", "day")
+    }
+    assert labels == {
+        "month": "December 2026",
+        "week": "28 December 2026 to 3 January 2027",
+        "day": "Wednesday 30 December 2026",
+    }
+    widths = [len(v) for v in labels.values()]
+    assert max(widths) - min(widths) >= 15, (
+        "The three views' headings for one date are now close enough in "
+        "length to reconsider the bar's layout."
+    )
+
+
 def test_the_day_view_covers_exactly_one_date(client, logged_in):
     _event(logged_in, date(2027, 3, 15), "On the day")
     _event(logged_in, date(2027, 3, 16), "The day after")
