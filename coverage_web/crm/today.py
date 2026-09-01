@@ -925,6 +925,30 @@ def _pace_firm_key(contact: dict):
     return ("text", text) if text else None
 
 
+# The action kinds the per-firm budget may defer: the ones the STUDENT
+# initiates into a firm that has not asked for them. Everything else - an
+# owed reply, a thank-you inside its window, an advance on a live thread, a
+# pre-deadline re-ping - is a send the other side is expecting, and pacing it
+# is the tool teaching a bad habit. `crm/relevance.py`'s module docstring
+# already holds this line for owed replies ("answering a person who wrote to
+# you is basic courtesy and costs one reply; letting a relevance rule swallow
+# it would be the tool teaching a bad habit"); the practitioner rule the cap
+# is built on is about spraying strangers, not about answering mail.
+#
+# Found by audit on 2026-09-01, the day the cap shipped: a reply owed to
+# someone who had written in, and a thank-you inside its 24-hour window, were
+# both paced behind two cold follow-ups at the same bank. The thank-you then
+# re-entered the next morning as OVERDUE and critical - the cap manufacturing
+# the very state it exempts.
+#
+# Exempt kinds still SPEND budget when live, for the same reason live
+# criticals do: the banker's inbox does not care why the email was expected.
+# Two owed replies at Citi this morning mean a third cold note there waits.
+FIRM_PACEABLE_ACTIONS = frozenset({
+    "first_outreach", "follow_up", "keep_warm", "maintain", "confirm_chat",
+})
+
+
 def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
     """Mark the actions that a firm's daily budget pushes to a later day.
 
@@ -935,6 +959,11 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
     pacing clause is appended to the reason the student already reads, which
     means every surface rendering `reason` (Today, the daily digest, the
     assistant's queue tool) discloses it without any of them opting in.
+
+    ONLY SELF-INITIATED KINDS ARE PACED. `FIRM_PACEABLE_ACTIONS` (above) is
+    the set; an owed reply, a thank-you, an advance or a re-ping is exempt
+    because the other side is expecting it, and it spends budget because it
+    is still a send. See that constant for the audit that found the gap.
 
     CRITICALS ARE EXEMPT, AND SPEND ONLY WHILE THEY STILL HOLD A SLOT. A
     confirmed deadline is never something the page decides you'll get to
@@ -975,6 +1004,10 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
         if _is_critical(a):
             if today is None or not _stale_critical(a, today):
                 budget[key] += 1
+            continue
+        if a.get("owed_reply") or a.get("action") not in FIRM_PACEABLE_ACTIONS:
+            # Expected by the other side: never paced, but a real send.
+            budget[key] += 1
             continue
         rankable.append((key, a))
 

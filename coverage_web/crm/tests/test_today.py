@@ -2469,3 +2469,56 @@ def test_a_stale_critical_does_not_spend_a_firms_budget():
                  if a["contact"]["name"].startswith("Cold") and not a["firm_paced"]]
     assert len(cold_live) == 2
     assert not any(a["firm_paced"] for a in stuck_cards)
+
+
+# ---------------------------------------------------------------------------
+# The per-firm cap must never defer a send the other side is expecting.
+# Found by audit the day the cap shipped (2026-09-01): an owed reply and a
+# thank-you inside its window were paced behind two cold follow-ups at the
+# same bank, and the thank-you re-entered the next morning as OVERDUE and
+# critical - the cap manufacturing the state it exempts.
+# ---------------------------------------------------------------------------
+
+def _pace_action(cid, firm_id, action, *, ev=2.4, owed_reply=False, **extra):
+    a = {"contact": {"id": cid, "firm_id": firm_id}, "action": action,
+         "ev": ev, "owed_reply": owed_reply, "reason": "r", "firm_name": "Citi",
+         "class": 2, "priority": 1, "last_business_days": 5, "closes_on": None}
+    a.update(extra)
+    return a
+
+
+def test_the_firm_cap_never_paces_an_owed_reply_or_a_thank_you():
+    from crm.today import _pace_by_firm, FIRM_DAILY_CONTACT_CAP
+    # Two cold follow-ups fill the firm's budget...
+    cold = [_pace_action(i, 9, "follow_up", ev=2.4) for i in range(FIRM_DAILY_CONTACT_CAP)]
+    # ...then an owed reply, a thank-you and an advance arrive, all lower ev.
+    reply = _pace_action(90, 9, "follow_up", ev=1.0, owed_reply=True)
+    thanks = _pace_action(91, 9, "thank_you", ev=1.0)
+    advance = _pace_action(92, 9, "advance", ev=1.0)
+    _pace_by_firm(cold + [reply, thanks, advance], sent_today={}, today=None)
+    assert not reply["firm_paced"], "a reply someone is waiting on was told 'better tomorrow'"
+    assert not thanks["firm_paced"], "a thank-you inside its window was deferred"
+    assert not advance["firm_paced"]
+    for a in (reply, thanks, advance):
+        assert "better tomorrow" not in a["reason"]
+
+
+def test_expected_sends_still_spend_the_firms_budget():
+    """The exemption is not a free pass into the firm: two owed replies at
+    Citi this morning mean a third COLD note there waits, because the
+    banker's inbox does not care why the first two were expected."""
+    from crm.today import _pace_by_firm, FIRM_DAILY_CONTACT_CAP
+    replies = [_pace_action(i, 9, "follow_up", ev=1.0, owed_reply=True)
+               for i in range(FIRM_DAILY_CONTACT_CAP)]
+    cold = _pace_action(50, 9, "follow_up", ev=5.0)   # highest ev, still waits
+    _pace_by_firm(replies + [cold], sent_today={}, today=None)
+    assert all(not r["firm_paced"] for r in replies)
+    assert cold["firm_paced"], "the cold note should wait behind the expected sends"
+
+
+def test_only_self_initiated_kinds_are_in_the_paceable_set():
+    from crm.today import FIRM_PACEABLE_ACTIONS
+    assert FIRM_PACEABLE_ACTIONS == {"first_outreach", "follow_up", "keep_warm",
+                                     "maintain", "confirm_chat"}
+    for expected in ("thank_you", "advance", "reping", "park"):
+        assert expected not in FIRM_PACEABLE_ACTIONS
