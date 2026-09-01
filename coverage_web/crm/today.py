@@ -9,6 +9,7 @@ working unchanged.
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date, timedelta
 from math import ceil
 
@@ -477,7 +478,39 @@ def _build_actions(user):
         # calls inbound, for the same reason.
         a["owed_reply"] = bool(last and last.kind in rel.INBOUND_TOUCH_KINDS)
 
-    actions = _gate_and_rank(actions, tiers, openings)
+    # WHAT THE STUDENT HAS ALREADY SENT INTO EACH FIRM TODAY — the other half
+    # of the per-firm daily budget `_gate_and_rank`'s fourth pass spends. Read
+    # off the `touches` list already in hand, so this costs no query.
+    #
+    # It has to be here rather than left implicit at zero: the cap is per DAY,
+    # and a student who worked five cards this morning and reopens the page
+    # after lunch would otherwise be handed a fresh allowance at every firm.
+    # The queue would then pace nothing on exactly the days it matters most.
+    #
+    # Keyed by `_pace_firm_key` off the SAME contact dicts the actions carry,
+    # so a touch and an action can never disagree about which firm they belong
+    # to. A touch against an archived contact contributes nothing (archived
+    # rows are not in `contact_dicts`) — the email still landed, but the queue
+    # has no card to pace against it and inventing a key here would be a
+    # different function's guess.
+    pace_key_by_contact = {
+        cd["id"]: _pace_firm_key(cd) for cd in contact_dicts
+    }
+    sent_today: Counter = Counter()
+    for t in touches:
+        if t.kind not in FIRM_PACE_TOUCH_KINDS:
+            continue
+        key = pace_key_by_contact.get(t.contact_id)
+        if key is None:
+            continue
+        # `local_date`, the same helper every other clock on this page runs a
+        # `ts` through. A raw UTC `.date()` would put an 8am Hong Kong send on
+        # yesterday's tally and hand the firm its budget back. See the skew
+        # note at the top of this function.
+        if local_date(t.ts).date() == today:
+            sent_today[key] += 1
+
+    actions = _gate_and_rank(actions, tiers, openings, sent_today, today)
     return actions, contacts
 
 
@@ -809,12 +842,164 @@ def _opening_bench(user, contacts, actions, today) -> list[dict]:
     return candidates[:BENCH_PLAN_MAX]
 
 
-def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict) -> list[dict]:
+# How many contacts at ONE firm the plan may put in front of the student on
+# ONE day. Everyone past it stays in the queue and keeps their card; they just
+# do not take a plan slot today.
+#
+# WHERE THE NUMBER COMES FROM. It is composed from two pieces of practitioner
+# testimony, not chosen for feel:
+#
+#   - "Do not email multiple people on the same team in the same day, give it
+#     a couple of days or a week... The analysts talk to each other." That is
+#     a ceiling of ONE per group per day.
+#   - "You don't need to network with every group at a bank. Just the 1-2
+#     you're most interested in." That is at most TWO groups per firm.
+#
+# One per group per day x at most two groups per firm = 2. The same testimony
+# puts a lifetime ceiling of "4-5 people max" on a single group, which is a
+# different limit this cap does not try to be (see the per-DAY note below).
+#
+# WHY A FIRM CAP AND NOT A GROUP CAP, when the evidence is about groups. A
+# contact row carries a free-text `role`, not a reliable group, so a group cap
+# would be a cap on a guess. The firm is the field the data actually holds, and
+# composing the two quotes gives a firm-level number the evidence supports
+# directly, so nothing has to be inferred about which desk anyone sits on.
+#
+# PER DAY, NEVER A LIFETIME CAP. Working through a firm over weeks is the
+# behaviour the product wants; sending eleven notes into one bank on one
+# morning is the behaviour it was producing. The budget resets every day, and
+# it counts sends already logged today (`FIRM_PACE_TOUCH_KINDS`) as well as
+# cards, so opening the page after a morning of outreach does not hand the
+# student a fresh allowance.
+#
+# WHAT WOULD CHANGE IT. It is an evidence-derived DEFAULT, not a measurement of
+# outcomes: nobody has yet observed a Coverage user's reply rate against firms
+# they paced versus firms they blasted. Two things should move it. (1) Better
+# group data — if a contact's desk ever becomes a reliable field, the honest
+# cap is one per group per day and this constant is replaced by it rather than
+# retuned. (2) Reply-rate evidence from real accounts, which is the only thing
+# that can say whether 2 is generous or already too many. Until one of those
+# exists, changing this number is changing a guess for a guess.
+FIRM_DAILY_CONTACT_CAP = 2
+
+# Touches that spend a firm's daily budget: messages the student SENT into
+# that firm today.
+#
+# Derived from the ratchet's vocabulary rather than hand-listed, the same
+# discipline `PACE_TOUCH_KINDS` below holds to and for the same reason: a
+# touch kind added to `TOUCH_TRANSITIONS` later counts as a send by default
+# and has to be excluded ON PURPOSE, which is the direction that fails safe.
+# `bulk_received` is the case that rule was written for — it joined the
+# ratchet without being named, and a hand-listed set would simply not have
+# seen it.
+#
+# `chat` is subtracted on top of the inbound kinds, and it is the one
+# judgement call here. It IS the student's own work and the pace ring counts
+# it as such, but it is not a message landing in somebody's inbox: sitting
+# down for a conversation both sides already agreed to is not what the
+# analysts-talk-to-each-other evidence is about, and spending a firm's daily
+# budget on it would punish the student for the most valuable thing they can
+# do.
+FIRM_PACE_TOUCH_KINDS = (
+    frozenset(TOUCH_TRANSITIONS)
+    - rel.INBOUND_TOUCH_KINDS
+    - {BULK_RECEIVED_KIND, "chat"}
+)
+
+
+def _pace_firm_key(contact: dict):
+    """The identity the per-day budget is counted against, or None for a
+    contact whose employer we cannot name.
+
+    `firm_id` when the contact is matched to a directory firm; the normalised
+    free-text employer otherwise. None means UNCAPPED, deliberately: a queue
+    can hold a dozen hand-added contacts with a blank firm, and pooling them
+    under one "" key would pace people who work nowhere near each other. It
+    is the same refusal `cadence.contact_region` makes about a blank region —
+    a missing field is not a value.
+    """
+    fid = contact.get("firm_id")
+    if fid is not None:
+        return ("id", fid)
+    text = (contact.get("firm_text") or "").strip().lower()
+    return ("text", text) if text else None
+
+
+def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
+    """Mark the actions that a firm's daily budget pushes to a later day.
+
+    MARKS, NEVER DROPS. Every action stays in the list and keeps its card;
+    `firm_paced` only costs it a plan slot (`_cockpit_context`), exactly like
+    `QUIET_UPKEEP_PLAN_MAX` caps quiet keep-warms without demoting them. An
+    invisible cap would be its own kind of lie, so the card also SAYS it — the
+    pacing clause is appended to the reason the student already reads, which
+    means every surface rendering `reason` (Today, the daily digest, the
+    assistant's queue tool) discloses it without any of them opting in.
+
+    CRITICALS ARE EXEMPT, AND SPEND ONLY WHILE THEY STILL HOLD A SLOT. A
+    confirmed deadline is never something the page decides you'll get to
+    tomorrow — the same rule `_cockpit_context` already applies to the daily
+    cap — so `_is_critical` cards are never paced. A LIVE one consumes budget,
+    because the banker's inbox does not care why the email was urgent.
+
+    A STALE one does not, and the boundary is the whole point of the budget.
+    `_stale_critical` means the plan has stopped budgeting for that card: it
+    has moved to the "Still open" strip, costs no slot, and is not an email
+    the page is asking for today. Letting it spend anyway would charge a firm
+    for a send nobody is being prompted to make — measured on the fixture that
+    caught it, two three-week-old `confirm_chat` prompts at one bank silenced
+    all twelve of that bank's cold follow-ups and emptied the lane. The clock
+    is deliberately re-read here rather than passed in: it is a pure function
+    of `closes_on` and `last_business_days`, both already on the action, so
+    the two calls cannot disagree.
+
+    WITHIN A FIRM, THE BUDGET GOES TO THE HIGHEST `ev`. The ordering has to be
+    a total one for the same reason every other sort in this module does: `ev`
+    is a product of three small lookup tables and ties are the normal case
+    (44 of the founder's 46 queue items once scored 2.4 identically). The
+    contact id breaks it, `str()`-wrapped, so the same queue paces the same
+    people on every render instead of shuffling who waits.
+
+    Degrades to today's behaviour on thin data by construction: a student with
+    two or fewer contacts per firm has nothing paced, and a contact with no
+    nameable employer is never paced at all.
+    """
+    budget = Counter(sent_today or {})
+    rankable: list[tuple[tuple, dict]] = []
+    for a in actions:
+        a["firm_paced"] = False
+        a["pace_note"] = ""
+        key = _pace_firm_key(a["contact"])
+        if key is None:
+            continue
+        if _is_critical(a):
+            if today is None or not _stale_critical(a, today):
+                budget[key] += 1
+            continue
+        rankable.append((key, a))
+
+    rankable.sort(key=lambda p: (-p[1]["ev"], str(p[1]["contact"].get("id"))))
+    for key, a in rankable:
+        if budget[key] < FIRM_DAILY_CONTACT_CAP:
+            budget[key] += 1
+            continue
+        a["firm_paced"] = True
+        firm = a.get("firm_name") or a["contact"].get("firm_text") or "this firm"
+        a["pace_note"] = (
+            f"{firm} already has {budget[key]} today, "
+            "so this one is better tomorrow"
+        )
+        base = (a.get("reason") or "").strip()
+        a["reason"] = f"{base} — {a['pace_note']}" if base else a["pace_note"]
+
+
+def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
+                   sent_today=None, today=None) -> list[dict]:
     """Decide who the queue may speak about, what it may ask them for, and in
     what order. Everything here is a VIEW decision — see `crm/relevance.py`'s
     module docstring for why none of it belongs in `coverage_domain.cadence`.
 
-    Three passes, in this order because each one narrows what the next has to
+    Four passes, in this order because each one narrows what the next has to
     load:
 
       1. RELEVANCE. A contact at a tiered firm, a contact who shares the
@@ -834,10 +1019,33 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict) -> list[dic
          so a keep-warm card can name a reason instead of a day count. `ev` is
          then the whole ordering: relevance x relationship x trigger.
 
-    Takes no `user`, and that is worth one line: `tiers` and `openings` are the
-    only two things about the student this decision needs, both already loaded
-    by the caller. Passing the user as well would put a second, unscoped route
-    to their rows inside a function whose whole job is filtering.
+      4. PACE PER FIRM PER DAY (`_pace_by_firm`). Runs last because it is the
+         only pass that needs `ev`, and it needs `ev` because it decides which
+         contacts at a firm the day's budget goes to. What it is FOR is not a
+         ranking problem, though — it is the one thing on this page the
+         practitioners were unanimous about. "Do not email multiple people on
+         the same team in the same day... The analysts talk to each other."
+         Measured against that: the founder's queue was 44 actions across
+         exactly four firms (12 J.P. Morgan, 11 Citi, 11 Goldman, 10 Morgan
+         Stanley), and his own history holds 26 separate days on which he sent
+         3+ notes into one bank, peaking at 13 Morgan Stanley contacts, 12
+         J.P. Morgan, 12 Citi and 11 Goldman ON THE SAME DAY. The scarce
+         resource is the banker's referral budget — a bulge-bracket associate
+         described taking ~30 networking emails a week and forwarding ~5
+         resumes a YEAR — and no amount of student-side volume expands it. A
+         queue that offers eleven Citi cards at once is not generosity, it is
+         the product handing the student the shovel.
+
+    Takes no `user`, and that is worth one line: `tiers`, `openings` and
+    `sent_today` are the only things about the student this decision needs,
+    all three already loaded by the caller, and all three are derived facts
+    rather than a route back to the rows. Passing the user instead would put a
+    second, unscoped query path inside a function whose whole job is filtering.
+    `sent_today` is a {firm key: count} tally of outbound touches logged today
+    (see `_pace_firm_key`) and `today` is the local date those clocks are read
+    against; omitting them paces against the queue alone and treats every
+    critical as still holding its slot, which is what a caller with no notion
+    of "today" should get.
     """
     kept: list[dict] = []
     for a in actions:
@@ -919,6 +1127,7 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict) -> list[dic
         a["ev"] = rel.expected_value(a)
         out.append(a)
 
+    _pace_by_firm(out, sent_today, today)
     return out
 
 
@@ -2268,13 +2477,27 @@ def _cockpit_context(user) -> dict:
     # inversion `_TODAY_CLASS` was written to kill, arriving by a different
     # door. A warm contact still leads a quiet day. There is just never a wall
     # of them.
+    #
+    # A SECOND EXCEPTION OF THE SAME SHAPE, and it is here rather than in the
+    # sort for the same reason. `firm_paced` is set by `_gate_and_rank`'s
+    # fourth pass on everyone past `FIRM_DAILY_CONTACT_CAP` at their firm
+    # today. Costing a plan slot is the whole of what the flag does: the card
+    # still renders under "Up next", still carries every button it had, and
+    # its own reason line now says which firm is at pace and why it reads
+    # better tomorrow. Demoting or dropping them instead would starve a firm
+    # rather than pace it, and the practitioner evidence the cap is built on
+    # says the opposite — work the firm over days, just not all in one.
     slots = max(0, cap - len(critical))
     planned_rest: list[dict] = []
     held: list[dict] = []
     quiet_used = 0
     for a in rest:
         quiet = a["action"] in ("keep_warm", "maintain") and not a.get("opening")
-        if len(planned_rest) < slots and not (quiet and quiet_used >= QUIET_UPKEEP_PLAN_MAX):
+        blocked = (
+            (quiet and quiet_used >= QUIET_UPKEEP_PLAN_MAX)
+            or a.get("firm_paced")
+        )
+        if len(planned_rest) < slots and not blocked:
             planned_rest.append(a)
             quiet_used += 1 if quiet else 0
         else:

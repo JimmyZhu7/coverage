@@ -2203,3 +2203,269 @@ def test_an_opening_keep_warm_at_an_unranked_firm_does_not_break_the_page():
     # TypeError that took the page down.
     assert card["tier"] < 4
     assert _today_sort_key(card)[3] < 4
+
+
+# ---------------------------------------------------------------------------
+# PER-FIRM DAILY PACE (`FIRM_DAILY_CONTACT_CAP`, `_pace_by_firm`).
+#
+# THE EVIDENCE. Practitioners, unprompted and unanimous: "Do not email
+# multiple people on the same team in the same day, give it a couple of days
+# or a week... The analysts talk to each other." A ceiling of "4-5 people max"
+# per group, and "you don't need to network with every group at a bank, just
+# the 1-2 you're most interested in". Separately, a bulge-bracket associate
+# takes ~30 networking emails a week and forwards ~5 resumes a YEAR — the
+# scarce resource is his referral budget, and student-side volume cannot
+# expand it.
+#
+# THE DEFECT, measured on the founder's live account 2026-09-01: 44 queue
+# actions across exactly four firms (12 J.P. Morgan, 11 Citi, 11 Goldman, 10
+# Morgan Stanley), and 26 separate days in his own history with 3+ outbound
+# touches into one bank — peaking at 13 Morgan Stanley contacts, 12 J.P.
+# Morgan, 12 Citi and 11 Goldman on the same day. The queue was generating
+# exactly the behaviour the evidence says damages the user.
+# ---------------------------------------------------------------------------
+def _paced_names(actions):
+    return {a["contact"]["name"] for a in actions if a["firm_paced"]}
+
+
+def test_a_firm_gets_two_cards_a_day_and_the_rest_pace_out():
+    from crm.today import FIRM_DAILY_CONTACT_CAP, _build_actions
+
+    user = _user("pace-one-firm@example.com")
+    firm = Firm.objects.create(slug="pace-bulge", name="Bulge Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    for i in range(6):
+        _contact(user=user, name=f"Banker {i}", firm=firm)
+
+    actions, _ = _build_actions(user)
+    assert len(actions) == 6, "fixture must produce one card per contact"
+    live = [a for a in actions if not a["firm_paced"]]
+    assert len(live) == FIRM_DAILY_CONTACT_CAP == 2
+    assert len(_paced_names(actions)) == 4
+
+    # NEVER SILENTLY HIDDEN. Every one of the six is still in the queue, and
+    # the four that wait say so in the sentence the student actually reads.
+    for a in actions:
+        if a["firm_paced"]:
+            assert "Bulge Bank already has 2 today" in a["reason"]
+            assert "better tomorrow" in a["reason"]
+        else:
+            assert "already has" not in a["reason"]
+
+
+def test_one_contact_per_firm_sees_no_change_at_all():
+    """Degrade to today's behaviour on thin data. A student whose network is
+    one person per bank must not notice this feature exists."""
+    from crm.today import _build_actions
+
+    user = _user("pace-thin@example.com")
+    for i, name in enumerate(("Alpha Bank", "Beta Bank", "Gamma Bank")):
+        firm = Firm.objects.create(slug=f"pace-thin-{i}", name=name)
+        UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+        _contact(user=user, name=f"Only Contact {i}", firm=firm)
+
+    actions, _ = _build_actions(user)
+    assert len(actions) == 3
+    assert _paced_names(actions) == set()
+
+
+def test_notes_already_sent_today_spend_the_firms_budget():
+    """The cap is per firm per DAY, not per page load. A student who worked
+    two cards this morning and reopens Today after lunch does not get a fresh
+    allowance at that bank."""
+    from crm.today import _build_actions
+
+    user = _user("pace-sent-today@example.com")
+    firm = Firm.objects.create(slug="pace-sent", name="Sent Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    for i in range(3):
+        _contact(user=user, name=f"Fresh {i}", firm=firm)
+
+    # Baseline: three untouched contacts, two of them live.
+    assert len(_paced_names(_build_actions(user)[0])) == 1
+
+    # Two notes already sent into this firm today, to people whose own cards
+    # the cadence is therefore quiet about. The inbox does not care that the
+    # queue has nothing left to say about them.
+    for i in range(2):
+        already = _contact(user=user, name=f"Emailed {i}", firm=firm)
+        _touch(user, already, "outreach", days_ago=0)
+
+    actions, _ = _build_actions(user)
+    assert {a["contact"]["name"] for a in actions} == {"Fresh 0", "Fresh 1", "Fresh 2"}
+    assert len(_paced_names(actions)) == 3, (
+        "the morning's two sends did not spend the firm's daily budget"
+    )
+
+
+def test_inbound_mail_does_not_spend_a_firms_budget():
+    """Only what the STUDENT sent counts. Replies landing from a bank are
+    that bank writing to them, and a queue that paced itself on other
+    people's mail would go quiet exactly when a thread got warm."""
+    from crm.today import _build_actions
+
+    user = _user("pace-inbound@example.com")
+    firm = Firm.objects.create(slug="pace-inbound-firm", name="Inbound Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    for i in range(3):
+        _contact(user=user, name=f"Fresh {i}", firm=firm)
+    # Parked, so the queue has no card of its own about this person and the
+    # only thing under test is whether their inbound mail spends the budget.
+    noisy = _contact(user=user, name="Wrote To Me", firm=firm,
+                     thread_state="parked")
+    for kind in ("reply_received", "chat_scheduled", "bulk_received"):
+        _touch(user, noisy, kind, days_ago=0)
+
+    actions, _ = _build_actions(user)
+    assert {a["contact"]["name"] for a in actions} == {"Fresh 0", "Fresh 1", "Fresh 2"}
+    assert len(_paced_names(actions)) == 1, (
+        "other people's mail spent the firm's daily budget"
+    )
+
+
+def test_a_confirmed_deadline_is_never_paced_and_still_spends_the_budget():
+    """A confirmed close is never something the page decides you'll get to
+    tomorrow — the same exemption the daily cap already grants. The banker's
+    inbox does not care why the email was urgent, so the re-pings still spend
+    the budget, and the cold card behind them waits."""
+    from crm.today import _build_actions, _is_critical
+
+    user = _user("pace-critical@example.com")
+    firm = Firm.objects.create(slug="pace-crit", name="Closing Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    FirmDate.objects.create(
+        firm=firm, event_kind="app_close", region="us",
+        date=timezone.localdate() + timedelta(days=6),
+        confidence=1.0, precision="day",
+    )
+    for i in range(3):
+        warm = _contact(user=user, name=f"Warm {i}", firm=firm, region="us",
+                        warmth="replied", thread_state="replied")
+        _touch(user, warm, "reply_received", days_ago=20)
+    _contact(user=user, name="Cold Stranger", firm=firm, region="us")
+
+    actions, _ = _build_actions(user)
+    criticals = [a for a in actions if _is_critical(a)]
+    assert len(criticals) == 3, "fixture must produce three re-pings"
+    assert not any(a["firm_paced"] for a in criticals)
+    assert _paced_names(actions) == {"Cold Stranger"}
+
+
+def test_a_contact_with_no_nameable_employer_is_never_paced():
+    """A blank firm is a missing field, not a value. Pooling every hand-added
+    contact under one empty key would pace people who work nowhere near each
+    other — the same refusal `cadence.contact_region` makes about a blank
+    region."""
+    from crm.today import _build_actions
+
+    user = _user("pace-blank@example.com")
+    for i in range(5):
+        _contact(user=user, name=f"Nowhere {i}")
+
+    actions, _ = _build_actions(user)
+    assert len(actions) == 5
+    assert _paced_names(actions) == set()
+
+
+def test_free_text_employers_pace_by_their_own_name():
+    """No `firm_id` is not the same as no employer. Five people whose rows
+    say the same bank in free text are five people at one bank."""
+    from crm.today import _build_actions
+
+    user = _user("pace-freetext@example.com")
+    for i in range(4):
+        _contact(user=user, name=f"Textual {i}", firm_text="Jefferies")
+    _contact(user=user, name="Elsewhere", firm_text="Lazard")
+
+    actions, _ = _build_actions(user)
+    assert len(_paced_names(actions)) == 2
+    assert "Elsewhere" not in _paced_names(actions)
+
+
+def test_paced_cards_lose_the_plan_slot_and_keep_the_queue():
+    """What the flag COSTS is a plan slot and nothing else. The card still
+    renders under "Up next" with every button it had, and its own sentence
+    says which bank is at pace."""
+    from crm.today import _build_actions
+
+    # `weekly_touch_goal=3` pins the daily cap at 3 on every weekday, so this
+    # passes on a Monday and a Friday alike (see `_stuck_queue`).
+    user = _user("pace-cockpit@example.com", weekly_touch_goal=3)
+    for i, name in enumerate(("Alpha Bank", "Beta Bank")):
+        firm = Firm.objects.create(slug=f"pace-plan-{i}", name=name)
+        UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+        for j in range(5):
+            _contact(user=user, name=f"{name} {j}", firm=firm)
+
+    ctx = _cockpit_context(user)
+    planned = [a for lane in ctx["lanes"] for a in lane["items"]]
+    assert planned, "the plan must not empty itself out"
+    assert not any(a["firm_paced"] for a in planned)
+
+    by_firm = {}
+    for a in planned:
+        by_firm[a["firm_name"]] = by_firm.get(a["firm_name"], 0) + 1
+    assert max(by_firm.values()) <= 2, f"a firm took more than its day: {by_firm}"
+    assert len(by_firm) >= 2, "pacing must spread the plan, not starve a firm"
+
+    # Nobody vanished: ten contacts, ten cards, and the ones that waited say
+    # why on the card the student can still open.
+    assert len(planned) + ctx["held_total"] == 10
+    paced_held = [a for a in ctx["held"] if a["firm_paced"]]
+    assert paced_held
+    for a in paced_held:
+        assert a["pace_note"] in a["reason"]
+        assert a["firm_name"] in a["reason"]
+
+
+def test_the_budget_is_spent_by_sends_and_only_by_sends():
+    """`FIRM_PACE_TOUCH_KINDS` is derived from the ratchet's own vocabulary,
+    so a kind added later counts as a send by default and has to be excluded
+    on purpose — the direction that fails safe. `bulk_received` is why: it
+    joined `TOUCH_TRANSITIONS` without being named anywhere, and a hand-listed
+    set would not have seen it."""
+    from crm.today import FIRM_PACE_TOUCH_KINDS
+
+    assert FIRM_PACE_TOUCH_KINDS == {
+        "outreach", "follow_up", "thank_you", "maintain", "reping",
+    }
+    # A conversation is the student's own work (the pace ring counts it) but
+    # it is not a message landing in an inbox.
+    assert "chat" not in FIRM_PACE_TOUCH_KINDS
+    assert "chat" in PACE_TOUCH_KINDS
+
+
+def test_a_stale_critical_does_not_spend_a_firms_budget():
+    """A critical the plan has stopped budgeting for is not an email the page
+    is asking for today, so it must not charge the firm for one.
+
+    THE CASE THAT CAUGHT IT (`test_today_order`'s own fixture): two
+    three-week-old `confirm_chat` prompts at one bank, both already decayed to
+    the "Still open" strip and costing no plan slot, spent the whole daily
+    budget and silenced all twelve of that bank's cold follow-ups. The cold
+    lane rendered empty."""
+    from crm.today import _build_actions, _is_critical, _stale_critical
+
+    user = _user("pace-stale-crit@example.com")
+    firm = Firm.objects.create(slug="pace-stale", name="Stuck Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    for i in range(2):
+        stuck = _contact(user=user, name=f"Stuck {i}", firm=firm,
+                         warmth="chatted", thread_state="chat_scheduled")
+        _touch(user, stuck, "chat_scheduled", days_ago=60)
+    for i in range(4):
+        cold = _contact(user=user, name=f"Cold {i}", firm=firm)
+        _touch(user, cold, "outreach", days_ago=40 + i)
+
+    today = timezone.localdate()
+    actions, _ = _build_actions(user)
+    stuck_cards = [a for a in actions if a["contact"]["name"].startswith("Stuck")]
+    assert len(stuck_cards) == 2
+    assert all(_is_critical(a) and _stale_critical(a, today) for a in stuck_cards)
+
+    # The two stuck prompts spend nothing, so the four cold cards still get
+    # the firm's full two-a-day.
+    cold_live = [a for a in actions
+                 if a["contact"]["name"].startswith("Cold") and not a["firm_paced"]]
+    assert len(cold_live) == 2
+    assert not any(a["firm_paced"] for a in stuck_cards)

@@ -1408,3 +1408,83 @@ def test_a_bulk_blast_does_not_reset_a_relationships_idle_clock():
     assert [a["action"] for a in actions] == ["maintain"], (
         "a bulk blast reset the advocate clock and silenced a due contact"
     )
+
+
+# --------------------------------------------------------------------------
+# The crossed keep-warm pair. Each keep-warm clock is a `_min_weeks` that
+# GATES and a `_max_weeks` that is display only, and only the min half of
+# each pair is tunable from Settings (`crm.today.TUNABLE_CADENCE_PARAMS`).
+# Tune the min past the fixed max and the copy used to render a range that
+# counts backwards.
+#
+# NOT HYPOTHETICAL: the founder runs `chatted_touch_min_weeks = 6` against a
+# fixed max of 5, so branch 5b was one keep_warm action away from printing
+# "target every 6–5 weeks" on his own account.
+# --------------------------------------------------------------------------
+def test_keep_warm_range_collapses_when_the_founders_dial_crosses_the_max():
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-04-01 10:00")]  # long past any window
+    my = [a for a in cadence.due_actions(
+        [c], touches, [], as_of=AS_OF, firms=FIRMS,
+        params={"chatted_touch_min_weeks": 6},   # max stays at its default 5
+    ) if a["contact"]["id"] == 1][0]
+    assert my["action"] == "keep_warm"
+    assert "target every 6 weeks" in my["reason"]
+    assert "6–5" not in my["reason"], "the range rendered backwards"
+
+
+def test_maintain_range_collapses_when_the_advocate_min_crosses_the_max():
+    """The same hole on the advocate pair, which had never been reported.
+    Its copy was fixed once to render the MIN from the params and left the
+    max hardcoded to the default, which is half a fix."""
+    c = contact(1, warmth="advocate", thread_state="no_reply")
+    touches = [touch(1, "chat", "2026-04-01 10:00")]
+    my = [a for a in cadence.due_actions(
+        [c], touches, [], as_of=AS_OF, firms=FIRMS,
+        params={"advocate_touch_min_weeks": 8},  # max stays at its default 6
+    ) if a["contact"]["id"] == 1][0]
+    assert my["action"] == "maintain"
+    assert "target every 8 weeks" in my["reason"]
+    assert "8–6" not in my["reason"]
+
+
+def test_an_equal_pair_prints_one_number_not_a_zero_width_range():
+    """Nothing is invented to fill the gap. Widening the max to `min + 2` to
+    preserve the default's spread would print a number the student never set
+    and the engine never uses."""
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-04-01 10:00")]
+    my = [a for a in cadence.due_actions(
+        [c], touches, [], as_of=AS_OF, firms=FIRMS,
+        params={"chatted_touch_min_weeks": 5, "chatted_touch_max_weeks": 5},
+    ) if a["contact"]["id"] == 1][0]
+    assert "target every 5 weeks" in my["reason"]
+    assert "5–5" not in my["reason"]
+    assert "5–7" not in my["reason"]
+
+
+def test_a_collapsed_one_week_window_is_singular():
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-04-01 10:00")]
+    my = [a for a in cadence.due_actions(
+        [c], touches, [], as_of=AS_OF, firms=FIRMS,
+        params={"chatted_touch_min_weeks": 1, "chatted_touch_max_weeks": 1},
+    ) if a["contact"]["id"] == 1][0]
+    assert "target every 1 week)" in my["reason"]
+
+
+def test_an_uncrossed_pair_still_renders_the_full_range():
+    """The collapse must not swallow the ordinary case: the default pair, and
+    a widened-but-still-ordered one, keep both numbers."""
+    c = contact(1, warmth="chatted", thread_state="chat_done")
+    touches = [touch(1, "chat", "2026-04-01 10:00")]
+    default = [a for a in cadence.due_actions(
+        [c], touches, [], as_of=AS_OF, firms=FIRMS,
+    ) if a["contact"]["id"] == 1][0]
+    assert "target every 3–5 weeks" in default["reason"]
+
+    tuned = [a for a in cadence.due_actions(
+        [c], touches, [], as_of=AS_OF, firms=FIRMS,
+        params={"chatted_touch_min_weeks": 6, "chatted_touch_max_weeks": 9},
+    ) if a["contact"]["id"] == 1][0]
+    assert "target every 6–9 weeks" in tuned["reason"]

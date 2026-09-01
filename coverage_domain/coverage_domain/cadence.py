@@ -254,7 +254,9 @@ CADENCE_DEFAULTS: dict[str, int] = {
     # candidate mid-cycle, and the gap between "we spoke" and "who was that
     # again" is shorter than a month. `chatted_touch_max_weeks` is display
     # only — it renders the range in the reason string and gates nothing —
-    # exactly like `advocate_touch_max_weeks`.
+    # exactly like `advocate_touch_max_weeks`. Being display-only is also why
+    # neither `_max_` key is tunable, and why the pair can end up crossed;
+    # `_target_window` below is the one place that has to cope with it.
     "chatted_touch_min_weeks": 3,        # keep chatted contacts warm every 3-5 weeks
     "chatted_touch_max_weeks": 5,
     "pre_deadline_reping_days": 14,      # re-ping warm contacts when a CONFIRMED app_close is this near
@@ -316,6 +318,46 @@ def _merged_params(params: Mapping[str, Any] | None) -> dict[str, int]:
     if params:
         merged.update(params)
     return merged
+
+
+def _target_window(min_weeks: int, max_weeks: int) -> str:
+    """The "every N–M weeks" clause the two keep-warm branches print.
+
+    ONE HELPER BECAUSE THE INVERSION HAS TWO DOORS. Each keep-warm clock is a
+    pair: a `_min_weeks` that GATES the branch and a `_max_weeks` that is
+    display only (see CADENCE_DEFAULTS). Only the min half of each pair is in
+    `crm.today.TUNABLE_CADENCE_PARAMS`, so a student who widens the min past
+    the product's fixed max leaves the two crossed and the copy renders a
+    range that counts backwards.
+
+    THE LIVE CASE, not a hypothetical: the founder has
+    `chatted_touch_min_weeks = 6` against a fixed max of 5, so branch 5b was
+    one `keep_warm` action away from printing "target every 6–5 weeks". The
+    advocate pair has the identical hole — tune `advocate_touch_min_weeks` to
+    8 and you get "8–6" — and its copy was ALREADY fixed once, on 2026-08
+    ("a hardcoded 4–6 used to keep printing after the min was tuned away"),
+    which moved the min into the string and left the max behind. Half a fix
+    on one branch, the same bug untouched on the other; both are closed here.
+
+    A crossed or equal pair collapses to the single number that is true. The
+    min is what the engine actually enforces; the max never gated anything, so
+    dropping it costs the sentence nothing it was entitled to say. The
+    tempting alternative — widen the max to `min + 2` to preserve the
+    default's two-week spread — is rejected on this module's own standing
+    rule: it would print a number the student never set and the engine never
+    uses, which is a confident guess dressed as a setting.
+
+    Three options were considered for this and the other two rejected in the
+    same spirit. Clamping `max` up to `min` at merge time yields "every 6–6
+    weeks", a range with no width, which is this same guess with worse
+    grammar. Adding `*_touch_max_weeks` to `TUNABLE_CADENCE_PARAMS` would put
+    a knob on the Settings page that changes copy and nothing else — the
+    "a knob that LOOKS reachable is worse than no knob at all" rule that
+    `stale_thread_days` was deleted under, arriving from the other direction.
+    """
+    if max_weeks > min_weeks:
+        return f"every {min_weeks}–{max_weeks} weeks"
+    return f"every {min_weeks} week{'' if min_weeks == 1 else 's'}"
 
 
 def infer_region(source: str | None) -> str | None:
@@ -855,13 +897,16 @@ def due_actions(
                 # hardcoded — only `advocate_touch_min_weeks` gates this
                 # branch and it IS user-tunable from Settings; a hardcoded
                 # "4–6" used to keep printing even after the min was tuned
-                # away from the default, e.g. to 8.
+                # away from the default, e.g. to 8. `_target_window` is what
+                # keeps the OTHER half of that pair honest: the max is not
+                # tunable, so tuning the min past it used to render a range
+                # that counts backwards.
+                window = _target_window(adv_min_weeks, adv_max_weeks)
                 reason = (
                     "advocate — no dateable touch on record "
-                    f"(target every {adv_min_weeks}–{adv_max_weeks} weeks)"
+                    f"(target {window})"
                     if days is None else
-                    f"advocate — last touch {days}d ago (target every "
-                    f"{adv_min_weeks}–{adv_max_weeks} weeks)"
+                    f"advocate — last touch {days}d ago (target {window})"
                 )
                 add("maintain", reason, 2, days_since=days, target_min_weeks=adv_min_weeks)
             continue
@@ -922,12 +967,18 @@ def due_actions(
                 # is the same one — say what the number measures and stop. The
                 # warmth lead stays, because `warmth == "chatted"` IS true; it
                 # is only the clock that had the wrong noun on it.
+                #
+                # The window clause goes through `_target_window` for the
+                # reason spelled out there: `chatted_touch_max_weeks` is not
+                # tunable and the founder's own min is 6, so the literal
+                # "{min}–{max}" this used to interpolate rendered "6–5".
+                window = _target_window(chat_min_weeks, chat_max_weeks)
                 reason = (
                     "chatted — no dateable touch on record — send an update or a "
-                    f"question (target every {chat_min_weeks}–{chat_max_weeks} weeks)"
+                    f"question (target {window})"
                     if days is None else
                     f"chatted — last touch {days}d ago — send an update or a "
-                    f"question (target every {chat_min_weeks}–{chat_max_weeks} weeks)"
+                    f"question (target {window})"
                 )
                 add("keep_warm", reason, 2, days_since=days, target_min_weeks=chat_min_weeks)
             continue

@@ -319,3 +319,51 @@ def test_an_open_role_beside_a_closed_one_still_reaches_the_digest():
     digest = assemble_digest(user, today=TODAY)
     assert digest is not None
     assert [i["title"] for i in digest["closing"]] == [live.title]
+
+
+# ---------------------------------------------------------------------------
+# The daily email must not lead with the cards the queue has just deferred.
+#
+# `_gate_and_rank` marks an action `firm_paced` once its firm has had its
+# day's sends, and rewrites the reason to "... already has 2 today, so this
+# one is better tomorrow". `_who_to_ping` sorted purely by `_today_sort_key`,
+# which is blind to that flag — measured on the founder's live queue, 6 of the
+# 8 cards the digest chose were paced while sendable ones sat in a 36-card
+# overflow. An email whose top half says "not today" is not a worse ordering
+# of the same information; it is the wrong information.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_the_digest_prefers_contacts_that_are_actually_sendable_today():
+    from crm.digest import _who_to_ping
+
+    user = get_user_model().objects.create_user(
+        email="paced@x.test", password="pw12345!")
+    crowded = Firm.objects.create(slug="crowded-bank", name="Crowded Bank")
+    quiet = Firm.objects.create(slug="quiet-bank", name="Quiet Bank")
+    UserFirm.all_objects.create(user=user, firm=crowded, tier=1, status="target")
+    UserFirm.all_objects.create(user=user, firm=quiet, tier=1, status="target")
+
+    long_ago = timezone.now() - timedelta(days=40)
+    # Four at one firm: the cap lets two through and paces the rest.
+    for i in range(4):
+        c = Contact.all_objects.create(user=user, name=f"Crowded {i}",
+                                       firm=crowded, email=f"c{i}@crowded.test")
+        Touch.all_objects.create(user=user, contact=c, kind="email", ts=long_ago)
+    # One at a firm with room. It is NEWER, so a flag-blind sort ranks it last.
+    c = Contact.all_objects.create(user=user, name="Quiet One", firm=quiet,
+                                   email="q@quiet.test")
+    Touch.all_objects.create(user=user, contact=c, kind="email",
+                             ts=timezone.now() - timedelta(days=30))
+
+    shown, _overflow = _who_to_ping(user)
+    assert shown, "fixture should produce a queue"
+    paced = [a for a in shown if a.get("firm_paced")]
+    unpaced = [a for a in shown if not a.get("firm_paced")]
+    # Every sendable card outranks every deferred one.
+    assert shown[:len(unpaced)] == unpaced, (
+        "a firm-paced action was ordered above one the student can still send "
+        "today; the digest would lead with 'better tomorrow'"
+    )
+    if paced:
+        assert shown.index(paced[0]) >= len(unpaced)

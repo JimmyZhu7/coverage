@@ -130,8 +130,22 @@ def _matching(answers):
 
     * region — `directory.views._apply_region_filter` matches one market at a
       time; a chipset is several, so this is the `IN` of them.
-    * track — the feed's `firm__tracks__contains=[track]`, widened to
-      `overlap` for the same reason: several chips mean "any of these".
+    * track — `directory.views._row_tracks`, the feed's own single definition
+      of role-level track membership, asked of each row. This used to be
+      `firm__tracks__overlap`, a pure database filter, and that stopped being
+      the feed's rule on 2026-09-01 when the Track facet moved from the
+      EMPLOYER's verticals to the ROLE's stated function. Leaving the fast
+      version here would have quietly broken the promise this docstring makes
+      one line above: the panel would over-report ib/st/consulting and
+      under-report am/pe against the feed the student actually lands on, and
+      a signup number that the product then fails to reproduce is worse than
+      a slower one.
+      It costs a Python pass, which is the thing the class-year note below
+      refuses to pay for the prose windows — the difference is that
+      `_row_tracks` reads the TITLE through a cached regex, not a JSON blob
+      per row. Measured over the whole 2,723-row campus set: 43ms cold,
+      0.3ms warm. The narrowing runs LAST so it walks the smallest set the
+      answers allow.
     * class year — the decidable half of `directory.views._eligibility`'s
       title-stated branch. A posting that NAMES a graduating class other than
       yours is a blocking verdict on the feed, so it is out of this count
@@ -144,10 +158,18 @@ def _matching(answers):
     qs = _campus()
     if answers["regions"]:
         qs = qs.filter(region__in=answers["regions"])
-    if answers["tracks"]:
-        qs = qs.filter(firm__tracks__overlap=answers["tracks"])
     if answers["class_year"]:
         qs = qs.filter(Q(class_year="") | Q(class_year=str(answers["class_year"])))
+    if answers["tracks"]:
+        # Local import for the same startup reason as `profile_preview`'s.
+        from directory.views import _row_tracks
+
+        wanted = set(answers["tracks"])
+        keep = [
+            pk for pk, firm_tracks, title in qs.values_list("pk", "firm__tracks", "title")
+            if wanted & set(_row_tracks(firm_tracks or [], title or ""))
+        ]
+        qs = qs.filter(pk__in=keep)
     return qs
 
 

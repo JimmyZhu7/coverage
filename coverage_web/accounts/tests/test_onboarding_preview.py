@@ -374,7 +374,17 @@ def test_an_unknown_step_falls_back_instead_of_erroring(client, user, world):
     # ceiling exists so a future edit cannot quietly reintroduce the feed
     # pipeline (or an N+1 over the picked firms) on a control that re-runs
     # every time a chip is toggled.
-    ("profile", 5),
+    # profile's budget is 6, not 5: the track narrowing became a Python pass
+    # on 2026-09-01, when the Track facet moved from the EMPLOYER's verticals
+    # to the ROLE's stated function and `firm__tracks__overlap` stopped being
+    # the feed's rule. `_matching` now reads titles through
+    # `directory.views._row_tracks` and re-filters on the surviving pks, which
+    # costs ONE extra flat query. Same shape as work_auth's exception below —
+    # a second query, not an N+1, and not the feed pipeline — so the ceiling
+    # still guards what this test exists to guard. The alternative was keeping
+    # the fast filter and letting the panel promise a count the feed would not
+    # honour, which is the one thing this panel must never do.
+    ("profile", 6),
     # work_auth's budget is 4, not 3: `firm_policy_map()` (see
     # directory/sponsorship.py) adds one small, bounded scan of firms
     # carrying policy data (58 on live data) so the panel can answer with
@@ -496,3 +506,56 @@ def test_the_preview_panel_sticks_below_the_masthead(client, user):
     assert fallback and int(fallback.group(1)) >= 100, (
         "the JS-off fallback has to clear the masthead on its own"
     )
+
+
+# ---------------------------------------------------------------------------
+# The signup panel's own docstring promises "the number here is a number the
+# feed will reproduce". That promise had a hole in it from the moment the
+# Track facet moved off `Firm.tracks` (2026-09-01): the panel kept filtering
+# by the EMPLOYER's verticals while the feed had moved to the ROLE's stated
+# function, so a student was shown a count at signup that the product then
+# failed to honour — over-reporting ib/st/consulting, under-reporting am/pe.
+#
+# These pin the two halves of the rule that closed it.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_signup_count_uses_the_same_track_rule_as_the_feed():
+    """A role whose title states a DIFFERENT function than its firm's track
+    must not be counted at signup, because the feed will not show it."""
+    from accounts.onboarding_preview import _matching
+
+    firm = Firm.objects.create(slug="gs-preview", name="Goldman Sachs", tracks=["ib"])
+    Opportunity.objects.create(
+        firm=firm, url="https://x.test/ib", title="2027 Investment Banking Summer Analyst",
+        bucket="internship", status="open")
+    Opportunity.objects.create(
+        firm=firm, url="https://x.test/audit", title="2027 Internal Audit Summer Analyst",
+        bucket="internship", status="open")
+
+    answers = {"regions": [], "tracks": ["ib"], "class_year": None,
+               "work_auth": "", "firm_ids": []}
+    titles = set(_matching(answers).values_list("title", flat=True))
+    assert "2027 Investment Banking Summer Analyst" in titles
+    assert "2027 Internal Audit Summer Analyst" not in titles, (
+        "an Internal Audit role at an IB-covering bank is not an IB role, and "
+        "the feed does not show it under the IB track"
+    )
+
+
+@pytest.mark.django_db
+def test_signup_count_still_includes_titles_that_state_no_function():
+    """The load-bearing half. About half of all campus postings say only
+    "2027 Summer Analyst". Those inherit the firm's coverage on the feed, so
+    the signup count must include them too - requiring a positive title match
+    would under-report by roughly half and make the panel useless."""
+    from accounts.onboarding_preview import _matching
+
+    firm = Firm.objects.create(slug="ms-preview", name="Morgan Stanley", tracks=["ib"])
+    Opportunity.objects.create(
+        firm=firm, url="https://x.test/silent", title="2027 Summer Analyst",
+        bucket="internship", status="open")
+
+    answers = {"regions": [], "tracks": ["ib"], "class_year": None,
+               "work_auth": "", "firm_ids": []}
+    assert "2027 Summer Analyst" in set(_matching(answers).values_list("title", flat=True))

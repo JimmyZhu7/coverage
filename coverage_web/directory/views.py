@@ -26,6 +26,7 @@ import re
 from datetime import date
 
 from collections import Counter
+from functools import lru_cache
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Case, Count, F, IntegerField, Max, Q, Value, When
@@ -73,7 +74,9 @@ from directory.open_runs import (
     onboarding_cutoffs,
     open_run_days,
 )
-from directory.recommend import Candidate, Profile, parse_target_cycle, recommend
+from directory.recommend import (
+    Candidate, Profile, parse_target_cycle, recommend, role_function,
+)
 from directory.sponsorship import effective_sponsorship, firm_policy_map, firm_policy_q
 from directory.timeline import (
     EVENT_LABELS, TRACK_SHORT, cycle_slug_for_target,
@@ -1276,30 +1279,142 @@ def _region_facet(qs, selected=""):
     return options
 
 
+# `role_function` is not cheap enough to run per row on every render: 229ms
+# for the 16,029 open rows at `?role=all` (measured 2026-09-01), against a
+# facet budget the docstring below quotes in single-digit milliseconds. The
+# input is `Opportunity.title`, a bounded vocabulary from a bounded table
+# (13,464 distinct titles across those 16,029 rows) and never anything a
+# request supplies, so memoising on it is bounded by the board, not by
+# traffic. Warm, the same sweep costs 0.6ms. The cache is process-local and
+# the classifier is pure, so a stale entry is impossible without an edit to
+# `recommend.py` — which restarts the process anyway.
+_role_function = lru_cache(maxsize=32768)(role_function)
+
+
+def _row_tracks(firm_tracks, title):
+    """The tracks ONE row answers to — THE single definition of role-level
+    track membership, called by both `_track_facet` (counts) and
+    `_apply_track_filter` (rows) so the two cannot drift. A facet number that
+    disagreed with the list under it would break the count promise the whole
+    filter bar is built on.
+
+    Three cases, and they are `recommend._track_fit`'s three cases on purpose
+    (that function's docstring argues them out at length):
+
+      title names a track      -> that track, and only it. "2027 Internal
+                                  Audit Analyst" is not an IB role because
+                                  its bank covers IB, and "Investment Banking
+                                  Summer Analyst" IS one wherever it is posted.
+      title names a function   -> no track at all. Audit, Controllers, Branch,
+        outside the vocabulary    IT, HR: real work, none of it these tracks.
+      title names nothing      -> the FIRM's coverage, exactly as before.
+        ("2027 Summer Analyst")
+
+    THE THIRD CASE IS THE LOAD-BEARING ONE. 1,336 of the 2,723 open campus
+    rows (49%) state no function in their title at all, and requiring a
+    positive title match would delete every one of them from every track
+    facet. The rule is "drop rows that state a DIFFERENT function", never
+    "keep only rows that state THIS one" — silent rows degrade to today's
+    behaviour, which is the honest answer when the posting did not say."""
+    fn = _role_function(title or "")
+    if fn == "none":
+        return ()
+    if fn:
+        return (fn,)
+    return tuple(firm_tracks or ())
+
+
+def _firm_tracks_map():
+    """Every firm's `tracks` list, one flat read (~100 rows)."""
+    return dict(Firm.objects.values_list("id", "tracks"))
+
+
+def _apply_track_filter(qs, track):
+    """Rows whose OWN function answers to `track`, falling back to the firm's
+    coverage only where the title is silent — see `_row_tracks`.
+
+    WHAT THIS REPLACED, AND WHY. The filter was `firm__tracks__contains=
+    [track]`, i.e. a claim about the EMPLOYER standing in for a claim about
+    the JOB. Measured on the live board 2026-09-01, `?track=ib` returned
+    1,125 open campus roles of which 189 (17%) named investment banking in
+    their title; 215 named an explicitly non-track function (Risk,
+    Controllers, Branch, IT, HR) and 198 named a DIFFERENT track. The other
+    four facets were no better: st 17%, consulting 15%, pe 8%, am 5%. A
+    student filtering to "Investment Banking" was shown, overwhelmingly,
+    roles that are not investment banking — while `recommend._track_fit`, on
+    the same rows, had already been reading the role's own function for
+    months. The two surfaces disagreed about what "IB" means; this is that
+    disagreement resolved in the recommender's favour.
+
+    Effect, same measurement, open campus scope: ib 1,125 -> 724, st 1,049 ->
+    574, consulting 1,002 -> 692, am 168 -> 228, pe 64 -> 59. 675 rows naming
+    an explicitly non-track function leave every facet; `am` and `consulting`
+    GAIN the rows that name their function at a firm not tagged for it, which
+    is the same "the role speaks for itself" rule pointing the other way.
+
+    PYTHON, NOT SQL, AND LAST IN THE CHAIN. `role_function` is a regex
+    cascade with span arithmetic (`recommend._names_non_track`); there is no
+    honest way to say it in a WHERE clause, and reimplementing it in one is
+    how the two definitions of "IB" started disagreeing in the first place.
+    So this scans, which is why `_apply_filters` runs it AFTER every other
+    filter — the scan is over the smallest queryset the request allows (2,723
+    rows at the default campus scope, 724 ids out). Measured warm at that
+    scope: 2.3ms to build the id list, 4.7ms for filter-and-count end to
+    end."""
+    if not track:
+        return qs
+    tracks_by_firm = _firm_tracks_map()
+    ids = [
+        pk
+        for pk, firm_id, title in (
+            qs.order_by().values_list("id", "firm_id", "title")
+        )
+        if track in _row_tracks(tracks_by_firm.get(firm_id), title)
+    ]
+    return qs.filter(id__in=ids)
+
+
 def _track_facet(qs, selected=""):
-    """Track options with live per-option counts. Track is the FIRM's vertical
-    (`Firm.tracks`: ib/consulting/...), a different dimension from the role's
-    own classified bucket — merging the two into one select is what the
-    separate Role Type facet replaced, and they must not re-merge.
+    """Track options with live per-option counts. Track is the vertical
+    (ib/consulting/...) — a different dimension from the role's own classified
+    BUCKET (insight / internship / entry-level), which is what the separate
+    Role Type facet shows, and the two must not re-merge into one select.
+    That separation is untouched here: this facet reads the role's FUNCTION,
+    never its bucket, and the Role Type control is not involved.
+
+    Track used to be read purely off `Firm.tracks`, a claim about the
+    employer. It is now the role's own function where the title states one
+    and the firm's coverage where it does not — see `_apply_track_filter` for
+    the measurement that forced the change (2026-09-01) and `_row_tracks` for
+    the rule. These counts go through that same helper, so each one is still
+    exactly what picking that option returns.
 
     OVERLAP, deliberately, same posture as `_year_facet`: a firm carrying both
-    `ib` and `st` counts its roles under BOTH, so these counts can sum to more
-    than the total. Deduping would mean picking one of a firm's real verticals
-    to lie about. Each individual number still keeps the count promise — pick
-    that track and you get exactly that many.
+    `ib` and `st` counts its SILENT roles under BOTH, so these counts can sum
+    to more than the total. Deduping would mean picking one of a firm's real
+    verticals to lie about. Each individual number still keeps the count
+    promise — pick that track and you get exactly that many.
 
-    Two small queries instead of a row-by-row firm join: one GROUP BY firm_id
-    over the filtered set (~100 rows), one flat read of every firm's tracks.
+    COST. This is a GROUP BY over (firm_id, title) plus a Python walk, where
+    it used to be a GROUP BY over firm_id alone; the walk is unavoidable
+    because `role_function` is Python (see `_apply_track_filter`). Measured
+    2026-09-01, with `_role_function`'s cache warm: 3.5ms at the campus
+    scope and 13.7ms at `?role=all`, against the 2.0ms / 15.2ms the firm_id
+    GROUP BY cost. The first render of a fresh process pays the cache miss
+    instead — 207ms to classify all 13,464 distinct open titles, once.
 
     See `_region_facet` for why `selected` is always kept in the options."""
-    tracks_by_firm = dict(Firm.objects.values_list("id", "tracks"))
+    tracks_by_firm = _firm_tracks_map()
     counts: Counter[str] = Counter()
     total = 0
-    for firm_id, n in (
-        qs.values_list("firm_id").annotate(n=Count("id")).values_list("firm_id", "n")
+    for firm_id, title, n in (
+        qs.order_by()
+        .values_list("firm_id", "title")
+        .annotate(n=Count("id"))
+        .values_list("firm_id", "title", "n")
     ):
         total += n
-        for t in (tracks_by_firm.get(firm_id) or []):
+        for t in _row_tracks(tracks_by_firm.get(firm_id), title):
             counts[t] += n
     return [
         {"value": "", "label": "Any Track", "count": total},
@@ -1403,8 +1518,6 @@ def _apply_filters(qs, sel, *, skip=()):
     """
     if "region" not in skip:
         qs = _apply_region_filter(qs, sel["region"])
-    if "track" not in skip and sel["track"]:
-        qs = qs.filter(firm__tracks__contains=[sel["track"]])
     if "provider" not in skip and sel["provider"]:
         qs = qs.filter(source__iexact=sel["provider"])
     if "sponsorship" not in skip and sel.get("sponsorship"):
@@ -1421,6 +1534,14 @@ def _apply_filters(qs, sel, *, skip=()):
         qs = _apply_year_filter(qs, sel["year"])
     if "role" not in skip:
         qs = _apply_role_filter(qs, sel["role"])
+    # Track goes LAST, and that ordering is load-bearing rather than
+    # cosmetic. Every other clause is a WHERE the database evaluates, so
+    # their order is the planner's business; `_apply_track_filter` is a
+    # Python scan of the rows that reach it, so it wants to reach as few as
+    # possible. Filters are conjunctive and none of them join a multi-valued
+    # relation, so moving it here cannot change the result — only its cost.
+    if "track" not in skip:
+        qs = _apply_track_filter(qs, sel["track"])
     return qs
 
 

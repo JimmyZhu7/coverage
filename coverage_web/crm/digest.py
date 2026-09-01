@@ -147,7 +147,21 @@ def _who_to_ping(user) -> tuple[list[dict], int]:
 
     raw_actions, _contacts = _build_actions(user)
     pingable = [a for a in raw_actions if _today_class(a) != CLASS_PARK]
-    pingable.sort(key=_today_sort_key)
+    # Firm-paced actions sort LAST, then by Today's own key within each group.
+    # `_gate_and_rank` marks an action `firm_paced` when its firm already has
+    # its day's sends (see `FIRM_DAILY_CONTACT_CAP`), and the reason string it
+    # rewrites reads "... already has 2 today, so this one is better
+    # tomorrow". Sorting purely by `_today_sort_key` filled this email with
+    # exactly those: measured on the founder's live queue, 6 of the 8 cards
+    # the digest picked were paced while genuinely-sendable ones sat in the
+    # 36-card overflow. An email whose whole top half says "not today" is not
+    # a worse ordering of the same information, it is the wrong information.
+    #
+    # They still sort in rather than out, for the same reason Today keeps
+    # showing their cards: paced is "later", never "never", and on a day when
+    # a student has already worked one bank hard the honest digest is a short
+    # one that says so, not a padded one that hides why.
+    pingable.sort(key=lambda a: (bool(a.get("firm_paced")), _today_sort_key(a)))
     shown = pingable[:MAX_ACTIONS]
     overflow = max(0, len(pingable) - len(shown))
     return shown, overflow
