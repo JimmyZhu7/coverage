@@ -3,8 +3,10 @@
 *Section 0 was rewritten on 2026-09-01 to describe the system that ships, not
 the system the 2026-07-23 planning pass committed to. Five of its statements had
 been false for weeks, and every "spec drift" finding filed against them was the
-document being wrong. The rest of the file is the July contract, kept for the
-class-name and htmx guarantees that are still binding.*
+document being wrong. §6.1 was rewritten on 2026-09-02 for the same reason: it
+demanded sentence case that no page had ever used. The rest of the file is the
+July contract, kept for the class-name and htmx guarantees that are still
+binding.*
 
 *`static/css/coverage.css` and `templates/base.html` are living files. Read the
 CSS for the current class inventory; where this document and the CSS disagree,
@@ -214,7 +216,8 @@ No other inline styles.
 **How to read the index.** "No spec" is a statement of fact, not a gap to be
 filled opportunistically: a spec written mid-refactor documents the refactor,
 not the product. Where a page has none, the CSS comments and the page's own
-tests are the record, and D-14 decides whether the Network page earns one.
+tests are the record. Network earned one on 2026-09-02 (D-14), written after
+its redesign pass landed rather than during it.
 
 | Page | Template | Spec |
 |---|---|---|
@@ -224,7 +227,7 @@ tests are the record, and D-14 decides whether the Network page earns one.
 | My Applications `/opportunities/mine/` | `directory/my_applications.html` | No spec. See `docs/specs/` or the CSS comments. |
 | Firm page `/firms/<slug>/` | `directory/firm_detail.html` | No spec. See `docs/specs/` or the CSS comments. |
 | Today `/app/` | `crm/week.html` | `docs/specs/today-page.md`. |
-| Network `/app/contacts/` | `crm/contact_list.html` | No spec. See `docs/specs/` or the CSS comments. |
+| Network `/app/contacts/` | `crm/contact_list.html` | `docs/specs/network-page.md`. |
 | Contact detail `/app/contacts/<id>/` | `crm/contact_detail.html` | No spec. See `docs/specs/` or the CSS comments. |
 | Calendar `/app/calendar/` | `crm/calendar.html` | No spec. See `docs/specs/` or the CSS comments. |
 | Talk `/assistant/` | `assistant/chat.html` | No spec. See `docs/specs/` or the CSS comments. |
@@ -244,18 +247,55 @@ lives inside Settings, which is why `/capture/` lights the Settings tab.
 
 ## 6. Voice & microcopy rules
 
-1. **Sentence case everywhere** — headings, buttons, nav, pills. Never Title
-   Case, never ALL CAPS in copy (CSS may render badge text uppercase; source
-   text stays sentence case).
+1. **Title Case for names.** Page titles, section headings, named surfaces and
+   the primary action on a page are Title Case: "Add Contact", "Coverage Gaps",
+   "Welcome Back", "Build My Queue", "Log Touch", "Upload & Import",
+   "Permanently Delete My Account".
+
+   **This reverses the rule that stood here until 2026-09-02** ("sentence case
+   everywhere, never Title Case"). It was never followed. Every page shipped
+   Title Case for its titles and its primary actions, consistently enough to be
+   a convention rather than drift, and the choice was between rewriting every
+   label on every surface for no measured gain or writing down what ships. D-15
+   in `docs/plans/2026-09-02-decisions.md` chose the second. Nothing in the
+   product changed when this paragraph did.
+
+   Three exceptions:
+
+   a. **Nav, badges and chips are uppercased by CSS, not in the source.**
+   `.site-nav a` and `.pill, .chip, .prio` both carry `text-transform:
+   uppercase`. Source text stays ordinary Title Case ("Network", not
+   "NETWORK"), so no template types ALL CAPS and turning the transform off
+   leaves readable copy.
+
+   b. **Data is cased by `smart_title` and never by hand.** Firm names, people's
+   names and roles pass through the filter. A hand-cased firm name in a template
+   is a bug, not a style choice: it is a second spelling of a fact the database
+   already holds.
+
+   c. **A sentence stays sentence case.** Empty states, help text, honesty
+   markers, error messages and captions are prose, and prose is not a name.
+   "No contacts yet.", "Shown on a guess.", "may be stale".
+
+   Below the title-and-primary-action line the shipped labels are not uniform:
+   inline and per-row verbs run both ways ("Log it", "They replied", "Bring
+   back" against "Browse Openings", "Back to Network"). Title Case is the target
+   for a label that names a thing, and a short spoken verb phrase reads as
+   exception (c). Fix a label's case when you are touching it for another
+   reason. Never in a sweep, and never against a test: a scan cannot tell a name
+   from a sentence, so a blanket case check would fire on correct copy and on
+   `smart_title` output alike. `core/tests/test_design_spec.py` pins the three
+   exceptions and the named labels instead, which is the part a machine can
+   check without guessing.
 2. **No exclamation marks, no emoji, no decorative unicode.** The ✓ in the step
    indicator and → in link affordances are the only permitted symbols.
 3. **Honesty markers are verbatim and never softened**: "may be stale",
    "No deadline posted", "unrated", "rumored · confidence low", "rules v1".
 4. **Numbers are plain and unadorned** — "3 openings", "12d ago", "45/100".
    Numbers render in mono/tabular via `.num`, `.v`, `.val`, `.tabular`.
-5. **Buttons start with a verb** and say exactly what happens: "Log touch",
-   "Upload & import", "Permanently delete my account". Destructive buttons name
-   the destruction.
+5. **Buttons start with a verb** and say exactly what happens: "Log Touch",
+   "Upload & Import", "Permanently Delete My Account". Destructive buttons name
+   the destruction. (Cased per rule 1; these three are the strings that ship.)
 6. **Empty states = one fact + one action.** Never apologize, never cheerlead
    ("You're on top of it." in week.html is the permitted ceiling of warmth).
 7. **Insider vocabulary over marketing vocabulary**: "coverage", "openings",

@@ -21,6 +21,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 SPEC = REPO / "docs" / "design-spec.md"
 CSS = REPO / "coverage_web" / "static" / "css" / "coverage.css"
+TEMPLATES = REPO / "coverage_web" / "templates"
 
 # The fenced block in §0 that carries the typeface list, keyed off its own
 # marker comment so a later edit cannot move it without noticing this test.
@@ -87,3 +88,80 @@ def test_every_page_in_section_5_is_specced_or_says_it_is_not():
 
     # The seven pages the audit named as genuinely unspecced.
     assert section.count("No spec") >= 7
+
+
+# ---------------------------------------------------------------------------
+# §6.1: the case convention (D-15, 2026-09-02)
+# ---------------------------------------------------------------------------
+# The rule that stood here demanded sentence case and no page had ever used
+# it. D-15 kept the code and rewrote the document. What a machine can check
+# without guessing is NOT "is every label Title Case" -- a scan cannot tell a
+# name from a sentence, and `smart_title` output would fail it -- but the two
+# halves the rule actually turns on: that the three exceptions are real in the
+# code, and that the labels the decision named still ship as it says they do.
+
+
+def _spec_section_6() -> str:
+    text = SPEC.read_text(encoding="utf-8")
+    start = text.index("## 6. Voice & microcopy rules")
+    return text[start:text.index("## 7.", start)]
+
+
+def _css_block(selector: str) -> str:
+    """The declaration body of one rule, keyed on its exact selector text."""
+    css = CSS.read_text(encoding="utf-8")
+    match = re.search(re.escape(selector) + r"\s*\{(.*?)\}", css, re.DOTALL)
+    assert match, f"coverage.css no longer has a `{selector}` rule"
+    return match.group(1)
+
+
+def test_the_case_rule_is_title_case_and_says_it_reverses_the_old_one():
+    """Silence would read as drift, and the next reader would re-litigate a
+    settled taste call. The paragraph has to name the reversal."""
+    section = _spec_section_6()
+    assert "**Title Case for names.**" in section
+    assert "reverses the rule" in section
+    assert "**Sentence case everywhere**" not in section
+
+
+def test_the_case_rule_names_its_three_exceptions():
+    section = _spec_section_6()
+    assert "text-transform:" in section, "(a) uppercase comes from CSS"
+    assert "`smart_title`" in section, "(b) data is cased by the filter"
+    assert "sentence case" in section, "(c) prose stays prose"
+
+
+def test_nav_badges_and_chips_are_uppercased_by_css_not_in_the_source():
+    """Exception (a), both halves. The transform is what shouts; the source
+    text stays readable, so turning the transform off leaves ordinary copy
+    rather than a page of ALL CAPS."""
+    assert "text-transform: uppercase" in _css_block(".site-nav a")
+    assert "text-transform: uppercase" in _css_block(".pill, .chip, .prio")
+
+    nav = re.search(
+        r'<nav class="site-nav".*?</nav>',
+        (TEMPLATES / "base.html").read_text(encoding="utf-8"),
+        re.DOTALL,
+    )
+    assert nav, "base.html no longer renders a .site-nav"
+    labels = re.findall(r">([A-Za-z][A-Za-z ]*)</a>", nav.group(0))
+    assert len(labels) >= 5, labels
+    for label in labels:
+        assert label != label.upper(), f"nav types {label!r} in caps; CSS does that"
+
+
+def test_the_labels_the_case_decision_named_still_ship():
+    """The ones D-15 quotes, plus the three §6.5 lists. Literal strings in
+    named files, so this cannot fire on data or on a heading whose shape it
+    had to guess."""
+    named = {
+        "crm/contact_list.html": ["Add Contact", "Coverage Gaps", "Log Touch"],
+        "account/login.html": ["Welcome Back"],
+        "core/home.html": ["Build My Queue"],
+        "accounts/import.html": ["Upload &amp; Import"],
+        "accounts/delete.html": ["Permanently Delete My Account"],
+    }
+    for path, labels in named.items():
+        body = (TEMPLATES / path).read_text(encoding="utf-8")
+        for label in labels:
+            assert f">{label}<" in body, f"{path} no longer renders {label!r}"
