@@ -94,7 +94,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from email.utils import getaddresses, parseaddr
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from django.conf import settings
 from django.db.models import Max, Q
 from django.utils import timezone
@@ -350,7 +350,19 @@ def is_push_configured() -> bool:
 # Token encryption
 # ---------------------------------------------------------------------------
 
-def _fernet() -> Fernet:
+def token_keys() -> list[str]:
+    """`GMAIL_LIVE_TOKEN_KEY` as a list, NEWEST FIRST.
+
+    One value is one key and behaves exactly as it always has. A
+    comma-separated list is a rotation in progress: `MultiFernet` encrypts
+    with the first and decrypts with any, so old ciphertext keeps working
+    until `rotate_gmail_tokens` has re-encrypted it.
+    """
+    raw = settings.GMAIL_LIVE_TOKEN_KEY or ""
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def _fernet() -> MultiFernet:
     # `is_configured()` only checks this setting is non-EMPTY — it cannot
     # check it is a valid key without constructing a Fernet, which is what
     # this is. A key that isn't 32 url-safe-base64 bytes (truncated on a
@@ -359,15 +371,38 @@ def _fernet() -> Fernet:
     # site happened to encrypt or decrypt first — and the OAuth callback
     # only catches `GmailLiveError`, so that surfaces as a blank 500 page
     # rather than "your key is malformed."
+    #
+    # ALWAYS a MultiFernet, even for one key, so the encrypt and decrypt
+    # paths are the same code whether or not a rotation is running. A
+    # single-key configuration is a MultiFernet of one, which encrypts and
+    # decrypts byte-for-byte identically to the bare Fernet this used to be.
+    keys = token_keys()
+    if not keys:
+        raise GmailLiveError(
+            "GMAIL_LIVE_TOKEN_KEY is empty — Gmail Live cannot read or write "
+            "a stored refresh token without it."
+        )
     try:
-        return Fernet(settings.GMAIL_LIVE_TOKEN_KEY.encode("utf-8"))
+        return MultiFernet([Fernet(key.encode("utf-8")) for key in keys])
     except (ValueError, TypeError) as exc:
         raise GmailLiveError(
             "GMAIL_LIVE_TOKEN_KEY is not a valid Fernet key — it must be the "
             "exact 44-character output of Fernet.generate_key(), with no "
-            "quotes or truncation. Regenerate it and set it on every service "
+            "quotes or truncation, or a comma-separated list of those with "
+            "the newest first. Regenerate it and set it on every service "
             "that talks to Gmail."
         ) from exc
+
+
+def rotate_token(ciphertext: str) -> str:
+    """Re-encrypt one stored token under the FIRST key in the list.
+
+    `MultiFernet.rotate` decrypts with whichever key still can and re-encrypts
+    with the newest, which is what makes the rotation resumable: running it
+    twice is not an error, and a row already on the new key comes back
+    re-encrypted under the same key with a fresh timestamp.
+    """
+    return _fernet().rotate(ciphertext.encode("utf-8")).decode("utf-8")
 
 
 def encrypt_token(raw: str) -> str:
@@ -384,7 +419,9 @@ def decrypt_token(ciphertext: str) -> str:
         # silently treating one user as "revoked".
         raise GmailLiveError(
             "GMAIL_LIVE_TOKEN_KEY cannot decrypt a stored refresh token — "
-            "has the key changed since it was encrypted?"
+            "has the key changed since it was encrypted? If you are rotating, "
+            "the OLD key must stay in the comma-separated list until "
+            "`manage.py rotate_gmail_tokens` reports every row re-encrypted."
         ) from exc
 
 
@@ -505,6 +542,17 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
             "history_id": str(profile["historyId"]),
             "status": "active",
             "backfill_status": backfill_status,
+            # WHEN THIS REFRESH TOKEN WAS ISSUED, not when this mailbox was
+            # first linked. `connected_at` is `auto_now_add`, so it recorded
+            # the first connect and then never moved again: a student who
+            # reconnected after a revoke still showed the original date, and
+            # nothing in the database said when the token in the row above
+            # actually came from Google. That is the timestamp the seven-day
+            # expiry question needs (`todo-mined.md §4` from
+            # `docs/gmail-live-setup.md §9`; D-17), so the reconnect writes
+            # it. `auto_now_add` only fills the field on INSERT, so an
+            # explicit value in `defaults` is what makes an UPDATE move it.
+            "connected_at": timezone.now(),
         },
     )
 

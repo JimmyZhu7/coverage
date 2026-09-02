@@ -1,5 +1,16 @@
 # Gmail Live setup — the steps only Jimmy can do
 
+> **Status, 2026-09-02: steps 1 to 8 are DONE on this machine.** All five
+> `GMAIL_LIVE_*` values are in `.env`, `com.coverage.gmailpoll` is loaded, and
+> the mailbox has been live since 2026-09-01. The document still reads as a
+> to-do list because nobody came back to it after doing it, which is its own
+> small trap: a reader could easily conclude the feature was never set up
+> (`todo-mined.md §6c`). Keep the steps — they are the record of what was
+> done, and they are what a second deployment or a new Google Cloud project
+> would follow — but read them as history rather than as work outstanding.
+> §9 (the seven-day token expiry) is the one section that is still an open
+> question, and it is D-17.
+
 `capture/gmail_live.py` is the code side of docs/build-plan.md §5's "v2".
 Everything in code is built and tested (`capture/tests/test_gmail_live.py`,
 `pytest capture/` — 142 passed). What's left is Google Cloud Console work
@@ -132,6 +143,33 @@ One-time, from the `coverage_web` directory:
 ```bash
 uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+### Rotating it later
+
+`GMAIL_LIVE_TOKEN_KEY` takes a comma-separated list, newest first. One value
+is one key and behaves exactly as it always has; a list is a rotation in
+progress, where the first key encrypts and any key can decrypt. Four steps,
+and the last one is the only one that can hurt:
+
+1. Generate a new key with the command above.
+2. Set `GMAIL_LIVE_TOKEN_KEY="<new>,<old>"` — **new first** — on every
+   service that talks to Gmail (`gmail_poll`, `gmail_backfill`, the web
+   process), and restart them. Everything written from now on uses the new
+   key; everything already stored still decrypts under the old.
+3. `python manage.py rotate_gmail_tokens`. It reports how many rows it
+   re-encrypted, writes only `refresh_token_encrypted`, and is safe to run
+   again if it is interrupted. `--check` reports without writing.
+4. Only once step 3 reports 0 unreadable, drop the old key:
+   `GMAIL_LIVE_TOKEN_KEY="<new>"`, and restart. The old key is retired.
+
+Taking step 4 early is what breaks: a row that has not been re-encrypted
+becomes unreadable the moment the old key leaves the list, and to a student
+that looks like Coverage silently disconnecting their Gmail. Run
+`rotate_gmail_tokens --check` first; it will tell you whether anything is
+still on an older key.
+
+There was no rotation path at all until 2026-09-02 (`audit-security.md`
+finding 9), which meant the key could not be retired if it ever leaked.
 
 ## 7. Put it all in `.env`
 

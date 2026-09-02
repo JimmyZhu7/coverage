@@ -1,6 +1,16 @@
 # Credit system plan — metering Coverage's AI surfaces
 
-Status: design for review, nothing built. No code or migrations exist for this yet.
+Status, corrected 2026-09-02: **most of this is built.** The header said
+"design for review, nothing built. No code or migrations exist for this yet"
+while §10's own changelog, four screens down, said the top-up packs were built
+and inert — two sentences in one document disagreeing about the same code
+(`todo-mined.md §4`). What exists today: `billing/models.py::CreditLedger` and
+its migrations, `billing/credits.py` (the per-plan grants, the daily burst,
+`spend`), `billing/stripe_gateway.py`'s two one-time packs, and the Credits
+card on Settings. What does not: a subscription, and any charge for Pro
+itself. §10's "Stripe-shaped but inert" is still the accurate sentence for the
+top-ups; the deploy has no Stripe keys and no registered webhook, so nothing
+can be bought.
 
 > **Changelog — v4, 2026-08-20 (Pro repriced to $69/cycle; coffee-chat
 > brief metered).** Founder decision (`docs/founder-decisions-2026-08-20.md`

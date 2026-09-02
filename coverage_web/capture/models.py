@@ -495,6 +495,16 @@ class GmailConnection(PrivateModel):
     # not ours) — `gmail_watch_renew` re-issues before this passes.
     watch_expiration = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="active")
+    # WHEN THE STORED REFRESH TOKEN WAS ISSUED, which is not the same as when
+    # this mailbox was first linked. `auto_now_add` fills it on insert and
+    # then never touches it again, so a student who reconnected after a
+    # revoked grant kept showing the original date and nothing in the row said
+    # when the token beside it actually came from Google — which is exactly
+    # the timestamp the seven-day-expiry question needs (D-17,
+    # `docs/gmail-live-setup.md §9`). `connect_gmail` now writes it explicitly
+    # on every successful connect, so this reads "issued", not "first seen".
+    # `auto_now_add` stays for the insert path and for any row created outside
+    # that function.
     connected_at = models.DateTimeField(auto_now_add=True)
     last_notification_at = models.DateTimeField(null=True, blank=True)
 

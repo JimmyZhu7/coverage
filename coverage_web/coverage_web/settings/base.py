@@ -814,11 +814,24 @@ GMAIL_LIVE_PUBSUB_TOPIC = env("GMAIL_LIVE_PUBSUB_TOPIC", default="")
 # means "deploy Coverage" becomes a precondition. Pull means
 # `gmail_pubsub_listen` can run against this project long before that.
 GMAIL_LIVE_PUBSUB_SUBSCRIPTION = env("GMAIL_LIVE_PUBSUB_SUBSCRIPTION", default="")
-# Fernet key encrypting `GmailConnection.refresh_token_encrypted` at rest.
-# Generate once with `Fernet.generate_key()` and never rotate it casually —
-# rotating without re-encrypting every row first makes every stored refresh
-# token unreadable, which reads to a user as "Coverage silently disconnected
-# my Gmail."
+# Fernet key(s) encrypting `GmailConnection.refresh_token_encrypted` at rest.
+#
+# ONE VALUE, OR A COMMA-SEPARATED LIST, NEWEST FIRST. A single key behaves
+# exactly as it always has. A list is a rotation in progress: the first key
+# encrypts everything written from now on, and every key in the list can
+# decrypt, so old ciphertext keeps working while
+# `manage.py rotate_gmail_tokens` re-encrypts it. When the command reports
+# every row re-encrypted, drop the trailing keys and the list is one value
+# again.
+#
+# WHY THIS EXISTS (audit-security.md finding 9). There was one static key and
+# no rotation path, so rotating meant a re-encrypt script that did not exist —
+# and changing the key without one makes every stored refresh token
+# unreadable, which reads to a student as "Coverage silently disconnected my
+# Gmail." The failure mode was at least honest (`InvalidToken` raises loudly
+# rather than treating one user as revoked), so this is a prospective fix, not
+# a live incident. The list is the whole mechanism; there is no second copy of
+# the key anywhere.
 GMAIL_LIVE_TOKEN_KEY = env("GMAIL_LIVE_TOKEN_KEY", default="")
 # Requested at connect time, and the narrowest scope that can do the job:
 # `gmail.metadata` cannot read an `.ics` attachment, and reading invites is

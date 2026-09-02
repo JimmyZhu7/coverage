@@ -173,9 +173,15 @@ def test_a_revoked_connection_is_surfaced(client):
     assert entry["user_email"] == "revoked-student@example.com"
     assert entry["gmail_address"] == "revoked-student@example.com"
     assert "connected_at" in entry
-    # The approximation caveat must travel with the data, not live only in
-    # a comment a reader of the raw JSON would never see.
-    assert "does not update on reconnect" in entry["connected_at_note"]
+    # The caveat must travel with the data, not live only in a comment a
+    # reader of the raw JSON would never see. It USED to read "does not update
+    # on reconnect", which was true and is not any more: `connect_gmail` now
+    # writes `connected_at` on every successful connect (WS-OPS-20), so the
+    # field is the token issue date. Rewritten rather than deleted, because a
+    # row last connected before 2026-09-02 still carries the old meaning and a
+    # staff reader has no way to tell which kind they are looking at.
+    assert "token issue date" in entry["connected_at_note"]
+    assert "2026-09-02" in entry["connected_at_note"]
 
 
 def test_an_active_connection_does_not_appear_in_revoked(client):

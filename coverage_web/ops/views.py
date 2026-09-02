@@ -89,15 +89,18 @@ def health_gmail(request):
     - `stale_active`: `active` connections whose `connected_at` already
       exceeds GMAIL_STALE_WARNING_AFTER, as an early-warning heads-up before
       they hit `revoked` (Testing-mode expiry is a fixed 7 days, not a
-      random event, so this is worth flagging ahead of time). BUT
-      `connected_at` is `auto_now_add=True` — set once at row creation and
-      never touched by a reconnect (`connect_gmail`'s `update_or_create`
-      only refreshes token/history_id/status, not `connected_at`). So for
-      any mailbox that has ever been reconnected, this age is measured from
-      the ORIGINAL connection, not the current token's real issue date, and
-      will overstate how stale the live token actually is. Every entry in
-      this list carries that caveat inline rather than presenting an age as
-      a precise countdown.
+      random event, so this is worth flagging ahead of time).
+
+      `connected_at` is now the TOKEN ISSUE DATE, which is what makes this
+      age mean anything. It used to be `auto_now_add` and nothing else, so it
+      recorded the first connect and never moved: for any mailbox that had
+      ever been reconnected, this list measured staleness from the ORIGINAL
+      connection and overstated it, sometimes by months. `connect_gmail`
+      writes the field explicitly on every successful connect as of
+      2026-09-02 (WS-OPS-20), so a reconnect resets the clock the way a
+      reader of this page always assumed it did. Rows last written before
+      that date still carry the old meaning, which is why each entry says
+      where its timestamp comes from rather than presenting a bare age.
     """
     all_ok = True
     now = timezone.now()
@@ -115,8 +118,10 @@ def health_gmail(request):
             "gmail_address": conn.gmail_address,
             "connected_at": conn.connected_at.isoformat(),
             "connected_at_note": (
-                "approximate: connected_at is set once at row creation and "
-                "does not update on reconnect"
+                "connected_at is the token issue date: connect_gmail writes "
+                "it on every successful connect (since 2026-09-02). Rows "
+                "last connected before that date still read as first-connect "
+                "and may overstate the age"
             ),
         })
 
