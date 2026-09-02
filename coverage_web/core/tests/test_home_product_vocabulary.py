@@ -6,7 +6,7 @@ docs/specs/today-page.md retired two verbs and one whole lane vocabulary:
 
   F5  "Sent" logged an outreach touch in one click with no compose having
       happened, which invited a sweep down 29 cards that left the CRM
-      believing 29 notes went out. The button is "Log it" now, an
+      believing 29 notes went out. The button is "Done" now, an
       attestation. "Reply" read as "compose a reply" and mislogged; the
       button is "They replied", an event about the other person.
   F6  The three lanes were a priority-number echo (`priority 0 -> Overdue`),
@@ -62,7 +62,7 @@ def test_landing_mock_draws_only_live_product_verbs(client):
 def test_landing_mock_uses_the_act_cards_own_verbs(client):
     labels = _control_labels(client.get("/").content.decode())
 
-    for live in ("Log it", "They replied"):
+    for live in ("Done", "They replied"):
         assert live in labels, (
             f"{live!r} is what crm/_act_card.html draws; the mock should "
             f"show the same word. Found: {labels}"
@@ -92,6 +92,6 @@ def test_landing_feature_list_does_not_advertise_the_retired_one_click_verbs(cli
     joined = " ".join(points)
 
     assert "One-click Sent, Reply" not in joined
-    assert "Log it, They replied" in joined, (
+    assert "Done, They replied" in joined, (
         "the Today feature bullet should name the buttons the app draws"
     )

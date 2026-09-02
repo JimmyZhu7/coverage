@@ -4183,7 +4183,7 @@ def _reschedule_chat(user, contact, starts_at, *, now):
 @require_POST
 def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     """A Today-card quick action: log a touch you attest to having made
-    ("Log it"), record that THEY replied, park a contact out of the cadence
+    ("Done"), record that THEY replied, park a contact out of the cadence
     entirely, or snooze/skip it out of today's queue. Re-renders the whole
     cockpit so the queue, pace, and activity feed stay in sync.
 

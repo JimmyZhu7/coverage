@@ -131,16 +131,22 @@ as the row's left edge, every control and hx contract byte-identical.
         </details>
       {% elif a.touch_kind %}
         {% comment %}
-        "Log it", not "Sent". This button does not send anything -- it records
+        "Done", not "Sent". This button does not send anything -- it records
         that you did, possibly outside Coverage. Called "Sent" it invited a
         one-click sweep down 29 cards that left the CRM believing 29 notes went
         out, warmth clocks reset and the queue clear, all of it fabricated.
+
+        "Log it" until 2026-09-02, the founder's own call. Both words describe
+        the same write, and the reason "Sent" was wrong holds for either: the
+        student is telling the queue they handled this card, not asking it to
+        send anything. "Done" is what they would say out loud, and the `title`
+        below still spells out that it records rather than sends.
         {% endcomment %}
         <button type="button" class="btn btn-primary act-btn"
-                aria-label="Log {{ a.label|lower }} to {{ a.contact.name }}"
+                aria-label="Mark {{ a.label|lower }} to {{ a.contact.name }} done"
                 title="Record that you did this"
                 hx-post="{% url 'crm:today_act' a.contact.id 'sent' %}"
-                hx-vals='{"kind": "{{ a.touch_kind }}"}'>Log it</button>
+                hx-vals='{"kind": "{{ a.touch_kind }}"}'>Done</button>
       {% endif %}
       {% if a.action != "park" %}
         {% comment %}

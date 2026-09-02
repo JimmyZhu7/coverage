@@ -424,7 +424,7 @@ def test_the_log_button_does_not_claim_to_have_sent_anything(client):
 
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
-    assert ">Log it<" in body
+    assert ">Done<" in body
     assert ">Sent<" not in body
     assert ">They replied<" in body
     assert ">Reply<" not in body
@@ -438,7 +438,7 @@ def test_every_quick_action_names_its_contact_for_a_screen_reader(client):
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
     for label in (
-        'aria-label="Log follow up to Ethan Gao"',
+        'aria-label="Mark follow up to Ethan Gao done"',
         'aria-label="Record that Ethan Gao replied"',
         'aria-label="Compose an email to Ethan Gao"',
         'aria-label="Snooze Ethan Gao for 3 days"',
